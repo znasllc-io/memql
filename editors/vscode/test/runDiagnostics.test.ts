@@ -23,10 +23,18 @@ import type { AuthoringDiagnostic } from "@znasllc-io/memql-sdk-core/authoring";
 import { assembleBundle, type WorkspaceSources } from "../src/run/bundle.js";
 import { groupByFile, mapBundleDiagnostics } from "../src/run/diagnostics.js";
 
-function workspace(files: Record<string, { text: string; dirty: boolean }>): WorkspaceSources {
+// `imports` stands in for the language server -- since memql#3335 the walk
+// asks `memql/imports` rather than scanning. The fixtures below need exactly
+// one hop, so the stub answers with it directly rather than re-deriving it
+// from the text.
+function workspace(
+  files: Record<string, { text: string; dirty: boolean }>,
+  imports: string[] = [],
+): WorkspaceSources {
   return {
     resolveImport: (dotted) => `/ws/dsl/${dotted.split(".").join("/")}.memql`,
     read: (path) => files[path],
+    imports: (_path, text) => (text.includes("use ") ? imports : []),
   };
 }
 
@@ -54,13 +62,14 @@ function diag(overrides: Partial<AuthoringDiagnostic> = {}): AuthoringDiagnostic
 //   4  "}"                                                buffer line 3
 //
 // The engine's 1-based lines are one higher than each index above.
-function twoFileBundle() {
-  return assembleBundle(
+async function twoFileBundle() {
+  return await assembleBundle(
     "/ws/active.memql",
     "use a.dep.{ x }\nquery q {\n  filter broken ==\n}\n",
-    workspace({
-      "/ws/dsl/a/dep.memql": { text: "shape dep { }\n", dirty: true },
-    }),
+    workspace(
+      { "/ws/dsl/a/dep.memql": { text: "shape dep { }\n", dirty: true } },
+      ["a.dep"],
+    ),
   );
 }
 
@@ -70,8 +79,8 @@ const BROKEN_LINE = "  filter broken ==";
 // The zero rule
 // -----------------------------------------------------------------------------
 
-test("mapBundleDiagnostics -- line 0 becomes a FILE-LEVEL diagnostic on the ACTIVE file", () => {
-  const bundle = twoFileBundle();
+test("mapBundleDiagnostics -- line 0 becomes a FILE-LEVEL diagnostic on the ACTIVE file", async () => {
+  const bundle = (await twoFileBundle());
   const [mapped] = mapBundleDiagnostics([diag({ line: 0 })], bundle);
   assert.ok(mapped);
   assert.equal(mapped.fileLevel, true);
@@ -81,29 +90,29 @@ test("mapBundleDiagnostics -- line 0 becomes a FILE-LEVEL diagnostic on the ACTI
   assert.equal(mapped.start.line, 0);
 });
 
-test("mapBundleDiagnostics -- a file-level message says the position is missing", () => {
+test("mapBundleDiagnostics -- a file-level message says the position is missing", async () => {
   // Without this the developer sees a diagnostic about a construct declared
   // on line 40 sitting at the top of the file and concludes the mapping is
   // broken.
-  const [mapped] = mapBundleDiagnostics([diag({ line: 0, error: "bind failed" })], twoFileBundle());
+  const [mapped] = mapBundleDiagnostics([diag({ line: 0, error: "bind failed" })], (await twoFileBundle()));
   assert.match(mapped?.message ?? "", /no source position/);
   assert.match(mapped?.message ?? "", /bind failed/);
 });
 
-test("mapBundleDiagnostics -- line 1 is a REAL position, not the sentinel", () => {
+test("mapBundleDiagnostics -- line 1 is a REAL position, not the sentinel", async () => {
   // The boundary that makes the zero rule non-obvious: 1-based line 1 is the
   // first line of the bundle and is perfectly valid.
-  const [mapped] = mapBundleDiagnostics([diag({ line: 1, column: 1 })], twoFileBundle());
+  const [mapped] = mapBundleDiagnostics([diag({ line: 1, column: 1 })], (await twoFileBundle()));
   assert.equal(mapped?.fileLevel, false);
   assert.equal(mapped?.path, "/ws/dsl/a/dep.memql");
   assert.equal(mapped?.start.line, 0);
   assert.equal(mapped?.start.character, 0);
 });
 
-test("mapBundleDiagnostics -- column 0 with a real line is start-of-line, not file-level", () => {
+test("mapBundleDiagnostics -- column 0 with a real line is start-of-line, not file-level", async () => {
   // The engine can know the line and not the column; that is still a usable
   // position and must not be thrown away.
-  const [mapped] = mapBundleDiagnostics([diag({ line: 5, column: 0 })], twoFileBundle());
+  const [mapped] = mapBundleDiagnostics([diag({ line: 5, column: 0 })], (await twoFileBundle()));
   assert.equal(mapped?.fileLevel, false);
   assert.equal(mapped?.start.character, 0);
 });
@@ -112,61 +121,61 @@ test("mapBundleDiagnostics -- column 0 with a real line is start-of-line, not fi
 // Coordinate arithmetic
 // -----------------------------------------------------------------------------
 
-test("mapBundleDiagnostics -- a bundle line inside the ACTIVE file maps to its buffer line", () => {
+test("mapBundleDiagnostics -- a bundle line inside the ACTIVE file maps to its buffer line", async () => {
   // Bundle line 4 (1-based) is index 3; the active file starts at index 1, so
   // this is buffer line 2 -- the `filter broken ==` line.
-  const bundle = twoFileBundle();
+  const bundle = (await twoFileBundle());
   const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 3 })], bundle);
   assert.equal(mapped?.path, "/ws/active.memql");
   assert.equal(mapped?.start.line, 2);
   assert.equal(mapped?.start.character, 2);
 });
 
-test("mapBundleDiagnostics -- a bundle line inside a DEPENDENCY maps to that file", () => {
-  const [mapped] = mapBundleDiagnostics([diag({ line: 1, column: 1 })], twoFileBundle());
+test("mapBundleDiagnostics -- a bundle line inside a DEPENDENCY maps to that file", async () => {
+  const [mapped] = mapBundleDiagnostics([diag({ line: 1, column: 1 })], (await twoFileBundle()));
   assert.equal(mapped?.path, "/ws/dsl/a/dep.memql");
   assert.equal(mapped?.start.line, 0);
 });
 
-test("mapBundleDiagnostics -- with no end anchor the range widens to end of line", () => {
+test("mapBundleDiagnostics -- with no end anchor the range widens to end of line", async () => {
   // An empty range renders as a zero-width caret with no squiggle: the
   // diagnostic would occupy a Problems row and be invisible in the editor.
-  const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 3, endLine: 0 })], twoFileBundle());
+  const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 3, endLine: 0 })], (await twoFileBundle()));
   assert.equal(mapped?.end.line, 2);
   assert.equal(mapped?.end.character, BROKEN_LINE.length);
 });
 
-test("mapBundleDiagnostics -- a real end anchor is honoured", () => {
+test("mapBundleDiagnostics -- a real end anchor is honoured", async () => {
   const [mapped] = mapBundleDiagnostics(
     [diag({ line: 4, column: 3, endLine: 4, endColumn: 9 })],
-    twoFileBundle(),
+    (await twoFileBundle()),
   );
   assert.equal(mapped?.start.character, 2);
   assert.equal(mapped?.end.line, 2);
   assert.equal(mapped?.end.character, 8);
 });
 
-test("mapBundleDiagnostics -- an end anchor outside the file falls back to end of line", () => {
+test("mapBundleDiagnostics -- an end anchor outside the file falls back to end of line", async () => {
   // A range spanning a file boundary does not exist in the editor; the
   // boundary is an artefact of concatenation.
   const [mapped] = mapBundleDiagnostics(
     [diag({ line: 4, column: 3, endLine: 99, endColumn: 2 })],
-    twoFileBundle(),
+    (await twoFileBundle()),
   );
   assert.equal(mapped?.end.line, 2);
   assert.equal(mapped?.end.character, BROKEN_LINE.length);
 });
 
-test("mapBundleDiagnostics -- a backwards end anchor widens instead of inverting", () => {
+test("mapBundleDiagnostics -- a backwards end anchor widens instead of inverting", async () => {
   const [mapped] = mapBundleDiagnostics(
     [diag({ line: 4, column: 10, endLine: 4, endColumn: 2 })],
-    twoFileBundle(),
+    (await twoFileBundle()),
   );
   assert.ok((mapped?.end.character ?? 0) >= (mapped?.start.character ?? 0));
 });
 
-test("mapBundleDiagnostics -- a line past the end of the bundle degrades to file-level", () => {
-  const [mapped] = mapBundleDiagnostics([diag({ line: 500, column: 1 })], twoFileBundle());
+test("mapBundleDiagnostics -- a line past the end of the bundle degrades to file-level", async () => {
+  const [mapped] = mapBundleDiagnostics([diag({ line: 500, column: 1 })], (await twoFileBundle()));
   assert.equal(mapped?.fileLevel, true);
   assert.equal(mapped?.path, "/ws/active.memql");
 });
@@ -175,23 +184,23 @@ test("mapBundleDiagnostics -- a line past the end of the bundle degrades to file
 // What counts as a failure
 // -----------------------------------------------------------------------------
 
-test("mapBundleDiagnostics -- a SKIPPED construct is not a diagnostic", () => {
+test("mapBundleDiagnostics -- a SKIPPED construct is not a diagnostic", async () => {
   // A bundle routinely carries a shape or a concept, and each reports ok=false
   // with skipped=true without failing the bundle. Rendering those would put
   // permanent noise under every file that declares one.
   const mapped = mapBundleDiagnostics(
     [diag({ ok: false, skipped: true, kind: "shape", error: "kind not compiled", line: 1 })],
-    twoFileBundle(),
+    (await twoFileBundle()),
   );
   assert.deepEqual(mapped, []);
 });
 
-test("mapBundleDiagnostics -- a successful construct is not a diagnostic", () => {
-  assert.deepEqual(mapBundleDiagnostics([diag({ ok: true, line: 1 })], twoFileBundle()), []);
+test("mapBundleDiagnostics -- a successful construct is not a diagnostic", async () => {
+  assert.deepEqual(mapBundleDiagnostics([diag({ ok: true, line: 1 })], (await twoFileBundle())), []);
 });
 
-test("mapBundleDiagnostics -- an empty error still produces a usable message", () => {
-  const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 1, error: "" })], twoFileBundle());
+test("mapBundleDiagnostics -- an empty error still produces a usable message", async () => {
+  const [mapped] = mapBundleDiagnostics([diag({ line: 4, column: 1, error: "" })], (await twoFileBundle()));
   assert.match(mapped?.message ?? "", /failed to compile/);
 });
 
@@ -199,8 +208,8 @@ test("mapBundleDiagnostics -- an empty error still produces a usable message", (
 // groupByFile
 // -----------------------------------------------------------------------------
 
-test("groupByFile -- buckets per file, preserving order", () => {
-  const bundle = twoFileBundle();
+test("groupByFile -- buckets per file, preserving order", async () => {
+  const bundle = (await twoFileBundle());
   const grouped = groupByFile(
     mapBundleDiagnostics(
       [diag({ line: 1, column: 1, name: "dep" }), diag({ line: 4, column: 1, name: "q" }), diag({ line: 5, column: 1, name: "q2" })],

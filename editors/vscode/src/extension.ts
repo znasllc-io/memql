@@ -45,6 +45,12 @@ import {
   type AutomationRunRequest,
 } from './run/automationRun.js';
 import { assembleBundle, type BundleSource, type WorkspaceSources } from './run/bundle.js';
+import {
+  IMPORTS_CAPABILITY,
+  IMPORTS_METHOD,
+  importPaths,
+  parseImports,
+} from './constructs/imports.js';
 import type { MappedDiagnostic } from './run/diagnostics.js';
 import { groupByFile } from './run/diagnostics.js';
 import { RunOrchestrator, type RunCluster, type RunEngine } from './run/orchestrator.js';
@@ -634,11 +640,13 @@ function buildRunEngine(conns: ConnectionManager): RunEngine | undefined {
 // an open document's live text (dirty or not), falling back to the file on
 // disk for anything not open.
 //
-// Synchronous on purpose. Open documents are already in memory, and the only
-// disk reads are for files an import points at -- so making the whole run
-// await a filesystem walk would buy nothing and would open a window for the
-// buffer to change between the decision to run and the text that gets sent.
-function assembleForTarget(target: RunTarget, workspaceRoot: string | undefined) {
+// The ACTIVE TEXT is captured SYNCHRONOUSLY, before anything is awaited. That
+// is what the walk's old synchrony was really protecting -- the buffer moving
+// between the decision to run and the bytes that get sent -- and it survives
+// the import lookup becoming a request (memql#3335). Dependency text is read
+// as the walk reaches it, which is the same guarantee it had before: whatever
+// the editor holds at that moment.
+async function assembleForTarget(target: RunTarget, workspaceRoot: string | undefined) {
   const uri = Uri.parse(target.uri);
   const activePath = uri.fsPath;
   const open = workspace.textDocuments.find((d) => d.uri.toString() === target.uri);
@@ -647,8 +655,44 @@ function assembleForTarget(target: RunTarget, workspaceRoot: string | undefined)
   const sources: WorkspaceSources = {
     resolveImport: (dotted) => resolveImportPath(dotted, workspaceRoot, activePath),
     read: (p) => readSource(p),
+    imports: (p, text) => requestImports(p, text),
   };
   return assembleBundle(activePath, activeText, sources);
+}
+
+// requestImports asks the language server which modules `text` imports.
+//
+// FEATURE-DETECTED, like the CodeLens path: an older memql-lsp on the PATH is
+// an ordinary situation (serverPath is a user setting and the PATH fallback is
+// whatever is installed), and a MethodNotFound surfacing as a toast in the
+// middle of a run would be a worse answer than the degradation.
+//
+// Every failure degrades to "no imports", which bundles the active file alone.
+// That means a dirty dependency runs as its deployed version -- the same
+// bounded, visible cost the walk always had for an import it could not
+// resolve. What it deliberately does NOT do is fall back to scanning the text
+// here: a second parser is the thing this request exists to delete, and a
+// fallback one would be a second parser that only runs when nobody is looking.
+//
+// The TEXT is sent rather than only the URI because the walk reaches files the
+// editor has never opened -- a CLEAN file is a legitimate route to a DIRTY one
+// -- so the server holds no copy of them. The bytes analysed are then exactly
+// the bytes the bundle is assembled from.
+async function requestImports(filePath: string, text: string): Promise<string[]> {
+  if (client === undefined) return [];
+  const experimental = client.initializeResult?.capabilities.experimental as
+    | Record<string, unknown>
+    | undefined;
+  if (experimental === undefined || experimental[IMPORTS_CAPABILITY] !== true) return [];
+  try {
+    const raw = await client.sendRequest(IMPORTS_METHOD, {
+      textDocument: { uri: Uri.file(filePath).toString() },
+      text,
+    });
+    return importPaths(parseImports(raw));
+  } catch {
+    return [];
+  }
 }
 
 function readFileOrThrow(p: string): string {
