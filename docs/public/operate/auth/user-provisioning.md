@@ -33,7 +33,7 @@ them).
 ## Magic-link flow (the primary path)
 
 1. User visits the identity web app and enters their email at
-   `/auth/login`.
+   `/login`.
 2. The form posts to `/auth/magic-link`. The handler runs the
    anti-abuse middleware (per-IP rate limit, optional Cloudflare
    Turnstile, disposable-email blocklist, MX-record validation,

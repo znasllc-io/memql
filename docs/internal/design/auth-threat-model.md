@@ -50,7 +50,7 @@ Worker tokens are revoked by flipping `active=false` on the identity row; expiry
 |---|---|---|---|
 | `/healthz` | GET | none | intentional public |
 | `/.well-known/jwks.json` | GET | none | intentional public; key distribution |
-| `/auth/login` | GET, POST | none (entry point) | magic-link request |
+| `/login` | GET, POST | none (entry point) | magic-link request |
 | `/auth/magic-link` | POST | none (entry point) | magic-link mint |
 | `/auth/complete` | GET | none (link consume) | magic-link redeem |
 | `/oauth/token` | POST | code | OAuth-style code exchange |
@@ -214,10 +214,10 @@ Shipped via #106 (PR #148).
 
 ### 5.7 CSRF on web form POSTs
 
-`/auth/login` (POST), `/setup`, and `/auth/complete` are unauthenticated entry points (no Bearer required) and do not carry CSRF tokens. SameSite=Lax on `memql_auth` partially mitigates by blocking the cookie from cross-site POSTs, but the underlying forms accept any well-formed POST.
+`/login` (POST), `/setup`, and `/auth/complete` are unauthenticated entry points (no Bearer required) and do not carry CSRF tokens. SameSite=Lax on `memql_auth` partially mitigates by blocking the cookie from cross-site POSTs, but the underlying forms accept any well-formed POST.
 
 **Threat:** the impact of CSRF on these forms is limited because the side-effects are:
-- `/auth/login` POST → mint a magic link → send to the *form-supplied* email address. The attacker who triggers this has no way to read the resulting email; the magic-link goes to a real user's mailbox.
+- `/login` POST → mint a magic link → send to the *form-supplied* email address. The attacker who triggers this has no way to read the resulting email; the magic-link goes to a real user's mailbox.
 - `/setup` POST → bootstrap-only; runs at most once.
 
 **Trust assumption:** the unauthenticated entry-point surface does not warrant a full CSRF framework today. If authenticated form POSTs are added (admin console etc.), introduce a `gorilla/csrf`-style middleware first.
