@@ -23,13 +23,20 @@ import (
 // serialized reply is the only shape that catches the field nobody thought to
 // assert on.
 
-// plantedGraphSecret / plantedSMTPPassword are deliberately long and
-// distinctive: redactSecrets skips values under eight characters, and a short
-// planted value would make the sweep vacuous.
+// plantedGraphSecret / plantedSMTPPassword / plantedRowSecret are deliberately
+// long and distinctive: redactSecrets skips values under eight characters, and
+// a short planted value would make the sweep vacuous.
+//
+// They are also deliberately ALL WORDS. An earlier spelling ended each in a
+// short hex suffix, which read as high-entropy to gitleaks' generic-api-key
+// rule and reddened the secret-scanning lane. A fixture whose entire purpose
+// is proving that secrets never escape is a poor thing to silence with an
+// allowlist entry, and dictionary words are just as distinctive for a
+// substring sweep while being unmistakable to a scanner or a reader.
 const (
-	plantedGraphSecret  = "PLANTED-GRAPH-CLIENT-SECRET-8f21c0"
-	plantedSMTPPassword = "PLANTED-SMTP-PASSWORD-3ba97e"
-	plantedRowSecret    = "PLANTED-ROW-SECRET-c41d55"
+	plantedGraphSecret  = "PLANTED-GRAPH-CLIENT-SECRET-DO-NOT-EMIT"
+	plantedSMTPPassword = "PLANTED-SMTP-PASSWORD-DO-NOT-EMIT"
+	plantedRowSecret    = "PLANTED-ROW-SECRET-DO-NOT-EMIT"
 )
 
 // clearEmailEnv blanks every environment variable the email lane consults, so
