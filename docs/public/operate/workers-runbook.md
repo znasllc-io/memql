@@ -116,6 +116,18 @@ capabilities:
   - COMPUTERUSE
 ```
 
+**`cluster_url` states its transport, and a bare `host:port` means
+PLAINTEXT.** The worker turns this value into a dial address plus a
+TLS flag (`sdk/go/worker.ParseClusterURL`): `https://` and `wss://`
+dial with TLS on 443 unless another port is given; `http://` and
+`ws://` dial in the clear; a value with no scheme is dialled in the
+clear whatever its port, because a port number is not evidence of a
+transport -- `agent.example.com:443` and `agent.example.com:8443` are
+equally silent about TLS. Pairing (`memql-cockpit worker pair`) writes
+this file for you and the server now supplies the scheme, so this only
+bites a hand-written config. If you edit it, write the scheme
+(memql#3437).
+
 `~/.memql/policy.yaml` (optional) controls allow/deny for shell,
 fs, and HTTP tools, plus per-call resource limits and the optional
 setuid drop for `exec`:

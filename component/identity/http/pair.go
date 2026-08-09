@@ -94,6 +94,14 @@ type PairRedeemRequest struct {
 }
 
 // PairRedeemResponse mirrors the previous gRPC reply shape.
+//
+// ClusterURL is the gRPC dial target for WorkerService.Stream, and it STATES
+// its transport: `https://host:443` or `http://host:50050` (memql#3437). The
+// consumer parses it with sdk/go/worker.ParseClusterURL, which reads a scheme
+// as authoritative and a BARE `host:port` as plaintext -- so a bare value here
+// told a worker to dial a TLS port in the clear. The only value that is still
+// bare is an operator endpoint that named a port but no scheme; the handler
+// logs a WARN when it emits one.
 type PairRedeemResponse struct {
 	Success     bool   `json:"success"`
 	PlainToken  string `json:"plainToken,omitempty"`
@@ -322,6 +330,7 @@ func (s *Server) handlePairRedeem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	dialURL := resolveWorkerDialEndpoint(row.ClusterURL)
+	s.warnOnTransportSilentDialURL(dialURL)
 
 	if s.Audit != nil {
 		s.Audit.Log(ctx, identity.AuditEvent{
@@ -373,10 +382,10 @@ func (s *Server) requireBearer(w http.ResponseWriter, r *http.Request) (*identit
 //
 //  1. MEMQL_WORKER_DIAL_ENDPOINT -- explicit operator override.
 //     Production deployments set this to the agent's public dial
-//     address (e.g. agent.acme.com:443).
-//  2. identity.DialEndpointFromOrigin(storedURL) -- maps the origin
+//     address, WITH A SCHEME: https://agent.acme.com (see below).
+//  2. identity.DialURLFromOrigin(storedURL) -- maps the origin
 //     stamped on the pairing row (the product SPA's
-//     `window.location.origin`) to a host:port, using the same
+//     `window.location.origin`) to a dial address, using the same
 //     origin-to-dial mapping the discovery document derives with.
 //  3. The cluster-wide advertised discovery endpoint, when the stored
 //     origin is unreadable.
@@ -388,20 +397,67 @@ func (s *Server) requireBearer(w http.ResponseWriter, r *http.Request) (*identit
 // worker was handed the one advertised endpoint regardless of what it paired
 // against. The mapping is now reached without the lookup (memql#3434); the
 // advertised endpoint survives only as tier 3, where it belongs.
+//
+// THE VALUE CARRIES ITS TRANSPORT (memql#3437). Each tier resolves through a
+// scheme-STATING mapping rather than the bare `host:port` one the discovery
+// document publishes. The consumer is sdk/go/worker.ParseClusterURL, which
+// reads a bare address as useTLS=false -- so the old bare "cockpit.<domain>:443"
+// told a worker to dial a TLS port in plaintext, with its `mql_wkr_` bearer
+// token in the clear. The dial TARGET is unchanged; strip the scheme from any
+// value below and the pre-fix string comes back exactly.
+//
+// The one form that stays bare is an operator endpoint that names a PORT but
+// no scheme (tiers 1 and 3), because nothing in `host:443` says whether that
+// listener speaks TLS and the port is not evidence -- see
+// identity.DialURLFromEndpoint. The caller logs a WARN when that happens; the
+// remedy is to write the scheme.
 func resolveWorkerDialEndpoint(storedURL string) string {
 	if v := strings.TrimSpace(os.Getenv("MEMQL_WORKER_DIAL_ENDPOINT")); v != "" {
+		if u := identity.DialURLFromEndpoint(v); u != "" {
+			return u
+		}
+		// Unreadable, but the operator wrote it deliberately -- hand it over
+		// as-is rather than silently substituting a derived address.
 		return v
 	}
-	if v := identity.DialEndpointFromOrigin(storedURL); v != "" {
+	if v := identity.DialURLFromOrigin(storedURL); v != "" {
 		return v
 	}
 	// Unreadable origin. The advertised endpoint answers a different
 	// question -- it names the cluster front door, not this pairing's
 	// origin -- but it is at least a dialable address.
-	if v := identity.DeriveGRPCEndpoint(storedURL, os.Getenv); v != "" {
+	if v := identity.DialURLFromEndpoint(os.Getenv("MEMQL_DISCOVERY_GRPC_ENDPOINT")); v != "" {
 		return v
 	}
 	return storedURL
+}
+
+// warnOnTransportSilentDialURL logs when the resolved dial address names a
+// port but no transport (memql#3437).
+//
+// The receiving worker parses it with sdk/go/worker.ParseClusterURL, which
+// documents a bare `host:port` as PLAINTEXT. That default is reasonable for an
+// operator hand-editing worker.yaml against a local cluster, and the server
+// deliberately does NOT override it by guessing from the port number -- a TLS
+// listener on a non-standard port would be guessed wrong, and `:443` is a
+// convention, not a fact. What the server can do is refuse to be quiet about
+// it: a worker that dials a TLS port in the clear writes its `mql_wkr_` bearer
+// token onto the wire before the handshake fails.
+//
+// Only an operator-configured endpoint can reach here (tiers 1 and 3); a
+// pairing origin always carries its scheme.
+func (s *Server) warnOnTransportSilentDialURL(dialURL string) {
+	if s == nil || s.Logger == nil {
+		return
+	}
+	if dialURL == "" || strings.Contains(dialURL, "://") {
+		return
+	}
+	s.Logger.Warn("worker pairing reply carries a dial address with no transport; the worker will dial it in PLAINTEXT",
+		"dialEndpoint", dialURL,
+		"remedy", "write the scheme on the configured endpoint -- https://host for TLS, http://host for plaintext",
+		"source", "MEMQL_WORKER_DIAL_ENDPOINT or MEMQL_DISCOVERY_GRPC_ENDPOINT",
+	)
 }
 
 // extractAuthScheme returns the token portion of an `Authorization:

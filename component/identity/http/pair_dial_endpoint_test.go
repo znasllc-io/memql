@@ -14,6 +14,14 @@ import "testing"
 // too), so tier 2 never actually read the stored URL -- every worker was
 // handed the one cluster-wide advertised endpoint no matter which origin
 // it paired against.
+//
+// The expected values below carry a scheme since memql#3437, which made the
+// reply STATE its transport instead of leaving a bare `:443` to be read as
+// plaintext. Nothing about the precedence changed -- the same tier wins in
+// every case, at the same host and port. The sibling
+// TestResolveWorkerDialEndpoint_StatesTransportSecurity pins the form, and
+// asserts separately that stripping the scheme reproduces exactly the bare
+// strings this test used to expect.
 func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
 	const discovery = "cockpit.local.znas.io:443"
 
@@ -22,7 +30,7 @@ func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
 		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", discovery)
 
 		got := resolveWorkerDialEndpoint("https://app.local.znas.io")
-		if want := "app.local.znas.io:443"; got != want {
+		if want := "https://app.local.znas.io:443"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint = %q, want %q (the pairing row's own origin, not the advertised %q)", got, want, discovery)
 		}
 	})
@@ -47,14 +55,16 @@ func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
 		}
 	})
 
-	t.Run("stored URL is mapped, never republished as a URL", func(t *testing.T) {
+	t.Run("stored URL is mapped, never echoed back unchanged", func(t *testing.T) {
 		t.Setenv("MEMQL_WORKER_DIAL_ENDPOINT", "")
 		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "")
 
 		// The origin's OWN port is where the SPA serves HTTP, never where a
 		// client dials gRPC -- the scheme names the port, the port is dropped.
+		// The scheme itself is KEPT (memql#3437): it is what tells the worker
+		// whether to negotiate TLS, and 3000 -> 50050 is a plaintext hop.
 		got := resolveWorkerDialEndpoint("http://localhost:3000")
-		if want := "localhost:50050"; got != want {
+		if want := "http://localhost:50050"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint = %q, want %q", got, want)
 		}
 	})
