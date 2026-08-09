@@ -9,6 +9,14 @@
 // the shared element library rather than through markup this repo drew, and
 // that "schedule" never claims to have sent anything.
 //
+// memql#3348 added the SEND actions, and with them a third property worth
+// asserting from the browser side: the one irreversible control on this
+// surface must offer exactly one action per campaign state, and must not offer
+// any for a campaign that is already sent. A row of disabled buttons answers
+// "what can I do now" worse than one enabled one, and a Start button on a sent
+// campaign invites a second run that would mail nobody (the delivery ledger is
+// per (campaign, recipient), so every recipient is already terminal).
+//
 // The quoting case is not decorative. Argument interpolation is where a
 // hand-built call string goes wrong, and the failure is silent-ish and nasty:
 // an unescaped quote does not corrupt one field, it terminates the literal and
@@ -118,18 +126,22 @@ const TEMPLATE_ROWS: Row[] = [
   }),
 ];
 
-const CAMPAIGN_ROWS: Row[] = [
-  node(CAMPAIGN, "camp-1", {
-    ownerUserId: "user-1",
-    name: "August send",
-    audienceId: "aud-1",
-    templateId: "tpl-1",
-    status: "draft",
-    recipientCount: 0,
-    sentCount: 0,
-    failedCount: 0,
-  }),
-];
+function campaignRows(status = "draft"): Row[] {
+  return [
+    node(CAMPAIGN, "camp-1", {
+      ownerUserId: "user-1",
+      name: "August send",
+      audienceId: "aud-1",
+      templateId: "tpl-1",
+      status,
+      recipientCount: 0,
+      sentCount: 0,
+      failedCount: 0,
+    }),
+  ];
+}
+
+const CAMPAIGN_ROWS: Row[] = campaignRows();
 
 const AUTH_DISABLED_CLUSTER = {
   identityUrl: "",
@@ -138,7 +150,8 @@ const AUTH_DISABLED_CLUSTER = {
   authEnabled: false,
 };
 
-function renderAt(path: string) {
+function renderAt(path: string, campaignStatus = "draft") {
+  const rows = campaignRows(campaignStatus);
   const access: AccessSummary = {
     requestId: "r1",
     userId: "user-1",
@@ -151,7 +164,7 @@ function renderAt(path: string) {
     calls.push(call);
     switch (name) {
       case "campaigns":
-        return new Result({ bundle: { nodes: CAMPAIGN_ROWS }, meta: { cursor: "" } });
+        return new Result({ bundle: { nodes: rows }, meta: { cursor: "" } });
       case "audiences":
         return new Result({ bundle: { nodes: AUDIENCE_ROWS }, meta: { cursor: "" } });
       case "templates":
@@ -332,13 +345,77 @@ describe("the campaign editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Record schedule/ }));
 
     await waitFor(() => expect(callsNamed(calls, "scheduleCampaign").length).toBe(1));
-    expect(await screen.findByText(/Nothing sends yet/)).toBeTruthy();
+    // Sending exists now (memql#3348), but nothing STARTS a send from a clock,
+    // so the confirmation still has to say that in words -- an operator who
+    // reads "Scheduled." will otherwise expect mail that never comes.
+    expect(await screen.findByText(/nothing starts a send from it yet/)).toBeTruthy();
   });
 
   it("explains an empty delivery list rather than implying a send reached nobody", async () => {
     renderAt("/integrations/campaigns/camp-1");
     await waitFor(() => expect(screen.getByText(/No delivery records/)).toBeTruthy());
-    expect(screen.getByText(/sending engine is a separate piece of work/)).toBeTruthy();
+    expect(screen.getByText(/has not been sent/)).toBeTruthy();
+  });
+
+  // The same empty table means something DIFFERENT mid-send, and saying so is
+  // the point: for the first minute of a real send an empty ledger is normal,
+  // and copy that reads "this has not been sent" would be a lie the operator
+  // acts on.
+  it("reads an empty delivery list differently while a send is running", async () => {
+    renderAt("/integrations/campaigns/camp-1", "sending");
+    await waitFor(() => expect(screen.getByText(/No delivery records yet/)).toBeTruthy());
+    expect(screen.getByText(/in batches/)).toBeTruthy();
+  });
+
+  it("starts a send through the builtin, not a mutation", async () => {
+    const { calls } = renderAt("/integrations/campaigns/camp-1");
+    await waitFor(() =>
+      expect((screen.getByPlaceholderText("August product update") as HTMLInputElement).value).toBe(
+        "August send",
+      ),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Start sending/ }));
+
+    await waitFor(() => expect(callsNamed(calls, "campaignStartSend").length).toBe(1));
+    // The keyword matters: `builtin` is what the engine's parser dispatches on,
+    // and a `mutation` spelling would reach nothing.
+    expect(callsNamed(calls, "campaignStartSend")[0]).toBe(
+      'builtin campaignStartSend(campaignId: "camp-1")',
+    );
+    expect(await screen.findByText(/Sending started/)).toBeTruthy();
+  });
+
+  it("offers exactly one send action per campaign state", async () => {
+    const cases: Array<[string, RegExp | null]> = [
+      ["draft", /Start sending/],
+      ["scheduled", /Start sending/],
+      ["sending", /Pause sending/],
+      ["paused", /Resume sending/],
+      ["sent", null],
+      ["cancelled", null],
+    ];
+    for (const [status, expected] of cases) {
+      const { unmount } = renderAt("/integrations/campaigns/camp-1", status);
+      await waitFor(() => expect(screen.getByRole("button", { name: /Cancel campaign/ })).toBeTruthy());
+
+      for (const label of [/Start sending/, /Pause sending/, /Resume sending/]) {
+        const present = screen.queryByRole("button", { name: label }) !== null;
+        const want = expected !== null && label.source === expected.source;
+        expect(present, `status=${status} label=${label.source}`).toBe(want);
+      }
+      unmount();
+    }
+  });
+
+  it("pauses through the builtin and says the ledger survives", async () => {
+    const { calls } = renderAt("/integrations/campaigns/camp-1", "sending");
+    await waitFor(() => expect(screen.getByRole("button", { name: /Pause sending/ })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /Pause sending/ }));
+
+    await waitFor(() => expect(callsNamed(calls, "campaignPauseSend").length).toBe(1));
+    expect(await screen.findByText(/resuming continues where it stopped/)).toBeTruthy();
   });
 
   it("says an unknown id is not yours rather than opening a blank form", async () => {
