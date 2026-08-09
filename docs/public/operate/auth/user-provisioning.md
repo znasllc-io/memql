@@ -12,8 +12,7 @@ owner: znas
 How users get into the cluster. The identity service
 (`component/identity`) owns the registration surface end-to-end --
 the web UI, the magic-link flow, the invitation flow, and the
-underlying mutations on `v1:identity:user` / `v1:identity:identity`
-/ `v1:identity:partitionAccess`.
+underlying mutations on `v1:identity:user` / `v1:identity:identity`.
 
 ## Registration modes
 
@@ -83,15 +82,21 @@ flows:
 Tokens are stored as SHA-256 hashes (column: `tokenHash`); the
 plaintext is shown only once at issuance.
 
-## Personal partitions for external users
+## External users
 
 External users (email did not match `MEMQL_IDENTITY_INTERNAL_DOMAINS`)
-do not get a cluster-wide role. Instead the
-`provisionPersonalPartitionOnFirstLogin` automation creates a
-personal partition for them on the first session and stamps a
-`v1:identity:partitionAccess(role=owner)` grant against it. From
-the user's perspective they own their own workspace; from the
-cluster's perspective they have no global visibility.
+are flagged `internal=false` and take the default cluster-wide role,
+`reader` (`Store.CreateUserOnFirstLogin` substitutes it when the
+caller passes an empty role).
+
+They get no separate workspace. The
+`provisionPersonalPartitionOnFirstLogin` automation this section used
+to describe was removed with partitioning in #56 and does not exist
+in the tree; neither does the
+`v1:identity:partitionAccess(role=owner)` grant it stamped. What
+bounds an external user today is the per-row check on each concept
+they read -- see
+[access-model.md](access-model.md#what-the-role-actually-decides).
 
 ## Internal users
 
@@ -106,12 +111,11 @@ even if the configuration drifts later.
 Users are created in exactly one place: the magic-link
 verification path inside the identity service
 (`Store.CreateUserOnFirstLogin`). When a fresh email completes a
-magic-link flow, the verifier inserts the `v1:identity:user`,
-matching `v1:identity:identity` (variant=magic_link), and
-`v1:identity:partitionAccess` rows in one go. The
-`provisionPersonalPartitionOnFirstLogin` automation reacts to
-the new user-row event and materialises a personal partition
-for external users.
+magic-link flow, the verifier inserts the `v1:identity:user` row and
+the matching `v1:identity:identity` row (variant=magic_link)
+together. Those two rows are the whole of it -- there is no third
+grant row, and no automation runs afterwards to materialise a
+workspace.
 
 There is **no** `session.opened` auto-provision automation. An
 earlier `bootstrapIdentity` automation existed as a backstop for
@@ -132,8 +136,8 @@ does not hard-delete; an `accountDeletionSweep` cron runs after
 `MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS` and performs the cascade:
 
 - User row hard-deleted
-- All `v1:identity:identity` / `v1:identity:partitionAccess` /
-  `v1:identity:authSession` rows for the user hard-deleted
+- All `v1:identity:identity` / `v1:identity:authSession` rows for
+  the user hard-deleted
 - Audit / access-request / invitation references to the user are
   tombstoned (`<deleted:hash>`) rather than removed, preserving
   the audit trail

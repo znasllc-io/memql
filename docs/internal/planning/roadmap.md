@@ -37,12 +37,23 @@ The items below build on this model.
 
 ## Multi-tenancy & Auth
 
-### Partition-aware auth -- DONE (April 2026)
+### Partition-aware auth -- DONE (April 2026), then RETIRED (#56)
 
-Shipped. See [docs/public/operate/auth/access-model.md](../../public/operate/auth/access-model.md) for the
-model.
+> **Superseded -- do not design against this section (memql#3305).**
+> Everything below shipped in April 2026 and was then removed wholesale
+> by #56. `v1:identity:partitionAccess` no longer exists; `PartitionACL`
+> and `component/auth/access/` are not in the tree; `"MemoryNodes"` has
+> no `partition` column; and the wire field is `reserved` in
+> `component/grpc/memql.proto`. The mechanism that replaced it is
+> **per-row authorization** -- see
+> [access-model.md](../../public/operate/auth/access-model.md) and
+> [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
+>
+> Kept as a record of what was built and unwound, because scoping work
+> has more than once reached for partitions on the strength of pages
+> like this one.
 
-Summary of what landed:
+Summary of what landed at the time:
 
 - `v1:identity:user` (the person), `v1:identity:identity` (a credential
   set owned by a user), and `v1:identity:partitionAccess` (the grant)
@@ -78,6 +89,14 @@ Deferred (not blockers for SaaS safety, but worth following up):
 ---
 
 ## Partition tooling
+
+> **Superseded -- do not design against this section (memql#3305).**
+> Partitioning was retired in #56. There is no `partition` column on
+> `"MemoryNodes"` to hard-delete, migrate or report on, and
+> `v1:platform:partition` is not a tenancy boundary. What survives
+> under the name is `v1:platform:partitionSecret` /
+> `partitionVariable`, which are **config storage**. Kept as a record
+> of work that was planned and is no longer applicable.
 
 ### Hard-delete partition
 
@@ -270,14 +289,13 @@ discoverable:
 
 ## Nice-to-have
 
-- **CLI: cluster-level partition stats**. Show row counts and last
-  activity per partition in the partition manager detail pane. Requires
-  a cheap aggregate query.
-- **CLI: bulk partition migration tool**. Move all rows from one
-  partition to another (renames a customer, splits a noisy tenant).
-  Pairs with hard-delete.
-- **Auth: per-partition write-vs-read enforcement**. Per-partition
-  grants already exist (`v1:identity:partitionAccess.role`), but the
-  middleware today only checks "does the caller have *any* grant for
-  this partition". Tighten it to block readers from running mutations
-  and block writer+/admin-scoped mutations from reader grants.
+- ~~**CLI: cluster-level partition stats**~~ -- moot; partitioning
+  retired in #56 (memql#3305).
+- ~~**CLI: bulk partition migration tool**~~ -- moot; same reason.
+- ~~**Auth: per-partition write-vs-read enforcement**~~ -- moot as
+  written: `v1:identity:partitionAccess.role` does not exist and there
+  is no partition ACL middleware to tighten. The live question this
+  gestured at -- *should a reader be blocked from running mutations?*
+  -- is now a per-row-authz question, and the row-authz write guard
+  (`component/memql/rowauthz_write_guard.go`) is where it would be
+  answered.
