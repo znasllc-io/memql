@@ -1242,8 +1242,10 @@ surface entirely.
 | Procedural func / automation / policy | File-top `args { ... }` block above the `func (...)` |
 | Builtin / tool / prompt | Body fields directly — the body IS the schema |
 
-`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@default(<expr>)] [@description("...")]`. Omitting
-`@required` makes the field optional.
+`args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")]`. Omitting
+`@required` makes the field optional. Describe the field with a `///` doc
+comment on the line above it — `@description` and `@default` are both rejected
+at load (memql#3336, #991).
 
 **How args get read inside the body:**
 
@@ -1470,7 +1472,13 @@ name collides with one of those is rejected at load time.
 **Annotations** in the args block:
 - `@required` — non-optional
 - `@enum("a", "b", "c")` — restricts to a value set
-- `@description("...")`, `@maxLength(N)`, `@pattern("re")`
+- `@maxLength(N)`, `@pattern("re")`
+- `@description` is **not** valid on an args field (it was parsed and then
+  discarded — there was never an AST slot for it; rejected at load,
+  memql#3336). An arg description is the `///` doc comment on the line above
+  the field, which is the channel the corpus uses and the LSP reads. A
+  `tool` / `prompt` / `builtin` field keeps its `@description` — those bodies
+  ARE the schema and retain it.
 - `@default` is **not** valid on an args field (it was never applied —
   rejected at load, #991). Apply a default in the body with the `??`
   null-coalescing operator (`args.X ?? <default>`). A concept-field
