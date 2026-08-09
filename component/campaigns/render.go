@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"fmt"
+	"html"
 	"net/url"
 	"strings"
 
@@ -80,7 +81,14 @@ func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) e
 			name = "there"
 		}
 	}
+	// TWO replacers, not one. `name` is recipient-supplied -- it arrives on an
+	// imported audience roster -- so the HTML path must escape it, while the
+	// text path must not (escaping there would render "&amp;" as literal text
+	// to the reader). Using one replacer for both is the bug CodeQL caught in
+	// memql#3348: the footer below escaped its operator-set values while the
+	// substitution above it interpolated recipient data raw.
 	subst := strings.NewReplacer("{{displayName}}", name)
+	substHTML := strings.NewReplacer("{{displayName}}", htmlEscape(name))
 
 	text := subst.Replace(t.TextBody)
 	text += fmt.Sprintf("\r\n\r\n--\r\nYou are receiving this because you subscribed to %s.\r\nUnsubscribe: %s\r\n",
@@ -99,7 +107,7 @@ func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) e
 		},
 	}
 	if strings.TrimSpace(t.HTMLBody) != "" {
-		html := subst.Replace(t.HTMLBody)
+		html := substHTML.Replace(t.HTMLBody)
 		html += fmt.Sprintf(
 			`<hr><p style="font-size:12px;color:#666">You are receiving this because you subscribed to %s. <a href="%s">Unsubscribe</a>.</p>`,
 			htmlEscape(displayNameFor(c)), htmlEscape(unsubscribeURL))
@@ -124,18 +132,15 @@ func unsubscribeURL(baseURL, token string) string {
 	return fmt.Sprintf("%s%s?token=%s", base, UnsubscribePath, url.QueryEscape(token))
 }
 
-// htmlEscape is deliberately narrow: it escapes the five characters that
-// can break out of the attribute or text context this file puts values
-// into. The values are an operator-set display name and a URL this
-// package built, so this is defence in depth rather than the primary
-// barrier -- but a display name is free text and free text reaches a
-// recipient's mail client.
+// htmlEscape delegates to the standard library rather than hand-rolling the
+// five replacements, which is what this was before memql#3348.
+//
+// The hand-rolled version was *correct* -- html.EscapeString escapes exactly
+// the same five characters -- so this is not a bug fix. It is a maintenance
+// and analysis one: a custom escaper is a sanitizer no static analyser
+// recognises, so CodeQL reported the one-token unsubscribe page as reflected
+// XSS, and any future reader has to re-derive that the five are sufficient for
+// the context. The stdlib carries both guarantees for free.
 func htmlEscape(s string) string {
-	return strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&#39;",
-	).Replace(s)
+	return html.EscapeString(s)
 }

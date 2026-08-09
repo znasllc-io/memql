@@ -2,6 +2,7 @@ package campaigns
 
 import (
 	"context"
+	"html"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -205,7 +206,11 @@ func (h *UnsubscribeHandler) render(rw http.ResponseWriter, status int, page uns
 	switch page {
 	case pageConfirm:
 		body = `<h1>Unsubscribe</h1><p>Confirm that you no longer want to receive these emails.</p>` +
-			`<form method="POST"><input type="hidden" name="token" value="` + htmlEscape(token) + `">` +
+			// html.EscapeString directly at the sink rather than through the
+			// package helper: this is the one value on this page that came off
+			// the wire, so the sanitizer is spelled out where a reader (and a
+			// static analyser) sees it next to the interpolation.
+			`<form method="POST"><input type="hidden" name="token" value="` + html.EscapeString(token) + `">` +
 			`<button type="submit">Unsubscribe me</button></form>`
 	case pageDone:
 		body = `<h1>Unsubscribed</h1><p>You will not receive further emails from this sender. ` +
