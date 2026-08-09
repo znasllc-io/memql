@@ -28,6 +28,7 @@ import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
 import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
 import type { ClusterConfig } from './clusters/model.js';
+import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -179,7 +180,33 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   }
 
   const clustersPath = defaultClustersPath();
-  connections = new ConnectionManager();
+  // The credential resolver (memql#3383 / memql#3385). This is the only place
+  // the three things it needs actually exist:
+  //
+  //   - context.secrets  -- VS Code's SecretStorage, where the LONG-LIVED
+  //     refresh token is kept. clusters.yaml is plaintext and owned by the
+  //     memQL Cockpit, so the 30-day credential must not live there; the
+  //     15-minute access token still does, because the Cockpit reads it too.
+  //     See src/connection/credentials.ts for the full split.
+  //   - a write-back into clusters.yaml, so a refreshed access token is there
+  //     for the next connect (and for the Cockpit) instead of being re-earned.
+  //   - the global fetch, for the /oauth/token exchange.
+  connections = new ConnectionManager(
+    undefined,
+    new CredentialResolver({
+      secrets: context.secrets,
+      persist: async (clusterName, update) => {
+        // undefined leaves the on-disk value alone; "" DELETES the key. So the
+        // plaintext refresh token is removed only once SecretStorage has taken
+        // custody of the rotated one -- otherwise the file holds the only copy.
+        await upsertCluster(clustersPath, {
+          name: clusterName,
+          token: update.token,
+          refreshToken: update.clearStoredRefreshToken ? '' : undefined,
+        });
+      },
+    })
+  );
 
   const clustersTree = new ClustersTreeProvider(clustersPath, connections);
   context.subscriptions.push(
@@ -1074,13 +1101,39 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     return undefined;
   }
 
-  const pat = await window.showInputBox({
-    prompt: 'Personal Access Token (mql_pat_...). Leave empty to authenticate in the memQL Cockpit instead.',
-    value: existing?.pat ?? '',
+  // A JWT ACCESS TOKEN, not a PAT (memql#3383). The old prompt asked for a
+  // Personal Access Token, which a bff rejects before any lookup -- so an
+  // operator who answered it correctly still could not connect, and nothing
+  // said why.
+  const token = await window.showInputBox({
+    prompt:
+      'Access token: the identity-issued JWT from POST <identity>/oauth/token. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
+    value: existing?.token ?? '',
     ignoreFocusOut: true,
     password: true,
   });
-  if (pat === undefined) {
+  if (token === undefined) {
+    return undefined;
+  }
+
+  // The refresh token is collected here as the INGEST path only (memql#3385):
+  // the credential resolver takes custody of it on the first exchange, moving
+  // it into VS Code's SecretStorage and deleting it from the cockpit-shared
+  // plaintext file. It is a 30-day credential, so leaving it on disk is the
+  // thing this flow exists to avoid, not a step in it.
+  const refreshToken = await window.showInputBox({
+    prompt:
+      'Refresh token (optional): the `refresh_token` from the same response. Stored in the editor\'s secret storage and used to renew the access token as it expires.',
+    // Prefilled from whatever is still PENDING in the file. Normally nothing:
+    // once the resolver has taken custody the key is gone from disk, and the
+    // secret is deliberately not readable back into a text box. Prefilling the
+    // pending case is what stops "add a cluster, then edit it before the first
+    // connect" from silently dropping the token the operator just pasted.
+    value: existing?.refreshToken ?? '',
+    ignoreFocusOut: true,
+    password: true,
+  });
+  if (refreshToken === undefined) {
     return undefined;
   }
 
@@ -1121,8 +1174,8 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // Every collected field is returned, INCLUDING the empty ones. An empty
   // string means "the user cleared this input", which upsertCluster turns into
   // a key delete. Omitting the key instead would mean "leave whatever is on
-  // disk alone" -- so clearing the PAT field to revoke a token left the old
-  // token sitting in clusters.yaml while the UI showed it gone.
+  // disk alone" -- so clearing the token field to revoke a credential left the
+  // old one sitting in clusters.yaml while the UI showed it gone.
   //
   // `local` is returned as a real boolean for the same reason: false here means
   // "the user chose not-local", which upsertCluster writes as an ABSENT key
@@ -1131,7 +1184,8 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     name: name.trim(),
     endpoint: endpoint.trim(),
     domain: domain.trim(),
-    pat: pat.trim(),
+    token: token.trim(),
+    refreshToken: refreshToken.trim(),
     local: localChoice.value,
   };
 }
