@@ -92,8 +92,9 @@ type seedResult struct {
 	OK      bool `json:"ok"`
 	Changed bool `json:"changed"`
 	Result  struct {
-		MasterKeySource string `json:"masterKeySource"`
-		Source          string `json:"source"`
+		MasterKeySource    string `json:"masterKeySource"`
+		Source             string `json:"source"`
+		FrontDoorTLSSource string `json:"frontDoorTlsSource"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -140,6 +141,12 @@ func runSeedSecrets(t *testing.T, sc scenario) (string, []string, int) {
 	if err := os.WriteFile(fake, []byte(fakeKubectlTemplate), 0o755); err != nil {
 		t.Fatalf("write fake kubectl: %v", err)
 	}
+	// HOME is redirected to tmp below, so this IS the default front-door pair
+	// location (scripts/lib/localtls.sh). Planting it keeps these master-key
+	// tests hermetic: with a pair already on disk the script reuses it and
+	// never reaches for mkcert. The issuance path itself is covered in
+	// seed_secrets_front_door_tls_test.go.
+	writeFrontDoorPair(t, tmp)
 
 	state := sc.secretState
 	if state == "" {
