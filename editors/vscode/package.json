@@ -157,6 +157,15 @@
         "icon": "$(edit)"
       },
       {
+        "command": "memql.clusters.signIn",
+        "title": "memQL: Sign In",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "memql.clusters.signOut",
+        "title": "memQL: Sign Out"
+      },
+      {
         "command": "memql.clusters.disconnect",
         "title": "memQL: Disconnect"
       },
@@ -223,6 +232,14 @@
         },
         {
           "command": "memql.clusters.edit",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.signIn",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.signOut",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -307,6 +324,16 @@
           "command": "memql.clusters.edit",
           "when": "view == memqlClusters && viewItem == memqlCluster",
           "group": "inline@2"
+        },
+        {
+          "command": "memql.clusters.signIn",
+          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "group": "auth@1"
+        },
+        {
+          "command": "memql.clusters.signOut",
+          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "group": "auth@2"
         },
         {
           "command": "memql.runs.execute",

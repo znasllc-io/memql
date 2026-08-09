@@ -4,9 +4,11 @@ import {
   commands,
   Diagnostic,
   DiagnosticSeverity,
+  env,
   ExtensionContext,
   languages,
   Position,
+  ProgressLocation,
   Range,
   RelativePattern,
   Uri,
@@ -26,8 +28,17 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
-import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
-import type { ClusterConfig } from './clusters/model.js';
+import { runAuthorizationFlow } from './auth/flow.js';
+import {
+  canSignIn,
+  describeSignInFailure,
+  performSignIn,
+  signInCanRecover,
+  type SignInTokenStore,
+} from './auth/signin.js';
+import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
+import { displayLabel, type ClusterConfig } from './clusters/model.js';
+import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
@@ -272,6 +283,34 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
+  // The sign-in persistence seam (memql#3403 / memql#3404).
+  //
+  // This DELEGATES to src/auth/store.ts rather than reimplementing the split.
+  // It is tempting to inline it -- write the access token to clusters.yaml,
+  // the refresh token to SecretStorage, done -- and an earlier draft of this
+  // file did exactly that. It is wrong for a reason that is invisible from
+  // here: SecretStorage cannot be enumerated, so #3404 keeps an INDEX of which
+  // clusters have secrets, and sweeps any secret whose cluster is gone. A
+  // sign-in that wrote a secret without indexing it would look fine until the
+  // next sweep silently deleted the credential it had just stored.
+  const storeDeps = {
+    secrets: context.secrets,
+    writeCluster: (update: ClusterUpdate) => upsertCluster(clustersPath, update),
+  };
+  const signInStore: SignInTokenStore = {
+    persistSignIn: (clusterName, credentials) =>
+      persistSignIn(storeDeps, clusterName, {
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        expiresAtEpochSeconds: credentials.expiresAtEpochSeconds,
+        // The client_id is written separately by the ClientIdWriter below --
+        // it is registered before the tokens exist, so it is not part of this
+        // payload. "" leaves the stored value alone.
+        clientId: '',
+      }),
+    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
+  };
+
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
     commands.registerCommand('memql.clusters.disconnect', async () => {
@@ -288,8 +327,66 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       await connections?.connect(target.cluster);
       const state = connections?.state;
       if (state?.status === 'error') {
-        window.showErrorMessage(`memQL: ${state.message}`);
+        // A failure the CREDENTIAL causes now has a first-class recovery in the
+        // editor, so it is offered as the primary action rather than described
+        // in prose the operator has to act on somewhere else (memql#3403). The
+        // decision of which reasons qualify is signInCanRecover's -- a dial
+        // that failed because the cluster is unreachable is not made reachable
+        // by a fresh token, and `notConfigured` means there is no endpoint at
+        // all. canSignIn is the second half: a cluster naming no identity
+        // service has nowhere to sign in to, and a button whose only outcome is
+        // an error toast is worse than no button.
+        const offer = signInCanRecover(state.reason) && canSignIn(target.cluster);
+        const choice = offer
+          ? await window.showErrorMessage(`memQL: ${state.message}`, 'Sign in')
+          : await window.showErrorMessage(`memQL: ${state.message}`);
+        if (choice === 'Sign in') {
+          await signInToCluster(target.cluster, {
+            clustersPath,
+            store: signInStore,
+            clustersTree,
+          });
+        }
       }
+    }),
+    // memql#3403. Reached from the Clusters view's context menu (which supplies
+    // the node) and from the palette (which cannot, so it asks).
+    commands.registerCommand('memql.clusters.signIn', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      await signInToCluster(target.cluster, {
+        clustersPath,
+        store: signInStore,
+        clustersTree,
+      });
+    }),
+    // The counterpart: forget this cluster's session. The store owns what that
+    // means in each of the two places a credential lives (memql#3404).
+    commands.registerCommand('memql.clusters.signOut', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      try {
+        await signInStore.signOut(target.cluster.name);
+      } catch (err) {
+        window.showErrorMessage(
+          `memQL: signing out of "${target.cluster.name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return;
+      }
+      // A live connection is dialing with the credential just revoked; leaving
+      // it up would make "signed out" false for as long as the socket lasts.
+      const state = connections?.state;
+      if (state !== undefined && state.status !== 'disconnected' && state.clusterName === target.cluster.name) {
+        await connections?.disconnect();
+      }
+      clustersTree.refresh();
+      window.showInformationMessage(
+        `memQL: signed out of "${target.cluster.name}". Run "memQL: Sign In" to authenticate again.`
+      );
     }),
     commands.registerCommand('memql.clusters.add', async () => {
       const created = await promptForCluster();
@@ -1068,6 +1165,102 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
   return { cluster: picked.cluster, selected: picked.cluster.name === file.selectedCluster };
 }
 
+interface SignInDeps {
+  clustersPath: string;
+  store: SignInTokenStore;
+  clustersTree: ClustersTreeProvider;
+}
+
+// signInToCluster is the editor half of memql#3403's sign-in: progress,
+// cancellation, and the two vscode.env capabilities the flow needs injected.
+//
+// WHY THE PROGRESS IS CANCELLABLE AND WHAT CANCELLING ACTUALLY DOES.
+// A browser sign-in parks on a loopback listener for minutes at a time waiting
+// for a person to finish a page they may already have closed. A notification
+// with no way out would leave the operator watching a spinner with no
+// affordance except reloading the window. The token is bridged to the
+// AbortSignal src/auth/flow.ts accepts, so cancelling closes the listener and
+// rejects with kind `cancelled` -- it is a real abort, not a hidden spinner.
+//
+// WHY THE FAILURE TOAST IS NOT AWAITED. Every rejection is reported through a
+// fire-and-forget message box: awaiting one would keep this command pending
+// until a human dismissed a notification, which makes the command unusable from
+// any automated caller (the host smoke lane included) and buys nothing -- the
+// message offers no choice to read back.
+async function signInToCluster(cluster: ClusterConfig, deps: SignInDeps): Promise<boolean> {
+  return window.withProgress(
+    {
+      location: ProgressLocation.Notification,
+      title: `memQL: signing in to ${displayLabel(cluster)}`,
+      cancellable: true,
+    },
+    async (progress, token) => {
+      const aborter = new AbortController();
+      const cancelSubscription = token.onCancellationRequested(() => aborter.abort());
+      try {
+        progress.report({ message: 'opening your browser...' });
+        await performSignIn(cluster, {
+          signal: aborter.signal,
+          store: deps.store,
+          persistClientId: async (clusterName, clientId) => {
+            await upsertCluster(deps.clustersPath, { name: clusterName, clientId });
+          },
+          runFlow: (target, signal) =>
+            runAuthorizationFlow(target, {
+              signal,
+              // asExternalUri is not decoration: under Remote-SSH, Codespaces
+              // or a dev container the browser runs on a different machine
+              // from this extension host, and the loopback URL has to be
+              // rewritten into one that machine can reach. toString(true)
+              // skips re-encoding -- the authorization URL's query is already
+              // percent-encoded and encoding it twice corrupts the PKCE
+              // challenge and the state.
+              resolveExternalUri: async (url) =>
+                (await env.asExternalUri(Uri.parse(url))).toString(true),
+              openExternal: (url) => env.openExternal(Uri.parse(url)),
+            }),
+        });
+      } catch (err) {
+        const report = describeSignInFailure(cluster.name, err);
+        if (report.level === 'error') {
+          void window.showErrorMessage(report.message);
+        } else if (report.level === 'warning') {
+          void window.showWarningMessage(report.message);
+        }
+        return false;
+      } finally {
+        cancelSubscription.dispose();
+      }
+
+      deps.clustersTree.refresh();
+
+      // Reconnect ONLY the working cluster. Exactly one connection exists at a
+      // time (see ConnectionManager), so dialing a cluster the operator merely
+      // signed into would silently switch which cluster every other view is
+      // showing. When the sign-in came from a failed connect, this IS the
+      // selected cluster and the reconnect is the point.
+      //
+      // Re-read from disk rather than reusing the in-memory config: the token
+      // just persisted is the whole reason to reconnect, and the object this
+      // function was called with predates it.
+      const result = await readClustersFileSafe(deps.clustersPath);
+      if (result.ok && result.file.selectedCluster === cluster.name) {
+        const fresh = result.file.clusters.find((c) => c.name === cluster.name);
+        if (fresh !== undefined) {
+          await connections?.connect(fresh);
+          const state = connections?.state;
+          if (state?.status === 'error') {
+            void window.showErrorMessage(`memQL: ${state.message}`);
+            return true;
+          }
+        }
+      }
+      void window.showInformationMessage(`memQL: signed in to "${cluster.name}".`);
+      return true;
+    }
+  );
+}
+
 // promptForCluster collects a cluster with native inputs rather than a webview:
 // it is four fields, and a QuickInput sequence is both less code and more
 // idiomatic than a custom form.
@@ -1105,9 +1298,16 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // Personal Access Token, which a bff rejects before any lookup -- so an
   // operator who answered it correctly still could not connect, and nothing
   // said why.
+  //
+  // The field is now OPTIONAL IN PRACTICE (memql#3403): the extension can mint
+  // its own credential through the browser, so leaving this empty and running
+  // "memQL: Sign In" is the ordinary path rather than a dead end. Saying so
+  // here is the difference between an operator who signs in and one who goes
+  // hunting for a token to paste -- the prompt is where they are standing when
+  // the question arises.
   const token = await window.showInputBox({
     prompt:
-      'Access token: the identity-issued JWT from POST <identity>/oauth/token. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
+      'Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. Leave empty and run "memQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
     value: existing?.token ?? '',
     ignoreFocusOut: true,
     password: true,

@@ -68,6 +68,10 @@ test('the runtime commands are registered, so a cluster can be selected and conn
     'memql.clusters.select',
     'memql.clusters.add',
     'memql.clusters.edit',
+    // memql#3403: sign-in is reachable from the palette and the Clusters view,
+    // so it has to be registered at activation like every other cluster command.
+    'memql.clusters.signIn',
+    'memql.clusters.signOut',
     'memql.clusters.disconnect',
     'memql.cluster.open',
     'memql.concepts.refresh',
