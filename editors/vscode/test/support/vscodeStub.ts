@@ -230,6 +230,20 @@ export const window = {
     recorded.treeViews.push(viewId);
     return { dispose: () => undefined };
   },
+
+  // What the "+" menu reaches for (memql#3412). Answers "the operator dismissed
+  // it", which is the outcome that makes a command handler return without doing
+  // anything -- the only behaviour this stub is asked for, since the menu's
+  // DECISION is unit-tested away from `vscode` (src/clusters/presence.ts) and
+  // its RENDERING in the host smoke lane.
+  //
+  // showInformationMessage is NOT redeclared here: the one above already
+  // records into `recorded.infos`, which is strictly more useful than a silent
+  // resolve, and env/clipboard already carries the throwing contract memql#3403
+  // established and memql#3411 extended.
+  showQuickPick(_items: unknown, _options?: unknown): Promise<undefined> {
+    return Promise.resolve(undefined);
+  },
 };
 
 // The progress-notification location src/extension.ts names for the sign-in
