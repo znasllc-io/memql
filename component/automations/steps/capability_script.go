@@ -97,6 +97,17 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
 	"install.magicLink":         "scripts/install/magic-link.sh",
 	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
+
+	// install.e2eBaseline is CI's INSTRUMENT rather than a step of any install
+	// graph: it fingerprints the four surfaces an install touches so the
+	// round-trip workflow can prove the machine came back byte-identical
+	// (install(17), #3374). It is registered here for the same reachability
+	// reason as the rest -- install_allowlist_test.go walks scripts/install/
+	// and fails on any capability script missing from this map -- and it is
+	// deliberately the one install.* capability with NO DSL action, because no
+	// graph runs it and dsl_agreement_test.go asserts every action belongs to a
+	// real install.
+	"install.e2eBaseline": "scripts/install/e2e-baseline.sh",
 }
 
 // scriptParamKey is the reserved rendered-arg key that names the capability

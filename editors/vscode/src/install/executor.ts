@@ -58,6 +58,8 @@ export interface StepOutcome {
   params: Record<string, string>;
   /** Human sentence for a non-ok status. */
   reason?: string;
+  /** On a skip: whether the condition dependents were waiting for already holds. */
+  satisfied?: boolean;
   startedAt: string;
   finishedAt: string;
 }
@@ -82,7 +84,24 @@ export type StepPlan =
        */
       preservedOnRefusal?: boolean;
     }
-  | { action: "skip"; reason: string };
+  | {
+      action: "skip";
+      reason: string;
+      /**
+       * The state this step would have established already holds, so the steps
+       * waiting on it may proceed.
+       *
+       * This is what an uninstall needs. `removeCheckout` waits for
+       * `removeCluster`; when no cluster was ever created there is nothing to
+       * remove, and the condition removeCheckout was waiting for -- no cluster
+       * -- is already true. Without this distinction an install that stopped
+       * before the cluster leaves an uninstall that skips everything and takes
+       * nothing back. Absent (the default) means the skip BLOCKS dependents,
+       * which is the right reading on the install side: no cluster, no secret
+       * seeded into it.
+       */
+      satisfied?: boolean;
+    };
 
 export type ExecEvent =
   | { type: "waveStarted"; index: number; ids: string[] }
@@ -154,19 +173,20 @@ async function runStep(
 ): Promise<StepOutcome> {
   const startedAt = new Date().toISOString();
 
-  // A dependency that failed or was skipped makes this step unsafe: it was
-  // told to wait for something that did not happen.
+  // A dependency that failed, or was skipped without satisfying what it was
+  // there to establish, makes this step unsafe: it was told to wait for
+  // something that did not happen.
   const blocked = (step.dependsOn ?? []).filter((d) => {
     const o = outcomes.get(d);
-    return !o || o.status === "failed" || o.status === "skipped";
+    return !o || o.status === "failed" || (o.status === "skipped" && !o.satisfied);
   });
   if (blocked.length > 0) {
-    return skipped(step, startedAt, `skipped: ${blocked.join(", ")} did not complete`);
+    return skipped(step, startedAt, `skipped: ${blocked.join(", ")} did not complete`, false);
   }
 
   const decision = plan(step);
   if (decision.action === "skip") {
-    return skipped(step, startedAt, decision.reason);
+    return skipped(step, startedAt, decision.reason, decision.satisfied === true);
   }
 
   // Graph-pinned params WIN over run-time ones. What the graph pins is policy
@@ -242,7 +262,7 @@ async function runStep(
   return ok;
 }
 
-function skipped(step: Step, startedAt: string, reason: string): StepOutcome {
+function skipped(step: Step, startedAt: string, reason: string, satisfied: boolean): StepOutcome {
   return {
     id: step.id,
     script: step.script,
@@ -253,6 +273,7 @@ function skipped(step: Step, startedAt: string, reason: string): StepOutcome {
     preExisting: false,
     params: {},
     reason,
+    satisfied,
     startedAt,
     finishedAt: new Date().toISOString(),
   };

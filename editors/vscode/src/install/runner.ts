@@ -264,6 +264,8 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "install.verifyFrontDoor": "scripts/install/verify-frontdoor.sh",
   "install.magicLink": "scripts/install/magic-link.sh",
   "install.removeArtifact": "scripts/install/remove-artifact.sh",
+  // CI's instrument for the install/uninstall round trip, not a graph step.
+  "install.e2eBaseline": "scripts/install/e2e-baseline.sh",
 };
 
 /** Resolves a capability id under a repository root. Unknown ids are refused. */

@@ -23,8 +23,9 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { loadGraph, type Graph } from "../src/install/graph.js";
-import { readReceipt } from "../src/install/receipt.js";
+import { graphDocumentPath, loadGraph, loadGraphFile, type Graph } from "../src/install/graph.js";
+import { readReceipt, type Receipt } from "../src/install/receipt.js";
+import { installPlan, parseCliArgs, uninstallPlan } from "../src/install/cli.js";
 import {
   CAPABILITY_SCRIPTS,
   capabilityScriptPath,
@@ -593,4 +594,159 @@ test("the executor drives real capability scripts through the real runner", asyn
   });
   assert.equal(report.outcomes.find((o) => o.id === "a")?.status, "ok");
   assert.equal(report.outcomes.find((o) => o.id === "b")?.status, "failed");
+});
+
+// -----------------------------------------------------------------------------
+// a skip that satisfies its dependents (install(17), #3374)
+// -----------------------------------------------------------------------------
+
+test("a satisfied skip does not block its dependents", async () => {
+  // An uninstall's removeCluster has nothing to remove when no cluster was
+  // ever created. The state it would have established -- no cluster -- already
+  // holds, so removeCheckout, which waits for it, is safe to run. Without this
+  // an install that stopped before the cluster leaves an uninstall that does
+  // nothing at all.
+  const g = graphOf([{ id: "a" }, { id: "b", dependsOn: ["a"] }]);
+  const runner = fakeRunner(() => ({}));
+  const report = await executeGraph({
+    graph: g,
+    scriptPath: () => "/bin/true",
+    run: runner.run,
+    plan: (step) =>
+      step.id === "a" ? { action: "skip", reason: "nothing to remove", satisfied: true } : { action: "run", params: {} },
+  });
+  assert.equal(report.outcomes.find((o) => o.id === "a")?.status, "skipped");
+  assert.equal(report.outcomes.find((o) => o.id === "b")?.status, "ok");
+  assert.equal(report.ok, true);
+});
+
+// -----------------------------------------------------------------------------
+// the CLI harness
+// -----------------------------------------------------------------------------
+
+test("parseCliArgs -- a command is required and unknown flags are refused", () => {
+  assert.throws(() => parseCliArgs([]), /install\|uninstall/);
+  assert.throws(() => parseCliArgs(["reinstall"]), /install\|uninstall/);
+  assert.throws(() => parseCliArgs(["install", "--wat=1"]), /unknown flag/i);
+  assert.throws(() => parseCliArgs(["install", "positional"]), /positional/i);
+  assert.equal(parseCliArgs(["uninstall"]).command, "uninstall");
+});
+
+test("parseCliArgs -- --param is scoped to a step and its flag", () => {
+  const opts = parseCliArgs(["install", "--param=stackCheckout.repo=/src", "--param=hostsBlock.hosts-file=/tmp/h"]);
+  assert.deepEqual(opts.stepParams, {
+    stackCheckout: { repo: "/src" },
+    hostsBlock: { "hosts-file": "/tmp/h" },
+  });
+  assert.throws(() => parseCliArgs(["install", "--param=nodot"]), /step/i);
+});
+
+test("the install plan supplies exactly what the graph does not pin", async () => {
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const opts = parseCliArgs([
+    "install",
+    "--tag=v1.4.0",
+    "--provider-key-file=/run/secrets/key",
+    "--domain=local.znas.io",
+    "--owner-email=dev@example.com",
+    "--owner-first-name=Dev",
+    "--owner-last-name=Eloper",
+    "--registration-mode=invite_only",
+  ]);
+  const plan = installPlan(opts);
+  const paramsFor = (id: string): Record<string, string> => {
+    const p = plan(g.steps.find((s) => s.id === id)!);
+    assert.equal(p.action, "run");
+    return p.action === "run" ? p.params : {};
+  };
+
+  assert.equal(paramsFor("stackCheckout").tag, "v1.4.0");
+  assert.equal(paramsFor("providerKey")["key-file"], "/run/secrets/key");
+  assert.deepEqual(paramsFor("seedBootstrap"), {
+    domain: "local.znas.io",
+    "owner-email": "dev@example.com",
+    "owner-first-name": "Dev",
+    "owner-last-name": "Eloper",
+    "registration-mode": "invite_only",
+    provider: "anthropic",
+    "provider-key-file": "/run/secrets/key",
+  });
+  // Nothing else is invented for a step the graph already pins.
+  assert.deepEqual(paramsFor("detect"), {});
+});
+
+test("the AI provider key is a FILE PATH and never a value on argv", async () => {
+  // argv is world-readable in `ps`, so the scripts declare --key-file and
+  // --provider-key-file and there is deliberately no flag that takes the key
+  // itself. A CLI that accepted one would put the operator's Anthropic key in
+  // every process listing on the machine for the length of the install.
+  assert.throws(() => parseCliArgs(["install", "--provider-key=sk-secret"]), /unknown flag/i);
+
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const plan = installPlan(parseCliArgs(["install", "--tag=v1", "--provider-key-file=/run/secrets/key"]));
+  for (const step of g.steps) {
+    const p = plan(step);
+    if (p.action !== "run") continue;
+    for (const [flag, value] of Object.entries(p.params)) {
+      assert.doesNotMatch(value, /^sk-/, `${step.id} --${flag} carries a key value`);
+    }
+  }
+});
+
+test("--skip removes a step, and the graph carries the removal downstream", async () => {
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const opts = parseCliArgs(["install", "--tag=v1", "--skip=providerKey"]);
+  const plan = installPlan(opts);
+  assert.equal(plan(g.steps.find((s) => s.id === "providerKey")!).action, "skip");
+  assert.equal(plan(g.steps.find((s) => s.id === "detect")!).action, "run");
+});
+
+test("the uninstall plan reads its target and its verdict off the receipt", async () => {
+  const g = await loadGraphFile(graphDocumentPath("uninstall", REPO_ROOT));
+  const receipt: Receipt = {
+    version: 1,
+    graph: "install",
+    startedAt: "t",
+    updatedAt: "t",
+    entries: [
+      {
+        stepId: "toolK3d",
+        script: "install.binary",
+        receipt: "binary",
+        preExisting: false,
+        params: { tool: "k3d" },
+        result: { path: "/home/dev/.memql/bin/k3d" },
+        changed: true,
+        recordedAt: "t",
+      },
+      {
+        stepId: "localCA",
+        script: "install.mkcert",
+        receipt: "mkcertCA",
+        preExisting: true,
+        params: {},
+        result: { caroot: "/home/dev/.local/share/mkcert" },
+        changed: false,
+        recordedAt: "t",
+      },
+    ],
+  };
+  const plan = uninstallPlan(receipt);
+
+  const k3d = plan(g.steps.find((s) => s.id === "removeToolK3d")!);
+  assert.equal(k3d.action, "run");
+  assert.equal(k3d.action === "run" ? k3d.params.path : "", "/home/dev/.memql/bin/k3d");
+  assert.equal(k3d.action === "run" ? k3d.params["pre-existing"] : "", "false");
+
+  // The CA was already on the machine: the flag says so, and the refusal that
+  // follows is the expected outcome rather than a failure.
+  const ca = plan(g.steps.find((s) => s.id === "removeLocalCA")!);
+  assert.equal(ca.action === "run" ? ca.params["pre-existing"] : "", "true");
+  assert.equal(ca.action === "run" ? ca.preservedOnRefusal : false, true);
+
+  // Nothing was ever installed for these, so there is nothing to take back --
+  // and the removals that depend on them must still run.
+  const cluster = plan(g.steps.find((s) => s.id === "removeCluster")!);
+  assert.equal(cluster.action, "skip");
+  assert.equal(cluster.action === "skip" ? cluster.satisfied : false, true);
 });
