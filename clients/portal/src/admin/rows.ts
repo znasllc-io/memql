@@ -251,3 +251,55 @@ export function brandAssetSummary(row: Row | null): string {
   if (icon) return "an icon is uploaded, no logo";
   return "no brand images uploaded";
 }
+
+// ---------------------------------------------------------------------------
+// Node tokens
+// ---------------------------------------------------------------------------
+
+// A cluster node's bootstrap credential. `node` leads because the operator
+// question is "which machine is this", and the id of the identity row that
+// carries it is not how anyone thinks about a node.
+//
+// Every field here comes off the credential-free `nodeTokenSummary` shape --
+// the keyHash is never projected, so it is not merely unrendered, it never
+// reaches the browser. See dsl/identity/shapes.memql.
+export const NODE_TOKEN_CONCEPT: ConceptLike = {
+  id: "admin.nodeToken",
+  entity: "node token",
+  displayCard: {
+    primary: "node",
+    secondary: "nodeType",
+    tertiary: "lastConnectAt",
+    status: "state",
+  },
+};
+
+export interface NodeTokenRow extends Record<string, unknown> {
+  id: string;
+  node: string;
+  nodeType: string;
+  state: string;
+  mintedBy: string;
+  expiresAt: string;
+  lastConnectAt: string;
+  createdAt: string;
+}
+
+export function nodeTokenRows(rows: readonly Row[]): NodeTokenRow[] {
+  const out: NodeTokenRow[] = [];
+  for (const row of rows) {
+    const id = str(row, "id");
+    if (id === "") continue;
+    out.push({
+      id,
+      node: str(row, "nodeId") || "(unbound)",
+      nodeType: str(row, "nodeType") || "unknown",
+      state: row["active"] === false ? "revoked" : "active",
+      mintedBy: str(row, "mintedBy") || "the bootstrap path",
+      expiresAt: str(row, "expiresAt") || "no expiry",
+      lastConnectAt: str(row, "lastConnectAt") || "never connected",
+      createdAt: str(row, "createdAt"),
+    });
+  }
+  return out;
+}

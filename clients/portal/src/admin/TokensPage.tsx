@@ -4,10 +4,16 @@ import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-ki
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
 import { ViewElement } from "../views/ViewElement";
-import { AdminFrame, Elsewhere, Reading, Refused } from "./AdminLayout";
-import { TOKEN_CONCEPT } from "./rows";
+import { AdminFrame, Reading, Refused } from "./AdminLayout";
+import { NODE_TOKEN_CONCEPT, TOKEN_CONCEPT } from "./rows";
 import { surfaceById } from "./urls";
-import { useAdminAccess, useTokenConsole } from "./useAdminConsole";
+import {
+  useAdminAccess,
+  useAdminWrites,
+  useNodeTokenConsole,
+  useTokenConsole,
+} from "./useAdminConsole";
+import { WriteOutcome } from "./WriteOutcome";
 
 // Sessions and tokens.
 //
@@ -16,11 +22,23 @@ import { useAdminAccess, useTokenConsole } from "./useAdminConsole";
 // commit" notice -- there was never a session list to move. Open sessions ARE
 // listed, in the People view, which reads v1:identity:authSession beside the
 // people who own them. This page is the credential half: the long-lived tokens
-// that outlive any session.
+// that outlive any session, in two families -- the personal access tokens
+// people mint from the CLI, and the node_token credentials cluster nodes
+// authenticate with.
+//
+// REVOKING IS THE POINT OF THE PAGE, and the button is not the gate. Both
+// revokes go through IdentityAdminClient onto component/identity/adminops,
+// which refuses below owner/admin server-side and audits the refusal. The node
+// revoke additionally runs its engine write as the system credential actor,
+// because a node_token row is a machine credential the memql#2513 guard admits
+// only a system actor to -- that decision is the server's and is deliberately
+// not expressible from here.
 export function TokensPage(): ReactNode {
   const surface = surfaceById("tokens");
   const { role, canAdminister, resolved } = useAdminAccess();
   const console_ = useTokenConsole(canAdminister);
+  const nodes = useNodeTokenConsole(canAdminister);
+  const writes = useAdminWrites();
 
   if (surface === undefined) return null;
   if (!canAdminister) {
@@ -38,7 +56,16 @@ export function TokensPage(): ReactNode {
       surface={surface}
       role={role}
       resolved={resolved}
-      actions={<MetaButton onClick={console_.reload}>Refresh</MetaButton>}
+      actions={
+        <MetaButton
+          onClick={() => {
+            console_.reload();
+            nodes.reload();
+          }}
+        >
+          Refresh
+        </MetaButton>
+      }
     >
       <Band>
         <div className="flex flex-wrap gap-2">
@@ -74,6 +101,7 @@ export function TokensPage(): ReactNode {
             someone further down the list is not shown.
           </p>
         ) : null}
+        <WriteOutcome state={writes} />
       </Band>
 
       <Band title="By state" meta="Revoked rows stay listed so a revoke can be confirmed">
@@ -113,24 +141,125 @@ export function TokensPage(): ReactNode {
         )}
       </Band>
 
-      <Elsewhere what="Revoking a token">
-        Revocation is not on this console. <code>revokePATIdentity</code> takes
-        any identity id and applies no check of its own, so the owner-and-admin
-        rule protecting it is the identity service's route rather than the
-        cluster's — a button here would be gated by this page and nothing
-        behind it. Revoke at <code>/admin/tokens</code> on the identity service,
-        where that gate holds, until the mutation gates itself (memql#3324).
-        Every revoke there writes a <code>pat_revoked_admin</code> audit event.
-      </Elsewhere>
+      <Band
+        title="Revoke a personal access token"
+        meta="Takes effect on the next call that presents it"
+      >
+        <RevokeList
+          items={console_.tokens.map((token) => ({
+            id: token.id,
+            label: `${token.owner} — ${token.label}`,
+            revoked: token.state === "revoked",
+          }))}
+          busy={writes.busy}
+          empty="No personal access tokens have been issued."
+          onRevoke={(id) =>
+            writes.run(
+              (client) => client.revokePersonalAccessToken(id),
+              console_.reload,
+            )
+          }
+        />
+      </Band>
 
-      <Elsewhere what="Node tokens">
-        The machine credentials cluster nodes authenticate with are not listed
-        here. Reading them means calling <code>nodeTokenIdentities</code>, which
-        the cluster serves only to server-originated callers, and revoking one
-        additionally has to run as a system credential actor — neither is
-        something a browser can be. They stay on the identity service's own
-        console at <code>/admin/tokens</code> (memql#3324).
-      </Elsewhere>
+      <Band
+        title="Node credentials"
+        meta={`${nodes.tokens.length} minted, revoked ones included`}
+        panel
+      >
+        {nodes.error !== "" ? (
+          <ErrorMessage>Could not read the node tokens: {nodes.error}</ErrorMessage>
+        ) : nodes.tokens.length === 0 ? (
+          <p className="p-3 text-sm text-subtle">
+            {nodes.loading
+              ? "Reading node credentials…"
+              : "No node has bootstrapped a credential on this cluster."}
+          </p>
+        ) : (
+          <ViewElement
+            element={TABLE_ELEMENT}
+            rows={nodes.tokens}
+            concept={NODE_TOKEN_CONCEPT}
+            options={{
+              bindings: {
+                column: ["node", "nodeType", "state", "lastConnectAt", "expiresAt", "mintedBy"],
+              },
+              sort: { field: "createdAt", direction: "desc" },
+            }}
+          />
+        )}
+      </Band>
+
+      <Band
+        title="Revoke a node credential"
+        meta="The node cannot re-mint one afterwards"
+      >
+        <p className="mb-3 max-w-3xl text-xs text-subtle">
+          Revoking flips the credential's active flag. The bootstrap gate
+          consults it and refuses to re-mint, so the next time that node tries
+          to self-bootstrap the identity service turns it away — an already
+          issued JWT stops working when it expires or when the verifier's
+          revocation gate catches it, whichever comes first.
+        </p>
+        <RevokeList
+          items={nodes.tokens.map((token) => ({
+            id: token.id,
+            label: `${token.node} (${token.nodeType})`,
+            revoked: token.state === "revoked",
+          }))}
+          busy={writes.busy}
+          empty="Nothing to revoke."
+          onRevoke={(id) =>
+            writes.run((client) => client.revokeNodeToken(id), nodes.reload)
+          }
+        />
+      </Band>
+
     </AdminFrame>
+  );
+}
+
+// One revocable credential per row, with the row's own button.
+//
+// A LIST OF BUTTONS RATHER THAN A COLUMN IN THE TABLE ABOVE, deliberately. The
+// tables here are rendered by view-kit's element library, which draws rows and
+// does not host controls -- and it should not: an element that could embed an
+// arbitrary action would stop being a rendering of data. So the destructive
+// act lives in its own band, where it reads as a separate decision from
+// reading the list, and where an already-revoked credential is visibly spent
+// rather than offering a button that would do nothing.
+function RevokeList({
+  items,
+  busy,
+  empty,
+  onRevoke,
+}: {
+  items: readonly { id: string; label: string; revoked: boolean }[];
+  busy: boolean;
+  empty: string;
+  onRevoke: (id: string) => void;
+}): ReactNode {
+  if (items.length === 0) return <p className="text-sm text-subtle">{empty}</p>;
+  return (
+    <ul className="flex flex-col gap-1">
+      {items.map((item) => (
+        <li
+          key={item.id}
+          className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-surface px-3 py-1.5"
+        >
+          <span className="min-w-0 text-sm">
+            {item.label}
+            <span className="ml-2 font-mono text-xs break-all text-subtle">{item.id}</span>
+          </span>
+          {item.revoked ? (
+            <span className="text-xs text-subtle">already revoked</span>
+          ) : (
+            <MetaButton tone="danger" disabled={busy} onClick={() => onRevoke(item.id)}>
+              Revoke
+            </MetaButton>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }

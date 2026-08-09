@@ -12,9 +12,18 @@ import (
 	webtempl "github.com/znasllc-io/memql/component/identity/web/templ"
 )
 
-// AdminServer hosts the /admin/* operator surface. Mounted onto the
-// identity binary's mux via the SetAdminMounter setter on
-// component/identity.Service.
+// AdminServer hosts what is left of the /admin/* operator surface: the
+// sign-in pages and /admin/deployments. Mounted onto the identity binary's mux
+// via the SetAdminMounter setter on component/identity.Service.
+//
+// It hosted seven screens. Six moved into the memQL portal in memql#3324 --
+// writes and owner/admin gate together, the gate landing in
+// component/identity/adminops and reached over MemqlService.Stream rather than
+// over an HTTP route. Deployments did not, for a topology reason:
+// DeployControlService runs shell scripts against an on-disk overlay checkout,
+// so it exists only on this node, while the portal is served by the bff and
+// dials the origin that served it. Retiring this page would have deleted a
+// working capability rather than moved it.
 //
 // All dependencies are required:
 //
@@ -25,16 +34,11 @@ import (
 //     v1:identity:* concept tree.
 //   - Issuer  -- JWT issuer used to validate the admin's access token
 //     on every request.
-//   - Keys    -- key manager, exposed for the JWKS rotation page.
 //   - Audit   -- audit logger; Phase 6 emits admin_* events for every
 //     operator action.
 //   - Settings-- LiveSettings reader so brand fields render the same
 //     values the public web pages use. Optional; falls back
 //     to the immutable Config.
-//   - RotateNow- callback wired by the integration layer that triggers
-//     an immediate key rotation. Kept as a callback so the
-//     admin package doesn't depend on the higher-level
-//     Service struct.
 //   - WebServer-- handle to the public web server; used to share the
 //     LayoutData builder so admin pages render through the
 //     same templ Layout component as the public pages.
@@ -44,23 +48,10 @@ type AdminServer struct {
 	Cfg       identity.Config
 	Engine    identity.EngineExecutor
 	Issuer    *identity.JWTIssuer
-	Keys      *identity.KeyManager
 	Audit     identity.AuditLogger
 	Settings  identityweb.LiveSettings
 	WebServer *identityweb.Server
-	RotateNow func(r *http.Request) error
 	Logger    *slog.Logger
-
-	// Phase 7: PAT management. Wired by SetPATAdapter from
-	// app/integrations_identity.go after the engine is up.
-	patAdapter PATAdapter
-
-	// memql#350: node-token management on the same /admin/tokens
-	// page. Wired by SetNodeTokenAdapter from
-	// app/integrations_identity.go after the engine is up. Nil-
-	// safe: the page degrades to "PATs only" when this isn't wired
-	// (e.g. an identity binary built without the node-token surface).
-	nodeTokenAdapter NodeTokenAdapter
 
 	// memql#726: deployment-status reader backing the read-only
 	// /admin/deployments view. Wired by SetDeployControlReader from
@@ -79,19 +70,24 @@ type AdminServer struct {
 	deployActions DeployControlActions
 }
 
-// Built-in nav links rendered in the layout header on every admin
-// page. Source-of-truth for both the dashboard pages and the
-// placeholder pages.
+// The one page this app still serves.
 //
-// "Overview" is gone: the portal's /admin overview replaced it (memql#3324),
-// and /admin/ now redirects here rather than rendering a page of its own.
+// It served seven. Six of them -- the dashboard, users, tokens, audit, JWKS
+// and settings -- moved into the memQL portal in memql#3324, along with every
+// write they carried and the owner/admin gate that protected it
+// (component/identity/adminops). Deployments did not, and the reason is
+// topology rather than effort: DeployControlService runs shell scripts against
+// an on-disk overlay checkout, so it exists ONLY on the identity node, while
+// the portal is served by the bff and dials the origin that served it. A
+// bff-served portal reaching for the deploy surface gets UNIMPLEMENTED. Until
+// that RPC can cross the mesh, retiring this page would delete a working
+// capability instead of moving it.
+//
+// So this is what remains: /admin/login to establish a session, and
+// /admin/deployments. Everything else under /admin is gone -- the routes with
+// the pages, in the same commit, per the repo's no-stale-code convention.
 var adminNav = []webtempl.NavLink{
-	{Href: "/admin/users", Label: "Users"},
-	{Href: "/admin/tokens", Label: "Tokens"},
-	{Href: "/admin/audit", Label: "Audit"},
 	{Href: "/admin/deployments", Label: "Deployments"},
-	{Href: "/admin/jwks", Label: "JWKS"},
-	{Href: "/admin/settings", Label: "Settings"},
 }
 
 // New validates dependencies and returns a ready-to-mount AdminServer.
@@ -109,9 +105,6 @@ func New(s *AdminServer) (*AdminServer, error) {
 	}
 	if s.Engine == nil {
 		return nil, fmt.Errorf("admin: Engine required")
-	}
-	if s.Keys == nil {
-		return nil, fmt.Errorf("admin: Keys required for JWKS page")
 	}
 	if s.WebServer == nil {
 		return nil, fmt.Errorf("admin: WebServer required for shared layout")
@@ -156,14 +149,6 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 
 	// Gated pages.
 	mux.HandleFunc("GET /admin/{$}", gated(s.handleRoot))
-	mux.HandleFunc("GET /admin/users", gated(s.handleUsersList))
-	mux.HandleFunc("GET /admin/users/detail", gated(s.handleUsersDetail))
-	mux.HandleFunc("POST /admin/users/profile", gated(s.handleEditUserProfile))
-	mux.HandleFunc("POST /admin/users/role", gated(s.handleChangeUserRole))
-	mux.HandleFunc("POST /admin/users/suspend", gated(s.handleSuspendUser))
-	mux.HandleFunc("POST /admin/users/unsuspend", gated(s.handleUnsuspendUser))
-
-	mux.HandleFunc("GET /admin/audit", gated(s.handleAuditList))
 
 	mux.HandleFunc("GET /admin/deployments", gated(s.handleDeploymentsGet))
 	mux.HandleFunc("POST /admin/deployments/deploy-staging", gated(s.handleDeployStagingPost))
@@ -171,35 +156,12 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/deployments/rollback", gated(s.handleDeployRollbackPost))
 	mux.HandleFunc("POST /admin/deployments/rollout", gated(s.handleDeployRolloutPost))
 
-	mux.HandleFunc("GET /admin/tokens", gated(s.handleTokensList))
-	mux.HandleFunc("POST /admin/tokens/revoke", gated(s.handleTokensRevoke))
-	mux.HandleFunc("POST /admin/tokens/node/revoke", gated(s.handleNodeTokensRevoke))
-
-	mux.HandleFunc("GET /admin/jwks", gated(s.handleJWKS))
-	mux.HandleFunc("POST /admin/jwks/rotate", gated(s.handleJWKSRotate))
-
-	mux.HandleFunc("GET /admin/settings", gated(s.handleSettingsGet))
-	mux.HandleFunc("POST /admin/settings", gated(s.handleSettingsPost))
-
-	// Deferred surfaces. Placeholder page so navigation doesn't 404
-	// during the in-between window before a per-surface implementation
-	// lands. Each route shares the same handler.
-	mux.HandleFunc("GET /admin/sessions", gated(s.handlePlaceholder("Sessions",
-		"List active sessions across users with per-row revoke. Tracked for a follow-up commit.")))
-	mux.HandleFunc("GET /admin/invitations", gated(s.handlePlaceholder("Invitations",
-		"Issue + manage admin invitations for invite-only mode. Tracked for a follow-up commit.")))
-	mux.HandleFunc("GET /admin/partition-grants", gated(s.handlePlaceholder("Partition grants",
-		"View + edit per-(user, partition) access grants. Tracked for a follow-up commit.")))
-	mux.HandleFunc("GET /admin/access-requests", gated(s.handlePlaceholder("Access requests",
-		"Review the waitlist queue: approve, reject, or defer. Tracked for a follow-up commit.")))
-
-	// 24 gated + 3 session-establishment. Hand-maintained and it had already
-	// drifted -- this read 19 while Mount registered 27, so anyone using the
-	// log line to confirm a route landed was misled. route_gate_test.go now
-	// pins it against the routes actually registered.
+	// 6 gated + 3 session-establishment. Hand-maintained, and it had already
+	// drifted once (it read 19 while Mount registered 27), so
+	// route_gate_test.go pins it against the routes actually registered.
 	s.Logger.Info("admin web routes mounted",
 		slog.String("base_url", s.Cfg.BaseURL),
-		slog.Int("routes", 27),
+		slog.Int("routes", 9),
 	)
 }
 
@@ -207,9 +169,10 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 // page, with the admin nav and brand snapshot. `noNav` suppresses the
 // nav (used on /admin/login before the operator authenticates).
 //
-// extraScripts forwards page-specific Stimulus controller files (e.g.
-// /static/admin-settings-branding.js for the Settings page color
-// picker + logo cropper). Callers that don't need scripts pass nil.
+// extraScripts forwards page-specific Stimulus controller files. No
+// surviving page uses one -- the settings colour picker / logo cropper went
+// with the settings page in memql#3324 -- but the parameter stays because it
+// is the layout's contract, not this console's.
 func (s *AdminServer) layoutData(r *http.Request, title string, noNav bool, extraScripts ...string) webtempl.LayoutData {
 	nav := adminNav
 	if noNav {
@@ -238,20 +201,6 @@ func readFlash(r *http.Request) *webtempl.Flash {
 		kind = "info"
 	}
 	return &webtempl.Flash{Kind: kind, Message: msg}
-}
-
-// modeSnapshot returns the live registration mode for an admin page.
-// Used by the dashboard to display "Registration mode" without an
-// extra DB call.
-func (s *AdminServer) modeSnapshot(r *http.Request) string {
-	mode := string(s.Cfg.RegistrationMode)
-	if s.Settings != nil {
-		live := s.Settings.Snapshot(r.Context())
-		if live.RegistrationMode != "" {
-			mode = string(live.RegistrationMode)
-		}
-	}
-	return mode
 }
 
 // render writes the cache-control + content-type headers and renders

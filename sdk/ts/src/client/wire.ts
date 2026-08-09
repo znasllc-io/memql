@@ -210,6 +210,71 @@ export type DeployControlRequestPayload =
 
 export type DeployControlPayload = { requestId: string } & DeployControlRequestPayload;
 
+// Identity administration (memql#3324). The writes the server-rendered
+// /admin/* console owned, bridged onto the stream as ONE envelope so the
+// owner/admin gate and the audit write live in one Go implementation
+// (component/identity/adminops) rather than one per operation. Exactly one
+// request field is set.
+//
+// These are WRITES WITH A ROLE FLOOR, and the floor is not here: every one
+// is refused server-side for a caller below owner or admin, with an
+// `admin_auth_forbidden` audit event whose id comes back on the reply.
+
+export interface IdentityAdminUserProfilePayload {
+  userId: string;
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  primaryRole?: string;
+  gender?: string;
+  birthdate?: string;
+}
+
+export interface IdentityAdminSetRolePayload {
+  userId: string;
+  role: string; // owner | admin | developer | writer | reader
+}
+
+export interface IdentityAdminSetSuspendedPayload {
+  userId: string;
+  suspended: boolean;
+  reason?: string;
+}
+
+export interface IdentityAdminRevokeTokenPayload {
+  identityId: string;
+}
+
+export interface IdentityAdminClusterSettingsPayload {
+  brandName?: string;
+  brandPrimaryColor?: string;
+  brandLogoDataUri?: string;
+  brandIconDataUri?: string;
+  registrationMode: string;
+  registrationDomains?: string;
+  internalDomains?: string;
+  internalDefaultRole: string;
+  registeredClientsJson?: string;
+  accessRequestNotifyEmails?: string;
+  // Seconds (days for the invitation one). 0 = fall back to the boot default.
+  accessTokenTtlSeconds?: number;
+  refreshTokenTtlSeconds?: number;
+  magicLinkTtlSeconds?: number;
+  invitationTtlDays?: number;
+  refreshCookieSameSite?: string; // "lax" | "none" | ""
+}
+
+export type IdentityAdminRequestPayload =
+  | { updateUserProfile: IdentityAdminUserProfilePayload }
+  | { setUserRole: IdentityAdminSetRolePayload }
+  | { setUserSuspended: IdentityAdminSetSuspendedPayload }
+  | { revokeUserToken: IdentityAdminRevokeTokenPayload }
+  | { revokeNodeToken: IdentityAdminRevokeTokenPayload }
+  | { updateClusterSettings: IdentityAdminClusterSettingsPayload };
+
+export type IdentityAdminPayload = { requestId: string } & IdentityAdminRequestPayload;
+
 // -----------------------------------------------------------------------------
 // Automation run (memql#3310)
 // -----------------------------------------------------------------------------
@@ -369,6 +434,7 @@ type ClientPayload =
   | { revokeBadge: RevokeBadgePayload }
   | { polyphonRoomToken: PolyphonRoomTokenPayload }
   | { deployControl: DeployControlPayload }
+  | { identityAdmin: IdentityAdminPayload }
   | { runAutomation: RunAutomationPayload }
   | { authoringValidateBundle: AuthoringValidateBundlePayload }
   | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
@@ -687,6 +753,22 @@ export interface DeployControlResultPayload {
   action?: DeployActionResultWire;
 }
 
+// Identity-administration reply (memql#3324). Same envelope-carried status as
+// the deploy bridge above, and for the same reason: a multiplexed stream has
+// no per-message status channel. protojson omits zero values, so an absent
+// errorCode is 0 (OK).
+//
+// auditEventId is present on a REFUSAL too -- the refusal is itself an audited
+// event, and an operator arguing about a denial needs its id.
+export interface IdentityAdminResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  errorCode?: number;
+  errorMessage?: string;
+  auditEventId?: string;
+  message?: string;
+}
+
 // AutomationRunEvent -- one frame of a run's streamed trace. Mirrors
 // MemqlServerMessage oneof slot 124.
 //
@@ -919,6 +1001,7 @@ type ServerPayload =
   | { revokeBadgeResult: RevokeBadgeResultPayload }
   | { polyphonRoomTokenResult: PolyphonRoomTokenResultPayload }
   | { deployControlResult: DeployControlResultPayload }
+  | { identityAdminResult: IdentityAdminResultPayload }
   | { automationRunEvent: AutomationRunEventPayload }
   | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
   | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
@@ -958,6 +1041,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "revokeBadgeResult"; value: RevokeBadgeResultPayload }
   | { kind: "polyphonRoomTokenResult"; value: PolyphonRoomTokenResultPayload }
   | { kind: "deployControlResult"; value: DeployControlResultPayload }
+  | { kind: "identityAdminResult"; value: IdentityAdminResultPayload }
   | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
   | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
   | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
@@ -1032,6 +1116,8 @@ export function readServerPayload(msg: ServerMessage):
     };
   if (m.deployControlResult)
     return { kind: "deployControlResult", value: m.deployControlResult as DeployControlResultPayload };
+  if (m.identityAdminResult)
+    return { kind: "identityAdminResult", value: m.identityAdminResult as IdentityAdminResultPayload };
   if (m.automationRunEvent)
     return { kind: "automationRunEvent", value: m.automationRunEvent as AutomationRunEventPayload };
   if (m.authoringValidateBundleResult)

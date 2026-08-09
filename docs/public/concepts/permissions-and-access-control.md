@@ -67,7 +67,10 @@ in-house identity service:
   default to the cluster's `internalDefaultRole`.
 - External users default to `reader` and live in their own
   personal partition.
-- Admins re-assign roles via the /admin/users/detail editor.
+- Admins re-assign roles from the memQL portal at `/portal/admin/people`. The
+  write is gated server-side in `component/identity/adminops` (owner or admin)
+  and appends a `user_role_changed` audit event; a refusal appends
+  `admin_auth_forbidden`.
 
 ### Permission Matrix
 

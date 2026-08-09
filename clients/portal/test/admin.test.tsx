@@ -154,6 +154,25 @@ const TOKENS: Readonly<Record<string, Row[]>> = {
   ],
 };
 
+const NODE_TOKENS: Row[] = [
+  node("v1:identity:identity", "node-bff-1", {
+    userId: "user-bootstrap",
+    active: true,
+    nodeId: "bff-0",
+    nodeType: "bff",
+    mintedBy: "user-ada",
+    lastConnectAt: "2026-08-08T05:30:00Z",
+    expiresAt: "2026-11-08T00:00:00Z",
+  }),
+  node("v1:identity:identity", "node-voice-1", {
+    userId: "user-bootstrap",
+    active: false,
+    nodeId: "voice-0",
+    nodeType: "voice",
+    mintedBy: "user-ada",
+  }),
+];
+
 const JWKS = {
   keys: [
     { kty: "OKP", alg: "EdDSA", use: "sig", crv: "Ed25519", kid: "kid-current" },
@@ -179,17 +198,33 @@ interface Harness {
   jwks: "ok" | "fail";
   // Blank the identity origin, to exercise the "no feed to read" branch.
   noIdentityOrigin: boolean;
+  // How the cluster answers an identity-admin write. "refuse" reproduces what
+  // a caller below owner/admin gets from component/identity/adminops: an
+  // envelope-carried PERMISSION_DENIED plus the audit id of the
+  // `admin_auth_forbidden` event the refusal wrote.
+  write: "accept" | "refuse";
 }
 
 // Every executeNamed the console issued, in order. The authorization
 // assertions read this rather than a rendered string.
 let calls: { name: string; call: string }[] = [];
 
+// Every envelope the console pushed onto the stream. The WRITES land here --
+// they are IdentityAdminMsg payloads, not named-primitive calls -- so the
+// assertions about what a control actually issues read this.
+let sent: Record<string, unknown>[] = [];
+
 function renderAdmin(
-  { role = "owner", jwks = "ok", noIdentityOrigin = false }: Partial<Harness>,
+  {
+    role = "owner",
+    jwks = "ok",
+    noIdentityOrigin = false,
+    write = "accept",
+  }: Partial<Harness>,
   path: string,
 ) {
   calls = [];
+  sent = [];
 
   const access: AccessSummary = {
     requestId: "r1",
@@ -216,6 +251,9 @@ function renderAdmin(
           meta: { cursor: "" },
         });
       }
+      if (name === "nodeTokenIdentitiesAdmin") {
+        return new Result({ bundle: { nodes: NODE_TOKENS }, meta: { cursor: "" } });
+      }
       if (name === "patIdentitiesForUser") {
         const match = /userId: "([^"]+)"/.exec(call);
         const nodes = TOKENS[match?.[1] ?? ""] ?? [];
@@ -225,12 +263,34 @@ function renderAdmin(
     }),
   } as unknown as QueryClient;
 
+  const sendAndWait = vi.fn(async (msg: Record<string, unknown>) => {
+    sent.push(msg);
+    if (write === "refuse") {
+      return {
+        identityAdminResult: {
+          ok: false,
+          errorCode: 7,
+          errorMessage: 'identity admin: requires the owner or admin role (you hold "writer")',
+          auditEventId: "audit-refusal",
+        },
+      };
+    }
+    return {
+      identityAdminResult: {
+        ok: true,
+        message: "Done.",
+        auditEventId: "audit-write-1",
+      },
+    };
+  });
+
   const dial = vi.fn(
     async () =>
       ({
         nodeId: "bff-test",
         serverVersion: "0.0.0-test",
         query,
+        dispatcher: { sendAndWait },
         close: vi.fn(),
         done: vi.fn(() => new Promise<void>(() => {})),
       }) as unknown as Connection,
@@ -284,6 +344,7 @@ function bandTitles(): (string | null)[] {
 
 beforeEach(() => {
   calls = [];
+  sent = [];
 });
 
 describe("the admin console's authorization shape", () => {
@@ -304,14 +365,18 @@ describe("the admin console's authorization shape", () => {
     expect(calls.some((c) => c.name === "searchUsers")).toBe(true);
   });
 
-  it("issues no write from any of its surfaces", async () => {
-    for (const path of ["/admin", "/admin/tokens", "/admin/keys", "/admin/settings"]) {
+  it("never reaches a write through the query surface", async () => {
+    for (const path of ["/admin", "/admin/people", "/admin/tokens", "/admin/keys", "/admin/settings"]) {
       const view = renderAdmin({}, path);
       await waitFor(() => expect(calls.length).toBeGreaterThan(0));
-      // Every write the retired console performed is either refused for a
-      // client-originated call or reachable without the owner/admin gate that
-      // console applies at its route. A mutation appearing here would mean a
-      // control shipped whose only gate is a boolean in the browser.
+      // THE ASSERTION THAT MATTERS ABOUT WRITES. Every write this console
+      // performs -- profile, role, suspension, revoke, settings -- goes through
+      // IdentityAdminMsg, where component/identity/adminops applies the
+      // owner/admin gate and writes the audit event. A `mutation ...` string on
+      // the query surface would mean a control reached updateUser /
+      // revokePATIdentity / updateClusterSettings directly, none of which
+      // carries a role predicate of its own -- which is exactly how this move
+      // would hand a writer what the retired console reserved for an admin.
       for (const { call } of calls) {
         expect(call.startsWith("mutation ")).toBe(false);
       }
@@ -370,10 +435,80 @@ describe("the overview", () => {
     expect(audits.some((c) => c.call.includes('category: "configuration"'))).toBe(true);
   });
 
-  it("says where changing a person went, rather than hiding the absence", async () => {
+  it("points at the change surface rather than carrying its controls", async () => {
     renderAdmin({}, "/admin");
-    await waitFor(() => expect(screen.getByText("Changing a person")).toBeTruthy());
-    expect(screen.getByText(/updateUser/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("Where a person gets changed")).toBeTruthy());
+    // An overview is where an operator looks to find out what is going on.
+    // Nothing on it changes who can do what.
+    expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
+    const main = screen.getByRole("main");
+    expect(
+      within(main)
+        .getAllByRole("link", { name: "People" })
+        .some((link) => link.getAttribute("href") === "/admin/people"),
+    ).toBe(true);
+  });
+});
+
+describe("people -- the change surface", () => {
+  it("offers no controls until a person is picked", async () => {
+    renderAdmin({}, "/admin/people");
+    await waitFor(() => expect(screen.getByText("Ada Lovelace")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Save the profile" })).toBeNull();
+    // The population itself lives in the predefined view, and the page says so
+    // rather than duplicating it.
+    expect(screen.getByRole("link", { name: "People view" })).toBeTruthy();
+  });
+
+  it("edits a picked person's profile through the gated seam", async () => {
+    renderAdmin({}, "/admin/people?person=user-grace");
+    await waitFor(() => expect(screen.getAllByText("Grace Hopper").length).toBe(2));
+
+    screen.getByRole("button", { name: "Save the profile" }).click();
+    await waitFor(() => expect(sent.length).toBe(1));
+
+    const edit = (sent[0] as { identityAdmin?: Record<string, unknown> }).identityAdmin
+      ?.updateUserProfile as Record<string, unknown>;
+    expect(edit.userId).toBe("user-grace");
+    expect(edit.displayName).toBe("Grace Hopper");
+    await waitFor(() => expect(screen.getByText("audit-write-1")).toBeTruthy());
+  });
+
+  it("changes a role and suspends, as two separate decisions", async () => {
+    renderAdmin({}, "/admin/people?person=user-grace");
+    await waitFor(() => expect(screen.getAllByText("Grace Hopper").length).toBe(2));
+
+    // Two forms, two buttons, two audit actions. A single "Save" would let a
+    // role change ride along with a phone-number correction.
+    const role = screen.getByLabelText("Cluster role") as HTMLSelectElement;
+    role.value = "admin";
+    role.dispatchEvent(new Event("change", { bubbles: true }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Apply the role" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    screen.getByRole("button", { name: "Apply the role" }).click();
+    await waitFor(() => expect(sent.length).toBe(1));
+    expect(
+      (sent[0] as { identityAdmin?: Record<string, unknown> }).identityAdmin?.setUserRole,
+    ).toEqual({ userId: "user-grace", role: "admin" });
+
+    screen.getByRole("button", { name: "Suspend the account" }).click();
+    await waitFor(() => expect(sent.length).toBe(2));
+    const suspend = (sent[1] as { identityAdmin?: Record<string, unknown> }).identityAdmin
+      ?.setUserSuspended as Record<string, unknown>;
+    expect(suspend.userId).toBe("user-grace");
+    expect(suspend.suspended).toBe(true);
+  });
+
+  it("refuses to offer anything to a reader, and issues no read", async () => {
+    renderAdmin({ role: "reader" }, "/admin/people");
+    await waitFor(() =>
+      expect(screen.getByText("This is an owner and admin surface")).toBeTruthy(),
+    );
+    expect(calls.some((c) => c.name === "searchUsers")).toBe(false);
+    expect(sent.length).toBe(0);
   });
 });
 
@@ -399,11 +534,52 @@ describe("sessions and tokens", () => {
     expect(fanOut.length).toBe(2);
   });
 
-  it("names the two capabilities it does not carry", async () => {
+  it("lists node credentials without ever carrying their key hash", async () => {
     renderAdmin({}, "/admin/tokens");
-    await waitFor(() => expect(screen.getByText("Revoking a token")).toBeTruthy());
-    expect(screen.getByText("Node tokens")).toBeTruthy();
-    expect(screen.getByText(/nodeTokenIdentities/)).toBeTruthy();
+    await waitFor(() => expect(screen.getByText("bff-0")).toBeTruthy());
+
+    // The gated twin, never the @serverOnly original -- which projects
+    // identityFull and would put a credential hash in a browser.
+    expect(calls.some((c) => c.name === "nodeTokenIdentitiesAdmin")).toBe(true);
+    expect(calls.some((c) => c.name === "nodeTokenIdentities")).toBe(false);
+
+    // A revoked node credential stays listed rather than being ghosted.
+    expect(screen.getByText("voice-0")).toBeTruthy();
+  });
+
+  it("revokes a token through the gated seam, and surfaces the audit id", async () => {
+    renderAdmin({}, "/admin/tokens");
+    await waitFor(() => expect(screen.getByText("ada@example.com")).toBeTruthy());
+
+    const revokes = screen.getAllByRole("button", { name: "Revoke" });
+    // Two revocable credentials: Ada's active PAT and the active bff node
+    // token. Grace's revoked PAT and the revoked voice token offer no button.
+    expect(revokes.length).toBe(2);
+    revokes[0]?.click();
+
+    await waitFor(() => expect(sent.length).toBe(1));
+    const payload = sent[0] as { identityAdmin?: Record<string, unknown> };
+    expect(payload.identityAdmin).toBeTruthy();
+    expect(payload.identityAdmin?.revokeUserToken).toEqual({ identityId: "pat-1" });
+
+    // The audit id is the durable artefact of the revoke, so the console says
+    // it rather than only "Done."
+    await waitFor(() => expect(screen.getByText("audit-write-1")).toBeTruthy());
+  });
+
+  it("shows the cluster's refusal verbatim, with the id of the blocked event", async () => {
+    renderAdmin({ write: "refuse" }, "/admin/tokens");
+    await waitFor(() => expect(screen.getByText("ada@example.com")).toBeTruthy());
+
+    screen.getAllByRole("button", { name: "Revoke" })[0]?.click();
+
+    // The gate is the cluster's: the console issued the call, and what comes
+    // back is the server's own sentence rather than a paraphrase.
+    await waitFor(() =>
+      expect(screen.getByText(/requires the owner or admin role/)).toBeTruthy(),
+    );
+    // A refusal is an audited event too, and its id is what an operator quotes.
+    expect(screen.getByText("audit-refusal")).toBeTruthy();
   });
 });
 
@@ -439,10 +615,15 @@ describe("signing keys", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("says where rotation went", async () => {
+  it("says why there is no rotate button anywhere in a real deployment", async () => {
     renderAdmin({}, "/admin/keys");
     await waitFor(() => expect(screen.getByText("Rotating a key")).toBeTruthy());
-    expect(screen.getByText(/POST \/admin\/jwks\/rotate/)).toBeTruthy();
+    // The retired console's "Rotate now" was inert in every environment that
+    // seals the key into the env envelope -- which is every deployed one. The
+    // page states the actual procedure instead of pointing at a broken button.
+    expect(screen.getByText(/MEMQL_IDENTITY_SIGNING_KEY_B64/)).toBeTruthy();
+    expect(screen.getByText(/re-seal and a rolling restart/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Rotate/ })).toBeNull();
   });
 });
 
@@ -466,19 +647,48 @@ describe("cluster settings", () => {
     expect(screen.queryByText(/data:image\/png/)).toBeNull();
   });
 
-  it("says why it does not edit", async () => {
+  it("edits through the gated seam, in the operator's units", async () => {
     renderAdmin({}, "/admin/settings");
-    await waitFor(() => expect(screen.getByText("Changing a setting")).toBeTruthy());
-    expect(screen.getByText(/carries no role check of its own/)).toBeTruthy();
+    // Wait for a FIELD, not the band title. "Change a setting" is the Band's
+    // heading and renders unconditionally; the form inside it renders only once
+    // settings.data is non-null. Waiting on the title and then querying a field
+    // synchronously is therefore a race -- one the test usually wins, which is
+    // why it survived review. It lost in CI on the #3324 PR and once locally.
+    await screen.findByLabelText("Access token (minutes)");
+
+    // The form seeds from the row, converting seconds to the unit an operator
+    // sets: 900s -> 15 minutes, 2592000s -> 30 days.
+    expect((screen.getByLabelText("Access token (minutes)") as HTMLInputElement).value).toBe("15");
+    expect((screen.getByLabelText("Refresh token (days)") as HTMLInputElement).value).toBe("30");
+    // An unset lifetime is an EMPTY box, not a "0" that reads as "no time".
+    expect((screen.getByLabelText("Magic link (minutes)") as HTMLInputElement).value).toBe("");
+
+    screen.getByRole("button", { name: "Save the settings" }).click();
+    await waitFor(() => expect(sent.length).toBe(1));
+
+    const payload = (sent[0] as { identityAdmin?: Record<string, unknown> }).identityAdmin;
+    const edit = payload?.updateClusterSettings as Record<string, unknown>;
+    expect(edit).toBeTruthy();
+    // The WIRE carries the concept's own units. The minutes/days conversion is
+    // presentation and stays in the form, so a second client cannot disagree
+    // about what a number means.
+    expect(edit.accessTokenTtlSeconds).toBe(900);
+    expect(edit.refreshTokenTtlSeconds).toBe(2592000);
+    expect(edit.magicLinkTtlSeconds).toBe(0);
+    expect(edit.registrationMode).toBe("invite_only");
+    // The fields the form deliberately does not own are ABSENT rather than
+    // empty: the write read-merges, so omitting preserves and "" would wipe.
+    expect(edit.clusterDomain).toBeUndefined();
+    expect(screen.queryByLabelText("Cluster domain")).toBeNull();
   });
 });
 
 describe("the admin sub-nav", () => {
-  it("links the four surfaces and marks the current one", async () => {
+  it("links every surface and marks the current one", async () => {
     renderAdmin({}, "/admin/tokens");
     await waitFor(() => expect(screen.getByText("Sessions and tokens")).toBeTruthy());
     const nav = screen.getByRole("navigation", { name: "Administration" });
-    for (const label of ["Overview", "Tokens", "Signing keys", "Settings"]) {
+    for (const label of ["Overview", "People", "Tokens", "Signing keys", "Settings"]) {
       expect(within(nav).getByRole("link", { name: label })).toBeTruthy();
     }
     expect(within(nav).getByRole("link", { name: "Tokens" }).getAttribute("aria-current")).toBe(

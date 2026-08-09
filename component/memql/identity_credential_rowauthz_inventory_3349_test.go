@@ -186,6 +186,17 @@ var credentialReadInventory = map[string]struct {
 	"nodeTokenIdentityById": {classMachine,
 		"@serverOnly single node credential by id, for the revoke/inspect path. Same " +
 			"audience as nodeTokenIdentities."},
+	"nodeTokenIdentitiesAdmin": {classMachine,
+		"memql#3324. The same cluster-wide node-credential listing as nodeTokenIdentities, " +
+			"but client-reachable and gated on requiresOwnerOrAdmin -- the portal SPA " +
+			"replaced a templ console that reached the @serverOnly sibling from inside the " +
+			"identity binary, and a browser cannot. classMachine for the same reason as that " +
+			"sibling, and NOT because it went unexamined: a node_token row's userId is the " +
+			"synthetic bootstrap user rather than any reader, so an owner tier would narrow " +
+			"it to nothing and hand the admin it exists for a confidently empty answer. The " +
+			"role is the gate that fits, and it is stated in the query's own filter instead " +
+			"of in a route, which is where the retired console kept it. Projects the " +
+			"credential-free nodeTokenSummary shape, so keyHash never leaves the engine."},
 }
 
 // TestCredentialConceptReadInventory pins the population (box 1).

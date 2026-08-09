@@ -1926,6 +1926,50 @@ query identity nodeTokenIdentities {
   shape   identityFull
 }
 
+// ---- queries/v1/identity/nodeTokenIdentitiesAdmin.memql ----
+
+// nodeTokenIdentitiesAdmin
+// ========================
+//
+// The wire-reachable twin of nodeTokenIdentities above, for the portal's
+// Tokens surface (memql#3324). Two differences, and both are the point:
+//
+//   1. requiresOwnerOrAdmin as a TOP-LEVEL CONJUNCT, evaluated in-process
+//      against the auth envelope. The @serverOnly original is reachable only
+//      from Go under an internal origin, which is the right gate for a caller
+//      that has ALREADY been authorized in Go -- and no gate at all for a
+//      browser, which is why the portal cannot simply call it.
+//   2. nodeTokenSummary rather than identityFull. identityFull projects the
+//      whole `credentials` object, keyHash included; a read a browser can
+//      issue must not carry a credential whatever the caller's role. The
+//      projection is the boundary (see the shape's own note).
+//
+// The @serverOnly original STAYS: component/identity/store.go's
+// ListNodeTokenIdentities reads the keyHash to verify a presented token, and
+// that is a genuinely server-side need this projection cannot serve.
+//
+// Rows are returned active and inactive alike, so the console shows a revoked
+// credential explicitly rather than ghosting it -- the operator question is
+// "what has ever been minted for this node", not "what still works". Newest
+// first, paginated at 200: one credential row per cluster node is a small set,
+// and a window big enough to hold every node's whole revocation history is
+// what makes "newest first" honest rather than a truncation the console cannot
+// see.
+
+/// Every node_token identity across the cluster (active + revoked), in the credential-free
+/// nodeTokenSummary shape. Owner or admin only. Backs the portal's Tokens surface (memql#3324).
+///
+/// Why actor.userId scoping is not the alternative: a node_token row's `userId` is the synthetic
+/// bootstrap user rather than any reader, so `userId==actor.userId` returns nothing for the admin
+/// who consumes this. The gate that fits is the role, and it is stated here rather than left to a
+/// route.
+query identity nodeTokenIdentitiesAdmin {
+  filter   identityIsNodeToken && requiresOwnerOrAdmin
+  sort     "row.createdAt", "desc"
+  paginate 200
+  shape    nodeTokenSummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityById.memql ----
 
 // nodeTokenIdentityById
