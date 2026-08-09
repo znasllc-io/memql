@@ -132,17 +132,21 @@ Sign in against identity to get the pair. The sign-in page is
 code exchange; what you need out of the `/oauth/token` response is
 `access_token` and `refresh_token`.
 
-The cluster's own discovery document names the identity service and the OAuth
-client id:
+The cluster's own discovery document names every connection fact the entries
+below need, so none of them has to be guessed:
 
 ```bash
 curl -s https://identity.local.znas.io/.well-known/memql-config.json
-# {"identityUrl":"https://identity.local.znas.io","grpcEndpoint":"...","clientId":"cockpit","clusterName":"local"}
+# {"identityUrl":"https://identity.local.znas.io","grpcEndpoint":"cockpit.local.znas.io:443","clientId":"cockpit","clusterName":"local"}
 ```
 
-Use `identityUrl` for `issuer` and `clientId` for `client_id`. Do **not** use
-`grpcEndpoint` for `endpoint`: locally it reads `https://bff.local.znas.io`,
-which is both a URL (rejected -- see below) and a host with no ingress.
+`identityUrl` is `issuer`, `clientId` is `client_id`, and `grpcEndpoint` is
+`endpoint` -- a bare `host[:port]` naming the front door, which is exactly the
+form the extension accepts. It was not always: until memql#3399 this field read
+`https://bff.local.znas.io`, a URL at a host with no ingress, and the two wrong
+guesses in the note below are the ones it handed the reader. Both halves are now
+pinned to one shared statement of the contract
+(`test/fixtures/discovery-endpoint-contract.json`).
 
 ### 5. Write two cluster entries
 

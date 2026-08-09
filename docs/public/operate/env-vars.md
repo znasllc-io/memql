@@ -359,6 +359,9 @@ For the identity binary (`-tags identity`):
 | `MEMQL_IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
 | `MEMQL_IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
+| `MEMQL_DISCOVERY_GRPC_ENDPOINT`                 | the identity host + a scheme-appropriate port | The dial address published as `grpcEndpoint` in `GET /.well-known/memql-config.json`. **A bare `host[:port]`, never a URL** -- a scheme is read for its port and then dropped, and a value that cannot be read as a host falls back to the default. Set it to the FRONT DOOR (`cockpit.<domain>:443`), the only host whose ingress carries gRPC to the bff; the default derives the identity host, which serves HTTP only. Declared in `deploy/k8s/base/identity.yaml` and patched per overlay, so a stale value in an operator's genesis envelope cannot reach the wire (memql#3399). |
+| `MEMQL_DISCOVERY_CLIENT_ID`                     | the first registered client | The OAuth `client_id` published as `clientId` in the same document.                                              |
+| `MEMQL_DISCOVERY_CLUSTER_NAME`                  | the identity host        | The human-readable default name published as `clusterName` in the same document.                                     |
 
 For every other binary (bff/voice/cognition/agent/planner):
 

@@ -132,6 +132,22 @@ spec:
             - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
             - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
+            # The dial address this cluster ADVERTISES to clients in
+            # GET /.well-known/memql-config.json (memql#3399). It is the FRONT
+            # DOOR -- cockpit.<domain>:443, the one host whose ingress carries
+            # gRPC to the bff -- and emphatically not identity.<domain>, which
+            # serves HTTP (JWKS, /oauth/token, the web UI) and no MemqlService.
+            #
+            # DECLARED HERE, IN BASE, ON PURPOSE. Without it the handler falls
+            # back to deriving the identity host, so every environment would
+            # advertise the wrong host and be correct only where an operator
+            # happened to set the env var by hand -- which is exactly how
+            # memql#3399 shipped. A container env entry also WINS over the
+            # genesis envelope (genesis autoload is set-if-absent), so a stale
+            # value in an operator's sealed envelope can no longer reach the
+            # wire. Same placeholder convention as the URLs above: a
+            # deployment's overlay patches the real host.
+            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "cockpit.staging.example.com:443" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
             # The ops-edge host is listed alongside it because the memQL Portal
             # (memql#3315) is itself a browser client of this identity service:

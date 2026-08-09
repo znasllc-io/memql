@@ -25,6 +25,14 @@ spec:
               value: "https://identity.local.znas.io"
             - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
               value: "local.znas.io"
+            # What clients are told to dial (memql#3399): the traefik front
+            # door on 443, whose `/` rule forwards h2c to svc/bff:50051. The
+            # local analog of the cloud ingress, and the same value the
+            # runbook's clusters.yaml entry uses -- so a client that trusts
+            # the discovery document lands where a client that read the docs
+            # lands.
+            - name: MEMQL_DISCOVERY_GRPC_ENDPOINT
+              value: "cockpit.local.znas.io:443"
             # Admit the SPA on both address forms (domain + localhost), the dev
             # API server, and the ops-edge front door the memQL Portal is
             # served from (memql#3315 -- the portal exchanges its authorization
