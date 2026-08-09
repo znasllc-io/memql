@@ -52,19 +52,10 @@ func TestArraySyntaxRuleColumnsCountRunes(t *testing.T) {
 	}
 }
 
-func TestDiscardedArgsDescriptionsColumnsCountRunes(t *testing.T) {
-	line := `    name string @default("ü") @description("doc")`
-	src := "query q {\n  args {\n" + line + "\n  }\n}\n"
-	got := DiscardedArgsDescriptions(src)
-	if len(got) != 1 {
-		t.Fatalf("want one discarded-args-description hint, got %+v", got)
-	}
-	want := wantRuneColumn(t, line, "@description")
-	if got[0].Range.Start.Column != want {
-		t.Errorf("start column = %d, want %d (rune column; a byte column would be %d)",
-			got[0].Range.Start.Column, want, strings.Index(line, "@description")+1)
-	}
-}
+// (The args-field @description rule this file also guarded is gone --
+// memql#3336 made the annotation a parse rejection, so there is no
+// source-scanning rule left to column-check. Its replacement is
+// TestArgsFieldDescriptionSurfacesAsLoadError in authoring_rules_test.go.)
 
 func TestActorRuleColumnsCountRunes(t *testing.T) {
 	// The issue's own repro shape: a non-ASCII value earlier in the filter.

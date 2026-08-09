@@ -242,31 +242,47 @@ func TestRedundantVersionRule(t *testing.T) {
 	}
 }
 
-func TestDiscardedArgsDescriptionRule(t *testing.T) {
-	src := "@description(\"declaration level\")\nquery q {\n  args {\n    x string @required @description(\"dead\")\n  }\n}\nconcept widget {\n  label string @description(\"load-bearing\")\n}\n"
-	got := discardedArgsDescriptionRule(src)
-	if len(got) != 1 || got[0].Code != "discarded-args-description" || got[0].Range.Start.Line != 4 {
-		t.Fatalf("want one hint on line 4, got %+v", got)
+// memql#3336: the args-field @description Hint is gone -- the parser rejects
+// the annotation, so the editor gets the LOAD ERROR itself (Diagnose Phase 2)
+// instead of a hint claiming it was "parsed and discarded". This pins that the
+// replacement path actually reaches the editor, with the actionable message.
+func TestArgsFieldDescriptionSurfacesAsLoadError(t *testing.T) {
+	src := `use cognition.concepts.{ participant }
+use cognition.shapes.{ participantFull }
+@description("declaration level -- load-bearing, must not flag")
+query participant spaceParticipants {
+  args {
+    spaceId string @required @description("dead")
+  }
+  filter spaceId==args.spaceId
+  shape  participantFull
+}
+`
+	svc := New(nil)
+	diags := svc.Diagnose(src, "queries.memql")
+	var got *Diagnostic
+	for i := range diags {
+		if diags[i].Severity == SeverityError && strings.Contains(diags[i].Message, "@description") {
+			got = &diags[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("want an Error naming @description, got %+v", diags)
+	}
+	if got.Range.Start.Line != 6 {
+		t.Errorf("anchor line = %d, want 6 (the offending args field)", got.Range.Start.Line)
+	}
+	if !strings.Contains(got.Message, "///") {
+		t.Errorf("message must point at the /// doc comment; got %q", got.Message)
 	}
 
-	// #2658 review: the opener line is inside the block.
-	opener := "query q {\n  args { x string @description(\"dead\") }\n}\n"
-	if got := discardedArgsDescriptionRule(opener); len(got) != 1 || got[0].Range.Start.Line != 2 {
-		t.Errorf("opener-line annotation: want one hint on line 2, got %+v", got)
-	}
-
-	for name, clean := range map[string]string{
-		"declaration-level":     "@description(\"keep\")\nquery q {\n  args {\n    x string\n  }\n}\n",
-		"concept-field":         "concept widget {\n  label string @description(\"keep\")\n}\n",
-		"shape-block":           "mutation m {\n  args {\n    x string\n  }\n  shape {\n    y string @description(\"keep\")\n  }\n}\n",
-		"shape-same-line":       "mutation m {\n  args {\n    x string\n  } shape {\n    y string @description(\"keep\")\n  }\n}\n",
-		"args-in-comment":       "// args { commentary\nconcept w {\n  label string @description(\"keep\")\n}\n",
-		"args-in-string":        "query q {\n  filter { note == \"args {\" }\n}\n@description(\"keep\")\n",
-		"args-in-block-comment": "/*\nargs {\n  x string @description(\"commented out\")\n}\n*/\nconcept w {\n  label string\n}\n",
-		"longer-annotation":     "query q {\n  args {\n    x string @descriptionX(\"different\")\n  }\n}\n",
-	} {
-		if got := discardedArgsDescriptionRule(clean); len(got) != 0 {
-			t.Errorf("%s: want no hint, got %+v", name, got)
+	// The declaration-level @description on the same construct is
+	// load-bearing: with the args-field annotation removed the file is clean.
+	clean := strings.Replace(src, ` @description("dead")`, "", 1)
+	for _, d := range svc.Diagnose(clean, "queries.memql") {
+		if d.Severity == SeverityError {
+			t.Errorf("declaration-level @description must not flag; got %+v", d)
 		}
 	}
 }

@@ -199,11 +199,11 @@ func TestJSONRoundTrips(t *testing.T) {
 	}
 }
 
-// TestArgsBlockRuleStopsAdvertisingDiscardedDescription pins #2615: the
-// inArgsBlock next-rule must not steer authors into @description on an
-// args field -- the parser discards it. The doc must instead carry the
-// discard warning.
-func TestArgsBlockRuleStopsAdvertisingDiscardedDescription(t *testing.T) {
+// TestArgsBlockRuleStopsAdvertisingRejectedDescription pins memql#3336: the
+// inArgsBlock next-rule must not steer authors into @description on an args
+// field -- the parser REJECTS it. The doc must carry the rejection and name
+// the /// doc comment that carries an arg description instead.
+func TestArgsBlockRuleStopsAdvertisingRejectedDescription(t *testing.T) {
 	s := Build()
 	for _, r := range s.NextRules {
 		if r.Context != "inArgsBlock" {
@@ -212,8 +212,11 @@ func TestArgsBlockRuleStopsAdvertisingDiscardedDescription(t *testing.T) {
 		if strings.Contains(r.Doc, "[@description") {
 			t.Errorf("inArgsBlock doc still advertises @description as part of the field shape: %q", r.Doc)
 		}
-		if !strings.Contains(r.Doc, "DISCARDED") {
-			t.Errorf("inArgsBlock doc must warn that @description is discarded (#2615): %q", r.Doc)
+		if !strings.Contains(r.Doc, "REJECTED") {
+			t.Errorf("inArgsBlock doc must say @description is rejected on an args field (memql#3336): %q", r.Doc)
+		}
+		if !strings.Contains(r.Doc, "///") {
+			t.Errorf("inArgsBlock doc must name the /// doc comment as the arg-description channel: %q", r.Doc)
 		}
 		return
 	}

@@ -263,7 +263,6 @@ func (s *Service) semanticDiagnostics(file *parser.File, source string) []Diagno
 	diagnostics = append(diagnostics, bareRowIntrinsicSortKeyRule(source)...)
 	diagnostics = append(diagnostics, actorUndeclaredRule(source)...)
 	diagnostics = append(diagnostics, actorUnknownPropertyRule(source)...)
-	diagnostics = append(diagnostics, discardedArgsDescriptionRule(source)...)
 	diagnostics = append(diagnostics, descriptionLengthRule(file, source)...)
 
 	// Check function definitions.
