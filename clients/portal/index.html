@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>memQL Portal</title>
+    <!--
+      The theme attribute is written by src/app/theme.ts BEFORE React mounts
+      (the module runs at import time, ahead of createRoot) so the first paint
+      is already in the right palette. Leaving it unset here is deliberate:
+      with no attribute the token layer falls through to prefers-color-scheme,
+      which is the correct default for a viewer who has never chosen.
+    -->
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

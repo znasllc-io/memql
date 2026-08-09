@@ -68,6 +68,16 @@ memQL/
 │   └── _reference/    Per-construct authoring reference skeletons
 │                      (_concept / _shape / _spec / _trait / _agent)
 ├── integrations/      External services + DSL-callable capabilities (Go)
+├── clients/           Surfaces built ON the platform -- the mirror of
+│   │                  integrations/ (which points outward). One directory per
+│   │                  client; the engine carries exactly one, which is the
+│   │                  worked example the memql-project template copies.
+│   ├── README.md      The convention: what belongs here, and the wiring a
+│   │                  client needs (npm package, Go server, CI lane + bucket,
+│   │                  Dockerfile stage, deploy component)
+│   └── portal/        memQL Portal -- the platform's graphical operations
+│                      console, the Cockpit's browser sibling. React + TS +
+│                      Vite + Tailwind; served by component/portal
 ├── component/         Core Go components
 │   ├── bus/           Channel-based inter-component communication (Go)
 │   ├── config/        Centralized env var loading (Go)
@@ -113,6 +123,9 @@ memQL/
 | `dsl/<ns>/shapes.memql` | Reusable shape templates | MemQL | — |
 | `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
+| `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps). Plural + first-class, the inward-facing mirror of `integrations/`. The engine carries one inhabitant -- the portal -- as the worked example downstream repos copy | TypeScript | [→](clients/README.md) |
+| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/portal` at `/portal/` on the bff | TypeScript | [→](clients/README.md) |
+| `component/portal/` | Serves the portal bundle from `MEMQL_PORTAL_DIST` (SPA fallback, asset caching, CSP). Not `go:embed` -- see its `doc.go` | Go | -- |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
 | `component/config/` | Centralized configuration loading | Go | -- |
@@ -425,6 +438,25 @@ carrier-built nodes in the common case. Reusable capabilities (chat,
 daily-space, avatar, ...) live in the engine as **generic, DSL-configurable
 features**, never product code.
 
+**What "never product code" is actually enforced by** -- two narrow guards, not
+a general one, so know their edges (memql#3326):
+
+- `TestEngineIsProductNeutral` (`product_neutrality_test.go`) -- a **banned-names
+  list**. It sweeps every tracked file, path and body, for the specific product
+  names this repo shed. It cannot notice a product arriving under a name nobody
+  thought to ban.
+- `TestClientsDirectoryIsAllowlisted` (`clients_allowlist_test.go`) -- an
+  **allowlist of `clients/` inhabitants**. `clients/` is where a client
+  application would land, so it gets structural enforcement: an unlisted
+  directory fails. The engine hosts the platform's own console (the portal); a
+  customer's SPA belongs in a product repo built from the `memql-project`
+  template.
+
+Everything else -- generic-vs-product Go in `component/`, a product-shaped
+concept in `dsl/` -- rests on review. Write new product-shaped code as a
+DSL-configurable feature or keep it downstream; do not read the guards as
+proof that anything unflagged is neutral.
+
 **Product DSL is delivered at runtime, not compiled in.** A product ships its
 DSL as a tiny data-only **bundle image**; the `dsl-bundle` kustomize component
 (`deploy/k8s/components/dsl-bundle`) runs it as an init-container that copies
@@ -554,6 +586,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
+| **Portal SPA assets** | `GET /portal/*` (bff only) | A browser cannot fetch its own bundle over gRPC -- the request that loads the application is made before any application code exists to speak a protocol. Same category as the `/memql/ws` upgrade and identity's web UI (memql#3314). Static bytes only, identical for every visitor: declared in `server.PublicPaths()` via `PortalPaths()`, while the DATA the portal reads stays gated on the `/memql/ws` stream it then dials. Served by `component/portal` from `MEMQL_PORTAL_DIST` |
 
 ### gRPC-Only Endpoints (HTTP Retired)
 

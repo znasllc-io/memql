@@ -1,0 +1,60 @@
+// portalviews domain -- views a person composed, stored as data.
+//
+// A predefined view is code (clients/portal/src/views, memql#3319). A
+// COMPOSED view is a row: somebody picked one or more concepts, the
+// system matched elements against their shape, a model may have
+// proposed an arrangement, the person adjusted it, and the result was
+// saved. memql#3320.
+//
+// WHY A CONCEPT AND NOT A PREFERENCES BLOB. Three properties fall out
+// of storing it as a row and out of nothing else:
+//
+//   * it is authorization-gated by the same per-row rules as everything
+//     else, rather than by whatever a settings surface remembered to
+//     check;
+//   * it is inspectable in the portal's own concept browser -- a
+//     composed view is browsable at /concepts/v1:portalviews:view like
+//     any other row set, which is the honest test of "the portal reads
+//     its own data back";
+//   * it has version history, because a write in memQL is an append.
+//     Editing a view keeps the previous arrangement.
+//
+// Per-row authz tier: OWNED, engine-enforced. ownerUserId is @serverSet
+// and stamped from actor.userId on every write, and @rowAuthz makes the
+// engine AND ownerUserId==actor.userId into every read
+// (component/memql/rowauthz_enforce.go) and refuse an update whose
+// target row the actor does not own
+// (component/memql/rowauthz_write_guard.go).
+//
+// SHARING IS NOT MODELLED, deliberately and honestly. The granted tier
+// has no expressible predicate today: there is no per-(view, user)
+// grant row and no engine mechanism to gate a read on one, so a
+// "shared with" list would be documentation that no filter enforces.
+// A composed view is a single-owner record, which is the shape the
+// account-isolation model handles well
+// (docs/internal/design/account-isolation-model.md).
+
+use identity.concepts.{ user }
+
+/// A view a person composed rather than one the portal ships: a named selection of concepts plus
+/// the arrangement of elements chosen to render them. The arrangement is the plain data structure
+/// sdk/ts-viewkit produces -- deterministically from the concepts' shape, optionally improved by a
+/// model, always editable by hand -- so a saved row is exactly what the composer was holding and
+/// reading one back is a parse rather than a reconstruction. Per-row authz: owned; ownerUserId is
+/// @serverSet and stamped from actor.userId on every write, and the @rowAuthz declaration is what
+/// the engine enforces on read and on update.
+@displayCard(primary="name", secondary="description", tertiary="updatedAt", status="status")
+@rowAuthz(owner="ownerUserId")
+concept view {
+  ownerUserId   string!  @serverSet  @description("v1:identity:user.id of the person who composed this view. THE ROW-AUTHZ OWNER FIELD: stamped from actor.userId on create and re-stamped on every update, so ownership can never be reassigned by a caller, and @serverSet makes 'never accepted from caller args' a load-time rejection rather than a convention.")
+  name          string!  @description("What the composer called this view. The primary display field and the label in the portal's saved-view list. Not unique -- the engine enforces uniqueness on no payload field, and the row id is the only identity.")
+  description   string  @description("Free-text note on what the view is for. Rendered as the display card's secondary line and under the heading when the view is opened.")
+  conceptIds    []string!  @description("The concepts the composer selected, in the order they were picked. THE SELECTION, as distinct from the arrangement below: it is what the person asked for, and it is what a 'which views cover this concept' lookup filters on. Usually one entry; several when the view stacks independent sections (see arrangements).")
+  arrangements  []object!  @description("One arrangement per selected concept, in the order the sections should read. Each entry is view-kit's Arrangement value verbatim: {conceptId, elements:[{element, band, title?, bindings?}]}. `element` is an ElementSpec id (table / calendar / chart.line / ...), `band` is which question the element answers (reading | shape | roll), and `bindings` maps a requirement slot to the field names to use -- an EMPTY list there declines the slot, which is how a composer says 'count the rows, do not total anything'. Stored opaquely: the engine never interprets it, and view-kit re-validates every entry against the live rows on read, so a saved view naming an element a later release removed degrades to the deterministic arrangement instead of failing.")
+  origin        enum("manual", "suggested")!  @description("Where the saved arrangement started: 'manual' = the deterministic match plus the composer's own edits, 'suggested' = a model's proposal was accepted (possibly then edited). Provenance for a person looking at a view months later, and the only signal that tells an operator how much of their library came out of a model. It is NOT an authorization or execution input -- both kinds of row render identically.")
+  status        enum("active", "archived")!  @description("Lifecycle. active = in the composer's saved list. archived = retired but retained; there is no hard delete, since a write in memQL is an append onto the same id. Stamped 'active' by createComposedView and flipped by archiveComposedView.")
+  updatedAt     datetime  @description("RFC3339 watermark of the most recent edit, stamped to now on every write so the saved-view list can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for reading the latest version.")
+  archivedAt    datetime  @description("RFC3339 timestamp stamped by archiveComposedView. Empty while the view is active. Kept beside status so a retention sweep can age archived views without re-deriving the transition time from the row's version history.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}

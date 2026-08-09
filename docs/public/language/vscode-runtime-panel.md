@@ -67,7 +67,11 @@ Click a concept to open its browser tab: rows on the left, detail on the
 right.
 
 - Rows are labelled using whatever `@displayCard` slots the concept
-  declares, falling back to the row id when it declares none.
+  declares. A concept that declares none falls through to the stated
+  fallback contract -- a title inferred from a `name` / `title` / `label`
+  field, a status inferred from a lifecycle field, the row id when neither
+  is present. See
+  [display-cards.md](../concepts/display-cards.md).
 - **Load more** pages through the keyset cursor; a concept larger than one
   page is fully walkable.
 - Selecting a row shows its full nested shape -- payload, provenance and

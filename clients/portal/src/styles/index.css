@@ -1,0 +1,82 @@
+/*
+ * The portal's single stylesheet entry point.
+ *
+ * Tailwind v4 is configured HERE, in CSS -- there is no tailwind.config.js and
+ * no PostCSS pipeline (the @tailwindcss/vite plugin does the work). `@theme
+ * inline` is what bridges the two systems: it registers each design token as a
+ * Tailwind namespace entry, so `bg-surface` / `text-muted` / `border-line`
+ * exist as utilities AND still emit `var(--portal-*)` rather than a baked
+ * value. `inline` is load-bearing -- without it Tailwind copies the token's
+ * resolved value into the utility and every utility freezes into the light
+ * theme.
+ */
+
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./status.css";
+
+@theme inline {
+  --color-bg: var(--portal-bg);
+  --color-surface: var(--portal-surface);
+  --color-raised: var(--portal-surface-raised);
+
+  --color-fg: var(--portal-fg);
+  --color-muted: var(--portal-fg-muted);
+  --color-subtle: var(--portal-fg-subtle);
+
+  --color-line: var(--portal-border);
+  --color-line-strong: var(--portal-border-strong);
+
+  --color-accent: var(--portal-accent);
+  --color-accent-fg: var(--portal-accent-fg);
+  --color-accent-subtle: var(--portal-accent-subtle);
+
+  --color-ok: var(--portal-ok);
+  --color-ok-subtle: var(--portal-ok-subtle);
+  --color-warn: var(--portal-warn);
+  --color-warn-subtle: var(--portal-warn-subtle);
+  --color-danger: var(--portal-danger);
+  --color-danger-subtle: var(--portal-danger-subtle);
+
+  --font-sans: var(--portal-font-sans);
+  --font-mono: var(--portal-font-mono);
+
+  --text-xs: var(--portal-text-xs);
+  --text-sm: var(--portal-text-sm);
+  --text-base: var(--portal-text-base);
+  --text-lg: var(--portal-text-lg);
+  --text-xl: var(--portal-text-xl);
+
+  --radius-DEFAULT: var(--portal-radius);
+  --radius-lg: var(--portal-radius-lg);
+}
+
+/*
+ * Base layer. Everything else in the portal is a utility class on a component;
+ * only the document-level defaults live as bare CSS, because there is no
+ * element to hang a class on.
+ */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    /* The host paints its own ground behind the page; a transparent body
+       borrows it and the theme flip stops halfway. Paint it explicitly. */
+    background-color: var(--portal-bg);
+    color: var(--portal-fg);
+    font-family: var(--portal-font-sans);
+    font-size: var(--portal-text-base);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* A visible, theme-aware focus ring on every interactive element. An
+     operations console gets driven by keyboard more than most UIs. */
+  :focus-visible {
+    outline: 2px solid var(--portal-accent);
+    outline-offset: 2px;
+  }
+}

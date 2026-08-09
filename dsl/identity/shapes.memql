@@ -3,6 +3,26 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+/// Full projection of v1:identity:account -- an operator-managed customer record. Carries the two
+/// @pii contact fields, so every query binding this shape must constrain its caller; both account
+/// reads do, via the ownerUserId==actor.userId conjunct that the concept's owned tier also injects.
+/// ownerUserId is projected deliberately: an operator surface renders "managed by" and the field is
+/// the row's authz key, so hiding it would make the tier invisible to the UI that depends on it.
+@row
+shape account accountFull {
+  row.id
+  ownerUserId
+  name
+  status
+  description
+  primaryContactName
+  primaryContactEmail
+  externalRef
+  archivedAt
+  updatedAt
+  row.createdAt
+}
+
 /// Full projection of v1:identity:accountEntitlement -- the per-account concurrency cap (epic
 /// memql#902 / #903) read by the admission controller (#904) and the Tasks UX (#909). createdAt is
 /// carried so a reader that gets more than one time-series version can pick the latest.
@@ -229,6 +249,27 @@ shape identity patSummary {
   label
   usableByAgents
   active
+  lastUsedAt
+  row.createdAt
+}
+
+/// Account-token (account_token identity) projection for the operator's per-account token list.
+/// Projects the credential's non-secret leaves BY PATH rather than projecting `credentials`
+/// wholesale, which is the whole difference between this shape and identityFull: a shape keys each
+/// projected path by its terminal segment, so credentials.accountId arrives as accountId and
+/// keyHash is simply never named. That is load-bearing rather than tidy -- memql#3064 recorded
+/// that workerTokensForUser leaked keyHash to any caller PRECISELY because identityFull projects
+/// the whole object, and the reads over this shape are wire-reachable by design (the operator's
+/// own portal calls them), so the projection is the boundary rather than the call origin.
+@row
+shape identity accountTokenSummary {
+  row.id
+  userId
+  label
+  active
+  credentials.accountId
+  credentials.mintedBy
+  credentials.expiresAt
   lastUsedAt
   row.createdAt
 }

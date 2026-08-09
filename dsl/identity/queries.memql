@@ -6,6 +6,107 @@
 use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
+// account -- the operator's customer records
+// ==========================================
+//
+// Both reads are OWNED, and owned twice over: the filters name
+// ownerUserId==actor.userId as a top-level conjunct, and the concept's
+// @rowAuthz(owner="ownerUserId") declaration makes the engine AND the
+// same term in whether the author wrote it or not (memql#3172). The
+// authored conjunct is kept rather than leaned off, for two reasons --
+// TestRowAuthzEnforcementLandGate requires every read over a declared
+// concept to be already-implied under injection, and the per-row-authz
+// classifier reads the authored filter, so dropping the term would
+// silently reclassify these out of the `owned` bucket.
+//
+// There is deliberately NO cross-operator roll-up query here. Read
+// enforcement has no cluster-owner escape (enforceRowAuthzOnPlan ANDs
+// the predicate unconditionally), so an admin-gated `all accounts` read
+// over this concept would be narrowed to the admin's OWN accounts and
+// return a confidently wrong answer. See
+// docs/internal/design/account-isolation-model.md, "owned and admin do
+// not compose".
+
+/// List the caller's accounts, newest first, optionally narrowed to one lifecycle status. Owned:
+/// ownerUserId==actor.userId gates the row set server-side, so an operator can never see another
+/// operator's customers. Omit status to get every account including archived ones.
+@actor
+query account accounts {
+  args {
+    status  enum("active", "suspended", "archived")
+  }
+  filter  ownerUserId==actor.userId && when(args.status) { status==args.status }
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    accountFull
+}
+
+/// Fetch a single account by id, gated to the caller. Owned: ownerUserId==actor.userId is the
+/// load-bearing guard, so an operator can never read another operator's customer even holding its
+/// id. Backs the account detail read and the pre-write existence check.
+@unbounded("account by id (guarded) gated to the owning operator -- bounded to a single row")
+@actor
+query account accountById {
+  args {
+    accountId  string!
+  }
+  filter  when(args.accountId) { row.id==args.accountId } && ownerUserId==actor.userId
+  shape   accountFull
+}
+
+// account tokens -- credentials issued TO A USER on behalf of an account
+// ======================================================================
+//
+// An account_token identity row is NOT a second kind of subject. Its
+// authenticated subject is `userId` -- the operator who owns the bound
+// account -- and `credentials.accountId` is a binding carried for
+// attribution and grouped revocation. Nothing authenticates AS an
+// account (docs/internal/design/account-isolation-model.md 3.3, 3.4).
+//
+// Both reads below are therefore gated on `userId==actor.userId`, the
+// SUBJECT relation, and NOT on the account binding. That distinction is
+// the point: gating on accountId alone would be authorization by
+// honour system (5.2 -- the caller names the tenant whose rows they
+// would like), whereas userId==actor.userId is the same owned predicate
+// every other credential listing in this file uses. The accountId
+// conjunct is a NARROWING of an already-authorized set, not the gate.
+//
+// There is deliberately NO by-keyHash lookup. The worker-token,
+// node-token and badge families each have one because an interceptor
+// resolves a presented bearer through it; no surface admits an
+// account token, so a hot-path lookup would be the one piece of
+// machinery that turns an inert credential into a live one by
+// accident. The digest is a custody record, not an index.
+
+/// List the account tokens the CALLING user has issued for one account, newest first. Owned:
+/// userId==actor.userId is the gate (the credential's subject is the operator, never the account);
+/// the accountId conjunct narrows an already-authorized set rather than deciding access. Includes
+/// revoked rows so a revocation can be seen to have taken effect. Carries no keyHash -- the shape
+/// names the credential's non-secret leaves by path.
+@actor
+query identity accountTokensForAccount {
+  args {
+    accountId  string!
+  }
+  filter  identityType=="account_token" && userId==actor.userId && credentials.accountId==args.accountId
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    accountTokenSummary
+}
+
+/// Fetch one account-token identity by id, gated to the calling user. Owned: userId==actor.userId,
+/// so an operator can never read (or, via the revoke handler that calls this, revoke) a credential
+/// another operator issued. Backs the pre-revoke ownership check.
+@unbounded("account token by id (guarded) gated to the issuing operator -- bounded to a single row")
+@actor
+query identity accountTokenById {
+  args {
+    identityId  string!
+  }
+  filter  when(args.identityId) { row.id==args.identityId } && identityType=="account_token" && userId==actor.userId
+  shape   accountTokenSummary
+}
+
 // ---- queries/v1/identity/accountEntitlement.memql ----
 
 // accountEntitlement - the account's task-concurrency cap
@@ -1147,11 +1248,17 @@ query accessRequest pendingAccessRequests {
 }
 
 /// Recent audit events, optionally filtered by category. Powers the admin audit-log view.
+/// Owner/admin only: the audit trail names who did what to whom across the whole cluster, so an
+/// ungated read hands every authenticated caller the cluster's security history. The gate was
+/// implicit while the only caller was the identity service's /admin/* routes, which enforce it at
+/// the route (component/identity/admin, requireAdmin). The portal reaches this query directly over
+/// the stream (memql#3324), where no route gate stands in front of it -- so the predicate has to be
+/// in the query, which is the only place both callers pass through.
 query auditEvent recentAuditEvents {
   args {
     category  string
   }
-  filter  when(args.category) { category==args.category }
+  filter  requiresOwnerOrAdmin && when(args.category) { category==args.category }
   // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
   // (createdAt, id) instead of a full-table pull. Literal page size -- the
   // struct-query paginate directive only accepts an integer literal.

@@ -1,0 +1,38 @@
+// portalviews domain -- caller-scoped reads.
+//
+// Authz tier: owned. Every filter gates on ownerUserId==actor.userId,
+// so a caller only ever reads views they composed. The conjunct is
+// written out rather than left to the engine's @rowAuthz injection on
+// purpose: the injection is the enforcement, and the visible conjunct
+// is what makes the tier legible to a reader of this file and to the
+// classification gate in test/dslconformance.
+
+/// List the caller's composed views, newest first. Owned: the row set is gated by
+/// ownerUserId==actor.userId server-side, so cross-user reads are impossible and no argument can
+/// widen it. Optional status narrows to the active list or to the archived one; omit it for both.
+/// Optional conceptId answers "which of my views cover this concept", which is what the composer
+/// offers when somebody opens a concept that already has a saved view.
+@actor
+query view composedViews {
+  args {
+    status     enum("active", "archived")
+    conceptId  string
+  }
+  filter   ownerUserId==actor.userId && when(args.status) { status==args.status } && when(args.conceptId) { args.conceptId in conceptIds }
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    composedViewFull
+}
+
+/// Fetch one composed view by id, gated to its owner. Owned: ownerUserId==actor.userId is the
+/// load-bearing guard, so a caller cannot open another person's view even holding its id. This is
+/// the read behind opening a saved view and behind re-opening it in the composer to edit.
+@unbounded("composed view by id (guarded), gated to the owner -- bounded to a single row")
+@actor
+query view composedViewById {
+  args {
+    viewId  string!
+  }
+  filter  when(args.viewId) { row.id==args.viewId } && ownerUserId==actor.userId
+  shape   composedViewFull
+}

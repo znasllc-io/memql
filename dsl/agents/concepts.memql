@@ -129,6 +129,7 @@ concept agent {
 /// Dropping any one of the three reopens the other two: an unstamped userId defeats the
 /// guard from inside a row the attacker legitimately owns, and an unscoped read hands out
 /// the ids the guard is asked about.
+@displayCard(primary="action", secondary="agentId", tertiary="userId", status="active")
 @rowAuthz(owner="userId")
 concept agentAuthorization {
   agentId         string! @description("v1:agents:agent.id this grant authorizes.")
@@ -168,6 +169,7 @@ concept agentAuthorization {
 /// (cognition / conductor) need to see the same role surface across every partition; that makes one
 /// user's custom role visible to every caller -- a known trade rather than an oversight, with the
 /// scoped alternative written down. See the note above activeAgentRoles in dsl/agents/queries.memql.
+@displayCard(primary="name", secondary="category", tertiary="tier", status="active")
 concept agentRole {
   slug                   string!  @description("Canonical slug -- the value v1:agents:agent.roleSlug points to. Kebab-case, stable, never renamed (rename = new row + migration). Examples: 'it-support', 'family-doctor', 'commercial-pilot', 'union-carpenter'. ENFORCED UNIQUE ACROSS ACTIVE ROWS on the write path by validateAgentRoleSlugUnique (component/memql/agent_role_slug_unique_validation.go, memql#3207): a write that would put a second ACTIVE row under a slug an active row at a different id already holds is refused -- including a RENAME onto a taken slug, and including the raw insert() path that skips the mutation template. Be exact about the bounds, because this description is the thing a reader trusts. (1) The rule is over ACTIVE rows only: deactivating a role releases its slug, so 'never renamed' is a convention about how to treat the field, not a claim that the store forbids reuse afterwards. (2) The SYSTEM actor is carved out, mirroring validateAgentRolePredefinedLock, so the SeedMaterializer's idempotent re-write of every predefined role on each boot cannot be refused -- which means two AUTHORED seeds claiming one slug is not caught here. (3) It is not an ownership control: this concept has no owner field, so a caller supplying NO agentRoleId gets id = slug, which for an existing user role is that row's own id, and the write read-merges over it rather than being refused as a duplicate. Uniqueness is a key constraint; that hole needs an owner column. memql#3066's preference in findRoleBySlug is retained as defence in depth and is now BACKED by this invariant rather than standing in for it.")
   name                   string!  @description("Display name, e.g. 'IT Support' or 'Family Medicine Physician'. Surfaced in role pickers and on the agent card.")
@@ -192,6 +194,7 @@ concept agentRole {
 /// threading parallel flat lists; this concept is the spine of that surface. Phase 1 (this PR)
 /// lands the schema + a 13-row predefined catalog; consumers don't read skills yet. Phase 2
 /// migrates roles + agents to skillIds[]; Phase 3 lands the mintSkill authority + approval card.
+@displayCard(primary="name", secondary="category", tertiary="tier", status="active")
 concept skill {
   slug           string!  @description("Canonical slug -- stable, kebab-case identifier. Examples: workbench-baseline, web-research, go-backend-engineering. Never renamed (rename = new row + migration).")
   name           string!  @description("Display name shown in the role manager and the agent edit modal. Example: 'Web Research'.")
@@ -217,6 +220,7 @@ concept skill {
 /// replay against. Two writes per attach (the agent row update + the event row); cheap. Phase 1
 /// lands the concept; Phase 2 starts writing rows from the agent factory. detached is reserved for
 /// a future phase -- v1 is append-only because no consumer currently reads the negative path.
+@displayCard(primary="changeKind", secondary="skillId", tertiary="targetAgentId", status="changeKind")
 concept skillChangeEvent {
   targetAgentId   string!  @description("v1:agents:agent.id whose skill set changed. Pair with createdAt to reconstruct an agent's skill timeline.")
   skillId         string!  @description("v1:agents:skill.id that was attached or reconfigured. The event log entries are denormalized by skillId so the audit / trace viewer can answer 'when was X attached to Y'.")
@@ -237,6 +241,10 @@ concept skillChangeEvent {
 /// Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across
 /// takeovers so the operator agent can learn the user's app usage patterns and shortcut repeat
 /// work.
+// @no-displayCard: One accumulating notes blob per user: the payload is an array of entries
+//   plus a timestamp. The only scalar is the owning-user foreign key, which
+//   says nothing the row id does not already say -- the generic fallback is
+//   the honest rendering.
 concept operatorMemory {
   userId  string!  @description("ID of the user this memory belongs to. One-to-one with v1:identity:user.")
 

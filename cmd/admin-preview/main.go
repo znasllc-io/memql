@@ -52,8 +52,10 @@ func main() {
 
 	asset := func(p string) string { return p }
 
+	// Mirrors adminNav in component/identity/admin/server.go. No "Overview":
+	// the dashboard was retired when the portal's /admin overview replaced it
+	// (memql#3324), and /admin/ redirects to /admin/users.
 	nav := []webtempl.NavLink{
-		{Href: "/admin/", Label: "Overview"},
 		{Href: "/admin/users", Label: "Users"},
 		{Href: "/admin/tokens", Label: "Tokens"},
 		{Href: "/admin/audit", Label: "Audit"},
@@ -92,16 +94,9 @@ func main() {
 		{ID: "user-4", DisplayName: "Suspended Sam", PrimaryEmail: "sam@partner.io", Role: "writer", SuspendedAt: "2026-04-30 18:01:00 UTC", SuspendedReason: "credential reuse", CreatedAt: "2026-04-25 08:22:00 UTC"},
 	}
 
-	render(filepath.Join(outDir, "admin.html"), webtempl.AdminDashboard(webtempl.AdminDashboardData{
-		Layout:        layout("Cluster overview", "/admin/"),
-		Mode:          "waitlist",
-		UserCount:     12,
-		AuditCount:    47,
-		AuditWindow:   "last 24h",
-		AuditEvents:   auditEvents,
-		CurrentKID:    "kid-2026-04-22T00:00:00Z",
-		CurrentKeyAge: "13d",
-	}))
+	// No admin.html. The cluster-overview dashboard it previewed is gone
+	// (memql#3324); its replacement is a React page in clients/portal, previewed
+	// by running the portal rather than by rendering templ into a file.
 
 	render(filepath.Join(outDir, "admin-users.html"), webtempl.AdminUsersList(webtempl.AdminUsersListData{
 		Layout:    layout("Users", "/admin/users"),
@@ -243,7 +238,6 @@ func writeIndex(path string) {
 <body><div class="shell"><main class="shell-main">
 <h1>Admin preview index</h1>
 <ul>
-<li><a href="/admin.html">/admin/ — Cluster overview</a></li>
 <li><a href="/admin-users.html">/admin/users — Users list</a></li>
 <li><a href="/admin-users-detail.html">/admin/users/detail — User detail</a></li>
 <li><a href="/admin-audit.html">/admin/audit — Audit log</a></li>

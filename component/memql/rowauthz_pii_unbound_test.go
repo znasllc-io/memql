@@ -299,7 +299,25 @@ func TestDeclaredTierTakesPrecedence(t *testing.T) {
 func TestPIIBearingConceptPopulation(t *testing.T) {
 	loadConcepts(t)
 
-	want := map[string]bool{piiConcept: true}
+	// Each entry is an ANSWERED question, not a suppression.
+	//
+	// v1:identity:user is the concept this gate exists for: it declares no
+	// tier, so the unbound path is what protects it.
+	//
+	// The three below arrived with the memQL Portal (memql#3322 / #3323) and
+	// every one DECLARES @rowAuthz(owner="ownerUserId"). Per
+	// TestDeclaredTierTakesPrecedence that is the complete answer: the tier
+	// decides, the engine ANDs the owner predicate into every read of them,
+	// and this gate never fires for them. They are LISTED rather than
+	// exempted so that dropping a tier from any of them re-opens the question
+	// here, instead of falling silently through to a gate that no longer
+	// covers it.
+	want := map[string]bool{
+		piiConcept:               true,
+		"v1:identity:account":    true,
+		"v1:campaigns:recipient": true,
+		"v1:campaigns:delivery":  true,
+	}
 
 	got := map[string][]string{}
 	for name, c := range memorynodes.All() {
@@ -324,7 +342,7 @@ Answer the same question for it, then add it here:
     subject is a payload field (ownerUserId, userId) will deny everyone
     but an admin. That is fail-closed and safe, but if the concept needs
     finer access the fix is to declare a tier, not to widen this gate.`,
-			id, fields)
+				id, fields)
 		}
 	}
 	for id := range want {

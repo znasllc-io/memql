@@ -21,6 +21,12 @@
 # (go build -tags <node>). The engine Dockerfile has two runtime stages:
 # the default distroless `runtime` for CGO-free nodes and `voice-runtime`
 # (debian + libopus) for voice, which needs CGO for LibOpus.
+#
+# PORTAL_DIST_STAGE selects where the runtime copies the memQL Portal bundle
+# from (memql#3314). Only the bff serves the portal, so only the bff pays for
+# the Node stage that builds it; every other node type takes the default
+# empty stage and never pulls a Node image. See the global ARG at the top of
+# the Dockerfile for why this is a stage selector rather than a flag.
 
 function engine_build_args_for_node() {
     local node="$1"
@@ -29,5 +35,8 @@ function engine_build_args_for_node() {
     if [[ "$node" == "voice" ]]; then
         ENGINE_BUILD_ARGS+=(--build-arg CGO_ENABLED=1)
         ENGINE_BUILD_TARGET="voice-runtime"
+    fi
+    if [[ "$node" == "bff" ]]; then
+        ENGINE_BUILD_ARGS+=(--build-arg PORTAL_DIST_STAGE=portal-build)
     fi
 }

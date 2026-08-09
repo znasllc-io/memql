@@ -65,6 +65,7 @@ jobs:
       voice: ${{ steps.filter.outputs.voice }}
       proto: ${{ steps.filter.outputs.proto }}
       vscode: ${{ steps.filter.outputs.vscode }}
+      portal: ${{ steps.filter.outputs.portal }}
       ci: ${{ steps.filter.outputs.ci }}
       # Target-module buckets (memql#3163 / design D3). Declared so the split
       # in memql#3165 is a no-op for CI, per decision F. NOT yet consumed by any
@@ -195,6 +196,18 @@ jobs:
               - 'examples/deploypack/dsl/**'
               - 'examples/referencepack/dsl/**'
               - 'integrations/*.json'
+              # The `clients/` tree (memql#3326). clients_allowlist_test.go in
+              # the ROOT package sweeps `git ls-files clients` and fails on a
+              # directory that is not in its allowlist -- the structural half of
+              # product neutrality, which the banned-NAMES sweep next to it
+              # cannot cover.
+              #
+              # It needs a route of its own because a new client is TypeScript:
+              # `clients/acme-spa/**` sets the `portal` bucket, and portal-checks
+              # runs npm, not Go. Without this entry the one PR shape the guard
+              # exists for -- a product SPA landing under clients/ -- matches no
+              # bucket that reaches a Go lane, and the guard never fires.
+              - 'clients/**'
               # Not embedded, but a gate input read by a package this lane
               # already runs (`./component/architecture/...`), and found in the
               # same sweep: it was in NO consumed bucket while being able to
@@ -339,6 +352,30 @@ jobs:
               - 'scripts/vscode/**'
               - 'sdk/ts/**'
               - 'sdk/ts-viewkit/**'
+            # The `clients/` category -- surfaces built on the platform, of
+            # which this repo carries exactly one, the memQL Portal
+            # (memql#3314). Written as `clients/**` rather than
+            # `clients/portal/**` so a second inhabitant is covered the day it
+            # lands rather than the day someone remembers this file.
+            #
+            # sdk/ts and sdk/ts-viewkit are in here as well as in their OWN
+            # buckets, for exactly the reason spelled out above the `vscode`
+            # bucket -- and that lesson is why they are here from the start.
+            # The portal consumes both as `file:` dependencies and Vite bundles
+            # them into the SPA, so a change confined to either package can
+            # break the portal's typecheck, its tests and `vite build`, while
+            # the sdkts / viewkit lanes run that package's own tests, go green,
+            # and report nothing. Renaming an export is enough to do it.
+            # scripts/dev/portal_lane_scope_test.go fails if either is dropped.
+            #
+            # scripts/portal/** is the install/build cycle every portal command
+            # goes through, so a change there breaks the lane's own recipe.
+            portal:
+              - 'clients/**'
+              - 'sdk/ts/**'
+              - 'sdk/ts-viewkit/**'
+              - 'scripts/portal/**'
+              - 'component/portal/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -857,6 +894,40 @@ jobs:
         run: make viewkit-typecheck
       - name: test
         run: make viewkit-test
+
+  # memQL Portal lane (memql#3314). Gates on `portal`, which deliberately
+  # includes the portal's `file:` dependencies (sdk/ts, sdk/ts-viewkit) --
+  # see the bucket definition for why omitting them is a silent fail-open.
+  #
+  # Node 22 rather than the 20 the other TS lanes use: Vite 7 requires
+  # ^20.19 || >=22.12, and pinning the floor exactly would make a patch
+  # release of Node the thing that reds the lane.
+  portal-checks:
+    name: portal-checks
+    timeout-minutes: 15
+    needs: changes
+    if: ${{ github.event_name != 'pull_request' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.portal == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v4
+        with:
+          node-version: '22'
+      # Retried (memql#3166 / design D4.3): dependency install is a network op.
+      # The three steps below are deliberately NOT retried -- retrying a test
+      # is how a flake becomes invisible.
+      - name: install
+        run: scripts/ci/retry.sh -- make portal-install
+      - name: typecheck
+        run: make portal-typecheck
+      - name: test
+        run: make portal-test
+      # The build is a gate, not a packaging step: a type error `tsc` tolerates
+      # (a bad Tailwind token reference, a broken CSS import, a dynamic import
+      # that does not resolve) shows up only here, and the image build runs
+      # exactly this command.
+      - name: build
+        run: make portal-build
 
   # MCP conformance suite (memql#1715) -- the capstone regression gate for epic
   # #1704. Unlike go-checks (which has no database, so every *_db_test.go skips),
@@ -1419,6 +1490,7 @@ jobs:
       - build-node-tags
       - sdk-ts-typecheck
       - viewkit-checks
+      - portal-checks
       - conformance
       - db-tests
       - vscode-extension

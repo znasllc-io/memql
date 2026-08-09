@@ -133,6 +133,10 @@ concept task {
 /// the user responds, the planner re-invokes the agent with this state as bootstrap context. Same
 /// machinery powers Pause/Resume (Q12) and refinement-Plan parent-Task resumption (Q9). Per Task;
 /// written when the Task transitions to awaitingFeedback / paused; read on resume.
+// @no-displayCard: A per-Task working-memory blob: nested objects, arrays, and a
+//   multi-kilobyte reasoning transcript. The one scalar (`taskId`) is a
+//   foreign key, not an identity -- the row's identity IS its Task, which the
+//   row id already carries.
 concept taskState {
   taskId            string! @description("v1:planner:task.id this state belongs to. One row per (taskId, persisted-version-seq); the planner reads the latest on resume.")
   workingMemory     object  @description("Intermediate results from previous tool calls in this Task. Free-form per agent kind; the agent's prompt template knows how to consume.")

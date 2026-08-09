@@ -7,6 +7,7 @@ go 1.26.1
 toolchain go1.26.5
 
 require (
+	github.com/znasllc-io/memql/component/auth v0.0.0
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
@@ -41,7 +42,6 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/auth v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect

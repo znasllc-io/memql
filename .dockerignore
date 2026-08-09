@@ -12,3 +12,7 @@ node_modules
 **/node_modules
 .DS_Store
 deploy/k8s
+# A host-built portal bundle must never enter the build context: the image's
+# bundle is produced by the Dockerfile's own portal stage, from source, and a
+# stale dist/ copied in would be indistinguishable from a fresh one.
+clients/portal/dist

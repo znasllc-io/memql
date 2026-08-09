@@ -3,6 +3,182 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
+// account -- the operator's customer records
+// ==========================================
+//
+// Every write stamps ownerUserId from actor.userId and never accepts
+// it from caller args; the field is @serverSet, so an accept{} naming
+// it would fail to LOAD rather than merely be wrong. Ownership is
+// therefore immutable across the row's whole version history and a
+// caller can neither create an account owned by someone else nor
+// reassign an existing one.
+//
+// The two update-kind mutations below land on an EXISTING row, which
+// is exactly the surface the row-authz write guard covers
+// (component/memql/rowauthz_write_guard.go, memql#3174): the engine
+// resolves the target row and refuses when its declared owner is not
+// the actor, so the caller-supplied accountId cannot be pointed at
+// another operator's customer. That guard is why these do not need
+// @serverOnly -- see docs/internal/design/account-isolation-model.md.
+//
+// There is no restoreAccount and no hard delete. Un-archiving is
+// deliberately out of this pass's scope (memql#3321 enumerates create /
+// update / archive) and is a two-line sibling of archiveAccount when a
+// surface needs it; hard delete does not exist in memQL at all -- a
+// write is an append onto the same id.
+
+/// Create an account (an operator-managed customer record). Owned: ownerUserId is stamped from
+/// actor.userId, so an operator can only ever create their own customer records. Opens at
+/// status=active; the descriptive fields are all optional so a record can be created from a name
+/// alone and filled in later.
+@actor
+mutate account createAccount {
+  args {
+    accountId            string!
+    name                 string!
+    description          string
+    primaryContactName   string
+    primaryContactEmail  string
+    externalRef          string
+  }
+  insert {
+    accept { name, description, primaryContactName, primaryContactEmail, externalRef }
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      status: "active"
+      updatedAt: now
+    }
+  }
+}
+
+/// Update an account's descriptive fields. Partial read-merge: an omitted field keeps its current
+/// value. Owned: ownerUserId is re-stamped from actor.userId so the write cannot transfer the row,
+/// and the row-authz write guard refuses the call outright when the target row belongs to another
+/// operator. status is NOT accepted here -- lifecycle transitions go through archiveAccount so the
+/// transition timestamp is stamped with the status rather than beside it.
+@actor
+mutate account updateAccount {
+  args {
+    accountId            string!
+    name                 string
+    description          string
+    primaryContactName   string
+    primaryContactEmail  string
+    externalRef          string
+  }
+  update {
+    accept { name, description, primaryContactName, primaryContactEmail, externalRef }
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      updatedAt: now
+    }
+  }
+}
+
+/// Archive an account: flip status to archived and stamp archivedAt. The row is retained in full --
+/// memQL has no hard delete, and the operator's history of a closed customer is the point. Owned:
+/// ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor
+/// does not own.
+@actor
+mutate account archiveAccount {
+  args {
+    accountId  string!
+  }
+  update {
+    stamp {
+      id: args.accountId
+      ownerUserId: actor.userId
+      status: "archived"
+      archivedAt: now
+      updatedAt: now
+    }
+  }
+}
+
+// account tokens -- the credential rows behind the two mutations below
+// ====================================================================
+//
+// An account_token identity is a credential issued TO A USER ON BEHALF
+// OF an account. userId is the SUBJECT; credentials.accountId is a
+// binding. Nothing authenticates as an account
+// (docs/internal/design/account-isolation-model.md 3.3, 3.4).
+//
+// Neither mutation is @serverOnly, and that is a decision rather than
+// an omission: component/grpc is on call_origin_conformance_test.go's
+// wire-path DENY list, so the one package that calls these CANNOT
+// stamp internal origin, and marking them @serverOnly would make them
+// permanently unreachable. The exposure is bounded differently instead:
+//
+//   create -- userId and mintedBy are stamped from actor.userId and
+//     are NOT args, so a wire caller can only ever mint a credential
+//     row subject to themselves. The accountId is caller-supplied and
+//     unchecked HERE (the handler checks it by reading accountById as
+//     the caller, where @rowAuthz decides); a raw call naming someone
+//     else's account produces an inert row in the CALLER's own list,
+//     because both reads gate on userId==actor.userId.
+//
+//   revoke -- a caller-supplied identityId with no actor check, which
+//     is exactly the shape revokePATIdentity and
+//     revokeWorkerTokenIdentity already have. Ownership is checked in
+//     the handler via accountTokenById. The residual is that a raw
+//     wire call can deactivate another operator's account_token row --
+//     a nuisance against a credential that authorizes nothing, not a
+//     disclosure. The real fix is a @rowAuthz(owner="userId")
+//     declaration on v1:identity:identity, which would put all three
+//     revokes behind the engine's write guard at once; that belongs to
+//     memql#3173 (declaring tiers on the remaining concepts) rather
+//     than to one credential family.
+//
+// keyHash is the SHA-256 of the plaintext. The plaintext never reaches
+// the engine -- there is no arg for it -- so it cannot be persisted
+// here even by mistake.
+
+/// Create an account_token identity: a credential issued to the CALLING user on behalf of
+/// args.accountId. The subject is the user; the account is a binding, never a second kind of
+/// subject. userId and mintedBy are stamped from actor.userId and are deliberately not args, so the
+/// mutation cannot mint a credential attributed to anyone but its caller. Stores only the SHA-256
+/// hex digest -- plaintext lives at the caller for one-time display.
+@actor
+mutate identity createAccountTokenIdentity {
+  args {
+    identityId  string!
+    accountId   string!
+    label       string!
+    keyHash     string!
+    expiresAt   string
+  }
+  insert {
+    id: args.identityId
+    userId: actor.userId
+    identityType: "account_token"
+    credentials: {
+        accountId: args.accountId,
+        keyHash: args.keyHash,
+        mintedBy: actor.userId,
+        expiresAt: args.expiresAt ?? ""
+      }
+    label: args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
+/// Revoke (deactivate) an account_token identity row. Only `active` changes; identityType,
+/// credentials and label inherit from the persisted row. Ownership is checked by the caller
+/// (component/grpc/account_token_handlers.go reads accountTokenById as the CALLER first) -- see the
+/// block comment above for why the check cannot live here yet.
+mutate identity revokeAccountTokenIdentity {
+  args {
+    identityId  string!
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}
+
 /// Approve an access request (status=approved, stamps reviewer + invitation).
 mutate accessRequest approveAccessRequest {
   args {

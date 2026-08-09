@@ -9,6 +9,7 @@
 /// with vectorField='content'. Per Q8: text-style breakdowns of user-uploaded Documents (PDF
 /// sections, markdown chunks, plain text chunks) reuse this concept rather than duplicating the
 /// chunk infrastructure into a new typed concept.
+@displayCard(primary="text", secondary="sourceRef", tertiary="domainId", status="validationStatus")
 concept documentChunk {
   domainId    string!  @description("ID of the parent v1:knowledge:knowledgeDomain. Queries filter by this to scope retrieval to the agent's selected domains.")
   text        string!  @description("The chunk text. Kept as plain text so findSimilar can re-embed on demand and the model can render it in the system_knowledge prompt block.")

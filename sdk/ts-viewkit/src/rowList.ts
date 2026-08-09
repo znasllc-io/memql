@@ -2,11 +2,12 @@
 //
 // The rule this file exists to enforce: there is NO concept-specific rendering
 // code, anywhere. A row is projected through whatever @displayCard slots its
-// concept declares, and degrades to the row id when it declares none or when
-// the named field is absent. That is what lets a newly declared concept render
-// the day it is declared, with no renderer update.
+// concept declares, and through the stated fallback contract (displayCard.ts)
+// when it declares none. That is what lets a newly declared concept render the
+// day it is declared, with no renderer update.
 
 import { h, text, type VNode } from "./vnode.js";
+import { resolveDisplayCard, statusText, statusValue } from "./displayCard.js";
 import type { ConceptLike, RowLike } from "./types.js";
 
 // scalarField reads a row field and renders it as a display string. Non-scalar
@@ -38,7 +39,9 @@ export function renderRowList(
     ]);
   }
 
-  const card = concept.displayCard;
+  // Resolved once for the whole set: a declared card verbatim, otherwise the
+  // inferred one, so every row in the list labels itself off the same field.
+  const card = resolveDisplayCard(concept, rows);
   const items = rows.map((row) => {
     const id = rowDisplayId(row);
     const attrs: Record<string, string> = { class: "vk-row", "data-row-id": id };
@@ -50,23 +53,28 @@ export function renderRowList(
 
     // Primary falls back to the row id so a row is always clickable and always
     // identifiable, even with no display card at all.
-    const primary = scalarField(row, card?.primary) || id;
+    const primary = scalarField(row, card.primary) || id;
     children.push(h("span", { class: "vk-row-primary" }, [text(primary)]));
 
-    const secondary = scalarField(row, card?.secondary);
+    const secondary = scalarField(row, card.secondary);
     if (secondary) {
       children.push(h("span", { class: "vk-row-secondary" }, [text(secondary)]));
     }
 
-    const tertiary = scalarField(row, card?.tertiary);
+    const tertiary = scalarField(row, card.tertiary);
     if (tertiary) {
       children.push(h("span", { class: "vk-row-tertiary" }, [text(tertiary)]));
     }
 
-    const status = scalarField(row, card?.status);
+    // The badge carries prose for the reader and the raw value for the host's
+    // stylesheet -- see statusText / statusValue for why those differ.
+    const statusRaw = card.status === undefined ? undefined : row[card.status];
+    const status = card.status === undefined ? "" : statusText(card.status, statusRaw);
     if (status) {
       children.push(
-        h("span", { class: "vk-row-status", "data-status": status }, [text(status)]),
+        h("span", { class: "vk-row-status", "data-status": statusValue(statusRaw) }, [
+          text(status),
+        ]),
       );
     }
 

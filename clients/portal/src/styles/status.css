@@ -1,0 +1,85 @@
+/*
+ * Lifecycle colour on view-kit's status badges.
+ *
+ * ===========================================================================
+ * WHY THE HOST OWNS THIS AND VIEW-KIT DOES NOT
+ * ===========================================================================
+ * view-kit renders a status badge with the raw value on `data-status` and
+ * stays deliberately value-agnostic -- it has no idea whether "draining" is
+ * good news. Its stylesheet says so, and names this exact file's job: "a host
+ * wanting per-value colour adds `.vk-row-status[data-status="failed"]` rules
+ * of its own" (sdk/ts-viewkit/src/styles.ts).
+ *
+ * So this is the sanctioned seam, and it is keyed on VALUES, not on concepts.
+ * `succeeded` reads the same whether it is on a deployment, a plan or a task,
+ * which is the property that makes the rule safe to write: a concept declared
+ * tomorrow whose status enum happens to include `failed` is coloured today,
+ * with no edit here. A rule keyed on a concept id would be the concept-
+ * specific rendering the whole epic exists to not have.
+ *
+ * ===========================================================================
+ * RESTRAINT IS THE POINT
+ * ===========================================================================
+ * Three families are coloured and nothing else:
+ *
+ *   ok      it finished, it is up, it passed
+ *   warn    it is mid-flight, or held, or drifting -- look, but nothing broke
+ *   danger  it failed, it is down, it was refused
+ *
+ * Everything else -- `archived`, `superseded`, `true` / `false`, and every
+ * enum member this file has never heard of -- keeps the neutral bordered pill
+ * view-kit ships. That is deliberate. `archived` is not a problem, a boolean
+ * is not a severity, and a page where six values are six colours has spent the
+ * channel that should mean "this deploy failed" on decoration. If a value is
+ * not clearly one of the three, it does not get a colour.
+ *
+ * ===========================================================================
+ * THE COLOUR IS THE BORDER AND THE FILL, NEVER THE TEXT
+ * ===========================================================================
+ * A badge is ~12px, and `--portal-ok` on the page background is about 3.4:1 in
+ * light mode -- under the 4.5:1 floor for text that small. So the hue goes on
+ * the border and a tinted fill, and the label keeps `--vk-fg`. That also makes
+ * the badge readable without colour at all, which matters more than the hue:
+ * the pill's text is the status word itself, so nothing here is the only
+ * carrier of anything. The `opacity: 0.8` view-kit sets on the pill is left
+ * alone -- it applies to the whole badge, and the tinted fill is already
+ * calibrated against it.
+ *
+ * Both themes resolve through --portal-* roles, which the token layer
+ * redefines for dark, so nothing here needs a second copy.
+ */
+
+.vk-row-status[data-status="succeeded"],
+.vk-row-status[data-status="success"],
+.vk-row-status[data-status="healthy"],
+.vk-row-status[data-status="active"],
+.vk-row-status[data-status="connected"],
+.vk-row-status[data-status="passed"],
+.vk-row-status[data-status="provisioned"] {
+  border-color: var(--portal-ok);
+  background: var(--portal-ok-subtle);
+}
+
+.vk-row-status[data-status="pending"],
+.vk-row-status[data-status="in_progress"],
+.vk-row-status[data-status="connecting"],
+.vk-row-status[data-status="degraded"],
+.vk-row-status[data-status="draining"],
+.vk-row-status[data-status="suspended"],
+.vk-row-status[data-status="paused"],
+.vk-row-status[data-status="blocked"] {
+  border-color: var(--portal-warn);
+  background: var(--portal-warn-subtle);
+}
+
+.vk-row-status[data-status="failed"],
+.vk-row-status[data-status="failure"],
+.vk-row-status[data-status="error"],
+.vk-row-status[data-status="offline"],
+.vk-row-status[data-status="stopped"],
+.vk-row-status[data-status="cancelled"],
+.vk-row-status[data-status="rolled_back"],
+.vk-row-status[data-status="revoked"] {
+  border-color: var(--portal-danger);
+  background: var(--portal-danger-subtle);
+}

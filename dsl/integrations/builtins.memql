@@ -1,0 +1,30 @@
+// integrations domain -- the read path from a browser to the integration
+// registry (memql#3323).
+//
+// WHY A BUILTIN AND NOT A CONCEPT. Almost everything the portal shows is a
+// concept row, and that is the right default. This is the case where it is
+// not: which plug-ins a node registered, and whether each one's credentials
+// resolved, is PROCESS STATE. It differs per replica and per node-type build
+// (build tags decide which plug-ins compile in), it is recomputed at boot,
+// and it is never true of "the cluster" the way a row is. Writing it into the
+// graph would mean a writer, a staleness question, and a row that disagrees
+// with the process it claims to describe. So it is read live, through the
+// ExecuteQuery seam every other named call already rides -- no new gRPC
+// message, no new transport.
+//
+// WHAT IT DELIBERATELY NEVER RETURNS: a credential value. The handler reports
+// each credential slot's PRESENCE, its source (env / globalVariable /
+// globalSecret / unset) and, where the secret store already publishes one, its
+// non-reversible fingerprint. Never the value, never the ciphertext, and
+// never a length. integrations/email/status.go states the invariant and
+// integrations/email/status_test.go holds it: the whole reply is serialized
+// and swept for planted credential values.
+//
+// This domain declares no concepts. That is intentional -- it contributes a
+// read, not a schema.
+
+@executor("integration.email.status")
+@description("Report this node's integration registry: every plug-in the running binary registered, and for the email integration the resolved sender mode plus a slot-by-slot account of which settings and credentials are configured and where each came from. Credential VALUES are never included -- only presence, source and (for stored secrets) a fingerprint. Pass probe=true to additionally run a live, non-sending reachability check (Microsoft Graph: acquire a client-credentials token; SMTP: connect, EHLO, STARTTLS, AUTH, QUIT) and report its verdict; probe=false (the default) answers the configuration question only.")
+builtin integrationStatus {
+  probe  bool
+}

@@ -1248,7 +1248,13 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		// automation's whole action chain server-side -- writes, LLM calls,
 		// downstream automations -- and those effects outlive the grant's TTL
 		// containment exactly as a deploy's do.
-		*memqlv1.MemqlClientMessage_RunAutomation:
+		*memqlv1.MemqlClientMessage_RunAutomation,
+		// Account credentials (memql#3322). A mint hands back a long-lived
+		// bearer -- exactly the thing a walked-away kiosk must not be able to
+		// leave behind -- and its revoke sits beside it so a borrowed grant
+		// cannot quietly dismantle the operator's issued set either.
+		*memqlv1.MemqlClientMessage_CreateAccountToken,
+		*memqlv1.MemqlClientMessage_RevokeAccountToken:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1289,6 +1295,10 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.DeployControl.GetRequestId()
 	case *memqlv1.MemqlClientMessage_RunAutomation:
 		return p.RunAutomation.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CreateAccountToken:
+		return p.CreateAccountToken.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
+		return p.RevokeAccountToken.GetRequestId()
 	}
 	return ""
 }
@@ -1619,6 +1629,13 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// automation path, and streams back a step trace.
 	case *memqlv1.MemqlClientMessage_RunAutomation:
 		return s.handleRunAutomation(envelope, payload.RunAutomation)
+	// Account-token mint / revoke (memql#3322). A credential issued to the
+	// calling USER on behalf of one of their accounts; the account is a
+	// binding, never a subject. See account_token_handlers.go.
+	case *memqlv1.MemqlClientMessage_CreateAccountToken:
+		return s.handleCreateAccountToken(envelope, payload.CreateAccountToken)
+	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
+		return s.handleRevokeAccountToken(envelope, payload.RevokeAccountToken)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)

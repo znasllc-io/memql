@@ -312,6 +312,14 @@ message MemqlClientMessage {
     // dispatch it through the normal automation path, and stream back a step
     // trace. See RunAutomationMsg.
     RunAutomationMsg run_automation = 102;
+
+    // Account credentials (memql#3322). Minting rides a stream message
+    // rather than a mutation for the reason the PAT and worker-token paths
+    // already do: the plaintext exists ONLY in the reply, and a mutation's
+    // result is a ROW -- which is precisely where the one value that must
+    // never be persisted would end up. See CreateAccountTokenMsg.
+    CreateAccountTokenMsg create_account_token = 103;
+    RevokeAccountTokenMsg revoke_account_token = 104;
   }
 }
 
@@ -458,6 +466,11 @@ message MemqlServerMessage {
     // run -- accepted / step / complete -- as an inner oneof, so the three
     // cannot drift apart. See AutomationRunEvent.
     AutomationRunEvent automation_run_event = 124;
+
+    // Account credential replies (memql#3322). See CreateAccountTokenResult
+    // for why the plaintext travels here and nowhere else.
+    CreateAccountTokenResult create_account_token_result = 125;
+    RevokeAccountTokenResult revoke_account_token_result = 126;
   }
 }
 
@@ -2850,3 +2863,63 @@ message AutomationRunComplete {
   string executed_on_node_id = 7;
   string executed_on_node_type = 8;
 }
+
+// -----------------------------------------------------------------------------
+// Account credentials (memql#3322)
+// -----------------------------------------------------------------------------
+//
+// A credential issued TO THE OPERATOR, ON BEHALF OF an account. The
+// authenticated subject is the operator's user; the account is a binding on
+// it. Nothing authenticates AS an account -- v1:identity:account holds no
+// credential and is never a subject (docs/internal/design/account-isolation-model.md).
+//
+// Only the SHA-256 hash is persisted, exactly as the PAT and worker-token
+// paths do, so the plaintext below is genuinely unrecoverable after the reply.
+message CreateAccountTokenMsg {
+  string request_id = 1;
+  // v1:identity:account.id the credential is issued on behalf of.
+  // Bare or canonical; the handler normalizes.
+  string account_id = 2;
+  // Operator-chosen label ("Acme nightly export"). Required: an
+  // unlabelled credential in a list of credentials cannot be revoked
+  // with any confidence about which one is going.
+  string label = 3;
+  // Optional ISO8601 expiry. Empty = no expiry stamped; revocation is
+  // the operator's control either way.
+  string expires_at = 4;
+}
+message CreateAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  // Plain credential -- "mql_acct_<43 base64url>". THE ONLY PLACE THIS
+  // VALUE EVER EXISTS. It is not persisted, not logged, and not
+  // recoverable; a caller that does not capture it here must revoke
+  // and mint again.
+  string plain_token = 3;
+  // Identity row id (v1:identity:identity), canonical form.
+  string identity_id = 4;
+  // Echo of the resolved account binding.
+  string account_id = 5;
+  // The credential's authenticated SUBJECT -- the operator user, never
+  // the account. Echoed so a client cannot render "signed in as Acme"
+  // without contradicting a field it was handed.
+  string subject_user_id = 6;
+  // Correlation id of the emitted audit event, matching the deploy
+  // console's ActionResult.audit_event_id convention: it is the audit
+  // row's correlationId, not its primary key.
+  string audit_event_id = 7;
+  string error_code = 8;
+  string error_message = 9;
+}
+message RevokeAccountTokenMsg {
+  string request_id = 1;
+  string identity_id = 2;
+}
+message RevokeAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  string audit_event_id = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+

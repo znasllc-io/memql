@@ -48,6 +48,7 @@ use identity.concepts.{ user }
 /// healed data an actor may add. Per-row authz: owned -- ownerUserId is stamped from actor.userId
 /// on every write and every read gates on ownerUserId==actor.userId. Multi-node consistent via the
 /// shared Postgres + the cache.invalidate broadcast.
+@displayCard(primary="baseConstructId", secondary="tier", tertiary="reason", status="validationStatus")
 @rowAuthz(owner="ownerUserId")
 concept healedOverride {
   ownerUserId      string!  @description("v1:identity:user.id that owns this override -- the user whose construct was healed. Stamped from actor.userId at create time and re-stamped on every update so ownership can never be reassigned by a caller. The load-bearing per-row authz key. For an embedded tier=base row materialized by the SeedMaterializer this is the system owner.")

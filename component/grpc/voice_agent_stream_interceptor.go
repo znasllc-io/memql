@@ -75,11 +75,21 @@ func NewVoiceAgentStreamInterceptor(
 }
 
 // hasReservedTokenPrefix reports whether `token` starts with one of
-// the bearer-prefix schemes that aren't JWTs (PAT, worker token).
-// Used to short-circuit the voice-agent verifier path on bearers
-// that can't possibly be voice-agent JWTs.
+// the bearer-prefix schemes that aren't JWTs (PAT, worker token,
+// account token). Used to short-circuit the voice-agent verifier path
+// on bearers that can't possibly be voice-agent JWTs.
+//
+// RESERVATION IS NOT ADMISSION. mql_acct_ (memql#3322) is listed here
+// so an account token presented as a Bearer is recognised as
+// not-a-JWT and short-circuited rather than fed to the JWT parser --
+// which would otherwise produce a parse error whose message says
+// nothing useful about what was presented. NOTHING in the tree
+// resolves an mql_acct_ bearer into an identity: no verifier branch,
+// no interceptor, and no by-keyHash query. That absence is the design
+// (docs/public/operate/auth/account-tokens.md) and is asserted by
+// component/identity/accounttoken's own tests.
 func hasReservedTokenPrefix(token string) bool {
-	for _, p := range []string{"mql_pat_", "mql_wkr_"} {
+	for _, p := range []string{"mql_pat_", "mql_wkr_", "mql_acct_"} {
 		if strings.HasPrefix(token, p) {
 			return true
 		}

@@ -82,8 +82,10 @@ type AdminServer struct {
 // Built-in nav links rendered in the layout header on every admin
 // page. Source-of-truth for both the dashboard pages and the
 // placeholder pages.
+//
+// "Overview" is gone: the portal's /admin overview replaced it (memql#3324),
+// and /admin/ now redirects here rather than rendering a page of its own.
 var adminNav = []webtempl.NavLink{
-	{Href: "/admin/", Label: "Overview"},
 	{Href: "/admin/users", Label: "Users"},
 	{Href: "/admin/tokens", Label: "Tokens"},
 	{Href: "/admin/audit", Label: "Audit"},
@@ -153,7 +155,7 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/logout", wrap(s.handleLogout))
 
 	// Gated pages.
-	mux.HandleFunc("GET /admin/{$}", gated(s.handleDashboard))
+	mux.HandleFunc("GET /admin/{$}", gated(s.handleRoot))
 	mux.HandleFunc("GET /admin/users", gated(s.handleUsersList))
 	mux.HandleFunc("GET /admin/users/detail", gated(s.handleUsersDetail))
 	mux.HandleFunc("POST /admin/users/profile", gated(s.handleEditUserProfile))

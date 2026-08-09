@@ -1,5 +1,25 @@
 package webtempl
 
+// AdminAuditView is the per-row projection rendered into the admin audit
+// table. Mirrors the admin package's auditView struct field-for-field.
+//
+// Declared here rather than beside the dashboard that also rendered it: the
+// dashboard was retired when the portal's /admin overview replaced it
+// (memql#3324), and this is now the only page that shows these rows.
+type AdminAuditView struct {
+	ID            string
+	OccurredAt    string
+	Category      string
+	Action        string
+	ActorEmail    string
+	ActorRole     string
+	TargetID      string
+	TargetEmail   string
+	Outcome       string
+	FailureReason string
+	SourceIP      string
+}
+
 // AdminAuditListData drives /admin/audit.
 type AdminAuditListData struct {
 	Layout   LayoutData

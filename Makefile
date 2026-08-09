@@ -356,7 +356,7 @@ scale:
 # ---------------------------------------------------------------------------
 
 ##@ Test & SDK
-.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host
+.PHONY: test test-v test-cover test-polyphon sdk-gen sdk-gen-check sdk-ts-install sdk-ts-typecheck dsl-lint viewkit-install viewkit-typecheck viewkit-test vscode-deps vscode-test vscode-test-host portal-install portal-typecheck portal-test portal-build portal-clean
 
 ## Regenerate the typed SDK surface from the DSL tree. Reads every
 ## query / mutation / logic under dsl/**/*.memql and emits typed
@@ -474,6 +474,32 @@ vscode-deps:
 ## import `vscode`; the API layer is exercised by the host lane below.
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
+
+## Install the memQL Portal's dependencies (clients/portal), building the
+## sdk/ts + sdk/ts-viewkit `file:` dependencies first -- their dist/ must
+## exist before anything in the portal can resolve against them. Idempotent.
+portal-install:
+	bash scripts/portal/build.sh install
+
+## Typecheck the portal. `tsc -b` over both projects: the browser sources and
+## vite.config.ts are deliberately separate type environments.
+portal-typecheck:
+	bash scripts/portal/build.sh typecheck
+
+## Run the portal test suite (vitest + @testing-library/react on jsdom).
+portal-test:
+	bash scripts/portal/build.sh test
+
+## Build the portal bundle into clients/portal/dist. This is what the
+## Dockerfile's portal stage runs, and what MEMQL_PORTAL_DIST points at when
+## serving a locally-built bundle from a `go run` binary.
+portal-build:
+	bash scripts/portal/build.sh build
+
+## Remove the portal's build output (dist + the vite/tsc caches). Leaves
+## node_modules alone -- `npm ci` already fixes anything stale in there.
+portal-clean:
+	bash scripts/portal/build.sh clean
 
 ## Run the VS Code extension's Extension Development Host smoke lane
 ## (memql#3302): downloads a real VS Code and asserts the host-only surface --

@@ -11,6 +11,7 @@ use agents.concepts.{ agent }
 /// the reason and closes the row. Also auto-aged by the accessRequestExpirySweep cron once
 /// IDENTITY_ACCESS_REQUEST_EXPIRY_DAYS has elapsed without a decision. Global scope so admins in
 /// any partition (typically owners of the cluster) can review the queue.
+@displayCard(primary="email", secondary="name", tertiary="reviewedBy", status="status")
 concept accessRequest {
   email             string!  @description("Email address the requester wants to register with. Same value flows into the eventual v1:identity:user.primaryEmail on approval.")
   name              string  @description("Display name supplied at submission time. Optional (some flows ask, some don't).")
@@ -80,6 +81,10 @@ concept auditEvent {
 /// authCodeFull never projected it. The field was written and read by nothing.
 /// Finding a row by sha256(presented) IS the verification -- it proves the
 /// presenter holds the preimage -- so removing the field cost no property.
+// @no-displayCard: Single-use credential row: a secret hash plus opaque foreign keys and a
+//   ~60s TTL. There is no human-facing identity to promote, and giving a
+//   credential a browsable-looking label in a row list is the wrong
+//   affordance.
 concept authCode {
   codeHash            string!  @description("SHA-256 hex digest of the plaintext code. Primary lookup key in the token-exchange path -- avoids equality lookups on the plaintext.")
   clientId            string!  @description("OAuth client identifier the code was minted for. Token-exchange MUST verify the redeeming client matches; mismatched client = reject and audit as code_misuse.")
@@ -105,6 +110,7 @@ concept authCode {
 /// like a static MEMQL_IDENTITY_REGISTERED_CLIENTS entry. Public clients only -- no secret is
 /// issued (token_endpoint_auth_method = none). Global scope: registration + token redemption are
 /// unauthenticated and must work without a partition context.
+@displayCard(primary="clientName", secondary="clientId", tertiary="tokenEndpointAuthMethod")
 concept oauthClient {
   clientId                string!  @description("Public OAuth client_id issued at dynamic registration (RFC 7591). Lookup key in /authorize + /oauth/token.")
   clientName              string  @description("Human-readable client_name from the registration request.")
@@ -119,6 +125,7 @@ concept oauthClient {
 /// magic-link / refresh flow. Looked up on every authenticated request to enforce per-session
 /// revocation; rows past expiresAt are tombstoned by GC, not by user action. Global scope: lives in
 /// _system so any partition's middleware can resolve a session.
+@displayCard(primary="subject", secondary="clientLabel", tertiary="lastActivityAt", status="source")
 concept authSession {
   userId          string  @description("Owning v1:identity:user. Optional because rows are written at token-issuance time, which can race ahead of the magic-link verifier's user-row insert on first-time logins. Subject is the canonical lookup key.")
   identityId      string  @description("v1:identity:identity the session was minted from (typically the magic_link variant). Same caveat as userId.")
@@ -146,6 +153,7 @@ concept authSession {
 /// here first and falls back to env so a fresh deployment is functional without any post-bootstrap
 /// edits. Global scope so the configuration is reachable from every binary that needs it (identity
 /// itself plus future per-node verifier middleware).
+@displayCard(primary="clusterDomain", secondary="brandName", tertiary="bootstrapEmail", status="registrationMode")
 concept clusterSettings {
   clusterDomain                   string  @description("The deployment-wide hostname suffix the operator entered at /setup (or supplied via MEMQL_IDENTITY_BOOTSTRAP_DOMAIN). Examples: local.znas.io, staging.acme.com, acme.com. Every public service URL the cluster builds derives from it: app.<clusterDomain> for the SPA, identity.<clusterDomain> for sign-in, bff.<clusterDomain> for the API, agent.<clusterDomain> for worker registration. Empty before the wizard runs.")
   registrationMode                enum("open", "domain_restricted", "invite_only", "waitlist")!  @default("open")  @description("Who can self-register. Mirror of MEMQL_IDENTITY_REGISTRATION_MODE.")
@@ -178,6 +186,7 @@ concept clusterSettings {
 /// Grants an AI agent the right to act through a user's v1:identity:identity for a bounded role
 /// ceiling, scope set, and lifetime. Global scope: lives in _system and is readable from any
 /// partition so cross-partition agent work does not require per-partition delegation rows.
+@displayCard(primary="identitySubject", secondary="agentId", tertiary="roleCeiling", status="active")
 concept delegation {
   identityId         string!  @description("Node ID of the v1:identity:identity granting authority. Through its userId the delegation resolves back to a v1:identity:user.")
   identitySubject    string!  @description("authenticated subject id of the delegating identity (denormalized for fast lookup on the auth hot path).")
@@ -244,10 +253,11 @@ concept delegation {
 // (b) a SPLIT by credential kind, so person-owned credentials carry
 // owner="userId" and machine credentials carry clusterOwner. (b) is a data
 // migration plus a wire-contract change, not an annotation.
+@displayCard(primary="label", secondary="identityType", tertiary="userId", status="active")
 concept identity {
   active          bool    @default("true")  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
   userId          string!  @description("Owning v1:identity:user. Every identity must belong to exactly one user; a user can own many identities.")
-  identityType    enum("oauth", "api_key", "service_account", "magic_link", "worker_token", "node_token", "voice_agent_token", "badge")!  @description("Which credential family this identity belongs to. Determines the shape of the credentials object: see the credentials field below. The 'worker_token' variant authenticates a memql-cockpit-worker process (one credential per registered machine); it is server-side-scoped to WorkerService.Stream + audit-emit paths and is rejected by the auth interceptor on every other RPC. The 'node_token' variant authenticates a cluster-internal node binary (bff / voice / cognition / agent / planner / workbench) on NodeService.Stream; the interceptor pins this surface to node-class JWTs and rejects every other class (#105). The 'voice_agent_token' variant authenticates the Go voice-agent process on MemqlService.Stream; surface-pinned to VoiceAgent* payload types so a leaked credential can't drive other RPCs (#109).")
+  identityType    enum("oauth", "api_key", "service_account", "magic_link", "worker_token", "node_token", "voice_agent_token", "badge", "account_token")!  @description("Which credential family this identity belongs to. Determines the shape of the credentials object: see the credentials field below. The 'worker_token' variant authenticates a memql-cockpit-worker process (one credential per registered machine); it is server-side-scoped to WorkerService.Stream + audit-emit paths and is rejected by the auth interceptor on every other RPC. The 'node_token' variant authenticates a cluster-internal node binary (bff / voice / cognition / agent / planner / workbench) on NodeService.Stream; the interceptor pins this surface to node-class JWTs and rejects every other class (#105). The 'voice_agent_token' variant authenticates the Go voice-agent process on MemqlService.Stream; surface-pinned to VoiceAgent* payload types so a leaked credential can't drive other RPCs (#109). The 'account_token' variant is a credential ISSUED TO THIS USER ON BEHALF OF a v1:identity:account -- the subject is still userId, never the account, because nothing authenticates AS an account; it is admitted by NO verifier and NO interceptor today (memql#3322), so it grants nothing until the actor envelope carries a tenancy dimension.")
   credentials     object!  @description("Type-specific credential material. Shape is a oneOf picked by identityType: see the @variant block below. Raw OAuth tokens and API-key plaintext never live here.")  @variant(discriminator="identityType") {
     oauth {
       provider         string!  @description("External app identifier, e.g. \"slack\" or \"github\".")
@@ -296,6 +306,12 @@ concept identity {
       expiresAt     string  @description("When the token expires (RFC3339Nano). Default 90 days. Empty string = 'no expiry stamped yet' (set on first verify). Rotation = mint fresh + restart voice-agent; no refresh path.")
       lastConnectAt string  @description("Most recent successful MemqlService.Stream ClientHello timestamp (RFC3339Nano). Operator visibility into 'is the voice-agent connected'.")
     }
+    account_token {
+      accountId  string!  @description("v1:identity:account.id this credential is issued ON BEHALF OF. A BINDING, NOT A SUBJECT and NOT A SCOPE: the authenticated subject of this row is the enclosing identity's userId (the operator who owns the account), because nothing authenticates AS an account (docs/internal/design/account-isolation-model.md section 3.3). It is also not an authorization narrowing -- the actor envelope carries no tenancy dimension (section 5.2), so no engine mechanism can compare a row against it. What it IS: attribution on every audit event the credential's lifecycle emits, the key the operator's token list is grouped by, and the value that would populate actor.accountIds once section 6(b) lands.")
+      keyHash    string!  @description("SHA-256 hex digest of the mql_acct_<43> token. The plaintext is returned exactly ONCE in the mint reply and is never persisted, never logged and never re-derivable. NOT an authentication index: no query looks a row up by this digest, deliberately (memql#3322) -- see the account-tokens runbook for why a credential with no admitting surface is the honest state of the art while section 6(b) is outstanding.")
+      mintedBy   string!  @description("v1:identity:user.id of the operator who minted the credential. Equal to the enclosing identity's userId for every token minted today (the account's owner is the only principal that can mint one); carried separately so an admin-minted variant does not have to re-derive attribution from the audit trail.")
+      expiresAt  string  @description("When the credential expires (RFC3339Nano). Empty string = no expiry stamped; revocation (active=false) is the operator's control either way. Stored as a string -- not datetime -- so empty is a legal 'not set' encoding the schema validator accepts, matching worker_token and node_token.")
+    }
   }
   label           string  @description("Human label shown in UIs, e.g. 'Work email', 'Personal Slack', 'Legacy integration key'. Optional, defaults to a generated summary of the credentials.")
   usableByAgents  bool    @default("false")  @description("Whether v1:identity:delegation can borrow this identity for agent work. Magic-link identities default false (agents shouldn't impersonate humans wholesale); OAuth identities for specific external apps default true (they exist precisely so agents can act against that app on the user's behalf).")
@@ -340,6 +356,7 @@ concept invitation {
 /// first successful click and any subsequent click against the same row is rejected. Past expiresAt
 /// the row is also rejected. Global scope so the public unauthenticated /auth/magic-link/consume
 /// endpoint can resolve the row regardless of which partition the eventual user belongs to.
+@displayCard(primary="email", secondary="sourceIP", tertiary="expiresAt")
 concept magicLinkRequest {
   email           string!  @description("Email address the magic link was sent to. Drives the user-lookup / first-time-registration path on consume.")
   tokenHash       string!  @description("SHA-256 hex digest of the plain magic-link token. Primary lookup key on consume; the plaintext token is delivered in the email link and never stored server-side.")
@@ -459,6 +476,9 @@ concept user {
 /// redeemedAt + redeemedBy, mints a v1:identity:identity worker_token row owned by the same user,
 /// and returns the plain mql_wkr_<...> token + cluster URL to the cockpit. Single-use: a row with
 /// non-empty redeemedAt is dead. TTL ~10 minutes (IDENTITY_PAIRING_CODE_TTL_MIN, default 10).
+// @no-displayCard: Single-use credential row, same reasoning as v1:identity:authCode: a
+//   secret hash plus foreign keys. `clusterURL` is identical on every row in a
+//   cluster, so promoting it would distinguish nothing.
 concept workerPairingCode {
   ownerUserId  string!  @description("v1:identity:user.id who minted the code (and who will own the resulting worker_token + v1:worker:registration). The redeem handler reads this and uses it as the registeredBy for the new worker_token credential.")
   codeHash     string!  @description("SHA-256 hex digest of the plain XXXX-XXXX code. Plaintext is shown to the user ONCE on the frontend's Settings card and never persisted.")
@@ -476,6 +496,7 @@ concept workerPairingCode {
 /// Organization group. Users belong to groups; agents are assigned to groups for scoped access
 /// control. Created and managed in-app; the externalId field is preserved for any legacy rows that
 /// came from a previous external sync source.
+@displayCard(primary="name", secondary="description", tertiary="externalId", status="active")
 concept group {
   name         string! @description("Display name of the group.")
   description  string! @description("Short description of the group's purpose. Required so group pickers (CreateSpaceModal, admin lists) always have a useful subtitle.")
@@ -485,6 +506,36 @@ concept group {
   maxHumans    int     @description("Maximum human members this group can hold. Convention: 5 -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it; an absent value reads as 0 (no capacity). Matches v1:cognition:space.maxHumans so a group can seed a space without silent truncation.")
   maxAgents    int     @description("Maximum agent members this group can hold (convention: 3 -- NOT applied on insert; no mutation is bound to this concept, so a writer must supply it, and an absent value reads as 0), inclusive of any user's auto-joined assistant. Matches v1:cognition:space.maxAgents.")
   active       bool    @description("Whether the group is active. Convention: true -- NOT applied on insert, and no mutation is bound to this concept, so a writer must supply it.")
+}
+
+/// A CUSTOMER THE OPERATOR MANAGES -- the record memQL keeps ABOUT a downstream business, as
+/// opposed to v1:identity:user (a principal that logs in) or v1:identity:accountEntitlement (a
+/// billing cap keyed on a paying account id). An account is operator-side bookkeeping: it holds no
+/// credential, mints no session and is never a subject -- nothing authenticates AS an account, and
+/// no v1:identity:identity row points at one. Accounts are also FLAT: there is deliberately no
+/// parentAccountId, because a nesting edge makes the isolation predicate transitive and a
+/// transitive predicate cannot be pushed down as a single filter conjunct. An agency with
+/// sub-clients is N sibling accounts sharing an operator, not a tree. Per-row authz: OWNED, and
+/// engine-enforced rather than author-enforced -- ownerUserId is @serverSet and stamped from
+/// actor.userId on every write, and the @rowAuthz declaration makes the engine AND
+/// ownerUserId==actor.userId into every read (component/memql/rowauthz_enforce.go, memql#3172) and
+/// refuse any update whose target row the actor does not own
+/// (component/memql/rowauthz_write_guard.go, memql#3174). The model, and the three places it is
+/// NOT sufficient, are recorded in docs/internal/design/account-isolation-model.md.
+@displayCard(primary="name", secondary="description", tertiary="primaryContactEmail", status="status")
+@rowAuthz(owner="ownerUserId")
+concept account {
+  ownerUserId          string!  @serverSet  @description("v1:identity:user.id of the operator principal that manages this customer. THE ROW-AUTHZ OWNER FIELD: stamped from actor.userId on create and re-stamped on every update so ownership can never be reassigned by a caller, and @serverSet turns 'never accepted from caller args' into a LOAD-TIME rejection rather than a convention. Because the concept declares @rowAuthz(owner=\"ownerUserId\"), this field is also what the engine compares against on the read path and in the write guard -- it is not merely documentation of an intent each query has to restate.")
+  name                 string!  @description("Display name of the customer, as the operator refers to them. The primary display field. Not unique -- the engine enforces no uniqueness constraint on any payload field, so two accounts may share a name and the row id is the only identity.")
+  status               enum("active", "suspended", "archived")!  @description("Lifecycle. active = a live customer. suspended = temporarily stopped (non-payment, pause) but still visible in the operator's list. archived = closed; retained for history and excluded from working lists by the caller's filter. Stamped 'active' by createAccount and flipped to 'archived' by archiveAccount; there is no hard delete -- a write is an append onto the same id.")
+  description          string  @description("Free-text operator note about who this customer is and what memQL does for them. Rendered as the display card's secondary line.")
+  primaryContactName   string  @pii  @description("Name of the human the operator deals with at this customer. Personal data about a third party rather than about a memQL principal, hence @pii: any query projecting it must constrain its caller (test/dslconformance/pii_projection_test.go).")
+  primaryContactEmail  string  @pii  @description("Email of the primary contact. @pii for the same reason as primaryContactName. NOT a credential and NOT a login: an account has no authentication path, so this address is never matched against a magic-link or session lookup.")
+  externalRef          string  @description("The operator's own identifier for this customer in whatever system is upstream of memQL -- a CRM record id, a billing customer id, an internal account number. Opaque to the engine: never parsed, never resolved, and deliberately NOT an @relationship, because it names a row in a system memQL does not host.")
+  archivedAt           datetime  @description("RFC3339 timestamp stamped by archiveAccount. Empty while status is active or suspended. Kept alongside status so a retention sweep can age archived customers without re-deriving the transition time from the row's version history.")
+  updatedAt            datetime  @description("RFC3339 watermark of the most recent edit, stamped to now on every write so an operator list can sort by recency. The authoritative version order is still the row's createdAt history; this is a denormalized convenience for the latest version.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
 
 /// Per-account entitlement that caps the number of CONCURRENTLY-RUNNING tasks (Plans) a paying
@@ -501,6 +552,7 @@ concept group {
 /// billing / admin writer can both reach it from any partition. One logical row per account:
 /// setAccountEntitlement mints a deterministic id (accountEntitlement-<hash(accountId)>) so each
 /// set appends a new time-series version and the latest wins.
+@displayCard(primary="accountId", secondary="accountKind", tertiary="note", status="tier")
 concept accountEntitlement {
   accountId          string! @description("The paying account this entitlement applies to. v1: a v1:identity:user.id (accountKind='user'). The admission controller (#904) resolves a Plan's account via Plan.requestedBy and reads the effective cap from the matching row here.")
   accountKind        enum("user", "org")! @default("user") @description("Whether accountId names a user or an org. v1 is always 'user' (per-user account); 'org' is reserved for the future per-organization concurrency rollup where many users share one paying account's pool of slots.")

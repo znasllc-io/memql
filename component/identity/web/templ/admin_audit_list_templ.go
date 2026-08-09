@@ -8,6 +8,26 @@ package webtempl
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
+// AdminAuditView is the per-row projection rendered into the admin audit
+// table. Mirrors the admin package's auditView struct field-for-field.
+//
+// Declared here rather than beside the dashboard that also rendered it: the
+// dashboard was retired when the portal's /admin overview replaced it
+// (memql#3324), and this is now the only page that shows these rows.
+type AdminAuditView struct {
+	ID            string
+	OccurredAt    string
+	Category      string
+	Action        string
+	ActorEmail    string
+	ActorRole     string
+	TargetID      string
+	TargetEmail   string
+	Outcome       string
+	FailureReason string
+	SourceIP      string
+}
+
 // AdminAuditListData drives /admin/audit.
 type AdminAuditListData struct {
 	Layout   LayoutData
@@ -57,7 +77,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(formatInt(data.Limit))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 17, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 37, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -155,7 +175,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 					var templ_7745c5c3_Var4 string
 					templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(ev.OccurredAt)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 52, Col: 69}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 72, Col: 69}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 					if templ_7745c5c3_Err != nil {
@@ -168,7 +188,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 					var templ_7745c5c3_Var5 string
 					templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(ev.Category)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 53, Col: 26}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 73, Col: 26}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 					if templ_7745c5c3_Err != nil {
@@ -181,7 +201,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(ev.Action)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 54, Col: 30}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 74, Col: 30}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -195,7 +215,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 						var templ_7745c5c3_Var7 string
 						templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(ev.ActorEmail)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 57, Col: 26}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 77, Col: 26}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 						if templ_7745c5c3_Err != nil {
@@ -219,7 +239,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 						var templ_7745c5c3_Var8 string
 						templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(ev.TargetID)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 64, Col: 30}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 84, Col: 30}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 						if templ_7745c5c3_Err != nil {
@@ -242,7 +262,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 						var templ_7745c5c3_Var9 string
 						templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(ev.Outcome)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 69, Col: 43}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 89, Col: 43}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 						if templ_7745c5c3_Err != nil {
@@ -260,7 +280,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 						var templ_7745c5c3_Var10 string
 						templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(ev.Outcome)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 71, Col: 56}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 91, Col: 56}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 						if templ_7745c5c3_Err != nil {
@@ -279,7 +299,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 						var templ_7745c5c3_Var11 string
 						templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(ev.FailureReason)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 74, Col: 75}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 94, Col: 75}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 						if templ_7745c5c3_Err != nil {
@@ -297,7 +317,7 @@ func AdminAuditList(data AdminAuditListData) templ.Component {
 					var templ_7745c5c3_Var12 string
 					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(ev.SourceIP)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 77, Col: 67}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `admin_audit_list.templ`, Line: 97, Col: 67}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 					if templ_7745c5c3_Err != nil {
