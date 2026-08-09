@@ -165,6 +165,41 @@ All three are model-affecting and all three want the same fix, so the gate does
 not need to distinguish them -- but do not go hunting for a deletion that is not
 there.
 
+Since memql#3288 the subset also covers **the edge set itself**, not only its
+endpoints. Endpoints are a question about symbols; a deleted call between two
+functions that both survive changes no symbol at all, so the gate saw nothing.
+Measured on `main` at f9a2d046 with the whole suite green: 15 committed `calls`
+edges named a call the code no longer makes, every one with both endpoints alive
+(`(Server).handleToken -calls-> setRefreshCookie` and friends, left behind by the
+identity refactors). **Deleting or moving a call site is a model-affecting
+change.** Regenerate.
+
+**What the gate still cannot catch, deliberately** (memql#3288 -- half the point
+of that issue was that this list was never written down):
+
+- **Anything ADDED.** Every check walks the committed model and asks whether the
+  regeneration agrees; nothing walks the regeneration. That is the add-only
+  asymmetry, and it is load-bearing.
+- **A fact surgically removed from the artifact.** Deleting one edge from the
+  committed file leaves it a strict subset, which is the "behind" direction,
+  which passes. Unfixable while the asymmetry holds: "the artifact is missing
+  A->B" and "a concurrent merge added A->B" are the same observation from the
+  gate's side. The count-equality gate proposed in #3288 catches the first only
+  by giving up the second -- on f9a2d046 the artifact was 552 nodes and 7,761
+  edges behind purely from merges, so equality would have been red on an
+  untouched `main`. What bounds this instead is the **drift ceiling**: the gate
+  fails if the committed model is more than 25% behind a regeneration, which no
+  single merge approaches (three weeks of merges produced 2.5% / 5.8%) but
+  months of neglect does. The counts are printed on every run, pass or fail.
+- **Node attributes** -- signature, doc, attrs, `source.line`. Measured before
+  rejecting: of 1,353 shared node ids whose JSON differed from a regeneration,
+  1,343 differed ONLY in `source.line`, because editing a file shifts every
+  declaration below it. Gating that is byte-equality wearing a hat.
+- **Edge attributes**, same reason at smaller scale: keying edges on Attrs turned
+  those 15 findings into 49, the extra 34 being `call_sites` counts on calls that
+  still happen.
+- **Order**, which `TestCommittedModelIsSorted` covers separately.
+
 One operational caveat worth knowing before you debug a red gate: the live set
 now includes ~5,000 symbols that exist only if the call graph was built for
 their package. A node disappears only when the type-checker stops seeing a

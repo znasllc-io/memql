@@ -117,8 +117,23 @@ spec:
             # memql-secrets envFrom above (as a key on the Secret, or inside the
             # sealed genesis envelope), so every replica derives the SAME Ed25519
             # key + kid + JWKS. No on-disk MEMQL_IDENTITY_KEY_DIR / RWO PVC ->
-            # identity scales to >=2 replicas. Rotate by writing a new seed and
-            # rolling; that invalidates every live session and mesh node token.
+            # identity scales to >=2 replicas.
+            #
+            # ROTATION (memql#3381): impossible from inside the running system
+            # in this mode -- KeyManager.RotationSupported() is false, so the
+            # 90-day MEMQL_IDENTITY_KEY_ROTATION_DAYS scheduler is INERT here
+            # and there is no rotate control anywhere. Rotate by re-sealing a
+            # new seed and rolling. That path never populates the JWKS overlap
+            # window, so it is a HARD SWAP: every unexpired access token, mesh
+            # node token, service-account JWT and voice-agent JWT dies at once
+            # (opaque credentials -- refresh tokens, PATs, worker tokens --
+            # survive). Follow the procedure and the blast-radius table in
+            # docs/public/operate/auth/identity-service.md#rotating-the-signing-key.
+            #
+            # Seal MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT (RFC3339, the date the
+            # seed was minted) alongside the seed and re-stamp it on every
+            # re-seal. A bare seed carries no date, so without it key age reads
+            # as pod uptime and the overdue-rotation alert can never fire.
             # Internal TLS: serve https + trust the cluster CA.
             - { name: MEMQL_HTTP_TLS_CERT_FILE, value: "/etc/memql/tls/tls.crt" }
             - { name: MEMQL_HTTP_TLS_KEY_FILE, value: "/etc/memql/tls/tls.key" }
