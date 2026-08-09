@@ -6,6 +6,7 @@ import (
 
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/adminops"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -45,6 +46,38 @@ func (a *App) transportBase() {
 	// MemQL Sense -- language intelligence service.
 	senseAdapter := memqlengine.NewSenseAdapter(a.engine)
 	a.grpcServer.SetSense(sense.New(senseAdapter))
+
+	// Identity administration (memql#3324). The writes the server-rendered
+	// /admin/* console owned -- profile, role, suspension, credential revoke,
+	// cluster settings -- reached over MemqlService.Stream instead.
+	//
+	// WIRED ON EVERY NODE WITH AN ENGINE, deliberately unlike the
+	// deploy-control bridge next door. Deploy control runs shell scripts
+	// against an on-disk overlay checkout and so genuinely only exists on the
+	// identity node; these are ordinary engine mutations against a shared
+	// database, and the gate is Go running in this process. Pinning them to
+	// identity would put them behind a gRPC surface that admits operator
+	// credentials only (see the interceptor note above) -- which is to say,
+	// out of the portal's reach entirely, since the portal is served by the
+	// bff and dials the origin that served it.
+	if a.engine != nil {
+		identityAdmin, err := adminops.New(&adminops.Service{
+			Engine: a.engine,
+			// Same two-sink logger the identity binary builds for its own
+			// audit trail: the slog stream for the operator tailing logs, and
+			// the engine sink so the event lands on v1:identity:auditEvent
+			// where the portal's Audit view reads it.
+			Audit: &identity.SlogAuditLogger{
+				Logger: a.Logger,
+				DB:     &identity.EngineAuditSink{Engine: a.engine, Logger: a.Logger},
+			},
+			Logger: a.Logger,
+		})
+		if err != nil {
+			a.fatal("identity admin: build failed", "error", err)
+		}
+		a.grpcServer.SetIdentityAdminHandler(identityAdmin)
+	}
 
 	// Configure gRPC authentication. The interceptor chain reads
 	// outside-in:

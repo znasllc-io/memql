@@ -320,6 +320,14 @@ message MemqlClientMessage {
     // never be persisted would end up. See CreateAccountTokenMsg.
     CreateAccountTokenMsg create_account_token = 103;
     RevokeAccountTokenMsg revoke_account_token = 104;
+
+    // Identity administration (memql#3324). The writes the server-rendered
+    // /admin/* console owned -- edit a person's profile, change their role,
+    // suspend them, revoke a token, edit cluster settings -- carried as ONE
+    // envelope with an inner oneof, so the owner/admin gate and the audit
+    // write live in one place (component/identityadmin) rather than once
+    // per operation. See IdentityAdminMsg.
+    IdentityAdminMsg identity_admin = 105;
   }
 }
 
@@ -471,6 +479,9 @@ message MemqlServerMessage {
     // for why the plaintext travels here and nowhere else.
     CreateAccountTokenResult create_account_token_result = 125;
     RevokeAccountTokenResult revoke_account_token_result = 126;
+
+    // Identity-administration reply (see IdentityAdminMsg, memql#3324).
+    IdentityAdminResult identity_admin_result = 127;
   }
 }
 
@@ -2923,3 +2934,161 @@ message RevokeAccountTokenResult {
   string error_message = 5;
 }
 
+
+// -----------------------------------------------------------------------------
+// Identity administration (memql#3324)
+// -----------------------------------------------------------------------------
+//
+// The five WRITES the server-rendered /admin/* console owned, moved onto the
+// stream so the portal can own them instead.
+//
+// WHY A GO SEAM AND NOT A DSL MUTATION CALL. Every one of these writes already
+// existed as a mutation -- updateUser, revokePATIdentity,
+// revokeWorkerTokenIdentity, updateClusterSettings -- and the portal could
+// have called them directly over the ordinary query surface. That would have
+// DELETED the gate rather than moved it. A memQL mutation cannot carry a role
+// predicate (a `filter` is a read construct; there is no mutation-side spec),
+// so the owner/admin rule those writes ran under was the templ app's HTTP
+// ROUTE and nothing else: updateUser is @serverOnly with no client-reachable
+// seam at all, and revokePATIdentity / updateClusterSettings name an arbitrary
+// target and apply no predicate, so a `writer` calling either one over the
+// stream would succeed where the console demanded admin.
+//
+// So the gate stays in Go, where it already lived, and moves from an HTTP
+// middleware to component/identityadmin -- one implementation, reached by one
+// envelope. It refuses below owner/admin with PERMISSION_DENIED and the SAME
+// `admin_auth_forbidden` audit event the route wrote, and every successful
+// write emits the same audit action name the templ handler emitted, so the
+// trail an operator greps is unbroken across the move.
+//
+// WHY ONE ENVELOPE RATHER THAN SIX PAIRS. The DeployControlMsg precedent
+// (memql#3311), for the same reasons: six pairs is twelve top-level tags and
+// six chances for a request shape to drift, and a console renders a list of
+// actions rather than six unrelated call sites. A seventh operation lands as
+// one inner field.
+message IdentityAdminMsg {
+  string request_id = 1;
+
+  // Exactly one request must be set. An empty oneof is rejected with
+  // error_code = INVALID_ARGUMENT.
+  oneof request {
+    UpdateUserProfileRequest update_user_profile = 10;
+    SetUserRoleRequest set_user_role = 11;
+    SetUserSuspendedRequest set_user_suspended = 12;
+    RevokeUserTokenRequest revoke_user_token = 13;
+    RevokeNodeTokenRequest revoke_node_token = 14;
+    UpdateClusterSettingsRequest update_cluster_settings = 15;
+  }
+}
+
+// IdentityAdminResult is the reply to IdentityAdminMsg.
+//
+// The status rides INSIDE the envelope for the reason DeployControlResult
+// documents: a multiplexed stream has no per-message status channel, and
+// returning a Go error from a handler tears the whole stream down and takes
+// every other in-flight request with it. error_code is the canonical gRPC
+// code (7 = PERMISSION_DENIED for a caller below owner/admin), so a bridged
+// caller observes what a unary caller would.
+message IdentityAdminResult {
+  string request_id = 1;
+  // ok is true when the write was permitted AND succeeded.
+  bool ok = 2;
+  // Canonical gRPC code (0 = OK, 3 = INVALID_ARGUMENT, 5 = NOT_FOUND,
+  // 7 = PERMISSION_DENIED, 13 = INTERNAL, 16 = UNAUTHENTICATED).
+  int32 error_code = 3;
+  string error_message = 4;
+  // The v1:identity:auditEvent correlation id this call wrote -- present on
+  // a REFUSAL too, because the refusal is itself an audited event and an
+  // operator arguing about a denial needs its id. Same convention as the
+  // deploy console's ActionResult.audit_event_id.
+  string audit_event_id = 5;
+  // Short human-readable summary of what changed, for the console's status
+  // line. Never carries a credential or a payload.
+  string message = 6;
+}
+
+// UpdateUserProfileRequest sets a person's directory fields. Replaces
+// POST /admin/users/profile.
+//
+// Every field is sent every time: the underlying updateUser mutation is a
+// shallow merge, so an omitted field would inherit rather than clear, and a
+// console that cannot clear a phone number is not as capable as the form it
+// replaced. display_name may be empty, in which case the handler derives it
+// from first_name + last_name exactly as the templ handler did.
+message UpdateUserProfileRequest {
+  string user_id = 1;
+  string display_name = 2;
+  string first_name = 3;
+  string last_name = 4;
+  string phone = 5;
+  string primary_role = 6;
+  string gender = 7;
+  string birthdate = 8;
+}
+
+// SetUserRoleRequest changes a person's cluster-wide role. Replaces
+// POST /admin/users/role.
+message SetUserRoleRequest {
+  string user_id = 1;
+  // owner | admin | developer | writer | reader. Validated server-side.
+  string role = 2;
+}
+
+// SetUserSuspendedRequest suspends or reinstates a person. Replaces both
+// POST /admin/users/suspend and POST /admin/users/unsuspend -- one message,
+// because they are one decision with two values and the pair only existed
+// because an HTML form cannot carry a boolean without a hidden input.
+message SetUserSuspendedRequest {
+  string user_id = 1;
+  bool suspended = 2;
+  // Recorded on the row and in the audit detail. Ignored when reinstating.
+  string reason = 3;
+}
+
+// RevokeUserTokenRequest deactivates a personal access token. Replaces
+// POST /admin/tokens/revoke.
+message RevokeUserTokenRequest {
+  // v1:identity:identity row id of the api_key credential.
+  string identity_id = 1;
+}
+
+// RevokeNodeTokenRequest deactivates a node_token credential. Replaces
+// POST /admin/tokens/node/revoke.
+//
+// Separate from RevokeUserTokenRequest despite the identical shape, because
+// the two writes are not the same write: a node_token row is a MACHINE
+// credential and its update runs under the system credential actor
+// (memql#2513), which the handler stamps. Collapsing them into one message
+// with a `kind` field would put that decision in the caller's hands.
+message RevokeNodeTokenRequest {
+  string identity_id = 1;
+}
+
+// UpdateClusterSettingsRequest edits the singleton runtime settings row.
+// Replaces POST /admin/settings.
+//
+// TTLs are SECONDS on the wire (days for the invitation one), matching the
+// concept's own fields. The templ form took minutes and days and converted;
+// that conversion is presentation and belongs in the console, not in a
+// protocol. 0 means "fall back to the boot-time default" -- it is the
+// concept's own sentinel, not a missing value.
+message UpdateClusterSettingsRequest {
+  string brand_name = 1;
+  string brand_primary_color = 2;
+  string brand_logo_data_uri = 3;
+  string brand_icon_data_uri = 4;
+  // open | domain_restricted | invite_only | waitlist. Validated server-side.
+  string registration_mode = 5;
+  string registration_domains = 6;
+  string internal_domains = 7;
+  // owner | admin | developer | writer | reader. Validated server-side.
+  string internal_default_role = 8;
+  string registered_clients_json = 9;
+  string access_request_notify_emails = 10;
+  int32 access_token_ttl_seconds = 11;
+  int32 refresh_token_ttl_seconds = 12;
+  int32 magic_link_ttl_seconds = 13;
+  int32 invitation_ttl_days = 14;
+  // lax | none | "" (use the boot default).
+  string refresh_cookie_same_site = 15;
+}

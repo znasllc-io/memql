@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { QueryClient, Role, Row } from "@znasllc-io/memql-sdk-core/client";
+import {
+  IdentityAdminClient,
+  IdentityAdminError,
+} from "@znasllc-io/memql-sdk-core/identityadmin";
 
 import { useAuth } from "../auth/AuthProvider";
 import { useCluster } from "../cluster/ClusterProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
-import { tokenRows, type TokenRow } from "./rows";
+import { nodeTokenRows, tokenRows, type NodeTokenRow, type TokenRow } from "./rows";
 import {
   fetchSigningKeys,
   readAuditEvents,
   readClusterSettings,
+  readNodeTokens,
   readPeople,
   readTokensForUser,
   type SigningKey,
@@ -367,4 +372,112 @@ export function useTokenConsole(enabled: boolean): TokenConsoleState {
     capped,
     reload,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Node tokens
+// ---------------------------------------------------------------------------
+
+export function useNodeTokens(enabled: boolean): ReadState<Row[]> {
+  return useGatedRead(
+    NO_ROWS,
+    (query, signal) => readNodeTokens(query, signal),
+    enabled,
+    "nodeTokens",
+  );
+}
+
+export function useNodeTokenConsole(enabled: boolean): {
+  tokens: NodeTokenRow[];
+  loading: boolean;
+  error: string;
+  reload: () => void;
+} {
+  const read = useNodeTokens(enabled);
+  const tokens = useMemo(() => nodeTokenRows(read.data), [read.data]);
+  return { tokens, loading: read.loading, error: read.error, reload: read.reload };
+}
+
+// ---------------------------------------------------------------------------
+// Writes
+// ---------------------------------------------------------------------------
+
+// The console's one write path.
+//
+// ===========================================================================
+// THIS HOOK DECIDES NOTHING ABOUT PERMISSION
+// ===========================================================================
+// It has no role argument and no gate. Every call it makes is refused
+// server-side for a caller below owner/admin, in component/identity/adminops,
+// against the role the stream interceptor verified -- so a page that renders
+// its buttons anyway gets a refusal, not a write. What the pages do with
+// `canAdminister` is decide what to OFFER, which is a courtesy.
+//
+// THE AUDIT ID IS SURFACED, ALWAYS. Every write emits a v1:identity:auditEvent
+// and the reply carries its id, refusals included. The console shows it rather
+// than swallowing it: an operator reconciling a change -- or arguing about a
+// denial -- needs the row they can open in the Audit view, and a status line
+// that says only "Saved." has thrown away the one durable thing that happened.
+export interface WriteState {
+  // True while a write is in flight. Pages disable their controls on it so a
+  // double-click cannot issue the same revoke twice.
+  busy: boolean;
+  // The outcome of the LAST write, either way. One of the two is set.
+  message: string;
+  error: string;
+  // The audit event the last write recorded. Present on a refusal too.
+  auditEventId: string;
+  // run issues one write and records its outcome. `onDone` fires only on
+  // success, so a page can reload without flickering after a refusal.
+  run: (
+    write: (client: IdentityAdminClient) => Promise<{ message: string; auditEventId: string }>,
+    onDone?: () => void,
+  ) => void;
+}
+
+export function useAdminWrites(): WriteState {
+  const { dispatcher } = useCluster();
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [auditEventId, setAuditEventId] = useState("");
+  // Guards against a state update after the page navigated away mid-write.
+  const live = useRef(true);
+  useEffect(() => {
+    live.current = true;
+    return () => {
+      live.current = false;
+    };
+  }, []);
+
+  const run = useCallback<WriteState["run"]>(
+    (write, onDone) => {
+      if (dispatcher === null) {
+        setError("The connection to the cluster is not up.");
+        return;
+      }
+      setBusy(true);
+      setMessage("");
+      setError("");
+      setAuditEventId("");
+      void write(new IdentityAdminClient(dispatcher))
+        .then((result) => {
+          if (!live.current) return;
+          setMessage(result.message);
+          setAuditEventId(result.auditEventId);
+          onDone?.();
+        })
+        .catch((err: unknown) => {
+          if (!live.current) return;
+          setError(describe(err));
+          if (err instanceof IdentityAdminError) setAuditEventId(err.auditEventId);
+        })
+        .finally(() => {
+          if (live.current) setBusy(false);
+        });
+    },
+    [dispatcher],
+  );
+
+  return { busy, message, error, auditEventId, run };
 }

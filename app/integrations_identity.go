@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"github.com/znasllc-io/memql/component/auth"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -349,37 +348,28 @@ func (a *App) integrationsIdentity() {
 
 	svc.SetWebMounter(webSrv)
 
-	// Phase 6: admin web app under /admin/*. Mounted on the same mux
-	// as the public web pages; auth-gated by the admin package's own
-	// requireAdmin middleware (role=owner|admin).
+	// What is left of the admin web app under /admin/*: the sign-in pages and
+	// /admin/deployments. Everything else it served moved into the memQL
+	// portal in memql#3324 -- including every write, whose owner/admin gate now
+	// lives in component/identity/adminops and is wired onto the stream in
+	// app/transport.go rather than onto an HTTP route here.
+	//
+	// Deployments stayed for a topology reason, not an effort one: the deploy
+	// RPCs run shell scripts against an on-disk overlay checkout, so
+	// DeployControlService exists only on THIS node, while the portal is served
+	// by the bff and dials the origin that served it.
 	adminSrv, err := admin.New(&admin.AdminServer{
 		Cfg:       cfg,
 		Engine:    a.engine,
 		Issuer:    svc.Issuer(),
-		Keys:      svc.Keys(),
 		Audit:     auditLogger,
 		Settings:  liveSettings,
 		WebServer: webSrv,
 		Logger:    a.Logger,
-		RotateNow: func(r *http.Request) error {
-			actor := identity.AuditActor{}
-			if r != nil {
-				return svc.RotateNow(r.Context(), actor)
-			}
-			return svc.RotateNow(context.Background(), actor)
-		},
 	})
 	if err != nil {
 		a.fatal("failed to construct identity admin server", "error", err, "component", identity.ComponentName)
 	}
-	adminSrv.SetPATAdapter(patStore)
-	// memql#350: the /admin/tokens Node-tokens section + revoke
-	// route is backed by the identity Store's NodeTokenIdentity
-	// methods (ListNodeTokenIdentities / LookupNodeTokenIdentityById
-	// / RevokeNodeTokenIdentity). The narrow adapter shape lives in
-	// the admin package; an inline struct satisfying it is the
-	// thinnest wiring.
-	adminSrv.SetNodeTokenAdapter(&storeNodeTokenAdapter{store: store})
 	svc.SetAdminMounter(adminSrv)
 
 	// Stash the admin server so setupDeployControlService (which runs
@@ -692,34 +682,4 @@ func (a *App) shutdownIdentityService(ctx context.Context) error {
 		return nil
 	}
 	return svc.Shutdown(ctx)
-}
-
-// storeNodeTokenAdapter satisfies admin.NodeTokenAdapter via the
-// identity.Store's NodeTokenIdentity surface (memql#350). Lives
-// here rather than in the admin package so the admin layer stays
-// decoupled from the concrete store type -- the package depends on
-// the narrow port shape, the wiring layer satisfies it.
-type storeNodeTokenAdapter struct {
-	store *identity.Store
-}
-
-func (a *storeNodeTokenAdapter) ListAll(ctx context.Context) ([]identity.NodeTokenRow, error) {
-	if a == nil || a.store == nil {
-		return nil, nil
-	}
-	return a.store.ListNodeTokenIdentities(ctx)
-}
-
-func (a *storeNodeTokenAdapter) LookupById(ctx context.Context, identityId string) (*identity.NodeTokenRow, error) {
-	if a == nil || a.store == nil {
-		return nil, nil
-	}
-	return a.store.LookupNodeTokenIdentityById(ctx, identityId)
-}
-
-func (a *storeNodeTokenAdapter) Revoke(ctx context.Context, identityId string) error {
-	if a == nil || a.store == nil {
-		return fmt.Errorf("storeNodeTokenAdapter: nil store")
-	}
-	return a.store.RevokeNodeTokenIdentity(ctx, identityId)
 }

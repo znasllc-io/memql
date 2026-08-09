@@ -207,18 +207,22 @@ export function OverviewPage(): ReactNode {
         )}
       </Band>
 
-      <Elsewhere what="Changing a person">
-        Editing a profile, changing someone's role, and suspending an account are
-        not on this console. They write through <code>updateUser</code>, which the
-        cluster refuses for any call originating from a client, so the browser
-        cannot make them however it asks. Use the identity service's own console
-        at <code>/admin/users</code> until that changes (memql#3324). The people
-        themselves are readable here and in the{" "}
+      <Elsewhere what="Where a person gets changed">
+        Editing a profile, changing someone&apos;s role and suspending an
+        account are one screen along, under{" "}
+        <Link to={adminPath("people")} className="underline hover:text-fg">
+          People
+        </Link>
+        . They are kept off this page deliberately: an overview is where an
+        operator looks to find out what is going on, and a control that changes
+        who can do what does not belong on a page nobody arrived at intending to
+        act. The whole population, with the sessions open in their name, is in
+        the{" "}
         <Link to="/views/people" className="underline hover:text-fg">
           People view
         </Link>
-        , and every one of those writes is audited wherever it happens — see the
-        activity table above.
+        , and every one of those writes is audited — see the activity table
+        above.
       </Elsewhere>
 
       <p className="text-xs text-subtle">

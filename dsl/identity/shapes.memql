@@ -274,6 +274,29 @@ shape identity accountTokenSummary {
   row.createdAt
 }
 
+/// Credential-free projection of a node_token identity, for the portal's Tokens surface
+/// (memql#3324). The node fields an operator needs -- which node, which type, who minted it, when
+/// it last connected -- and nothing else.
+///
+/// The PROJECTION is the boundary, exactly as accountTokenSummary's note argues: a shape keys each
+/// path by its terminal segment, so credentials.nodeId arrives as nodeId and `keyHash` is simply
+/// never named. That is what makes a wire-reachable read of this concept safe, and it is why this
+/// exists rather than the portal reusing identityFull (which projects the credentials object
+/// wholesale and is the reason nodeTokenIdentities had to become @serverOnly, memql#2987).
+@row
+shape identity nodeTokenSummary {
+  row.id
+  userId
+  active
+  credentials.nodeId
+  credentials.nodeType
+  credentials.mintedBy
+  credentials.expiresAt
+  credentials.lastConnectAt
+  credentials.bootstrappedAt
+  row.createdAt
+}
+
 /// Lightweight projection: just the user's id and activePartitionId pointer. Phase 4 of the
 /// chat-architecture plan.
 @row

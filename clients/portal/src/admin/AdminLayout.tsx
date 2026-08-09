@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 
 import { adminPath, ADMIN_SURFACES, type AdminSurface } from "./urls";
 
-// The chrome the four admin screens share.
+// The chrome the admin screens share.
 //
 // ===========================================================================
 // WHY THIS IS NOT ViewFrame
@@ -12,7 +12,7 @@ import { adminPath, ADMIN_SURFACES, type AdminSurface } from "./urls";
 // frame is built around that: an eyebrow naming the concept, a header meta slot
 // reporting how much of the population has paged in. An admin screen is not a
 // population. It is a question about the cluster's own operating state, and two
-// of the four render nothing that came out of the graph at all.
+// of them render nothing that came out of the graph at all.
 //
 // So the grammar is kept and the frame is not. Bands, hairline rules, the type
 // hierarchy and every token come from the views (Band is imported from them
@@ -75,10 +75,10 @@ export function AdminFrame({
   );
 }
 
-// The four surfaces, as a row of links directly under the header.
+// The surfaces, as a row of links directly under the header.
 //
 // A second nav RAIL would compete with the shell's; a row of links reads as
-// what it is -- four facets of one console, not four unrelated destinations.
+// what it is -- facets of one console, not unrelated destinations.
 function AdminNav({ current }: { current: string }): ReactNode {
   return (
     <nav aria-label="Administration" className="-mt-2 flex flex-wrap gap-1">

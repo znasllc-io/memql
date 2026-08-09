@@ -1,4 +1,4 @@
-// The addresses under /admin, and the four surfaces that answer to them.
+// The addresses under /admin, and the surfaces that answer to them.
 //
 // A sibling module rather than a block at the top of AdminRoutes, for the
 // reason src/integrations/urls.ts is one: a path is referenced from the route
@@ -6,7 +6,7 @@
 // how a link ends up pointing one segment away from the route that serves it.
 //
 // The route table (src/app/routes.tsx) mounts this module as a SPLAT, so
-// nothing here is repeated there -- adding a fifth surface is a row in
+// nothing here is repeated there -- adding a surface is a row in
 // ADMIN_SURFACES plus a Route, and no edit outside this directory.
 
 export const ADMIN_ROOT = "/admin";
@@ -31,6 +31,15 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     blurb:
       "Who can sign in, what the cluster has been doing, and which key it is " +
       "signing with right now.",
+  },
+  {
+    id: "people",
+    label: "People",
+    title: "People",
+    blurb:
+      "Everyone who can sign in, and what an owner or admin may " +
+      "change about one of them: their profile, their role, and whether they " +
+      "may sign in at all.",
   },
   {
     id: "tokens",

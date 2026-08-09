@@ -124,14 +124,22 @@ export function KeysPage(): ReactNode {
       </Band>
 
       <Elsewhere what="Rotating a key">
-        Forcing an immediate rotation — what you would do if you suspected the
-        private key had leaked — is not on this console. The cluster exposes
-        rotation only as <code>POST /admin/jwks/rotate</code> on the identity
-        service; there is no message for it on the stream a browser speaks, so
-        the button cannot be built here yet (memql#3324). Rotate from the
-        identity service's own console at <code>/admin/jwks</code>. Whichever
-        path is used, the rotation writes a{" "}
-        <code>jwks_rotated</code> audit event and shows up in the reading above.
+        There is no rotate button here, and in a deployed cluster there is no
+        rotate button anywhere — the retired identity console had one, and it
+        answers with an error in every environment that runs the way this one
+        does. A staging or production node receives its signing key sealed in
+        the environment envelope (<code>MEMQL_IDENTITY_SIGNING_KEY_B64</code>),
+        so that every replica derives the SAME key and any of them can verify a
+        token another minted. A key manager in that mode reports
+        <code> RotationSupported() == false</code> and refuses to rotate,
+        because rotating in one replica&apos;s memory would leave the other
+        replicas signing with the old key and rejecting the new one. Rotation
+        there is a re-seal and a rolling restart, not a click — see the
+        identity-service runbook. The scheduled rotation (
+        <code>MEMQL_IDENTITY_KEY_ROTATION_DAYS</code>, 90 by default) applies
+        only to the on-disk key directory a single-node development cluster
+        uses. Either way the rotation writes a <code>jwks_rotated</code> audit
+        event and shows up in the reading above.
       </Elsewhere>
     </AdminFrame>
   );

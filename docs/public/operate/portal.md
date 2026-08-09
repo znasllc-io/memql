@@ -288,50 +288,71 @@ See [per-row-authz-audit.md](auth/per-row-authz-audit.md).
 ## Administration
 
 `/portal/admin` is the operator console: the cluster's own state, rather than
-the data it holds. Four surfaces, all owner-and-admin:
+the data it holds. Every surface is owner-and-admin.
 
 | Surface | Address | What it answers |
 |---|---|---|
 | Overview | `/portal/admin` | How many people can sign in, how they divide by role, how a new person gets an account, which key is signing, and what has happened recently. |
-| Sessions and tokens | `/portal/admin/tokens` | Every personal access token issued against the cluster and who holds it, revoked ones included. |
+| People | `/portal/admin/people` | Who can sign in, and the changes an owner or admin may make to one of them: profile, cluster role, suspension. |
+| Sessions and tokens | `/portal/admin/tokens` | Every personal access token issued against the cluster and who holds it, plus every node credential; revoke either. |
 | Signing keys | `/portal/admin/keys` | The Ed25519 keys the cluster publishes, which one is signing, whether an overlap window is open, and when it last rotated. |
-| Cluster settings | `/portal/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and what each unset value falls back to. |
+| Cluster settings | `/portal/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and the form that changes them. |
 
-People, the audit trail and deployments are **not** here: they are populations,
-and they live in the predefined views at `/portal/views/people`,
-`/portal/views/audit` and `/portal/views/deployments`.
+The audit trail and deployments are **not** here: they are populations, and
+they live in the predefined views at `/portal/views/audit` and
+`/portal/views/deployments`. Neither is the People *population*
+(`/portal/views/people`) -- that view answers "who is in this organisation and
+who is signed in", carries no controls, and composes only view-kit elements.
+`/portal/admin/people` is the CHANGE surface, one person at a time. Putting an
+owner-only write inside a predefined view would break the contract that makes
+those views work for a concept nobody has designed for.
 
-**The gate is the cluster's.** Each admin read names a query that carries
-`requiresOwnerOrAdmin` in its own filter (`searchUsers`,
-`patIdentitiesForUser`), so a caller below the floor gets an empty result from
-the engine rather than a page this console decided to hide. The signing keys
-come from the public `/.well-known/jwks.json` feed -- the same document every
-verifier node reads, which is what makes the page useful when a JWKS has gone
-incoherent across replicas.
+### The gate is the cluster's, on both halves
 
-### What still lives on the identity service
+**Reads.** Each admin read names a query carrying `requiresOwnerOrAdmin` in its
+own filter (`searchUsers`, `patIdentitiesForUser`, `recentAuditEvents`,
+`nodeTokenIdentitiesAdmin`), so a caller below the floor gets an empty result
+from the engine rather than a page this console decided to hide. The signing
+keys come from the public `/.well-known/jwks.json` feed -- the same document
+every verifier node reads, which is what makes the page useful when a JWKS has
+gone incoherent across replicas.
 
-The portal's admin console **reads**. Every write the identity service's own
-`/admin/*` console performs is still performed there, and the portal names each
-one where an operator would look for it:
+**Writes.** Every write goes through one bridged envelope,
+`IdentityAdminMsg` / `IdentityAdminResult` on `MemqlService.Stream`, onto
+`component/identity/adminops` (memql#3324). The console never calls the
+underlying mutation directly, and that is the whole design: a memQL mutation
+**cannot carry a role predicate** -- `filter` is a read construct -- so
+`updateUser` is server-origin-only with no client-reachable seam, and
+`revokePATIdentity` / `updateClusterSettings` name an arbitrary target under a
+coarse write check that admits every role from `writer` up. Calling them from a
+browser would have handed a `writer` what the retired server-rendered console
+reserved for an admin.
 
-| To do this | Go to | Why it is not in the portal |
+So the gate stayed in Go, where it already was, and moved from an HTTP
+middleware to one package with one implementation of the rule and one audit
+write. A refusal is `PERMISSION_DENIED` plus the same `admin_auth_forbidden`
+event, with the same `role_not_admin` reason, that the retired route wrote --
+so an audit trail an operator greps is unbroken across the move.
+
+**Every write reports its audit event id**, refusals included, next to a link
+into `/portal/views/audit`. Quote it in an incident thread; it is the durable
+artefact of the action, and a status line saying only "Saved." would have
+thrown it away.
+
+### What is deliberately NOT in the portal
+
+| Capability | Where it is | Why |
 |---|---|---|
-| Edit a profile, change a role, suspend an account | `/admin/users` | `updateUser` is server-origin-only; the cluster refuses it for any call from a client. |
-| Revoke a personal access token | `/admin/tokens` | `revokePATIdentity` applies no check of its own, so the owner-and-admin rule protecting it is that console's route rather than the cluster's. |
-| List or revoke a node token | `/admin/tokens` | `nodeTokenIdentities` is server-origin-only, and the revoke must run as a system credential actor. |
-| Force a key rotation | `/admin/jwks` | Rotation exists only as an HTTP POST on the identity service; there is no message for it on the stream a browser speaks. |
-| Change a cluster setting | `/admin/settings` | `updateClusterSettings` carries no role gate, so a form in the portal would hand the registration mode and every token lifetime to anyone who can write. |
+| Force a signing-key rotation | Nowhere, by design | The key manager runs in-process on the identity node, and in every deployed environment the key arrives sealed in the env envelope (`MEMQL_IDENTITY_SIGNING_KEY_B64`) so each replica derives the same one. `KeyManager.RotationSupported()` is false in that mode, so the retired console's "Rotate now" button returned an error in staging and production alike. Rotation is a **re-seal and a rolling restart**. The scheduled rotation (`MEMQL_IDENTITY_KEY_ROTATION_DAYS`) applies only to the on-disk key directory a single-node dev cluster uses. |
+| Deployments -- the live gate, image digests and actions | `https://identity.<host>/admin/deployments`, the Cockpit, and `/portal/views/deployments` for the history | `DeployControlService` runs shell scripts against an on-disk overlay checkout, so it exists only on the **identity** node. The portal is served by the bff and dials the origin that served it, so its deploy actions reach a node with no deploy-control service and come back `UNIMPLEMENTED`. Until that RPC can cross the mesh, the identity console keeps the surface. See [deployment-console.md](deployment-console.md). |
 
-Each of those is a missing **server** seam, not a missing screen. Until the
-mutation gates itself or the capability reaches the stream, the two consoles
-coexist: the portal for reading, the identity service for writing. Every write
-on either side appends a `v1:identity:auditEvent`, and a refused attempt
-appends `admin_auth_forbidden` -- visible in the portal's Overview and in
-`/portal/views/audit`.
+### The server-rendered `/admin/*` console is otherwise retired
 
-The identity service's own cluster-overview dashboard is **gone**: the portal's
-Overview replaced it, and `/admin/` now redirects to `/admin/users`.
+It served seven screens. Six of them -- the dashboard, users, tokens, audit,
+JWKS and settings -- are gone, along with their routes, their handlers and
+their templates, deleted in the same commits that landed their replacements.
+What remains on the identity service is `/admin/login` (which establishes the
+session) and `/admin/deployments`; `/admin/` redirects to the latter.
 
 ### The `/me/*` pages stay where they are
 

@@ -29,8 +29,23 @@ here.
 | Surface | Where | Use it when |
 |---------|-------|-------------|
 | **memQL portal -- Deployments** | `https://cockpit.<env>.example.com/portal/views/deployments` | You want the designed operator view: the live release beside the last gate's legs, the image digests in force, and the whole deployment history on one page (memql#3319). |
-| **Identity portal -- Deployments** | `https://identity.<env>.example.com/admin/deployments` (your identity host) | You want a full-screen, point-and-click view with confirm dialogs; you are already in the admin portal (users / sessions / audit / JWKS). |
+| **Identity service -- Deployments** | `https://identity.<env>.example.com/admin/deployments` (your identity host) | You want the point-and-click view with confirm dialogs, or you need to ACT on a deployment from a browser -- see the note below. |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
+
+> **Which of these can actually act, today.** `DeployControlService` runs shell
+> scripts against an on-disk overlay checkout, so it exists only on the
+> **identity** node. The memQL portal is served by the bff and dials the origin
+> that served it (a deliberate property -- see
+> [portal.md](portal.md)), so its live-state read and its action buttons reach a
+> node with no deploy-control service and come back `UNIMPLEMENTED`. What the
+> portal view does show from any node is the **history**: `v1:cluster:deployment`
+> rows are ordinary concept rows read through the normal query surface. To act,
+> use the identity service's `/admin/deployments` or the Cockpit, both of which
+> talk to the identity node directly. This is why `/admin/deployments` was NOT
+> retired alongside the rest of that console in memql#3324 -- retiring it would
+> have deleted a working capability rather than moved it. Closing the gap means
+> letting the RPC cross the mesh (a `NodeService` forward, as the AI surfaces
+> do), which is deliberately out of that issue's scope.
 
 Every surface calls the same role-gated **deploy-control API**
 (memQL `DeployControlService`); none shells out to
@@ -109,10 +124,12 @@ Every read and every action requires the cluster role **owner** or
 see [access-model.md](auth/access-model.md)). `writer` and `reader`
 roles get nothing:
 
-- **Portal:** `/admin/deployments` sits behind the same `requireAdmin`
-  middleware as the rest of `/admin/*`. A non-admin is rejected with a
-  403 and an `admin_auth_forbidden` audit event, and never sees the
-  Deployments nav entry.
+- **Identity service:** `/admin/deployments` sits behind the same
+  `requireAdmin` middleware every gated route under `/admin/*` uses. A
+  non-admin is rejected with a 403 and an `admin_auth_forbidden` audit
+  event, and never sees the Deployments nav entry.
+  (`component/identity/admin/route_gate_test.go` asserts both halves --
+  the refusal and the audit row.)
 - **Cockpit:** the Topology view resolves your cluster role; non-admins
   see a single `Deployments: owner/admin only` line, the deploy-control
   read is never issued, and the action menu does not open.
@@ -196,7 +213,7 @@ reality.
 ## Where audit events land
 
 All console writes and denials append to the identity audit log
-(`v1:identity:auditEvent`), visible in the portal's `/admin/audit`
+(`v1:identity:auditEvent`), visible in the memQL portal's Audit view
 view. Promotion-to-prod and rollback in particular are auditable after
 the fact: actor, env, target version / digest, and outcome.
 

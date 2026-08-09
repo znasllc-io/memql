@@ -27,6 +27,7 @@ import (
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	identitycomp "github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/adminops"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
@@ -134,6 +135,12 @@ type Server struct {
 	// one gate + one audit logger and cannot drift. Nil elsewhere; the
 	// DeployControl handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+	// identityAdminHandler is the gated identity-admin write surface the
+	// IdentityAdminMsg handler dispatches to (memql#3324). Set by app
+	// bootstrap on every node that carries an engine + an audit sink, because
+	// the writes are ordinary engine mutations and the gate is Go. Nil
+	// elsewhere; the handler answers Unimplemented.
+	identityAdminHandler *adminops.Service
 	// automationRunner is the mesh-aware automation invoke path the
 	// RunAutomation surface dispatches to (memql#3310). Set by app bootstrap
 	// on every binary that carries an automation scheduler; nil elsewhere,
@@ -352,6 +359,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		deployControlHandler:   s.deployControlHandler,
+		identityAdminHandler:   s.identityAdminHandler,
 		automationRunner:       s.automationRunner,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
@@ -657,6 +665,12 @@ type service struct {
 	// the identity node (the same instance the unary service is registered
 	// with); nil elsewhere, where the handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+
+	// identityAdminHandler is the gated identity-admin write surface the
+	// IdentityAdminMsg handler dispatches to (memql#3324). Non-nil wherever
+	// app bootstrap wired an engine + audit sink; nil elsewhere, where the
+	// handler answers Unimplemented.
+	identityAdminHandler *adminops.Service
 
 	// automationRunner is the mesh-aware automation invoke path the
 	// RunAutomation surface dispatches to (memql#3310). Non-nil wherever an
@@ -1254,7 +1268,12 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		// leave behind -- and its revoke sits beside it so a borrowed grant
 		// cannot quietly dismantle the operator's issued set either.
 		*memqlv1.MemqlClientMessage_CreateAccountToken,
-		*memqlv1.MemqlClientMessage_RevokeAccountToken:
+		*memqlv1.MemqlClientMessage_RevokeAccountToken,
+		// Identity administration (memql#3324). Changing a person's role,
+		// suspending them, or revoking a credential outlives the grant's TTL
+		// containment entirely -- a walked-away kiosk must not be able to
+		// promote its holder to owner.
+		*memqlv1.MemqlClientMessage_IdentityAdmin:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1293,6 +1312,8 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.CallTool.GetRequestId()
 	case *memqlv1.MemqlClientMessage_DeployControl:
 		return p.DeployControl.GetRequestId()
+	case *memqlv1.MemqlClientMessage_IdentityAdmin:
+		return p.IdentityAdmin.GetRequestId()
 	case *memqlv1.MemqlClientMessage_RunAutomation:
 		return p.RunAutomation.GetRequestId()
 	case *memqlv1.MemqlClientMessage_CreateAccountToken:
@@ -1678,6 +1699,12 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// deploy_control_handlers.go.
 	case *memqlv1.MemqlClientMessage_DeployControl:
 		return s.handleDeployControl(envelope, payload.DeployControl)
+	// Identity administration (memql#3324): the writes the server-rendered
+	// /admin/* console owned. The handler stamps the session's access context
+	// and calls component/identity/adminops; the owner/admin gate and the
+	// audit write live there, not here. See identity_admin_handlers.go.
+	case *memqlv1.MemqlClientMessage_IdentityAdmin:
+		return s.handleIdentityAdmin(envelope, payload.IdentityAdmin)
 	// Realtime voice + video (Initiative C). The Go voice-agent
 	// (integrations/voice/agent) speaks these messages while authenticated
 	// as a service account. See voice_agent_handlers.go.
