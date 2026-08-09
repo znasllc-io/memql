@@ -178,6 +178,39 @@ const undeclared3217SeedSweepReason = "memql#3217 -- system-actor startup sweep,
 // correct one. Both are classified in the memql#3349 credential-read inventory.
 const undeclared3406PasskeyReason = "memql#3406 -- passkey reads (one self-scoped, one pre-actor); v1:identity:identity still declares no tier"
 
+// undeclared3410DeviceCodeReason covers the two reads over
+// `v1:identity:deviceCode`, the RFC 8628 device-authorization row added by
+// memql#3410.
+//
+// They postdate the seed and name their own issue rather than carrying the
+// grandfather marker, for the same reason as the entries above.
+//
+// Why a tier could not simply be declared, and this is a property of the
+// grant rather than a deferral:
+//
+//   - `deviceCodeByDeviceCodeHash` is a PRE-ACTOR read in the same sense as
+//     the `*ByKeyHash` credential lookups. The polling device holds no
+//     session -- getting one is the entire point of the flow -- so there is
+//     no `actor.userId` for an owner tier to compare against, and
+//     `enforceRowAuthzOnPlan` has no read-side escape. An owner tier here
+//     would AND `approvedByUserId == ""` into every poll and the grant would
+//     never complete.
+//   - `deviceCodeByUserCodeHash` DOES run for a signed-in human, and is
+//     still not owner-scopable: the row is minted by a device with no user
+//     attached, so `approvedByUserId` is empty at exactly the moment the
+//     verification page has to find it. The field names the eventual
+//     approver, not a pre-existing owner -- the same "the field is not an
+//     ownership claim" finding memql#3349 records for the credential
+//     concept.
+//
+// What bounds the two reads instead is the credential itself: each is a
+// lookup by the SHA-256 digest of an unguessable secret (a 256-bit
+// device_code, a ~50-bit user_code), returning at most one row, behind a
+// per-IP limiter on both entry points. That is the same shape as
+// `workerPairingCodeByHash` above, and it is a bound, not a measurement --
+// which is why the entries are here.
+const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lookups; the polling read is pre-actor and approvedByUserId is empty when the page read runs, so no owner tier fits"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -352,6 +385,10 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:identity:clusterSettings
 	"clusterSettingsCurrent": {"v1:identity:clusterSettings", undeclaredGrandfatherReason},
+
+	// v1:identity:deviceCode
+	"deviceCodeByDeviceCodeHash": {"v1:identity:deviceCode", undeclared3410DeviceCodeReason},
+	"deviceCodeByUserCodeHash":   {"v1:identity:deviceCode", undeclared3410DeviceCodeReason},
 
 	// v1:identity:delegation
 	"activeDelegationsByIdentitySubject": {"v1:identity:delegation", undeclaredGrandfatherReason},

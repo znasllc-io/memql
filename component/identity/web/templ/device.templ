@@ -1,0 +1,187 @@
+package webtempl
+
+// DeviceData drives GET/POST /device -- the RFC 8628 verification page
+// (memql#3410).
+//
+// The page has exactly two states and the field that picks between
+// them is Pending:
+//
+//	Pending == nil   the code-entry form. Reached with no user_code, or
+//	                 after one that did not resolve.
+//	Pending != nil   the approval panel for a live, still-pending
+//	                 authorization.
+//
+// A resolved-but-unapprovable code (already answered, expired, spent)
+// renders the entry form with a Flash saying which, rather than an
+// approval panel whose buttons would do nothing. The distinction
+// matters to the human: "that code is expired" and "no such code" are
+// different problems with different next steps.
+type DeviceData struct {
+	Layout LayoutData
+	Flash  *Flash
+	// PrefillCode is the user_code to put in the entry field, carried
+	// from verification_uri_complete's ?user_code= so the common case
+	// is a click rather than a transcription.
+	PrefillCode string
+	// Pending, when set, is the authorization awaiting this user's
+	// answer.
+	Pending *DevicePending
+	// Done marks the terminal confirmation screen shown right after
+	// Approve or Deny. DoneApproved distinguishes which.
+	Done         bool
+	DoneApproved bool
+}
+
+// DevicePending is what the approver is shown about the request.
+//
+// Every field here exists to answer one question: "is this MY device,
+// or is somebody else's request sitting in front of me?" A device flow
+// with no such evidence is a phishing primitive -- an attacker starts
+// an authorization, reads the code to a victim over the phone, and the
+// victim approves a session the attacker holds. Naming the client, the
+// source IP and the user agent is what gives the human something to
+// check.
+type DevicePending struct {
+	// UserCode is the display form, echoed back so the approver can
+	// confirm it against what the device is showing.
+	UserCode string
+	// ClientName is the registered client's human name, falling back to
+	// its client_id.
+	ClientName string
+	// ClientId is always shown alongside the name -- a friendly name is
+	// self-asserted at registration, the id is what the session is
+	// actually bound to.
+	ClientId string
+	// SourceIP is where the POST /device/code request came from.
+	SourceIP string
+	// UserAgent is what that request identified itself as.
+	UserAgent string
+	// RequestedAt / ExpiresAt are rendered as plain UTC timestamps.
+	RequestedAt string
+	ExpiresAt   string
+}
+
+templ Device(data DeviceData) {
+	@Layout(data.Layout) {
+		<div class="card">
+			if data.Done {
+				@deviceDone(data)
+			} else if data.Pending != nil {
+				@deviceApproval(data)
+			} else {
+				@deviceEntry(data)
+			}
+		</div>
+	}
+}
+
+templ deviceEntry(data DeviceData) {
+	<h1 class="card-title">Connect a device</h1>
+	<p class="card-subtitle">
+		Enter the code shown on the device you are signing in. Letters are
+		not case-sensitive, and the dash is optional.
+	</p>
+	if data.Flash != nil {
+		<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+	}
+	<form method="POST" action="/device" class="form-row" data-submit-once>
+		@CSRFField(data.Layout.CSRFToken)
+		<input type="hidden" name="action" value="lookup"/>
+		<input
+			type="text"
+			name="user_code"
+			value={ data.PrefillCode }
+			placeholder="XXXX-XXXX"
+			autocomplete="off"
+			autocapitalize="characters"
+			spellcheck="false"
+			required
+			maxlength="16"
+			style="flex:1;"
+		/>
+		<button type="submit" class="btn btn-primary">Continue</button>
+	</form>
+}
+
+templ deviceApproval(data DeviceData) {
+	<h1 class="card-title">Approve this sign-in?</h1>
+	<p class="card-subtitle">
+		A device is asking to sign in as you. Approve it only if you started
+		this and the details below match what you see on that device.
+	</p>
+	if data.Flash != nil {
+		<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+	}
+	<table class="data">
+		<tbody>
+			<tr>
+				<th>Code</th>
+				<td><code>{ data.Pending.UserCode }</code></td>
+			</tr>
+			<tr>
+				<th>Application</th>
+				<td>
+					{ data.Pending.ClientName }
+					<div class="text-small text-muted"><code>{ data.Pending.ClientId }</code></div>
+				</td>
+			</tr>
+			<tr>
+				<th>Requested from</th>
+				<td><code>{ data.Pending.SourceIP }</code></td>
+			</tr>
+			<tr>
+				<th>Device reported itself as</th>
+				<td class="text-small">{ data.Pending.UserAgent }</td>
+			</tr>
+			<tr>
+				<th>Requested at</th>
+				<td class="text-small">{ data.Pending.RequestedAt }</td>
+			</tr>
+			<tr>
+				<th>Expires</th>
+				<td class="text-small">{ data.Pending.ExpiresAt }</td>
+			</tr>
+		</tbody>
+	</table>
+	<div class="alert alert-warn">
+		<p>
+			<strong>If you did not start this, deny it.</strong> Approving grants
+			that device the same access you have right now. Nobody legitimate
+			will ever read you a code over the phone or in a chat message and
+			ask you to approve it.
+		</p>
+	</div>
+	<div class="form-row">
+		<form method="POST" action="/device" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			<input type="hidden" name="user_code" value={ data.Pending.UserCode }/>
+			<input type="hidden" name="action" value="approve"/>
+			<button type="submit" class="btn btn-primary">Approve</button>
+		</form>
+		<form method="POST" action="/device" data-submit-once>
+			@CSRFField(data.Layout.CSRFToken)
+			<input type="hidden" name="user_code" value={ data.Pending.UserCode }/>
+			<input type="hidden" name="action" value="deny"/>
+			<button type="submit" class="btn">Deny</button>
+		</form>
+	</div>
+}
+
+templ deviceDone(data DeviceData) {
+	if data.DoneApproved {
+		<h1 class="card-title">Device approved</h1>
+		<p class="card-subtitle">
+			You can close this page. The device will finish signing in within a
+			few seconds.
+		</p>
+	} else {
+		<h1 class="card-title">Request denied</h1>
+		<p class="card-subtitle">
+			Nothing was granted. If you did not start this request, no further
+			action is needed -- the code is now dead.
+		</p>
+	}
+	if data.Flash != nil {
+		<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+	}
+}

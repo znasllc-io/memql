@@ -95,6 +95,16 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 			s.renderCompleteError(w, "Internal error starting admin session (reference "+eid+").")
 			return
 		}
+		// An identity-owned page the visitor was bounced off while
+		// signed out gets them back (memql#3410). This is NOT the
+		// return_to path: return_to names a relying party and is
+		// matched against registered redirect URIs, which is exactly
+		// why a first-party page like /device could not use it. The
+		// cookie is same-origin-validated at both ends.
+		if dest := identity.TakePostLoginRedirect(w, r); dest != "" {
+			http.Redirect(w, r, dest, http.StatusFound)
+			return
+		}
 		http.Redirect(w, r, "/admin/", http.StatusFound)
 		return
 	}

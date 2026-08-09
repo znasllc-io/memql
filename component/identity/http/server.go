@@ -15,6 +15,7 @@
 //	POST /auth/badge/grant -- exchange a registered badge id for a short-lived operator grant (Bearer auth; memql#2513)
 //	POST /auth/webauthn/register/begin  -- issue a passkey registration challenge (Bearer auth; memql#3406)
 //	POST /auth/webauthn/register/finish -- verify the attestation and persist the credential (Bearer auth; memql#3406)
+//	POST /device/code      -- RFC 8628 device authorization request (memql#3410)
 //
 // /.well-known/jwks.json is mounted by component/identity.Service
 // directly (Phase 1 wiring); Server only owns the auth flow.
@@ -30,6 +31,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/devicecode"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
@@ -92,6 +94,20 @@ type Server struct {
 	webauthnCeremonyValue *webauthn.Ceremony
 	webauthnCeremonyErr   error
 	webauthnCeremonyOnce  sync.Once
+
+	// DeviceCodes backs the RFC 8628 device authorization grant
+	// (memql#3410): POST /device/code here, the verification page in
+	// component/identity/web, and the device_code grant on
+	// /oauth/token. Nil leaves /device/code returning
+	// temporarily_unavailable and the grant refusing -- binaries
+	// without an engine do not half-serve the flow.
+	DeviceCodes *devicecode.Store
+
+	// deviceCodeLimiterVal is the per-IP limiter on POST /device/code,
+	// lazily built per-Server on first use for the same reason
+	// badgeGrantLimiter is server-scoped rather than a package global.
+	deviceCodeLimiterVal  *abuse.IPRateLimiter
+	deviceCodeLimiterOnce sync.Once
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -200,6 +216,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// required + per-IP rate-limited inside the handler.
 	mux.HandleFunc("POST /auth/badge/grant", wrap(s.cors(s.handleBadgeGrant)))
 	mux.HandleFunc("OPTIONS /auth/badge/grant", wrap(s.cors(s.handleOptions)))
+
+	// RFC 8628 device authorization request (memql#3410). Public by
+	// design -- the requesting device has no credential yet; the
+	// client_id must resolve and the per-IP limiter bounds the rest.
+	// The human-facing verification page (GET /device) is mounted by
+	// component/identity/web, and the redemption is a grant on
+	// /oauth/token above.
+	mux.HandleFunc("POST /device/code", wrap(s.cors(s.handleDeviceCode)))
+	mux.HandleFunc("OPTIONS /device/code", wrap(s.cors(s.handleOptions)))
 
 	// Node bootstrap -- self-mint a class="node" JWT for cluster
 	// binaries (bff / agent / cognition / planner / voice) that

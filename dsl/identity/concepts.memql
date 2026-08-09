@@ -104,6 +104,40 @@ concept authCode {
   @relationship(type="parent", field="magicLinkRequestId", target=magicLinkRequest, direction="outgoing")
 }
 
+/// RFC 8628 device authorization grant state (memql#3410). One row per `POST /device/code` call.
+/// The device (a headless box, a hardened network, an editor extension that cannot bind a loopback
+/// listener) holds the plaintext `device_code` and polls `/oauth/token`; the human carries the
+/// short `user_code` to `/device` on a second device, signs in normally, and approves or denies.
+/// BOTH credentials are hashed at rest -- the plaintext device_code is returned exactly once in
+/// the `POST /device/code` response and the plaintext user_code is shown to the operator there and
+/// typed into the verification page; neither is ever persisted. Single-use: `status` is the state
+/// machine (pending -> approved -> redeemed, or pending -> denied), and only a row in `approved`
+/// can be redeemed, exactly once. 10-minute TTL (expiresAt), independent of status.
+// @no-displayCard: Single-use credential row, same reasoning as v1:identity:authCode and
+//   v1:identity:workerPairingCode: two secret hashes plus a poll clock. There is no
+//   human-facing identity to promote, and clientId is identical across every row a
+//   given client mints.
+concept deviceCode {
+  clientId            string!  @description("OAuth client_id the device authorization was requested for. The token-grant redemption MUST verify the polling client matches; a mismatch is rejected and audited.")
+  deviceCodeHash      string!  @description("SHA-256 hex digest of the plaintext `mql_dvc_<...>` device_code. Primary lookup key on the polling path. The plaintext is returned once in the POST /device/code response and never persisted.")
+  userCodeHash        string!  @description("SHA-256 hex digest of the CANONICALIZED user_code (uppercased, separator stripped). Lookup key for the verification page. The plaintext is displayed by the requesting device and typed by the human; never persisted.")
+  status              enum("pending", "approved", "denied", "redeemed")!  @description("The state machine. `pending` = awaiting the human. `approved` = the human said yes and the device may redeem exactly once. `denied` = the human said no; polling returns access_denied forever. `redeemed` = tokens were issued; any further poll is rejected. Expiry is orthogonal and read off expiresAt.")
+  scope               string  @description("Space-delimited OAuth scope requested by the device, echoed onto the issued session. Empty when the device requested none.")
+  codeChallenge       string  @description("PKCE code_challenge (RFC 7636) supplied at POST /device/code. Empty when the device did not use PKCE. When set, the device_code grant REQUIRES a matching code_verifier, exactly as the authorization_code grant does.")
+  codeChallengeMethod string  @description("PKCE method: S256 (required for new flows) or plain. Empty when codeChallenge is empty.")
+  expiresAt           datetime!  @description("Absolute expiration, ~10 minutes after creation per RFC 8628 §3.2. Past this the poll returns expired_token and the verification page refuses the code, regardless of status.")
+  intervalSeconds     int!  @description("The minimum seconds the device must wait between polls, returned as `interval` in the device-authorization response and RE-READ on every poll. A poll that arrives sooner than this after lastPolledAt gets slow_down AND this value is increased by 5 (RFC 8628 §3.5), so an impatient client is progressively throttled rather than merely warned.")
+  lastPolledAt        datetime  @description("Timestamp of the most recent /oauth/token poll against this row, stamped on EVERY poll including rejected ones. Paired with intervalSeconds to enforce the poll floor across replicas -- an in-memory clock would give each replica its own budget.")
+  approvedByUserId    string  @description("v1:identity:user.id of the human who approved (or denied) at /device. Stamped from actor.userId, never accepted from caller args. Empty while pending.")
+  approvedAt          datetime  @description("Stamped when the human approved. Empty otherwise.")
+  deniedAt            datetime  @description("Stamped when the human denied. Empty otherwise.")
+  redeemedAt          datetime  @description("Stamped on the first successful token redemption. Single-use enforcement: the redeem transition also flips status to `redeemed`, so a replayed device_code is rejected.")
+  sourceIP            string  @description("IP the POST /device/code request came from. Shown on the approval page so the human can tell their own request apart from someone else's, and kept as an abuse signal.")
+  userAgent           string  @description("User-Agent the POST /device/code request carried. Shown on the approval page for the same reason as sourceIP: it is the only evidence the approver has about what they are authorizing.")
+
+  @relationship(type="parent", field="approvedByUserId", target=user, direction="outgoing")
+}
+
 /// Public OAuth client minted at dynamic client registration (RFC 7591). claude.ai / Claude
 /// Desktop's 'add custom connector' flow POSTs to /register and cannot pre-configure a client_id,
 /// so the identity service issues one here and looks it up at /authorize + /oauth/token exactly
