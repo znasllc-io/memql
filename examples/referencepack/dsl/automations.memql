@@ -30,7 +30,9 @@ use referencepack.builtins.{ referencePackComposeGreeting }
 @description("On creation of a core note, compose a greeting for the note owner via the pack's integration capability. Demonstrates a pack automation hooking a core service event.")
 automation referencePackGreetOnNoteCreate {
   args {
-    ownerUserId any @description("The note owner the greeting targets, bound from the created note's payload (G5 typed contract).")
+    /// The note owner the greeting targets, bound from the created note's
+    /// payload (G5 typed contract).
+    ownerUserId any
   }
 
   // FIRST-CLASS PRECONDITION (Epic 4 / memql#2139). A deterministic check

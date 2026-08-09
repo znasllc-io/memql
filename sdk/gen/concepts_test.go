@@ -261,7 +261,7 @@ concept participant { spaceId string @required }
 	writeFixture(t, root, "cognition/queries.memql", `
 @description("List participants for a space.")
 query participant spaceParticipants {
-  args { spaceId string @required @description("The space id.") }
+  args { spaceId string @required }
   filter spaceId==args.spaceId
   shape participantCard
 }

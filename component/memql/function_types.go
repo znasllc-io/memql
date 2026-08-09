@@ -389,8 +389,8 @@ func (a *ArgsSchemaConfig) clone() *ArgsSchemaConfig {
 // FunctionArgsField defines a single argument field's type assertion.
 type FunctionArgsField struct {
 	// Description is the resolved field documentation -- the /// doc
-	// comment captured above the field (memql#2634; the args-field
-	// @description spelling stays retired, #2615).
+	// comment captured above the field (memql#2634). It is the ONLY
+	// channel: an args-field @description is rejected at load (memql#3336).
 	Description string
 	// Name is the field name (e.g., "userId", "email")
 	Name string

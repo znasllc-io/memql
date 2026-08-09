@@ -19,9 +19,10 @@
 //	slice-syntax        array(T) → []T (Go-aligned slice type spelling).
 //
 //	args-description    strip @description("...") from args{} fields --
-//	                    the parser discards the annotation (no AST slot,
-//	                    #2615); declaration-level and concept-field
-//	                    @description are load-bearing and untouched.
+//	                    the parser REJECTS the annotation (memql#3336, no
+//	                    AST slot), so this is the fixer for a file that
+//	                    refuses to load; declaration-level and concept-
+//	                    field @description are load-bearing and untouched.
 //
 //	accept-stamp        collapse arg-mirror runs in mutation write blocks
 //	                    into the accept/stamp form (#2616; form shipped by
@@ -555,9 +556,11 @@ func lexicalTokenRewrite(src []byte, mapper func(langparser.Token) (string, bool
 }
 
 // rewriteArgsDescription strips @description("...") annotations from
-// args{} fields (#2615). The args-block parser consumes the annotation
-// and throws it away ("silently accepted (no AST slot)"), so the prose
-// is dead weight. Only annotations lexically inside an `args { }` block
+// args{} fields. The args-block parser REJECTS the annotation outright
+// (memql#3336) -- there is no AST slot for it and an arg description is
+// carried by the /// doc comment above the field -- so this rewrite is
+// how a file carrying one is made loadable again. Only annotations
+// lexically inside an `args { }` block
 // are touched -- declaration-level and concept-field @description are
 // load-bearing. Tracking happens on the token stream, so `args {` in a
 // comment or string never opens a block. A deletion that leaves its
