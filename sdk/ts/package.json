@@ -30,6 +30,10 @@
       "types": "./dist/identity/index.d.ts",
       "import": "./dist/identity/index.js"
     },
+    "./identityadmin": {
+      "types": "./dist/identityadmin/index.d.ts",
+      "import": "./dist/identityadmin/index.js"
+    },
     "./deploy": {
       "types": "./dist/deploy/index.d.ts",
       "import": "./dist/deploy/index.js"

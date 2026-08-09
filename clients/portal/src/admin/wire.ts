@@ -32,43 +32,33 @@ import { renderMemQLValue } from "@znasllc-io/memql-sdk-core/client";
 // ungated path -- see the "beyond this console" notes in the pages.
 //
 // ===========================================================================
-// WHAT THIS CONSOLE CANNOT REACH, AND WHY (memql#3324)
+// THE WRITES GO THROUGH A GO GATE, NOT A MUTATION (memql#3324)
 // ===========================================================================
-// Four capabilities of the server-rendered console have no client-reachable
-// seam, so they are NOT implemented here and the pages name their absence:
+// Every write this console performs -- edit a profile, change a role, suspend
+// an account, revoke a token, save the settings -- is issued through
+// IdentityAdminClient (@znasllc-io/memql-sdk-core/identityadmin), NOT through
+// a `mutation ...` call on the query surface, and that is the whole design.
 //
-//   edit a user / change a role / suspend   `updateUser` is @serverOnly
-//                                           (memql#2991) -- refused for a
-//                                           client-originated call.
-//   list or revoke a node token             `nodeTokenIdentities` and
-//                                           `nodeTokenIdentityById` are
-//                                           @serverOnly (memql#2987), and the
-//                                           revoke additionally needs a system
-//                                           credential actor (memql#2513).
-//   rotate the signing key                  no stream message exists; the only
-//                                           caller is POST /admin/jwks/rotate.
-//   edit cluster settings                   `updateClusterSettings` carries no
-//                                           role gate of its own, so writing it
-//                                           from here would hand a `writer` a
-//                                           power the owner/admin gate reserves.
-//   revoke a personal access token          `revokePATIdentity` is the same
-//                                           shape, and is enumerated as exactly
-//                                           that debt -- "revokes any user's
-//                                           personal access token" -- in
-//                                           test/dslconformance/
-//                                           caller_arg_selection_test.go.
+// A memQL mutation cannot carry a role predicate: `filter` is a read
+// construct. So `updateUser` is @serverOnly with no client-reachable seam at
+// all, and `revokePATIdentity` / `updateClusterSettings` name an arbitrary
+// target under a coarse write check that admits every role from `writer` up.
+// Calling any of them from here would have handed a writer what the retired
+// console reserved for an admin -- deleting the gate rather than moving it.
 //
-// Each is a missing SERVER seam, not a missing screen. Adding one is a change
-// to dsl/ or component/grpc/, deliberately out of this change's reach.
+// component/identity/adminops holds the owner/admin rule and the audit write,
+// and component/grpc bridges it onto the stream as IdentityAdminMsg. A refusal
+// comes back as an IdentityAdminError carrying PERMISSION_DENIED and the id of
+// the `admin_auth_forbidden` event it wrote. Which is to say: this file
+// contains no mutation string, and a test asserts that (test/admin.test.tsx).
 //
-// The consequence is worth stating plainly rather than discovering screen by
-// screen: EVERY WRITE the server-rendered console performed is, today, either
-// origin-gated away from the browser or reachable without the owner/admin gate
-// that console applies at its route. So these four surfaces are READINGS, and
-// each one names the write it does not carry and where that write still lives.
-// Shipping a control whose only gate was a boolean in this file would move the
-// authorization decision into a browser, which is the one outcome the move must
-// not produce.
+// STILL NOT REACHABLE, and the pages say so rather than hiding it:
+//
+//   rotate the signing key   the KeyManager is in-process on the identity
+//                            node, and in every deployed environment the key
+//                            arrives sealed in the env envelope, where
+//                            RotationSupported() is false and rotation is a
+//                            re-seal + roll rather than a button.
 
 // namedCall composes a MemQL named-primitive invocation.
 //
@@ -165,11 +155,28 @@ export function readTokensForUser(
   );
 }
 
-// There is deliberately no revoke here. `revokePATIdentity` takes an arbitrary
-// identity id, applies no predicate, and the coarse write check admits every
-// role from `writer` up -- so the owner/admin rule that protects the revoke
-// today is the identity service's ROUTE, not the cluster's. Calling it from a
-// browser would leave the button gated by a React boolean and nothing else.
+// The cluster's node credentials -- one row per node that has bootstrapped.
+//
+// `nodeTokenIdentitiesAdmin`, not `nodeTokenIdentities`: the original is
+// @serverOnly AND projects identityFull, which carries the credentials object
+// keyHash and all. The admin twin (memql#3324) gates itself on
+// `requiresOwnerOrAdmin` and projects the credential-free `nodeTokenSummary`,
+// so the row that reaches a browser cannot carry a secret whatever the
+// caller's role. The @serverOnly original stays for the verifier, which
+// genuinely needs the hash.
+export function readNodeTokens(query: QueryClient, signal?: AbortSignal): Promise<Row[]> {
+  return run(
+    query,
+    "nodeTokenIdentitiesAdmin",
+    namedCall("query", "nodeTokenIdentitiesAdmin"),
+    signal,
+  );
+}
+
+// Revocation is NOT here, and its absence from this module is deliberate
+// rather than an omission: it is a write, and every write on this console goes
+// through IdentityAdminClient so the gate is the cluster's rather than a
+// boolean in a browser. See the note at the top of this file.
 
 // ---------------------------------------------------------------------------
 // The signing keys, over plain HTTP
