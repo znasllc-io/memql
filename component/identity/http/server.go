@@ -13,6 +13,8 @@
 //	POST /pair/codes       -- mint a worker-pairing code (Bearer auth)
 //	POST /pair/redeem      -- redeem a code for a worker token (Pair auth)
 //	POST /auth/badge/grant -- exchange a registered badge id for a short-lived operator grant (Bearer auth; memql#2513)
+//	POST /auth/webauthn/register/begin  -- issue a passkey registration challenge (Bearer auth; memql#3406)
+//	POST /auth/webauthn/register/finish -- verify the attestation and persist the credential (Bearer auth; memql#3406)
 //
 // /.well-known/jwks.json is mounted by component/identity.Service
 // directly (Phase 1 wiring); Server only owns the auth flow.
@@ -30,6 +32,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/refresh"
+	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
 
 // Server bundles the dependencies the handlers need. Constructed once
@@ -72,6 +75,23 @@ type Server struct {
 	// logger, matching the anti-abuse pattern above.
 	badgeGrantLimiter     *abuse.IPRateLimiter
 	badgeGrantLimiterOnce sync.Once
+
+	// passkeyLimiter is the per-IP token bucket for the WebAuthn
+	// registration ceremony (memql#3406), lazily built per-Server on
+	// first use for the same reason badgeGrantLimiter is.
+	passkeyLimiter     *abuse.IPRateLimiter
+	passkeyLimiterOnce sync.Once
+
+	// webauthnCeremonyValue is the relying party + challenge store the
+	// passkey routes use, derived once from Cfg.BaseURL. Built lazily
+	// rather than injected so the RP ID has exactly one source and cannot
+	// drift from the Config the rest of the service reads. The derivation
+	// error is cached alongside it: a base URL that yields no usable RP ID
+	// is a boot-time misconfiguration, and the routes refuse rather than
+	// falling back to the request Host.
+	webauthnCeremonyValue *webauthn.Ceremony
+	webauthnCeremonyErr   error
+	webauthnCeremonyOnce  sync.Once
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
@@ -189,6 +209,14 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// identity service. memql#338.
 	mux.HandleFunc("POST /node/bootstrap", wrap(s.cors(s.handleNodeBootstrap)))
 	mux.HandleFunc("OPTIONS /node/bootstrap", wrap(s.cors(s.handleOptions)))
+
+	// WebAuthn passkey registration (memql#3406). Both steps require an
+	// authenticated user-class bearer; the RP id comes from Cfg.BaseURL,
+	// never from the request Host. Login is memql#3407.
+	mux.HandleFunc("POST /auth/webauthn/register/begin", wrap(s.cors(s.handleWebAuthnRegisterBegin)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/register/begin", wrap(s.cors(s.handleOptions)))
+	mux.HandleFunc("POST /auth/webauthn/register/finish", wrap(s.cors(s.handleWebAuthnRegisterFinish)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/register/finish", wrap(s.cors(s.handleOptions)))
 
 	if s.Logger != nil {
 		s.Logger.Info("identity HTTP routes mounted",

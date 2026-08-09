@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsNodeToken, identityIsPasskey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -1823,6 +1823,81 @@ query identity badgesForSelf {
   sort     "row.createdAt", "desc"
   paginate 50
   shape    identitySummary
+}
+
+// ---- queries/v1/identity/passkeyByCredentialId.memql ----
+
+// passkeyByCredentialId - Credential-id lookup for the WebAuthn ceremonies
+// ========================================================================
+//
+// Two callers, one key. POST /auth/webauthn/register/finish uses it to
+// reject an enrolment whose credential id is already registered
+// (memql#3406); the login ceremony (memql#3407) uses it to resolve a
+// DISCOVERABLE assertion, which arrives carrying no user hint at all --
+// the credential id is the only thing in the message that names a row.
+//
+// PRE-ACTOR by the same argument as badgeByKeyHash, and more strongly:
+// at login there is no authenticated caller yet, so there is no
+// actor.userId to scope by. Classified in the memql#3349 credential-read
+// inventory (component/memql).
+//
+// Projects identityFull rather than passkeySummary because the verifier
+// needs the two fields that shape deliberately omits -- publicKey and
+// signCount. That is safe here in a way it is not for a keyHash family:
+// a passkey row's credentials carry a PUBLIC key, so the wholesale
+// projection leaks no secret. Possession is proved by a signature, never
+// by knowing the stored bytes.
+//
+// Returns rows even when active=false so the handlers can distinguish
+// "revoked passkey" from "unknown credential" in the audit trail, and so
+// a re-registration of a revoked credential id is still refused.
+//
+// Arguments:
+//   credentialId (string, required) - base64url (unpadded) credential id
+//
+// Returns:
+//   Zero or one identity row in identityFull shape.
+
+/// Look up a passkey identity by its base64url credential id. Returns active + inactive rows.
+@unbounded("passkey identity by unique credential id -- bounded to a single row")
+query identity passkeyByCredentialId {
+  args {
+    credentialId  string!
+  }
+  filter  identityIsPasskey && credentials.credentialId==args.credentialId
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/passkeysForSelf.memql ----
+
+// passkeysForSelf
+// ===============
+//
+// Lists every passkey the CALLER has enrolled. Two consumers, and the
+// second is why this exists at registration time rather than waiting for
+// the management surface (memql#3409):
+//
+//  1. POST /auth/webauthn/register/begin builds excludeCredentials from
+//     it, so an authenticator the user already enrolled declines to
+//     enrol twice instead of minting a second credential the user then
+//     has to tell apart from the first.
+//  2. The passkey management list -- name, model, backup posture, last
+//     use -- for the "is this account recoverable if I lose this phone"
+//     question.
+//
+// There is no userId argument BY DESIGN, following patIdentitiesForSelf
+// and badgesForSelf (memql#3178): the row set comes from
+// userId==actor.userId, so it cannot be pointed at a stranger's
+// authenticators.
+
+/// List the CALLING user's own enrolled passkeys, newest first. Projects passkeySummary -- the
+/// recognisable fields plus the backup flags, never the COSE public key or the signature counter.
+@actor
+query identity passkeysForSelf {
+  filter  identityIsPasskey && userId==actor.userId
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    passkeySummary
 }
 
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
