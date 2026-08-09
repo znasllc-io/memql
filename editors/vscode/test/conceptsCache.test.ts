@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ConceptsCache } from "../src/views/conceptsCache.js";
+import { ConceptsCache } from "../src/state/conceptsCache.js";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -142,4 +142,96 @@ test("a populated cache short-circuits fetch on subsequent load() calls", async 
   await cache.load(fetch);
 
   assert.equal(calls, 1, "fetch must run exactly once while the cache holds a value");
+});
+
+// --- In-flight memoization -------------------------------------------------
+//
+// VS Code calls getChildren() once for the root and again for every domain
+// the user expands, and those calls overlap freely. Without a memo each one
+// issued its own listConcepts() round-trip, against the same cluster, for the
+// same answer -- N concurrent gRPC calls where one would do.
+
+test("two concurrent load() calls share a single fetch", async () => {
+  const cache = new ConceptsCache<string>();
+
+  let calls = 0;
+  const pending = deferred<string[]>();
+  const fetch = (): Promise<string[]> => {
+    calls++;
+    return pending.promise;
+  };
+
+  const first = cache.load(fetch);
+  const second = cache.load(fetch);
+
+  pending.resolve(["a", "b"]);
+
+  assert.deepEqual(await first, ["a", "b"]);
+  assert.deepEqual(await second, ["a", "b"], "the joining caller must get the same answer");
+  assert.equal(calls, 1, "the second concurrent call must not issue its own round-trip");
+});
+
+test("a concurrent rejection is delivered to every joined caller as the same empty result", async () => {
+  const cache = new ConceptsCache<string>();
+
+  let calls = 0;
+  const pending = deferred<string[]>();
+  const fetch = (): Promise<string[]> => {
+    calls++;
+    return pending.promise;
+  };
+
+  const first = cache.load(fetch);
+  const second = cache.load(fetch);
+  pending.reject(new Error("boom"));
+
+  assert.deepEqual(await first, []);
+  assert.deepEqual(await second, [], "a joined caller must not see an unhandled rejection");
+  assert.equal(calls, 1);
+  assert.equal(cache.cachedError, "boom");
+});
+
+test("the memo is released once the fetch settles, so a later load after invalidate re-fetches", async () => {
+  const cache = new ConceptsCache<string>();
+
+  let calls = 0;
+  const fetch = (): Promise<string[]> => {
+    calls++;
+    return Promise.resolve(["a"]);
+  };
+
+  await cache.load(fetch);
+  cache.invalidate();
+  await cache.load(fetch);
+
+  assert.equal(calls, 2, "a settled attempt must not be memoized past the invalidate");
+});
+
+test("invalidate() drops an in-flight memo so the next load fetches against the NEW cluster", async () => {
+  const cache = new ConceptsCache<string>();
+
+  const stale = deferred<string[]>();
+  const staleLoad = cache.load(() => stale.promise);
+
+  // A cluster switch while the old cluster's fetch is still outstanding. The
+  // next load must NOT be handed that outstanding promise -- it is a request
+  // against the cluster we just left.
+  cache.invalidate();
+
+  let freshCalls = 0;
+  const fresh = await cache.load(() => {
+    freshCalls++;
+    return Promise.resolve(["fresh"]);
+  });
+
+  assert.equal(freshCalls, 1, "the fresh load must issue its own fetch, not join the stale one");
+  assert.deepEqual(fresh, ["fresh"]);
+
+  stale.resolve(["stale"]);
+  assert.deepEqual(await staleLoad, ["stale"], "the stale caller still resolves to its own data");
+  assert.deepEqual(
+    await cache.load(() => Promise.reject(new Error("must not be called"))),
+    ["fresh"],
+    "and the cache still holds the fresh cluster's answer",
+  );
 });

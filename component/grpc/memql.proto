@@ -8,13 +8,12 @@ option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 
 import "google/protobuf/struct.proto";
 import "google/protobuf/timestamp.proto";
-// deploy_control.proto is the DeployControlService's own schema, imported
-// rather than mirrored (memql#3311). The streamed bridge below carries the
-// BYTE-IDENTICAL request/response messages the unary service does; hand-copying
-// nine request/response pairs into this file would create two schemas that
-// drift the first time a field lands on one of them. Both files declare the
-// same go_package (".../component/grpc/gen;memqlv1"), so the cross-file
-// reference generates into one Go package and costs no Go-side import.
+// The DeployControlService request/response messages are REUSED verbatim by
+// the streamed bridge below (DeployControlMsg / DeployControlResult, #3311).
+// Importing rather than re-declaring them is the point: the streamed path and
+// the unary path carry the byte-identical types, so the two surfaces cannot
+// drift a field apart. deploy_control.proto does not import this file, so
+// there is no cycle; both generate into the same Go package (memqlv1).
 import "deploy_control.proto";
 
 service MemqlService {
@@ -300,23 +299,27 @@ message MemqlClientMessage {
     CreateBadgeMsg create_badge = 83;
     RevokeBadgeMsg revoke_badge = 84;
 
-    // Deploy console (memql#3311). One envelope carrying the
-    // DeployControlService request set, so every deploy RPC is reachable
-    // from a WebSocket client (the VS Code extension, the memQL portal)
-    // that cannot dial a second unary service. The bridge handler calls
-    // the SAME *deploycontrol.Service methods the unary path calls, so
-    // the owner/admin/developer gate + the audit event are one
-    // implementation, not two. See DeployControlMsg.
-    DeployControlMsg deploy_control = 86;
+    // Deploy control (memql#3311). DeployControlService is a separate
+    // UNARY service on the same listener, which a browser -- and any
+    // WebSocket client -- structurally cannot dial. This ONE bridged
+    // envelope carries every DeployControlService request as an inner
+    // oneof, so the VS Code extension and the portal reach the whole
+    // deploy surface over /memql/ws. See DeployControlMsg.
+    DeployControlMsg deploy_control = 101;
 
-    // Account-token mint / revoke (memql#3322). The operator portal
-    // calls these DIRECTLY, for the reason CreateWorkerTokenMsg gives:
-    // the plaintext credential exists only inside
-    // CreateAccountTokenResult, so every extra hop is another place it
-    // could be logged. See CreateAccountTokenMsg for what an account
-    // token is -- and, more to the point, what it is not.
-    CreateAccountTokenMsg create_account_token = 87;
-    RevokeAccountTokenMsg revoke_account_token = 88;
+    // Automation run (memql#3310). The ONLY invoke path for an automation on
+    // any surface: synthesize a trigger event for a named automation,
+    // dispatch it through the normal automation path, and stream back a step
+    // trace. See RunAutomationMsg.
+    RunAutomationMsg run_automation = 102;
+
+    // Account credentials (memql#3322). Minting rides a stream message
+    // rather than a mutation for the reason the PAT and worker-token paths
+    // already do: the plaintext exists ONLY in the reply, and a mutation's
+    // result is a ROW -- which is precisely where the one value that must
+    // never be persisted would end up. See CreateAccountTokenMsg.
+    CreateAccountTokenMsg create_account_token = 103;
+    RevokeAccountTokenMsg revoke_account_token = 104;
   }
 }
 
@@ -455,16 +458,19 @@ message MemqlServerMessage {
     CreateBadgeResult create_badge_result = 120;
     RevokeBadgeResult revoke_badge_result = 121;
 
-    // Deploy console reply (see DeployControlMsg, memql#3311). Errors --
-    // including the PermissionDenied a gated RPC raises -- travel on the
-    // ordinary QueryErrorMsg channel keyed by request_id, carrying the
-    // gRPC status code verbatim, so a streamed caller sees the same code
-    // a unary caller sees.
+    // Deploy-control reply (see DeployControlMsg, memql#3311). Tag 122 is
+    // taken by sense_definition_result above, so this starts at 123.
     DeployControlResult deploy_control_result = 123;
-    // Account-token mint / revoke replies (memql#3322). The mint reply
-    // is the ONLY place the plaintext credential ever exists.
-    CreateAccountTokenResult create_account_token_result = 124;
-    RevokeAccountTokenResult revoke_account_token_result = 125;
+
+    // Automation run trace (memql#3310). One tag carries every frame of a
+    // run -- accepted / step / complete -- as an inner oneof, so the three
+    // cannot drift apart. See AutomationRunEvent.
+    AutomationRunEvent automation_run_event = 124;
+
+    // Account credential replies (memql#3322). See CreateAccountTokenResult
+    // for why the plaintext travels here and nowhere else.
+    CreateAccountTokenResult create_account_token_result = 125;
+    RevokeAccountTokenResult revoke_account_token_result = 126;
   }
 }
 
@@ -2094,92 +2100,6 @@ message RevokeWorkerTokenResult {
   string error_message = 4;
 }
 
-// -----------------------------------------------------------------------------
-// Account tokens (memql#3322)
-// -----------------------------------------------------------------------------
-//
-// WHAT AN ACCOUNT TOKEN IS, before the fields: a credential ISSUED TO A
-// USER, ON BEHALF OF AN ACCOUNT. The authenticated subject is the
-// operator's v1:identity:user; the account is a BINDING carried on the
-// credential row (v1:identity:identity of
-// identityType="account_token"). Nothing authenticates AS an account.
-//
-// WHAT IT AUTHORIZES: nothing, today, deliberately. No verifier
-// resolves the mql_acct_ prefix and no interceptor admits it, because
-// docs/internal/design/account-isolation-model.md rules out both
-// alternatives -- section 3.3 (an account is never a subject) and
-// section 5.2 (the actor envelope has no tenancy dimension, so the
-// binding cannot NARROW the operator's authority, and a credential
-// named for a customer that in fact carries the operator's whole
-// authority is worse than a PAT). What ships is custody: mint, show
-// once, store only the digest, list, revoke, audit both ends. The
-// authorization half lands with section 6(b).
-//
-// The read side is ordinary DSL -- `query accountTokensForAccount` over
-// the accountTokenSummary shape, which projects no digest. Only the
-// mint and the revoke need envelopes, and only because the mint reply
-// is the single place the plaintext exists and the revoke is audited.
-
-// CreateAccountTokenMsg mints an account token for one of the caller's
-// accounts. The caller's ownership of `account_id` is checked
-// server-side by reading accountById AS THE CALLER, so
-// @rowAuthz(owner="ownerUserId") on v1:identity:account -- not a
-// hand-written comparison -- decides whether the account is theirs.
-message CreateAccountTokenMsg {
-  string request_id = 1;
-  // v1:identity:account.id the credential is issued on behalf of.
-  // Bare or canonical; the handler normalizes.
-  string account_id = 2;
-  // Operator-chosen label ("Acme nightly export"). Required: an
-  // unlabelled credential in a list of credentials cannot be revoked
-  // with any confidence about which one is going.
-  string label = 3;
-  // Optional ISO8601 expiry. Empty = no expiry stamped; revocation is
-  // the operator's control either way.
-  string expires_at = 4;
-}
-
-message CreateAccountTokenResult {
-  string request_id = 1;
-  bool success = 2;
-  // Plain credential -- "mql_acct_<43 base64url>". THE ONLY PLACE THIS
-  // VALUE EVER EXISTS. It is not persisted, not logged, and not
-  // recoverable; a caller that does not capture it here must revoke
-  // and mint again.
-  string plain_token = 3;
-  // Identity row id (v1:identity:identity), canonical form.
-  string identity_id = 4;
-  // Echo of the resolved account binding.
-  string account_id = 5;
-  // The credential's authenticated SUBJECT -- the operator user, never
-  // the account. Echoed so a client cannot render "signed in as Acme"
-  // without contradicting a field it was handed.
-  string subject_user_id = 6;
-  // Correlation id of the emitted audit event, matching the deploy
-  // console's ActionResult.audit_event_id convention: it is the audit
-  // row's correlationId, not its primary key.
-  string audit_event_id = 7;
-  string error_code = 8;
-  string error_message = 9;
-}
-
-// RevokeAccountTokenMsg flips active=false on the account_token
-// identity row. Immediate and audited. The caller must own the row --
-// checked by resolving it through accountTokenById as the caller,
-// whose filter carries userId==actor.userId.
-message RevokeAccountTokenMsg {
-  string request_id = 1;
-  string identity_id = 2;
-}
-
-message RevokeAccountTokenResult {
-  string request_id = 1;
-  bool success = 2;
-  string audit_event_id = 3;
-  string error_code = 4;
-  string error_message = 5;
-}
-
 // CreateBadgeMsg registers a shared-terminal operator badge
 // (memql#2513): maps a physical badge/device identifier to a
 // v1:identity:user so the identity service's POST /auth/badge/grant
@@ -2652,45 +2572,55 @@ message NodeMaintenanceResult {
 }
 
 // -----------------------------------------------------------------------------
-// Deploy console bridge (memql#3311)
+// Deploy control bridged onto MemqlService.Stream (memql#3311)
 // -----------------------------------------------------------------------------
 
-// DeployControlMsg carries one DeployControlService request over
-// MemqlService.Stream.
+// DeployControlMsg carries ONE DeployControlService request over the
+// multiplexed stream.
 //
-// WHY A BRIDGE AT ALL: DeployControlService is a separate UNARY service
-// mounted on the same listener (deploy_control.proto). The Go SDK dials it
-// natively, but a browser cannot -- and neither can anything else speaking
-// the `/memql/ws` WebSocket bridge, which tunnels MemqlService.Stream and
-// nothing else. That put the entire deploy surface out of reach of the VS
-// Code extension and the memQL portal. This envelope makes every deploy RPC
-// reachable from any stream client without a second dial.
+// WHY A BRIDGE. DeployControlService (component/grpc/deploy_control.proto)
+// is a separate unary gRPC service mounted on the same listener. The Go SDK
+// dials it natively, but a browser cannot dial gRPC at all and neither can
+// any WebSocket client, so the whole deploy surface was unreachable from the
+// VS Code extension (which speaks /memql/ws) and from the portal. The
+// identity /admin/* app only sidesteps that by being server-rendered --
+// exactly the property the portal gives up.
 //
-// WHY ONE ENVELOPE RATHER THAN NINE MESSAGE PAIRS: the request types are
-// IMPORTED from deploy_control.proto, not re-declared. There is exactly one
-// schema for a DeployStagingRequest, so the two transports cannot drift.
+// WHY ONE ENVELOPE RATHER THAN NINE PAIRS. The inner oneof reuses the
+// DeployControlService request messages VERBATIM (the import at the top of
+// this file). Nine bridged pairs would have meant nine re-declared request
+// shapes that the compiler is perfectly happy to let drift a field away from
+// the unary ones; reusing the originals makes the two surfaces the same
+// types by construction. It also costs the top-level oneof two field numbers
+// instead of eighteen, and a tenth RPC lands as one inner field rather than
+// another top-level pair. Both consumers benefit: the extension and the
+// portal each write one dispatcher and switch on the inner discriminant,
+// which is what a DevOps panel wants anyway (it renders a list of actions,
+// not nine unrelated call sites).
 //
-// WHY THE GATE IS SAFE: the handler (deploy_control_handlers.go) unwraps this
-// oneof and calls the matching method on the very same
-// memqlv1.DeployControlServiceServer implementation the unary path is
-// registered with -- component/deploycontrol's *Service. The role gate and
-// the v1:identity:auditEvent write live INSIDE those methods, so the bridge
-// adds no authorization code of its own and cannot weaken the matrix
-// (view: admin+; cut/deploy: developer+; rollback: owner only).
+// GATE. The handler does NOT re-implement the role matrix. It resolves the
+// stream's AccessContext, stamps it on a context, and calls the SAME
+// DeployControlServiceServer method the unary path serves -- so the
+// owner/admin/developer gate and the audit event in
+// component/deploycontrol are literally one implementation, not two that
+// agree today. See component/grpc/deploy_control_handlers.go and
+// component/deploycontrol.Dispatch.
 //
-// Deployment HISTORY is deliberately absent: v1:cluster:deployment rows are
-// ordinary concept rows, already readable over ExecuteQueryMsg. Duplicating
-// them here would be a second read path to keep honest.
+// NOT BRIDGED: deployment history. v1:cluster:deployment rows stay readable
+// as ordinary concepts through ExecuteQuery -- duplicating that read here
+// would fork the history contract for no gain.
 message DeployControlMsg {
-  // request_id correlates the reply (and any QueryErrorMsg) with the call.
   string request_id = 1;
 
+  // Exactly one request must be set. An empty oneof is rejected with
+  // error_code = INVALID_ARGUMENT.
   oneof request {
     // Reads.
     znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest get_deployment_status = 10;
     znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest suggest_next_version = 11;
-    // Actions. Each one is role-gated + audited server-side; the reply's
-    // ActionResult carries the emitted audit event id.
+    // Actions. Each writes a v1:identity:auditEvent (category admin,
+    // action deployment_console_<verb>) and returns its id on
+    // ActionResult.audit_event_id -- identical to the unary path.
     znasllc.memql.deploycontrol.v1.DeployStagingRequest deploy_staging = 12;
     znasllc.memql.deploycontrol.v1.PromoteRequest promote = 13;
     znasllc.memql.deploycontrol.v1.RollbackRequest rollback = 14;
@@ -2701,31 +2631,295 @@ message DeployControlMsg {
   }
 }
 
-// DeployControlResult is the reply to a DeployControlMsg.
+// DeployControlResult is the reply to DeployControlMsg.
 //
-// The response oneof has three arms, not nine, because DeployControlService
-// itself returns only three types: seven of its RPCs share ActionResult. The
-// caller already knows which RPC it issued (request_id correlates), and `rpc`
-// echoes the method name for a generic client that multiplexes several calls
-// through one handler.
-//
-// There is no error field here on purpose: a failed call replies with the
-// ordinary QueryErrorMsg carrying the gRPC status code as a string
-// ("PermissionDenied", "InvalidArgument", ...), which is what every other
-// stream family does and what the SDK dispatchers already understand. That is
-// also what keeps the parity assertion honest -- the streamed caller reads the
-// same code out of the wire that a unary caller reads off the status error.
+// A unary DeployControlService call fails by returning a gRPC status error.
+// A multiplexed stream has no per-message status channel -- returning an
+// error would tear down the whole stream and take every other in-flight
+// request with it -- so the status is carried IN the envelope: error_code
+// holds the canonical gRPC code (google.rpc.Code numbering, 0 = OK) and
+// error_message its message. A caller that maps error_code back to a
+// grpc code observes exactly what the unary caller observes, which is what
+// the streamed/unary parity test asserts (PERMISSION_DENIED = 7 for a
+// caller below the required role, on both paths, for every gated RPC).
 message DeployControlResult {
-  // request_id echoes DeployControlMsg.request_id.
   string request_id = 1;
-  // rpc is the DeployControlService method name this reply answers
-  // ("GetDeploymentStatus", "CutVersion", ...).
-  string rpc = 2;
+  // ok is true when the RPC returned without a status error. It is NOT the
+  // action's own success: a write that ran and failed returns ok = true
+  // here with ActionResult.ok = false, exactly as the unary path does.
+  bool ok = 2;
+  // error_code is the canonical gRPC code (0 = OK, 3 = INVALID_ARGUMENT,
+  // 7 = PERMISSION_DENIED, 16 = UNAUTHENTICATED, 13 = INTERNAL, ...).
+  int32 error_code = 3;
+  string error_message = 4;
 
-  oneof response {
+  // Set only when ok. Which field is populated follows from the request:
+  // get_deployment_status -> deployment_status, suggest_next_version ->
+  // next_version, every action -> action.
+  oneof result {
     znasllc.memql.deploycontrol.v1.DeploymentStatus deployment_status = 10;
     znasllc.memql.deploycontrol.v1.SuggestNextVersionResult next_version = 11;
-    // action answers all seven write RPCs (they share ActionResult).
     znasllc.memql.deploycontrol.v1.ActionResult action = 12;
   }
 }
+
+// -----------------------------------------------------------------------------
+// Automation run (memql#3310)
+// -----------------------------------------------------------------------------
+
+// RunAutomationMsg synthesizes a trigger event for a NAMED automation,
+// dispatches it through the normal automation path, and asks the engine to
+// stream back a step trace.
+//
+// This is the ONLY invoke path for an automation on MemqlService.Stream.
+// Before it, an automation could be exercised only by causing its trigger
+// event for real -- which is why automations are the hardest construct in the
+// DSL to test, and why the VS Code runtime panel could offer a Run affordance
+// for every other runnable kind but not this one.
+//
+// THE DEFINITION THAT RUNS IS ALWAYS THE DEPLOYED ONE. Session-define
+// (AuthoringSessionDefineBundleMsg) covers the plain construct family --
+// query / mutate / logic / spec / trait -- and deliberately does not cover
+// automations: an automation is registered against the scheduler's event
+// subscriptions at load time, not resolved by name at call time, so there is
+// nothing for a stream-scoped registry to shadow. A caller that just edited an
+// automation in a buffer and pressed Run is therefore running the version on
+// the cluster, not the version on screen. AutomationRunAccepted carries that
+// fact as DATA (ran_deployed_definition + definition_note) rather than leaving
+// it to a doc comment, because the UI has to say it out loud.
+message RunAutomationMsg {
+  string request_id = 1;
+
+  // automation is the automation's DSL name (e.g. "autoJoinSI"). Required.
+  string automation = 2;
+
+  // payload is the synthesized trigger event's payload -- what the
+  // automation body reads as args.payload.<field> / event.payload.<field>.
+  //
+  // There is no declared payload schema to validate against in the general
+  // case: an automation binds its whole triggering event as `args` and reads
+  // through it freely. An automation that DOES declare an `args { }` block
+  // gets the ordinary fire-time binding + validation, and a violation refuses
+  // the run in the usual loud way.
+  //
+  // A @trigger(schedule=...) automation has no concept and no event: leave
+  // payload unset and the run fires with an EMPTY event, which is exactly
+  // what a cron firing hands the executor.
+  google.protobuf.Struct payload = 3;
+
+  // concept optionally names the concept the payload row belongs to. When
+  // empty it is derived from the automation's own @trigger(concept=...), so a
+  // caller that picked a row of the trigger concept in the UI does not have to
+  // restate it. Only used to build the synthetic event topic.
+  string concept = 4;
+
+  // topic optionally overrides the synthetic event's topic outright, for the
+  // case where the automation's trigger pattern is a glob the engine cannot
+  // make concrete on its own. Empty = derived from the automation's trigger.
+  string topic = 5;
+
+  // target_node_type routes the run to a specific node type in the mesh
+  // ("cognition", "agent", "planner", "voice", "workbench", "bff", ...).
+  //
+  // Empty (the default) means "run on the node that received this request",
+  // which is the single-node and the ordinary case. A NON-empty value that
+  // differs from the receiving node's type makes the run a genuine cross-node
+  // dispatch: the receiving node relays the request over the event bus and
+  // streams back the trace the executing node publishes. That path exists
+  // because an automation's steps can reach integrations that are compiled
+  // into one node type only -- testing such an automation from the editor
+  // requires running it where those integrations live.
+  string target_node_type = 6;
+
+  // timeout_ms bounds the whole run from the caller's point of view. Zero
+  // takes the server default (60s); the server also caps it (300s). A run
+  // that exceeds it terminates the trace with DEADLINE_EXCEEDED -- it does
+  // NOT cancel work already dispatched on another node.
+  uint32 timeout_ms = 7;
+
+  // include_step_output attaches each step's own result payload to its trace
+  // entry. Off by default: step outputs can be large, and the timeline view
+  // only needs name / status / duration until a step is expanded.
+  bool include_step_output = 8;
+}
+
+// AutomationRunEvent is one frame of a run's streamed trace.
+//
+// A run is not a single round-trip, so this follows the same shape as the
+// other streamed surfaces (QueryResultChunk, the transcribe-stream flow):
+// many frames correlated by request_id, terminated by exactly one `complete`.
+// Every run emits `accepted` first and `complete` last, including a run that
+// was refused outright -- a caller can therefore always park on `complete`.
+//
+// The inner oneof (rather than three top-level server payload tags) mirrors
+// DeployControlMsg / DeployControlResult: one envelope, one tag on
+// MemqlServerMessage, and no way for the three frames to drift apart.
+message AutomationRunEvent {
+  string request_id = 1;
+
+  // run_id identifies this run. It is the automation execution id on the
+  // node that executed it, so it joins to v1:memql:checkpoint rows and to the
+  // executionId in the engine's logs.
+  string run_id = 2;
+
+  oneof event {
+    AutomationRunAccepted accepted = 10;
+    AutomationRunStep step = 11;
+    AutomationRunComplete complete = 12;
+  }
+}
+
+// AutomationRunAccepted is the first frame of every run. It arrives BEFORE any
+// step, so the UI can render the banner and the header while the run is still
+// in flight.
+message AutomationRunAccepted {
+  // automation is the resolved automation name.
+  string automation = 1;
+
+  // ran_deployed_definition is always true, and is a field rather than a
+  // comment on purpose: the UI must state that the deployed definition ran,
+  // not the caller's buffer. Reading it as a constant is fine; reading it as
+  // the thing to render is the point.
+  bool ran_deployed_definition = 2;
+
+  // definition_note is the ready-to-render banner text for the above.
+  string definition_note = 3;
+
+  // trigger_kind is "event" for @trigger(event=...), "schedule" for
+  // @trigger(schedule=...), and "manual" for an automation with neither.
+  string trigger_kind = 4;
+
+  // trigger_topic is the synthetic event's topic. Empty for a schedule-kind
+  // run, which fires with an empty event and therefore has no topic.
+  string trigger_topic = 5;
+
+  // requested_on_node_id / requested_on_node_type identify the node that
+  // received the request -- the "cluster it ran against" half of what the
+  // extension needs for its non-local write confirmation (memql#3310 / B2).
+  string requested_on_node_id = 6;
+  string requested_on_node_type = 7;
+
+  // target_node_type echoes the requested target ("" = the receiving node).
+  string target_node_type = 8;
+}
+
+// AutomationRunStep is one step's outcome, emitted as the step completes.
+message AutomationRunStep {
+  // sequence is the 0-based position of this frame in the trace, so a client
+  // can order frames without relying on arrival order.
+  int32 sequence = 1;
+
+  // step_id is the step's declared name in the automation body.
+  string step_id = 2;
+
+  // status is "success", "failed" or "skipped" -- the automation executor's
+  // own StepResult.Status values, passed through unchanged.
+  string status = 3;
+
+  int64 duration_ms = 4;
+
+  // output carries the step's result when include_step_output was set and the
+  // result is representable as a Struct. A scalar or array result is wrapped
+  // under the key "value".
+  google.protobuf.Struct output = 5;
+
+  // error is the step's error message when status is "failed".
+  string error = 6;
+}
+
+// AutomationRunComplete terminates the trace. Exactly one is sent per run.
+//
+// Failures ride HERE, not out of the handler as a Go error: an error returned
+// from a stream handler tears down the multiplexed stream and takes every
+// other in-flight request on it with it. error_code carries the canonical
+// gRPC code (google.rpc.Code numbering, 0 = OK) so a caller maps it back to
+// the status a unary call would have produced. This is the convention
+// DeployControlResult established (memql#3311).
+message AutomationRunComplete {
+  // status is the execution's own terminal status -- "completed", "failed",
+  // "cancelled" -- or "refused" when the run never started (unknown or
+  // disabled automation, permission denied, timeout).
+  string status = 1;
+
+  int64 duration_ms = 2;
+
+  // step_count is how many step frames preceded this one.
+  int32 step_count = 3;
+
+  // error is the automation-level error message when the run failed after
+  // starting.
+  string error = 4;
+
+  // error_code is the canonical gRPC code (0 = OK, 3 = INVALID_ARGUMENT,
+  // 5 = NOT_FOUND, 7 = PERMISSION_DENIED, 4 = DEADLINE_EXCEEDED,
+  // 9 = FAILED_PRECONDITION, 12 = UNIMPLEMENTED, 13 = INTERNAL).
+  int32 error_code = 5;
+  string error_message = 6;
+
+  // executed_on_node_id / executed_on_node_type name the node that actually
+  // ran the automation. On a cross-node run these differ from the
+  // requested_on_* pair in AutomationRunAccepted, which is what makes the
+  // cross-node hop assertable from a test and legible in the UI.
+  string executed_on_node_id = 7;
+  string executed_on_node_type = 8;
+}
+
+// -----------------------------------------------------------------------------
+// Account credentials (memql#3322)
+// -----------------------------------------------------------------------------
+//
+// A credential issued TO THE OPERATOR, ON BEHALF OF an account. The
+// authenticated subject is the operator's user; the account is a binding on
+// it. Nothing authenticates AS an account -- v1:identity:account holds no
+// credential and is never a subject (docs/internal/design/account-isolation-model.md).
+//
+// Only the SHA-256 hash is persisted, exactly as the PAT and worker-token
+// paths do, so the plaintext below is genuinely unrecoverable after the reply.
+message CreateAccountTokenMsg {
+  string request_id = 1;
+  // v1:identity:account.id the credential is issued on behalf of.
+  // Bare or canonical; the handler normalizes.
+  string account_id = 2;
+  // Operator-chosen label ("Acme nightly export"). Required: an
+  // unlabelled credential in a list of credentials cannot be revoked
+  // with any confidence about which one is going.
+  string label = 3;
+  // Optional ISO8601 expiry. Empty = no expiry stamped; revocation is
+  // the operator's control either way.
+  string expires_at = 4;
+}
+message CreateAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  // Plain credential -- "mql_acct_<43 base64url>". THE ONLY PLACE THIS
+  // VALUE EVER EXISTS. It is not persisted, not logged, and not
+  // recoverable; a caller that does not capture it here must revoke
+  // and mint again.
+  string plain_token = 3;
+  // Identity row id (v1:identity:identity), canonical form.
+  string identity_id = 4;
+  // Echo of the resolved account binding.
+  string account_id = 5;
+  // The credential's authenticated SUBJECT -- the operator user, never
+  // the account. Echoed so a client cannot render "signed in as Acme"
+  // without contradicting a field it was handed.
+  string subject_user_id = 6;
+  // Correlation id of the emitted audit event, matching the deploy
+  // console's ActionResult.audit_event_id convention: it is the audit
+  // row's correlationId, not its primary key.
+  string audit_event_id = 7;
+  string error_code = 8;
+  string error_message = 9;
+}
+message RevokeAccountTokenMsg {
+  string request_id = 1;
+  string identity_id = 2;
+}
+message RevokeAccountTokenResult {
+  string request_id = 1;
+  bool success = 2;
+  string audit_event_id = 3;
+  string error_code = 4;
+  string error_message = 5;
+}
+

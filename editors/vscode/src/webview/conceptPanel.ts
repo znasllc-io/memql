@@ -19,7 +19,7 @@
 // clusters underneath the panel, a live CDC event on this concept (see
 // subscribeToChanges() below), or (for loadPage specifically) a second
 // "Load more" click before the first response lands. All are guarded by
-// ConceptPanelState (see conceptPanelState.ts -- generation counters for
+// ConceptPanelState (see state/conceptPanelState.ts -- Latest guards for
 // supersession, a separate in-flight marker for loadPage's concurrency
 // case); this file's job is only to wire the connection lifecycle, the CDC
 // subscription lifecycle, and the webview's HTML/postMessage boundary
@@ -39,11 +39,21 @@ import {
 } from "@znasllc-io/memql-view-kit";
 
 import type { ConnectionManager } from "../connection/manager.js";
-import { ConceptPanelState } from "./conceptPanelState.js";
-import { flattenForList } from "./rowProjection.js";
+import { ConceptPanelState } from "../state/conceptPanelState.js";
+import { flattenForList } from "../state/rowProjection.js";
 
 const PAGE_SIZE = 200;
 const NOT_CONNECTED_MESSAGE = "Not connected. Select a cluster in the Clusters view.";
+// The persistent notice shown whenever there is no connection to carry CDC
+// events. Deliberately distinct from NOT_CONNECTED_MESSAGE, which is the
+// transient data-fetch error a later successful query clears: this one answers
+// "are live updates on?", and it must survive that success exactly as the
+// subscribe-failure notice does.
+const LIVE_UPDATES_OFFLINE_MESSAGE = "live updates unavailable: not connected";
+
+function titleFor(concept: Concept): string {
+  return `Concept: ${concept.entity}`;
+}
 
 export class ConceptPanel {
   private static readonly open_ = new Map<string, ConceptPanel>();
@@ -51,12 +61,35 @@ export class ConceptPanel {
   private readonly panel: vscode.WebviewPanel;
   private readonly state = new ConceptPanelState<Row>();
   private readonly disposeConnectionListener: () => void;
+  // The map key this panel registered itself under. Captured at construction
+  // rather than read off `this.concept` at teardown: adopt() swaps in a
+  // fresher descriptor, and a panel that removed itself under a different key
+  // would leave a dead entry in open_ forever, making that concept impossible
+  // to reopen for the rest of the session.
+  private readonly conceptId: string;
   private concept: Concept;
   // Unregister for the live-refresh CDC subscription (see
   // subscribeToChanges()). undefined whenever no subscription is live --
   // not yet established, torn down for a reconnect, or never started
   // because the connection has no SubscriptionManager.
   private unsubscribeChanges: (() => void) | undefined;
+
+  // This panel's OWN disposables, disposed together when the tab closes.
+  //
+  // Registering them straight onto context.subscriptions (as B1 did) leaks:
+  // that array is disposed exactly once, at extension deactivation, so every
+  // listener from every concept tab the operator ever opened accumulated there
+  // for the life of the window, each still holding a reference to a
+  // long-disposed panel. Unbounded across a session, bounded only by the
+  // concept count.
+  private readonly disposables: vscode.Disposable[] = [];
+  // The single entry this panel puts on context.subscriptions, so a tab still
+  // open at deactivation is torn down properly. Spliced back out when the tab
+  // closes on its own -- that removal is what keeps the extension-lifetime
+  // array from growing one entry per tab ever opened.
+  private readonly contextSubscriptions: { dispose(): unknown }[];
+  private readonly contextEntry: vscode.Disposable;
+  private disposed = false;
 
   static open(
     context: vscode.ExtensionContext,
@@ -65,17 +98,28 @@ export class ConceptPanel {
   ): void {
     const existing = ConceptPanel.open_.get(concept.id);
     if (existing !== undefined) {
-      // The Concepts tree can hand us a fresher descriptor for an
-      // already-open tab (e.g. a refresh picked up a changed displayCard).
-      // Adopt it and re-render BEFORE reveal(), or the tab would keep
-      // rendering against the stale concept it was constructed with.
-      existing.concept = concept;
-      existing.render();
+      existing.adopt(concept);
       existing.panel.reveal();
       return;
     }
     const panel = new ConceptPanel(context, connections, concept);
     ConceptPanel.open_.set(concept.id, panel);
+  }
+
+  // adopt takes a fresher descriptor for the concept this panel is already
+  // showing -- the Concepts tree hands one over when a refresh picks up a
+  // changed displayCard or entity name.
+  //
+  // The TAB LABEL is updated alongside the content. Re-rendering against the
+  // new descriptor while leaving the title from the old one showed a renamed
+  // entity's new name inside the panel and its old name on the tab, and with
+  // several concepts open the tab label is what an operator actually
+  // navigates by. Both happen BEFORE the caller's reveal(), so nothing stale
+  // is ever brought to the front.
+  private adopt(concept: Concept): void {
+    this.concept = concept;
+    this.panel.title = titleFor(concept);
+    this.render();
   }
 
   private constructor(
@@ -84,17 +128,34 @@ export class ConceptPanel {
     concept: Concept,
   ) {
     this.concept = concept;
+    this.conceptId = concept.id;
+    this.contextSubscriptions = context.subscriptions;
     this.panel = vscode.window.createWebviewPanel(
       "memqlConcept",
-      `Concept: ${concept.entity}`,
+      titleFor(concept),
       vscode.ViewColumn.Active,
-      { enableScripts: true, retainContextWhenHidden: true },
+      // No retainContextWhenHidden. It keeps the hidden tab's whole webview
+      // process alive to preserve DOM state, and there is no DOM state here
+      // worth preserving: every render() replaces webview.html wholesale, so a
+      // revealed tab is repainted from ConceptPanelState (which lives in the
+      // extension host and survives regardless) rather than resumed. All it
+      // would buy is scroll position -- which the wholesale re-render already
+      // discards on any reload -- at the cost of a retained process per
+      // background concept tab.
+      { enableScripts: true },
     );
+
+    // One entry on context.subscriptions per panel, so a tab still open when
+    // the extension deactivates is torn down rather than left holding a
+    // connection listener. Everything else this panel registers goes into its
+    // own bag (this.disposables) and is disposed with the tab.
+    this.contextEntry = new vscode.Disposable(() => this.dispose(false));
+    context.subscriptions.push(this.contextEntry);
 
     // The reconnect staleness guard: a cluster switch (or a reconnect to the
     // SAME cluster) must not let a response already in flight against the
-    // OLD connection land on this panel. reset() bumps both of
-    // ConceptPanelState's generation counters, so loadPage()/selectRow()
+    // OLD connection land on this panel. reset() invalidates both of
+    // ConceptPanelState's Latest guards, so loadPage()/selectRow()
     // calls started before this fire discard their result when they settle.
     // We then re-render the now-empty state and kick off a fresh load --
     // ConceptsTreeProvider follows the same invalidate-on-every-state-change
@@ -105,64 +166,93 @@ export class ConceptPanel {
     // something else -- otherwise a cluster switch would leave a
     // subscription registered against a socket this panel no longer reads
     // from (a leak) while ALSO leaving the panel silently unsubscribed from
-    // the new one. Re-establish it only once the new state is "connected";
-    // "connecting" / "error" / "disconnected" leave it unsubscribed until
-    // the next successful connect.
+    // the new one. Re-establish it only once the new state is "connected".
     //
-    // subscribeToChanges() runs BEFORE reset()/render(): it only writes the
-    // liveUpdatesDegradedMessage field (see conceptPanelState.ts), which
-    // reset() does not touch, so a single render() below picks up both the
-    // fresh (empty) row state AND whatever the subscribe attempt just did to
-    // the live-updates notice, in one paint -- no separate render() inside
-    // subscribeToChanges() itself.
+    // "connecting" / "error" / "disconnected" therefore leave this panel with
+    // NO subscription until the next successful connect, and the else branch
+    // is what says so. Without it there was a window -- every reconnect passes
+    // through "connecting", and a dropped socket parks in "error" -- in which
+    // live updates were off and nothing on screen mentioned it: precisely the
+    // "looks live, silently isn't" failure mode the notice exists to prevent.
+    // subscribeToChanges() clears it again the moment a subscription is
+    // actually up.
+    //
+    // subscribeToChanges() (and this else branch) run BEFORE reset()/render():
+    // both only write the liveUpdatesDegradedMessage field (see
+    // state/conceptPanelState.ts), which reset() does not touch, so a single
+    // render() below picks up both the fresh (empty) row state AND whatever
+    // just happened to the live-updates notice, in one paint -- no separate
+    // render() inside subscribeToChanges() itself.
     this.disposeConnectionListener = this.connections.onDidChangeState((connState) => {
       this.unsubscribeChanges?.();
       this.unsubscribeChanges = undefined;
       if (connState.status === "connected") {
         this.subscribeToChanges();
+      } else {
+        this.state.setLiveUpdatesDegraded(LIVE_UPDATES_OFFLINE_MESSAGE);
       }
       this.state.reset();
       this.render();
       void this.loadPage();
     });
 
-    this.panel.onDidDispose(
-      () => {
-        this.unsubscribeChanges?.();
-        this.unsubscribeChanges = undefined;
-        ConceptPanel.open_.delete(concept.id);
-        this.disposeConnectionListener();
-      },
-      null,
-      context.subscriptions,
-    );
-
-    this.panel.webview.onDidReceiveMessage(
-      // The webview posts plain JSON; treat it as untrusted input rather
-      // than trusting the compile-time annotation. `msg.type` on a
-      // null/non-object message would throw, and `rowId !== undefined`
-      // would admit any non-undefined value (a number, an object) straight
-      // into getRowByConceptAndId -- narrow both before use.
-      (msg: unknown) => {
-        if (msg === null || typeof msg !== "object") return;
-        const { type, rowId } = msg as { type?: unknown; rowId?: unknown };
-        if (type === "selectRow" && typeof rowId === "string") {
-          void this.selectRow(rowId);
-        } else if (type === "loadMore") {
-          void this.loadPage();
-        } else if (type === "reload") {
-          this.state.reset();
-          this.render();
-          void this.loadPage();
-        }
-      },
-      null,
-      context.subscriptions,
+    this.disposables.push(
+      this.panel.onDidDispose(() => this.dispose(true)),
+      this.panel.webview.onDidReceiveMessage(
+        // The webview posts plain JSON; treat it as untrusted input rather
+        // than trusting the compile-time annotation. `msg.type` on a
+        // null/non-object message would throw, and `rowId !== undefined`
+        // would admit any non-undefined value (a number, an object) straight
+        // into getRowByConceptAndId -- narrow both before use.
+        (msg: unknown) => {
+          if (msg === null || typeof msg !== "object") return;
+          const { type, rowId } = msg as { type?: unknown; rowId?: unknown };
+          if (type === "selectRow" && typeof rowId === "string") {
+            void this.selectRow(rowId);
+          } else if (type === "loadMore") {
+            void this.loadPage();
+          } else if (type === "reload") {
+            this.state.reset();
+            this.render();
+            void this.loadPage();
+          }
+        },
+      ),
     );
 
     this.subscribeToChanges();
     this.render();
     void this.loadPage();
+  }
+
+  // dispose tears the panel down exactly once, from either direction: the user
+  // closed the tab (fromPanel === true) or the extension is deactivating and
+  // context.subscriptions is being drained (fromPanel === false).
+  //
+  // fromPanel is what decides whether to splice this panel's entry out of
+  // context.subscriptions. Removing it is the point of the whole arrangement
+  // when the tab closes on its own -- but during deactivation VS Code is
+  // ITERATING that same array to dispose it, and mutating it mid-iteration
+  // would skip whatever entry slid into the vacated index. So the removal
+  // happens only on the path that is not already inside that walk.
+  private dispose(fromPanel: boolean): void {
+    if (this.disposed) return;
+    this.disposed = true;
+
+    if (fromPanel) {
+      const at = this.contextSubscriptions.indexOf(this.contextEntry);
+      if (at >= 0) this.contextSubscriptions.splice(at, 1);
+    }
+
+    this.unsubscribeChanges?.();
+    this.unsubscribeChanges = undefined;
+    this.disposeConnectionListener();
+    for (const d of this.disposables.splice(0)) d.dispose();
+    ConceptPanel.open_.delete(this.conceptId);
+    // A no-op when the panel is what triggered this; the call matters on the
+    // deactivation path, where the tab is still open and nothing else closes
+    // it. The `disposed` flag above absorbs the onDidDispose that comes back.
+    this.panel.dispose();
   }
 
   // Live refresh. A CDC subscription on this concept means a row written by
@@ -177,7 +267,7 @@ export class ConceptPanel {
   //
   // The reload goes through ConceptPanelState.reset(), the same
   // invalidation path Reload and a connection-state change already use --
-  // it bumps both generation counters, so any page or detail fetch already
+  // it invalidates both Latest guards, so any page or detail fetch already
   // in flight when the event arrives is discarded instead of landing on top
   // of the reload triggered here.
   //
@@ -187,7 +277,15 @@ export class ConceptPanel {
   // subscribe attempt fails.
   private subscribeToChanges(): void {
     const subs = this.connections.subscriptions;
-    if (subs === undefined) return;
+    if (subs === undefined) {
+      // No SubscriptionManager means no live updates, and the panel must say
+      // so rather than look live. This is the constructor's case when a
+      // concept tab is opened while disconnected -- the reconnect listener
+      // has its own else branch for the same condition, and both must set the
+      // notice or the panel is silently static.
+      this.state.setLiveUpdatesDegraded(LIVE_UPDATES_OFFLINE_MESSAGE);
+      return;
+    }
     try {
       this.unsubscribeChanges = subs.subscribeGraph(
         () => {

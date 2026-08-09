@@ -11,6 +11,15 @@ export {
   SECONDARY_NAME_FIELDS,
   STATUS_NAME_FIELDS,
 } from "./displayCard.js";
+
+export {
+  renderTopologyGrid,
+  renderTally,
+  renderDeploymentHistory,
+  type TopologyNodeView,
+  type TallyRowView,
+  type DeploymentHistoryView,
+} from "./cluster.js";
 export type { ConceptLike, DisplayCardHints, RowLike } from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
 

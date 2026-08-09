@@ -127,13 +127,19 @@ type Server struct {
 	// port -- component/grpc can't import app/node-lifecycle). Nil on
 	// non-mesh binaries; the NodeMaintenance handler reports "unavailable".
 	nodeMaintenanceHandler NodeMaintenanceHandler
-	// deployControl backs the streamed DeployControlService bridge
-	// (memql#3311). Set by app bootstrap on the identity node -- the only
-	// binary that constructs a *deploycontrol.Service -- to the very same
-	// instance registered as the unary service, so both transports run one
-	// role gate and one audit write. Nil elsewhere; the DeployControl handler
-	// answers Unimplemented.
-	deployControl DeployControlHandler
+	// deployControlHandler is the DeployControlService implementation the
+	// bridged stream surface dispatches to (memql#3311). app bootstrap wires
+	// it on the identity node with the SAME *deploycontrol.Service instance
+	// registered for the unary service, so the streamed and unary paths share
+	// one gate + one audit logger and cannot drift. Nil elsewhere; the
+	// DeployControl handler answers Unimplemented.
+	deployControlHandler memqlv1.DeployControlServiceServer
+	// automationRunner is the mesh-aware automation invoke path the
+	// RunAutomation surface dispatches to (memql#3310). Set by app bootstrap
+	// on every binary that carries an automation scheduler; nil elsewhere,
+	// where the handler refuses with a message saying so rather than
+	// pretending the surface exists.
+	automationRunner AutomationRunner
 	// clientToolRPC serves the substrate-RPC client-tool return channel per
 	// agent turn (memql#1265). Set by app bootstrap on agent binaries where the
 	// delivery substrate is wired; nil otherwise (legacy ForwardContinuation).
@@ -345,7 +351,8 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		aiForwarder:            s.aiForwarder,
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
-		deployControl:          s.deployControl,
+		deployControlHandler:   s.deployControlHandler,
+		automationRunner:       s.automationRunner,
 		clientToolResultServer: s.clientToolRPC,
 		deliverySubstrate:      s.deliverySubstrate,
 		streamNodeID:           s.streamNodeID,
@@ -645,12 +652,17 @@ type service struct {
 	// NodeMaintenance handler reports "unavailable" when unset.
 	nodeMaintenanceHandler NodeMaintenanceHandler
 
-	// deployControl backs the streamed DeployControlService bridge
-	// (memql#3311). Non-nil on the identity node, holding the SAME
-	// *deploycontrol.Service the unary DeployControlService is registered
-	// with -- one role gate, one audit write, two transports. Nil elsewhere;
-	// handleDeployControl answers Unimplemented.
-	deployControl DeployControlHandler
+	// deployControlHandler is the DeployControlService implementation the
+	// bridged DeployControlMsg surface dispatches to (memql#3311). Non-nil on
+	// the identity node (the same instance the unary service is registered
+	// with); nil elsewhere, where the handler answers Unimplemented.
+	deployControlHandler memqlv1.DeployControlServiceServer
+
+	// automationRunner is the mesh-aware automation invoke path the
+	// RunAutomation surface dispatches to (memql#3310). Non-nil wherever an
+	// automation scheduler is wired; nil elsewhere, where the handler
+	// refuses.
+	automationRunner AutomationRunner
 
 	// transcribeStreams holds the worker-side state for in-flight
 	// streaming transcription sessions, keyed by the caller's
@@ -1216,13 +1228,6 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 	switch envelope.GetPayload().(type) {
 	case *memqlv1.MemqlClientMessage_CreateWorkerToken,
 		*memqlv1.MemqlClientMessage_RevokeWorkerToken,
-		// An account token is a DURABLE credential minted under the
-		// operator's own subject (memql#3322) -- exactly the thing a
-		// walked-away kiosk must not be able to leave behind, and its
-		// revoke sits beside it so a borrowed grant cannot quietly
-		// dismantle the operator's issued set either.
-		*memqlv1.MemqlClientMessage_CreateAccountToken,
-		*memqlv1.MemqlClientMessage_RevokeAccountToken,
 		*memqlv1.MemqlClientMessage_CreateBadge,
 		*memqlv1.MemqlClientMessage_RevokeBadge,
 		*memqlv1.MemqlClientMessage_RevokeCurrentSession,
@@ -1233,10 +1238,23 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		*memqlv1.MemqlClientMessage_DurablePromoteBundle,
 		*memqlv1.MemqlClientMessage_DurableDemoteBundle,
 		*memqlv1.MemqlClientMessage_NodeMaintenance,
-		// Deploy control is cluster state of the most consequential kind
-		// (memql#3311): a walked-away kiosk must never be able to cut, ship,
-		// or roll back a release under a borrowed operator grant.
-		*memqlv1.MemqlClientMessage_DeployControl:
+		// Deploy control (memql#3311) sits in the same bucket as
+		// NodeMaintenance: cutting a version, shipping, or rolling back is
+		// cluster-state management whose effects outlive the grant's TTL
+		// containment by a wide margin. A walked-away kiosk must not be able
+		// to promote a release.
+		*memqlv1.MemqlClientMessage_DeployControl,
+		// Automation run (memql#3310) joins the same bucket: a run executes an
+		// automation's whole action chain server-side -- writes, LLM calls,
+		// downstream automations -- and those effects outlive the grant's TTL
+		// containment exactly as a deploy's do.
+		*memqlv1.MemqlClientMessage_RunAutomation,
+		// Account credentials (memql#3322). A mint hands back a long-lived
+		// bearer -- exactly the thing a walked-away kiosk must not be able to
+		// leave behind -- and its revoke sits beside it so a borrowed grant
+		// cannot quietly dismantle the operator's issued set either.
+		*memqlv1.MemqlClientMessage_CreateAccountToken,
+		*memqlv1.MemqlClientMessage_RevokeAccountToken:
 		return badgeGateRestricted
 	}
 	return badgeGateAllow
@@ -1275,6 +1293,12 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.CallTool.GetRequestId()
 	case *memqlv1.MemqlClientMessage_DeployControl:
 		return p.DeployControl.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RunAutomation:
+		return p.RunAutomation.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CreateAccountToken:
+		return p.CreateAccountToken.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
+		return p.RevokeAccountToken.GetRequestId()
 	}
 	return ""
 }
@@ -1600,13 +1624,18 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// THIS node into Draining on demand via the same #1269 drain mechanism.
 	case *memqlv1.MemqlClientMessage_NodeMaintenance:
 		return s.handleNodeMaintenance(envelope, payload.NodeMaintenance)
-	// Deploy console (memql#3311): the DeployControlService RPCs bridged onto
-	// this stream so WebSocket clients (VS Code extension, memQL portal) can
-	// reach them. Every gate + audit write lives in the wired
-	// *deploycontrol.Service, shared verbatim with the unary path. See
-	// deploy_control_handlers.go.
-	case *memqlv1.MemqlClientMessage_DeployControl:
-		return s.handleDeployControl(envelope, payload.DeployControl)
+	// Automation run (memql#3310): owner/admin-gated; synthesizes a trigger
+	// event for a named automation, dispatches it through the normal
+	// automation path, and streams back a step trace.
+	case *memqlv1.MemqlClientMessage_RunAutomation:
+		return s.handleRunAutomation(envelope, payload.RunAutomation)
+	// Account-token mint / revoke (memql#3322). A credential issued to the
+	// calling USER on behalf of one of their accounts; the account is a
+	// binding, never a subject. See account_token_handlers.go.
+	case *memqlv1.MemqlClientMessage_CreateAccountToken:
+		return s.handleCreateAccountToken(envelope, payload.CreateAccountToken)
+	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
+		return s.handleRevokeAccountToken(envelope, payload.RevokeAccountToken)
 	// Concepts -- schema metadata (Phase 3)
 	case *memqlv1.MemqlClientMessage_ConceptsList:
 		return s.handleConceptsList(envelope, payload.ConceptsList)
@@ -1635,19 +1664,20 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleCreateWorkerToken(envelope, payload.CreateWorkerToken)
 	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
 		return s.handleRevokeWorkerToken(envelope, payload.RevokeWorkerToken)
-	// Account-token mint / revoke (memql#3322). A credential issued to
-	// the calling USER on behalf of one of their accounts; the account
-	// is a binding, never a subject. See account_token_handlers.go.
-	case *memqlv1.MemqlClientMessage_CreateAccountToken:
-		return s.handleCreateAccountToken(envelope, payload.CreateAccountToken)
-	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
-		return s.handleRevokeAccountToken(envelope, payload.RevokeAccountToken)
 	// Badge registration lifecycle (memql#2513); the grant exchange
 	// itself lives on the identity HTTP surface. See badge_handlers.go.
 	case *memqlv1.MemqlClientMessage_CreateBadge:
 		return s.handleCreateBadge(envelope, payload.CreateBadge)
 	case *memqlv1.MemqlClientMessage_RevokeBadge:
 		return s.handleRevokeBadge(envelope, payload.RevokeBadge)
+	// Deploy control bridged off the separate unary DeployControlService so
+	// WebSocket clients -- the VS Code extension and the portal -- can reach
+	// it (memql#3311). The handler stamps the session's access context and
+	// calls the SAME service methods the unary path serves; the role matrix
+	// and the audit write live there, not here. See
+	// deploy_control_handlers.go.
+	case *memqlv1.MemqlClientMessage_DeployControl:
+		return s.handleDeployControl(envelope, payload.DeployControl)
 	// Realtime voice + video (Initiative C). The Go voice-agent
 	// (integrations/voice/agent) speaks these messages while authenticated
 	// as a service account. See voice_agent_handlers.go.

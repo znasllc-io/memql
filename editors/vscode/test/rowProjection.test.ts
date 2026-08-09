@@ -11,7 +11,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { flattenForList } from "../src/webview/rowProjection.js";
+import { flattenForList } from "../src/state/rowProjection.js";
 
 test("flattenForList lifts payload fields to the top level", () => {
   const out = flattenForList({ id: "row-1", payload: { name: "Alice", active: true } });

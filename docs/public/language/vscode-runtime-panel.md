@@ -13,6 +13,11 @@ The memQL extension's activity-bar panel connects VS Code to a running
 cluster: pick a cluster, browse every registered concept, and inspect
 rows without leaving the editor.
 
+Verifying a change to this panel: [VS Code Runtime Panel -- Manual Verification
+Checklist](vscode-runtime-panel-verification.md), which also states what the
+automated `make vscode-test-host` smoke lane covers and what it deliberately
+leaves to a human.
+
 ## Requirements
 
 - A **trusted** workspace. Language features (highlighting, diagnostics,

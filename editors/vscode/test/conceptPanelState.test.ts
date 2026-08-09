@@ -12,7 +12,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { ConceptPanelState } from "../src/webview/conceptPanelState.js";
+import { ConceptPanelState } from "../src/state/conceptPanelState.js";
 
 function deferred<T>(): {
   promise: Promise<T>;

@@ -205,7 +205,12 @@ function renderView({ role = "owner", deployFails, without }: Partial<Harness>, 
   const dispatcher = {
     sendAndWait: vi.fn(async () => {
       if (deployFails) throw new Error("stream closed");
-      return { deployControlResult: { deploymentStatus: DEPLOYMENT_STATUS } };
+      // `ok: true` is load-bearing, not fixture noise: the SDK client treats a
+      // reply without it as a malformed one and throws, deliberately, so that a
+      // protojson-omitted zero value cannot read as success.
+      return {
+        deployControlResult: { ok: true, errorCode: 0, deploymentStatus: DEPLOYMENT_STATUS },
+      };
     }),
   };
 

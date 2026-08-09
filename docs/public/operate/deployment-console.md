@@ -68,6 +68,40 @@ either transport. Actions return their audit event id identically.
 Deployment **history** is deliberately not bridged: `v1:cluster:deployment`
 rows are ordinary concept rows, read with a normal query.
 
+### Reaching the API from a WebSocket client (memql#3311)
+
+`DeployControlService` is a separate **unary** gRPC service mounted on
+the same listener. That is dialable from Go (`sdk/go`'s
+`DeployControlClient`) and from `grpcurl`, but **not from a browser and
+not from any WebSocket client** -- so the VS Code extension and the
+memQL portal, which both speak `/memql/ws`, could not reach the deploy
+surface at all. (The identity portal only sidesteps this by being
+server-rendered.)
+
+Every RPC is therefore also reachable over `MemqlService.Stream` as a
+single bridged envelope pair, `DeployControlMsg` /
+`DeployControlResult`, whose inner `oneof` carries the
+`DeployControlService` request messages verbatim. `sdk/ts` exposes it as
+`DeployControlClient` (`@znasllc-io/memql-sdk-core/deploy`) with the
+same nine methods as the Go client.
+
+Two properties an operator should know:
+
+- **The gate is the same gate**, not a second copy of it. The stream
+  handler stamps the caller's identity and invokes the *same* service
+  methods the unary path serves, so the role matrix below and the audit
+  event hold identically on both surfaces -- and a parity test asserts a
+  denied role gets `PermissionDenied` from both, for every RPC.
+- **Errors ride inside the reply.** A multiplexed stream has no
+  per-message status channel, so a bridged refusal comes back as
+  `error_code` (the canonical gRPC code, e.g. `7` =
+  `PERMISSION_DENIED`) rather than as a stream error. `sdk/ts` turns
+  that back into a thrown `DeployControlError` carrying the code.
+
+Deployment **history** is deliberately not bridged: `v1:cluster:deployment`
+rows stay readable as ordinary concept rows through the normal query
+surface.
+
 ## Owner/admin gating
 
 Every read and every action requires the cluster role **owner** or
@@ -84,7 +118,10 @@ roles get nothing:
   read is never issued, and the action menu does not open.
 - **API:** the deploy-control read and write RPCs independently enforce
   owner/admin server-side, so the gate holds even for a direct API
-  caller -- a non-admin gets `PermissionDenied`.
+  caller -- a non-admin gets `PermissionDenied`. This is one enforcement
+  point, not one per surface: the WebSocket bridge (memql#3311) calls the
+  same service methods, so it cannot admit anyone the unary service
+  refuses.
 
 ## Reading the console
 

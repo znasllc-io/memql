@@ -138,6 +138,12 @@ func (s *server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		SignatureHelpProvider: &protocol.SignatureHelpOptions{
 			TriggerCharacters: signatureHelpTriggerChars,
 		},
+		// Custom (non-LSP) requests this server answers, advertised so a client
+		// can feature-detect rather than call blind and handle MethodNotFound.
+		// See runnable.go.
+		Experimental: map[string]any{
+			capabilityRunnableConstructs: true,
+		},
 	}
 	s.log.Infof("initialize: workspace root=%s", s.root)
 	return protocol.InitializeResult{

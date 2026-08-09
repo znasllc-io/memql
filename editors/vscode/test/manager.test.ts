@@ -344,3 +344,31 @@ test("a reconnect to the same cluster is not undone by the previous connection's
   assert.equal(first.wasClosed, true);
   assert.deepEqual(manager.query, { conn: "second" });
 });
+
+test("an OIDC cluster with no endpoint reports 'not configured', not 'authenticate in the Cockpit'", async () => {
+  // isOidcOnly is checked before needsAuth, so an isOidcOnly that ignored the
+  // endpoint sent the operator to the cockpit to authenticate a cluster that
+  // has nowhere to dial in the first place.
+  let dialed = false;
+  const dial: DialFn = () => {
+    dialed = true;
+    return Promise.resolve(fakeConn("x"));
+  };
+  const manager = new ConnectionManager(dial);
+
+  await manager.connect(
+    cluster("oidc-no-endpoint", {
+      endpoint: "",
+      pat: undefined,
+      issuer: "https://issuer.example.com",
+      clientId: "abc",
+    }),
+  );
+
+  assert.equal(dialed, false);
+  assert.deepEqual(manager.state, {
+    status: "error",
+    clusterName: "oidc-no-endpoint",
+    message: "This cluster is not configured. Set an endpoint and a PAT.",
+  });
+});

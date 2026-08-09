@@ -64,15 +64,15 @@ func (a *App) setupDeployControlService() {
 
 	a.grpcServer.RegisterService(svc.Register)
 
-	// Bridge the SAME service onto MemqlService.Stream (memql#3311). The
-	// unary DeployControlService is undialable from a browser -- and from
-	// anything else speaking the /memql/ws bridge, which tunnels
-	// MemqlService.Stream only -- so the VS Code extension and the memQL
-	// portal could not reach the deploy surface at all. Handing the streamed
-	// bridge THIS instance (not a copy, not a re-implementation) is what makes
-	// the role gate and the audit write literally one code path across both
-	// transports; the parity test in component/grpc holds that down.
-	a.grpcServer.SetDeployControlService(svc)
+	// Bridge the SAME service instance onto MemqlService.Stream (memql#3311).
+	// DeployControlService is unary-only, which a browser -- and every other
+	// WebSocket client -- structurally cannot dial, leaving the VS Code
+	// extension and the portal with no route to the deploy surface. Handing
+	// the bridge the identical *deploycontrol.Service (not a second
+	// construction) is what makes the streamed and unary paths share one role
+	// gate and one audit logger; they cannot drift because there is only one
+	// of each.
+	a.grpcServer.SetDeployControlHandler(svc)
 
 	a.deployControlService = svc
 	// Deploy / RollbackDeployment are automation-driven (#2115 step 6

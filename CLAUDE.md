@@ -94,10 +94,17 @@ memQL/
 │   └── cluster/       (legacy GCP configs removed; AKS manifests live in deploy/k8s/)
 ├── docs/              Documentation
 ├── docker/            Full Docker stack + cluster mode
-└── .claude/
-    ├── config/            Staging environment configuration
-    ├── launch.json        Dev server configurations
-    └── permissions.json   Access control configuration
+└── .claude/           Claude Code project state. This repo is PUBLIC, so
+    │                   .gitignore ignores `.claude/*` and negates back only
+    │                   what should travel with the project (memql#3344)
+    ├── skills/        Project skills -- tracked
+    ├── commands/      Project slash commands -- tracked
+    ├── agents/        Project subagent definitions -- tracked
+    ├── settings.json  Shared project settings -- tracked
+    ├── settings.local.json   Personal permission overrides -- NEVER tracked
+    ├── epics/ prds/   CCPM working state -- not tracked; the durable record is
+    │                  the GitHub Issues CCPM syncs them to
+    └── worktrees/     Local checkouts -- not tracked
 ```
 
 ---

@@ -1,52 +1,46 @@
-// Deploy console client (memql#3311).
+// The typed deploy-control surface -- the TypeScript mirror of
+// sdk/go/client/deploycontrol.go (memql#3311).
 //
-// DeployControlService is a separate UNARY gRPC service mounted on the same
-// listener as MemqlService. sdk/go dials it natively (sdk/go/client/
-// deploycontrol.go); a browser cannot, and neither can anything else speaking
-// `/memql/ws`. The engine therefore bridges all nine RPCs onto
-// MemqlService.Stream behind a single DeployControlMsg envelope, and this
-// module is the typed surface over that bridge -- the TS mirror of the Go
-// client, method for method.
+// The Go SDK dials DeployControlService natively, because it can: the
+// service is a separate UNARY gRPC service mounted on the same listener.
+// A browser cannot dial gRPC at all, and neither can any other WebSocket
+// client, so this surface rides the bridged DeployControlMsg /
+// DeployControlResult pair on MemqlService.Stream instead. The method set
+// and the plain result shapes match the Go client one-for-one so a
+// consumer moving between them is not learning two APIs.
 //
-// AUTHORIZATION IS SERVER-SIDE AND IDENTICAL ON BOTH TRANSPORTS. The bridge
-// calls the same service methods the unary path calls, so the locked role
-// matrix holds here without this file knowing anything about it:
-//
-//   view (deploymentStatus)                 admin / owner
-//   cut + deploy (suggestNextVersion,
-//     cutVersion, deploy)                   developer / admin / owner
-//   roll back (rollbackDeployment)          OWNER ONLY -- not even admin
-//
-// A caller below the floor gets a queryError with code "PermissionDenied",
-// which every function here raises as a DeployControlError carrying that code.
-// Do NOT pre-filter actions on the client as a security measure; hide buttons
-// for UX if you like, but the server is the gate.
-//
-// Every action writes a v1:identity:auditEvent (category `admin`, action
-// `deployment_console_<verb>`) and returns its id in ActionResult.auditEventId.
-//
-// Deployment HISTORY is deliberately not here: v1:cluster:deployment rows are
-// ordinary concept rows -- read them with a normal query rather than through a
-// second, drifting path.
+// AUTHORIZATION IS SERVER-SIDE, ALWAYS. Nothing in this file checks a
+// role. The engine enforces the locked matrix (epic #1871) on the streamed
+// path through the SAME gate the unary path uses -- view is owner/admin,
+// cut + deploy are developer/admin/owner, rollback is owner ONLY, not even
+// admin -- and every action writes a v1:identity:auditEvent whose id comes
+// back on the result. A caller may hide buttons a user cannot use, but
+// that is presentation; the refusal is authoritative and arrives as a
+// DeployControlError with code PERMISSION_DENIED.
 
 import type { Dispatcher } from "../client/dispatcher.js";
 import { newShortId } from "../client/id.js";
-import {
-  readServerPayload,
-  type DeployControlRequestWire,
-  type DeployControlResultPayload,
+import { readServerPayload } from "../client/wire.js";
+import type {
+  DeployControlRequestPayload,
+  DeployControlResultPayload,
+  DeploymentStatusWire,
+  SuggestNextVersionResultWire,
+  DeployActionResultWire,
 } from "../client/wire.js";
 
 // -----------------------------------------------------------------------------
-// Result types (mirror sdk/go/client/deploycontrol.go)
+// Plain result types (no wire shapes leak to consumers)
 // -----------------------------------------------------------------------------
 
+/** One deployed component's pinned image. */
 export interface ComponentDigest {
   name: string;
   digest: string;
   repo: string;
 }
 
+/** The Argo CD application status. */
 export interface ArgoStatus {
   syncStatus: string;
   healthStatus: string;
@@ -55,6 +49,7 @@ export interface ArgoStatus {
   outOfSync: boolean;
 }
 
+/** One Argo Rollout's progressive-delivery state. */
 export interface RolloutStatus {
   name: string;
   kind: string; // "bluegreen" | "canary"
@@ -66,18 +61,21 @@ export interface RolloutStatus {
   latestAnalysisResult: string;
 }
 
+/** One leg of the deploy gate. */
 export interface GateLeg {
   name: string;
   passed: boolean;
   detail: string;
 }
 
+/** The latest deploy-gate outcome. */
 export interface GateResult {
   result: string; // "pass" | "fail" | "unknown"
   legs: GateLeg[];
   ranAt: string;
 }
 
+/** The aggregate per-env deployment view. */
 export interface DeploymentStatus {
   env: string;
   version: string;
@@ -90,16 +88,23 @@ export interface DeploymentStatus {
   gateResult: GateResult;
 }
 
+/**
+ * The uniform return for every write action.
+ *
+ * `ok` is the ACTION's own success, distinct from "the call was
+ * permitted" -- a refused call throws instead of returning ok=false.
+ * `auditEventId` is the v1:identity:auditEvent this action wrote; show it
+ * to the operator and quote it in support threads.
+ */
 export interface ActionResult {
   ok: boolean;
   message: string;
-  // Id of the v1:identity:auditEvent this action wrote. Present on the
-  // streamed path exactly as on the unary one.
   auditEventId: string;
   correlationId: string;
   details: Record<string, string>;
 }
 
+/** The current version plus the three next-version proposals. */
 export interface NextVersionSuggestion {
   currentVersion: string;
   nextMajor: string;
@@ -108,91 +113,269 @@ export interface NextVersionSuggestion {
   source: string; // "deployment" | "overlay" | "none"
 }
 
-export type DeployEnv = "staging" | "prod";
-export type SemverBump = "major" | "minor" | "patch";
+// -----------------------------------------------------------------------------
+// Errors
+// -----------------------------------------------------------------------------
 
-// DeployControlError carries the gRPC status code the server returned, so a
-// caller can distinguish "you are not allowed" (PermissionDenied) from "wrong
-// node" (Unimplemented) or "bad input" (InvalidArgument) without string
-// matching the message.
+/**
+ * Canonical gRPC codes the deploy surface returns, by number. The bridge
+ * carries the code as an int rather than a status error because a
+ * multiplexed stream has no per-message status channel -- see
+ * DeployControlResult in component/grpc/memql.proto.
+ *
+ * Only the codes this surface actually produces are named; anything else
+ * surfaces as its number.
+ */
+const GRPC_CODE_NAMES: Record<number, string> = {
+  0: "OK",
+  3: "INVALID_ARGUMENT",
+  7: "PERMISSION_DENIED",
+  12: "UNIMPLEMENTED",
+  13: "INTERNAL",
+  16: "UNAUTHENTICATED",
+};
+
+/** PERMISSION_DENIED -- the caller's role is below the action's tier. */
+export const CODE_PERMISSION_DENIED = 7;
+/** UNAUTHENTICATED -- the stream carries no resolvable actor. */
+export const CODE_UNAUTHENTICATED = 16;
+/** UNIMPLEMENTED -- this node does not host the deploy-control service. */
+export const CODE_UNIMPLEMENTED = 12;
+
+/**
+ * A refused or failed deploy-control call.
+ *
+ * `code` is the canonical gRPC code the engine returned, so a UI can tell
+ * "you are not allowed to do this" (CODE_PERMISSION_DENIED) apart from
+ * "this node cannot do this" (CODE_UNIMPLEMENTED) and from a genuine
+ * failure, rather than string-matching a message.
+ */
 export class DeployControlError extends Error {
-  readonly code: string;
-  constructor(rpc: string, code: string, message: string) {
-    super(`deploy console: ${rpc}: ${code}: ${message}`);
+  readonly code: number;
+  readonly codeName: string;
+
+  constructor(verb: string, code: number, message: string) {
+    const name = GRPC_CODE_NAMES[code] ?? String(code);
+    super(`deploy console: ${verb}: ${name}: ${message || "(no message)"}`);
     this.name = "DeployControlError";
     this.code = code;
+    this.codeName = name;
+  }
+
+  /** True when the refusal was the role gate, not a failure. */
+  get isPermissionDenied(): boolean {
+    return this.code === CODE_PERMISSION_DENIED;
   }
 }
 
 // -----------------------------------------------------------------------------
-// Transport
+// Client
 // -----------------------------------------------------------------------------
 
-// call sends one DeployControlMsg and returns the correlated result payload.
-// Every method below funnels through it so the error handling -- and the
-// PermissionDenied surface in particular -- is written once.
-async function call(
-  dispatcher: Dispatcher,
-  rpc: string,
-  request: DeployControlRequestWire,
-  signal?: AbortSignal,
-): Promise<DeployControlResultPayload> {
-  if (!dispatcher) throw new Error(`${rpc}: dispatcher is required`);
-  const requestId = newShortId();
-  const reply = await dispatcher.sendAndWait(
-    { deployControl: { requestId, ...request } },
-    signal,
-  );
-  const payload = readServerPayload(reply);
-  if (payload?.kind === "queryError") {
-    throw new DeployControlError(
-      rpc,
-      payload.value.error?.code ?? "Unknown",
-      payload.value.error?.message ?? "(no message)",
+export interface DeployControlCallOptions {
+  signal?: AbortSignal;
+}
+
+/**
+ * A thin typed client over the bridged DeployControlService.
+ *
+ * Construct it from a Dispatcher (the same one Connection exposes) and
+ * call the method you want; each one sends a single DeployControlMsg and
+ * awaits its correlated DeployControlResult.
+ *
+ * NOT here, deliberately: deployment history. `v1:cluster:deployment` rows
+ * are ordinary concept rows -- read them through the normal query surface
+ * rather than a second, divergent path.
+ */
+export class DeployControlClient {
+  constructor(private readonly dispatcher: Dispatcher) {
+    if (!dispatcher) throw new Error("DeployControlClient: dispatcher is required");
+  }
+
+  /** The full deployment picture for env ("staging" | "prod"). */
+  async getDeploymentStatus(
+    env: string,
+    opts: DeployControlCallOptions = {},
+  ): Promise<DeploymentStatus> {
+    requireArg("getDeploymentStatus", "env", env);
+    const res = await this.call("get_status", { getDeploymentStatus: { env } }, opts);
+    return deploymentStatusFromWire(res.deploymentStatus);
+  }
+
+  /**
+   * The latest succeeded deployment's version for env plus the next
+   * major / minor / patch proposals. Read-only, but developer-or-above
+   * gated server-side: it is the read companion to cutVersion.
+   */
+  async suggestNextVersion(
+    env: string,
+    opts: DeployControlCallOptions = {},
+  ): Promise<NextVersionSuggestion> {
+    requireArg("suggestNextVersion", "env", env);
+    const res = await this.call("suggest_version", { suggestNextVersion: { env } }, opts);
+    return nextVersionFromWire(res.nextVersion);
+  }
+
+  /** Deploy a release version into staging. */
+  async deployStaging(version: string, opts: DeployControlCallOptions = {}): Promise<ActionResult> {
+    requireArg("deployStaging", "version", version);
+    return actionFromWire(
+      await this.call("deploy_staging", { deployStaging: { version } }, opts),
     );
   }
-  if (payload?.kind !== "deployControlResult") {
-    throw new Error(`deploy console: ${rpc}: unexpected reply envelope`);
+
+  /** Copy a validated staging release into prod (digest copy, no rebuild). */
+  async promote(version: string, opts: DeployControlCallOptions = {}): Promise<ActionResult> {
+    requireArg("promote", "version", version);
+    return actionFromWire(await this.call("promote", { promote: { version } }, opts));
   }
-  return payload.value;
+
+  /** Revert the overlay commit identified by commitSha for env. */
+  async rollback(
+    env: string,
+    commitSha: string,
+    opts: DeployControlCallOptions = {},
+  ): Promise<ActionResult> {
+    requireArg("rollback", "env", env);
+    requireArg("rollback", "commitSha", commitSha);
+    return actionFromWire(await this.call("rollback", { rollback: { env, commitSha } }, opts));
+  }
+
+  /** Promote or abort an in-flight Argo Rollout (action: "promote" | "abort"). */
+  async rolloutAction(
+    env: string,
+    rollout: string,
+    action: string,
+    opts: DeployControlCallOptions = {},
+  ): Promise<ActionResult> {
+    requireArg("rolloutAction", "env", env);
+    requireArg("rolloutAction", "rollout", rollout);
+    requireArg("rolloutAction", "action", action);
+    return actionFromWire(
+      await this.call("rollout_action", { rolloutAction: { env, rollout, action } }, opts),
+    );
+  }
+
+  /**
+   * Create a new pending deployment record at the chosen next version,
+   * ready for deploy() to ship.
+   *
+   * `bump` selects the semver part to increment off the current version
+   * ("major" | "minor" | "patch"; empty defaults to patch). `version` is
+   * an explicit override -- when set, bump is ignored.
+   */
+  async cutVersion(
+    env: string,
+    bump = "",
+    version = "",
+    opts: DeployControlCallOptions = {},
+  ): Promise<ActionResult> {
+    requireArg("cutVersion", "env", env);
+    return actionFromWire(
+      await this.call(
+        "cut_version",
+        {
+          cutVersion: {
+            env,
+            ...(bump ? { bump } : {}),
+            ...(version ? { version } : {}),
+          },
+        },
+        opts,
+      ),
+    );
+  }
+
+  /**
+   * Ship a cut (pending) deployment record to its target.
+   *
+   * Async by design: a successful result means "accepted + kicked off",
+   * NOT "deployed". Poll getDeploymentStatus or the v1:cluster:deployment
+   * row for the terminal status.
+   */
+  async deploy(deploymentId: string, opts: DeployControlCallOptions = {}): Promise<ActionResult> {
+    requireArg("deploy", "deploymentId", deploymentId);
+    return actionFromWire(await this.call("deploy", { deploy: { deploymentId } }, opts));
+  }
+
+  /**
+   * Redeploy a prior SUCCEEDED deployment's stored image digest -- NOT a
+   * blue-green colour flip. A new deployment record is created pointing at
+   * the historical digest. OWNER-ONLY server-side: an admin caller gets
+   * PERMISSION_DENIED here, by design.
+   *
+   * Async, like deploy(): the result acknowledges the kick-off.
+   */
+  async rollbackDeployment(
+    toDeploymentId: string,
+    opts: DeployControlCallOptions = {},
+  ): Promise<ActionResult> {
+    requireArg("rollbackDeployment", "toDeploymentId", toDeploymentId);
+    return actionFromWire(
+      await this.call("rollback_deployment", { rollbackDeployment: { toDeploymentId } }, opts),
+    );
+  }
+
+  // call sends one bridged request and unwraps its reply, turning a
+  // carried gRPC code into a thrown DeployControlError. `verb` is only
+  // used to label the error.
+  private async call(
+    verb: string,
+    request: DeployControlRequestPayload,
+    opts: DeployControlCallOptions,
+  ): Promise<DeployControlResultPayload> {
+    const requestId = newShortId();
+    const reply = await this.dispatcher.sendAndWait(
+      { deployControl: { requestId, ...request } },
+      opts.signal,
+    );
+    const payload = readServerPayload(reply);
+    if (payload?.kind === "queryError") {
+      throw new Error(`deploy console: ${verb}: ${payload.value.error?.message ?? "(no message)"}`);
+    }
+    if (payload?.kind !== "deployControlResult") {
+      throw new Error(`deploy console: ${verb}: unexpected reply envelope`);
+    }
+    const res = payload.value;
+    // protojson omits zero values, so an absent `ok` is false and an
+    // absent errorCode is 0 (OK). Trusting `ok` alone would read a
+    // malformed reply as success, so a non-zero code is authoritative.
+    const code = res.errorCode ?? 0;
+    if (code !== 0 || res.ok !== true) {
+      throw new DeployControlError(verb, code, res.errorMessage ?? "");
+    }
+    return res;
+  }
+}
+
+function requireArg(method: string, name: string, value: string): void {
+  if (!value) throw new Error(`${method}: ${name} is required`);
 }
 
 // -----------------------------------------------------------------------------
-// Reads
+// wire -> plain translation
 // -----------------------------------------------------------------------------
 
-// getDeploymentStatus returns the full deployment picture for one environment:
-// deployed digests, the resolved release lockfile, Argo CD sync/health,
-// per-rollout progressive-delivery state, and the latest deploy-gate result.
-// Admin/owner gated server-side.
-export async function getDeploymentStatus(
-  dispatcher: Dispatcher,
-  env: DeployEnv,
-  signal?: AbortSignal,
-): Promise<DeploymentStatus> {
-  const res = await call(dispatcher, "getDeploymentStatus", {
-    getDeploymentStatus: { env },
-  }, signal);
-  const s = res.deploymentStatus ?? {};
+function deploymentStatusFromWire(w: DeploymentStatusWire | undefined): DeploymentStatus {
   return {
-    env: s.env ?? "",
-    version: s.version ?? "",
-    engineVersion: s.engineVersion ?? "",
-    validatedAt: s.validatedAt ?? "",
-    gate: s.gate ?? "",
-    components: (s.components ?? []).map((c) => ({
+    env: w?.env ?? "",
+    version: w?.version ?? "",
+    engineVersion: w?.engineVersion ?? "",
+    validatedAt: w?.validatedAt ?? "",
+    gate: w?.gate ?? "",
+    components: (w?.components ?? []).map((c) => ({
       name: c.name ?? "",
       digest: c.digest ?? "",
       repo: c.repo ?? "",
     })),
     argocd: {
-      syncStatus: s.argocd?.syncStatus ?? "",
-      healthStatus: s.argocd?.healthStatus ?? "",
-      lastSyncRevision: s.argocd?.lastSyncRevision ?? "",
-      lastSyncAt: s.argocd?.lastSyncAt ?? "",
-      outOfSync: s.argocd?.outOfSync === true,
+      syncStatus: w?.argocd?.syncStatus ?? "",
+      healthStatus: w?.argocd?.healthStatus ?? "",
+      lastSyncRevision: w?.argocd?.lastSyncRevision ?? "",
+      lastSyncAt: w?.argocd?.lastSyncAt ?? "",
+      outOfSync: w?.argocd?.outOfSync === true,
     },
-    rollouts: (s.rollouts ?? []).map((r) => ({
+    rollouts: (w?.rollouts ?? []).map((r) => ({
       name: r.name ?? "",
       kind: r.kind ?? "",
       phase: r.phase ?? "",
@@ -203,148 +386,34 @@ export async function getDeploymentStatus(
       latestAnalysisResult: r.latestAnalysisResult ?? "",
     })),
     gateResult: {
-      result: s.gateResult?.result ?? "",
-      legs: (s.gateResult?.legs ?? []).map((l) => ({
+      result: w?.gateResult?.result ?? "",
+      legs: (w?.gateResult?.legs ?? []).map((l) => ({
         name: l.name ?? "",
         passed: l.passed === true,
         detail: l.detail ?? "",
       })),
-      ranAt: s.gateResult?.ranAt ?? "",
+      ranAt: w?.gateResult?.ranAt ?? "",
     },
   };
 }
 
-// suggestNextVersion reads the env's current version and proposes the next
-// major / minor / patch semver. Developer/admin/owner gated server-side.
-export async function suggestNextVersion(
-  dispatcher: Dispatcher,
-  env: DeployEnv,
-  signal?: AbortSignal,
-): Promise<NextVersionSuggestion> {
-  const res = await call(dispatcher, "suggestNextVersion", {
-    suggestNextVersion: { env },
-  }, signal);
-  const n = res.nextVersion ?? {};
+function nextVersionFromWire(w: SuggestNextVersionResultWire | undefined): NextVersionSuggestion {
   return {
-    currentVersion: n.currentVersion ?? "",
-    nextMajor: n.nextMajor ?? "",
-    nextMinor: n.nextMinor ?? "",
-    nextPatch: n.nextPatch ?? "",
-    source: n.source ?? "",
+    currentVersion: w?.currentVersion ?? "",
+    nextMajor: w?.nextMajor ?? "",
+    nextMinor: w?.nextMinor ?? "",
+    nextPatch: w?.nextPatch ?? "",
+    source: w?.source ?? "",
   };
 }
 
-// -----------------------------------------------------------------------------
-// Actions
-// -----------------------------------------------------------------------------
-
-function actionResult(res: DeployControlResultPayload): ActionResult {
-  const a = res.action ?? {};
+function actionFromWire(res: DeployControlResultPayload): ActionResult {
+  const w: DeployActionResultWire = res.action ?? {};
   return {
-    ok: a.ok === true,
-    message: a.message ?? "",
-    auditEventId: a.auditEventId ?? "",
-    correlationId: a.correlationId ?? "",
-    details: a.details ?? {},
+    ok: w.ok === true,
+    message: w.message ?? "",
+    auditEventId: w.auditEventId ?? "",
+    correlationId: w.correlationId ?? "",
+    details: w.details ?? {},
   };
-}
-
-// deployStaging assembles + applies a release into the staging overlay.
-export async function deployStaging(
-  dispatcher: Dispatcher,
-  version: string,
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(
-    await call(dispatcher, "deployStaging", { deployStaging: { version } }, signal),
-  );
-}
-
-// promote copies a validated staging release into the prod overlay (digest
-// copy, no rebuild).
-export async function promote(
-  dispatcher: Dispatcher,
-  version: string,
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(await call(dispatcher, "promote", { promote: { version } }, signal));
-}
-
-// rollback reverts the overlay commit identified by commitSha for env.
-export async function rollback(
-  dispatcher: Dispatcher,
-  env: DeployEnv,
-  commitSha: string,
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(
-    await call(dispatcher, "rollback", { rollback: { env, commitSha } }, signal),
-  );
-}
-
-// rolloutAction promotes or aborts an in-flight Argo Rollout.
-export async function rolloutAction(
-  dispatcher: Dispatcher,
-  env: DeployEnv,
-  rollout: string,
-  action: "promote" | "abort",
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(
-    await call(dispatcher, "rolloutAction", { rolloutAction: { env, rollout, action } }, signal),
-  );
-}
-
-export interface CutVersionArgs {
-  env: DeployEnv;
-  // bump selects the semver part to increment off the current version.
-  // Ignored when version is set; defaults to "patch" server-side.
-  bump?: SemverBump;
-  // version is an explicit clean-semver override. When set, bump is ignored.
-  version?: string;
-  signal?: AbortSignal;
-}
-
-// cutVersion creates a new pending v1:cluster:deployment record at the chosen
-// next version with the resolved image digest -- ready for deploy() to ship.
-// Developer/admin/owner gated server-side.
-export async function cutVersion(
-  dispatcher: Dispatcher,
-  args: CutVersionArgs,
-): Promise<ActionResult> {
-  return actionResult(
-    await call(dispatcher, "cutVersion", {
-      cutVersion: {
-        env: args.env,
-        ...(args.bump ? { bump: args.bump } : {}),
-        ...(args.version ? { version: args.version } : {}),
-      },
-    }, args.signal),
-  );
-}
-
-// deploy ships a cut (pending) deployment record to its target, selecting the
-// driver by the record's stored provider. Developer/admin/owner gated
-// server-side. The RPC returns an async ack; poll getDeploymentStatus or the
-// v1:cluster:deployment row for resolution.
-export async function deploy(
-  dispatcher: Dispatcher,
-  deploymentId: string,
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(await call(dispatcher, "deploy", { deploy: { deploymentId } }, signal));
-}
-
-// rollbackDeployment redeploys a prior SUCCEEDED deployment's stored image
-// digest through the same driver -- NOT a blue-green color flip. A new
-// deployment record is created pointing at the historical digest. OWNER ONLY
-// server-side: an admin caller gets PermissionDenied, by design.
-export async function rollbackDeployment(
-  dispatcher: Dispatcher,
-  toDeploymentId: string,
-  signal?: AbortSignal,
-): Promise<ActionResult> {
-  return actionResult(
-    await call(dispatcher, "rollbackDeployment", { rollbackDeployment: { toDeploymentId } }, signal),
-  );
 }

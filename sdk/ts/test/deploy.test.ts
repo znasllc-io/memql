@@ -1,35 +1,35 @@
-// Mock-dispatcher tests for the deploy console surface (memql#3311):
-// the nine DeployControlService RPCs bridged onto MemqlService.Stream.
+// Mock-dispatcher tests for the deploy-control surface (memql#3311) --
+// the nine DeployControlService RPCs bridged onto MemqlService.Stream so
+// a WebSocket client can reach them at all.
 //
-// Two things matter here and nothing else does. First, each method must emit
-// the RIGHT arm of the DeployControlMsg request oneof -- a client that sends
-// `promote` when the caller asked for `deployStaging` ships a release to the
-// wrong environment. Second, a server denial must surface as a
-// DeployControlError carrying the gRPC code verbatim, so a portal can tell
-// "you are not allowed" from "wrong node" without string matching. The gate
-// itself is server-side and tested in component/grpc's parity suite; this
-// suite only proves the client does not swallow or mistranslate its verdict.
+// Two things matter here beyond the usual envelope/unwrap coverage.
+//
+// First, the ENVELOPE SHAPE. Every method must land in its own inner
+// oneof field: the engine dispatches on that discriminant, so a method
+// wired to the wrong field would silently invoke a different RPC -- a
+// promote firing a rollback is not a bug you want to find in staging.
+//
+// Second, the REFUSAL. The gate is server-side and authoritative; the
+// client's whole job on a denial is to surface it faithfully as a
+// DeployControlError carrying the gRPC code, so a UI can tell "you may
+// not do this" apart from "this failed". Nothing in the SDK checks a
+// role, and these tests assume nothing does.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  getDeploymentStatus,
-  suggestNextVersion,
-  deployStaging,
-  promote,
-  rollback,
-  rolloutAction,
-  cutVersion,
-  deploy,
-  rollbackDeployment,
+  DeployControlClient,
   DeployControlError,
+  CODE_PERMISSION_DENIED,
+  CODE_UNIMPLEMENTED,
 } from "../src/deploy/deployControl.js";
 import type { Dispatcher } from "../src/client/dispatcher.js";
 import type { ClientMessage, ServerMessage } from "../src/client/wire.js";
 
-// MockDispatcher mirrors the stand-in used by identity.test.ts. Kept local
-// rather than shared so each suite stays self-contained.
+// MockDispatcher mirrors the stand-in used by identity.test.ts: only the
+// methods this surface touches, kept local so each test file stays
+// self-contained.
 class MockDispatcher {
   readonly sent: Array<{ msg: ClientMessage; messageId: string }> = [];
   private pendingReplies = new Map<string, (msg: ServerMessage) => void>();
@@ -63,6 +63,10 @@ class MockDispatcher {
     });
   }
 
+  registerStream(_requestId: string, _handler: (msg: ServerMessage) => void): () => void {
+    return () => {};
+  }
+
   reply(payload: Record<string, unknown>): void {
     const last = this.sent.at(-1);
     if (!last) throw new Error("MockDispatcher.reply: nothing sent yet");
@@ -72,75 +76,181 @@ class MockDispatcher {
     resolver({ correlateTo: last.messageId, ...payload } as ServerMessage);
   }
 
-  lastDeployControl(): Record<string, unknown> {
+  lastSent(): ClientMessage {
     const last = this.sent.at(-1);
-    if (!last) throw new Error("MockDispatcher.lastDeployControl: nothing sent yet");
-    const env = last.msg as unknown as { deployControl?: Record<string, unknown> };
-    if (!env.deployControl) throw new Error("last envelope is not a deployControl");
-    return env.deployControl;
-  }
-
-  lastRequestId(): string {
-    const rid = this.lastDeployControl().requestId;
-    if (typeof rid !== "string" || !rid) throw new Error("no requestId on the envelope");
-    return rid;
-  }
-
-  asDispatcher(): Dispatcher {
-    return this as unknown as Dispatcher;
+    if (!last) throw new Error("MockDispatcher.lastSent: nothing sent yet");
+    return last.msg;
   }
 }
 
-// ---------------------------------------------------------------------
-// Reads
-// ---------------------------------------------------------------------
-
-test("getDeploymentStatus -- sends the read arm and flattens the reply", async () => {
+function newClient(): { mock: MockDispatcher; client: DeployControlClient } {
   const mock = new MockDispatcher();
-  const promise = getDeploymentStatus(mock.asDispatcher(), "prod");
+  return { mock, client: new DeployControlClient(mock as unknown as Dispatcher) };
+}
 
-  assert.deepEqual(mock.lastDeployControl().getDeploymentStatus, { env: "prod" });
+// deployControlPayload pulls the outbound envelope's deployControl block
+// so a test can assert on the discriminant and its arguments.
+function deployControlPayload(mock: MockDispatcher): Record<string, unknown> {
+  const sent = mock.lastSent() as unknown as Record<string, unknown>;
+  const dc = sent.deployControl as Record<string, unknown> | undefined;
+  assert.ok(dc, "envelope must carry a deployControl payload");
+  return dc;
+}
 
-  mock.reply({
-    deployControlResult: {
-      requestId: mock.lastRequestId(),
-      rpc: "GetDeploymentStatus",
+// okReply wraps a successful result the way the engine does: ok=true and
+// no errorCode (protojson omits the zero).
+function okReply(result: Record<string, unknown>): Record<string, unknown> {
+  return { deployControlResult: { requestId: "r", ok: true, ...result } };
+}
+
+// -----------------------------------------------------------------------------
+// Envelope shape -- one case per RPC
+// -----------------------------------------------------------------------------
+
+// Every method must set its OWN inner oneof field. The engine routes on
+// that discriminant, so this table is what keeps a method from invoking a
+// different RPC than its name promises.
+const envelopeCases: Array<{
+  name: string;
+  call: (c: DeployControlClient) => Promise<unknown>;
+  field: string;
+  args: Record<string, unknown>;
+}> = [
+  {
+    name: "getDeploymentStatus",
+    call: (c) => c.getDeploymentStatus("staging"),
+    field: "getDeploymentStatus",
+    args: { env: "staging" },
+  },
+  {
+    name: "suggestNextVersion",
+    call: (c) => c.suggestNextVersion("prod"),
+    field: "suggestNextVersion",
+    args: { env: "prod" },
+  },
+  {
+    name: "deployStaging",
+    call: (c) => c.deployStaging("1.2.3"),
+    field: "deployStaging",
+    args: { version: "1.2.3" },
+  },
+  {
+    name: "promote",
+    call: (c) => c.promote("1.2.3"),
+    field: "promote",
+    args: { version: "1.2.3" },
+  },
+  {
+    name: "rollback",
+    call: (c) => c.rollback("prod", "abc1234"),
+    field: "rollback",
+    args: { env: "prod", commitSha: "abc1234" },
+  },
+  {
+    name: "rolloutAction",
+    call: (c) => c.rolloutAction("staging", "bff", "abort"),
+    field: "rolloutAction",
+    args: { env: "staging", rollout: "bff", action: "abort" },
+  },
+  {
+    name: "cutVersion",
+    call: (c) => c.cutVersion("prod", "minor"),
+    field: "cutVersion",
+    args: { env: "prod", bump: "minor" },
+  },
+  {
+    name: "deploy",
+    call: (c) => c.deploy("dep-1"),
+    field: "deploy",
+    args: { deploymentId: "dep-1" },
+  },
+  {
+    name: "rollbackDeployment",
+    call: (c) => c.rollbackDeployment("dep-9"),
+    field: "rollbackDeployment",
+    args: { toDeploymentId: "dep-9" },
+  },
+];
+
+for (const c of envelopeCases) {
+  test(`deployControl -- ${c.name} sends its own request field`, async () => {
+    const { mock, client } = newClient();
+    const pending = c.call(client);
+
+    const dc = deployControlPayload(mock);
+    assert.equal(typeof dc.requestId, "string");
+    assert.ok((dc.requestId as string).length > 0, "requestId must be set for correlation");
+    assert.deepEqual(dc[c.field], c.args);
+
+    // Exactly one request field, so the engine's oneof is unambiguous.
+    const requestFields = Object.keys(dc).filter((k) => k !== "requestId");
+    assert.deepEqual(requestFields, [c.field]);
+
+    mock.reply(okReply({ action: { ok: true }, deploymentStatus: undefined, nextVersion: {} }));
+    await pending;
+  });
+}
+
+// -----------------------------------------------------------------------------
+// Result unwrapping
+// -----------------------------------------------------------------------------
+
+test("deployControl -- getDeploymentStatus maps the full status", async () => {
+  const { mock, client } = newClient();
+  const pending = client.getDeploymentStatus("prod");
+  mock.reply(
+    okReply({
       deploymentStatus: {
         env: "prod",
         version: "1.4.2",
-        engineVersion: "1.4.0",
-        components: [{ name: "acrmemql.azurecr.io/memql-bff", digest: "sha256:abc" }],
-        argocd: { syncStatus: "Synced", outOfSync: false },
-        rollouts: [{ name: "bff", kind: "bluegreen", phase: "Healthy" }],
-        gateResult: { result: "pass", legs: [{ name: "readyz", passed: true }] },
+        engineVersion: "0.9.40",
+        validatedAt: "2026-08-01T00:00:00Z",
+        gate: "pass:gate-7",
+        components: [{ name: "acrmemql.azurecr.io/memql-bff", digest: "sha256:abc", repo: "memql" }],
+        argocd: { syncStatus: "Synced", healthStatus: "Healthy", outOfSync: false },
+        rollouts: [{ name: "bff", kind: "bluegreen", phase: "Healthy", currentStep: 2 }],
+        gateResult: { result: "pass", legs: [{ name: "readyz", passed: true }], ranAt: "2026-08-01T00:01:00Z" },
       },
-    },
-  });
+    }),
+  );
 
-  const s = await promise;
-  assert.equal(s.env, "prod");
-  assert.equal(s.version, "1.4.2");
-  assert.equal(s.components.length, 1);
-  assert.equal(s.components[0]?.digest, "sha256:abc");
-  // Absent protojson fields default rather than surfacing as undefined.
-  assert.equal(s.components[0]?.repo, "");
-  assert.equal(s.argocd.syncStatus, "Synced");
-  assert.equal(s.argocd.outOfSync, false);
-  assert.equal(s.rollouts[0]?.canaryWeight, 0);
-  assert.equal(s.gateResult.result, "pass");
-  assert.equal(s.gateResult.legs[0]?.passed, true);
+  const status = await pending;
+  assert.equal(status.env, "prod");
+  assert.equal(status.version, "1.4.2");
+  assert.equal(status.engineVersion, "0.9.40");
+  assert.equal(status.components.length, 1);
+  assert.equal(status.components[0]?.digest, "sha256:abc");
+  assert.equal(status.argocd.syncStatus, "Synced");
+  assert.equal(status.argocd.outOfSync, false);
+  assert.equal(status.rollouts[0]?.kind, "bluegreen");
+  // protojson omits zero values, so an absent canaryWeight must read 0,
+  // not undefined -- a UI rendering it would otherwise print "undefined".
+  assert.equal(status.rollouts[0]?.canaryWeight, 0);
+  assert.equal(status.rollouts[0]?.currentStep, 2);
+  assert.equal(status.gateResult.result, "pass");
+  assert.equal(status.gateResult.legs[0]?.passed, true);
 });
 
-test("suggestNextVersion -- sends the read arm and flattens the proposals", async () => {
-  const mock = new MockDispatcher();
-  const promise = suggestNextVersion(mock.asDispatcher(), "staging");
+test("deployControl -- an empty status reply reads as empty, not undefined", async () => {
+  const { mock, client } = newClient();
+  const pending = client.getDeploymentStatus("staging");
+  // The engine returns a DeploymentStatus with only env set for a staging
+  // overlay carrying no promotion provenance; protojson drops the rest.
+  mock.reply(okReply({ deploymentStatus: { env: "staging" } }));
 
-  assert.deepEqual(mock.lastDeployControl().suggestNextVersion, { env: "staging" });
+  const status = await pending;
+  assert.equal(status.version, "");
+  assert.deepEqual(status.components, []);
+  assert.deepEqual(status.rollouts, []);
+  assert.equal(status.argocd.outOfSync, false);
+  assert.deepEqual(status.gateResult.legs, []);
+});
 
-  mock.reply({
-    deployControlResult: {
-      requestId: mock.lastRequestId(),
-      rpc: "SuggestNextVersion",
+test("deployControl -- suggestNextVersion maps the proposals", async () => {
+  const { mock, client } = newClient();
+  const pending = client.suggestNextVersion("prod");
+  mock.reply(
+    okReply({
       nextVersion: {
         currentVersion: "1.2.3",
         nextMajor: "2.0.0",
@@ -148,166 +258,171 @@ test("suggestNextVersion -- sends the read arm and flattens the proposals", asyn
         nextPatch: "1.2.4",
         source: "deployment",
       },
-    },
-  });
+    }),
+  );
 
-  const n = await promise;
-  assert.equal(n.currentVersion, "1.2.3");
-  assert.equal(n.nextPatch, "1.2.4");
-  assert.equal(n.source, "deployment");
+  const next = await pending;
+  assert.equal(next.currentVersion, "1.2.3");
+  assert.equal(next.nextMajor, "2.0.0");
+  assert.equal(next.nextMinor, "1.3.0");
+  assert.equal(next.nextPatch, "1.2.4");
+  assert.equal(next.source, "deployment");
 });
 
-// ---------------------------------------------------------------------
-// Actions -- each must emit its OWN request arm
-// ---------------------------------------------------------------------
-
-test("each action emits the matching request arm", async () => {
-  const cases: Array<{
-    name: string;
-    run: (d: Dispatcher) => Promise<unknown>;
-    expect: Record<string, unknown>;
-  }> = [
-    {
-      name: "deployStaging",
-      run: (d) => deployStaging(d, "1.2.3"),
-      expect: { deployStaging: { version: "1.2.3" } },
-    },
-    {
-      name: "promote",
-      run: (d) => promote(d, "1.2.3"),
-      expect: { promote: { version: "1.2.3" } },
-    },
-    {
-      name: "rollback",
-      run: (d) => rollback(d, "prod", "deadbeef"),
-      expect: { rollback: { env: "prod", commitSha: "deadbeef" } },
-    },
-    {
-      name: "rolloutAction",
-      run: (d) => rolloutAction(d, "prod", "bff", "abort"),
-      expect: { rolloutAction: { env: "prod", rollout: "bff", action: "abort" } },
-    },
-    {
-      name: "cutVersion",
-      run: (d) => cutVersion(d, { env: "prod", bump: "minor" }),
-      expect: { cutVersion: { env: "prod", bump: "minor" } },
-    },
-    {
-      name: "deploy",
-      run: (d) => deploy(d, "v1:cluster:deployment.d1"),
-      expect: { deploy: { deploymentId: "v1:cluster:deployment.d1" } },
-    },
-    {
-      name: "rollbackDeployment",
-      run: (d) => rollbackDeployment(d, "v1:cluster:deployment.d0"),
-      expect: { rollbackDeployment: { toDeploymentId: "v1:cluster:deployment.d0" } },
-    },
-  ];
-
-  for (const c of cases) {
-    const mock = new MockDispatcher();
-    const promise = c.run(mock.asDispatcher());
-    const sent = mock.lastDeployControl();
-    for (const [arm, body] of Object.entries(c.expect)) {
-      assert.deepEqual(sent[arm], body, `${c.name} must send the ${arm} arm`);
-    }
-    mock.reply({
-      deployControlResult: {
-        requestId: mock.lastRequestId(),
-        action: { ok: true, message: "done", auditEventId: "aud-1", correlationId: "aud-1" },
-      },
-    });
-    await promise;
-  }
-});
-
-test("an action result carries the audit event id, as the unary path does", async () => {
-  const mock = new MockDispatcher();
-  const promise = cutVersion(mock.asDispatcher(), { env: "prod", bump: "patch" });
-  mock.reply({
-    deployControlResult: {
-      requestId: mock.lastRequestId(),
-      rpc: "CutVersion",
+test("deployControl -- an action returns its audit event id", async () => {
+  const { mock, client } = newClient();
+  const pending = client.promote("1.2.3");
+  mock.reply(
+    okReply({
       action: {
         ok: true,
-        message: "cut 1.2.4",
-        auditEventId: "aud-xyz",
-        correlationId: "aud-xyz",
-        details: { env: "prod", version: "1.2.4" },
+        message: "SUCCESS: promoted",
+        auditEventId: "aud-42",
+        correlationId: "aud-42",
+        details: { env: "prod", version: "1.2.3" },
       },
-    },
-  });
-  const r = await promise;
-  assert.equal(r.ok, true);
-  assert.equal(r.auditEventId, "aud-xyz");
-  assert.equal(r.details.version, "1.2.4");
+    }),
+  );
+
+  const res = await pending;
+  assert.equal(res.ok, true);
+  assert.equal(res.auditEventId, "aud-42", "the audit id must reach the operator");
+  assert.equal(res.correlationId, "aud-42");
+  assert.deepEqual(res.details, { env: "prod", version: "1.2.3" });
 });
 
-test("cutVersion -- an explicit version omits bump", async () => {
-  const mock = new MockDispatcher();
-  const promise = cutVersion(mock.asDispatcher(), { env: "prod", version: "2.0.0" });
-  assert.deepEqual(mock.lastDeployControl().cutVersion, { env: "prod", version: "2.0.0" });
-  mock.reply({
-    deployControlResult: { requestId: mock.lastRequestId(), action: { ok: true } },
-  });
-  await promise;
+test("deployControl -- an action that RAN and FAILED resolves with ok=false", async () => {
+  // The call was permitted, so it is not an error; the action itself
+  // failed. Collapsing these two would leave a UI unable to say whether
+  // the operator lacked permission or the deploy broke.
+  const { mock, client } = newClient();
+  const pending = client.deployStaging("1.2.3");
+  mock.reply(okReply({ action: { ok: false, message: "promote.sh: exit 1", auditEventId: "aud-9" } }));
+
+  const res = await pending;
+  assert.equal(res.ok, false);
+  assert.equal(res.auditEventId, "aud-9", "a failed action is still audited");
+  assert.match(res.message, /exit 1/);
 });
 
-// ---------------------------------------------------------------------
-// Denials
-// ---------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Refusals
+// -----------------------------------------------------------------------------
 
-test("a PermissionDenied denial raises DeployControlError with the code intact", async () => {
-  const mock = new MockDispatcher();
-  const promise = rollbackDeployment(mock.asDispatcher(), "d0");
+test("deployControl -- PERMISSION_DENIED surfaces as a typed error", async () => {
+  const { mock, client } = newClient();
+  const pending = client.rollbackDeployment("dep-9");
   mock.reply({
-    queryError: {
-      requestId: mock.lastRequestId(),
-      error: {
-        code: "PermissionDenied",
-        message: "deploy console: rollback_deployment requires owner role (have \"admin\")",
-      },
+    deployControlResult: {
+      requestId: "r",
+      errorCode: CODE_PERMISSION_DENIED,
+      errorMessage: "deploy console: rollback_deployment requires owner role (have \"admin\")",
     },
   });
-  await assert.rejects(promise, (err: unknown) => {
+
+  await assert.rejects(pending, (err: unknown) => {
     assert.ok(err instanceof DeployControlError);
-    // The code must round-trip verbatim: a portal decides whether to show
-    // "ask an owner" vs "wrong node" off this, never off the message text.
-    assert.equal(err.code, "PermissionDenied");
+    assert.equal(err.code, CODE_PERMISSION_DENIED);
+    assert.equal(err.codeName, "PERMISSION_DENIED");
+    assert.equal(err.isPermissionDenied, true);
+    assert.match(err.message, /requires owner role/);
     return true;
   });
 });
 
-test("Unimplemented (wrong node) is distinguishable from a denial", async () => {
-  const mock = new MockDispatcher();
-  const promise = getDeploymentStatus(mock.asDispatcher(), "prod");
+test("deployControl -- UNIMPLEMENTED (node has no deploy service) is distinguishable", async () => {
+  const { mock, client } = newClient();
+  const pending = client.promote("1.0.0");
   mock.reply({
-    queryError: {
-      requestId: mock.lastRequestId(),
-      error: {
-        code: "Unimplemented",
-        message: "deploy console: this node does not host DeployControlService",
-      },
-    },
+    deployControlResult: { requestId: "r", errorCode: CODE_UNIMPLEMENTED, errorMessage: "no deploy-control service" },
   });
-  await assert.rejects(promise, (err: unknown) => {
+
+  await assert.rejects(pending, (err: unknown) => {
     assert.ok(err instanceof DeployControlError);
-    assert.equal(err.code, "Unimplemented");
+    assert.equal(err.code, CODE_UNIMPLEMENTED);
+    assert.equal(err.isPermissionDenied, false, "a missing service is not a permission problem");
     return true;
   });
 });
 
-test("an unexpected reply envelope is rejected rather than silently coerced", async () => {
-  const mock = new MockDispatcher();
-  const promise = deploy(mock.asDispatcher(), "d1");
-  mock.reply({ myAccessResult: { requestId: mock.lastRequestId() } });
-  await assert.rejects(promise, /unexpected reply envelope/);
+test("deployControl -- a reply with neither ok nor an error code is rejected", async () => {
+  // Trusting `ok` alone would read a malformed / truncated reply as a
+  // successful action. A missing ok is not a success.
+  const { mock, client } = newClient();
+  const pending = client.deploy("dep-1");
+  mock.reply({ deployControlResult: { requestId: "r" } });
+
+  await assert.rejects(pending, (err: unknown) => {
+    assert.ok(err instanceof DeployControlError);
+    return true;
+  });
 });
 
-test("an AbortSignal cancels an in-flight call", async () => {
-  const mock = new MockDispatcher();
-  const ac = new AbortController();
-  const promise = promote(mock.asDispatcher(), "1.2.3", ac.signal);
-  ac.abort();
-  await assert.rejects(promise, /aborted/);
+test("deployControl -- a queryError reply surfaces as an error", async () => {
+  const { mock, client } = newClient();
+  const pending = client.cutVersion("prod", "patch");
+  mock.reply({ queryError: { requestId: "r", error: { code: "internal", message: "boom" } } });
+
+  await assert.rejects(pending, /deploy console: cut_version: boom/);
+});
+
+test("deployControl -- an unexpected reply envelope is rejected", async () => {
+  const { mock, client } = newClient();
+  const pending = client.promote("1.0.0");
+  mock.reply({ myAccessResult: { userId: "u1" } });
+
+  await assert.rejects(pending, /unexpected reply envelope/);
+});
+
+// -----------------------------------------------------------------------------
+// Input validation + cancellation
+// -----------------------------------------------------------------------------
+
+test("deployControl -- required arguments are validated before sending", async () => {
+  const { mock, client } = newClient();
+  await assert.rejects(client.getDeploymentStatus(""), /env is required/);
+  await assert.rejects(client.suggestNextVersion(""), /env is required/);
+  await assert.rejects(client.deployStaging(""), /version is required/);
+  await assert.rejects(client.promote(""), /version is required/);
+  await assert.rejects(client.rollback("", "sha"), /env is required/);
+  await assert.rejects(client.rollback("prod", ""), /commitSha is required/);
+  await assert.rejects(client.rolloutAction("", "bff", "promote"), /env is required/);
+  await assert.rejects(client.rolloutAction("prod", "", "promote"), /rollout is required/);
+  await assert.rejects(client.rolloutAction("prod", "bff", ""), /action is required/);
+  await assert.rejects(client.cutVersion(""), /env is required/);
+  await assert.rejects(client.deploy(""), /deploymentId is required/);
+  await assert.rejects(client.rollbackDeployment(""), /toDeploymentId is required/);
+  assert.equal(mock.sent.length, 0, "a rejected argument must not reach the wire");
+});
+
+test("deployControl -- cutVersion omits empty bump/version rather than sending blanks", async () => {
+  // The engine defaults an absent bump to patch. Sending "" instead of
+  // omitting it is the same on this wire, but the envelope should say
+  // what the caller meant.
+  const { mock, client } = newClient();
+  const pending = client.cutVersion("staging");
+  assert.deepEqual(deployControlPayload(mock).cutVersion, { env: "staging" });
+  mock.reply(okReply({ action: { ok: true } }));
+  await pending;
+
+  const explicit = client.cutVersion("staging", "", "2.0.0");
+  assert.deepEqual(deployControlPayload(mock).cutVersion, { env: "staging", version: "2.0.0" });
+  mock.reply(okReply({ action: { ok: true } }));
+  await explicit;
+});
+
+test("deployControl -- an AbortSignal cancels an in-flight call", async () => {
+  const { mock, client } = newClient();
+  const ctrl = new AbortController();
+  const pending = client.getDeploymentStatus("prod", { signal: ctrl.signal });
+  assert.equal(mock.sent.length, 1);
+  ctrl.abort();
+  await assert.rejects(pending, /aborted/);
+});
+
+test("deployControl -- a dispatcher is required", () => {
+  assert.throws(
+    () => new DeployControlClient(undefined as unknown as Dispatcher),
+    /dispatcher is required/,
+  );
 });

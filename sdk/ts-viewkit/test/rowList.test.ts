@@ -96,3 +96,27 @@ test("rowDisplayId prefers id and tolerates a missing one", () => {
   assert.equal(rowDisplayId({ id: "a1" }), "a1");
   assert.equal(rowDisplayId({}), "");
 });
+
+// A non-string `id` is reachable, not theoretical: RowLike is
+// Record<string, unknown>, rowProjection merges payload fields into the same
+// flat object the row intrinsics live in, and a concept is free to carry a
+// numeric or object `id` in its payload. rowDisplayId must yield "" rather
+// than a stringified value, because the result becomes `data-row-id` and is
+// handed straight back to getRowByConceptAndId -- a "3" that was never a row
+// id resolves the wrong row or none at all, silently. Empty is the honest
+// answer, and renderRowList's primary slot falls back to the display card.
+test("rowDisplayId rejects a non-string id rather than stringifying it", () => {
+  assert.equal(rowDisplayId({ id: 3 }), "", "a numeric id must not become \"3\"");
+  assert.equal(rowDisplayId({ id: true }), "");
+  assert.equal(rowDisplayId({ id: null }), "");
+  assert.equal(rowDisplayId({ id: undefined }), "");
+  assert.equal(rowDisplayId({ id: { nested: "a1" } }), "");
+  assert.equal(rowDisplayId({ id: ["a1"] }), "");
+});
+
+test("a row with a non-string id renders with an empty data-row-id, not a coerced one", () => {
+  const html = renderToHtml(renderRowList([{ id: 3, name: "Sofia" }], AGENT));
+  assert.match(html, /data-row-id=""/);
+  assert.doesNotMatch(html, /data-row-id="3"/);
+  assert.match(html, /vk-row-primary">Sofia</, "the display card still labels the row");
+});

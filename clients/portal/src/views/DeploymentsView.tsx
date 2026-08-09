@@ -5,7 +5,7 @@ import {
   TABLE_ELEMENT,
   TIMELINE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
-import type { DeployEnv } from "@znasllc-io/memql-sdk-core/deploy";
+import type { DeployEnv } from "../deploy/useDeployConsole";
 
 import {
   COMPONENT_CONCEPT,

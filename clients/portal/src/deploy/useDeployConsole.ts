@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Role } from "@znasllc-io/memql-sdk-core/client";
 import {
+  DeployControlClient,
   DeployControlError,
-  cutVersion,
-  deploy as deployRelease,
-  getDeploymentStatus,
-  rollbackDeployment,
-  type DeployEnv,
   type DeploymentStatus,
-  type SemverBump,
 } from "@znasllc-io/memql-sdk-core/deploy";
+
+// The two vocabularies this console speaks, declared here because the SDK
+// takes them as plain strings. Narrowing them locally keeps a typo out of a
+// call the server would reject, without asking the SDK to model an enum the
+// wire does not carry.
+export type DeployEnv = "staging" | "prod";
+export type SemverBump = "major" | "minor" | "patch";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useMyAccess } from "../cluster/useMyAccess";
@@ -116,7 +118,8 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
     setLoading(true);
     setError("");
 
-    void getDeploymentStatus(dispatcher, env, controller.signal)
+    void new DeployControlClient(dispatcher)
+      .getDeploymentStatus(env, { signal: controller.signal })
       .then((next) => {
         if (live) setStatus(next);
       })
@@ -161,18 +164,24 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
   const refresh = useCallback(() => setEpoch((n) => n + 1), []);
 
   const cut = useCallback(
-    (bump: SemverBump) => run(dispatcher ? cutVersion(dispatcher, { env, bump }) : null),
+    (bump: SemverBump) =>
+      run(dispatcher ? new DeployControlClient(dispatcher).cutVersion(env, bump) : null),
     [dispatcher, env, run],
   );
 
   const ship = useCallback(
-    (deploymentId: string) => run(dispatcher ? deployRelease(dispatcher, deploymentId) : null),
+    (deploymentId: string) =>
+      run(dispatcher ? new DeployControlClient(dispatcher).deploy(deploymentId) : null),
     [dispatcher, run],
   );
 
   const rollBack = useCallback(
     (toDeploymentId: string) =>
-      run(dispatcher ? rollbackDeployment(dispatcher, toDeploymentId) : null),
+      run(
+        dispatcher
+          ? new DeployControlClient(dispatcher).rollbackDeployment(toDeploymentId)
+          : null,
+      ),
     [dispatcher, run],
   );
 
