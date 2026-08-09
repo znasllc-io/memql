@@ -431,16 +431,14 @@ func (a *App) integrationsIdentity() {
 
 	svc.SetWebMounter(webSrv)
 
-	// What is left of the admin web app under /admin/*: the sign-in pages and
-	// /admin/deployments. Everything else it served moved into the memQL
-	// portal in memql#3324 -- including every write, whose owner/admin gate now
-	// lives in component/identity/adminops and is wired onto the stream in
-	// app/transport.go rather than onto an HTTP route here.
-	//
-	// Deployments stayed for a topology reason, not an effort one: the deploy
-	// RPCs run shell scripts against an on-disk overlay checkout, so
-	// DeployControlService exists only on THIS node, while the portal is served
-	// by the bff and dials the origin that served it.
+	// What is left of the admin web app under /admin/*: the sign-in pages, and
+	// an /admin/ root that says where the console went. Every page it served
+	// is in the memQL portal now -- six moved in memql#3324 (writes and
+	// owner/admin gate together, the gate landing in
+	// component/identity/adminops and reached over MemqlService.Stream), and
+	// Deployments followed in memql#3380 once a deploy call could cross the
+	// mesh from a bff-served portal to the node that owns the on-disk overlay
+	// checkout.
 	adminSrv, err := admin.New(&admin.AdminServer{
 		Cfg:       cfg,
 		Engine:    a.engine,
@@ -455,9 +453,6 @@ func (a *App) integrationsIdentity() {
 	}
 	svc.SetAdminMounter(adminSrv)
 
-	// Stash the admin server so setupDeployControlService (which runs
-	// after the deploy-control service is constructed) can wire the
-	// in-process deployment-status reader onto it (memql#726).
 	a.adminServer = adminSrv
 
 	a.identityService = svc

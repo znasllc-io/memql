@@ -135,6 +135,12 @@ type Server struct {
 	// one gate + one audit logger and cannot drift. Nil elsewhere; the
 	// DeployControl handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+	// deployControlForwarder carries a bridged DeployControlMsg to the identity
+	// node when THIS node has no deploy-control service (memql#3380). Set by
+	// app bootstrap on the bff -- the node that serves the portal -- and nil
+	// everywhere else, where a deploy-control message with no local service
+	// keeps answering Unimplemented.
+	deployControlForwarder *DeployControlForwardRouter
 	// identityAdminHandler is the gated identity-admin write surface the
 	// IdentityAdminMsg handler dispatches to (memql#3324). Set by app
 	// bootstrap on every node that carries an engine + an audit sink, because
@@ -359,6 +365,7 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		agentReplier:           s.agentReplier,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		deployControlHandler:   s.deployControlHandler,
+		deployControlForwarder: s.deployControlForwarder,
 		identityAdminHandler:   s.identityAdminHandler,
 		automationRunner:       s.automationRunner,
 		clientToolResultServer: s.clientToolRPC,
@@ -665,6 +672,11 @@ type service struct {
 	// the identity node (the same instance the unary service is registered
 	// with); nil elsewhere, where the handler answers Unimplemented.
 	deployControlHandler memqlv1.DeployControlServiceServer
+
+	// deployControlForwarder carries a bridged DeployControlMsg to the identity
+	// node when this node has no local deploy-control service (memql#3380).
+	// Non-nil on the bff; nil elsewhere.
+	deployControlForwarder *DeployControlForwardRouter
 
 	// identityAdminHandler is the gated identity-admin write surface the
 	// IdentityAdminMsg handler dispatches to (memql#3324). Non-nil wherever

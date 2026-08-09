@@ -1,6 +1,8 @@
 package memql
 
 import (
+	"google.golang.org/grpc/codes"
+
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/deploycontrol"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
@@ -49,6 +51,26 @@ func (s *Server) SetDeployControlHandler(h memqlv1.DeployControlServiceServer) {
 	}
 }
 
+// SetDeployControlForwarder installs the mesh route to the node that DOES have
+// a deploy-control service (memql#3380). Wired on the bff, because the bff is
+// the only node type that serves the portal bundle and a SPA dials the origin
+// that served it -- so the deploy surface is always asked of a node that
+// cannot answer it locally.
+//
+// Nil elsewhere, which is the whole no-op condition: a node with neither a
+// local service nor a forwarder answers Unimplemented exactly as before.
+// Mirrors SetDeployControlHandler in updating both the Server field and the
+// live service reference so a post-Run install still takes effect.
+func (s *Server) SetDeployControlForwarder(r *DeployControlForwardRouter) {
+	if s == nil {
+		return
+	}
+	s.deployControlForwarder = r
+	if s.serviceRef != nil && s.serviceRef.svc != nil {
+		s.serviceRef.svc.deployControlForwarder = r
+	}
+}
+
 // handleDeployControl bridges one DeployControlMsg to the deploy-control
 // service and returns the reply on the stream.
 //
@@ -64,6 +86,16 @@ func (s *Server) SetDeployControlHandler(h memqlv1.DeployControlServiceServer) {
 // so a bridged caller observes the same code a unary caller would.
 func (s *streamSession) handleDeployControl(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DeployControlMsg) error {
 	ctx := s.stream.Context()
+
+	// No local service, but a route to the node that has one (memql#3380).
+	// This is the bff case, and it is the ONLY case an operator meets: the
+	// portal is served by the bff, and a SPA dials the origin that served it.
+	// The caller is asserted here, on the node that resolved them, and
+	// re-verified on the receiving side -- see deploy_control_forward.go for
+	// why that is the security content of the hop rather than a formality.
+	if s.service.deployControlHandler == nil && s.service.deployControlForwarder != nil {
+		return s.forwardDeployControl(envelope, msg)
+	}
 
 	// Stamp the session's resolved access context so the service's gate sees
 	// the streamed caller exactly as the unary interceptor presents a dialed
@@ -90,4 +122,74 @@ func (s *streamSession) handleDeployControl(envelope *memqlv1.MemqlClientMessage
 			DeployControlResult: result,
 		},
 	})
+}
+
+// forwardDeployControl carries one bridged DeployControlMsg to the identity
+// node and returns its reply on this stream (memql#3380).
+//
+// ASYNC, deliberately. handleMessage runs on the stream's Recv loop, so a
+// synchronous wait here would stall every other in-flight request on the
+// browser's single multiplexed stream for as long as the remote action takes
+// -- and the slowest action behind this hop is a synchronous promote.sh run,
+// not an RPC. The reply is sent from the goroutine through sendServerMessage,
+// which serializes on the session's send mutex.
+//
+// Failures never return a Go error: an error out of a handler tears down the
+// whole stream. A transport failure is folded into the SAME DeployControlResult
+// shape the local path produces, so a caller mapping error_code back to a
+// gRPC code observes one contract regardless of which node served it.
+func (s *streamSession) forwardDeployControl(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DeployControlMsg) error {
+	// Build the authority assertion BEFORE leaving the handler: it is derived
+	// from the session's post-rotate state, which is this node's knowledge and
+	// nobody else's. Refusing locally on a session whose authority cannot be
+	// established means an unprovable assertion never reaches the wire.
+	principal, err := s.forwardedPrincipal()
+	if err != nil {
+		return s.sendDeployControlResult(envelope, failedDeployControlResult(msg, codes.Internal,
+			"deploy console: cannot establish forwarded authority for this session: "+err.Error()))
+	}
+
+	ctx := s.stream.Context()
+	go func() {
+		result, ferr := s.service.deployControlForwarder.Forward(ctx, principal, msg)
+		if ferr != nil {
+			// Unavailable, not Internal: the deploy surface exists, this node
+			// just could not reach it right now, and the portal renders a
+			// retryable failure rather than a bug report.
+			result = failedDeployControlResult(msg, codes.Unavailable, ferr.Error())
+		}
+		if s.logger != nil && !result.GetOk() {
+			s.logger.Warn("deploy control (forwarded) rejected",
+				"request_id", result.GetRequestId(),
+				"error_code", result.GetErrorCode(),
+				"error_message", result.GetErrorMessage())
+		}
+		if serr := s.sendDeployControlResult(envelope, result); serr != nil && s.logger != nil {
+			s.logger.Warn("deploy control forwarded reply send failed",
+				"request_id", result.GetRequestId(), "error", serr)
+		}
+	}()
+	return nil
+}
+
+// sendDeployControlResult writes one DeployControlResult back on the stream,
+// correlated to the caller's envelope.
+func (s *streamSession) sendDeployControlResult(envelope *memqlv1.MemqlClientMessage, result *memqlv1.DeployControlResult) error {
+	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
+		Payload: &memqlv1.MemqlServerMessage_DeployControlResult{
+			DeployControlResult: result,
+		},
+	})
+}
+
+// failedDeployControlResult mirrors deploycontrol's own failure envelope for
+// the failures that happen on THIS side of the hop, so a transport problem and
+// a service refusal reach the client in one shape.
+func failedDeployControlResult(msg *memqlv1.DeployControlMsg, code codes.Code, message string) *memqlv1.DeployControlResult {
+	return &memqlv1.DeployControlResult{
+		RequestId:    msg.GetRequestId(),
+		Ok:           false,
+		ErrorCode:    int32(code),
+		ErrorMessage: message,
+	}
 }

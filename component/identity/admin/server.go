@@ -13,7 +13,8 @@ import (
 )
 
 // AdminServer hosts what is left of the /admin/* operator surface: the
-// sign-in pages and /admin/deployments. Mounted onto the identity binary's mux
+// sign-in pages, and a root that says the console is gone. Mounted onto the
+// identity binary's mux
 // via the SetAdminMounter setter on component/identity.Service.
 //
 // It hosted seven screens. Six moved into the memQL portal in memql#3324 --
@@ -52,43 +53,22 @@ type AdminServer struct {
 	Settings  identityweb.LiveSettings
 	WebServer *identityweb.Server
 	Logger    *slog.Logger
-
-	// memql#726: deployment-status reader backing the read-only
-	// /admin/deployments view. Wired by SetDeployControlReader from
-	// app/integrations_deploy_control.go after the deploy-control
-	// service is up. Nil-safe: the page renders an error flash when
-	// unwired (e.g. an identity binary without the deploy-control
-	// surface).
-	deployReader DeployControlReader
-
-	// memql#727: deployment write-action port backing the
-	// POST /admin/deployments/* handlers (deploy-staging, promote,
-	// rollback, rollout). Wired by SetDeployControlActions from
-	// app/integrations_deploy_control.go after the deploy-control
-	// service is up. Nil-safe: the handlers reject with an error flash
-	// when unwired.
-	deployActions DeployControlActions
 }
 
-// The one page this app still serves.
+// This app serves no pages.
 //
-// It served seven. Six of them -- the dashboard, users, tokens, audit, JWKS
-// and settings -- moved into the memQL portal in memql#3324, along with every
-// write they carried and the owner/admin gate that protected it
-// (component/identity/adminops). Deployments did not, and the reason is
-// topology rather than effort: DeployControlService runs shell scripts against
-// an on-disk overlay checkout, so it exists ONLY on the identity node, while
-// the portal is served by the bff and dials the origin that served it. A
-// bff-served portal reaching for the deploy surface gets UNIMPLEMENTED. Until
-// that RPC can cross the mesh, retiring this page would delete a working
-// capability instead of moving it.
+// It served seven. Six moved into the memQL portal in memql#3324; the seventh,
+// Deployments, followed in memql#3380 once a deploy call could reach the
+// identity node from a bff-served portal. The nav is empty because there is
+// nothing left to navigate to -- the routes went with the pages, in the same
+// commit, per the repo's no-stale-code convention.
 //
-// So this is what remains: /admin/login to establish a session, and
-// /admin/deployments. Everything else under /admin is gone -- the routes with
-// the pages, in the same commit, per the repo's no-stale-code convention.
-var adminNav = []webtempl.NavLink{
-	{Href: "/admin/deployments", Label: "Deployments"},
-}
+// The sign-in routes below outlive the pages they used to gate. They are kept
+// only because /admin/login is a documented, bookmarked entry point and a 404
+// there reads as an outage rather than as a move; /admin/ now says where the
+// console went. Retiring this package outright is a follow-up, not a
+// deploy-console change.
+var adminNav []webtempl.NavLink
 
 // New validates dependencies and returns a ready-to-mount AdminServer.
 // Returns a typed error when a required dependency is missing so the
@@ -147,21 +127,15 @@ func (s *AdminServer) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /admin/establish", wrap(s.handleEstablish))
 	mux.HandleFunc("POST /admin/logout", wrap(s.handleLogout))
 
-	// Gated pages.
+	// The one gated route left: a signpost, not a page.
 	mux.HandleFunc("GET /admin/{$}", gated(s.handleRoot))
 
-	mux.HandleFunc("GET /admin/deployments", gated(s.handleDeploymentsGet))
-	mux.HandleFunc("POST /admin/deployments/deploy-staging", gated(s.handleDeployStagingPost))
-	mux.HandleFunc("POST /admin/deployments/promote", gated(s.handleDeployPromotePost))
-	mux.HandleFunc("POST /admin/deployments/rollback", gated(s.handleDeployRollbackPost))
-	mux.HandleFunc("POST /admin/deployments/rollout", gated(s.handleDeployRolloutPost))
-
-	// 6 gated + 3 session-establishment. Hand-maintained, and it had already
+	// 1 gated + 3 session-establishment. Hand-maintained, and it had already
 	// drifted once (it read 19 while Mount registered 27), so
 	// route_gate_test.go pins it against the routes actually registered.
 	s.Logger.Info("admin web routes mounted",
 		slog.String("base_url", s.Cfg.BaseURL),
-		slog.Int("routes", 9),
+		slog.Int("routes", 4),
 	)
 }
 

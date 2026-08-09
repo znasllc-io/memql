@@ -41,6 +41,7 @@ message NodeClientMessage {
     AiForwardCancel ai_forward_cancel = 71;
     WorkbenchForwardRequest workbench_forward_request = 80;
     WorkbenchForwardCancel workbench_forward_cancel = 81;
+    DeployControlForwardRequest deploy_control_forward_request = 90;
   }
 }
 
@@ -66,6 +67,7 @@ message NodeServerMessage {
     NodeShutdown node_shutdown = 50;
     AiForwardResponse ai_forward_response = 70;
     WorkbenchForwardResponse workbench_forward_response = 80;
+    DeployControlForwardResponse deploy_control_forward_response = 90;
   }
 }
 
@@ -411,6 +413,62 @@ message WorkbenchForwardResponse {
 // for the request_id and free resources (kill exec, abort http_fetch).
 message WorkbenchForwardCancel {
   string request_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Deploy-control forwarding
+// ---------------------------------------------------------------------------
+//
+// DeployControlForwardRequest carries one bridged DeployControlMsg from the
+// node a portal / SDK client is talking to (in practice a bff -- it is the
+// only node type that serves the portal bundle) to the identity node, which
+// is the only node that HAS a DeployControlService: the service shells out
+// against an on-disk overlay checkout, so it cannot be universal (memql#3380).
+//
+// Single round-trip, no streaming: every deploy RPC is unary, so the
+// originating handler parks on one response.
+//
+// `deploy_control_msg` is a proto-serialized memqlv1.DeployControlMsg -- the
+// caller's envelope verbatim, byte-wrapped the way AiForwardRequest wraps a
+// MemqlClientMessage, so the receiving side runs the SAME deploycontrol.Dispatch
+// fan-out the local path runs and no RPC can be reachable on one surface and
+// not the other.
+//
+// `authority` is the mandatory authorization assertion (memql#3205) and it is
+// THE point of this message. Deploy control's gate is a role matrix in which
+// rollback is owner-only -- not even admin -- so an actor that does not survive
+// the hop is not a missing convenience, it is a widening. The receiver resolves
+// the caller from this assertion and from nothing else: not from the forwarding
+// node's own node-class credential (which is how a bff would silently become
+// an owner), not from a claims map, not from a database lookup keyed by a
+// wire-supplied subject. Absence is refusal.
+//
+// Like WorkbenchForwardRequest, this message carries NO attribution claims map
+// beside the assertion: the receiver derives them via
+// auth.ForwardedAuthority.Principal, so "claims without an authority" is
+// inexpressible here rather than merely discouraged.
+message DeployControlForwardRequest {
+  string request_id = 1;
+  bytes deploy_control_msg = 2;
+  ForwardedAuthority authority = 3;
+}
+
+// DeployControlForwardResponse carries the reply back to the originating node.
+//
+// `deploy_control_result` is a proto-serialized memqlv1.DeployControlResult --
+// the same envelope the local path produces, INCLUDING its error_code /
+// error_message fields, so a refusal crossing the mesh reaches the client with
+// the identical gRPC code a directly-served refusal carries.
+//
+// error_code / error_message here are for TRANSPORT failures only (the
+// receiving node has no deploy-control service, the envelope would not parse,
+// the authority was refused). A populated transport error and an empty
+// deploy_control_result mean the request never reached the service.
+message DeployControlForwardResponse {
+  string request_id = 1;
+  bytes deploy_control_result = 2;
+  string error_code = 3;
+  string error_message = 4;
 }
 
 // ---------------------------------------------------------------------------
