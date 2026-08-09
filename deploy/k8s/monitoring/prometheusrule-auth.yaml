@@ -106,3 +106,68 @@ spec:
               -- it has no signing keys to publish, so every token it (or a
               verifier fetching from it) checks will be rejected. See
               memql#1523.
+
+    - name: memql-identity-signing-key-age
+      # memql#3381. Signing-key rotation is IMPOSSIBLE from inside a
+      # deployed cluster: staging and prod supply the seed through the
+      # sealed env envelope, so KeyManager.RotationSupported() is false and
+      # the in-process 90-day scheduler is inert. Rotation there is a manual
+      # re-seal-and-roll runbook. The recorded decision was to keep it that
+      # way and close the gap with observability -- these two rules ARE that
+      # compensation, so treat them as load-bearing rather than nice-to-have.
+      # Runbook: docs/public/operate/auth/identity-service.md#rotating-the-signing-key
+      rules:
+        # The key has outlived the nominal 90-day cadence and, because
+        # nothing in-cluster can rotate it, it will keep ageing until a
+        # human runs the runbook. Warning, not critical: an overdue key is
+        # a hygiene debt on a planned maintenance action, not an outage --
+        # and paging someone at 03:00 for it would only teach them to
+        # silence the one alert that makes the manual path visible.
+        - alert: MemqlIdentitySigningKeyOverdue
+          expr: |
+            (
+              time() - max(memql_identity_signing_key_created_timestamp_seconds{namespace="memql",app="identity"})
+            ) > (90 * 24 * 3600)
+            and
+            min(memql_identity_signing_key_age_known{namespace="memql",app="identity"}) == 1
+          for: 1h
+          labels:
+            severity: warning
+            team: memql
+          annotations:
+            summary: "identity signing key is past its 90-day rotation cadence"
+            description: >
+              The active Ed25519 signing key was minted more than 90 days
+              ago and no in-cluster mechanism will rotate it -- the seed
+              rides the sealed env envelope, so the in-process scheduler is
+              inert by design. Rotate by re-sealing a new seed and rolling
+              identity. READ THE RUNBOOK FIRST: that path bypasses the JWKS
+              overlap window, so it invalidates every unexpired access
+              token, mesh node token, service-account JWT and voice-agent
+              JWT at once. See
+              docs/public/operate/auth/identity-service.md#rotating-the-signing-key
+              and memql#3381.
+
+        # Age is UNOBSERVABLE, which is strictly worse than age being high:
+        # a bare 32-byte seed carries no creation date, so without
+        # MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT the overdue rule above can
+        # never fire and the absence of alerts means nothing. This rule
+        # exists so that silence is earned rather than assumed.
+        - alert: MemqlIdentitySigningKeyAgeUnknown
+          expr: |
+            min(memql_identity_signing_key_age_known{namespace="memql",app="identity"}) == 0
+          for: 1h
+          labels:
+            severity: warning
+            team: memql
+          annotations:
+            summary: "identity cannot tell how old its signing key is"
+            description: >
+              At least one identity replica reports
+              memql_identity_signing_key_age_known=0: it was handed a seed
+              with no MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT stamp, so the
+              only date it has is its own process start. Key age is
+              therefore unmeasured and MemqlIdentitySigningKeyOverdue cannot
+              fire. Fix by sealing MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT
+              (RFC3339, the date the seed was minted) next to the seed on
+              every identity replica. See memql#3381.

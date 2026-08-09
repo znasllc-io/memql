@@ -98,7 +98,7 @@ func NewService(cfg Config, logger *slog.Logger, audit AuditLogger) (*Service, e
 		err error
 	)
 	if cfg.SigningKeyB64 != "" {
-		km, err = NewKeyManagerFromSeed(cfg.SigningKeyB64)
+		km, err = NewKeyManagerFromSeedMintedAt(cfg.SigningKeyB64, cfg.SigningKeyCreatedAt)
 	} else {
 		km, err = NewKeyManager(cfg.KeyDir, cfg.KeyEncryptionKey)
 	}
@@ -252,8 +252,41 @@ func (s *Service) PATStore() any {
 // loop). Idempotent — only the first call has an effect.
 func (s *Service) Start(ctx context.Context) {
 	s.startOnce.Do(func() {
+		s.logRotationRegime()
 		go s.rotationLoop(ctx)
 	})
+}
+
+// logRotationRegime states, once at boot, whether the rotation scheduler
+// this process just started will ever actually do anything.
+//
+// It exists because the scheduler is a false signal in every deployed
+// environment (memql#3381): staging and production get their signing key
+// from the sealed envelope, so RotationSupported() is false and
+// maybeRotate returns immediately, silently, forever -- while the loop's
+// existence and its {"trigger":"scheduled","intervalDays":90} audit detail
+// make rotation look handled precisely where it never runs. A boot log
+// that names the regime out loud is the cheapest place to stop that
+// reading.
+func (s *Service) logRotationRegime() {
+	if s.keys.RotationSupported() {
+		s.logger.Info("jwt_signing_key_rotation_scheduler_active",
+			slog.String("mode", "disk"),
+			slog.Int("interval_days", int(s.cfg.KeyRotationInterval/(24*time.Hour))),
+			slog.String("overlap", s.cfg.JWKSOverlapWindow.String()),
+			slog.String("note", "on-disk key dir (dev): the scheduler rotates in-process and publishes both keys through the JWKS overlap window"),
+		)
+		return
+	}
+	_, ageKnown := s.keys.CurrentKeyCreatedAt()
+	s.logger.Warn("jwt_signing_key_rotation_scheduler_inert",
+		slog.String("mode", "env_seed"),
+		slog.Bool("key_age_observable", ageKnown),
+		slog.String("reason", "the signing key is env-provided (MEMQL_IDENTITY_SIGNING_KEY_B64) and shared by every replica, so no replica may rotate it on its own"),
+		slog.String("consequence", "MEMQL_IDENTITY_KEY_ROTATION_DAYS has NO effect in this process; rotation is the manual re-seal-and-roll runbook, and that path bypasses the JWKS overlap window (a hard swap invalidates every unexpired access token at once)"),
+		slog.String("age_hint", "stamp MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT alongside the seed so key age is observable"),
+		slog.String("runbook", "docs/public/operate/auth/identity-service.md#rotating-the-signing-key"),
+	)
 }
 
 // Shutdown stops background goroutines and waits up to a few seconds
@@ -275,6 +308,15 @@ func (s *Service) Shutdown(ctx context.Context) error {
 // rotationLoop drives the 90-day automatic key rotation and the
 // 24-hour previous-key sweep. Wakes hourly to check both deadlines —
 // the cost is negligible and it keeps the loop simple.
+//
+// DEV-ONLY IN PRACTICE (memql#3381). Both bodies below are no-ops
+// whenever the signing key came from the environment, which is what
+// staging and production run. Read this loop as "the on-disk
+// MEMQL_IDENTITY_KEY_DIR path a single-node dev cluster uses", not as
+// the cluster's rotation story. The cluster's rotation story is the
+// manual runbook in
+// docs/public/operate/auth/identity-service.md#rotating-the-signing-key,
+// and Service.logRotationRegime says so at boot.
 func (s *Service) rotationLoop(parent context.Context) {
 	defer close(s.doneCh)
 	tick := time.NewTicker(time.Hour)
@@ -295,10 +337,19 @@ func (s *Service) rotationLoop(parent context.Context) {
 
 // maybeRotate checks the current key's age and rotates if older than
 // the configured interval.
+//
+// This returns on its first line in staging and production. Do not read
+// the audit event it emits below -- {"trigger":"scheduled",
+// "intervalDays":90} -- as evidence that a deployed cluster rotates
+// anything; that record can only ever be written by a dev node running
+// the on-disk key path. See rotationLoop (memql#3381).
 func (s *Service) maybeRotate(ctx context.Context) {
 	// #550: an env-provided signing key can't be auto-rotated (it's
 	// sealed in the envelope + shared across replicas); rotate by
-	// re-sealing + rolling instead.
+	// re-sealing + rolling instead. memql#3381 recorded the decision to
+	// keep it that way and to compensate with the key-age gauge
+	// (memql_identity_signing_key_created_timestamp_seconds) + an alert,
+	// rather than build a rotation surface that works in env mode.
 	if !s.keys.RotationSupported() {
 		return
 	}
