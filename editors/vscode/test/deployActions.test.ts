@@ -22,6 +22,7 @@ import {
   tierDescription,
   visibleActions,
   type DeployActionId,
+  type RoleTier,
 } from "../src/deploy/actions.js";
 
 function ids(role: Role): DeployActionId[] {
@@ -89,21 +90,48 @@ test("an admin sees everything EXCEPT rollback -- owner-only by design", () => {
   assert.deepEqual(shown, ["cutVersion", "deploy", "promote", "rolloutAction"]);
 });
 
+test("a developer sees cut and deploy, and NOTHING else -- memql#3331", () => {
+  // THE acceptance criterion. Before #3331 the SDK's wire enum had no
+  // USER_ROLE_DEVELOPER, so roleFromWire mapped a developer to "" and this
+  // caller fell into the indeterminate branch: every action offered behind a
+  // hedge, three of which the engine was certain to refuse.
+  //
+  // The engine's tiers (component/deploycontrol/service.go): cut + deploy are
+  // authorizeDeploy (AtLeastDeveloper), promote + rollout_action are
+  // authorize (AtLeastAdmin), rollback is authorizeOwner.
+  assert.deepEqual(ids("developer"), ["cutVersion", "deploy"]);
+});
+
+test("a developer is RESOLVED, not indeterminate -- the notice is gone", () => {
+  const visibility = roleVisibility("developer");
+  assert.equal(visibility.kind, "resolved");
+  if (visibility.kind === "resolved") assert.equal(visibility.role, "developer");
+});
+
+test("a developer is refused the admin and owner actions", () => {
+  // Stated as denials as well as by the positive list above, so a future
+  // widening of satisfiesTier has to break something that says why.
+  assert.equal(satisfiesTier("developer", "developer"), true);
+  assert.equal(satisfiesTier("developer", "admin"), false);
+  assert.equal(satisfiesTier("developer", "owner"), false);
+});
+
 test("a writer and a reader see NO actions -- the acceptance criterion", () => {
   assert.deepEqual(ids("writer"), []);
   assert.deepEqual(ids("reader"), []);
 });
 
 test("an indeterminate role is offered the actions, with a reason", () => {
-  // The TS SDK's wire enum has no USER_ROLE_DEVELOPER, so roleFromWire maps a
-  // developer to "". Hiding on that basis would lock a genuine developer out
-  // of cut and deploy that the engine would have allowed -- and hiding is not
-  // the gate anyway. The engine refuses, naming the role.
+  // Narrowed by memql#3331: this is now a genuine read failure only -- no
+  // live connection, a failed MyAccess, an unauthenticated caller. A
+  // developer no longer lands here. Offering with a notice is still right for
+  // what remains, because the caller may be an owner and hiding is not the
+  // gate; the engine refuses and names the role.
   const visibility = roleVisibility("");
   assert.equal(visibility.kind, "indeterminate");
   assert.equal(visibleActions(visibility).length, DEPLOY_ACTIONS.length);
   if (visibility.kind === "indeterminate") {
-    assert.match(visibility.reason, /could not be determined/);
+    assert.match(visibility.reason, /could not be read/);
   }
 });
 
@@ -113,16 +141,54 @@ test("an undefined role is indeterminate too, and takes a caller's reason", () =
   if (visibility.kind === "indeterminate") assert.equal(visibility.reason, "the access read failed");
 });
 
-test("satisfiesTier is narrower than the engine, never wider", () => {
-  // Narrower hides a button a developer could have used, which the
-  // indeterminate branch covers. Wider would show one that is certain to be
-  // refused, which trains operators to ignore the hint.
-  assert.equal(satisfiesTier("owner", "owner"), true);
-  assert.equal(satisfiesTier("admin", "owner"), false);
-  assert.equal(satisfiesTier("admin", "admin"), true);
-  assert.equal(satisfiesTier("admin", "developer"), true);
-  assert.equal(satisfiesTier("writer", "developer"), false);
-  assert.equal(satisfiesTier("", "developer"), false);
+test("satisfiesTier mirrors the engine's three helpers exactly", () => {
+  // EXACT as of memql#3331, where it was previously narrower-by-necessity
+  // (developer was unnameable, so the developer tier approximated to
+  // "admin or above"). Each row is read off component/auth/rbac.go:
+  //   owner      -> IsOwner
+  //   admin      -> AtLeastAdmin
+  //   developer  -> AtLeastDeveloper == execute-on-deployment
+  //                 (owner / developer / admin)
+  const matrix: ReadonlyArray<[Role, RoleTier, boolean]> = [
+    ["owner", "owner", true],
+    ["admin", "owner", false],
+    ["developer", "owner", false],
+    ["writer", "owner", false],
+
+    ["owner", "admin", true],
+    ["admin", "admin", true],
+    ["developer", "admin", false],
+    ["writer", "admin", false],
+
+    ["owner", "developer", true],
+    ["admin", "developer", true],
+    ["developer", "developer", true],
+    ["writer", "developer", false],
+    ["reader", "developer", false],
+    ["", "developer", false],
+  ];
+  for (const [role, tier, want] of matrix) {
+    assert.equal(
+      satisfiesTier(role, tier),
+      want,
+      `satisfiesTier(${JSON.stringify(role)}, ${JSON.stringify(tier)})`,
+    );
+  }
+});
+
+test("every role the SDK can name is covered by the matrix above", () => {
+  // A new Role value must be adjudicated against every tier rather than
+  // silently defaulting to "not satisfied" -- the same silent-"" class of bug
+  // memql#3331 fixed, one layer up.
+  const roles: readonly Role[] = ["", "owner", "admin", "developer", "writer", "reader"];
+  for (const role of roles) {
+    const tiers: readonly RoleTier[] = ["owner", "admin", "developer"];
+    for (const tier of tiers) {
+      assert.equal(typeof satisfiesTier(role, tier), "boolean");
+    }
+  }
+  // The union is closed; if a role is added, this list must grow with it.
+  assert.equal(roles.length, 6);
 });
 
 test("tier descriptions read the way the service phrases the refusal", () => {

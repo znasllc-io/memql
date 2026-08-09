@@ -298,7 +298,10 @@ function ensure_ccpm_skill() {
         fi
     else
         mkdir -p "$(dirname "$AGENTS_CCPM_SRC")"
-        if out="$(git clone --depth 1 "$AGENTS_CCPM_REPO" "$AGENTS_CCPM_SRC" 2>&1)"; then
+        # GIT_TERMINAL_PROMPT=0: the clone's output is captured, so a credential
+        # prompt would be invisible and hang the script forever. Fail fast into
+        # the error path below instead.
+        if out="$(GIT_TERMINAL_PROMPT=0 git clone --depth 1 "$AGENTS_CCPM_REPO" "$AGENTS_CCPM_SRC" 2>&1)"; then
             status PASS "CCPM source cloned to $AGENTS_CCPM_SRC"
         else
             status FAIL "could not clone $AGENTS_CCPM_REPO"
