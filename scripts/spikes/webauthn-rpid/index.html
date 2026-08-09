@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>memql#3405 - WebAuthn RP ID spike</title>
+    <style>
+      body {
+        font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+        max-width: 46rem;
+        margin: 3rem auto;
+        padding: 0 1.25rem;
+        color: #111;
+        background: #fff;
+      }
+      h1 { font-size: 1.1rem; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; }
+      dt { color: #666; }
+      button {
+        font: inherit;
+        padding: 0.6rem 1rem;
+        margin: 0.35rem 0.35rem 0.35rem 0;
+        cursor: pointer;
+      }
+      pre {
+        background: #f4f4f4;
+        padding: 1rem;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        min-height: 6rem;
+      }
+      .ok { color: #0a6b23; }
+      .err { color: #a01020; }
+    </style>
+  </head>
+  <body>
+    <h1>memql#3405 &mdash; does an RP ID under <code>.localhost</code> work?</h1>
+
+    <dl>
+      <dt>RP ID under test</dt><dd><code id="rpid">{{.RPID}}</code></dd>
+      <dt>Page origin</dt><dd><code id="origin"></code></dd>
+      <dt>Expected origin</dt><dd><code>{{.Origin}}</code></dd>
+      <dt>User agent</dt><dd><code id="ua"></code></dd>
+    </dl>
+
+    <p>
+      Run each button and record the outcome in the results table in
+      <code>README.md</code>. A <code>SecurityError</code> means the BROWSER
+      rejected the RP ID. A <code>NotAllowedError</code> after the platform UI
+      appeared means the AUTHENTICATOR refused (or you dismissed it). Those two
+      are different answers &mdash; note which one you got.
+    </p>
+
+    <button id="platform">1. Register &mdash; platform authenticator (Touch ID / Windows Hello)</button>
+    <button id="hybrid">2. Register &mdash; hybrid transport (QR &rarr; phone)</button>
+    <button id="any">3. Register &mdash; no attachment hint (browser picks)</button>
+    <button id="assert">4. Authenticate with whatever was just registered</button>
+
+    <pre id="out">INFO: ready.</pre>
+
+    <script>
+      const RP_ID = document.getElementById("rpid").textContent.trim();
+      const out = document.getElementById("out");
+      document.getElementById("origin").textContent = window.location.origin;
+      document.getElementById("ua").textContent = navigator.userAgent;
+
+      // Built as DOM nodes with textContent rather than appended to innerHTML.
+      // Everything logged here is attacker-adjacent by construction -- an
+      // authenticator's error message, a user agent string, a base64url
+      // credential id -- and a spike page that XSSes itself is a spike page
+      // whose result nobody can trust.
+      function log(msg, cls) {
+        const line = document.createElement("span");
+        if (cls) line.className = cls;
+        line.textContent = "\n" + new Date().toISOString() + " " + msg;
+        out.appendChild(line);
+      }
+
+      function randomBytes(n) {
+        return crypto.getRandomValues(new Uint8Array(n));
+      }
+
+      function b64url(buf) {
+        return btoa(String.fromCharCode(...new Uint8Array(buf)))
+          .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
+
+      // report distinguishes the two failure modes the spike actually cares
+      // about. err.name is the discriminator: SecurityError comes from the
+      // browser's RP ID validation, before any authenticator is consulted;
+      // NotAllowedError comes from the ceremony itself.
+      function report(err) {
+        log(`ERROR: ${err.name}: ${err.message}`, "err");
+        if (err.name === "SecurityError") {
+          log("  -> BROWSER-side RP ID rejection. The .localhost RP ID is not accepted by this browser.", "err");
+        } else if (err.name === "NotAllowedError") {
+          log("  -> AUTHENTICATOR-side refusal or user dismissal. Re-run and complete the prompt before concluding.", "err");
+        }
+      }
+
+      async function register(attachment, label) {
+        try {
+          log(`INFO: create() with rp.id=${RP_ID} attachment=${attachment ?? "(unset)"} ...`);
+          const authenticatorSelection = {
+            residentKey: "required",
+            userVerification: "required",
+          };
+          if (attachment) authenticatorSelection.authenticatorAttachment = attachment;
+
+          const cred = await navigator.credentials.create({
+            publicKey: {
+              challenge: randomBytes(32),
+              rp: { id: RP_ID, name: "memQL spike 3405" },
+              user: { id: randomBytes(16), name: "spike@" + RP_ID, displayName: "Spike User" },
+              pubKeyCredParams: [
+                { type: "public-key", alg: -7 },   // ES256
+                { type: "public-key", alg: -257 }, // RS256
+              ],
+              authenticatorSelection,
+              timeout: 120000,
+              attestation: "none",
+            },
+          });
+          window.__lastCredId = cred.rawId;
+          log(`SUCCESS: ${label} registered. credentialId=${b64url(cred.rawId)}`, "ok");
+          const t = cred.response.getTransports ? cred.response.getTransports() : [];
+          log(`  transports: ${JSON.stringify(t)}`, "ok");
+          log(`  -> The RP ID "${RP_ID}" WAS accepted end to end for this path.`, "ok");
+        } catch (err) {
+          report(err);
+        }
+      }
+
+      document.getElementById("platform").onclick = () => register("platform", "platform authenticator");
+      document.getElementById("hybrid").onclick = () => register("cross-platform", "hybrid / cross-platform");
+      document.getElementById("any").onclick = () => register(null, "unhinted");
+
+      document.getElementById("assert").onclick = async () => {
+        try {
+          log(`INFO: get() with rp.id=${RP_ID}, empty allowCredentials (usernameless) ...`);
+          const assertion = await navigator.credentials.get({
+            publicKey: {
+              challenge: randomBytes(32),
+              rpId: RP_ID,
+              allowCredentials: [],
+              userVerification: "required",
+              timeout: 120000,
+            },
+          });
+          log(`SUCCESS: assertion returned. credentialId=${b64url(assertion.rawId)}`, "ok");
+          log(`  -> Discoverable (usernameless) login works against this RP ID.`, "ok");
+        } catch (err) {
+          report(err);
+        }
+      };
+    </script>
+  </body>
+</html>
