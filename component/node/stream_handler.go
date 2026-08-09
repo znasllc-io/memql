@@ -58,6 +58,29 @@ type WorkbenchForwardResponseSink interface {
 	Dispatch(resp *nodev1.WorkbenchForwardResponse)
 }
 
+// DeployControlForwardHandler is the identity-node-side entry point for a
+// forwarded deploy-control call (memql#3380). The nodeService invokes it when
+// an inbound NodeClientMessage carries a DeployControlForwardRequest. Single
+// round-trip semantics: the handler verifies the caller's forwarded authority,
+// dispatches the bridged envelope into the local DeployControlService, and
+// uses `send` to deliver exactly one DeployControlForwardResponse back to the
+// originating node.
+//
+// Left as an interface so component/node/ stays independent of
+// component/grpc/ and component/deploycontrol/. The identity binary's cluster
+// wiring installs a concrete implementation via SetDeployControlForwardHandler.
+type DeployControlForwardHandler interface {
+	HandleForwardedRequest(ctx context.Context, req *nodev1.DeployControlForwardRequest, send func(*nodev1.NodeServerMessage) error)
+}
+
+// DeployControlForwardResponseSink is the originating-node-side receiver for
+// replies to deploy-control forwards started here. Each inbound
+// DeployControlForwardResponse on a peer connection is routed through this
+// sink; the bff-side DeployControlForwardRouter satisfies it.
+type DeployControlForwardResponseSink interface {
+	Dispatch(resp *nodev1.DeployControlForwardResponse)
+}
+
 // EventInbound accepts a peer-forwarded event, dedups it against
 // recently-seen event IDs + TTL, and republishes it on the local event
 // bus so local subscribers (integrations, automations, gRPC subscribers)
@@ -80,7 +103,11 @@ type nodeService struct {
 	aiForwardResponse        AiForwardResponseSink        // BFF-side response sink; nil on worker binaries
 	workbenchForwardHandler  WorkbenchForwardHandler      // workbench-side handler; nil on non-workbench binaries
 	workbenchForwardResponse WorkbenchForwardResponseSink // agent-side response sink; nil on non-agent binaries
-	eventInbound             EventInbound                 // bridges peer-forwarded events onto the local bus
+	// deployControlForwardHandler serves inbound deploy-control forwards
+	// (memql#3380). Non-nil only on the identity node, the only node that
+	// carries a DeployControlService.
+	deployControlForwardHandler DeployControlForwardHandler
+	eventInbound                EventInbound // bridges peer-forwarded events onto the local bus
 }
 
 // Stream handles a bidirectional streaming connection from a peer node.
@@ -332,6 +359,9 @@ func (s *nodeService) handleMessage(peerId string, msg *nodev1.NodeClientMessage
 	case *nodev1.NodeClientMessage_WorkbenchForwardCancel:
 		s.handleWorkbenchForwardCancel(peerId, payload.WorkbenchForwardCancel)
 
+	case *nodev1.NodeClientMessage_DeployControlForwardRequest:
+		s.handleDeployControlForwardRequest(peerId, payload.DeployControlForwardRequest, stream)
+
 	default:
 		s.logger.Debug("unhandled message type from peer",
 			"peer_id", peerId,
@@ -482,6 +512,15 @@ func (s *nodeService) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRespo
 	s.workbenchForwardResponse = sink
 }
 
+// SetDeployControlForwardHandler installs the identity-side handler invoked
+// for inbound DeployControlForwardRequest messages (memql#3380). Left nil
+// everywhere else -- the deploy-control service exists only on the identity
+// node, and a node without it answers Unimplemented rather than pretending
+// the surface exists.
+func (s *nodeService) SetDeployControlForwardHandler(h DeployControlForwardHandler) {
+	s.deployControlForwardHandler = h
+}
+
 // handleAiForwardRequest dispatches a forwarded AI/voice request to the
 // registered handler and streams responses back on the peer's stream.
 func (s *nodeService) handleAiForwardRequest(peerId string, req *nodev1.AiForwardRequest, stream nodev1.NodeService_StreamServer) {
@@ -545,6 +584,36 @@ func (s *nodeService) handleWorkbenchForwardRequest(peerId string, req *nodev1.W
 		return
 	}
 	s.workbenchForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
+}
+
+// handleDeployControlForwardRequest dispatches an inbound deploy-control
+// envelope to the identity node's local handler (memql#3380). Single request
+// -> single response.
+//
+// A node with no handler answers with a transport error rather than dropping
+// the message: the originating handler is parked on this reply, and a dropped
+// message would turn "this node cannot serve deploy control" into a hang. The
+// message deliberately reads the same way the local no-service path reads, so
+// an operator sees one explanation whichever node the portal happened to hit.
+func (s *nodeService) handleDeployControlForwardRequest(peerId string, req *nodev1.DeployControlForwardRequest, stream nodev1.NodeService_StreamServer) {
+	if s.deployControlForwardHandler == nil {
+		s.logger.Warn("deploy control forward received but no handler configured",
+			"peer_id", peerId, "request_id", req.GetRequestId(),
+		)
+		_ = stream.Send(&nodev1.NodeServerMessage{
+			MessageId:   id.NewShortId(),
+			CorrelateTo: req.GetRequestId(),
+			Payload: &nodev1.NodeServerMessage_DeployControlForwardResponse{
+				DeployControlForwardResponse: &nodev1.DeployControlForwardResponse{
+					RequestId:    req.GetRequestId(),
+					ErrorCode:    "not_configured",
+					ErrorMessage: "deploy console: this node has no deploy-control service (it runs on the identity node)",
+				},
+			},
+		})
+		return
+	}
+	s.deployControlForwardHandler.HandleForwardedRequest(stream.Context(), req, stream.Send)
 }
 
 // handleWorkbenchForwardCancel forwards a cancel notification to the

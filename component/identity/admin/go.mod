@@ -8,9 +8,7 @@ toolchain go1.26.5
 
 require (
 	github.com/a-h/templ v0.3.1020
-	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/znasllc-io/memql/component/auth v0.0.0
-	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/memql v0.0.0
@@ -29,6 +27,7 @@ require (
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/webauthn v0.17.4 // indirect
 	github.com/go-webauthn/x v0.2.6 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect

@@ -118,18 +118,25 @@ func claimsFromRequestToken(r *http.Request, issuer *identity.JWTIssuer) *identi
 // Root
 // ---------------------------------------------------------------------------
 
-// handleRoot forwards /admin/ to the one surface this console still owns.
+// handleRoot answers /admin/ now that the console serves no pages.
 //
-// Everything else it served -- the dashboard, users, tokens, audit, JWKS,
-// settings -- moved into the memQL portal in memql#3324, writes and
-// owner/admin gate together. Deployments stayed because DeployControlService
-// runs shell scripts against an on-disk overlay checkout and therefore exists
-// only on this node, while the portal is served by the bff and dials the
-// origin that served it.
+// Everything it served is in the memQL portal: the dashboard, users, tokens,
+// audit, JWKS and settings moved in memql#3324, and Deployments followed in
+// memql#3380 once a deploy call could reach the identity node from a
+// bff-served portal.
 //
-// The route stays, gated, as a redirect rather than being deleted: /admin/ is
-// where handleEstablish lands an operator after a successful sign-in, and
-// where a bookmark points. A 404 there would read as a broken console.
+// The route survives its pages deliberately. /admin/ is where handleEstablish
+// lands an operator after sign-in and where a bookmark points, and a bare 404
+// there reads as an outage. 410 Gone is the accurate status -- the resource
+// existed, it is deliberately retired, and the reply says where it went --
+// where a redirect would not be: the portal is served by the bff, on a
+// different origin from this one, so this server cannot name a URL that is
+// correct for every deployment.
 func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/admin/deployments", http.StatusSeeOther)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusGone)
+	_, _ = w.Write([]byte(
+		"The server-rendered admin console has been retired.\n\n" +
+			"Every surface it served -- users, tokens, audit, JWKS, settings and " +
+			"Deployments -- now lives in the memQL portal, served by the bff at /portal/.\n"))
 }

@@ -3,13 +3,10 @@
 package app
 
 import (
-	"context"
 	"os"
 
 	"github.com/znasllc-io/memql/component/deploycontrol"
-	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
-	"github.com/znasllc-io/memql/component/identity/admin"
 )
 
 // setupDeployControlService stands up the DeployControlService gRPC
@@ -74,6 +71,13 @@ func (a *App) setupDeployControlService() {
 	// of each.
 	a.grpcServer.SetDeployControlHandler(svc)
 
+	// The mesh route in (memql#3380) is installed later, in app/cluster.go:
+	// the NodeServer it hangs off does not exist yet at this point in the
+	// identity build. This method's job is to construct the ONE service
+	// instance all three surfaces share -- unary, streamed, and forwarded --
+	// which is what keeps the role matrix and the audit write from drifting
+	// between them. Nothing here is per-surface.
+
 	a.deployControlService = svc
 	// Deploy / RollbackDeployment are automation-driven (#2115 step 6
 	// retired the synchronous Go apply): they kick off the lifecycle and the
@@ -83,51 +87,4 @@ func (a *App) setupDeployControlService() {
 		"(automation-driven: Deploy/RollbackDeployment kick off the deploy pack "+
 		"automations which own promote + terminal, #2115)",
 		"component", identity.ComponentName)
-
-	// Wire the read-only /admin/deployments view (memql#726) to the
-	// in-process service. The admin server is constructed earlier in
-	// integrationsIdentity and stashed on a.adminServer. The reader
-	// is a thin adapter that turns the admin handler's
-	// (admin-context-stamped) call into a GetDeploymentStatus RPC; the
-	// read RPC's owner/admin gate (#728) admits it because the handler
-	// stamps an auth.AccessContext from the verified admin claims.
-	if adminSrv, ok := a.adminServer.(*admin.AdminServer); ok && adminSrv != nil {
-		adapter := &deployControlAdapter{svc: svc}
-		adminSrv.SetDeployControlReader(adapter)
-		adminSrv.SetDeployControlActions(adapter)
-		a.Logger.Info("deploy-control reader + actions wired into admin portal",
-			"component", identity.ComponentName)
-	}
-}
-
-// deployControlAdapter satisfies both admin.DeployControlReader
-// (memql#726) and admin.DeployControlActions (memql#727) via the
-// in-process *deploycontrol.Service. Lives here rather than in the
-// admin package so the admin layer stays decoupled from the concrete
-// deploy-control type -- the package depends on the narrow port
-// shapes, the wiring layer satisfies them. Each method maps the
-// admin handler's (actor-context-stamped) call onto the matching
-// owner/admin-gated + server-side-audited RPC.
-type deployControlAdapter struct {
-	svc *deploycontrol.Service
-}
-
-func (a *deployControlAdapter) DeploymentStatus(ctx context.Context, env string) (*memqlv1.DeploymentStatus, error) {
-	return a.svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: env})
-}
-
-func (a *deployControlAdapter) DeployStaging(ctx context.Context, version string) (*memqlv1.ActionResult, error) {
-	return a.svc.DeployStaging(ctx, &memqlv1.DeployStagingRequest{Version: version})
-}
-
-func (a *deployControlAdapter) Promote(ctx context.Context, version string) (*memqlv1.ActionResult, error) {
-	return a.svc.Promote(ctx, &memqlv1.PromoteRequest{Version: version})
-}
-
-func (a *deployControlAdapter) Rollback(ctx context.Context, env, commitSha string) (*memqlv1.ActionResult, error) {
-	return a.svc.Rollback(ctx, &memqlv1.RollbackRequest{Env: env, CommitSha: commitSha})
-}
-
-func (a *deployControlAdapter) RolloutAction(ctx context.Context, env, rollout, action string) (*memqlv1.ActionResult, error) {
-	return a.svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: env, Rollout: rollout, Action: action})
 }

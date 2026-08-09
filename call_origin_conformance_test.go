@@ -64,8 +64,10 @@ import (
 //     assertion with them -- gate_test.go drives EVERY operation with every
 //     role and asserts the engine is not reached below owner/admin, which is a
 //     tighter statement than "every route is registered with `gated`" because
-//     it is about the code path rather than the registration. The one
-//     surviving templ surface, /admin/deployments, keeps route_gate_test.go.)
+//     it is about the code path rather than the registration. memql#3380 then
+//     retired the last templ surface, /admin/deployments, once a deploy call
+//     could cross the mesh to the identity node; route_gate_test.go stays,
+//     now covering the sign-in routes and the /admin/ signpost that remain.)
 //
 // WHY IT CATCHES MORE THAN THE COMPILER WOULD. go/parser ignores build
 // constraints, so this sees files no CI lane compiles. app/integrations_identity.go

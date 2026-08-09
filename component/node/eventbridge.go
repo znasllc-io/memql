@@ -327,7 +327,7 @@ func (eb *EventBridge) forwardToPeers(forward *nodev1.EventForward, decision rou
 
 	var targets []*PeerEntry
 	if decision.Broadcast {
-		targets = eb.peerManager.AllPeers()
+		targets = meshEventParticipants(eb.peerManager.AllPeers())
 	} else {
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
@@ -416,7 +416,7 @@ func (eb *EventBridge) ForwardInboundToPeers(evt *nodev1.EventForward, excludeNo
 
 	var targets []*PeerEntry
 	if decision.Broadcast {
-		targets = eb.peerManager.AllPeers()
+		targets = meshEventParticipants(eb.peerManager.AllPeers())
 	} else {
 		targets = eb.peerManager.ByType(decision.TargetType)
 	}
@@ -462,4 +462,39 @@ func eventTimestamp(ts *timestamppb.Timestamp) time.Time {
 		return ts.AsTime()
 	}
 	return time.Now().UTC()
+}
+
+// meshEventParticipants filters a broadcast target list down to the nodes that
+// take part in mesh event distribution (memql#3380).
+//
+// It exists because reachability and event membership stopped being the same
+// thing. The bff now dials the identity node so a deploy-control call can reach
+// the one node that HAS a DeployControlService (isDialableType), which puts an
+// identity PeerEntry in the bff's peer table -- and a broadcast routing rule
+// (TargetType "") targets AllPeers. Without this filter, opening that route
+// would also start fanning every broadcast topic -- graph.node.*.v1:cluster:*,
+// cache.invalidate.*, authoring.promote.*, the planner lifecycle -- at the auth
+// service, which republishes them on its local bus and would fire its
+// subscribers and automations on events it has never seen before. That is a
+// large, unrelated behaviour change to smuggle in behind a deploy-console fix.
+//
+// The predicate is deliberately an exclusion of the ONE known non-participant
+// rather than an allow-list of participants: peer types arrive from a
+// NodeWelcome / PeerIntroduction over the wire and a gossiped sibling can carry
+// an empty NodeType, so an allow-list would silently stop forwarding to peers
+// it merely failed to recognise. Failing open for an unknown type preserves
+// today's behaviour exactly; only "identity" is dropped.
+//
+// Targeted (non-broadcast) rules need no filter: ByType is never asked for
+// identity, because no routing rule names it.
+func meshEventParticipants(peers []*PeerEntry) []*PeerEntry {
+	out := peers[:0:0]
+	for _, p := range peers {
+		if p != nil && p.Info != nil &&
+			NodeType(strings.ToLower(strings.TrimSpace(p.Info.NodeType))) == NodeTypeIdentity {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }

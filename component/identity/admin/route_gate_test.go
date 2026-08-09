@@ -172,12 +172,11 @@ type adminRoute struct {
 // TestMountRegistersOnlyKnownRoutes keeps this in step with server.go, so a
 // route added there without being added here fails rather than going untested.
 var gatedRoutes = []adminRoute{
+	// The only one left. The five /admin/deployments routes went with the page
+	// in memql#3380, once a deploy call could reach the identity node from a
+	// bff-served portal and the portal's Deployments surface stopped answering
+	// UNIMPLEMENTED.
 	{method: "GET", path: "/admin/"},
-	{method: "GET", path: "/admin/deployments"},
-	{method: "POST", path: "/admin/deployments/deploy-staging"},
-	{method: "POST", path: "/admin/deployments/promote"},
-	{method: "POST", path: "/admin/deployments/rollback"},
-	{method: "POST", path: "/admin/deployments/rollout"},
 }
 
 // ungatedRoutes cannot require a session: they are how one is established.
@@ -354,7 +353,7 @@ func TestAdminGateDoesNotAuditAnAdmittedCaller(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, routeGateRequest(
-		adminRoute{method: "GET", path: "/admin/deployments"},
+		adminRoute{method: "GET", path: "/admin/"},
 		routeGateToken(t, iss, "admin")))
 
 	for _, ev := range audit.snapshot() {
@@ -379,28 +378,29 @@ func TestAdminGateAdmitsAdminRole(t *testing.T) {
 				adminRoute{method: "GET", path: "/admin/"},
 				routeGateToken(t, iss, role)))
 
-			// THE REACH SENTINEL IS THE REDIRECT TARGET, not an engine call.
+			// THE REACH SENTINEL IS THE 410 BODY, not an engine call and no
+			// longer a redirect target.
 			//
 			// It used to be "the handler executed a query", which worked while
-			// this console had pages that read rows. It has one page left --
-			// /admin/deployments, whose reader is a nil port under test -- so
-			// no surviving handler touches the engine and that sentinel would
-			// now be permanently zero (memql#3324).
+			// this console had pages that read rows; no surviving handler
+			// touches the engine, so that sentinel would be permanently zero
+			// (memql#3324). It then became the redirect Location, which worked
+			// while handleRoot bounced to /admin/deployments -- and that page
+			// went to the portal in memql#3380, so handleRoot now answers 410
+			// in place.
 			//
-			// Location is a better one anyway, because it distinguishes the
-			// two outcomes a bare status code cannot: BOTH a refused and an
-			// admitted caller get 303 from /admin/, and they differ only in
-			// where they are sent. /admin/login means the gate turned this
-			// caller away; /admin/deployments means handleRoot itself ran,
-			// which is only reachable past requireAdmin.
+			// 410 is a good sentinel for the same reason the Location was: a
+			// REFUSED caller is sent to /admin/login with 303, so only a
+			// handler body that actually ran can produce it, and running is
+			// only reachable past requireAdmin.
 			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
 				t.Fatalf("role=%q was rejected with %d; the gate must admit owner and admin, "+
 					"otherwise the rejection tests above prove nothing", role, rec.Code)
 			}
-			if got := rec.Header().Get("Location"); got != "/admin/deployments" {
-				t.Errorf("admitted %q was sent to %q, want /admin/deployments -- the handler "+
+			if rec.Code != http.StatusGone {
+				t.Errorf("admitted %q got %d (Location %q), want 410 from handleRoot -- the handler "+
 					"body never ran, so this cannot tell a working gate from an unreachable route",
-					role, got)
+					role, rec.Code, rec.Header().Get("Location"))
 			}
 		})
 	}

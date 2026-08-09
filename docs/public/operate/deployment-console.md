@@ -29,24 +29,28 @@ here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **memQL portal -- Deployments** | `https://cockpit.<env>.example.com/portal/views/deployments` | You want the designed operator view: the live release beside the last gate's legs, the image digests in force, and the whole deployment history on one page (memql#3319). |
-| **Identity service -- Deployments** | `https://identity.<env>.example.com/admin/deployments` (your identity host) | You want the point-and-click view with confirm dialogs, or you need to ACT on a deployment from a browser -- see the note below. |
+| **memQL portal -- Deployments** | `https://cockpit.<env>.example.com/portal/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
-> **Which of these can actually act, today.** `DeployControlService` runs shell
-> scripts against an on-disk overlay checkout, so it exists only on the
-> **identity** node. The memQL portal is served by the bff and dials the origin
-> that served it (a deliberate property -- see
-> [portal.md](portal.md)), so its live-state read and its action buttons reach a
-> node with no deploy-control service and come back `UNIMPLEMENTED`. What the
-> portal view does show from any node is the **history**: `v1:cluster:deployment`
-> rows are ordinary concept rows read through the normal query surface. To act,
-> use the identity service's `/admin/deployments` or the Cockpit, both of which
-> talk to the identity node directly. This is why `/admin/deployments` was NOT
-> retired alongside the rest of that console in memql#3324 -- retiring it would
-> have deleted a working capability rather than moved it. Closing the gap means
-> letting the RPC cross the mesh (a `NodeService` forward, as the AI surfaces
-> do), which is deliberately out of that issue's scope.
+> **How the portal reaches the deploy surface.** `DeployControlService` runs
+> shell scripts against an on-disk overlay checkout, so it exists only on the
+> **identity** node, while the portal is served by the bff and dials the origin
+> that served it (a deliberate property -- see [portal.md](portal.md)). Until
+> memql#3380 that mismatch was the whole story: history rendered (it is ordinary
+> `v1:cluster:deployment` concept rows on the normal query surface) and live
+> state plus every control came back `UNIMPLEMENTED`.
+>
+> A bff now **forwards** the deploy RPCs to the identity node over
+> `NodeService.Stream`, the way the AI surfaces forward to their workers. The
+> caller travels with the call as a typed, verified authority assertion and the
+> receiving node resolves the actor from that and nothing else -- not from the
+> forwarding node's own credential -- so the role matrix below is the same one
+> whether you dialled identity directly or went through a bff. In particular
+> **rollback stays owner-only across the hop.**
+>
+> The server-rendered `/admin/deployments` page that covered the gap is retired
+> with the fix (memql#3380). `/admin/` now answers `410 Gone` and points at the
+> portal.
 
 Every surface calls the same role-gated **deploy-control API**
 (memQL `DeployControlService`); none shells out to
@@ -163,12 +167,9 @@ posture, not a status badge.
 
 ### Enforcement per surface
 
-- **Identity service:** `/admin/deployments` sits behind the same
-  `requireAdmin` middleware every gated route under `/admin/*` uses. A
-  non-admin is rejected with a 403 and an `admin_auth_forbidden` audit
-  event, and never sees the Deployments nav entry.
-  (`component/identity/admin/route_gate_test.go` asserts both halves --
-  the refusal and the audit row.)
+- **memQL portal:** the Deployments view resolves your cluster role and
+  hides an action you cannot take. That is a courtesy, not the control:
+  the call still crosses to the identity node and is gated there.
 - **Cockpit:** the Topology view resolves your cluster role; non-admins
   see a single `Deployments: owner/admin only` line, the deploy-control
   read is never issued, and the action menu does not open.
@@ -176,7 +177,17 @@ posture, not a status badge.
   the gate holds for a direct API caller -- below the floor you get
   `PermissionDenied`. This is one enforcement point, not one per
   surface: the WebSocket bridge (memql#3311) calls the same service
-  methods, so it cannot admit anyone the unary service refuses.
+  methods, so it cannot admit anyone the unary service refuses, and the
+  mesh forward (memql#3380) runs that same `deploycontrol.Dispatch`
+  fan-out on the receiving node rather than a copy of it.
+- **Across the mesh:** a forwarded call carries the ORIGINATING caller
+  as a typed `ForwardedAuthority` (the memql#3205 contract), verified
+  fail-closed on arrival. The receiving node never derives an actor from
+  the forwarding node's own `class="node"` credential -- if it did,
+  every caller who could reach a bff would arrive as the bff. Pinned by
+  `TestDeployControlForwardIgnoresTheForwardingNodesOwnCredential` and
+  by the per-role matrix in
+  `component/grpc/deploy_control_forward_test.go`.
 
 ### What a non-admin sees: a deliberately split surface
 
@@ -258,10 +269,16 @@ Notes that hold on both surfaces:
 
 ### Portal
 
-`/admin/deployments` -> select the env -> use the action forms in the
-Overview panel (deploy / promote), next to the version (rollback), and
-in the Rollouts table (per-rollout promote / abort). Forms are
-CSRF-protected; destructive actions render an inline confirm field.
+`/portal/views/deployments` -> select the env -> use the action controls
+on the Overview panel (deploy / promote), next to the version
+(rollback), and in the Rollouts table (per-rollout promote / abort).
+Destructive actions render an inline type-to-confirm field.
+
+The portal is served by the bff, so each of these crosses to the
+identity node over the mesh forward. A refusal you see here is the
+identity node's own `PermissionDenied`, carried back verbatim; a
+`UNAVAILABLE` means the bff could not reach an identity peer, which is a
+cluster problem rather than a permissions one.
 
 ### Cockpit
 

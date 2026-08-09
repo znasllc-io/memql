@@ -74,6 +74,16 @@ spec:
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50058" }
             # The bff is the mesh ROOT -- it does NOT dial a parent. Leaf nodes
             # (cognition/agent/planner/workbench/voice) dial it at bff-active:50058.
+            #
+            # One exception, outbound: the bff dials the IDENTITY node so the
+            # portal's Deployments surface can reach DeployControlService, which
+            # shells out against an on-disk overlay checkout and therefore lives
+            # only there (memql#3380). This is a first-boot seed only -- DB
+            # discovery against v1:cluster:node takes over once identity has
+            # registered -- and it grants reachability, not mesh membership:
+            # identity stays out of every event broadcast
+            # (EventBridge.meshEventParticipants).
+            - { name: MEMQL_WORKER_PEERS, value: "identity=identity:50061" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
