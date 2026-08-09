@@ -209,7 +209,50 @@ concept delegation {
 /// An account or credential set owned by a v1:identity:user. One user can have many identities: a
 /// magic-link verified email, OAuth accounts on external apps, API keys (Personal Access Tokens),
 /// or service accounts. Agents borrow identities to act on the user's behalf via
-/// v1:identity:delegation. Global scope: lives in _system and is readable from any partition.
+/// v1:identity:delegation. Cluster-wide: one row set, the same from every caller's view.
+//
+// NO @rowAuthz TIER, AND IT CANNOT CARRY AN `owner` ONE (memql#3349).
+// This is the recorded decision the issue asked for, not a backlog entry.
+// Each blocker below was MEASURED by declaring @rowAuthz(owner="userId")
+// here and running the existing gates; the inventory of all eleven reads
+// lives in component/memql/identity_credential_rowauthz_inventory_3349_test.go.
+//
+//  1. `userId` IS NOT AN OWNERSHIP CLAIM. TestDeclaredOwnerFieldsAreServerStamped
+//     reports SEVEN mutations writing it from caller args and ZERO stamping
+//     it from actor.userId (createBadgeIdentity, createIdentity,
+//     createNodeTokenIdentity, createPATIdentity, createVoiceAgentTokenIdentity,
+//     createWorkerTokenIdentity, updateIdentity). That is the field's MEANING,
+//     not a bug: an admin mints a PAT / worker token / badge FOR another user,
+//     and a node token's userId is a machine binding. It names the credential's
+//     SUBJECT. Stamping it from the actor would break admin issuance.
+//
+//  2. FOUR PRE-ACTOR READS BUILD THE ACTOR -- patIdentityByKeyHash,
+//     workerTokenByKeyHash, badgeByKeyHash, nodeTokenIdentityByBinding.
+//     component/identity/pat/verifier.go says it outright: "This is a pre-actor
+//     read, so it cannot be caller-scoped (#2800, #2984)." enforceRowAuthzOnPlan
+//     takes NO context and has no escape (the write path's rowAuthzWriteEscape
+//     has no read-side counterpart), so a tier ANDs userId==actor.userId into
+//     credential verification itself and every PAT / worker-token / badge /
+//     node-token login fails. Measured: TestRowAuthzEnforcementLandGate reports
+//     NINE of the eleven reads undecidable with the tier declared.
+//
+//  3. THE CONCEPT IS A UNION OF EIGHT CREDENTIAL KINDS with different subjects.
+//     node_token and voice_agent_token authenticate a PROCESS, not a person;
+//     nodeTokenIdentities is an operator listing of every node credential in
+//     the cluster and is caller-scopable by nobody.
+//
+// Not open reads: every construct carries its own filter predicate. But a
+// per-query predicate is exactly what @rowAuthz exists to stop relying on --
+// it is author-enforced, and the next query starts from zero. The inventory
+// test is the interim answer: a new read over this concept must classify
+// itself, so it starts from a stated position instead.
+//
+// What would close it, in dependency order: (a) a read-path escape mirroring
+// rowAuthzWriteEscape, so the pre-actor reads survive injection -- all four
+// already stamp internal origin, the read path just cannot consult it;
+// (b) a SPLIT by credential kind, so person-owned credentials carry
+// owner="userId" and machine credentials carry clusterOwner. (b) is a data
+// migration plus a wire-contract change, not an annotation.
 @displayCard(primary="label", secondary="identityType", tertiary="userId", status="active")
 concept identity {
   active          bool    @default("true")  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
@@ -346,6 +389,45 @@ concept magicLinkRequest {
 //
 // So the tier is declarable and still not TRUE here. Making it true is a
 // wire-contract decision over nine client-called mutations, not a bug fix.
+//
+// STILL UNDECLARED, AND NOW FOR A SECOND, INDEPENDENT REASON (memql#3350).
+// The note above is about the WRITE side. The read side rules a tier out
+// on its own, and this is the recorded decision memql#3350 asked for --
+// role-gating for this concept lives at the PROJECTION, not at the row.
+//
+// Measured over the seventeen constructs binding this concept:
+//
+//   - CROSS-USER READS FOR ORDINARY CALLERS. userDisplayById is @public
+//     and usersActiveInSpace is ungated: they are how one participant's
+//     name renders in another's chat. A tier ANDs its predicate into
+//     BOTH of them unconditionally, so any self-scoped tier breaks the
+//     product for every user, not only for readers.
+//   - PRE-ACTOR READS. userByEmail is the magic-link lookup and
+//     userByIdSystem resolves sub -> user in order to BUILD the actor
+//     (component/auth/identity_resolver.go), so actor.userId is circular
+//     there. enforceRowAuthzOnPlan takes NO context and has no escape --
+//     the write path's rowAuthzWriteEscape has no read-side counterpart
+//     -- so no tier can spare them.
+//   - THE ADMIN READS ARE A ROLL-UP. searchUsers / userById are
+//     "the users of this cluster", gated requiresOwnerOrAdmin. `owned`
+//     ANDs its predicate with no cluster-owner escape, so declaring it
+//     would narrow an admin's user list to the admin's own row and
+//     return a confidently wrong answer.
+//
+// So users may legitimately SEE each other; what they may not see is
+// each other's @pii. That is a field boundary, and the named queries
+// already draw it with their shapes -- which is why the leak was on the
+// one read that projects no shape, the generic concept browse. It is
+// closed at row admission for unbound reads, keyed off the @pii
+// annotations below rather than off this concept's name:
+// component/memql/rowauthz_pii_unbound.go.
+//
+// What would let a tier be declared here, in dependency order: (a) a
+// read-path escape mirroring rowAuthzWriteEscape, so the pre-actor and
+// system reads survive injection; (b) a tier that composes self-access
+// with an admin roll-up, since `owned` cannot express one. Neither is a
+// prerequisite for closing the browse hole, which is why #3350 shipped
+// without them.
 @displayCard(primary="displayName", secondary="role", tertiary="primaryEmail", status="active")
 concept user {
   active          bool    @default("true")  @description("Whether the user account is active.")

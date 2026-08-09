@@ -580,33 +580,44 @@ partition match is a bug waiting for phase 8 to land.
 
 ---
 
-## 11. Role enum: owner / admin / writer / reader
+## 11. Role enum: owner / admin / developer / writer / reader
 
-**Rule.** The unified role spectrum is **owner / admin / writer /
-reader**. This applies to:
+**Rule.** The unified role spectrum is **owner / admin / developer /
+writer / reader** -- five values, as returned by `AllRoles()` in
+`component/auth/rbac.go`. This applies to:
 
-- `v1:identity:user.role` (cluster-wide)
-- `v1:identity:partitionAccess.role` (per-partition)
+- `v1:identity:user.role` (cluster-wide, and the only role a user has
+  -- the per-partition grant that used to carry a second one went with
+  partitioning in #56)
 - `v1:identity:delegation.roleCeiling`
 - `v1:data:policy.revertMinRole`
 - The `UserRole` proto enum
-- `component/auth/rbac.go` (`RoleOwner`, `RoleAdmin`, `RoleWriter`,
-  `RoleReader`)
+- `component/auth/rbac.go` (`RoleOwner`, `RoleAdmin`, `RoleDeveloper`,
+  `RoleWriter`, `RoleReader`)
 
-The retired values **manager** and **user** are gone. Legacy data is
-migrated at read time by `migrateRole` in `rbac.go`:
+`developer` is **live**, not legacy: it is engineering power rather
+than admin power (authoring, inline DSL, deploy / cut-version, but no
+user management -- MCP epic #1529). An earlier revision of this
+section listed it among the retired values; `migrateRole` does not
+touch it.
+
+The genuinely retired values are **manager**, **user**, **advocate**,
+**member** and **guest**. Legacy data is migrated at read time by
+`migrateRole` in `rbac.go`:
 
 - `manager` -> `writer`
-- `user` -> `reader`
-- `developer` / `advocate` / `member` / `guest` -> the nearest match
+- `user` / `advocate` / `member` / `guest` -> `reader`
 
-**If you add a new concept with a role enum, use the four new values
-only.** Don't add legacy values "for compatibility" -- the migrator
-already handles old rows.
+**If you add a new concept with a role enum, use the five current
+values only.** Don't add legacy values "for compatibility" -- the
+migrator already handles old rows.
 
-**Ordering.** `RoleLevel` returns: owner=0, admin=1, writer=2,
-reader=3. Lower number = higher privilege. `RoleAtMost(a, b)` returns
-the more-restrictive of the two (useful for delegation ceilings).
+**Ordering.** `RoleLevel` returns: owner=0, admin=1, **developer=1**,
+writer=2, reader=3 (and any unknown role falls to 3). Lower number =
+higher privilege; note that admin and developer deliberately share a
+level rather than ranking against each other. `RoleAtMost(a, b)`
+returns the more-restrictive of the two (useful for delegation
+ceilings).
 
 ---
 
@@ -755,7 +766,7 @@ The five value positions:
 
 ---
 
-## 12. `partition` is a reserved payload field -- use `partitionName`
+## 12. `partition` is still a reserved payload field -- pick another name
 
 **Rule.** `partition` is one of the engine's reserved payload-level
 fields (alongside `id`, `createdAt`, `createdBy`, `concept`, `payload`,
@@ -763,16 +774,36 @@ fields (alongside `id`, `createdAt`, `createdBy`, `concept`, `payload`,
 fails `ensureReservedFieldsNotDeclared` at startup:
 
 ```
-concept v1:identity:partitionAccess definition schema declares reserved property "partition"
+concept v1:example:thing definition schema declares reserved property "partition"
 ```
 
-Use `partitionName` (or similarly explicit) instead. `v1:identity:
-partitionAccess.partitionName` is the canonical example.
+Pick an explicit alternative. Live examples in the tree:
+`v1:identity:user.activePartitionId` and
+`v1:identity:invitation.partitionId`.
 
-**Why it bites you.** The PK for partition-scoped rows is
-`(partition, id, createdAt)`. The engine uses the name `partition`
-for the PK column, so any payload field with the same name would
-shadow it in queries and confuse the schema check.
+**Why it bites you -- and why the old reason is no longer the reason.**
+This section used to say the PK for partition-scoped rows is
+`(partition, id, createdAt)` and that a payload field of the same name
+would shadow the PK column. **That is no longer true** (memql#3305).
+Partitioning was retired in #56: `"MemoryNodes"` has no `partition`
+column at all and its primary key is `(id, "createdAt")` -- read it in
+`component/database/memory-nodes/migrations/20260324000000_initial_setup.up.sql`,
+whose own comment says "no partition column post-#56 phase 3".
+
+The name nevertheless remains in `reservedPayloadFields`
+(`component/database/memory-nodes/constants.go`), so the rule stands
+and the startup check still fires. What changed is the rationale: the
+reservation is now a **retired-name guard** rather than a
+column-shadowing guard. Keeping it means a concept cannot quietly
+reintroduce a field whose name implies a tenancy dimension the engine
+no longer has -- which, given how much stale documentation described
+partitions as live, is worth keeping rather than reclaiming.
+
+The canonical example this section used to cite,
+`v1:identity:partitionAccess.partitionName`, **does not exist**; neither
+field nor concept survives. See
+[access-model.md](../operate/auth/access-model.md) for what replaced
+partition-based isolation.
 
 Full reserved list lives in `component/database/memory-nodes/constants.go`.
 As of Phase 1 of the language-improvements plan, the check also runs
@@ -1146,12 +1177,14 @@ Practical consequences for concept authors:
 
 - **`createdBy`**: never declare it. The engine sets it from the
   request actor on every insert. If you need a separate
-  "issued by some other actor" field (a grant is created by an admin
-  but stamped on a different user), use a payload field with a
-  distinct name like `grantedBy`. See
-  `v1:identity:partitionAccess.grantedBy` for the canonical example.
-- **`partition`**: see [#12](#12-partition-is-a-reserved-payload-field----use-partitionname).
-  Use `partitionName` instead.
+  "issued by some other actor" field (a row created by one user but
+  about another), use a payload field with a distinct name. See
+  `v1:identity:invitation.inviterId` for a live example -- the
+  inviter is recorded explicitly rather than inferred from
+  `createdBy`.
+- **`partition`**: see [#12](#12-partition-is-still-a-reserved-payload-field----pick-another-name).
+  The name is still reserved; pick something explicit like
+  `partitionId`.
 - **`id` / `createdAt`**: same -- the engine owns them.
 
 Practical consequences for mutation authors:
