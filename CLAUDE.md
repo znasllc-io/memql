@@ -583,7 +583,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/begin`, `POST /auth/webauthn/register/finish`, `POST /device/code`, `GET+POST /device` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The `/auth/webauthn/*` pair (memql#3406) is the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -1025,8 +1025,25 @@ node-type binary (`make identity`) and owns:
   memql#3406). Ceremony logic in `component/identity/webauthn/`; the RP id
   derives from `MEMQL_IDENTITY_BASE_URL`, challenges are single-use and
   TTL'd, and credentials are minted `residentKey=required` /
-  `userVerification=required` so they are discoverable. Passkey LOGIN is
-  memql#3407 and enrolment authorization is memql#3408.
+  `userVerification=required` so they are discoverable. Enrolment
+  authorization is memql#3408.
+- WebAuthn passkey **login** (`POST /auth/webauthn/login/{begin,finish}`,
+  memql#3407). Usernameless: the challenge carries an EMPTY
+  `allowCredentials` (no email has been typed) and resolves the assertion to
+  a row by credential id alone, which is why that id is unique cluster-wide.
+  The challenge also carries the in-flight OAuth context -- the same
+  `clientId` / `redirectURI` / `state` / `codeChallenge` /
+  `codeChallengeMethod` that `IssueMagicLink` stamps on a magic-link row --
+  validated at begin and held server-side, so `finish` mints an auth code
+  via `Store.CreateAuthCode` and returns the same client callback target a
+  magic-link click produces. **No client learns which factor ran**: what
+  reaches `/oauth/token` is an auth code, PKCE binding intact. A sign-count
+  regression is refused and audited as the cloned-authenticator signal (a
+  zero counter from an authenticator that does not implement one is not
+  that case). The `/login` page carries a "Sign in with a passkey" control
+  as a progressive enhancement; the magic-link form remains the path when
+  no passkey exists, WebAuthn is unavailable, or no relying party is in
+  scope.
 - OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/login`, `/auth/complete`, `/setup`,

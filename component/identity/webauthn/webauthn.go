@@ -268,7 +268,7 @@ func (c *Ceremony) BeginRegistration(user *User) (*RegistrationChallenge, error)
 	if err != nil {
 		return nil, fmt.Errorf("webauthn: begin registration: %w", err)
 	}
-	challengeId, expiresAt, err := c.challenges.Put(user.Id, CeremonyRegister, session)
+	challengeId, expiresAt, err := c.challenges.Put(user.Id, CeremonyRegister, session, OAuthContext{})
 	if err != nil {
 		return nil, err
 	}

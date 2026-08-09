@@ -15,6 +15,8 @@
 //	POST /auth/badge/grant -- exchange a registered badge id for a short-lived operator grant (Bearer auth; memql#2513)
 //	POST /auth/webauthn/register/begin  -- issue a passkey registration challenge (Bearer auth; memql#3406)
 //	POST /auth/webauthn/register/finish -- verify the attestation and persist the credential (Bearer auth; memql#3406)
+//	POST /auth/webauthn/login/begin     -- issue a usernameless passkey assertion challenge (unauthenticated; memql#3407)
+//	POST /auth/webauthn/login/finish    -- verify the assertion and mint an OAuth auth code (unauthenticated; memql#3407)
 //	POST /device/code      -- RFC 8628 device authorization request (memql#3410)
 //
 // /.well-known/jwks.json is mounted by component/identity.Service
@@ -83,6 +85,15 @@ type Server struct {
 	// first use for the same reason badgeGrantLimiter is.
 	passkeyLimiter     *abuse.IPRateLimiter
 	passkeyLimiterOnce sync.Once
+
+	// passkeyLoginLimiter is the per-IP token bucket for the WebAuthn
+	// LOGIN ceremony (memql#3407). Separate from the registration bucket
+	// above because the two have different natural rates -- signing in is
+	// routine, enrolling is rare -- and because the login pair is
+	// UNAUTHENTICATED, so its bucket is the only thing standing between a
+	// script and an unbounded stream of challenges.
+	passkeyLoginLimiter     *abuse.IPRateLimiter
+	passkeyLoginLimiterOnce sync.Once
 
 	// webauthnCeremonyValue is the relying party + challenge store the
 	// passkey routes use, derived once from Cfg.BaseURL. Built lazily
@@ -242,6 +253,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("OPTIONS /auth/webauthn/register/begin", wrap(s.cors(s.handleOptions)))
 	mux.HandleFunc("POST /auth/webauthn/register/finish", wrap(s.cors(s.handleWebAuthnRegisterFinish)))
 	mux.HandleFunc("OPTIONS /auth/webauthn/register/finish", wrap(s.cors(s.handleOptions)))
+
+	// WebAuthn passkey login (memql#3407). UNAUTHENTICATED by nature --
+	// this pair IS the authentication -- and it ends in the same auth
+	// code /auth/complete produces, so /oauth/token cannot tell which
+	// factor ran. Per-IP rate-limited and HTTPS-required inside the
+	// handlers.
+	mux.HandleFunc("POST /auth/webauthn/login/begin", wrap(s.cors(s.handleWebAuthnLoginBegin)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/login/begin", wrap(s.cors(s.handleOptions)))
+	mux.HandleFunc("POST /auth/webauthn/login/finish", wrap(s.cors(s.handleWebAuthnLoginFinish)))
+	mux.HandleFunc("OPTIONS /auth/webauthn/login/finish", wrap(s.cors(s.handleOptions)))
 
 	if s.Logger != nil {
 		s.Logger.Info("identity HTTP routes mounted",
