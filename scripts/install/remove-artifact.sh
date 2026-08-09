@@ -178,11 +178,54 @@ function remove_hosts_entries() {
 
     local tmp
     tmp="$(mktemp)" || cap_fail 5 "could not create a temporary file"
+    # PREFIX matching, and the sep=nl rule -- both mirror hosts-entries.sh's
+    # scan_blocks, which is the authority on this block's shape.
+    #
+    # Exact matching ($0 == b) was a silent reversal failure. When the hosts
+    # file did not end in a newline, hosts-entries.sh had to insert one before
+    # appending, and it records that by writing the marker as
+    # "# BEGIN memql sep=nl". The guard above greps with -F, which matches that
+    # line as a prefix and says "there is a block here"; exact-match awk then
+    # never recognised it, so `skip` never turned on. Every entry survived, only
+    # the "# END memql" line was dropped, and the envelope still reported
+    # removed=true / changed=true. Uninstall claimed the machine was clean while
+    # leaving the hostnames resolving -- the exact failure the receipt exists to
+    # prevent. Worse, the block was left unterminated, so a second removal had
+    # no END to find.
+    #
+    # sep=nl also means the newline itself was ours: restoring byte-for-byte
+    # requires dropping the trailing newline from the line that preceded the
+    # BEGIN marker, which is what nonl[] does.
     awk -v b="$begin" -v e="$end" '
-        $0 == b { skip = 1; next }
-        $0 == e { skip = 0; next }
-        skip == 0 { print }
-    ' "$path" > "$tmp" || { rm -f "$tmp"; cap_fail 5 "could not rewrite ${path}"; }
+        { line[NR] = $0; drop[NR] = 0; nonl[NR] = 0 }
+        END {
+            inblock = 0
+            for (i = 1; i <= NR; i++) {
+                if (inblock == 0) {
+                    if (substr(line[i], 1, length(b)) == b) {
+                        inblock = 1
+                        drop[i] = 1
+                        if (substr(line[i], length(line[i]) - 6) == " sep=nl" && i > 1) {
+                            nonl[i - 1] = 1
+                        }
+                    }
+                } else {
+                    drop[i] = 1
+                    if (substr(line[i], 1, length(e)) == e) { inblock = 0 }
+                }
+            }
+            if (inblock != 0) { exit 3 }
+            for (i = 1; i <= NR; i++) {
+                if (drop[i]) { continue }
+                if (nonl[i]) { printf "%s", line[i] } else { printf "%s\n", line[i] }
+            }
+        }
+    ' "$path" > "$tmp" || {
+        local rc=$?
+        rm -f "$tmp"
+        [[ "$rc" == "3" ]] && cap_fail 5 "unterminated '${begin}' block in ${path} -- refusing to guess where it ends"
+        cap_fail 5 "could not rewrite ${path}"
+    }
 
     # Redirect INTO the existing file rather than mv over it: preserves the
     # inode, its ownership and its mode (this is usually /etc/hosts).

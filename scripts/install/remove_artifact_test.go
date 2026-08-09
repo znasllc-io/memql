@@ -741,3 +741,96 @@ func raSanitizedBin(t *testing.T) string {
 	}
 	return dir
 }
+
+// TestRemoveArtifactHostsRoundTripIsByteIdentical is a PARITY test between the
+// two scripts that both know the shape of the managed hosts block:
+// hosts-entries.sh writes it (#3361) and remove-artifact.sh takes it back
+// (#3367). Every other test in this file, and every test in
+// hosts_entries_test.go, drives exactly one of them against a hand-built
+// fixture. That is how the two drifted without anything going red.
+//
+// The drift: when the hosts file does NOT end in a newline, hosts-entries.sh
+// must insert one before appending, and records that by writing the marker as
+// "# BEGIN memql sep=nl". remove-artifact.sh guarded with `grep -F` (a PREFIX
+// match, which finds that line) but stripped with `awk '$0 == b'` (an EXACT
+// match, which does not). So `skip` never turned on: every hostname survived,
+// only "# END memql" was dropped, the block was left unterminated -- and the
+// envelope still said removed=true, changed=true. Uninstall reported a clean
+// machine while the front-door hostnames kept resolving.
+//
+// The fixture is deliberately built by RUNNING hosts-entries.sh rather than by
+// hand-writing a block, because a hand-written fixture is what agreed with the
+// bug.
+func TestRemoveArtifactHostsRoundTripIsByteIdentical(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	adder := filepath.Join(filepath.Dir(raScript(t)), "hosts-entries.sh")
+	if _, err := os.Stat(adder); err != nil {
+		t.Fatalf("hosts-entries.sh not found at %s: %v", adder, err)
+	}
+
+	cases := []struct {
+		name       string
+		original   string
+		wantMarker string // the BEGIN marker the add is expected to write
+	}{
+		{
+			name:       "file ends in a newline",
+			original:   "127.0.0.1 localhost\n10.0.0.5 operator-box\n",
+			wantMarker: "# BEGIN memql",
+		},
+		{
+			// The regression case. The installer's own newline is part of what
+			// it must take back.
+			name:       "file does NOT end in a newline",
+			original:   "127.0.0.1 localhost\n10.0.0.5 operator-box",
+			wantMarker: "# BEGIN memql sep=nl",
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			w := raNewWorld(t, raClusterList, raImageList)
+			hosts := filepath.Join(t.TempDir(), "hosts")
+			if err := os.WriteFile(hosts, []byte(tc.original), 0o644); err != nil {
+				t.Fatalf("seed hosts: %v", err)
+			}
+
+			add := exec.Command("bash", adder, "--action=add",
+				"--hosts-file="+hosts, "--confirm=add-memql-hosts")
+			add.Stdin = nil
+			if out, err := add.CombinedOutput(); err != nil {
+				t.Fatalf("hosts-entries.sh add failed: %v\n%s", err, out)
+			}
+
+			added, err := os.ReadFile(hosts)
+			if err != nil {
+				t.Fatalf("read after add: %v", err)
+			}
+			if !strings.Contains(string(added), tc.wantMarker) {
+				t.Fatalf("add wrote no %q marker -- the fixture no longer exercises "+
+					"the case this test exists for:\n%s", tc.wantMarker, added)
+			}
+
+			stdout, stderr, code := raRun(t, w.env, "--kind=hostsEntries", "--path="+hosts)
+			if code != 0 {
+				t.Fatalf("removal exited %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+			}
+			env, _ := raParse(t, stdout)
+			if !env.Changed {
+				t.Error("changed=false after removing a block that was present")
+			}
+
+			got, err := os.ReadFile(hosts)
+			if err != nil {
+				t.Fatalf("read after remove: %v", err)
+			}
+			if string(got) != tc.original {
+				t.Errorf("add -> remove did not restore the file byte for byte.\n"+
+					" want %q\n  got %q", tc.original, string(got))
+			}
+		})
+	}
+}
