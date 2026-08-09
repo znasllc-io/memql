@@ -2,8 +2,79 @@ package webtempl
 
 // MeDevicesData drives /me/devices. Sessions are populated client-side
 // from /me/devices.json by app.js.
+//
+// The passkey half (memql#3409) is server-rendered instead, and that is
+// a deliberate difference from the sessions half rather than an
+// inconsistency: revoking a credential is the one action on this page
+// that can lock somebody out, so the warning that precedes it has to be
+// produced by the same code that performs it, not by a script that can
+// be skipped.
 type MeDevicesData struct {
 	Layout LayoutData
+	Flash  *Flash
+
+	// PasskeysEnabled is false when the passkey adapter is not wired
+	// (a binary without the engine). The card is then omitted entirely
+	// rather than rendered empty, which would read as "you have none".
+	PasskeysEnabled bool
+
+	// Passkeys is the caller's own enrolled authenticators, active and
+	// revoked alike -- a revoked row stays visible because its
+	// credential id stays taken, and a user who wonders why an old key
+	// will not re-enrol deserves to see it listed as revoked.
+	Passkeys []MePasskeyRow
+
+	// RevokeWarning is non-nil on the confirmation round-trip of a
+	// revoke. It is what makes the last-credential case explicit
+	// instead of silent.
+	RevokeWarning *MePasskeyRevokeWarning
+
+	// RoutesSummary is a plain sentence naming what the user can
+	// currently sign in with. Rendered above the list so the answer to
+	// "is this account recoverable" is visible without doing the
+	// arithmetic.
+	RoutesSummary string
+}
+
+// MePasskeyRow is the per-row projection rendered into the passkey
+// table. The handler converts webauthn.Row into this shape so the templ
+// component stays decoupled from the storage type.
+//
+// signCount is deliberately absent. It is on the stored row, but a zero
+// there means "this authenticator does not implement counters" -- which
+// most platform authenticators do not -- and NOT "never used". Showing
+// it would answer a question the user did not ask with a number that
+// looks like an answer to the one they did. LastUsedAt is that answer.
+type MePasskeyRow struct {
+	ID     string
+	Label  string
+	Active bool
+
+	// Authenticator is the AAGUID-derived make/model, or "" when the
+	// authenticator withheld it or the model is newer than our table.
+	// Empty is ordinary; the template renders it as a dash.
+	Authenticator string
+
+	// Backup is the one-word posture -- "Synced" or "Device-bound" --
+	// and BackupDetail is the consequence spelled out. Device-bound is
+	// the case that matters: losing the device loses the passkey.
+	Backup       string
+	BackupDetail string
+
+	Transports string
+	CreatedAt  string
+	LastUsedAt string
+}
+
+// MePasskeyRevokeWarning is the interstitial shown before a revoke goes
+// through. Every revoke gets one; LastCredential distinguishes "here is
+// what you will have left" from "you will have nothing left".
+type MePasskeyRevokeWarning struct {
+	ID             string
+	Label          string
+	Headline       string
+	Detail         string
+	LastCredential bool
 }
 
 templ MeDevices(data MeDevicesData) {
@@ -29,7 +100,135 @@ templ MeDevices(data MeDevicesData) {
 						</button>
 					</form>
 				</div>
+				if data.PasskeysEnabled {
+					@mePasskeysCard(data)
+				}
 			</section>
 		</div>
 	}
+}
+
+templ mePasskeysCard(data MeDevicesData) {
+	<div class="card card-wide">
+		<h1 class="card-title">Passkeys</h1>
+		<p class="card-subtitle">
+			A passkey signs you in with the fingerprint, face or PIN you already
+			use to unlock a device &mdash; no email round-trip. Register a second
+			one while the first still works: that is what turns losing a device
+			into an inconvenience instead of a locked account.
+		</p>
+		if data.Flash != nil {
+			<div class={ "alert", "alert-" + data.Flash.Kind }>{ data.Flash.Message }</div>
+		}
+		if data.RevokeWarning != nil {
+			@mePasskeyRevokeWarning(*data.RevokeWarning, data.Layout.CSRFToken)
+		}
+		<h2 class="card-section">Add a passkey</h2>
+		<p class="text-small text-muted">
+			Uses the session you are signed in with right now as the authority to
+			enrol. Your browser will ask which device to use.
+		</p>
+		<p>
+			<button type="button" class="btn btn-primary" data-passkeys-add>
+				Add a passkey
+			</button>
+		</p>
+		<p class="text-small" data-passkeys-status role="status"></p>
+		<h2 class="card-section">Your passkeys</h2>
+		if data.RoutesSummary != "" {
+			<p class="text-small text-muted">{ data.RoutesSummary }</p>
+		}
+		if len(data.Passkeys) == 0 {
+			<p class="text-muted">
+				You haven't registered any passkeys yet. Today you sign in by email
+				only.
+			</p>
+		} else {
+			<table class="data">
+				<thead>
+					<tr>
+						<th>Name</th>
+						<th>Authenticator</th>
+						<th>Backup</th>
+						<th>Last used</th>
+						<th>Added</th>
+						<th></th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, p := range data.Passkeys {
+						@mePasskeyRow(p, data.Layout.CSRFToken)
+					}
+				</tbody>
+			</table>
+		}
+	</div>
+}
+
+templ mePasskeyRow(p MePasskeyRow, csrfToken string) {
+	<tr>
+		<td>
+			if p.Active {
+				<form method="POST" action="/me/devices/passkeys/rename" class="form-row" data-submit-once>
+					@CSRFField(csrfToken)
+					<input type="hidden" name="id" value={ p.ID }/>
+					<input type="text" name="label" value={ p.Label } required maxlength="120" pattern="[^&lt;&gt;]+" aria-label="Passkey name"/>
+					<button type="submit" class="btn btn-secondary btn-small">Rename</button>
+				</form>
+			} else {
+				{ p.Label } <span class="badge badge-muted">revoked</span>
+			}
+		</td>
+		<td>
+			if p.Authenticator != "" {
+				{ p.Authenticator }
+			} else {
+				<span class="text-muted">&mdash;</span>
+			}
+			if p.Transports != "" {
+				<br/><span class="text-small text-muted">{ p.Transports }</span>
+			}
+		</td>
+		<td>
+			{ p.Backup }
+			<br/><span class="text-small text-muted">{ p.BackupDetail }</span>
+		</td>
+		<td>
+			if p.LastUsedAt != "" {
+				{ p.LastUsedAt }
+			} else {
+				<span class="text-muted">never</span>
+			}
+		</td>
+		<td>{ p.CreatedAt }</td>
+		<td>
+			if p.Active {
+				<form method="POST" action="/me/devices/passkeys/revoke" style="display:inline;" data-submit-once>
+					@CSRFField(csrfToken)
+					<input type="hidden" name="id" value={ p.ID }/>
+					<button type="submit" class="btn btn-danger btn-small">Revoke</button>
+				</form>
+			}
+		</td>
+	</tr>
+}
+
+templ mePasskeyRevokeWarning(warn MePasskeyRevokeWarning, csrfToken string) {
+	<div class={ "alert", templ.KV("alert-error", warn.LastCredential), templ.KV("alert-warn", !warn.LastCredential) }>
+		<p><strong>{ warn.Headline }</strong></p>
+		<p>{ warn.Detail }</p>
+		<form method="POST" action="/me/devices/passkeys/revoke" class="form-row" data-submit-once>
+			@CSRFField(csrfToken)
+			<input type="hidden" name="id" value={ warn.ID }/>
+			<input type="hidden" name="confirm" value="yes"/>
+			<button type="submit" class="btn btn-danger">
+				if warn.LastCredential {
+					Revoke anyway
+				} else {
+					Revoke this passkey
+				}
+			</button>
+			<a class="btn btn-secondary" href="/me/devices">Keep it</a>
+		</form>
+	</div>
 }

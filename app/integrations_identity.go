@@ -24,6 +24,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity/pat"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
+	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
 
 // newSSOAuthCode mints a plaintext URL-safe base64 code + its
@@ -380,6 +381,17 @@ func (a *App) integrationsIdentity() {
 			}
 			return ""
 		},
+	})
+
+	// /me/devices passkey management (memql#3409). The SAME
+	// *webauthn.Store the registration ceremony builds per-request in
+	// component/identity/http -- so the list a user manages here and the
+	// exclusion set the ceremony builds there can never disagree about
+	// what is enrolled.
+	webSrv.SetMePasskeys(&identityweb.MePasskeys{
+		Adapter: &webauthn.Store{Engine: a.engine, Logger: a.Logger},
+		Issuer:  svc.Issuer(),
+		Audit:   auditLogger,
 	})
 
 	svc.SetWebMounter(webSrv)

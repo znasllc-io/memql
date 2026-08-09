@@ -242,16 +242,17 @@ func (s *Server) handleMeTokensRevoke(w http.ResponseWriter, r *http.Request) {
 // return-to query. The PAT page's CSRF surface is the form-only POST
 // handlers; we don't accept JSON XHR here.
 func (s *Server) requireUser(w http.ResponseWriter, r *http.Request) (*identity.AccessTokenClaims, error) {
-	if s.meTokens == nil || s.meTokens.Issuer == nil {
-		s.renderError(w, r, http.StatusServiceUnavailable, "Token management is temporarily unavailable.")
-		return nil, errors.New("me-tokens not wired")
+	issuer := s.userIssuer()
+	if issuer == nil {
+		s.renderError(w, r, http.StatusServiceUnavailable, "Account management is temporarily unavailable.")
+		return nil, errors.New("no issuer wired for the /me/* surface")
 	}
 	raw := extractUserToken(r)
 	if raw == "" {
 		http.Redirect(w, r, "/login?return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
 		return nil, errors.New("no token")
 	}
-	claims, err := s.meTokens.Issuer.VerifyAccessToken(raw, time.Now().UTC())
+	claims, err := issuer.VerifyAccessToken(raw, time.Now().UTC())
 	if err != nil {
 		http.Redirect(w, r, "/login?flash=Your+session+expired&flash_kind=error&return_to="+url.QueryEscape(r.URL.Path), http.StatusSeeOther)
 		return nil, err
@@ -277,10 +278,44 @@ func extractUserToken(r *http.Request) string {
 	return ""
 }
 
+// userIssuer returns the JWT issuer the /me/* pages verify sessions
+// with. It is the same issuer either way -- the two structs are wired
+// from one `svc.Issuer()` at bootstrap -- but a binary may wire only
+// one of them, and a page must not be unreachable because a SIBLING
+// page's dependency is missing (memql#3409).
+func (s *Server) userIssuer() *identity.JWTIssuer {
+	if s == nil {
+		return nil
+	}
+	if s.meTokens != nil && s.meTokens.Issuer != nil {
+		return s.meTokens.Issuer
+	}
+	if s.mePasskeys != nil && s.mePasskeys.Issuer != nil {
+		return s.mePasskeys.Issuer
+	}
+	return nil
+}
+
+// auditLogger resolves the AuditLogger from whichever /me/* dependency
+// is wired, for the same reason userIssuer does.
+func (s *Server) auditLogger() identity.AuditLogger {
+	if s == nil {
+		return nil
+	}
+	if s.meTokens != nil && s.meTokens.Audit != nil {
+		return s.meTokens.Audit
+	}
+	if s.mePasskeys != nil && s.mePasskeys.Audit != nil {
+		return s.mePasskeys.Audit
+	}
+	return nil
+}
+
 // audit forwards an event to the configured AuditLogger, attaching
-// request metadata. Safe to call when meTokens / Audit are nil.
+// request metadata. Safe to call when no logger is wired.
 func (s *Server) audit(r *http.Request, ev identity.AuditEvent) {
-	if s == nil || s.meTokens == nil || s.meTokens.Audit == nil {
+	logger := s.auditLogger()
+	if logger == nil {
 		return
 	}
 	if r != nil {
@@ -291,7 +326,7 @@ func (s *Server) audit(r *http.Request, ev identity.AuditEvent) {
 			ev.UserAgent = r.Header.Get("User-Agent")
 		}
 	}
-	s.meTokens.Audit.Log(r.Context(), ev)
+	logger.Log(r.Context(), ev)
 }
 
 func projectTokens(rows []pat.PATRow) []webtempl.MeTokenRow {

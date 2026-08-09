@@ -9654,6 +9654,34 @@ func RemoveAgentFromSpaceBuild(args RemoveAgentFromSpaceArgs) string {
 	return b.String()
 }
 
+// RenamePasskeyIdentity -- Rename an enrolled passkey. Changes only the display label -- the credential itself is untouched.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["renamePasskeyIdentity"] in generated_concepts.go).
+type RenamePasskeyIdentityArgs struct {
+	IdentityId string
+	Label      string
+}
+
+// RenamePasskeyIdentity calls the engine mutation renamePasskeyIdentity.
+func (qc *QueryClient) RenamePasskeyIdentity(ctx context.Context, args RenamePasskeyIdentityArgs) (*Result, error) {
+	call := RenamePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "renamePasskeyIdentity", call)
+}
+
+func RenamePasskeyIdentityBuild(args RenamePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation renamePasskeyIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RequestChanges -- Send a v1:forge:request back for changes: set status 'changes_requested' with a reason.
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestChanges"] in generated_concepts.go).
@@ -9985,6 +10013,28 @@ func (qc *QueryClient) RevokePATIdentity(ctx context.Context, args RevokePATIden
 func RevokePATIdentityBuild(args RevokePATIdentityArgs) string {
 	var b strings.Builder
 	b.WriteString("mutation revokePATIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RevokePasskeyIdentity -- Revoke (deactivate) a passkey identity row. Soft-delete via active=false -- the row stays for audit, and its credential id stays taken so the same authenticator cannot be re-enrolled onto a fresh row.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["revokePasskeyIdentity"] in generated_concepts.go).
+type RevokePasskeyIdentityArgs struct {
+	IdentityId string
+}
+
+// RevokePasskeyIdentity calls the engine mutation revokePasskeyIdentity.
+func (qc *QueryClient) RevokePasskeyIdentity(ctx context.Context, args RevokePasskeyIdentityArgs) (*Result, error) {
+	call := RevokePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "revokePasskeyIdentity", call)
+}
+
+func RevokePasskeyIdentityBuild(args RevokePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokePasskeyIdentity(")
 	b.WriteString("identityId: ")
 	b.WriteString(quoteMemQL(args.IdentityId))
 	b.WriteString(")")

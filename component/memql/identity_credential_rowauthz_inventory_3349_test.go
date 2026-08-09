@@ -166,6 +166,13 @@ var credentialReadInventory = map[string]struct {
 			"badgesForSelf. Backs both the passkey management list and the excludeCredentials " +
 			"set at register/begin, so it must return the CALLER's authenticators and only " +
 			"those -- a wider set would hand one user another's credential ids."},
+	"signInIdentitiesForSelf": {classSelfScoped,
+		"filter (identityIsMagicLink || identityIsPasskey) && userId==actor.userId && " +
+			"isActiveRecord (memql#3409). Backs the last-credential warning on /me/devices: " +
+			"before a passkey revoke it counts what would REMAIN as a way into the account. " +
+			"Self-scoping is the correctness property as much as the authorization one -- a " +
+			"wider set would report somebody else's credentials as this caller's recovery " +
+			"route. Projects identitySummary, which carries no credential material."},
 	"accountTokensForAccount": {classSelfScoped,
 		"filter identityType==\"account_token\" && userId==actor.userId && " +
 			"credentials.accountId==args.accountId (memql#3322). An account token's SUBJECT is " +
