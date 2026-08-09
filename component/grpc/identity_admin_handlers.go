@@ -104,6 +104,18 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 			InvitationTTLDays:         int(p.GetInvitationTtlDays()),
 			RefreshCookieSameSite:     p.GetRefreshCookieSameSite(),
 		})
+	case *memqlv1.IdentityAdminMsg_IssueEnrolmentLink:
+		p := req.IssueEnrolmentLink
+		res = svc.IssueEnrolmentLink(ctx, adminops.EnrolmentLink{
+			UserId:     p.GetUserId(),
+			TTLSeconds: int(p.GetTtlSeconds()),
+			// The stream's peer address, not a caller-supplied value: an
+			// audit field a caller can set is an audit field a caller can
+			// forge.
+			SourceIP: extractRequestMeta(ctx).ClientIP,
+		})
+	case *memqlv1.IdentityAdminMsg_RevokeEnrolmentLink:
+		res = svc.RevokeEnrolmentLink(ctx, req.RevokeEnrolmentLink.GetEnrolmentTokenId())
 	default:
 		out.ErrorCode = adminops.CodeInvalidArgument
 		out.ErrorMessage = "identity admin: identity_admin message carries no request"
@@ -115,6 +127,10 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 	out.ErrorMessage = res.ErrorMessage
 	out.AuditEventId = res.AuditEventId
 	out.Message = res.Message
+	// Set by IssueEnrolmentLink alone; empty everywhere else, including on
+	// every refusal. See IdentityAdminResult.enrolment_url in memql.proto for
+	// why one field on this reply is allowed to carry a credential.
+	out.EnrolmentUrl = res.EnrolmentURL
 
 	if s.logger != nil && !res.OK {
 		s.logger.Warn("identity admin (streamed) rejected",

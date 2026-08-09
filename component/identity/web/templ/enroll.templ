@@ -1,0 +1,94 @@
+package webtempl
+
+// EnrollData drives GET /enroll?code=... -- the page a single-use enrolment
+// link lands on (memql#3408).
+//
+// Two shapes in one component: the live enrolment card, and one of four
+// distinct refusals. They share a template because they share a URL and a
+// layout, not because they are the same page -- Rejection is what picks.
+type EnrollData struct {
+	Layout LayoutData
+
+	// Rejection is "" on the live path. Otherwise it is the machine-readable
+	// state: "invalid", "expired", "already-used" or "revoked". Rendered into
+	// a data attribute so a test (and a support engineer reading a screenshot)
+	// can tell the four apart without matching on prose.
+	Rejection string
+
+	// Heading and Message are the refusal's human text. Empty on the live
+	// path.
+	Heading string
+	Message string
+
+	// NextStep is the one thing the holder should do about it, when there is
+	// one. A refusal that only says "no" makes the reader guess.
+	NextStep string
+
+	// AccountLabel names the account being enrolled -- an email when we have
+	// one, the user id otherwise. The holder is about to bind a credential
+	// into an account; they should be able to see which.
+	AccountLabel string
+
+	// ExpiresIn is a rendered duration ("14 minutes"), live path only.
+	ExpiresIn string
+}
+
+// Enroll renders the enrolment page.
+//
+// COPY CONSTRAINT (memql#3405 -- REVISIT WHEN THE SPIKE LANDS). THIS IS THE
+// COPY SITE. The body text below names the PLATFORM authenticator only: Touch
+// ID, Windows Hello, the built-in unlock on the device in front of you. It
+// deliberately says nothing about scanning a QR code with a phone, or about
+// using Face ID or a fingerprint on another device.
+//
+// That is a constraint on what we PROMISE, not on what works. The browser will
+// still offer whatever it supports, cross-device (hybrid) transport included,
+// and if that works the user gets it. What is unverified is the AUTHENTICATOR
+// leg of hybrid against a `.localhost`-family RP ID: the browser side is
+// settled, but nobody has yet run the phone half on physical iOS/Android
+// hardware. Promising a flow no one has watched succeed is how a first-run
+// install strands someone with no way in.
+//
+// When memql#3405 reports, this comment and the sentence in the `text-muted`
+// paragraph are what to change. Nothing else on the page depends on it.
+templ Enroll(data EnrollData) {
+	@Layout(data.Layout) {
+		if data.Rejection != "" {
+			<div class="card text-center" data-enroll-state={ data.Rejection }>
+				<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="color: var(--brand-primary); margin: 0 auto 12px; display: block;">
+					<path d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"></path>
+				</svg>
+				<h1 class="card-title">{ data.Heading }</h1>
+				<p class="text-muted">{ data.Message }</p>
+				if data.NextStep != "" {
+					<p class="text-small text-subtle mt-2">{ data.NextStep }</p>
+				}
+			</div>
+		} else {
+			<div class="card" data-enroll-state="valid">
+				<h1 class="card-title">Set up your passkey</h1>
+				<p class="text-muted">
+					A passkey signs you in with the unlock you already use on this device --
+					Touch ID, Windows Hello, or your screen lock. There is nothing to
+					remember and nothing to type.
+				</p>
+				if data.AccountLabel != "" {
+					<p class="text-small text-subtle mt-2">
+						This will be added to <strong>{ data.AccountLabel }</strong>.
+					</p>
+				}
+				if data.ExpiresIn != "" {
+					<p class="text-small text-subtle">
+						This link is single-use and expires in { data.ExpiresIn }.
+					</p>
+				}
+				<div class="mt-2">
+					<button type="button" id="enroll-start" class="btn btn-primary">
+						Create passkey
+					</button>
+				</div>
+				<p id="enroll-status" class="text-small mt-2" role="status" aria-live="polite"></p>
+			</div>
+		}
+	}
+}

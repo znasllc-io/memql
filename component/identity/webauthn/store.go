@@ -24,11 +24,15 @@ const maxPageWalk = 1000
 // Store wraps the memQL engine with typed passkey operations. Mirrors
 // badge.Store: create, lookup, list.
 //
-// Revocation is deliberately absent -- it belongs to the passkey
-// management surface (memql#3409) alongside the rename and the
-// last-credential guard, and adding a bare revoke here would invite a
-// caller that removes a user's only passkey with nothing checking
-// whether they still have a way in.
+// Rename, Revoke and the sign-in-route count landed with the management
+// surface (memql#3409) and live in management.go. The split is by what
+// the caller is holding, not by alphabet: everything in THIS file runs
+// with an attested credential in hand, and nothing over there does.
+//
+// Revoke was held back from this file until #3409 precisely so it would
+// arrive together with the guard that makes it safe -- a bare revoke
+// invites a caller that removes a user's only passkey with nothing
+// checking whether they still have a way in.
 type Store struct {
 	Engine identity.EngineExecutor
 	Logger *slog.Logger

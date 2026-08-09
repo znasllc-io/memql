@@ -215,6 +215,11 @@ type passkeyStubEngine struct {
 	forSelf []map[string]any
 	// user is the directory row userByIdSystem returns; nil for none.
 	user map[string]any
+	// enrolment is the row enrolmentTokenByHash returns; nil for none
+	// (memql#3408). Keyed by nothing -- the lookup is by a 256-bit digest, so
+	// a single row is all a test ever needs to stand in for "the one that
+	// matches".
+	enrolment map[string]any
 
 	queries   []string
 	mutations []string
@@ -247,6 +252,11 @@ func (e *passkeyStubEngine) Execute(_ context.Context, query string) (*memqlengi
 		return e.nodes(e.user)
 	case strings.Contains(query, "passkeysForSelf"):
 		return e.nodes(e.forSelf...)
+	case strings.Contains(query, "enrolmentTokenByHash"):
+		if e.enrolment == nil {
+			return e.nodes()
+		}
+		return e.nodes(e.enrolment)
 	case strings.Contains(query, "passkeyByCredentialId"):
 		for credId, fields := range e.byCredentialId {
 			if strings.Contains(query, credId) {

@@ -130,6 +130,36 @@ action recoverMagicLink {
   )
 }
 
+// Backend: scripts/install/enrolment-link.sh. Writes ONE row inside the
+// cluster (a hashed, single-use enrolment token) and nothing on the host --
+// which is why the graph step declares containedBy: clusterUp rather than a
+// receipt of its own: tearing the cluster down takes the row with it.
+/// Mint a single-use passkey-enrolment link for the cluster owner, so a fresh install ends with a
+/// credential the operator holds rather than an email round trip nobody can receive.
+action issueEnrolmentLink {
+  args {
+    local     boolean!
+    userEmail string!
+    baseUrl   string
+    ttl       string
+    context   string
+    namespace string
+    target    string
+    binary    string
+  }
+  capability script(
+    script: "install.enrolmentLink",
+    local: args.local,
+    user-email: args.userEmail,
+    base-url: args.baseUrl,
+    ttl: args.ttl,
+    context: args.context,
+    namespace: args.namespace,
+    target: args.target,
+    binary: args.binary
+  )
+}
+
 // =============================================================================
 //   Placement (mutating)
 // =============================================================================

@@ -246,6 +246,24 @@ export interface IdentityAdminRevokeTokenPayload {
   identityId: string;
 }
 
+// Mint a single-use enrolment link for another person (memql#3408) -- the
+// credential that lets them register their FIRST passkey with no mailbox in
+// the loop. The minted link comes back on IdentityAdminResultPayload
+// .enrolmentUrl and is shown once.
+export interface IdentityAdminIssueEnrolmentLinkPayload {
+  userId: string;
+  // 0 = the server's 15-minute default. Values above the server ceiling are
+  // clamped down rather than refused.
+  ttlSeconds?: number;
+}
+
+// Kill an unused enrolment link before its TTL expires. Distinct from
+// consumption all the way down: the /enroll page tells a revoked link apart
+// from a spent one, because they call for different next steps.
+export interface IdentityAdminRevokeEnrolmentLinkPayload {
+  enrolmentTokenId: string;
+}
+
 export interface IdentityAdminClusterSettingsPayload {
   brandName?: string;
   brandPrimaryColor?: string;
@@ -271,7 +289,9 @@ export type IdentityAdminRequestPayload =
   | { setUserSuspended: IdentityAdminSetSuspendedPayload }
   | { revokeUserToken: IdentityAdminRevokeTokenPayload }
   | { revokeNodeToken: IdentityAdminRevokeTokenPayload }
-  | { updateClusterSettings: IdentityAdminClusterSettingsPayload };
+  | { updateClusterSettings: IdentityAdminClusterSettingsPayload }
+  | { issueEnrolmentLink: IdentityAdminIssueEnrolmentLinkPayload }
+  | { revokeEnrolmentLink: IdentityAdminRevokeEnrolmentLinkPayload };
 
 export type IdentityAdminPayload = { requestId: string } & IdentityAdminRequestPayload;
 
@@ -767,6 +787,11 @@ export interface IdentityAdminResultPayload {
   errorMessage?: string;
   auditEventId?: string;
   message?: string;
+  // Set by issueEnrolmentLink ONLY (memql#3408) -- the one field on this
+  // reply that carries a credential, because the link IS that call's product
+  // and no later request can fetch it. Empty on every other operation and on
+  // every refusal.
+  enrolmentUrl?: string;
 }
 
 // AutomationRunEvent -- one frame of a run's streamed trace. Mirrors

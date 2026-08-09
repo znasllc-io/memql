@@ -2082,6 +2082,28 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EnrolmentTokenByHash -- Enrolment-token lookup by tokenHash for the /enroll redeem path.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["enrolmentTokenByHash"] in generated_concepts.go).
+type EnrolmentTokenByHashArgs struct {
+	TokenHash string
+}
+
+// EnrolmentTokenByHash calls the engine query enrolmentTokenByHash.
+func (qc *QueryClient) EnrolmentTokenByHash(ctx context.Context, args EnrolmentTokenByHashArgs) (*Result, error) {
+	call := EnrolmentTokenByHashBuild(args)
+	return qc.executeNamed(ctx, "enrolmentTokenByHash", call)
+}
+
+func EnrolmentTokenByHashBuild(args EnrolmentTokenByHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query enrolmentTokenByHash(")
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["eventsByDay"] in generated_concepts.go).
@@ -3853,6 +3875,23 @@ func SiParticipantForSpaceBuild(args SiParticipantForSpaceArgs) string {
 	b.WriteString(quoteMemQL(args.PartitionId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// SignInIdentitiesForSelf -- List the CALLING user's own ACTIVE sign-in routes -- magic-link and passkey credentials only. Backs the last-credential warning before a passkey revoke; the projection is identitySummary, which carries the type and the label and no credential material at all.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["signInIdentitiesForSelf"] in generated_concepts.go).
+type SignInIdentitiesForSelfArgs struct {
+}
+
+// SignInIdentitiesForSelf calls the engine query signInIdentitiesForSelf.
+func (qc *QueryClient) SignInIdentitiesForSelf(ctx context.Context, args SignInIdentitiesForSelfArgs) (*Result, error) {
+	call := SignInIdentitiesForSelfBuild(args)
+	return qc.executeNamed(ctx, "signInIdentitiesForSelf", call)
+}
+
+func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
+	_ = args
+	return "query signInIdentitiesForSelf()"
 }
 
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.

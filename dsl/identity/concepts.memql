@@ -538,6 +538,47 @@ concept workerPairingCode {
   @relationship(type="parent", field="redeemedBy", target=identity, direction="outgoing")
 }
 
+/// Single-use enrolment credential: authorizes exactly one action -- register a passkey as the
+/// named user -- which is what makes a FIRST credential obtainable with no mailbox (memql#3408).
+/// The plain token is mql_enr_<43 base64url chars> (32 CSPRNG bytes); only its SHA-256 hex digest
+/// lands here, so a database snapshot cannot be replayed into an enrolment. Single-use via
+/// consumedAt, stamped when the passkey registration succeeds; revokedAt is the issuer's kill
+/// switch before that. Default TTL 15 minutes.
+//
+// MIRRORS v1:identity:workerPairingCode RATHER THAN EXTENDING v1:identity:invitation. An
+// invitation's kind enum is ("user", "guest") -- "invite an existing user by ID" and "invite an
+// external email with a token" -- and its status enum runs through accepted / ignored / left /
+// kicked / dismissed, which is participation vocabulary. An enrolment token is neither an invitee
+// nor a participant: it has no invitee email, no inviter display name to render into a message, no
+// product scope, and it can never be "left" or "kicked". Adding an "enrolment" kind would leave
+// most of that concept's fields permanently empty and would put single-use on respondedAt+status
+// instead of the consumedAt stamp this credential actually needs. workerPairingCode is the row
+// this IS: a hashed, TTL'd, single-use bearer that authorizes one exchange. The HASHING
+// CONVENTION is unchanged and shared with every other credential row -- SHA-256 hex of the
+// plaintext (pat, workertoken, workerpairing, invitation, magicLinkRequest).
+//
+// NO @rowAuthz TIER, for the same structural reason magicLinkRequest and workerPairingCode carry
+// none: the redeem read is PRE-ACTOR. The token IS the credential, so at lookup time there is no
+// authenticated caller whose userId a tier could compare against, and any owner tier would resolve
+// actor.userId to "" and return nothing -- turning every redeem into a silent "invalid". The
+// lookup is bounded to a single row by a 256-bit hash, and enrolmentTokenByHash is registered in
+// component/memql/rowauthz_undeclared_gate_test.go naming this issue as its reason.
+// @no-displayCard: single-use credential row -- a secret hash plus foreign keys, same reasoning as
+//   v1:identity:workerPairingCode and v1:identity:authCode.
+concept enrolmentToken {
+  userId          string!    @description("v1:identity:user.id this token enrols. The redeem path resolves the passkey owner from THIS field and never from a caller-supplied argument, so a leaked token can only ever add a credential to the account it was minted for.")
+  tokenHash       string!    @description("SHA-256 hex digest of the plain mql_enr_<...> token. The plaintext is returned to the issuer ONCE, embedded in the enrolment link, and is never persisted or logged.")
+  issuedBy        string!    @description("v1:identity:user.id of the principal that minted the token -- the owner/admin on the portal path, the cluster owner on the install-wizard path. Equal to userId when someone mints their own link; carried separately so an admin-assisted enrolment has attribution without re-deriving it from the audit trail.")
+  expiresAt       datetime!  @description("Absolute expiration timestamp. Redeem rejects rows past this even when consumedAt is empty. Default 15 minutes from issue, overridable per-issue up to a capped maximum (component/identity/enrolment.MaxTTL).")
+  consumedAt      datetime   @description("Stamped when the authorized passkey registration completes. Single-use semantics: a row with non-empty consumedAt is dead and any replay is refused with the already-used rejection state.")
+  consumedFromIP  string     @description("Source IP the redeem came from. Audit signal -- helps detect 'someone else used my enrolment link'.")
+  revokedAt       datetime   @description("Stamped when the issuer kills the token before it was used. Distinct from consumedAt so the /enroll page can say 'this link was revoked' rather than the misleading 'already used'.")
+  sourceIP        string     @description("IP the issue request came from. Audit + abuse signal.")
+
+  @relationship(type="parent", field="userId", target=user, direction="outgoing")
+  @relationship(type="parent", field="issuedBy", target=user, direction="outgoing")
+}
+
 /// Organization group. Users belong to groups; agents are assigned to groups for scoped access
 /// control. Created and managed in-app; the externalId field is preserved for any legacy rows that
 /// came from a previous external sync source.

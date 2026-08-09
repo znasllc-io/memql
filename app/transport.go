@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -72,6 +73,11 @@ func (a *App) transportBase() {
 				DB:     &identity.EngineAuditSink{Engine: a.engine, Logger: a.Logger},
 			},
 			Logger: a.Logger,
+			// The PUBLIC identity origin an enrolment link must point at
+			// (memql#3408). Resolved per call rather than at boot so a cluster
+			// that gets its domain from the settings row after bring-up starts
+			// composing correct links without a restart.
+			IdentityBaseURL: a.publicIdentityBaseURL,
 		})
 		if err != nil {
 			a.fatal("identity admin: build failed", "error", err)
@@ -316,4 +322,43 @@ func (a *App) unauthenticatedSurfaceRoutes(wholeMux bool) []string {
 		routes = append(routes, a.registeredRoutes...)
 	}
 	return routes
+}
+
+// publicIdentityBaseURL resolves the origin an enrolment link must point at
+// (memql#3408).
+//
+// NOT MEMQL_IDENTITY_VERIFIER_BASE_URL, which is the only identity address a
+// non-identity node has. That one is the IN-CLUSTER service address
+// (https://identity:8085) -- a perfectly good place for this process to fetch
+// a JWKS document from, and a link nobody outside the cluster can open. Using
+// it would produce enrolment links that fail for exactly the people they are
+// issued to.
+//
+// Resolution order, both env-free-capable so a bff can answer:
+//
+//  1. MEMQL_IDENTITY_BASE_URL -- what the identity node itself is configured
+//     with, and the operator's explicit override anywhere else.
+//  2. v1:identity:clusterSettings.clusterDomain -> https://identity.<domain>,
+//     the same composition the Cockpit's identityBaseUrlFor uses. This is the
+//     branch that answers on the bff, where the portal actually runs.
+//
+// An empty result is not papered over: adminops refuses to mint rather than
+// emitting a link to nowhere, and says which of the two to set.
+func (a *App) publicIdentityBaseURL(ctx context.Context) string {
+	if v := strings.TrimRight(strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_BASE_URL")), "/"); v != "" {
+		return v
+	}
+	if a == nil || a.engine == nil {
+		return ""
+	}
+	store := &identity.Store{Engine: a.engine, Logger: a.Logger}
+	row, err := store.ReadClusterSettings(ctx)
+	if err != nil || row == nil {
+		return ""
+	}
+	domain := strings.Trim(strings.TrimSpace(row.ClusterDomain), ".")
+	if domain == "" {
+		return ""
+	}
+	return "https://identity." + domain
 }

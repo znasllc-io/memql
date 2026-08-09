@@ -2978,6 +2978,8 @@ message IdentityAdminMsg {
     RevokeUserTokenRequest revoke_user_token = 13;
     RevokeNodeTokenRequest revoke_node_token = 14;
     UpdateClusterSettingsRequest update_cluster_settings = 15;
+    IssueEnrolmentLinkRequest issue_enrolment_link = 16;
+    RevokeEnrolmentLinkRequest revoke_enrolment_link = 17;
   }
 }
 
@@ -3005,6 +3007,14 @@ message IdentityAdminResult {
   // Short human-readable summary of what changed, for the console's status
   // line. Never carries a credential or a payload.
   string message = 6;
+  // The enrolment link, set by issue_enrolment_link ONLY (memql#3408).
+  //
+  // The one field on this reply that carries a credential, and deliberately
+  // so: the link IS that call's product, the plaintext token exists nowhere
+  // else (only its SHA-256 hash was persisted), and no later request can
+  // fetch it. Empty for every other operation and for every refusal. A
+  // console must show it once and hold it nowhere else.
+  string enrolment_url = 7;
 }
 
 // UpdateUserProfileRequest sets a person's directory fields. Replaces
@@ -3091,4 +3101,34 @@ message UpdateClusterSettingsRequest {
   int32 invitation_ttl_days = 14;
   // lax | none | "" (use the boot default).
   string refresh_cookie_same_site = 15;
+}
+
+// IssueEnrolmentLinkRequest mints a single-use enrolment link for another
+// person (memql#3408) -- the credential that lets them register their FIRST
+// passkey with no mailbox in the loop.
+//
+// It is on THIS envelope, and not on a new HTTP endpoint, because it is an
+// owner/admin decision about somebody else's account: the same gate, the same
+// audit trail and the same refusal shape as the six operations above. The
+// minted link comes back on IdentityAdminResult.enrolment_url and is shown
+// once.
+message IssueEnrolmentLinkRequest {
+  // The account the link enrols a passkey into.
+  string user_id = 1;
+  // Lifetime override in seconds. 0 uses the 15-minute default; anything
+  // above the server's ceiling is CLAMPED down to it rather than refused --
+  // a caller asking for too much still wants a link, and the only wrong
+  // outcome would be silently issuing one that outlives the ceiling.
+  int32 ttl_seconds = 2;
+}
+
+// RevokeEnrolmentLinkRequest kills an unused enrolment link before its TTL
+// expires -- the issuer's undo for a link sent to the wrong address.
+//
+// Separate from consumption all the way down: a revoked link and a spent one
+// are told apart on the /enroll page, because "you already used this" and
+// "somebody cancelled this" call for different next steps.
+message RevokeEnrolmentLinkRequest {
+  // The v1:identity:enrolmentToken row id.
+  string enrolment_token_id = 1;
 }
