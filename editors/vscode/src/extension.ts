@@ -36,9 +36,10 @@ import {
   signInCanRecover,
   type SignInTokenStore,
 } from './auth/signin.js';
-import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster } from './clusters/file.js';
+import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
-import { CredentialResolver, refreshTokenSecretKey } from './connection/credentials.js';
+import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
+import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -282,42 +283,32 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
-  // The sign-in persistence seam (memql#3403 / memql#3404). It writes to the
-  // two places the credential resolver reads from, and it must keep the same
-  // split those two places encode: the 15-minute ACCESS token into the
-  // cockpit-shared clusters.yaml, the 30-day REFRESH token into the editor's
-  // SecretStorage. See src/connection/credentials.ts for why the halves differ.
+  // The sign-in persistence seam (memql#3403 / memql#3404).
+  //
+  // This DELEGATES to src/auth/store.ts rather than reimplementing the split.
+  // It is tempting to inline it -- write the access token to clusters.yaml,
+  // the refresh token to SecretStorage, done -- and an earlier draft of this
+  // file did exactly that. It is wrong for a reason that is invisible from
+  // here: SecretStorage cannot be enumerated, so #3404 keeps an INDEX of which
+  // clusters have secrets, and sweeps any secret whose cluster is gone. A
+  // sign-in that wrote a secret without indexing it would look fine until the
+  // next sweep silently deleted the credential it had just stored.
+  const storeDeps = {
+    secrets: context.secrets,
+    writeCluster: (update: ClusterUpdate) => upsertCluster(clustersPath, update),
+  };
   const signInStore: SignInTokenStore = {
-    persistSignIn: async (clusterName, credentials) => {
-      let custodyTaken = false;
-      if (credentials.refreshToken !== '') {
-        try {
-          await context.secrets.store(refreshTokenSecretKey(clusterName), credentials.refreshToken);
-          custodyTaken = true;
-        } catch {
-          // Falls through to the plaintext ingest key below. Losing the only
-          // copy of a 30-day credential because SecretStorage refused a write
-          // would be worse than the exposure -- the same trade the resolver
-          // makes when its own rotation cannot take custody.
-        }
-      }
-      await upsertCluster(clustersPath, {
-        name: clusterName,
-        token: credentials.accessToken,
-        // '' DELETES the key: once SecretStorage holds the refresh token, the
-        // shared plaintext file must not also hold it.
-        refreshToken: custodyTaken ? '' : credentials.refreshToken,
-      });
-    },
-    signOut: async (clusterName) => {
-      try {
-        await context.secrets.delete(refreshTokenSecretKey(clusterName));
-      } catch {
-        // Nothing to do: the file half below is cleared either way, and a
-        // stored secret with no access token beside it cannot dial anything.
-      }
-      await upsertCluster(clustersPath, { name: clusterName, token: '', refreshToken: '' });
-    },
+    persistSignIn: (clusterName, credentials) =>
+      persistSignIn(storeDeps, clusterName, {
+        accessToken: credentials.accessToken,
+        refreshToken: credentials.refreshToken,
+        expiresAtEpochSeconds: credentials.expiresAtEpochSeconds,
+        // The client_id is written separately by the ClientIdWriter below --
+        // it is registered before the tokens exist, so it is not part of this
+        // payload. "" leaves the stored value alone.
+        clientId: '',
+      }),
+    signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
   };
 
   context.subscriptions.push(
