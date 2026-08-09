@@ -93,7 +93,9 @@ interface Harness {
 }
 
 function emptyWorkspace(): WorkspaceSources {
-  return { resolveImport: () => undefined, read: () => undefined };
+  // `imports` is the language-server seam (memql#3335). An empty workspace
+  // declares none, so the bundle is the active file alone.
+  return { resolveImport: () => undefined, read: () => undefined, imports: () => [] };
 }
 
 function harness(): Harness {
@@ -491,6 +493,16 @@ test("run -- a second run supersedes the first, which reports rather than landin
   const gate = new Promise<void>((resolve) => {
     releaseFirst = resolve;
   });
+  // Signals that the FIRST run has actually reached validate and parked there.
+  //
+  // Needed since memql#3335 made bundle assembly awaitable: `run` now suspends
+  // before validate, so simply calling it no longer guarantees it has got that
+  // far. Without this the second run reaches validate first, consumes the gate,
+  // and the two deadlock -- an artefact of the harness, not of supersession.
+  let noteFirstParked: (() => void) | undefined;
+  const firstParked = new Promise<void>((resolve) => {
+    noteFirstParked = resolve;
+  });
 
   const engine = new StubEngine();
   let firstValidate = true;
@@ -499,6 +511,7 @@ test("run -- a second run supersedes the first, which reports rather than landin
     validateBundle: async (sources: string) => {
       if (firstValidate) {
         firstValidate = false;
+        noteFirstParked?.();
         await gate;
       }
       return engine.validateBundle(sources);
@@ -518,6 +531,7 @@ test("run -- a second run supersedes the first, which reports rather than landin
   const orchestrator = new RunOrchestrator(deps);
 
   const first = orchestrator.run(target(), { spaceId: "s1" });
+  await firstParked;
   const second = await orchestrator.run(target(), { spaceId: "s2" });
   releaseFirst?.();
   const firstOutcome = await first;
