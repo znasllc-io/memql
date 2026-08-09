@@ -65,9 +65,16 @@
       document.getElementById("origin").textContent = window.location.origin;
       document.getElementById("ua").textContent = navigator.userAgent;
 
+      // Built as DOM nodes with textContent rather than appended to innerHTML.
+      // Everything logged here is attacker-adjacent by construction -- an
+      // authenticator's error message, a user agent string, a base64url
+      // credential id -- and a spike page that XSSes itself is a spike page
+      // whose result nobody can trust.
       function log(msg, cls) {
-        const stamp = new Date().toISOString();
-        out.innerHTML += `\n<span class="${cls || ""}">${stamp} ${msg}</span>`;
+        const line = document.createElement("span");
+        if (cls) line.className = cls;
+        line.textContent = "\n" + new Date().toISOString() + " " + msg;
+        out.appendChild(line);
       }
 
       function randomBytes(n) {

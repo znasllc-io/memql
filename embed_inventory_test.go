@@ -96,6 +96,10 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
 	"github.com/znasllc-io/memql/integrations":                    1,   // *.json
 	"github.com/znasllc-io/memql/scripts/install/graph":           2,   // install.json uninstall.json (memql#3369)
+	// SPIKE, memql#3405. Delete this line together with the directory once the
+	// .localhost RP ID findings are recorded -- the entry existing is what makes
+	// that deletion fail loudly here instead of passing silently.
+	"github.com/znasllc-io/memql/scripts/spikes/webauthn-rpid": 1, // index.html
 }
 
 // embedModulePath is the selector root. Spelled as the module pattern, not
