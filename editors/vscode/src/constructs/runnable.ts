@@ -63,6 +63,14 @@ export interface RunnableArg {
   // actually retains -- the `///` doc comment for query/mutate/logic args, the
   // field's @description(...) for tool fields. The extension just renders it.
   description?: string;
+  // The field is marked @autoInjected: the engine stamps it server-side and
+  // DROPS whatever the caller sent. Only a `tool` field can carry it, so it is
+  // absent for every other kind (memql#3333).
+  //
+  // The field is still rendered and still sent. Dropping it client-side would
+  // be an invisible divergence from what the engine actually does; marking it
+  // tells the developer their value has no effect, which is the true statement.
+  autoInjected?: boolean;
 }
 
 export interface RunnableTrigger {
@@ -81,6 +89,14 @@ export interface RunnableConstruct {
   // body. This is what a CodeLens anchors to.
   signatureRange: LspRange;
   args: RunnableArg[];
+  // The construct carries @disabled: the loader skips it, so it is not active
+  // on any cluster right now and a run of it can only be refused (memql#3333).
+  //
+  // Per CLAUDE.md @disabled is a REVERSIBLE on/off switch, not deprecation, so
+  // the construct still gets a lens -- one that says so, rather than offering a
+  // run whose only possible outcome is a FAILED_PRECONDITION the developer then
+  // cannot tell apart from a @filter miss.
+  disabled?: boolean;
   // Automations only.
   trigger?: RunnableTrigger;
 }
@@ -186,6 +202,11 @@ function parseOne(raw: unknown): RunnableConstruct | undefined {
     args: Array.isArray(r.args) ? r.args.map(parseArg).filter(isDefined) : [],
   };
   if (typeof r.concept === "string" && r.concept !== "") out.concept = r.concept;
+  // The server omits `disabled` for an enabled construct (`omitempty`), and an
+  // older server never sends it at all. Both read as "not known to be
+  // disabled", which is the safe default: the run is offered as before and the
+  // refusal path still explains itself, exactly as it did before #3333.
+  if (r.disabled === true) out.disabled = true;
   const trigger = parseTrigger(r.trigger);
   if (trigger !== undefined) out.trigger = trigger;
   return out;
@@ -209,6 +230,10 @@ function parseArg(raw: unknown): RunnableArg | undefined {
   if (typeof r.description === "string" && r.description !== "") {
     out.description = r.description;
   }
+  // Omitted by the server for an ordinary field, and never sent at all by a
+  // server older than #3333. Both mean "not known to be auto-injected", which
+  // renders the field as an ordinary input -- the pre-#3333 behaviour.
+  if (r.autoInjected === true) out.autoInjected = true;
   return out;
 }
 
@@ -290,6 +315,16 @@ export interface AutomationTarget {
   uri: string;
   name: string;
   trigger?: RunnableTrigger;
+  /**
+   * The automation is @disabled in the buffer.
+   *
+   * Carried on the target because the REFUSAL is where it pays off: the engine
+   * answers both "@disabled" and "@filter rejected this event" with
+   * FAILED_PRECONDITION, and nothing in the reply distinguishes them. Knowing
+   * the construct was disabled before the click is what lets the refusal say
+   * which one happened instead of naming both (memql#3333).
+   */
+  disabled?: boolean;
 }
 
 export interface LensPlan {
@@ -329,9 +364,10 @@ export function lensPlansFor(
       // told the DEPLOYED definition is what will run.
       const automationTarget: AutomationTarget = { uri, name: c.name };
       if (c.trigger !== undefined) automationTarget.trigger = c.trigger;
+      if (c.disabled === true) automationTarget.disabled = true;
       out.push({
         range: c.signatureRange,
-        title: "Run automation...",
+        title: c.disabled === true ? "Run automation (@disabled)..." : "Run automation...",
         tooltip: automationTooltip(c),
         command: COMMAND_RUN_AUTOMATION,
         automationTarget,
@@ -341,7 +377,7 @@ export function lensPlansFor(
     const target: RunTarget = { uri, kind: c.kind, name: c.name, args: c.args };
     out.push({
       range: c.signatureRange,
-      title: "Run",
+      title: c.disabled === true ? "Run (@disabled)" : "Run",
       tooltip: runTooltip(c),
       command: COMMAND_RUN,
       target,
@@ -357,7 +393,30 @@ export function lensPlansFor(
   return out;
 }
 
+// disabledPrefix is the one sentence a @disabled construct's tooltip leads
+// with, on every runnable kind.
+//
+// It leads rather than trails because it changes what the rest of the tooltip
+// MEANS: "run this against the selected cluster" is not true of a construct the
+// loader skipped. The lens is kept (rather than dropped) because @disabled is a
+// reversible switch and the developer looking at the declaration is usually the
+// person about to re-enable it -- a construct that silently loses its
+// affordance reads as a broken extension, not as a disabled construct.
+//
+// Session-definable kinds get the second sentence: a query / mutate / logic is
+// injected from the buffer, so the run genuinely can succeed once the
+// annotation is gone -- and, since the injected definition is what runs,
+// removing the annotation in the buffer is enough. A tool or automation runs
+// the DEPLOYED definition, so only a redeploy helps.
+function disabledPrefix(kind: RunnableKind): string {
+  const remedy = isSessionDefinable(kind)
+    ? "Remove the annotation in this buffer and the run will use the enabled definition."
+    : "It runs the DEPLOYED definition, so it stays refused until the annotation is removed and redeployed.";
+  return `This ${kind} is @disabled: the loader skips it, so a run can only be refused. ${remedy}`;
+}
+
 function runTooltip(c: RunnableConstruct): string {
+  if (c.disabled === true) return disabledPrefix(c.kind);
   const required = c.args.filter((a) => a.required).length;
   if (c.kind === "tool") {
     // Said on the lens as well as in the result banner: by the time the
@@ -374,6 +433,7 @@ function runTooltip(c: RunnableConstruct): string {
 // as the tool one does -- by the time the result banner is on screen the
 // developer has already read the trace.
 function automationTooltip(c: RunnableConstruct): string {
+  if (c.disabled === true) return disabledPrefix(c.kind);
   const where =
     c.trigger?.schedule !== undefined && c.trigger.schedule !== "" && (c.trigger.event ?? "") === ""
       ? "It is time-driven, so the run fires it now with an empty event."

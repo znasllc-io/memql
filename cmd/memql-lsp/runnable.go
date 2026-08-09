@@ -44,12 +44,17 @@ type runnableConstructsResult struct {
 }
 
 type runnableConstruct struct {
-	Kind           string           `json:"kind"`
-	Name           string           `json:"name"`
-	Concept        string           `json:"concept,omitempty"`
-	SignatureRange protocol.Range   `json:"signatureRange"`
-	Args           []runnableArg    `json:"args"`
-	Trigger        *runnableTrigger `json:"trigger,omitempty"`
+	Kind           string         `json:"kind"`
+	Name           string         `json:"name"`
+	Concept        string         `json:"concept,omitempty"`
+	SignatureRange protocol.Range `json:"signatureRange"`
+	Args           []runnableArg  `json:"args"`
+	// Disabled carries the @disabled lifecycle flag so a client can render the
+	// state instead of offering a run that can only be refused (memql#3333).
+	// `omitempty` on purpose: the overwhelming majority of constructs are
+	// enabled, and an absent field reads as false on the TypeScript side.
+	Disabled bool             `json:"disabled,omitempty"`
+	Trigger  *runnableTrigger `json:"trigger,omitempty"`
 }
 
 type runnableArg struct {
@@ -58,6 +63,11 @@ type runnableArg struct {
 	Required    bool     `json:"required"`
 	Enum        []string `json:"enum,omitempty"`
 	Description string   `json:"description,omitempty"`
+	// AutoInjected marks a tool field the engine stamps server-side, dropping
+	// whatever the caller sent (memql#3333). Only a `tool` field can carry it,
+	// so it is absent for every other kind -- which is exactly what
+	// `omitempty` produces.
+	AutoInjected bool `json:"autoInjected,omitempty"`
 }
 
 type runnableTrigger struct {
@@ -163,15 +173,17 @@ func toWireConstruct(text string, rc sense.RunnableConstruct) runnableConstruct 
 			Start: position.ToLSPPosition(text, rc.SignatureRange.Start.Line, rc.SignatureRange.Start.Column),
 			End:   position.ToLSPPosition(text, rc.SignatureRange.End.Line, rc.SignatureRange.End.Column),
 		},
-		Args: make([]runnableArg, 0, len(rc.Args)),
+		Args:     make([]runnableArg, 0, len(rc.Args)),
+		Disabled: rc.Disabled,
 	}
 	for _, a := range rc.Args {
 		out.Args = append(out.Args, runnableArg{
-			Name:        a.Name,
-			Type:        a.Type,
-			Required:    a.Required,
-			Enum:        a.Enum,
-			Description: a.Description,
+			Name:         a.Name,
+			Type:         a.Type,
+			Required:     a.Required,
+			Enum:         a.Enum,
+			Description:  a.Description,
+			AutoInjected: a.AutoInjected,
 		})
 	}
 	if rc.Trigger != nil {

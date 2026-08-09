@@ -25,6 +25,13 @@ export interface ArgFieldModel {
   /** Non-empty when the arg declares a closed value set; the form renders a dropdown. */
   enumValues: string[];
   description: string;
+  /**
+   * The engine stamps this field server-side and DISCARDS whatever is sent for
+   * it (`@autoInjected` in the DSL). The form marks the field and still submits
+   * it: dropping it here would be an invisible divergence from what dispatch
+   * does, whereas marking it is simply the truth on screen (memql#3333).
+   */
+  autoInjected: boolean;
   /** The raw text to show in the input, already rendered from any prior value. */
   text: string;
 }
@@ -49,6 +56,7 @@ export function buildFields(
     required: arg.required,
     enumValues: arg.enum ?? [],
     description: arg.description ?? "",
+    autoInjected: arg.autoInjected === true,
     text: arg.name in values ? renderValueForInput(values[arg.name], arg.type) : "",
   }));
 }
@@ -186,18 +194,14 @@ function parseJson(text: string): { value: unknown } | { error: string } {
 }
 
 /**
- * autoInjectedNotice is the honest label for a tool's argument form.
+ * AUTO_INJECTED_FIELD_NOTE is the per-field caption on an `@autoInjected`
+ * field.
  *
- * A tool field can be marked `@autoInjected` in the DSL, which means the
- * engine supplies it server-side and DROPS whatever the caller sent. The
- * language server includes those fields in `args` with NO FLAG distinguishing
- * them (see cmd/memql-lsp/runnable.go), so the extension genuinely cannot tell
- * which ones they are -- and inventing a heuristic from field names would be
- * exactly the second parser the whole design forbids.
- *
- * So the form says so, once, rather than pretending. A developer who fills an
- * auto-injected field and sees their value ignored has an explanation on
- * screen instead of a mystery.
+ * It replaces the blanket form-level notice this module used to carry. That
+ * notice existed only because `memql/runnableConstructs` did not report the
+ * flag, so the extension could not tell which fields it applied to and had to
+ * disclaim the whole form. The server reports it per field now (memql#3333),
+ * so the form marks the one or two fields it is actually true of.
  */
-export const AUTO_INJECTED_NOTICE =
-  "Some tool fields are marked @autoInjected in the DSL: the engine supplies those itself and discards any value sent for them. The language server does not distinguish them from ordinary fields, so they appear below like any other -- a value you enter for one has no effect.";
+export const AUTO_INJECTED_FIELD_NOTE =
+  "Supplied by the engine -- any value entered here is discarded.";
