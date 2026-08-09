@@ -1,0 +1,20 @@
+// portalviews domain -- row projections.
+
+/// Comprehensive composed-view projection: every payload field plus the row id and creation
+/// timestamp. One shape for the list read and the by-id read alike, because the composer needs the
+/// whole arrangement to open a view and the list needs the whole card to render one -- a narrower
+/// list shape would only force a second read on every click.
+@row
+shape view composedViewFull {
+  row.id
+  ownerUserId
+  name
+  description
+  conceptIds
+  arrangements
+  origin
+  status
+  updatedAt
+  archivedAt
+  row.createdAt
+}

@@ -23,10 +23,14 @@ export {
   renderElement,
   boundField,
   boundFields,
+  elementBand,
   isIsoDateString,
+  BAND_ROLES,
+  BAND_QUESTIONS,
   FIELD_KINDS,
   NON_DISPLAY_FIELDS,
   CATEGORICAL_MAX_DISTINCT,
+  type BandRole,
   type FieldKind,
   type FieldProfile,
   type ConceptProfile,
@@ -40,6 +44,30 @@ export {
   type FitVerdict,
   type UnmetRequirement,
 } from "./fitness.js";
+
+// Arrangements -- the composition layer a user-composed view is built out of
+// (memql#3320). Deterministic first: everything here works with no model, no
+// network and no provider, and the AI path is one more producer of the same
+// value.
+export {
+  elementCandidates,
+  proposeArrangement,
+  explainArrangement,
+  arrangementProblems,
+  sanitizeArrangement,
+  readArrangement,
+  arrangementRequest,
+  elementOptions,
+  EMPTY_ARRANGEMENT,
+  ARRANGEMENT_PROPOSAL_SCHEMA,
+  type ArrangedElement,
+  type Arrangement,
+  type ArrangementFault,
+  type ArrangementProblem,
+  type ArrangementProposal,
+  type ArrangementRequest,
+  type ElementCandidate,
+} from "./arrangement.js";
 
 // The element library.
 export {

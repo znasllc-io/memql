@@ -1,0 +1,92 @@
+You arrange a screen for a set of database rows nobody has designed a screen for.
+
+The hard part is already done. Every element listed under CANDIDATES has been
+matched against these rows mechanically: it fits, and the fields it would use
+are named. Your job is only to decide WHICH of them belong on the screen, in
+what order, and to say why in one or two sentences.
+
+Output ONLY a JSON object -- no markdown fences, no prose outside it:
+
+```
+{
+  "reasoning": "<one or two sentences, written for the person composing the view>",
+  "elements": [
+    {
+      "element": "<an element id from CANDIDATES, exactly>",
+      "band": "reading" | "shape" | "roll",
+      "title": "<optional caption, only when the element's own title is not the clearest thing to say>",
+      "bindings": { "<slot>": ["<field>", "..."] }
+    }
+  ]
+}
+```
+
+## THE ROWS
+
+Concept: {{.concept.entity}} (`{{.concept.id}}`)
+Rows profiled: {{.rowCount}}
+
+| field | kind | present | distinct | display slots |
+| --- | --- | --- | --- | --- |
+{{range .fields}}| {{.field}} | {{.kind}} | {{.present}} | {{.distinct}} | {{if .slots}}{{range $i, $s := .slots}}{{if $i}}, {{end}}{{$s}}{{end}}{{else}}-{{end}} |
+{{end}}
+
+`distinct` is capped, so a large number means "many". A small one on a text
+field means the field is a category rather than free text.
+
+## THE BANDS
+
+{{range .bands}}- **{{.band}}** -- {{.question}}
+{{end}}
+
+A band is a question, not a position. The person reading this screen asks
+those three in that order, so an element goes in the band whose question it
+answers.
+
+## CANDIDATES
+
+{{range .candidates}}- `{{.element}}` -- {{.title}} ({{.band}} band, {{.verdict}} fit). {{.summary}}
+  {{.explanation}}{{if .bindings}}
+  Would bind: {{range $slot, $fields := .bindings}}{{$slot}} -> {{range $i, $f := $fields}}{{if $i}}, {{end}}{{$f}}{{end}}; {{end}}{{end}}
+{{end}}
+
+You may name ONLY these element ids. Anything else is discarded.
+
+## THE ARRANGEMENT ALREADY BUILT
+
+{{range .baseline.elements}}- {{.band}}: `{{.element}}`
+{{end}}
+
+This works. Return it unchanged if it is right -- "the obvious arrangement is
+the correct one" is a good answer and costs the person nothing.
+
+## HOW TO CHOOSE
+
+- **Fewer elements, better chosen.** Three is usually the ceiling: one
+  reading, one shape, one roll. A screen with six elements is a screen nobody
+  reads.
+- **The roll band is not optional.** Whatever else is on the screen, a person
+  needs to see the actual rows. Always include exactly one roll element.
+- **Prefer the element that engaged with the data.** A calendar over rows with
+  a real date beats a table of the same rows; a table beats a list when the
+  fields are worth comparing column to column.
+- **Skip a band rather than fill it badly.** If nothing divides these rows in
+  a way worth showing -- no category, no meaningful split -- omit the shape
+  band. An empty pie chart is worse than no pie chart.
+- **A chart of a handful of rows is not a chart.** Below roughly ten rows,
+  prefer the reading and the roll.
+- **`bindings` is for overruling a field choice, and rarely needed.** The
+  bindings shown under each candidate are what it would use if you say
+  nothing. Name a slot only when a different field is clearly better -- for
+  instance a timeline that should plot a business date rather than the row's
+  creation time. An EMPTY list declines a slot: use it to suppress a measure
+  that is numerically valid and semantically meaningless (a version counter,
+  an epoch).
+- **`title` is for when the element's own name is not what this screen is
+  about.** Most of the time leave it out.
+
+## REASONING
+
+Write it for the person about to accept or reject your suggestion, in their
+terms: what the arrangement lets them see, and what you left out and why. Not
+a description of the JSON.

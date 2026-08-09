@@ -1,0 +1,60 @@
+// portalviews domain -- the arrangement proposal.
+//
+// ONE PROMPT, AND IT IS OPTIONAL BY CONSTRUCTION.
+//
+// The composer's element matching is deterministic: view-kit profiles
+// the concept's rows, fits every element's declared requirements
+// against that profile, and produces a working arrangement with no
+// model involved (sdk/ts-viewkit/src/arrangement.ts, proposeArrangement).
+// This prompt asks a model to do ONE thing on top of that -- propose a
+// better arrangement of the SAME already-fitting elements, and say why.
+//
+// What it is therefore not allowed to be:
+//
+//   * it never decides candidacy. The candidate list is computed and
+//     handed to the model; an element it names that is not on that list
+//     is dropped at parse time (readArrangement), so the model cannot
+//     widen the space a person could have reached by hand.
+//   * it never sees row VALUES. The input is field names, kinds and
+//     cardinalities. A layout decision has no business reading somebody's
+//     data, and a payload of rows would put whatever the concept holds in
+//     front of a provider for the sake of picking a chart.
+//   * it is never required. Every failure -- no provider configured, the
+//     call erroring, a reply that parses to nothing usable -- leaves the
+//     deterministic arrangement standing, and the composer says the
+//     suggestion was unavailable rather than blanking.
+//
+// STRUCTURED OUTPUT. The reply is an object, not prose to parse: the
+// invocation goes through the engine's structured-output path
+// (InvokeAIStructured -> ChatStructuredProvider.CallChatStructured), so
+// the provider enforces the shape. The schema is
+// ARRANGEMENT_PROPOSAL_SCHEMA in sdk/ts-viewkit/src/arrangement.ts,
+// which lives beside the parser that reads the reply so the two cannot
+// drift; the template below restates it for the models that fall back
+// to schema-in-prompt.
+//
+// COST. This inherits the standard guardrails -- the process-wide rate
+// ceiling and the identical-request circuit breaker at the provider
+// chokepoint (component/memql/ai_guard.go) plus the AI cache, which is
+// keyed on the rendered prompt and therefore collapses the very common
+// case of two people composing a view over the same concept. See
+// docs/public/ai/llm-cost-control.md. It is a single cheap-tier call per
+// button press, never a loop.
+
+/// Propose an arrangement of already-fitting view elements for a concept the portal has no
+/// predefined view for, and explain the choice in a sentence. The candidate elements, their
+/// requirement bindings and a working deterministic arrangement are all supplied as input -- the
+/// model is choosing and ordering among offers, not inventing elements, and a reply that adds
+/// nothing to the baseline is a perfectly good reply. Structured output; the reply is parsed by
+/// readArrangement (sdk/ts-viewkit/src/arrangement.ts), which drops anything unfit and falls back to
+/// the baseline, so this prompt cannot produce a broken view.
+@defaultProvider("chat54Mini")
+@templateFile("prompts/composeViewArrangement.tmpl")
+prompt composeViewArrangement {
+  concept    object!  @description("The concept being arranged: {id, entity}. Identity only -- there is no schema here and no rows.")
+  rowCount   int  @description("How many rows the profile was built from. Lets the model prefer a reading over an enumeration for a large set, and skip a chart for a set of three.")
+  fields     []object!  @description("The concept's shape as OBSERVED on the rows, one entry per field: {field, kind, present, distinct, slots}. kind is text | number | boolean | datetime | list | object; present is how many rows carry a value; distinct is the capped distinct-value count (small means categorical); slots names the @displayCard slots pointing at the field.")
+  bands      []object!  @description("The layout grammar: [{band, question}] for reading / shape / roll. The question is the words a person would use, so the model places an element by what it answers rather than by where it goes.")
+  candidates []object!  @description("The elements that ALREADY FIT these rows, best first: {element, title, summary, band, verdict, bindings, explanation}. This is the deterministic match; the model may only choose from it. verdict is full or partial, and explanation is view-kit's own sentence about what the element would use and what it would lose.")
+  baseline   object  @description("The arrangement the system already built from the candidates: {conceptId, elements:[{element, band}]}. The model is improving on a working answer, not producing one from nothing.")
+}

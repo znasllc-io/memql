@@ -316,6 +316,7 @@ export const BAR_CHART_ELEMENT: ElementSpec = {
   id: "chart.bar",
   title: "Bar chart",
   summary: "One bar per category, sized by a measure or by row count.",
+  band: "shape",
   requires: [
     {
       slot: "category",
@@ -429,6 +430,9 @@ export const LINE_CHART_ELEMENT: ElementSpec = {
   id: "chart.line",
   title: "Line chart",
   summary: "A measure over time, one line per series.",
+  // How the population MOVES is a division of it, by time rather than by
+  // category -- the same question the rail answers, on a different axis.
+  band: "shape",
   requires: [
     {
       slot: "x",
@@ -576,6 +580,7 @@ export const PIE_CHART_ELEMENT: ElementSpec = {
   id: "chart.pie",
   title: "Pie chart",
   summary: "Each category's share of the whole.",
+  band: "shape",
   requires: [
     {
       slot: "category",
@@ -750,6 +755,7 @@ export const PROPORTION_BAR_ELEMENT: ElementSpec = {
   id: "chart.proportion",
   title: "Proportion rail",
   summary: "Each category's share of the whole, on a single line.",
+  band: "shape",
   requires: [
     {
       slot: "category",

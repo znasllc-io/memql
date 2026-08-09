@@ -346,6 +346,14 @@ proportion rail is the worked example: these views needed share-of-whole
 in one line of height, the pie needs a block, so the rail was added to
 the library and every concept has it now.
 
+The third tier -- a view a PERSON composes at runtime, over a concept
+nobody designed for -- is built on the same elements and the same
+requirement declarations, and is documented in
+[composed views](composed-views.md). An element gains one further piece
+of metadata for it: `band`, saying which of the three questions above the
+element answers, so a newly written element takes its place in a composed
+arrangement with no change to the composer.
+
 That rule is mechanical, not editorial.
 `portal_view_composition_test.go` (repo root, so weakening it edits Go)
 scans the view tree and fails on row markup (`<table>`, `<tr>`, `<ul>`,

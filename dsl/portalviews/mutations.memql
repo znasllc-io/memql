@@ -1,0 +1,96 @@
+// portalviews domain -- composing, editing and retiring a saved view.
+//
+// Every write stamps ownerUserId from actor.userId and never accepts it
+// from caller args; the field is @serverSet, so an accept{} naming it
+// would fail to LOAD rather than merely be wrong. Ownership is
+// therefore immutable across a view's whole version history, and a
+// caller can neither compose a view owned by someone else nor reassign
+// one.
+//
+// The two update-kind mutations land on an EXISTING row, which is the
+// surface the row-authz write guard covers
+// (component/memql/rowauthz_write_guard.go): the engine resolves the
+// target row and refuses when its declared owner is not the actor, so
+// the caller-supplied viewId cannot be pointed at another person's
+// view.
+//
+// THE ARRANGEMENT IS ACCEPTED WHOLE, not merged field by field. An
+// arrangement is an ordered list, and a partial merge of an ordered
+// list has no sane meaning -- removing the second of three elements
+// would have to be expressed as "send the two that remain", which is
+// exactly sending the whole list. The composer holds the whole value
+// anyway (it is what it renders from), so there is nothing to save by
+// sending less.
+
+/// Save a composed view. Owned: ownerUserId is stamped from actor.userId, so a person can only ever
+/// create their own views. Opens at status=active. conceptIds is the selection the composer made and
+/// arrangements is what it produced -- one arrangement per selected concept, in section order. origin
+/// records whether the saved arrangement came out of a model proposal or out of the deterministic
+/// match plus hand edits; it is provenance, and both kinds render identically.
+@actor
+mutate view createComposedView {
+  args {
+    viewId        string!
+    name          string!
+    description   string
+    conceptIds    []string!
+    arrangements  []object!
+    origin        enum("manual", "suggested")
+  }
+  insert {
+    accept { name, description, conceptIds, arrangements }
+    stamp {
+      id: args.viewId
+      ownerUserId: actor.userId
+      origin: args.origin ?? "manual"
+      status: "active"
+      updatedAt: now
+    }
+  }
+}
+
+/// Update a saved view: rename it, re-describe it, or replace its selection and arrangement.
+/// Partial read-merge, so an omitted field keeps its current value -- but an arrangement that IS
+/// supplied replaces the stored one whole (see the header). Owned: ownerUserId is re-stamped from
+/// actor.userId so the write cannot transfer the row, and the row-authz write guard refuses the call
+/// outright when the target belongs to somebody else. status is not accepted here; retiring a view
+/// goes through archiveComposedView so the transition timestamp is stamped with the status.
+@actor
+mutate view updateComposedView {
+  args {
+    viewId        string!
+    name          string
+    description   string
+    conceptIds    []string
+    arrangements  []object
+    origin        enum("manual", "suggested")
+  }
+  update {
+    accept { name, description, conceptIds, arrangements, origin }
+    stamp {
+      id: args.viewId
+      ownerUserId: actor.userId
+      updatedAt: now
+    }
+  }
+}
+
+/// Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in
+/// full -- memQL has no hard delete, and a person who retires a view they spent time on should be
+/// able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard
+/// refuses a target row the actor does not own.
+@actor
+mutate view archiveComposedView {
+  args {
+    viewId  string!
+  }
+  update {
+    stamp {
+      id: args.viewId
+      ownerUserId: actor.userId
+      status: "archived"
+      archivedAt: now
+      updatedAt: now
+    }
+  }
+}

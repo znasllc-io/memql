@@ -276,11 +276,40 @@ export interface ElementRequirement {
   readonly degraded?: string;
 }
 
+// Which QUESTION about a population an element answers. Three, because a
+// person arriving at an unfamiliar row set asks the same three in the same
+// order -- how many are there, how does that divide, which ones specifically
+// -- and the predefined views are already built on exactly that grammar (see
+// clients/portal/src/views/registry.ts and docs/public/concepts/
+// view-elements.md section 7).
+//
+// It lives on the ELEMENT rather than in whatever is laying a page out, for
+// the same reason a requirement does: an arrangement built from a list held
+// by the composer would have to be edited every time an element is added,
+// and the element added would be the one nobody remembered to list. Declared
+// here, a new element takes its place in a composed view -- and in the
+// deterministic proposal -- on the day it is written.
+export type BandRole = "reading" | "shape" | "roll";
+
+export const BAND_ROLES: readonly BandRole[] = ["reading", "shape", "roll"];
+
+// The question each band answers, in the words a person would use. Shown as
+// the band caption in a composer, so it is prose rather than a label.
+export const BAND_QUESTIONS: Readonly<Record<BandRole, string>> = {
+  reading: "How many are there?",
+  shape: "How does that divide?",
+  roll: "Which ones, specifically?",
+};
+
 export interface ElementSpec {
   readonly id: string;
   readonly title: string;
   // One sentence for a picker: what this element shows.
   readonly summary: string;
+  // Which band this element belongs in. Omitted means "roll": an element
+  // that has not thought about it enumerates rows, which is what all but a
+  // handful of them do.
+  readonly band?: BandRole;
   readonly requires: readonly ElementRequirement[];
   // Below this many rows the element has nothing to show (a detail pane needs
   // one row; a chart of one point is a stat tile). Defaults to 1.
@@ -354,6 +383,13 @@ export function boundField(fit: ElementFit, slot: string): string | undefined {
 
 export function boundFields(fit: ElementFit, slot: string): readonly string[] {
   return fit.bindings[slot] ?? [];
+}
+
+// elementBand reads an element's declared band, applying the documented
+// default. One implementation so a composer, a picker and a proposal cannot
+// each decide differently what an undeclared element is.
+export function elementBand(element: ElementSpec): BandRole {
+  return element.band ?? "roll";
 }
 
 function asArray(value: string | readonly string[]): readonly string[] {

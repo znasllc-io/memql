@@ -29,6 +29,8 @@ export const STAT_TILE_ELEMENT: ElementSpec = {
   id: "statTile",
   title: "Stat tiles",
   summary: "The row count plus a headline figure for each numeric field.",
+  // The opening reading: the numbers ARE the answer to "how many".
+  band: "reading",
   minRows: 0,
   requires: [
     {
