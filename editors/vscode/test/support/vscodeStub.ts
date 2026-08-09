@@ -231,29 +231,18 @@ export const window = {
     return { dispose: () => undefined };
   },
 
-  // The two the "+" menu reaches for (memql#3412). Both answer "the operator
-  // dismissed it", which is the outcome that makes a command handler return
-  // without doing anything -- the only behaviour this stub is asked for, since
-  // the menu's DECISION is unit-tested away from `vscode`
-  // (src/clusters/presence.ts) and its RENDERING in the host smoke lane.
+  // What the "+" menu reaches for (memql#3412). Answers "the operator dismissed
+  // it", which is the outcome that makes a command handler return without doing
+  // anything -- the only behaviour this stub is asked for, since the menu's
+  // DECISION is unit-tested away from `vscode` (src/clusters/presence.ts) and
+  // its RENDERING in the host smoke lane.
+  //
+  // showInformationMessage is NOT redeclared here: the one above already
+  // records into `recorded.infos`, which is strictly more useful than a silent
+  // resolve, and env/clipboard already carries the throwing contract memql#3403
+  // established and memql#3411 extended.
   showQuickPick(_items: unknown, _options?: unknown): Promise<undefined> {
     return Promise.resolve(undefined);
-  },
-
-  showInformationMessage(_message: string, ..._actions: string[]): Promise<undefined> {
-    return Promise.resolve(undefined);
-  },
-};
-
-// Present because src/extension.ts imports it (the install seam copies a
-// command line to the clipboard). A bundled ESM import of a name this module
-// does not export is a BUILD error, so an unused member here is not dead code
-// -- it is what keeps the alias in esbuild.test.js resolvable.
-export const env = {
-  clipboard: {
-    writeText(_text: string): Promise<void> {
-      return Promise.resolve();
-    },
   },
 };
 
