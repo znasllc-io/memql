@@ -296,10 +296,11 @@ export class ClusterPanel {
 
   // The caller's cluster role, or undefined when there is nothing to ask.
   //
-  // `getMyAccess()` reports "" for a role the SDK's wire enum cannot name --
-  // USER_ROLE_DEVELOPER has no TS mapping (roleFromWire), so a developer is
-  // indistinguishable from an unknown here. roleVisibility() treats both as
-  // indeterminate for exactly that reason.
+  // Every role the proto declares now round-trips, developer included
+  // (memql#3331 added USER_ROLE_DEVELOPER to UserRoleWire and mapped it in
+  // roleFromWire). So a "" from getMyAccess() means the access read produced
+  // no role -- not that the caller holds one the SDK cannot name -- and
+  // roleVisibility() treats only that genuine failure as indeterminate.
   private async readRole(): Promise<Role | undefined> {
     const query = this.connections.query;
     if (query === undefined) return undefined;
