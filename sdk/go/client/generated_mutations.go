@@ -3016,7 +3016,7 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 	return b.String()
 }
 
-// CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row.
+// CreateClusterSettings -- Persist (or refresh) the singleton cluster-settings row. `bootstrappedAt` is @noUnset: this body writes `args.bootstrappedAt ?? ""`, so a caller who simply omits it puts an EXPLICIT empty string in the delta -- which read-merge cannot protect against, because read-merge only inherits fields a delta OMITS. That is how a re-run of this mutation un-bootstrapped a live cluster and re-opened the unauthenticated /setup ownership wizard (memql#3415). @noUnset drops the empty value when the stored row already carries a stamp; setting it on a still-unclaimed row is unaffected.
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["createClusterSettings"] in generated_concepts.go).
 type CreateClusterSettingsArgs struct {
@@ -11917,7 +11917,7 @@ func UpdateCampaignBuild(args UpdateCampaignArgs) string {
 	return b.String()
 }
 
-// UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them.
+// UpdateClusterSettings -- Update the singleton cluster-settings row from the admin UI. Read-merges the existing row (update()): only the fields the caller actually passes change; every omitted field -- internalDomains, brand*, TTLs, bootstrap*, etc. -- inherits from the persisted row instead of being wiped to its empty default (memql#1686). registrationMode + internalDefaultRole stay @required because the admin form always submits them. `bootstrappedAt` is additionally @noUnset: the verifier's stamp (empty -> set) still lands, but no admin edit can take a stamped cluster back to un-bootstrapped by passing it explicitly empty -- un-bootstrapping is not an ordinary write (memql#3415).
 //
 // Bound concept: v1:identity:clusterSettings (machine-readable: BoundConcepts["updateClusterSettings"] in generated_concepts.go).
 type UpdateClusterSettingsArgs struct {

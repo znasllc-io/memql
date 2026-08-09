@@ -163,6 +163,7 @@ var (
 	AttrMergeFields          = ast.AttrMergeFields
 	AttrAppendFields         = ast.AttrAppendFields
 	AttrCreateOnly           = ast.AttrCreateOnly
+	AttrNoUnset              = ast.AttrNoUnset
 	AttrNocache              = ast.AttrNocache
 	AttrPublic               = ast.AttrPublic
 	AttrRateLimit            = ast.AttrRateLimit

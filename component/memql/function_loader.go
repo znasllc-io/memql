@@ -576,6 +576,11 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
 			}
 
+			noUnsetFields, err := mutationNoUnsetFields(funcDef)
+			if err != nil {
+				return nil, fmt.Errorf("function %q: %w", expectedName, err)
+			}
+
 			scrubPii, err := mutationScrubPii(funcDef, stmt.Kind)
 			if err != nil {
 				return nil, fmt.Errorf("function %q: %w", expectedName, err)
@@ -639,6 +644,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 				MergeFields:            mergeFields,
 				AppendFields:           appendFields,
 				CreateOnlyFields:       createOnlyFields,
+				NoUnsetFields:          noUnsetFields,
 				ScrubPii:               scrubPii,
 			}
 			fn.ExprSource = extractExpressionFromContent(content)
