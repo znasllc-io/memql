@@ -649,7 +649,12 @@ describe("cluster settings", () => {
 
   it("edits through the gated seam, in the operator's units", async () => {
     renderAdmin({}, "/admin/settings");
-    await waitFor(() => expect(screen.getByText("Change a setting")).toBeTruthy());
+    // Wait for a FIELD, not the band title. "Change a setting" is the Band's
+    // heading and renders unconditionally; the form inside it renders only once
+    // settings.data is non-null. Waiting on the title and then querying a field
+    // synchronously is therefore a race -- one the test usually wins, which is
+    // why it survived review. It lost in CI on the #3324 PR and once locally.
+    await screen.findByLabelText("Access token (minutes)");
 
     // The form seeds from the row, converting seconds to the unit an operator
     // sets: 900s -> 15 minutes, 2592000s -> 30 days.
