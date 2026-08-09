@@ -53,6 +53,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/localtls.sh
+source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "k3d.bringup" "Bring the local k3d + ArgoCD cluster fully up: bootstrap, build + import engine images, wait healthy. --clean nukes first."
 cap_spec_param "cluster"         "k3d cluster name"
@@ -92,6 +94,7 @@ CARRIER_REPO=""
 CARRIER_NODES=""
 CARRIER_CONTEXT=""
 HEALTHY=false
+FRONT_DOOR_TLS=false
 
 # Step labels, set in main() once --clean is known (6 steps clean, 5 fresh).
 STEP_UP=""
@@ -229,6 +232,32 @@ function run_migration() {
     fi
 }
 
+# "Every Deployment is Available" is not the whole of "the cluster is up": the
+# CLIENT-FACING edge is the traefik front door, and both local ingresses
+# (cockpit-front-door / identity-front-door) name the local-znas-tls secret in
+# their spec.tls. When that secret is absent traefik does not fail -- it
+# silently serves its own "TRAEFIK DEFAULT CERT" for both hosts, so browsers
+# warn and Node clients (the VS Code extension host among them) refuse the
+# connection outright, while every readiness probe in the mesh stays green.
+#
+# That gap is memql#3384: the run reported healthy and the front door was not
+# actually a front door. So the secret is asserted here, beside the Deployments
+# check, and its absence FAILS the bring-up rather than scrolling past as a
+# WARN. It is a deterministic condition, not a slow-start one -- there is
+# nothing to wait for and nothing to re-check.
+function verify_front_door_tls() {
+    if kubectl get secret "${MEMQL_LOCAL_TLS_SECRET}" -n "${NAMESPACE}" &>/dev/null; then
+        info "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' present in '${NAMESPACE}'."
+        FRONT_DOOR_TLS=true
+        return 0
+    fi
+    FRONT_DOOR_TLS=false
+    error "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is MISSING in '${NAMESPACE}'."
+    error "  Both front-door ingresses reference it; without it traefik serves its own"
+    error "  self-signed cert and every TLS client sees an untrusted edge."
+    error "  Re-seed it with:  make secrets    (it issues the pair with mkcert)"
+}
+
 function wait_for_healthy() {
     section "bringup ${STEP_HEALTHY}: waiting for the mesh to become Available"
 
@@ -242,6 +271,8 @@ function wait_for_healthy() {
         warn "Inspect: kubectl get pods -n ${NAMESPACE}"
         HEALTHY=false
     fi
+
+    verify_front_door_tls
 
     info "Bring-up complete. Cluster state:"
     kubectl get deploy -n "${NAMESPACE}" >&2 2>/dev/null || true
@@ -308,7 +339,19 @@ function main() {
     cap_result_set_raw cleaned "$([[ -n "$CLEAN" ]] && printf 'true' || printf 'false')"
     cap_result_set_raw rebuilt true
     cap_result_set_raw healthy "$HEALTHY"
+    cap_result_set_raw frontDoorTls "$FRONT_DOOR_TLS"
+    if [[ "$FRONT_DOOR_TLS" != "true" ]]; then
+        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://cockpit.local.znas.io and https://identity.local.znas.io are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
+    fi
     cap_ok
 }
 
-main "$@"
+# Run main only when EXECUTED, so the health assertions can be sourced and
+# exercised on their own. The steps around them (nuke / up / image rebuild /
+# migrate) are far too heavy to drive from a test, which is exactly how the
+# front-door TLS gap went unnoticed: nothing could check the post-bring-up
+# checks. Executed directly this is identical to the bare `main "$@"` every
+# sibling capability script ends with.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

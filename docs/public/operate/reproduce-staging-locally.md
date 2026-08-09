@@ -54,8 +54,43 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 - **docker** -- Docker Desktop or Colima (must be running).
 - **k3d** -- `brew install k3d`.
 - **kubectl** -- `brew install kubectl`.
+- **mkcert** -- `brew install mkcert`. The front door terminates TLS with a
+  browser-trusted `*.local.znas.io` wildcard; `make secrets` issues that pair
+  for you (see [Front-door TLS](#front-door-tls) below), but it needs mkcert
+  and a root CA on the machine.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
+
+### Front-door TLS
+
+One-time, per machine -- creating a root CA writes to the system trust store,
+so it stays a deliberate step and never a prompt:
+
+```bash
+bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca
+```
+
+That is only needed if you have no mkcert CA yet; if one already exists it is
+left completely alone (it may be signing certificates for your other local
+stacks). After that, `make up` / `make secrets` issue the `*.local.znas.io`
+pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
+present, and load it into the cluster as the `local-znas-tls` Secret that both
+front-door ingresses reference. Override the location with
+`MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or `--tls-cert` / `--tls-key`).
+
+The bring-up asserts that `local-znas-tls` exists and FAILS without it
+(memql#3384). It has to: traefik answers a missing referenced secret by
+silently serving its own `TRAEFIK DEFAULT CERT`, so every TLS client sees an
+untrusted edge while the whole mesh reports Available.
+
+Non-browser clients need the CA too. Node (the VS Code extension host, npm
+tooling) does **not** read the OS trust store: point it at mkcert's root with
+
+```bash
+export NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem"
+```
+
+otherwise the connection fails with `unable to verify the first certificate`.
 
 No product sibling repo is required: the engine cluster builds every node
 image from this repo's Dockerfile, product-agnostic. A product layers in at
@@ -125,9 +160,11 @@ low-level gRPC debugging only, a raw port-forward is still available:
 kubectl port-forward -n memql svc/bff 50051:50051   # debug only; not the connection path
 ```
 
-Access identity: `https://identity.local.znas.io` (front-door TLS -- needs the
-seeded mkcert cert + a `*.local.znas.io` hosts entry) or `http://localhost:8085`
-(direct / fallback when the cert isn't seeded).
+Access identity: `https://identity.local.znas.io` (front-door TLS -- needs a
+`*.local.znas.io` hosts entry; the cert is issued and seeded by `make up` /
+`make secrets`, see [Front-door TLS](#front-door-tls)). `http://localhost:8085`
+reaches identity directly, for low-level debugging only -- it is not the
+connection path.
 Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 
 ## Inner-loop dev
@@ -271,10 +308,10 @@ because:
 There is no *nginx* front door locally, but the local overlay DOES ship a
 k3s-bundled **traefik** front door on 443 for `https://identity.local.znas.io`
 (`deploy/k8s/overlays/local/front-door.yaml`), terminating TLS with a
-browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, seeded by
-`make secrets` from `docker/nginx/certs/dev.{crt,key}` -- skip-with-warning if
-that pair is absent, in which case identity is reached via the port-mapped
-`:8085` instead). This mirrors the cloud ingress topology. The **gRPC** heads
+browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, issued and
+seeded by `make secrets` at `~/.memql/certs/dev.{crt,key}` -- see
+[Front-door TLS](#front-door-tls); its absence fails the bring-up rather than
+degrading silently). This mirrors the cloud ingress topology. The **gRPC** heads
 are still reached via kubectl port-forward -- identity is not exposed on gRPC
 externally, and the `mcp` engine gRPC head `:50051` is forwarded on demand.
 Postgres `:5432` is likewise port-forwarded; the product SPA + the product
