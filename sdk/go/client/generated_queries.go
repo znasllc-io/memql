@@ -1927,6 +1927,50 @@ func DetectConflictsBuild(args DetectConflictsArgs) string {
 	return b.String()
 }
 
+// DeviceCodeByDeviceCodeHash -- Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token endpoint can emit the RFC-specified error rather than a generic invalid_grant.
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["deviceCodeByDeviceCodeHash"] in generated_concepts.go).
+type DeviceCodeByDeviceCodeHashArgs struct {
+	DeviceCodeHash string
+}
+
+// DeviceCodeByDeviceCodeHash calls the engine query deviceCodeByDeviceCodeHash.
+func (qc *QueryClient) DeviceCodeByDeviceCodeHash(ctx context.Context, args DeviceCodeByDeviceCodeHashArgs) (*Result, error) {
+	call := DeviceCodeByDeviceCodeHashBuild(args)
+	return qc.executeNamed(ctx, "deviceCodeByDeviceCodeHash", call)
+}
+
+func DeviceCodeByDeviceCodeHashBuild(args DeviceCodeByDeviceCodeHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query deviceCodeByDeviceCodeHash(")
+	b.WriteString("deviceCodeHash: ")
+	b.WriteString(quoteMemQL(args.DeviceCodeHash))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeviceCodeByUserCodeHash -- Verification-page lookup by userCodeHash. Returns rows in every status so /device can tell the human "already approved" / "denied" / "expired" apart from "no such code".
+//
+// Bound concept: v1:identity:deviceCode (machine-readable: BoundConcepts["deviceCodeByUserCodeHash"] in generated_concepts.go).
+type DeviceCodeByUserCodeHashArgs struct {
+	UserCodeHash string
+}
+
+// DeviceCodeByUserCodeHash calls the engine query deviceCodeByUserCodeHash.
+func (qc *QueryClient) DeviceCodeByUserCodeHash(ctx context.Context, args DeviceCodeByUserCodeHashArgs) (*Result, error) {
+	call := DeviceCodeByUserCodeHashBuild(args)
+	return qc.executeNamed(ctx, "deviceCodeByUserCodeHash", call)
+}
+
+func DeviceCodeByUserCodeHashBuild(args DeviceCodeByUserCodeHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query deviceCodeByUserCodeHash(")
+	b.WriteString("userCodeHash: ")
+	b.WriteString(quoteMemQL(args.UserCodeHash))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DocumentChunksForDomain -- Every documentChunk attached to a knowledge domain, full shape. Consumed by the trainSpecialist dispatcher for the Trainer Agent's mode='refresh' existingCorpus (read-what's-there-now-to-decide-what-to-supersede).
 //
 // Bound concept: v1:knowledge:documentChunk (machine-readable: BoundConcepts["documentChunksForDomain"] in generated_concepts.go).

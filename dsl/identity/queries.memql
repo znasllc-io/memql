@@ -1621,6 +1621,51 @@ query user usersScheduledForDeletion {
   shape   userFull
 }
 
+// deviceCodeByDeviceCodeHash / deviceCodeByUserCodeHash
+// =====================================================
+//
+// The two lookups the RFC 8628 device grant needs (memql#3410).
+//
+// deviceCodeByDeviceCodeHash is the POLLING path: hash the plaintext
+// device_code the client posted to /oauth/token and find its row. This
+// is a PRE-ACTOR read in the same sense as the *ByKeyHash credential
+// lookups -- the polling device holds no session and there is no
+// actor.userId to scope against; possession of the unguessable
+// device_code IS the authorization, and finding a row by its digest is
+// the verification.
+//
+// deviceCodeByUserCodeHash is the VERIFICATION-PAGE path. It runs for a
+// SIGNED-IN human, but it still cannot be actor-scoped: the row was
+// minted by a device that had no user attached, so `approvedByUserId`
+// is empty at exactly the moment this read has to succeed. What bounds
+// it is the user_code's own entropy plus the per-IP limiter on /device.
+//
+// Both return rows in ANY status so the caller can distinguish
+// authorization_pending from access_denied from expired_token, which
+// RFC 8628 §3.5 requires as separate errors rather than one "invalid".
+
+/// Device-grant polling lookup by deviceCodeHash. Returns rows in every status so the token
+/// endpoint can emit the RFC-specified error rather than a generic invalid_grant.
+@unbounded("device code by unique deviceCodeHash -- a credential lookup bounded to a single row")
+query deviceCode deviceCodeByDeviceCodeHash {
+  args {
+    deviceCodeHash  string!
+  }
+  filter  deviceCodeHash==args.deviceCodeHash
+  shape   deviceCodeFull
+}
+
+/// Verification-page lookup by userCodeHash. Returns rows in every status so /device can tell the
+/// human "already approved" / "denied" / "expired" apart from "no such code".
+@unbounded("device code by unique userCodeHash -- a credential lookup bounded to a single row")
+query deviceCode deviceCodeByUserCodeHash {
+  args {
+    userCodeHash  string!
+  }
+  filter  userCodeHash==args.userCodeHash
+  shape   deviceCodeFull
+}
+
 // ---- queries/v1/identity/workerPairingCodeByHash.memql ----
 
 // workerPairingCodeByHash

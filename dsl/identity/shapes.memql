@@ -387,6 +387,33 @@ shape user userIdRef {
   row.id
 }
 
+/// Full projection of a v1:identity:deviceCode row (RFC 8628, memql#3410). Backs BOTH lookups: the
+/// polling path (by deviceCodeHash) and the verification page (by userCodeHash). The two hashes ARE
+/// projected -- they are the lookup keys, they are already digests rather than credentials, and the
+/// caller compares nothing against them; what never exists server-side, and so cannot be projected,
+/// is either plaintext.
+@row
+shape deviceCode deviceCodeFull {
+  row.id
+  clientId
+  deviceCodeHash
+  userCodeHash
+  status
+  scope
+  codeChallenge
+  codeChallengeMethod
+  expiresAt
+  intervalSeconds
+  lastPolledAt
+  approvedByUserId
+  approvedAt
+  deniedAt
+  redeemedAt
+  sourceIP
+  userAgent
+  row.createdAt
+}
+
 /// Full projection of a v1:identity:workerPairingCode row. Backs the Pair-aware gRPC interceptor's
 /// lookup path + the redeem handler's validation path.
 @row

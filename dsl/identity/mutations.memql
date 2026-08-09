@@ -1082,6 +1082,116 @@ mutate user createUserOnFirstLogin {
   }
 }
 
+// deviceCode -- the RFC 8628 device authorization grant (memql#3410)
+// ==================================================================
+//
+// Five writes, one per transition of a deliberately small state
+// machine: create (pending), touchPoll (a clock tick, no transition),
+// approve, deny, redeem. The status field is stamped by the mutation
+// rather than accepted from args, so there is no call that can put a
+// row into an arbitrary state -- `approveDeviceCode` is the only way to
+// reach `approved` and `redeemDeviceCode` is the only way to leave it.
+//
+// approveDeviceCode / denyDeviceCode stamp approvedByUserId from
+// actor.userId and never accept it, so the recorded approver is the
+// signed-in human the verification page authenticated, not a value the
+// form could carry. The handler re-checks the row's status before
+// calling either, which is what keeps a second approval from silently
+// overwriting the first approver's id.
+
+/// Persist a device-authorization row at POST /device/code time, born `pending`. Both credentials
+/// arrive pre-hashed; neither plaintext is ever passed to the engine.
+mutate deviceCode createDeviceCode {
+  args {
+    deviceCodeId         string!
+    clientId             string!
+    deviceCodeHash       string!
+    userCodeHash         string!
+    expiresAt            string!
+    intervalSeconds      int!
+    scope                string
+    codeChallenge        string
+    codeChallengeMethod  string
+    sourceIP             string
+    userAgent            string
+  }
+  insert {
+    accept { clientId, deviceCodeHash, userCodeHash, expiresAt, intervalSeconds, scope, codeChallenge, codeChallengeMethod }
+    stamp {
+      id: args.deviceCodeId
+      status: "pending"
+      sourceIP: args.sourceIP ?? ""
+      userAgent: args.userAgent ?? ""
+    }
+  }
+}
+
+/// Stamp the poll clock. Called on EVERY /oauth/token device-grant poll, accepted or throttled, so
+/// the next poll's slow_down decision reads a value written by whichever replica served the last
+/// one. intervalSeconds is re-stamped because a too-fast poll raises it.
+mutate deviceCode touchDeviceCodePoll {
+  args {
+    deviceCodeId     string!
+    lastPolledAt     string!
+    intervalSeconds  int!
+  }
+  update {
+    accept { lastPolledAt, intervalSeconds }
+    stamp {
+      id: args.deviceCodeId
+    }
+  }
+}
+
+/// Approve a pending device authorization. The approver is stamped from actor.userId -- the form
+/// cannot name someone else.
+@actor
+mutate deviceCode approveDeviceCode {
+  args {
+    deviceCodeId  string!
+  }
+  update {
+    stamp {
+      id: args.deviceCodeId
+      status: "approved"
+      approvedByUserId: actor.userId
+      approvedAt: now
+    }
+  }
+}
+
+/// Deny a pending device authorization. Terminal: polling returns access_denied from here on.
+@actor
+mutate deviceCode denyDeviceCode {
+  args {
+    deviceCodeId  string!
+  }
+  update {
+    stamp {
+      id: args.deviceCodeId
+      status: "denied"
+      approvedByUserId: actor.userId
+      deniedAt: now
+    }
+  }
+}
+
+/// Mark an approved device authorization redeemed. Single-use: the handler stamps this BEFORE
+/// minting tokens, so a concurrent second poll finds status=redeemed and is refused.
+mutate deviceCode redeemDeviceCode {
+  args {
+    deviceCodeId  string!
+    redeemedAt    string!
+  }
+  update {
+    accept { redeemedAt }
+    stamp {
+      id: args.deviceCodeId
+      status: "redeemed"
+    }
+  }
+}
+
 // ---- mutations/v1/identity/createWorkerPairingCode.memql ----
 
 // createWorkerPairingCode

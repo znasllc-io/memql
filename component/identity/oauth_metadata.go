@@ -21,10 +21,15 @@ import (
 //
 // A struct (not a map) keeps the JSON field order stable.
 type OAuthServerMetadata struct {
-	Issuer                            string   `json:"issuer"`
-	AuthorizationEndpoint             string   `json:"authorization_endpoint"`
-	TokenEndpoint                     string   `json:"token_endpoint"`
-	RegistrationEndpoint              string   `json:"registration_endpoint"`
+	Issuer                string `json:"issuer"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	RegistrationEndpoint  string `json:"registration_endpoint"`
+	// DeviceAuthorizationEndpoint is the RFC 8628 §4 discovery field.
+	// A device-flow client reads THIS rather than guessing a path, so
+	// advertising it is what makes the fallback grant discoverable
+	// (memql#3410).
+	DeviceAuthorizationEndpoint       string   `json:"device_authorization_endpoint"`
 	JWKSURI                           string   `json:"jwks_uri"`
 	ResponseTypesSupported            []string `json:"response_types_supported"`
 	GrantTypesSupported               []string `json:"grant_types_supported"`
@@ -47,9 +52,10 @@ func OAuthServerMetadataHandler(cfg Config) http.Handler {
 			AuthorizationEndpoint:             base + "/authorize",
 			TokenEndpoint:                     base + "/oauth/token",
 			RegistrationEndpoint:              base + "/register",
+			DeviceAuthorizationEndpoint:       base + "/device/code",
 			JWKSURI:                           base + "/.well-known/jwks.json",
 			ResponseTypesSupported:            []string{"code"},
-			GrantTypesSupported:               []string{"authorization_code", "refresh_token"},
+			GrantTypesSupported:               []string{"authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"},
 			CodeChallengeMethodsSupported:     []string{"S256"},
 			TokenEndpointAuthMethodsSupported: []string{"none"},
 		}
