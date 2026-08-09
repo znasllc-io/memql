@@ -86,6 +86,15 @@ type KeyManager struct {
 	encryptionSecret string
 	envMode          bool
 
+	// createdAtKnown records whether current.CreatedAt is the date the
+	// key was really MINTED, or merely the moment this process booted.
+	// Always true on the disk path (the envelope persists createdAt).
+	// In envMode it is true only when the operator sealed
+	// MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT alongside the seed -- a raw
+	// 32-byte seed carries no date of its own. See
+	// CurrentKeyCreatedAt for why the distinction is load-bearing.
+	createdAtKnown bool
+
 	mu       sync.RWMutex
 	current  *KeyMaterial
 	previous *KeyMaterial
@@ -96,7 +105,25 @@ type KeyManager struct {
 // the environment rather than a PVC. Deterministic: the same seed always
 // yields the same keypair + kid, so multiple identity replicas agree on
 // JWKS. Rotation is disabled in this mode.
+//
+// The resulting manager reports its key's age as UNKNOWN: a bare 32-byte
+// seed carries no creation date. Use NewKeyManagerFromSeedMintedAt when
+// the operator has stamped one (memql#3381).
 func NewKeyManagerFromSeed(seedB64 string) (*KeyManager, error) {
+	return NewKeyManagerFromSeedMintedAt(seedB64, time.Time{})
+}
+
+// NewKeyManagerFromSeedMintedAt is NewKeyManagerFromSeed plus the date the
+// operator MINTED the seed, from MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT.
+//
+// The date is not used for anything cryptographic -- it exists so that
+// "how old is the active signing key" is answerable in the env-seed mode
+// that staging and production run, where rotation is a manual runbook step
+// and the age gauge is the only automated pressure toward performing it
+// (memql#3381). A zero createdAt means unstamped, and the manager then
+// reports UNKNOWN rather than pretending the key was born when the pod
+// was; see CurrentKeyCreatedAt.
+func NewKeyManagerFromSeedMintedAt(seedB64 string, createdAt time.Time) (*KeyManager, error) {
 	seed, err := base64.StdEncoding.DecodeString(seedB64)
 	if err != nil {
 		return nil, fmt.Errorf("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not valid base64: %w", err)
@@ -106,16 +133,65 @@ func NewKeyManagerFromSeed(seedB64 string) (*KeyManager, error) {
 	}
 	priv := ed25519.NewKeyFromSeed(seed)
 	pub := priv.Public().(ed25519.PublicKey)
+
+	known := !createdAt.IsZero()
+	stamp := createdAt.UTC()
+	if !known {
+		stamp = time.Now().UTC()
+	}
 	return &KeyManager{
-		envMode: true,
-		current: materializeKey(pub, priv, time.Now().UTC()),
+		envMode:        true,
+		createdAtKnown: known,
+		current:        materializeKey(pub, priv, stamp),
 	}, nil
 }
 
-// RotationSupported reports whether automatic key rotation is available.
-// False in envMode (the key is sealed in the envelope; rotate by
-// re-sealing + rolling).
+// RotationSupported reports whether this process can rotate its own
+// signing key. False in envMode -- and envMode is what STAGING AND
+// PRODUCTION run (the seed rides the sealed envelope so every replica
+// derives the same key, memql#550). So in every deployed environment
+// this returns false, which means:
+//
+//   - Service.RotateNow refuses (there is no rotate button anywhere), and
+//   - the in-process 90-day rotation scheduler (Service.maybeRotate) is
+//     INERT -- the cadence applies only to the on-disk KeyDir a dev
+//     cluster uses.
+//
+// That is a deliberate, recorded decision, not an oversight: rotating in
+// one replica's memory would leave its peers signing with the old key and
+// rejecting the new one, which is precisely the JWKS-incoherence outage
+// class of memql#1523 / memql#3400. Rotation in a deployed cluster is the
+// manual re-seal-and-roll runbook, and because that path never populates
+// `previous` it BYPASSES JWKSOverlapWindow -- a hard swap invalidates every
+// unexpired access token at once. Decision + reasoning + the alternative
+// that was rejected + the procedure and its blast radius:
+// docs/public/operate/auth/identity-service.md, "Rotating the signing key"
+// (memql#3381).
 func (km *KeyManager) RotationSupported() bool { return !km.envMode }
+
+// CurrentKeyCreatedAt returns when the active signing key was created and
+// whether that date is TRUSTWORTHY.
+//
+// The bool is the whole point. On the disk path the key envelope persists
+// createdAt, so the date survives restarts and the answer is always true.
+// In envMode the seed is 32 bytes of entropy with no metadata: unless the
+// operator sealed MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT next to it, the
+// only timestamp available is the moment this process called
+// NewKeyManagerFromSeed. Reporting that as key age would say "0 days" on a
+// key that has not been rotated in three years, every time a pod restarts
+// -- a metric that reads healthiest exactly where rotation never happens.
+// Callers must surface unknown as unknown.
+func (km *KeyManager) CurrentKeyCreatedAt() (time.Time, bool) {
+	km.mu.RLock()
+	defer km.mu.RUnlock()
+	if km.current == nil {
+		return time.Time{}, false
+	}
+	if !km.createdAtKnown || km.current.CreatedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return km.current.CreatedAt, true
+}
 
 // NewKeyManager prepares a KeyManager rooted at dir. dir is created
 // if it doesn't exist. The encryptionSecret must be either empty
@@ -133,6 +209,10 @@ func NewKeyManager(dir, encryptionSecret string) (*KeyManager, error) {
 	return &KeyManager{
 		dir:              dir,
 		encryptionSecret: encryptionSecret,
+		// The on-disk envelope persists createdAt, so every key this
+		// manager loads or mints carries a real, restart-surviving
+		// creation date.
+		createdAtKnown: true,
 	}, nil
 }
 

@@ -347,6 +347,26 @@ type Config struct {
 	// Env: MEMQL_IDENTITY_SIGNING_KEY_B64 (#550)
 	SigningKeyB64 string
 
+	// SigningKeyCreatedAt is the date the operator MINTED the seed in
+	// SigningKeyB64, sealed alongside it. Zero when unstamped.
+	//
+	// A 32-byte Ed25519 seed carries no metadata, so without this the
+	// service cannot tell a key minted this morning from one that has
+	// been signing since 2024 -- it would fall back to process start and
+	// report the pod's uptime as the key's age. Since rotation in env
+	// mode is a manual runbook step (memql#3381), "how old is the active
+	// signing key" is the ONLY automated pressure toward doing it, and it
+	// is worthless if it silently measures the wrong thing. Unstamped is
+	// therefore surfaced as UNKNOWN (memql_identity_signing_key_age_known
+	// = 0), never as zero.
+	//
+	// Set it to the same value in every identity replica's environment;
+	// like the seed it is a property of the KEY, not of the pod. Re-stamp
+	// it whenever the seed is re-sealed.
+	// Env: MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT (RFC3339, e.g.
+	// 2026-08-09T00:00:00Z)
+	SigningKeyCreatedAt time.Time
+
 	// AllowEphemeralKey opts a deployment INTO the per-pod ephemeral
 	// signing-key mode (no MEMQL_IDENTITY_SIGNING_KEY_B64). Without this, a
 	// non-localhost deployment that leaves MEMQL_IDENTITY_SIGNING_KEY_B64
@@ -624,6 +644,8 @@ func LoadConfigFromEnv() (Config, error) {
 		KeyEncryptionKey:  os.Getenv("MEMQL_IDENTITY_KEY_ENCRYPTION_KEY"),
 		SigningKeyB64:     strings.TrimSpace(os.Getenv("MEMQL_IDENTITY_SIGNING_KEY_B64")),
 		AllowEphemeralKey: envBool("MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY", false),
+
+		SigningKeyCreatedAt: envRFC3339("MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT"),
 		Bootstrap: BootstrapConfig{
 			Domain:              strings.TrimRight(os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_DOMAIN"), "/"),
 			OwnerEmail:          os.Getenv("MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL"),
@@ -999,6 +1021,23 @@ func envString(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envRFC3339 parses an RFC3339 timestamp, returning the zero time when
+// the var is unset OR unparseable. Unparseable degrading to zero is
+// deliberate: the value feeds an observability gauge, and "I do not know
+// when this key was made" is the honest reading of a malformed date. It
+// must never be able to keep the identity service from booting.
+func envRFC3339(key string) time.Time {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, v)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 func envBool(key string, fallback bool) bool {
