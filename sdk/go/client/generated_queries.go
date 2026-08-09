@@ -955,6 +955,29 @@ func AudienceByIdBuild(args AudienceByIdArgs) string {
 	return b.String()
 }
 
+// AudienceRosterForSend -- ENGINE (owner-scoped): every recipient in the audience a send is working through, oldest first -- including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
+// The 5000 bound is the send's AUDIENCE CEILING, not a page: the worker reads the roster whole on every batch and diffs it against the delivery ledger, so a larger audience would be silently truncated. campaignStartSend refuses a send whose audience exceeds MEMQL_CAMPAIGNS_MAX_AUDIENCE (default 5000, matched to this bound and to MEMORY_ENGINE_MAX_WINDOW) rather than mailing a prefix of it. Lifting the ceiling means keyset-cursoring the roster, which is a follow-up.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterForSend"] in generated_concepts.go).
+type AudienceRosterForSendArgs struct {
+	AudienceId string
+}
+
+// AudienceRosterForSend calls the engine query audienceRosterForSend.
+func (qc *QueryClient) AudienceRosterForSend(ctx context.Context, args AudienceRosterForSendArgs) (*Result, error) {
+	call := AudienceRosterForSendBuild(args)
+	return qc.executeNamed(ctx, "audienceRosterForSend", call)
+}
+
+func AudienceRosterForSendBuild(args AudienceRosterForSendArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceRosterForSend(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // Audiences -- The caller's audiences, newest first. Backs the audience list and the campaign editor's audience picker. Owned.
 //
 // Bound concept: v1:campaigns:audience (machine-readable: BoundConcepts["audiences"] in generated_concepts.go).
@@ -1754,7 +1777,7 @@ func DelegationsByIdentityBuild(args DelegationsByIdentityArgs) string {
 	return b.String()
 }
 
-// DeliveriesForCampaign -- Per-recipient outcomes for one campaign, newest first. Empty until the sending engine exists (memql#3323 scoped it out); the query ships with the schema so that work is additive. Owned; @pii projection.
+// DeliveriesForCampaign -- Per-recipient outcomes for one campaign, newest first. Written by the drain worker as it works through the audience (memql#3348), so an operator watching a live send sees the ledger fill in. Owned; @pii projection.
 //
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["deliveriesForCampaign"] in generated_concepts.go).
 type DeliveriesForCampaignArgs struct {
@@ -1770,6 +1793,28 @@ func (qc *QueryClient) DeliveriesForCampaign(ctx context.Context, args Deliverie
 func DeliveriesForCampaignBuild(args DeliveriesForCampaignArgs) string {
 	var b strings.Builder
 	b.WriteString("query deliveriesForCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeliveryLedgerForCampaign -- ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection -- recipient, outcome, attempts, retry due-time and nothing else. This is the read that makes a resumed send safe: the worker diffs it against the roster and mails only what is missing or due. Owned, read under the campaign owner's actor. Same 5000 ceiling and the same reason.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["deliveryLedgerForCampaign"] in generated_concepts.go).
+type DeliveryLedgerForCampaignArgs struct {
+	CampaignId string
+}
+
+// DeliveryLedgerForCampaign calls the engine query deliveryLedgerForCampaign.
+func (qc *QueryClient) DeliveryLedgerForCampaign(ctx context.Context, args DeliveryLedgerForCampaignArgs) (*Result, error) {
+	call := DeliveryLedgerForCampaignBuild(args)
+	return qc.executeNamed(ctx, "deliveryLedgerForCampaign", call)
+}
+
+func DeliveryLedgerForCampaignBuild(args DeliveryLedgerForCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("query deliveryLedgerForCampaign(")
 	b.WriteString("campaignId: ")
 	b.WriteString(quoteMemQL(args.CampaignId))
 	b.WriteString(")")
@@ -2057,6 +2102,23 @@ func DocumentVersionsForOwnerBuild(args DocumentVersionsForOwnerArgs) string {
 	b.WriteString(quoteMemQL(args.DocumentId))
 	b.WriteString(")")
 	return b.String()
+}
+
+// DrainableSendJobs -- ENGINE: send jobs the drain worker still has work to do on, oldest first so a long-queued campaign is not starved by a newer one. Cluster-owner gated -- this is the one read in the domain that deliberately spans owners, which is exactly why it may only be issued by the engine's own operator identity and why the row it returns carries no recipient data.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["drainableSendJobs"] in generated_concepts.go).
+type DrainableSendJobsArgs struct {
+}
+
+// DrainableSendJobs calls the engine query drainableSendJobs.
+func (qc *QueryClient) DrainableSendJobs(ctx context.Context, args DrainableSendJobsArgs) (*Result, error) {
+	call := DrainableSendJobsBuild(args)
+	return qc.executeNamed(ctx, "drainableSendJobs", call)
+}
+
+func DrainableSendJobsBuild(args DrainableSendJobsArgs) string {
+	_ = args
+	return "query drainableSendJobs()"
 }
 
 // DueResponsibilities -- The caller's active + enabled responsibilities of a given trigger archetype (recurring or reactive) -- the candidate set the reactive-loop evaluator (epic #632) checks for due-ness. Owned tier (ownerUserId == actor.userId). Cron-due / condition-match filtering happens Go-side (no OR operator + no cron arithmetic in the filter), mirroring queryDueRefreshDomains.
@@ -3833,6 +3895,28 @@ func SearchUsersBuild(args SearchUsersArgs) string {
 	return b.String()
 }
 
+// SendJobById -- ENGINE: one send job by id (the id is the campaign's bare short id). Cluster-owner gated. Read after a claim so the worker acts on the row as it stands now rather than as the scan saw it.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["sendJobById"] in generated_concepts.go).
+type SendJobByIdArgs struct {
+	SendJobId string
+}
+
+// SendJobById calls the engine query sendJobById.
+func (qc *QueryClient) SendJobById(ctx context.Context, args SendJobByIdArgs) (*Result, error) {
+	call := SendJobByIdBuild(args)
+	return qc.executeNamed(ctx, "sendJobById", call)
+}
+
+func SendJobByIdBuild(args SendJobByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query sendJobById(")
+	b.WriteString("sendJobId: ")
+	b.WriteString(quoteMemQL(args.SendJobId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SendableRecipientsForAudience -- The subset of an audience a send would actually reach: subscribed addresses only. Distinct from recipientsForAudience because the difference between the two counts IS the suppression rate, and an operator about to schedule a campaign wants both numbers. Owned; @pii projection.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["sendableRecipientsForAudience"] in generated_concepts.go).
@@ -4144,6 +4228,28 @@ func (qc *QueryClient) SupersededDeployments(ctx context.Context, args Supersede
 func SupersededDeploymentsBuild(args SupersededDeploymentsArgs) string {
 	_ = args
 	return "query supersededDeployments()"
+}
+
+// SuppressionByDigest -- ENGINE: is this address on the cluster-wide do-not-mail list? The argument is the SHA-256 hex digest of the normalized address, which is also the row id -- so this is a single-row read and a caller can only ask about an address it already holds. Cluster-owner gated: the suppression list is engine state, and it is checked under the engine's identity rather than the campaign owner's, precisely so that no operator's authority can decide whether it applies to them.
+//
+// Bound concept: v1:campaigns:suppression (machine-readable: BoundConcepts["suppressionByDigest"] in generated_concepts.go).
+type SuppressionByDigestArgs struct {
+	EmailDigest string
+}
+
+// SuppressionByDigest calls the engine query suppressionByDigest.
+func (qc *QueryClient) SuppressionByDigest(ctx context.Context, args SuppressionByDigestArgs) (*Result, error) {
+	call := SuppressionByDigestBuild(args)
+	return qc.executeNamed(ctx, "suppressionByDigest", call)
+}
+
+func SuppressionByDigestBuild(args SuppressionByDigestArgs) string {
+	var b strings.Builder
+	b.WriteString("query suppressionByDigest(")
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	b.WriteString(")")
+	return b.String()
 }
 
 // SurfacesForOwner -- List the calling owner's active v1:actions:surface registry entries for the capability->surface resolver (Phase 2 #1737). Owned tier.
