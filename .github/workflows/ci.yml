@@ -183,6 +183,13 @@ jobs:
             gates:
               - '**/*.md'
               - '**/*.memql'
+              # .claude/settings.json is TRACKED on purpose (the .gitignore
+              # negation, memql#3344) and scripts/dev/repo_hygiene_test.go
+              # asserts it stays non-ignored via sharedClaudeState. That test
+              # runs in THIS lane, but `scripts/**` below does not match the
+              # file itself -- so editing it ran zero lanes until memql#3440
+              # made it tracked and the coverage guard noticed.
+              - '.claude/settings.json'
               - 'scripts/secrets/manifest.yaml'
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'
