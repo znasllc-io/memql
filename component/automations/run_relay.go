@@ -559,6 +559,9 @@ func (r *RunRelay) runRemote(ctx context.Context, runId, name string, req RunReq
 		},
 	})
 
+	r.logger.Info("automation run relayed to the mesh",
+		"runId", runId, "automation", name, "targetType", req.TargetNodeType, "origin", r.nodeId)
+
 	// Wait for the executing node to claim the run. A missing routing rule
 	// lands HERE, and the message says so: this is the one failure mode that
 	// is invisible in single-node testing and fatal in the mesh.
@@ -747,9 +750,19 @@ func (r *RunRelay) onRunRequest(evt events.Event) {
 
 // executeRelayed runs a relayed request locally and publishes every frame back
 // to the origin node.
+//
+// This is the ONLY place the executing node appears in its own log for a
+// relayed run: the request arrived as a bus event, not as a stream message, so
+// nothing upstream of here logged it. Without this line the far side of the hop
+// is completely dark and an operator cannot tell "the target node never got it"
+// from "the target node got it and refused" (memql#3414).
 func (r *RunRelay) executeRelayed(runId, origin string, req relayedRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.maxTimeout)
 	defer cancel()
+
+	r.logger.Info("automation run claimed from the mesh",
+		"runId", runId, "automation", req.Automation, "origin", origin,
+		"nodeId", r.nodeId, "nodeType", r.nodeType)
 
 	sink := &publishingSink{relay: r, runId: runId, origin: origin}
 	r.runLocal(ctx, runId, req.Automation, RunRequest{
@@ -879,7 +892,17 @@ type publishingSink struct {
 
 func (p *publishingSink) Accepted(a RunAccepted) { p.publish(runFrame{Accepted: &a}) }
 func (p *publishingSink) Step(s RunStep)         { p.publish(runFrame{Step: &s}) }
-func (p *publishingSink) Complete(c RunComplete) { p.publish(runFrame{Complete: &c}) }
+
+// Complete publishes the terminating frame back to the origin, and records the
+// executing node's own answer. The origin logs what it received; this logs what
+// was sent, and the pair is what distinguishes a lost trace from a refusal.
+func (p *publishingSink) Complete(c RunComplete) {
+	p.relay.logger.Info("automation run answered to the origin node",
+		"runId", p.runId, "origin", p.origin, "status", c.Status,
+		"errorCode", c.ErrorCode, "errorMessage", c.ErrorMessage,
+		"stepCount", c.StepCount, "durationMs", c.DurationMs)
+	p.publish(runFrame{Complete: &c})
+}
 
 func (p *publishingSink) publish(frame runFrame) {
 	frame.Seq = p.seq
