@@ -128,6 +128,16 @@
       "readOnly": true,
       "elevation": "none",
       "verify": {"kind": "resultNonEmpty", "field": "result.link"}
+    },
+    {
+      "id": "enrolmentLink",
+      "script": "install.enrolmentLink",
+      "description": "Mint a single-use passkey-enrolment link for the cluster owner, so the install ends with a credential the operator holds rather than an email round trip nobody can receive.",
+      "params": {"local": "1"},
+      "dependsOn": ["magicLink"],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {"kind": "resultNonEmpty", "field": "result.enrolUrl"}
     }
   ]
 }

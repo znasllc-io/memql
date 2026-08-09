@@ -88,6 +88,21 @@ type Result struct {
 	AuditEventId string
 	// One line describing what changed, for the console's status line.
 	Message string
+
+	// EnrolmentURL is the ONE field on this Result that carries a credential,
+	// and it is set by exactly one operation (IssueEnrolmentLink, memql#3408).
+	//
+	// It breaks the "never quotes a credential" rule ErrorMessage states, and
+	// it has to: an enrolment link IS the product of that call, the plaintext
+	// exists nowhere else (only its SHA-256 hash was persisted), and there is
+	// no second request that could fetch it later. The alternative -- a
+	// separate message type for one operation -- would put the same value on
+	// the same stream while making the exception harder to find.
+	//
+	// Empty on every other operation and on every refusal. A surface showing
+	// it must show it ONCE and hold it nowhere else: not in storage, not in a
+	// URL of its own, not in a row.
+	EnrolmentURL string
 }
 
 func ok(auditID, message string) Result {
@@ -111,6 +126,22 @@ type Service struct {
 	Logger *slog.Logger
 	// Now is a test-friendly clock. nil = time.Now().UTC.
 	Now func() time.Time
+
+	// IdentityBaseURL resolves the PUBLIC base URL of the identity service --
+	// the origin an enrolment link has to point at (memql#3408).
+	//
+	// A seam rather than a string because this Service is constructed on every
+	// node with an engine, and the answer is not the same on all of them. The
+	// identity node knows it from MEMQL_IDENTITY_BASE_URL; the bff (which
+	// serves the portal, and so is where an admin actually clicks) has only
+	// MEMQL_IDENTITY_VERIFIER_BASE_URL, which is the IN-CLUSTER address
+	// (https://identity:8085) and would produce a link nobody outside the
+	// cluster can open. The wiring layer resolves it properly and this package
+	// stays out of the environment.
+	//
+	// Optional: nil, empty, or non-https refuses IssueEnrolmentLink with an
+	// actionable message and leaves every other operation untouched.
+	IdentityBaseURL func(ctx context.Context) string
 }
 
 // New validates dependencies and returns a ready Service.

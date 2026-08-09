@@ -214,6 +214,20 @@ type Server struct {
 	// mode for return_to flows.
 	mintSSOAuthCode MintSSOAuthCodeFunc
 
+	// Enrolment redeem (memql#3408). resolveEnrolment validates a presented
+	// enrolment token; enrolAudit receives one event per outcome, refusals
+	// included. Both are wired together by SetResolveEnrolment and both must
+	// be non-nil for GET /enroll to mount at all -- an unaudited
+	// credential-redeem surface is worse than an absent one, the same
+	// judgment adminops.New makes about its own Audit.
+	resolveEnrolment ResolveEnrolmentFunc
+	enrolAudit       identity.AuditLogger
+
+	// Per-IP redeem limiter, lazily built per-Server on first use so each
+	// Server (and each test) gets its own buckets.
+	enrolLimiterValue *abuse.IPRateLimiter
+	enrolLimiterOnce  sync.Once
+
 	// Asset versioning. Computed once at boot from the embedded FS.
 	// The webtempl layout pulls versioned URLs through LayoutData.Asset
 	// (a closure over s.assetURL), and handlers run paths through
@@ -349,6 +363,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /setup", wrap(s.handleSetupPost))
 	mux.HandleFunc("GET /legal/tos", wrap(s.handleLegalTOS))
 	mux.HandleFunc("GET /legal/privacy", wrap(s.handleLegalPrivacy))
+
+	// Enrolment redeem (memql#3408). Unauthenticated by Bearer standards --
+	// the enrolment code IS the credential, exactly as the pair code is on
+	// /pair/redeem -- so it is NOT wrapped in preAuth: a person following an
+	// enrolment link may already hold a session (an admin enrolling a second
+	// device) and bouncing them to /admin/ would silently drop the link.
+	// Mounts only when the validator + audit sink are both wired.
+	if s.resolveEnrolment != nil && s.enrolAudit != nil {
+		mux.HandleFunc("GET /enroll", wrap(s.handleEnroll))
+	}
 
 	// /me/* SPA shells. Authentication is fetched client-side via
 	// /auth/refresh — these handlers only render the shell.

@@ -2173,3 +2173,13 @@ query identity nodeTokenIdentityById {
   filter  identityIsNodeToken && row.id==args.identityId
   shape   identityFull
 }
+
+/// Enrolment-token lookup by tokenHash for the /enroll redeem path.
+@unbounded("enrolment token by unique tokenHash -- a credential lookup bounded to a single row")
+query enrolmentToken enrolmentTokenByHash {
+  args {
+    tokenHash  string!
+  }
+  filter  tokenHash==args.tokenHash
+  shape   enrolmentTokenFull
+}

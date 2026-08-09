@@ -32,6 +32,11 @@ const envAllowInsecurePair = "MEMQL_IDENTITY_ALLOW_INSECURE_PAIR"
 // credential-leak surface. A reverse-proxy fronting plaintext to the
 // binary surfaces the deployment posture via X-Forwarded-Proto.
 //
+// The transport predicate itself lives in identity.RequestIsSecure so
+// the enrolment surface (memql#3408) enforces the same rule from the
+// same code rather than from a second copy of it; the dev escape hatch
+// stays here because it is named per-surface.
+//
 // Returns true when the request is admissible; writes a 403 and
 // returns false otherwise.
 func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bool {
@@ -39,13 +44,10 @@ func (s *Server) requireSecureRequest(w http.ResponseWriter, r *http.Request) bo
 		http.Error(w, "no request", http.StatusBadRequest)
 		return false
 	}
-	if r.TLS != nil {
+	if identity.RequestIsSecure(r) {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https") {
-		return true
-	}
-	if strings.TrimSpace(os.Getenv(envAllowInsecurePair)) == "1" {
+	if identity.InsecureTransportEscapeEnabled(envAllowInsecurePair) {
 		if s != nil && s.Logger != nil {
 			s.Logger.Warn("pair endpoint admitting plaintext request via "+envAllowInsecurePair+"=1; production must leave this unset",
 				"path", r.URL.Path,

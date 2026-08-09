@@ -96,6 +96,7 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
 	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
 	"install.magicLink":         "scripts/install/magic-link.sh",
+	"install.enrolmentLink":     "scripts/install/enrolment-link.sh",
 	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
 
 	// install.e2eBaseline is CI's INSTRUMENT rather than a step of any install

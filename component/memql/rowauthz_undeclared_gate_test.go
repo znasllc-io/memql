@@ -210,6 +210,27 @@ const undeclared3406PasskeyReason = "memql#3406 -- passkey reads (one self-scope
 // `workerPairingCodeByHash` above, and it is a bound, not a measurement --
 // which is why the entries are here.
 const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lookups; the polling read is pre-actor and approvedByUserId is empty when the page read runs, so no owner tier fits"
+// undeclared3408EnrolmentReason covers enrolmentTokenByHash, the /enroll
+// redeem lookup memql#3408 added.
+//
+// It postdates the seed and names its own issue rather than carrying the
+// grandfather marker, for the same reason as the entries above.
+//
+// It is on this list because it CANNOT be caller-scoped, not because nobody
+// got around to scoping it. The enrolment token exists precisely so that a
+// person with NO credential can obtain their first one -- the token IS the
+// credential, and the read that validates it runs before any actor exists. An
+// owner tier on v1:identity:enrolmentToken would compare the row's userId
+// against an empty actor.userId and return nothing, turning every redeem into
+// a confident "invalid link"; enforceRowAuthzOnPlan has no cluster-owner
+// escape on the read path, so a wrong tier here fails the flow closed rather
+// than leaking. The same circularity keeps magicLinkRequest's and
+// workerPairingCode's lookups untiered.
+//
+// What bounds it instead is arithmetic rather than authorship: the filter is
+// equality on a SHA-256 digest of 32 CSPRNG bytes, so the read resolves to at
+// most one row and only for a caller who already holds the plaintext.
+const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-actor by construction (the token IS the credential), so no owner tier can be compared against"
 
 // undeclared3409SignInRoutesReason covers the one construct memql#3409 added
 // for the passkey management surface.
@@ -431,6 +452,9 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
+
+	// v1:identity:enrolmentToken
+	"enrolmentTokenByHash": {"v1:identity:enrolmentToken", undeclared3408EnrolmentReason},
 
 	// v1:identity:invitation
 	"invitationById":                {"v1:identity:invitation", undeclaredGrandfatherReason},
