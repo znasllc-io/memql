@@ -53,14 +53,23 @@ PATH" from the VS Code command palette.
 
 ## Requirements
 
-The `memql-lsp` binary. The extension resolves it in this order:
+The `memql-lsp` binary, for the LANGUAGE FEATURES only. The extension resolves
+it in this order:
 
-1. The `memql.lsp.serverPath` setting, if set.
+1. The `memql.lsp.serverPath` **user** setting, if set (see Settings below --
+   a workspace-scoped value is refused).
 2. A bundled platform binary at `bin/<platform>-<arch>/memql-lsp` (added at
    packaging time -- `make vscode-install` / `make vscode-package` bundle it).
 3. `memql-lsp` on your `PATH`.
 
 Build it from the memql repo with `go build -o bin/memql-lsp ./cmd/memql-lsp`.
+
+When none of the three resolves, the extension says so and keeps going: only
+highlighting, diagnostics, completion, hover and signature help are lost. The
+runtime surface -- the Clusters, Concepts and Runs views, and connecting to a
+cluster -- needs nothing from the language server and is unaffected. (The Run
+CodeLens does need it, because the constructs it offers are read from the
+server.)
 
 ## Development
 
@@ -102,5 +111,9 @@ checklist](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vs
 
 ## Settings
 
-- `memql.lsp.serverPath` -- absolute path to the `memql-lsp` binary.
+- `memql.lsp.serverPath` -- absolute path to the `memql-lsp` binary. **User
+  settings only.** A value in workspace settings (`.vscode/settings.json`) is
+  refused, and the extension shows a warning saying it was: an opened folder is
+  not trusted to name an executable this extension then runs, so honouring one
+  would hand any repository arbitrary code execution. Set it in User Settings.
 - `memql.lsp.trace.server` -- `off` | `messages` | `verbose`.
