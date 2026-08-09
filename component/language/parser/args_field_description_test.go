@@ -95,6 +95,34 @@ logic decideThing {
 }`,
 		},
 		{
+			// `action` and `capability` reach parseArgsBlockField through
+			// their OWN call sites in parseActionDecl / parseCapabilityDecl,
+			// not through the file-top/parseDefinition pair the other kinds
+			// use -- they are the two constructs the first pass of memql#3336
+			// missed. They discard the annotation identically: ArgsField has
+			// no Description slot, and both loaders build their param structs
+			// from Name/Type/Required alone.
+			name: "action",
+			src: `use capabilities.shell.{ script }
+@description("Check out a repo at a ref.")
+action cloneRepoAtVersion {
+  args {
+    workdir string @required @description("repo working tree")
+  }
+  capability script(script: "deploy.cloneRepo", workdir: args.workdir)
+}`,
+		},
+		{
+			name: "capability",
+			src: `@sideEffect("exec")
+@description("Run a shell script.")
+capability shell.script {
+  args {
+    script string @required @description("the script id")
+  }
+}`,
+		},
+		{
 			name: "automation",
 			src: `@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 @description("bootstrap a session")

@@ -7,12 +7,18 @@ import (
 // cloneSrc is a simplified-form authored action (construct-invocation ADR
 // Decision 3, Story 4): an `args` block + a single `capability <verb>(...)`
 // call, with the verb imported via `use capabilities.*`.
+// The per-arg prose is a `///` doc comment, never `@description`: an
+// args-field @description is rejected at load (memql#3336) for an action
+// exactly as for a query/mutate/logic, because ArgsField has no slot for it
+// and the actions loader builds Param{Name, Type, Required} without one.
 const cloneSrc = `use capabilities.shell.{ script }
 @description("Check out a repo at a ref.")
 action cloneRepoAtVersion {
   args {
-    workdir string @required @description("repo working tree")
-    ref     string @required @description("git ref")
+    /// repo working tree
+    workdir string @required
+    /// git ref
+    ref     string @required
   }
   capability script(script: "deploy.cloneRepo", workdir: args.workdir, ref: args.ref)
 }`
