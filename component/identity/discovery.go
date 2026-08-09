@@ -87,6 +87,16 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 // instead: the env tier here is unconditional and would silently outrank the
 // argument (memql#3434).
 //
+// This exported wrapper has no in-tree caller since memql#3437 moved the
+// worker-pairing path onto the scheme-stating forms below; the discovery
+// handler reaches the same logic through the unexported twin. It is KEPT
+// rather than deleted because removing an exported symbol fails
+// TestArchitectureModelIsNotStale until the committed architecture model is
+// regenerated, and that regeneration currently sweeps the whole concurrent
+// #3401 surface into whatever commit triggers it (measured on #3436: ~53k
+// pretty-printed lines). Deleting it is a cleanup for a commit that is
+// already regenerating the model.
+//
 // Note: MEMQL_GRPC_ADDRESS is INTENTIONALLY ignored. That env var
 // configures the identity binary's OWN listen address (e.g.
 // ":50051") -- it is not a dial address for external clients, and
@@ -139,6 +149,97 @@ func DialEndpointFromOrigin(origin string) string {
 	return host + ":" + plaintextDialPort
 }
 
+// DialURLFromOrigin is DialEndpointFromOrigin's answer with the transport
+// security STATED rather than dropped: "https://host:443" or
+// "http://host:50050", and "" for input it cannot read.
+//
+// WHY TWO FORMS OF THE SAME ANSWER EXIST (memql#3437). Two consumers read a
+// dial address and need different things from it.
+//
+//   - The DISCOVERY DOCUMENT publishes a bare `host[:port]`. That form is
+//     pinned by test/fixtures/discovery-endpoint-contract.json and asserted
+//     from Go and TypeScript, because the client reading it composes its own
+//     ws/wss URL and a scheme there is refused by name (memql#3399).
+//   - The WORKER-PAIRING REPLY hands its value to sdk/go/worker.ParseClusterURL,
+//     which maps a bare `host:port` to useTLS=FALSE. The same string that is
+//     correct in the discovery document therefore told a cockpit to dial
+//     cockpit.local.znas.io:443 in plaintext -- putting its `mql_wkr_` bearer
+//     token on the wire in the clear before the handshake failed.
+//
+// The server was never guessing: the origin it is handed carries the answer,
+// and the bare form was throwing it away. Strip the scheme from this
+// function's result and DialEndpointFromOrigin's result comes back byte for
+// byte, for every input -- the dial target does not move, only the silence
+// about TLS is removed.
+func DialURLFromOrigin(origin string) string {
+	host := dialHostFromOrigin(origin)
+	if host == "" {
+		return ""
+	}
+	if isHTTPS(origin) {
+		return "https://" + host + ":443"
+	}
+	return "http://" + host + ":" + plaintextDialPort
+}
+
+// DialURLFromEndpoint is normalizeDialEndpoint's answer for an
+// OPERATOR-CONFIGURED endpoint (MEMQL_WORKER_DIAL_ENDPOINT,
+// MEMQL_DISCOVERY_GRPC_ENDPOINT), restated in the most explicit form that
+// value supports -- and no more explicit than that (memql#3437).
+//
+// Three rules, in the order they apply:
+//
+//  1. A SCHEME IS HONOURED. https/wss -> TLS, http/ws -> plaintext, with the
+//     port the scheme implies when none is given. Writing the scheme is the
+//     only way to state TLS on a non-standard port, and it is what an
+//     operator who knows the listener's transport should do.
+//
+//  2. NO SCHEME AND NO PORT -> the transport that normalizeDialEndpoint's own
+//     port choice already implies: a loopback host is a dev plaintext
+//     listener, anything else is the front door on 443. Stating an inference
+//     that is already being made adds no new guess.
+//
+//  3. NO SCHEME, WITH A PORT -> returned BARE, deliberately. Nothing in
+//     `host:8443` says whether that listener speaks TLS, and the port is not
+//     evidence: a TLS listener on 8443 is ordinary, so reading `:443` as
+//     https would be exactly as much of an invention as reading `:8443` as
+//     http. A bare value reaches ParseClusterURL, which documents bare as
+//     plaintext -- an honest default for a hand-written local config, and the
+//     reason handlePairRedeem logs a WARN when it emits one.
+//
+// The scheme vocabulary is deliberately the one normalizeDialEndpoint already
+// reads. An unrecognised scheme (`grpcs://`) falls into rules 2/3 in BOTH
+// functions rather than meaning one thing here and another there.
+//
+// Unreadable input returns "" so the caller falls through rather than dial
+// garbage, exactly as normalizeDialEndpoint does.
+func DialURLFromEndpoint(raw string) string {
+	scheme, host, port := splitDialEndpoint(raw)
+	if host == "" {
+		return ""
+	}
+	switch scheme {
+	case "https", "wss":
+		if port == "" {
+			port = "443"
+		}
+		return "https://" + host + ":" + port
+	case "http", "ws":
+		if port == "" {
+			port = plaintextDialPort
+		}
+		return "http://" + host + ":" + port
+	}
+	if port != "" {
+		// Rule 3: a port without a transport. Say only what was said.
+		return host + ":" + port
+	}
+	if isLoopbackHost(strings.Trim(host, "[]")) {
+		return "http://" + host + ":" + plaintextDialPort
+	}
+	return "https://" + host + ":443"
+}
+
 // dialHostFromOrigin returns just the host of an origin, brackets intact for
 // an IPv6 literal, or "" when the authority cannot be read unambiguously.
 func dialHostFromOrigin(raw string) string {
@@ -185,30 +286,7 @@ const plaintextDialPort = "50050"
 // the right host is a deployment fact and lives in the overlay; this
 // only guarantees the FORM.
 func normalizeDialEndpoint(raw string) string {
-	v := strings.TrimSpace(raw)
-	if v == "" {
-		return ""
-	}
-
-	scheme := ""
-	if i := strings.Index(v, "://"); i >= 0 {
-		scheme = strings.ToLower(v[:i])
-		v = v[i+len("://"):]
-	}
-	// A path, query or fragment is not part of an authority.
-	if i := strings.IndexAny(v, "/?#"); i >= 0 {
-		v = v[:i]
-	}
-	// Userinfo is a URL affordance with no meaning to a dialer.
-	if i := strings.LastIndex(v, "@"); i >= 0 {
-		v = v[i+1:]
-	}
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return ""
-	}
-
-	host, port := splitDialHostPort(v)
+	scheme, host, port := splitDialEndpoint(raw)
 	if host == "" {
 		return ""
 	}
@@ -225,6 +303,38 @@ func normalizeDialEndpoint(raw string) string {
 		return host + ":" + plaintextDialPort
 	}
 	return host + ":443"
+}
+
+// splitDialEndpoint reads a configured endpoint into its (lowercased) scheme,
+// host and port. An empty host means the input could not be read
+// unambiguously and the caller must fall through rather than dial it.
+//
+// Shared by normalizeDialEndpoint (which drops the scheme) and
+// DialURLFromEndpoint (which keeps it), so the two cannot disagree about what
+// a configured value even IS -- one parser, two renderings (memql#3437).
+func splitDialEndpoint(raw string) (scheme, host, port string) {
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return "", "", ""
+	}
+	if i := strings.Index(v, "://"); i >= 0 {
+		scheme = strings.ToLower(v[:i])
+		v = v[i+len("://"):]
+	}
+	// A path, query or fragment is not part of an authority.
+	if i := strings.IndexAny(v, "/?#"); i >= 0 {
+		v = v[:i]
+	}
+	// Userinfo is a URL affordance with no meaning to a dialer.
+	if i := strings.LastIndex(v, "@"); i >= 0 {
+		v = v[i+1:]
+	}
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return scheme, "", ""
+	}
+	host, port = splitDialHostPort(v)
+	return scheme, host, port
 }
 
 // splitDialHostPort splits an authority into host and (optional) port,
