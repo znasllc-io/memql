@@ -66,6 +66,28 @@ func generatedProtoFiles(t *testing.T, root string) []string {
 			case ".git", "node_modules", "vendor":
 				return fs.SkipDir
 			}
+			// A NESTED CHECKOUT IS NOT PART OF THIS REPOSITORY (memql#3346).
+			// A git worktree carries its own full copy of
+			// component/{bus,grpc,node}/gen, and this repo's own .gitignore and
+			// CLAUDE.md put worktrees under .claude/worktrees/. Without this
+			// skip those copies are reported as uncovered wire trees of THIS
+			// repo, so `go test ./...` fails for every developer following the
+			// documented layout -- and the remediation the failure message
+			// suggests (add the path to the `proto` bucket) would pin ci.yml to
+			// one developer's local directory name.
+			//
+			// CI never saw it: a CI checkout has no nested worktrees, so the
+			// walk finds nothing extra and the guard passes.
+			//
+			// Detected by the `.git` entry rather than by directory name: a
+			// worktree has a `.git` FILE and a clone has a `.git` DIRECTORY, so
+			// this covers both, and covers a clone dropped anywhere in the tree
+			// rather than only under `.claude/`.
+			if path != root {
+				if _, statErr := os.Stat(filepath.Join(path, ".git")); statErr == nil {
+					return fs.SkipDir
+				}
+			}
 			return nil
 		}
 		if !strings.HasSuffix(d.Name(), ".pb.go") {

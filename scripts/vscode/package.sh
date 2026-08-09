@@ -36,12 +36,14 @@ VSCE_VERSION="@vscode/vsce@latest"
 
 function show_help() {
     cat <<EOF
-Usage: $0 [--goos=OS] [--goarch=ARCH] [--out=FILE]
+Usage: $0 [--goos=OS] [--goarch=ARCH] [--out=FILE] [--skip-deps]
 
 Options:
     --goos=OS      Target OS for the bundled binary (default: host -- $DEFAULT_GOOS)
     --goarch=ARCH  Target arch (default: host -- $DEFAULT_GOARCH)
     --out=FILE     VSIX output path (default: editors/vscode/<name>-<version>.vsix)
+    --skip-deps    Skip rebuilding the file: workspace dependencies (inner-loop
+                   reruns where sdk/ts and sdk/ts-viewkit have not changed)
     --help         Show this help
 
 Produces a .vsix bundling the memql-lsp binary under the Node-named directory
@@ -53,11 +55,13 @@ function parse_arguments() {
     GOOS_TARGET="$DEFAULT_GOOS"
     GOARCH_TARGET="$DEFAULT_GOARCH"
     OUT=""
+    SKIP_DEPS=false
     while [[ $# -gt 0 ]]; do
         case $1 in
             --goos=*) GOOS_TARGET="${1#*=}"; shift ;;
             --goarch=*) GOARCH_TARGET="${1#*=}"; shift ;;
             --out=*) OUT="${1#*=}"; shift ;;
+            --skip-deps) SKIP_DEPS=true; shift ;;
             --help) show_help; exit 0 ;;
             *) echo "ERROR: unknown option: $1"; show_help; exit 1 ;;
         esac
@@ -100,6 +104,26 @@ function build_binary() {
         go build -o "$bindir/$binname" ./cmd/memql-lsp )
 }
 
+# THE EXTENSION CANNOT COMPILE WITHOUT THIS (memql#3340). Both
+# @znasllc-io/memql-sdk-core and @znasllc-io/memql-view-kit are `file:`
+# dependencies whose types come from a gitignored dist/. The `npm ci` below
+# only creates the symlinks -- it does not build what they point at -- so
+# without this step `tsc` cannot resolve either package and the compile dies
+# with TS2307 plus a shower of downstream implicit-`any` errors.
+#
+# This lane shipped without it. `make vscode-install` and `make vscode-package`
+# both run this script, so the entire developer-facing install path failed on
+# any checkout that had not already built the SDKs for some other reason. CI hid
+# it: the packaging step runs after a step that builds them, so it passed on the
+# residue of an unrelated step rather than on its own merits.
+function build_workspace_deps() {
+    if [[ "$SKIP_DEPS" == true ]]; then
+        echo "INFO: --skip-deps; not rebuilding the file: workspace dependencies"
+        return
+    fi
+    bash "$REPO_ROOT/scripts/vscode/deps.sh"
+}
+
 function build_extension() {
     echo "INFO: compiling the extension"
     ( cd "$EXT_DIR" && npm ci --no-audit --no-fund && npm run compile )
@@ -126,6 +150,7 @@ function main() {
     parse_arguments "$@"
     check_prerequisites
     build_binary
+    build_workspace_deps
     build_extension
     package_vsix
     echo "SUCCESS: VSIX packaged"

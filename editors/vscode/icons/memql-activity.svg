@@ -1,15 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24">
-  <g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-    <line x1="4" y1="14" x2="11" y2="6"/>
-    <line x1="11" y1="6" x2="20" y2="15"/>
-    <line x1="4" y1="14" x2="11" y2="20"/>
-    <line x1="11" y1="20" x2="20" y2="15"/>
-    <line x1="11" y1="6" x2="11" y2="20"/>
+  <!-- The memQL mark: the same 9-node graph as icons/memql.png, traced from
+       that artwork and fitted to the 24x24 canvas. Monochrome via currentColor
+       because VS Code tints the activity-bar glyph to the theme's foreground. -->
+  <g fill="none" stroke="currentColor" stroke-width="0.78" stroke-linecap="round">
+    <line x1="13.09" y1="2.52" x2="4.30" y2="5.32"/>
+    <line x1="13.09" y1="2.52" x2="9.45" y2="6.83"/>
+    <line x1="13.09" y1="2.52" x2="19.70" y2="8.76"/>
+    <line x1="13.09" y1="2.52" x2="2.52" y2="14.24"/>
+    <line x1="4.30" y1="5.32" x2="9.45" y2="6.83"/>
+    <line x1="4.30" y1="5.32" x2="19.70" y2="8.76"/>
+    <line x1="4.30" y1="5.32" x2="2.52" y2="14.24"/>
+    <line x1="9.45" y1="6.83" x2="19.70" y2="8.76"/>
+    <line x1="9.45" y1="6.83" x2="2.52" y2="14.24"/>
+    <line x1="9.45" y1="6.83" x2="13.58" y2="16.07"/>
+    <line x1="19.70" y1="8.76" x2="13.58" y2="16.07"/>
+    <line x1="19.70" y1="8.76" x2="17.92" y2="17.85"/>
+    <line x1="19.70" y1="8.76" x2="9.40" y2="20.70"/>
+    <line x1="2.52" y1="14.24" x2="13.58" y2="16.07"/>
+    <line x1="2.52" y1="14.24" x2="9.40" y2="20.70"/>
+    <line x1="13.58" y1="16.07" x2="17.92" y2="17.85"/>
+    <line x1="13.58" y1="16.07" x2="9.40" y2="20.70"/>
+    <line x1="17.92" y1="17.85" x2="9.40" y2="20.70"/>
+    <line x1="17.92" y1="17.85" x2="21.52" y2="21.48"/>
   </g>
   <g fill="currentColor">
-    <circle cx="4" cy="14" r="2.4"/>
-    <circle cx="11" cy="6" r="2.4"/>
-    <circle cx="11" cy="20" r="2.4"/>
-    <circle cx="20" cy="15" r="2.4"/>
+    <circle cx="13.09" cy="2.52" r="1.53"/>
+    <circle cx="4.30" cy="5.32" r="1.53"/>
+    <circle cx="9.45" cy="6.83" r="1.53"/>
+    <circle cx="19.70" cy="8.76" r="1.53"/>
+    <circle cx="2.52" cy="14.24" r="1.53"/>
+    <circle cx="13.58" cy="16.07" r="1.53"/>
+    <circle cx="17.92" cy="17.85" r="1.53"/>
+    <circle cx="9.40" cy="20.70" r="1.53"/>
+    <circle cx="21.52" cy="21.48" r="1.53"/>
   </g>
 </svg>

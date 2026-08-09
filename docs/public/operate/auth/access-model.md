@@ -9,15 +9,26 @@ owner: znas
 
 # Access Model
 
-> **Status (#56 in progress):** the per-partition ACL layer described
-> below has been retired (phase 4). Authentication + identity stay
-> identical; authorization is enforced **per row** inside DSL queries
-> and mutations -- see
+> **Status (#56 complete):** the per-partition ACL layer is **gone**,
+> not deprecated. Authentication + identity are unchanged;
+> authorization is enforced **per row** -- see
 > [per-row-authz-audit.md](per-row-authz-audit.md) for the four
 > buckets (owned / granted / admin / public) and how each domain
-> classifies its constructs. The remaining `partition` references in
-> this doc reflect historical behavior; later #56 phases strip the
-> envelope dimension entirely.
+> classifies its constructs.
+>
+> Measured in this checkout rather than asserted (memql#3305):
+> `v1:identity:partitionAccess` does not exist in
+> `dsl/identity/concepts.memql`; `"MemoryNodes"` has **no `partition`
+> column** and its primary key is `(id, "createdAt")`; and
+> `component/grpc/memql.proto` carries `reserved "partition"` in two
+> messages plus `reserved "partitions"`. There is no envelope
+> dimension under the DSL any more, so the per-row check is not
+> defense in depth -- it is the only gate.
+>
+> What survives under the "partition" name is
+> `v1:platform:partitionSecret` / `partitionVariable` in
+> `dsl/platform/concepts.memql`. Those are **config storage** and
+> derive nobody's visibility.
 
 memQL's authorization has three layers: **authentication** (who are
 you), **identity** (which credential you're using), and
@@ -33,10 +44,13 @@ narrative (env vars, deployment, key rotation) see
 
 ## Concept model
 
-All identity concepts are **global-scoped** (`@scope("global")`):
-rows live in the reserved `_system` partition and are readable from
-every tenant's view. The partition selector on the wire does not
-hide them.
+Identity concepts are cluster-wide: one row set, the same from every
+caller's view. There is no scope annotation and no wire-level
+selector that hides them -- `@scope("global")` / `@scope("partition")`
+were retired with the rest of partitioning in #56, and authoring one
+today is a load error (`dsl/_reference/_concept.memql` §5). What
+limits who may *read* a given row is the per-row check described
+under [Enforcement](#enforcement), nothing above it.
 
 ### `v1:identity:user`
 
@@ -82,27 +96,6 @@ Key fields:
   this identity for agent work
 - `active`, `lastUsedAt`
 
-### `v1:identity:partitionAccess`
-
-The grant. One row per `(userId, partition)`. Re-granting appends a
-new time-series version so history is preserved; hard-delete is
-never used for access rows.
-
-Key fields:
-
-- `userId` -- recipient
-- `partitionName` -- the target partition's name
-- `role` -- per-partition role (same enum as user.role)
-- `grantedBy`, `grantedAt`, `expiresAt`
-- `active` -- soft-revoke flag
-- `source` -- `manual` today. The enum is reserved for future
-  provenance variants (e.g. SCIM-driven, SSO-group-driven) so a
-  sync job can later own only its own rows via `sourceRef`.
-
-> `partitionName`, not `partition` -- `partition` is reserved at the
-> engine's payload level (see
-> [memql-authoring-rules.md](../../language/authoring-rules.md#12-partition-is-a-reserved-payload-field----use-partitionname)).
-
 ### `v1:identity:authSession`
 
 Per-token session record. The identity service's magic-link / refresh
@@ -134,30 +127,41 @@ admin-issued user invitations.
 
 ## Role spectrum
 
-One enum, used everywhere: **owner / admin / writer / reader**.
+One enum, cluster-wide, on `v1:identity:user.role`. Five values, as
+declared in `component/auth/rbac.go` (`AllRoles()`) and in the
+concept's own `role` field:
 
-| Role   | Cluster-wide effect                                    | Per-partition effect                                      |
-|--------|--------------------------------------------------------|-----------------------------------------------------------|
-| owner  | Bypasses the per-partition ACL entirely                | (N/A -- cluster owners see everything)                    |
-| admin  | No ACL bypass. Still needs a grant to touch any        | Partition-level root. Manages other roles within          |
-|        | partition's data.                                      | the partition.                                            |
-| writer | Regular data producer.                                 | Can read and mutate data within the partition.            |
-| reader | Regular data consumer.                                 | Read-only.                                                |
+| Role      | Meaning                                                                  |
+|-----------|--------------------------------------------------------------------------|
+| owner     | The cluster operator. The only role `auth.IsClusterOwner()` accepts.      |
+| admin     | User + cluster management. Not the same as owner -- see below.            |
+| developer | Engineering power: authoring, inline DSL, deploy / cut-version. Not user management. |
+| writer    | Regular data producer.                                                    |
+| reader    | Regular data consumer.                                                    |
 
-## Cluster role vs partition role
+There is **no second, per-partition role**. The grant row that used to
+carry one is gone; a user has exactly one role and it is cluster-wide.
 
-The cluster-wide role on `v1:identity:user.role` answers:
+## What the role actually decides
 
-- **Owner?** Then the partition ACL is irrelevant -- you can target
-  any partition.
-- **Everyone else?** Then your access is defined by your
-  `v1:identity:partitionAccess` rows. A user with `role: "admin"`
-  cluster-wide but no partition grants can't read or write any data;
-  they can only perform cluster-level management operations
-  (granting access, managing users).
+Since #56 there is no ACL layer between the caller and the row, so a
+role matters only where something reads it. Two places do:
 
-The split is intentional: "I can manage users" and "I can see
-partition X" are different concerns.
+- **`auth.IsClusterOwner()` -- `Role == RoleOwner`, and nothing else.**
+  This is the sole escape in the row-authz write guard
+  (`rowAuthzWriteEscape`, `component/memql/rowauthz_write_guard.go`),
+  alongside internal server origin. `admin` is deliberately **not** an
+  escape there, and is not inferred from the read side or from the
+  fact that admin sounds privileged.
+- **Filter conjuncts that name the role**, such as the
+  `requiresOwnerOrAdmin` spec guarding `searchUsers` and `userById` in
+  `dsl/identity/queries.memql`. These are author-written, per-construct,
+  and reach only the construct that names them.
+
+The consequence is worth stating plainly: **a role is not a boundary
+the engine applies on your behalf.** Row visibility comes from the
+concept's `@rowAuthz` tier where one is declared, and from the
+construct's own filter where one is not.
 
 ## Enforcement
 

@@ -28,8 +28,11 @@ jobs:
           node-version: '20'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@znasllc-io'
+      # `npm ci`, not `npm install`: this lane produces a PUBLISHED artifact, so
+      # it is the one place the integrity-pinned, lockfile-exact install matters
+      # most. sdk/ts commits its package-lock.json as of memql#3344.
       - name: install deps
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: build
         run: npm run build
       - name: publish to GitHub Packages

@@ -427,8 +427,12 @@ dsl-lint:
 
 ## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
 ## (typescript). Idempotent.
+##
+## `npm ci`, not `npm install`: sdk/ts commits its package-lock.json as of
+## memql#3344, so the install is reproducible and integrity-pinned. It used
+## `npm install` only because that lockfile had never been committed.
 sdk-ts-install:
-	cd sdk/ts && npm install --no-audit --no-fund
+	cd sdk/ts && npm ci --no-audit --no-fund
 
 ## Typecheck the runtime core. Runs `tsc --noEmit` against sdk/ts. CI
 ## gates the core SDK through this target. Requires node + npm.
@@ -458,13 +462,13 @@ viewkit-test:
 ## dist/ must exist before `npm ci` in editors/vscode can resolve them, so a
 ## clean checkout needs this first.
 ##
-## sdk/ts uses `npm install`, not `npm ci`: its package-lock.json is not
-## committed, and `npm ci` fails without one. This matches the existing
-## sdk-ts-install target. sdk/ts-viewkit does commit its lockfile, so it gets
-## the reproducible `npm ci`.
+## The recipe itself lives in scripts/vscode/deps.sh rather than here, because
+## EVERY lane that compiles the extension needs it. While it existed as three
+## hand-maintained copies the fourth consumer -- package.sh, behind
+## `make vscode-install` -- was written without one and shipped broken from a
+## clean checkout (memql#3340).
 vscode-deps:
-	cd sdk/ts && npm install --no-audit --no-fund && npm run build
-	cd sdk/ts-viewkit && npm ci --no-audit --no-fund && npm run build
+	bash scripts/vscode/deps.sh
 
 ## Run the VS Code extension's unit tests. Covers only modules that do not
 ## import `vscode`; the API layer is exercised by the host lane below.
