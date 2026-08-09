@@ -174,6 +174,55 @@ func (s *Store) ListForSelf(ctx context.Context) ([]Row, error) {
 	return out, nil
 }
 
+// RecordAssertion stamps the post-login verifier state on a passkey row:
+// the new signature counter, the current backup state, and lastUsedAt.
+//
+// BEST-EFFORT. Callers log a failure and let the login stand, matching
+// the badge variant's precedent -- the assertion has already been
+// verified, and refusing a login because a bookkeeping write failed
+// would lock a user out over a database hiccup. The cost of the miss is
+// bounded: a lastUsedAt that lags, and a counter that stays where it was
+// (so the NEXT assertion from the same authenticator compares against an
+// older value, which is conservative rather than permissive -- it can
+// only produce a false regression, never suppress a real one).
+//
+// ctx MUST carry the system credential actor, for the same reason
+// Create does: a passkey row is gated by the memql#2513 credential-actor
+// guard and the login path has no authenticated actor at all yet.
+//
+// The write is a WHOLESALE credentials merge because partial nested
+// updates are unsupported, so every field that is not changing is
+// re-passed FROM THE STORED ROW. That matters most for backupEligible,
+// which the spec fixes for the credential's lifetime: it is echoed back
+// unchanged rather than re-read from the assertion, so this path cannot
+// rewrite it even by accident.
+func (s *Store) RecordAssertion(ctx context.Context, row *Row, signCount uint32, backupState bool, at time.Time) error {
+	if s == nil || s.Engine == nil {
+		return errors.New("webauthn.Store: engine not wired")
+	}
+	if row == nil || row.ID == "" {
+		return errors.New("webauthn.Store.RecordAssertion: row required")
+	}
+	transports, err := json.Marshal(row.Transports)
+	if err != nil {
+		return fmt.Errorf("webauthn.Store.RecordAssertion: encode transports: %w", err)
+	}
+	if len(row.Transports) == 0 {
+		transports = []byte("[]")
+	}
+	q := fmt.Sprintf(
+		`mutation recordPasskeyAssertion(identityId:%s,credentialId:%s,publicKey:%s,signCount:%d,aaguid:%s,transports:%s,backupEligible:%t,backupState:%t,registeredBy:%s,lastUsedAt:%s)`,
+		dslString(bareSlug(row.ID)), dslString(row.CredentialId), dslString(row.PublicKey),
+		signCount, dslString(row.AAGUID), string(transports),
+		row.BackupEligible, backupState, dslString(row.RegisteredBy),
+		dslString(at.UTC().Format(time.RFC3339Nano)),
+	)
+	if _, err := s.Engine.Execute(ctx, q); err != nil {
+		return fmt.Errorf("webauthn.Store.RecordAssertion: %w", err)
+	}
+	return nil
+}
+
 // dslString JSON-encodes a value into a DSL string literal. encoding/json's
 // quoting keeps a value containing a double quote from breaking out of its
 // enclosing literal, mirroring identity.Store's dslJSONString.

@@ -39,6 +39,7 @@ const vscodeExtensionSrcDir = "../../editors/vscode/src"
 // and rowProjection.ts were split out of src/webview/ and conceptsCache.ts
 // out of src/views/.
 var vscodeImportAllowList = []string{
+	"auth/deviceCodeUi.ts",       // progress / clipboard / openExternal adapter over auth/deviceCode.ts
 	"constructs/lensProvider.ts", // CodeLensProvider adapter over constructs/runnable.ts
 	"extension.ts",               // activation, command registration, LSP client wiring
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/

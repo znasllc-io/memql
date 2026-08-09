@@ -220,3 +220,79 @@ func (a *softwareAuthenticator) Attest(challenge, rpID, origin string, opts ...c
 func (a *softwareAuthenticator) CredentialIdB64() string {
 	return base64.RawURLEncoding.EncodeToString(a.credentialID)
 }
+
+// PublicKeyB64 is the base64url COSE key the row will carry -- the same
+// bytes FinishRegistration would have persisted, so a login test can
+// build a stored Row without running a registration first.
+func (a *softwareAuthenticator) PublicKeyB64() string {
+	return base64.RawURLEncoding.EncodeToString(a.coseKey())
+}
+
+// assertionAuthenticatorData assembles rpIdHash || flags || signCount for
+// an ASSERTION. No attested credential data: that is registration-only,
+// so the AT flag is cleared regardless of what the registration flags
+// said.
+func (a *softwareAuthenticator) assertionAuthenticatorData(rpID string) []byte {
+	a.t.Helper()
+	rpIDHash := sha256.Sum256([]byte(rpID))
+	out := make([]byte, 0, 37)
+	out = append(out, rpIDHash[:]...)
+	out = append(out, a.flags & ^flagAttestedData)
+	counter := make([]byte, 4)
+	binary.BigEndian.PutUint32(counter, a.signCount)
+	return append(out, counter...)
+}
+
+// Assert emits the PublicKeyCredential JSON body a browser would POST to
+// the login/finish endpoint.
+//
+// The signature is the real thing -- ES256 over
+// authenticatorData || sha256(clientDataJSON), exactly as WebAuthn §7.2
+// step 20 specifies -- so these tests exercise the library's verifier
+// rather than a stub of it. That is the whole reason this file exists.
+//
+// userHandle is what makes a DISCOVERABLE assertion discoverable: the
+// authenticator stored the user id at registration and hands it back
+// here, which is how a usernameless ceremony learns whose account it is
+// looking at. The library refuses a blank one.
+func (a *softwareAuthenticator) Assert(challenge, rpID, origin, userHandle string, opts ...createOption) []byte {
+	a.t.Helper()
+	cfg := createOptions{rpID: rpID, origin: origin}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+
+	clientData, err := json.Marshal(map[string]any{
+		"type":        "webauthn.get",
+		"challenge":   challenge,
+		"origin":      cfg.origin,
+		"crossOrigin": false,
+	})
+	if err != nil {
+		a.t.Fatalf("encode clientDataJSON: %v", err)
+	}
+	authData := a.assertionAuthenticatorData(cfg.rpID)
+	clientDataHash := sha256.Sum256(clientData)
+	digest := sha256.Sum256(append(append([]byte{}, authData...), clientDataHash[:]...))
+	signature, err := ecdsa.SignASN1(rand.Reader, a.key, digest[:])
+	if err != nil {
+		a.t.Fatalf("sign assertion: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]any{
+		"id":                     a.CredentialIdB64(),
+		"rawId":                  a.CredentialIdB64(),
+		"type":                   "public-key",
+		"clientExtensionResults": map[string]any{},
+		"response": map[string]any{
+			"clientDataJSON":    base64.RawURLEncoding.EncodeToString(clientData),
+			"authenticatorData": base64.RawURLEncoding.EncodeToString(authData),
+			"signature":         base64.RawURLEncoding.EncodeToString(signature),
+			"userHandle":        base64.RawURLEncoding.EncodeToString([]byte(userHandle)),
+		},
+	})
+	if err != nil {
+		a.t.Fatalf("encode assertion response: %v", err)
+	}
+	return body
+}

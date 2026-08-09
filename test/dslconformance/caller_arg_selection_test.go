@@ -222,8 +222,22 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql revokeAccountTokenIdentity": "revokes any user's account token; ownership is checked in the handler and the credential authorizes nothing (memql#3322).",
 	"identity/mutations.memql bumpPATLastUsedAt":          "stamps last-used on any PAT; server-side token path.",
 	"identity/mutations.memql touchBadgeLastUsed":         "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
-	"identity/mutations.memql stampNodeTokenBootstrap":    "stamps bootstrap state on any node token identity; server-side node path.",
-	"identity/queries.memql patIdentityById":              "returns a PAT identity row by id; server-side token verification path.",
+	// memql#3407. Same family and the same gate as touchBadgeLastUsed: a
+	// wholesale credentials merge on a caller-named identity row, reachable
+	// only under a system actor because the memql#2513 credential-actor
+	// guard fires on the read-merged payload (identityType=="passkey") and
+	// rejects every other actor. Its named-arg surface is NARROWER than its
+	// badge sibling's `credentials object!` splat -- validateMutationCallerArgs
+	// can see each field -- but the shape it could forge if that guard ever
+	// stopped firing is the sharpest in this map: {credentialId, publicKey}
+	// from caller input on a victim's row binds the attacker's own
+	// authenticator to the victim's account, and the login ceremony would
+	// then verify a perfectly genuine signature. Fixed for real by
+	// @rowAuthz(owner="userId") on v1:identity:identity (memql#3173), which
+	// is the same fix the five revokes above want.
+	"identity/mutations.memql recordPasskeyAssertion":  "wholesale credentials merge on a caller-named passkey identity; gated in practice by the memql#2513 credential-actor guard (system actor only), tracked for real by memql#3173.",
+	"identity/mutations.memql stampNodeTokenBootstrap": "stamps bootstrap state on any node token identity; server-side node path.",
+	"identity/queries.memql patIdentityById":           "returns a PAT identity row by id; server-side token verification path.",
 	// nodeTokenIdentityById's entry is GONE, and deliberately not replaced:
 	// memql#2987 moved it to @serverOnly, so this detector no longer reaches
 	// it and a lingering entry would fail the stale-exemption check. Its note

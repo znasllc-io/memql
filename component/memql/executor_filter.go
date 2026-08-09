@@ -2114,6 +2114,30 @@ func provenanceLeafFromJSON(raw json.RawMessage, leaf string) string {
 	return v
 }
 
+// executeFilterQuery resolves a pre-compiled SQL filter to the latest row per
+// matching id. It is the RELATIONSHIP path's lookup: fetchNodesByIds /
+// fetchNodesByJSONFieldValues / fetchNodesByNodeFieldValues
+// (executor_mutation.go) each call it with an enumerated `id IN (...)` or
+// `<field> IN (...)` set on behalf of parentOf / childOf / contains / owns /
+// interactsWith / createdBy. Those three are its only live callers, and all
+// three pass a nil `cmp`.
+//
+// WHO DOES NOT CALL IT (memql#3397, worth stating because the investigation
+// turned on it): the read path does not. evaluateExpressionSetWithContext has
+// a *ComparisonExpression branch that calls this with a non-nil `cmp`, but
+// tryCompileCombinedFilter runs first and succeeds for every comparison whose
+// compile succeeds -- and when the compile fails, the branch's own
+// compileComparisonExpressionWithContext call fails identically and returns the
+// error before reaching here. So filter reads land in
+// executeCombinedFilterQuery, which is why memql#3388 lost an hour patching
+// this function on the assumption it was the live path. Confirmed empirically:
+// an stderr probe on `cmp != nil` fired zero times across the whole db-gated
+// suite (2874 tests, six trees, against a live Postgres).
+//
+// The consequence for pagination: nothing paginates this path, no keyset cursor
+// reaches it, and no caller reads a short result as exhaustion. What its
+// callers DO read is an id's absence, as a dangling reference -- see the scan
+// comment below.
 func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExpression, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
 	db := e.database()
 	if db == nil {
@@ -2126,19 +2150,75 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 
 	var nodes []memorynodes.MemoryNode
 
-	query := db.NewSelect().Model(&nodes)
+	// THE SQL ENUMERATION HAS TO BE THE RESULT SET (memql#3397), the same way
+	// executeCombinedFilterQuery's does since memql#3388.
+	//
+	// MemoryNodes is append-only: one id carries one row per version, and this
+	// read returns the LATEST row per id. Scanning RAW rows and collapsing them
+	// afterwards makes the LIMIT bound VERSIONS rather than ids, so a window
+	// whose consecutive rows share an id yields fewer rows than were asked for.
+	// The old sizing guessed at `target * 2` -- an assumption of ~2 versions per
+	// id, against real concepts that run to 15.
+	//
+	// That matters more here than a short page does, because this path is what
+	// the RELATIONSHIP resolvers look ids up through (fetchNodesByIds /
+	// fetchNodesByJSONFieldValues / fetchNodesByNodeFieldValues, on behalf of
+	// parentOf / childOf / contains / owns / interactsWith / createdBy). Those
+	// callers enumerate the ids they want and read an id's ABSENCE from the
+	// result as a dangling reference -- fetchNodesByIds logs "memql reference
+	// missing; skipping node" and hands back a smaller graph bundle. So a
+	// collapsed window turned into a traversal answering "no parent" about a
+	// parent that exists: measured at 2 of 10 before this change.
+	//
+	// So the collapse happens IN SQL -- `DISTINCT ON (id) ... ORDER BY id,
+	// "createdAt" DESC` in a subquery, re-sorted by the declared ordering
+	// outside it. The LIMIT then bounds DISTINCT ids and the `* 2` guess is
+	// gone rather than retuned.
+	//
+	// THE PLAN, measured rather than assumed. memql#3388 recorded the combined
+	// path's collapse riding a SkipScan over `memory_nodes_id_created_at_desc_idx`;
+	// against a chunked hypertable neither path does. Both plan it as Sort +
+	// Unique above a per-chunk index scan on whatever index the FILTER selects,
+	// because `(id, "createdAt" DESC)` holds per chunk and the chunks still have
+	// to be merged. So #3388's other observation stands -- the outer sort differs
+	// from the inner ordering, and the LIMIT cannot short-circuit the inner scan
+	// -- but it is bounded differently here: every filter that reaches this
+	// function is an enumerated `id IN (...)` / `<field> IN (...)` set, so the
+	// inner scan reads the versions of rows the caller NAMED rather than a whole
+	// concept's. Measured on the 8-ids x 12-versions fixture in
+	// relationship_versioned_ids_3397_db_test.go: 96 rows scanned, 82 shared
+	// buffer hits, against 158 for the same lookup under the old raw window.
+	//
+	// The filter and the asOf timestamp ride INSIDE the collapse: a bare
+	// collapse would read every row in the table, and asOf has to bound the
+	// versions the collapse picks FROM or it would resolve rows to versions
+	// that did not exist yet. The filter carries the per-row authz it already
+	// carried, unchanged.
+	//
+	// NO WIDENING LOOP, unlike the combined path. The loop that survives there
+	// exists for one reason: engine.go's nextCursor block reads a short page as
+	// exhaustion, so a row dropped by the in-memory post-filter costs the rest
+	// of the set. Nothing paginates this path -- it takes no cursor and its
+	// callers ask for a bounded, enumerated id set -- so with the LIMIT now
+	// bounding ids, one scan returns every id that exists.
+	latest := db.NewSelect().
+		Model((*memorynodes.MemoryNode)(nil)).
+		DistinctOn("id").
+		OrderExpr(`id ASC, "createdAt" DESC`)
 
 	if filter.sql != "" {
-		query = query.Where(filter.sql, filter.args...)
+		latest = latest.Where(filter.sql, filter.args...)
 	}
 	if timestamp != nil {
-		query = query.Where(`"createdAt" <= ?`, timestamp.UTC())
+		latest = latest.Where(`"createdAt" <= ?`, timestamp.UTC())
 	}
-	orderExprs := []string{`"createdAt" DESC`}
-	if sorter != nil {
-		orderExprs = sorter.orderExpressions()
-	}
-	for _, expr := range orderExprs {
+
+	query := db.NewSelect().Model(&nodes).ModelTableExpr("(?) AS mn", latest)
+
+	// Shared with the combined path so the two orderings cannot drift; the
+	// nil-sorter fallback there also carries the `id ASC` tie-break, which
+	// makes equal-createdAt rows deterministic here instead of arbitrary.
+	for _, expr := range combinedFilterOrderExprs(sorter) {
 		if strings.TrimSpace(expr) == "" {
 			continue
 		}
@@ -2153,75 +2233,22 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 		fetchTarget = e.config.MaxResults
 	}
 
-	sqlLimit := fetchTarget * 2
-	if sqlLimit < fetchTarget {
-		sqlLimit = fetchTarget
-	}
-
-	query = query.Limit(sqlLimit)
+	query = query.Limit(fetchTarget)
 
 	if err := query.Scan(ctx); err != nil {
 		return nil, err
 	}
 
-	uniqueIds := make([]string, 0, len(nodes))
-	idSet := make(map[string]struct{}, len(nodes))
-	for _, node := range nodes {
-		id := strings.TrimSpace(node.ID)
-		if id == "" {
-			continue
-		}
-		if _, exists := idSet[id]; exists {
-			continue
-		}
-		idSet[id] = struct{}{}
-		uniqueIds = append(uniqueIds, id)
+	// The same post-filter the combined path runs, through the same helper:
+	// resolve each scanned candidate to its TRUE latest version and keep the
+	// ones the predicate still matches. A typed-nil *ComparisonExpression would
+	// make a non-nil ExpressionNode interface, so the nil case is spelled out --
+	// nil there means "no predicate", which is what every live caller passes.
+	var predicate ExpressionNode
+	if cmp != nil {
+		predicate = cmp
 	}
-
-	var latest map[string]memorynodes.MemoryNode
-	var err error
-	if len(uniqueIds) > 0 {
-		latest, err = e.loadLatestNodes(ctx, uniqueIds, timestamp)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	payloadCache := make(map[string]map[string]any)
-	seen := make(map[string]struct{})
-	result := make([]memorynodes.MemoryNode, 0, len(nodes))
-
-	for _, node := range nodes {
-		id := strings.TrimSpace(node.ID)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-
-		candidate := node
-		if latestNode, ok := latest[id]; ok {
-			candidate = latestNode
-		}
-		if cmp != nil {
-			match, err := nodeMatchesComparison(candidate, cmp, payloadCache)
-			if err != nil {
-				return nil, err
-			}
-			if !match {
-				continue
-			}
-		}
-
-		seen[id] = struct{}{}
-		result = append(result, candidate)
-		if target > 0 && len(result) >= target {
-			break
-		}
-	}
-
-	return result, nil
+	return e.latestMatchingNodes(ctx, nodes, predicate, timestamp, target)
 }
 
 // evaluateShapeTemplatesExpression lists available shape templates.
