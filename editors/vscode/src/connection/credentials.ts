@@ -433,7 +433,13 @@ export class CredentialResolver implements CredentialSource {
  */
 export const staticCredentials: CredentialSource = new CredentialResolver();
 
-function defaultFetch(url: string, init: HttpRequestInit): Promise<HttpResponseLike> {
+/**
+ * The real network. Exported so the sign-in flow (src/auth/) reaches the SAME
+ * identity service through the same seam rather than growing a second one --
+ * both talk to `POST <issuer>/oauth/token`, and a test that stubs one should
+ * not be able to miss the other.
+ */
+export function defaultFetch(url: string, init: HttpRequestInit): Promise<HttpResponseLike> {
   return fetch(url, init) as unknown as Promise<HttpResponseLike>;
 }
 
@@ -457,7 +463,10 @@ function errorText(err: unknown): string {
 // The errorId is carried through when present: it is the correlation id in the
 // identity service's own logs, which is exactly what an operator needs to hand
 // over when the message alone is not enough.
-function oauthError(raw: string): string {
+//
+// Exported for src/auth/, whose /register and authorization_code failures come
+// back through the very same writeJSONError shape.
+export function oauthError(raw: string): string {
   try {
     const parsed = JSON.parse(raw) as {
       error?: unknown;
