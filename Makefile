@@ -427,8 +427,12 @@ dsl-lint:
 
 ## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
 ## (typescript). Idempotent.
+##
+## `npm ci`, not `npm install`: sdk/ts commits its package-lock.json as of
+## memql#3344, so the install is reproducible and integrity-pinned. It used
+## `npm install` only because that lockfile had never been committed.
 sdk-ts-install:
-	cd sdk/ts && npm install --no-audit --no-fund
+	cd sdk/ts && npm ci --no-audit --no-fund
 
 ## Typecheck the runtime core. Runs `tsc --noEmit` against sdk/ts. CI
 ## gates the core SDK through this target. Requires node + npm.

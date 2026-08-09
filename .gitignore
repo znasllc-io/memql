@@ -72,10 +72,34 @@ bin/
 *.local
 .gocache/
 
-# Exception: allow .claude/skills/*-local/ skill directories
-!.claude/skills/*-local/
+# Claude Code project state (memql#3344).
+#
+# OPT IN, NOT OPT OUT. This repository is PUBLIC, so `.claude/` is ignored
+# wholesale and only the things that should genuinely travel with the project
+# are negated back in. A new kind of Claude state appearing under `.claude/`
+# therefore stays private by default instead of being offered up by
+# `git status` until someone notices.
+#
+# The sharp edge this closes: `.claude/settings.local.json` is a PERSONAL
+# permission allowlist, and it was kept out of commits only by an operator's
+# GLOBAL gitignore (~/.config/git/ignore). Nothing in the repo protected it, so
+# on another machine or from another contributor it would land in a public
+# repo. `.claude/*` covers it now, and the explicit line below documents that
+# it must never be re-included by a future negation.
+#
+# epics/ and prds/ (CCPM working state) stay ignored deliberately: CCPM already
+# syncs epic and task bodies to public GitHub Issues, so the durable record
+# exists there, while the local files churn every session and this working tree
+# is shared by concurrent Claude sessions -- the same reason CLAUDE.md forbids
+# `git add -A`.
+.claude/*
+!.claude/skills/
+!.claude/commands/
+!.claude/agents/
+!.claude/settings.json
 
-# Claude Code scratch state (not shared across machines)
+# Never shared, whatever the negations above may later allow.
+.claude/settings.local.json
 .claude/scheduled_tasks.lock
 .claude/worktrees/
 
@@ -86,17 +110,22 @@ logs/
 # Node.js -- the TS SDK under sdk/ts/ and the view-kit renderer under
 # sdk/ts-viewkit/ are checked-in node consumers in this monorepo
 # (memql#116). Their package.json is checked in; everything else stays
-# ignored. The deploy/gate-browser Playwright gate is also checked in --
-# its lockfile is what pins the npm deps by integrity hash (Scorecard
-# PinnedDependencies).
+# ignored. Both commit a package-lock.json, which is what pins the npm deps
+# by integrity hash (Scorecard PinnedDependencies) and lets every consumer
+# install with `npm ci`.
+#
+# A negation here is a CLAIM THAT THE FILE IS TRACKED, and
+# scripts/dev/repo_hygiene_test.go enforces that. Two claims were false when
+# that guard was written (memql#3344): sdk/ts's lockfile had never been
+# committed, and deploy/gate-browser had been deleted outright in 992deb41
+# (#2429) while its three rules and the comment describing them were left
+# behind. Do not add a negation for a file you are not also committing.
 package.json
 !sdk/ts/package.json
 !sdk/ts-viewkit/package.json
-!deploy/gate-browser/package.json
 package-lock.json
 !sdk/ts/package-lock.json
 !sdk/ts-viewkit/package-lock.json
-!deploy/gate-browser/package-lock.json
 node_modules/
 
 # macOS

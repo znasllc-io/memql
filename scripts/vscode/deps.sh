@@ -63,10 +63,12 @@ function check_prerequisites() {
 
 # build_workspace_deps builds each `file:` dependency of editors/vscode.
 #
-# The two packages install differently on purpose, and the difference is not
-# stylistic: sdk/ts does not commit a package-lock.json, and `npm ci` fails
-# outright without one. sdk/ts-viewkit does commit its lockfile, so it gets the
-# reproducible install. (The same split the retired Makefile recipe carried.)
+# Both use `npm ci`: both commit a package-lock.json, so both get the
+# reproducible, integrity-pinned install. sdk/ts used `npm install` until
+# memql#3344 -- not by choice, but because its lockfile had never been
+# committed even though .gitignore already exempted it from the global
+# package-lock.json ignore. Committing the file removed the reason for the
+# split.
 #
 # Written as one explicit line per package rather than a loop over a table: with
 # two entries a table is more machinery than it saves, and an explicit line
@@ -76,7 +78,7 @@ function check_prerequisites() {
 # package means adding a line here; that guard fails until you do.
 function build_workspace_deps() {
     echo "INFO: building the file: workspace dependencies the extension compiles against"
-    ( cd "$REPO_ROOT/sdk/ts" && npm install --no-audit --no-fund && npm run build )
+    ( cd "$REPO_ROOT/sdk/ts" && npm ci --no-audit --no-fund && npm run build )
     ( cd "$REPO_ROOT/sdk/ts-viewkit" && npm ci --no-audit --no-fund && npm run build )
 }
 
