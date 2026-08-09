@@ -411,6 +411,20 @@ shape deviceCode deviceCodeFull {
   redeemedAt
   sourceIP
   userAgent
+/// Full projection of a v1:identity:enrolmentToken row. Backs the /enroll redeem path's validation
+/// (expired / already-used / revoked are three DISTINCT rejections, so all three stamps have to
+/// come back on one read) and the passkey-registration authorization that follows it.
+@row
+shape enrolmentToken enrolmentTokenFull {
+  row.id
+  userId
+  tokenHash
+  issuedBy
+  expiresAt
+  consumedAt
+  consumedFromIP
+  revokedAt
+  sourceIP
   row.createdAt
 }
 

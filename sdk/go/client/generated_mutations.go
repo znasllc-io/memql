@@ -1239,6 +1239,42 @@ func ConsumeAuthCodeBuild(args ConsumeAuthCodeArgs) string {
 	return b.String()
 }
 
+// ConsumeEnrolmentToken -- Stamp an enrolment-token row consumed.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["consumeEnrolmentToken"] in generated_concepts.go).
+type ConsumeEnrolmentTokenArgs struct {
+	EnrolmentId    string
+	ConsumedAt     string
+	ConsumedFromIP string
+}
+
+// ConsumeEnrolmentToken calls the engine mutation consumeEnrolmentToken.
+func (qc *QueryClient) ConsumeEnrolmentToken(ctx context.Context, args ConsumeEnrolmentTokenArgs) (*Result, error) {
+	call := ConsumeEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "consumeEnrolmentToken", call)
+}
+
+func ConsumeEnrolmentTokenBuild(args ConsumeEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation consumeEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("consumedAt: ")
+	b.WriteString(quoteMemQL(args.ConsumedAt))
+	if args.ConsumedFromIP != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("consumedFromIP: ")
+		b.WriteString(quoteMemQL(args.ConsumedFromIP))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConsumeMagicLinkRequest -- Mark a magic-link request consumed (stamps consumedAt = now).
 //
 // Bound concept: v1:identity:magicLinkRequest (machine-readable: BoundConcepts["consumeMagicLinkRequest"] in generated_concepts.go).
@@ -3753,6 +3789,60 @@ func CreateDocumentChunkBuild(args CreateDocumentChunkArgs) string {
 		}
 		b.WriteString("sourceTopic: ")
 		b.WriteString(quoteMemQL(args.SourceTopic))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateEnrolmentToken -- Persist an enrolment-token row at issue time.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["createEnrolmentToken"] in generated_concepts.go).
+type CreateEnrolmentTokenArgs struct {
+	EnrolmentId string
+	UserId      string
+	TokenHash   string
+	IssuedBy    string
+	ExpiresAt   string
+	SourceIP    string
+}
+
+// CreateEnrolmentToken calls the engine mutation createEnrolmentToken.
+func (qc *QueryClient) CreateEnrolmentToken(ctx context.Context, args CreateEnrolmentTokenArgs) (*Result, error) {
+	call := CreateEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "createEnrolmentToken", call)
+}
+
+func CreateEnrolmentTokenBuild(args CreateEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("issuedBy: ")
+	b.WriteString(quoteMemQL(args.IssuedBy))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("expiresAt: ")
+	b.WriteString(quoteMemQL(args.ExpiresAt))
+	if args.SourceIP != "" {
+		if b.Len() > 30 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceIP: ")
+		b.WriteString(quoteMemQL(args.SourceIP))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -9971,6 +10061,34 @@ func RevokeDelegationBuild(args RevokeDelegationArgs) string {
 		b.WriteString("revokedAt: ")
 		b.WriteString(quoteMemQL(args.RevokedAt))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RevokeEnrolmentToken -- Stamp an enrolment-token row revoked.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["revokeEnrolmentToken"] in generated_concepts.go).
+type RevokeEnrolmentTokenArgs struct {
+	EnrolmentId string
+	RevokedAt   string
+}
+
+// RevokeEnrolmentToken calls the engine mutation revokeEnrolmentToken.
+func (qc *QueryClient) RevokeEnrolmentToken(ctx context.Context, args RevokeEnrolmentTokenArgs) (*Result, error) {
+	call := RevokeEnrolmentTokenBuild(args)
+	return qc.executeNamed(ctx, "revokeEnrolmentToken", call)
+}
+
+func RevokeEnrolmentTokenBuild(args RevokeEnrolmentTokenArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation revokeEnrolmentToken(")
+	b.WriteString("enrolmentId: ")
+	b.WriteString(quoteMemQL(args.EnrolmentId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("revokedAt: ")
+	b.WriteString(quoteMemQL(args.RevokedAt))
 	b.WriteString(")")
 	return b.String()
 }

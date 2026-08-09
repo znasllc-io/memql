@@ -88,6 +88,19 @@ export interface AdminWriteResult {
   auditEventId: string;
 }
 
+/**
+ * What `issueEnrolmentLink` reports back.
+ *
+ * `url` is a CREDENTIAL. It is the only value this surface returns that is
+ * one, it exists nowhere else (the server persisted only its SHA-256 hash),
+ * and no later call can retrieve it. Show it once, let the operator copy it,
+ * and hold it nowhere else -- not in storage, not in a URL of your own, not in
+ * a row.
+ */
+export interface EnrolmentLinkResult extends AdminWriteResult {
+  url: string;
+}
+
 export interface IdentityAdminCallOptions {
   signal?: AbortSignal;
 }
@@ -194,6 +207,54 @@ export class IdentityAdminClient {
     return this.call("editing cluster settings", { updateClusterSettings: settings }, opts);
   }
 
+  /**
+   * Mint a single-use enrolment link for another person.
+   *
+   * This is how somebody gets their FIRST credential when there is no mailbox
+   * in the loop: the link authorizes exactly one action -- register a passkey
+   * as the named user -- and nothing else. It is spent the moment that
+   * registration succeeds.
+   *
+   * `ttlSeconds` of 0 takes the server's 15-minute default; a larger value is
+   * clamped down to the server's ceiling rather than refused.
+   *
+   * The returned `url` is shown ONCE. See EnrolmentLinkResult.
+   */
+  async issueEnrolmentLink(
+    userId: string,
+    ttlSeconds = 0,
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<EnrolmentLinkResult> {
+    requireArg("issueEnrolmentLink", "userId", userId);
+    const { result, raw } = await this.callRaw(
+      "issuing an enrolment link",
+      { issueEnrolmentLink: { userId, ttlSeconds } },
+      opts,
+    );
+    const url = raw.enrolmentUrl ?? "";
+    if (url === "") {
+      // A success with no link is not a success. Reporting it as one would
+      // leave a live enrolment token in the cluster that nobody can use and
+      // nobody knows exists.
+      throw new IdentityAdminError(
+        "issuing an enrolment link",
+        13,
+        "the server reported success but returned no link",
+        result.auditEventId,
+      );
+    }
+    return { ...result, url };
+  }
+
+  /** Kill an unused enrolment link before it expires. */
+  async revokeEnrolmentLink(
+    enrolmentTokenId: string,
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<AdminWriteResult> {
+    requireArg("revokeEnrolmentLink", "enrolmentTokenId", enrolmentTokenId);
+    return this.call("revoking an enrolment link", { revokeEnrolmentLink: { enrolmentTokenId } }, opts);
+  }
+
   // call sends one bridged request and unwraps its reply, turning a carried
   // gRPC code into a thrown IdentityAdminError. `verb` only labels the error.
   private async call(
@@ -201,6 +262,17 @@ export class IdentityAdminClient {
     request: IdentityAdminRequestPayload,
     opts: IdentityAdminCallOptions,
   ): Promise<AdminWriteResult> {
+    const { result } = await this.callRaw(verb, request, opts);
+    return result;
+  }
+
+  // callRaw is call() plus the untouched reply payload, for the one operation
+  // whose product is a field call() deliberately does not model.
+  private async callRaw(
+    verb: string,
+    request: IdentityAdminRequestPayload,
+    opts: IdentityAdminCallOptions,
+  ): Promise<{ result: AdminWriteResult; raw: IdentityAdminResultPayload }> {
     const requestId = newShortId();
     const reply = await this.dispatcher.sendAndWait(
       { identityAdmin: { requestId, ...request } },
@@ -221,7 +293,10 @@ export class IdentityAdminClient {
     if (code !== 0 || res.ok !== true) {
       throw new IdentityAdminError(verb, code, res.errorMessage ?? "", res.auditEventId ?? "");
     }
-    return { message: res.message ?? "Done.", auditEventId: res.auditEventId ?? "" };
+    return {
+      result: { message: res.message ?? "Done.", auditEventId: res.auditEventId ?? "" },
+      raw: res,
+    };
   }
 }
 

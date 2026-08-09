@@ -47,8 +47,21 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
+	"github.com/znasllc-io/memql/component/identity/enrolment"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
+
+// AuthSchemeEnrolment is the Authorization scheme a single-use enrolment
+// token presents itself under (memql#3408): `Authorization: Enrolment
+// mql_enr_<...>`.
+//
+// Deliberately the same shape as pair.go's `Authorization: Pair <code>` --
+// the credential IS the authorization, so it travels where a bearer travels
+// rather than being smuggled in a body field or a query parameter that a
+// proxy would log. It is admitted on THESE TWO ROUTES ONLY; every other
+// surface in the service authenticates with a Bearer JWT and does not know
+// this scheme exists.
+const AuthSchemeEnrolment = "Enrolment"
 
 // envPasskeyRegisterPerHour tunes the per-IP registration-attempt rate
 // limit. Registration is a rare, deliberate act -- a handful per user
@@ -186,10 +199,11 @@ func (s *Server) handleWebAuthnRegisterBegin(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	userId, ok := s.requirePasskeyEnroller(w, r, "passkey_registration_challenge_denied")
+	enroller, ok := s.requirePasskeyEnroller(w, r, "passkey_registration_challenge_denied")
 	if !ok {
 		return
 	}
+	userId := enroller.UserId
 
 	ceremony, err := s.webauthnCeremony()
 	if err != nil {
@@ -291,10 +305,11 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	userId, ok := s.requirePasskeyEnroller(w, r, "passkey_registration_denied")
+	enroller, ok := s.requirePasskeyEnroller(w, r, "passkey_registration_denied")
 	if !ok {
 		return
 	}
+	userId := enroller.UserId
 
 	ceremony, err := s.webauthnCeremony()
 	if err != nil {
@@ -354,6 +369,33 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	}
 	label := resolvePasskeyLabel(body.Label, cred.CredentialId)
 
+	// SPEND THE ENROLMENT TOKEN BEFORE THE CREDENTIAL LANDS (memql#3408).
+	//
+	// The opposite order is what pair.go does, and it can: workertoken.Store
+	// has a Revoke, so a failed redeem-stamp is undone by soft-revoking the
+	// token it just minted. webauthn.Store has no such undo -- a registered
+	// passkey is a row on the user's account with no revoke path in this
+	// package -- so "create, then stamp, then repair on failure" has no
+	// repair step available, and a stamp that fails after the credential
+	// landed leaves a LIVE enrolment token that has already produced a
+	// passkey. That is a replay window.
+	//
+	// Consuming first inverts the failure: a persist error after the stamp
+	// burns the link and registers nothing. The holder asks for another link
+	// -- recoverable, and recoverable in the direction that does not leave a
+	// spent credential usable.
+	if enroller.Enrolment != nil {
+		if err := (&enrolment.Store{Engine: s.Store.Engine, Logger: s.Logger}).
+			Consume(ctx, enroller.Enrolment.ID, sourceIP, time.Now().UTC()); err != nil {
+			s.logErr("enrolment: consume stamp failed", err)
+			s.auditPasskey(r, "passkey_registration_denied", userId, enrolmentTargetId(enroller.Enrolment),
+				identity.AuditOutcomeFailure, "enrolment_consume_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnRegisterFinishResponse{
+				ErrorCode: "persist_failed", Error: "enrolment consume: " + err.Error()})
+			return
+		}
+	}
+
 	// A passkey row is a credential row, so the memql#2513 credential-actor
 	// guard admits only a system actor. This handler runs under the
 	// enroller's own bearer, which the guard rejects; the verified
@@ -369,14 +411,24 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	}
 
 	canonicalId := webauthn.CanonicalId(identityId)
-	s.auditPasskey(r, "passkey_registered", userId, canonicalId, identity.AuditOutcomeSuccess, "", map[string]any{
+	registrationDetail := map[string]any{
 		"label":          label,
 		"aaguid":         cred.AAGUID,
 		"transports":     cred.Transports,
 		"backupEligible": cred.BackupEligible,
 		"backupState":    cred.BackupState,
 		"relyingPartyId": ceremony.RPID(),
-	})
+	}
+	if enroller.Enrolment != nil {
+		// The audit trail has to say which authority produced this credential.
+		// "A passkey appeared on this account" reads very differently
+		// depending on whether the account's own session asked for it or a
+		// link somebody issued did.
+		registrationDetail["authorizedBy"] = "enrolmentToken"
+		registrationDetail["enrolmentTokenId"] = enrolmentTargetId(enroller.Enrolment)
+		registrationDetail["enrolmentIssuedBy"] = enroller.Enrolment.IssuedBy
+	}
+	s.auditPasskey(r, "passkey_registered", userId, canonicalId, identity.AuditOutcomeSuccess, "", registrationDetail)
 
 	writeJSON(w, http.StatusOK, WebAuthnRegisterFinishResponse{
 		Success:        true,
@@ -390,33 +442,148 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// requirePasskeyEnroller resolves the authenticated caller who will own
-// the credential, or writes the refusal and returns ok=false.
+// passkeyEnroller is the resolved authority for one registration ceremony:
+// who will own the credential, and what authorized it.
+type passkeyEnroller struct {
+	// UserId is the account the credential lands on.
+	UserId string
+	// Enrolment is non-nil when a single-use enrolment token authorized the
+	// ceremony instead of the caller's own session (memql#3408). The finish
+	// step spends it; the begin step does not, so reloading the page mid-way
+	// does not burn the link.
+	Enrolment *enrolment.Row
+}
+
+// requirePasskeyEnroller resolves who will own the credential, or writes the
+// refusal and returns ok=false.
 //
-// User-class only, for the same reason the badge grant is: a passkey
-// enrolment binds a NEW way into the account, so the session authorizing
-// it must be a person's own login and not a derived machine or grant
-// class. #3408 is where a stronger authorization (recent re-auth, admin
-// assistance, recovery flow) lands; this is the floor it builds on.
-func (s *Server) requirePasskeyEnroller(w http.ResponseWriter, r *http.Request, deniedAction string) (string, bool) {
+// TWO AUTHORITIES, AND ONLY TWO.
+//
+//  1. The caller's own user-class session (memql#3406). User-class only, for
+//     the same reason the badge grant is: a passkey enrolment binds a NEW way
+//     into the account, so the session authorizing it must be a person's own
+//     login and not a derived machine or grant class.
+//  2. A single-use enrolment token (memql#3408), presented as
+//     `Authorization: Enrolment mql_enr_<...>`. This is the authority that
+//     exists for someone who has NO session yet -- which is the entire point:
+//     it is how a first credential is obtainable with no mailbox.
+//
+// The owner is read off the token's row, never off a caller-supplied
+// argument, so a leaked token can only ever add a credential to the one
+// account it was minted for.
+//
+// The enrolment arm is checked first because it is unambiguous: a request
+// carrying `Authorization: Enrolment ...` is not also carrying a Bearer, and
+// falling through to requireBearer would answer it with a misleading
+// "Authorization: Bearer <token> required".
+func (s *Server) requirePasskeyEnroller(w http.ResponseWriter, r *http.Request, deniedAction string) (passkeyEnroller, bool) {
+	if plain := strings.TrimSpace(extractAuthScheme(r, AuthSchemeEnrolment)); plain != "" {
+		return s.requireEnrolmentToken(w, r, deniedAction, plain)
+	}
+
 	caller, ok := s.requireBearer(w, r)
 	if !ok {
-		return "", false
+		return passkeyEnroller{}, false
 	}
 	userId := strings.TrimSpace(caller.Subject)
 	if userId == "" {
 		writeJSON(w, http.StatusUnauthorized, WebAuthnRegisterBeginResponse{
 			ErrorCode: "unauthenticated", Error: "subject claim missing"})
-		return "", false
+		return passkeyEnroller{}, false
 	}
 	if class := strings.TrimSpace(caller.Class); class != "" && class != identity.ClassUser {
 		s.auditPasskey(r, deniedAction, userId, "", identity.AuditOutcomeBlocked, "caller_class_"+class, nil)
 		writeJSON(w, http.StatusForbidden, WebAuthnRegisterBeginResponse{
 			ErrorCode: "caller_class_rejected",
 			Error:     "passkey enrolment requires a user-class session; got class=" + class})
-		return "", false
+		return passkeyEnroller{}, false
 	}
-	return userId, true
+	return passkeyEnroller{UserId: userId}, true
+}
+
+// requireEnrolmentToken validates a presented enrolment token.
+//
+// Every rejection is audited with its own reason and answered with its own
+// error code. The codes are what the /enroll page branches on to tell the
+// holder which of the four things went wrong, so collapsing them into one
+// would delete a user-facing requirement, not just a log line.
+func (s *Server) requireEnrolmentToken(w http.ResponseWriter, r *http.Request, deniedAction, plain string) (passkeyEnroller, bool) {
+	if s.Store == nil || s.Store.Engine == nil {
+		writeJSON(w, http.StatusInternalServerError, WebAuthnRegisterBeginResponse{
+			ErrorCode: "server", Error: "identity engine not wired"})
+		return passkeyEnroller{}, false
+	}
+	store := &enrolment.Store{Engine: s.Store.Engine, Logger: s.Logger}
+	row, state, err := store.Resolve(r.Context(), plain, time.Now().UTC())
+	if err != nil {
+		s.logErr("enrolment: token lookup failed", err)
+		s.auditPasskey(r, deniedAction, "", "", identity.AuditOutcomeFailure, "enrolment_lookup_failed", nil)
+		writeJSON(w, http.StatusInternalServerError, WebAuthnRegisterBeginResponse{
+			ErrorCode: "lookup_failed", Error: "enrolment token lookup failed"})
+		return passkeyEnroller{}, false
+	}
+
+	actorUserId := ""
+	if row != nil {
+		actorUserId = row.UserId
+	}
+	if state != enrolment.StateValid {
+		status, code := enrolmentRejectionCode(state)
+		s.auditPasskey(r, deniedAction, actorUserId, enrolmentTargetId(row), identity.AuditOutcomeBlocked,
+			"enrolment_"+strings.ReplaceAll(string(state), "-", "_"), nil)
+		writeJSON(w, status, WebAuthnRegisterBeginResponse{
+			ErrorCode: code, Error: enrolmentRejectionMessage(state)})
+		return passkeyEnroller{}, false
+	}
+	if strings.TrimSpace(row.UserId) == "" {
+		// A row with no owner cannot authorize anything. Refused rather than
+		// defaulted, because every default here is somebody else's account.
+		s.auditPasskey(r, deniedAction, "", enrolmentTargetId(row), identity.AuditOutcomeFailure, "enrolment_row_has_no_user", nil)
+		writeJSON(w, http.StatusInternalServerError, WebAuthnRegisterBeginResponse{
+			ErrorCode: "enrolment_malformed", Error: "enrolment token names no user"})
+		return passkeyEnroller{}, false
+	}
+	return passkeyEnroller{UserId: row.UserId, Enrolment: row}, true
+}
+
+// enrolmentRejectionCode maps a rejection state onto an HTTP status and the
+// stable code the /enroll page branches on.
+func enrolmentRejectionCode(state enrolment.State) (int, string) {
+	switch state {
+	case enrolment.StateExpired:
+		return http.StatusGone, "enrolment_expired"
+	case enrolment.StateAlreadyUsed:
+		return http.StatusConflict, "enrolment_already_used"
+	case enrolment.StateRevoked:
+		return http.StatusForbidden, "enrolment_revoked"
+	default:
+		return http.StatusUnauthorized, "enrolment_invalid"
+	}
+}
+
+// enrolmentRejectionMessage is the API-side sentence for each state. The
+// page's own copy lives in the templ component; this is what a non-browser
+// caller (or a fetch that lost its page context) reads.
+func enrolmentRejectionMessage(state enrolment.State) string {
+	switch state {
+	case enrolment.StateExpired:
+		return "this enrolment link has expired"
+	case enrolment.StateAlreadyUsed:
+		return "this enrolment link has already been used"
+	case enrolment.StateRevoked:
+		return "this enrolment link was revoked"
+	default:
+		return "this enrolment link is not valid"
+	}
+}
+
+// enrolmentTargetId returns the row's id for an audit event, or "" when there
+// is no row. Never returns anything derived from the plaintext token.
+func enrolmentTargetId(row *enrolment.Row) string {
+	if row == nil {
+		return ""
+	}
+	return enrolment.CanonicalId(row.ID)
 }
 
 // passkeyCeremonyErrorCode maps a ceremony failure onto an HTTP status

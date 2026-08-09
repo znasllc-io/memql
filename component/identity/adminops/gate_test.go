@@ -62,7 +62,17 @@ func newTestService(t *testing.T) (*Service, *recordingEngine, *capturingAudit) 
 	t.Helper()
 	eng := &recordingEngine{}
 	audit := &capturingAudit{}
-	svc, err := New(&Service{Engine: eng, Audit: audit})
+	// A usable public identity origin, so issue_enrolment_link gets as far as
+	// the engine like every other operation on the table. Without it that one
+	// refuses on configuration BEFORE the gate is exercised, which would make
+	// its row on the refusal test pass for the wrong reason.
+	svc, err := New(&Service{
+		Engine: eng,
+		Audit:  audit,
+		IdentityBaseURL: func(context.Context) string {
+			return "https://identity.example.test"
+		},
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -109,6 +119,17 @@ var operations = []struct {
 		return s.UpdateClusterSettings(ctx, ClusterSettings{
 			RegistrationMode: "open", InternalDefaultRole: "writer",
 		})
+	}},
+	// memql#3408. An enrolment link is the ability to hand somebody a
+	// credential for another person's account, so it belongs on this table
+	// more obviously than most: the refusal test below asserts the engine is
+	// never reached, which for THIS operation means no enrolment row is
+	// written for a caller the gate would refuse.
+	{"issue_enrolment_link", func(s *Service, ctx context.Context) Result {
+		return s.IssueEnrolmentLink(ctx, EnrolmentLink{UserId: "v1:identity:user:target"})
+	}},
+	{"revoke_enrolment_link", func(s *Service, ctx context.Context) Result {
+		return s.RevokeEnrolmentLink(ctx, "v1:identity:enrolmentToken:tok")
 	}},
 }
 

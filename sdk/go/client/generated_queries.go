@@ -2082,6 +2082,28 @@ func DueResponsibilitiesBuild(args DueResponsibilitiesArgs) string {
 	return b.String()
 }
 
+// EnrolmentTokenByHash -- Enrolment-token lookup by tokenHash for the /enroll redeem path.
+//
+// Bound concept: v1:identity:enrolmentToken (machine-readable: BoundConcepts["enrolmentTokenByHash"] in generated_concepts.go).
+type EnrolmentTokenByHashArgs struct {
+	TokenHash string
+}
+
+// EnrolmentTokenByHash calls the engine query enrolmentTokenByHash.
+func (qc *QueryClient) EnrolmentTokenByHash(ctx context.Context, args EnrolmentTokenByHashArgs) (*Result, error) {
+	call := EnrolmentTokenByHashBuild(args)
+	return qc.executeNamed(ctx, "enrolmentTokenByHash", call)
+}
+
+func EnrolmentTokenByHashBuild(args EnrolmentTokenByHashArgs) string {
+	var b strings.Builder
+	b.WriteString("query enrolmentTokenByHash(")
+	b.WriteString("tokenHash: ")
+	b.WriteString(quoteMemQL(args.TokenHash))
+	b.WriteString(")")
+	return b.String()
+}
+
 // EventsByDay -- List the authenticated caller's events that start on a given day, bounded by the caller-supplied [dayStart, dayEnd] instants (computed in the user's timezone client-side). Self-scoped via actor.userId. Backs the calendar tool's day view and 'what's on my schedule today' agent queries.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["eventsByDay"] in generated_concepts.go).
