@@ -153,6 +153,22 @@ export class AutomationRunError extends Error {
   readonly code: number;
   readonly codeName: string;
   readonly runId: string;
+  /** The automation's DSL name, as its own field for the same reason engineMessage is. */
+  readonly automation: string;
+  /**
+   * The engine's own sentence, RAW -- no prefix, no code, no sentinel.
+   *
+   * `message` is formatted for a thrown Error read in a log:
+   * `run automation <name>: <CODE>: <msg>`. That is the wrong shape for a UI
+   * which already renders the automation's name and the code as separate
+   * elements, and pasting it verbatim shows both twice. So a consumer that has
+   * its own layout reads THIS, and a consumer that just logs reads `message`.
+   *
+   * Empty string when the engine sent no message. The `(no message)` sentinel
+   * belongs to `message`'s formatting and is deliberately not here: it reads
+   * fine in a log line and badly in a sentence a UI composes (memql#3339).
+   */
+  readonly engineMessage: string;
   /** The accepted frame, so a UI can still show which node refused. */
   readonly accepted?: AutomationRunAccepted;
 
@@ -163,6 +179,8 @@ export class AutomationRunError extends Error {
     this.code = code;
     this.codeName = name;
     this.runId = runId;
+    this.automation = automation;
+    this.engineMessage = message;
     this.accepted = accepted;
   }
 

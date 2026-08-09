@@ -190,9 +190,14 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
       // NAMING THE ROLE is the requirement. The engine's message is appended
       // rather than replaced so nothing it said is lost, but the sentence an
       // operator reads first tells them which role would have worked.
+      //
+      // engineMessage, not `message`: the latter carries the SDK's log prefix
+      // (`deploy console: <verb>: PERMISSION_DENIED: ...`), which restates the
+      // verb this line already named and a code the line has already explained
+      // in words (memql#3339).
       return {
         kind: "error",
-        line: `ERROR: ${spec.label} requires the ${tierDescription(spec.tier)} cluster role -- ${err.message}`,
+        line: `ERROR: ${spec.label} requires the ${tierDescription(spec.tier)} cluster role${detailSuffix(err.engineMessage)}`,
         // A refusal writes a BLOCKED audit event server-side, but its id is
         // not carried back: DeployControlResult populates `action` only when
         // the call was permitted. So there is genuinely no id to show here,
@@ -211,7 +216,12 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
         `ERROR: ${spec.label} was rejected as unauthenticated -- the connection carries no resolvable actor. Check the cluster's PAT.`,
       );
     }
-    return unreachable(`ERROR: ${err.message}`);
+    // The catch-all for a code with no tailored sentence. It names the action
+    // and the code itself, so the SDK's log-shaped `message` would restate
+    // both -- engineMessage is the part that is not already on the line.
+    return unreachable(
+      `ERROR: ${spec.label} failed (${err.codeName})${detailSuffix(err.engineMessage)}`,
+    );
   }
   return unreachable(`ERROR: ${err instanceof Error ? err.message : String(err)}`);
 }
@@ -230,6 +240,9 @@ function describeReadFailure(what: string, err: unknown): string {
   }
   if (err instanceof DeployControlError && err.code === CODE_UNIMPLEMENTED) {
     return `${what} is unavailable: this node does not host the deploy-control service.`;
+  }
+  if (err instanceof DeployControlError) {
+    return `${what} unavailable (${err.codeName})${detailSuffix(err.engineMessage)}`;
   }
   return `${what} unavailable: ${err instanceof Error ? err.message : String(err)}`;
 }

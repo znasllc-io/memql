@@ -58,6 +58,20 @@ export interface TraceRefusal {
   runId: string;
   /** Present when the refusal arrived after the accepted frame. */
   accepted?: AutomationRunAccepted;
+  /**
+   * The automation was known to be @disabled in the buffer BEFORE the run.
+   *
+   * The engine answers @disabled and a @filter miss with the same
+   * FAILED_PRECONDITION and nothing in the reply separates them, so this is
+   * the only thing that can (memql#3333). It comes from the language server's
+   * `disabled` flag on the construct, carried through the run target -- not
+   * from the refusal itself.
+   *
+   * Absent means "not known to be disabled", not "enabled": an older language
+   * server does not report the flag at all. So absence keeps the old
+   * both-possibilities wording rather than asserting the filter rejected it.
+   */
+  disabled?: boolean;
 }
 
 export class StepTraceModel {
@@ -196,6 +210,14 @@ export function describeRefusal(refusal: TraceRefusal): string {
     case 8: // RESOURCE_EXHAUSTED
       return `Too many operator-initiated runs are already in flight on that node${suffix}. Wait for one to finish and try again.`;
     case 9: // FAILED_PRECONDITION
+      // The engine gives @disabled and a @filter miss the same code, so this
+      // branch is the only place the two can be told apart -- and only when
+      // the language server reported the flag (memql#3333). Naming the actual
+      // cause matters because the two have opposite next actions: re-enable
+      // the construct, versus fix the payload.
+      if (refusal.disabled === true) {
+        return `The automation is @disabled${suffix}, so the loader skipped it and no run of it can be attempted. Its @filter was never consulted. Remove the annotation and redeploy to run it.`;
+      }
       return `The automation refused this event${suffix}. It is either @disabled, or its @filter rejects the payload -- which is the same question a real trigger would have asked.`;
     case 14: // UNAVAILABLE
       return `No node of the requested type picked the run up${suffix}. That node type is not running, or the run topics are not being forwarded across the mesh.`;
