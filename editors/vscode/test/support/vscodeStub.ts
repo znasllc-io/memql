@@ -42,6 +42,8 @@ export const recorded = {
   errors: [] as string[],
   /** window.showWarningMessage bodies. */
   warnings: [] as string[],
+  /** window.showInformationMessage bodies. */
+  infos: [] as string[],
   /** View ids passed to window.registerTreeDataProvider. */
   treeViews: [] as string[],
   /** Command ids passed to commands.registerCommand. */
@@ -201,6 +203,24 @@ export const window = {
     return Promise.resolve(undefined);
   },
 
+  showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
+    recorded.infos.push(message);
+    return Promise.resolve(undefined);
+  },
+
+  withProgress<T>(
+    _options: unknown,
+    task: (
+      progress: { report(value: { message?: string }): void },
+      token: { onCancellationRequested(listener: () => void): StubDisposable },
+    ) => Promise<T>,
+  ): Promise<T> {
+    return task(
+      { report: () => undefined },
+      { onCancellationRequested: () => ({ dispose: () => undefined }) },
+    );
+  },
+
   showWarningMessage(message: string): Promise<undefined> {
     recorded.warnings.push(message);
     return Promise.resolve(undefined);
@@ -222,17 +242,27 @@ export const ProgressLocation = {
   Notification: 15,
 } as const;
 
-// The browser capabilities the sign-in flow binds (vscode.env.asExternalUri /
-// openExternal). Present so the import in src/extension.ts resolves; THROWING
-// rather than resolving because nothing in activation may open a browser, and a
-// silent no-op here would let a case that wandered into the sign-in path pass
-// while asserting nothing.
+// The host capabilities the sign-in flows bind: asExternalUri / openExternal
+// for the loopback flow (memql#3403) and clipboard.writeText for the
+// device-code copy button (memql#3411). Present so the imports in
+// src/extension.ts resolve -- an absent named export is a bundle error, not a
+// lazy failure.
+//
+// All three THROW rather than resolving, and that is the point. Nothing in
+// activation may open a browser or touch the clipboard, so a silent no-op here
+// would let a case that wandered into a sign-in path pass while asserting
+// nothing. What those handlers actually do is host-lane territory.
 export const env = {
   asExternalUri(_uri: Uri): Promise<Uri> {
     throw new Error('vscodeStub: env.asExternalUri is out of scope -- this stub models activation only');
   },
   openExternal(_uri: Uri): Promise<boolean> {
     throw new Error('vscodeStub: env.openExternal is out of scope -- this stub models activation only');
+  },
+  clipboard: {
+    writeText(_value: string): Promise<void> {
+      throw new Error('vscodeStub: env.clipboard.writeText is out of scope -- this stub models activation only');
+    },
   },
 };
 
