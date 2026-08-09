@@ -47,11 +47,15 @@ AGENTS_MCP_URL="https://api.githubcopilot.com/mcp/"
 # marketplace declares in its manifest and what `marketplace list` reports back.
 # They are NOT interchangeable -- the source is a repo slug, the name comes from
 # the manifest's "name" field -- so the probe must match on NAME.
-AGENTS_MARKETPLACE_SOURCES="obra/superpowers-marketplace"
-AGENTS_MARKETPLACE_NAMES="superpowers-marketplace"
+#
+# Superpowers is sourced from Anthropic's official marketplace rather than the
+# upstream obra/superpowers-marketplace: it is the same plugin, and installing
+# it from both would put two copies of every skill name in scope.
+AGENTS_MARKETPLACE_SOURCES="anthropics/claude-plugins-official"
+AGENTS_MARKETPLACE_NAMES="claude-plugins-official"
 
 # Plugins, as plugin@marketplace ids (the form `plugin list --json` reports).
-AGENTS_PLUGIN_IDS="superpowers@superpowers-marketplace"
+AGENTS_PLUGIN_IDS="superpowers@claude-plugins-official"
 
 # CCPM ships as a plain Agent Skill (agentskills.io), NOT a Claude Code plugin
 # marketplace -- automazeio/ccpm has no .claude-plugin/marketplace.json, just a
