@@ -229,14 +229,24 @@ export function buildAuthorizeUrl(parts: AuthorizeUrlParts): string {
   return url.toString();
 }
 
+// openInBrowser hands the authorization URL to the editor's browser.
+//
+// Both failures here are `browserUnavailable` rather than `cancelled`, and the
+// difference is load-bearing rather than cosmetic. Nobody declined anything: a
+// host that cannot resolve an external URI or cannot launch a browser is a
+// headless box, a container with no desktop session, an SSH session with
+// nothing to hand the URL to. The device-code fallback (memql#3411) triggers on
+// environment limitations and deliberately does NOT trigger on user
+// cancellation, so calling this `cancelled` would make the fallback
+// contractually obliged to ignore the one failure it exists to rescue.
 async function openInBrowser(authorizeUrl: string, deps: AuthFlowDeps): Promise<void> {
   let external: string;
   try {
     external = await deps.resolveExternalUri(authorizeUrl);
   } catch (err) {
     throw new AuthFlowError(
-      "cancelled",
-      `The sign-in URL could not be resolved for this host (${errorText(err)}).`,
+      "browserUnavailable",
+      `The sign-in URL could not be resolved into one this host can open (${errorText(err)}). This machine may have no browser available.`,
       { cause: err },
     );
   }
@@ -244,8 +254,8 @@ async function openInBrowser(authorizeUrl: string, deps: AuthFlowDeps): Promise<
     await deps.openExternal(external);
   } catch (err) {
     throw new AuthFlowError(
-      "cancelled",
-      `A browser could not be opened for sign-in (${errorText(err)}).`,
+      "browserUnavailable",
+      `A browser could not be opened for sign-in (${errorText(err)}). This machine may have no browser available.`,
       { cause: err },
     );
   }

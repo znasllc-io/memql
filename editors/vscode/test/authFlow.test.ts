@@ -335,6 +335,78 @@ test("an abort during the wait fails as cancelled, not as timeout", async () => 
   );
 });
 
+// A host that cannot open a browser is an ENVIRONMENT limitation, and the two
+// ways it shows up must both be distinguishable from someone declining. The
+// device-code fallback (memql#3411) triggers on the former and explicitly not
+// on the latter, so a `cancelled` here would strand every headless user.
+
+test("a host whose asExternalUri fails reports browserUnavailable, not cancelled", async () => {
+  const net = identity();
+  const ui: FakeBrowser = {
+    resolved: [],
+    opened: [],
+    resolveExternalUri: async () => {
+      throw new Error("no external URI resolver on this host");
+    },
+    openExternal: async () => {
+      assert.fail("openExternal must not be reached when the URL could not be resolved");
+    },
+  };
+
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui, { timeoutMs: 5_000 })),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(err.kind, "browserUnavailable");
+      assert.notEqual(err.kind, "cancelled");
+      assert.match(err.message, /no external URI resolver on this host/);
+      return true;
+    },
+  );
+});
+
+test("a host whose openExternal fails reports browserUnavailable, not cancelled", async () => {
+  const net = identity();
+  const ui: FakeBrowser = {
+    resolved: [],
+    opened: [],
+    resolveExternalUri: async (url) => url,
+    openExternal: async () => {
+      // What a genuinely headless machine does: there is nothing to launch.
+      throw new Error("spawn xdg-open ENOENT");
+    },
+  };
+
+  await assert.rejects(
+    () => runAuthorizationFlow(cluster(), deps(net, ui, { timeoutMs: 5_000 })),
+    (err: unknown) => {
+      assert.ok(isAuthFlowError(err));
+      assert.equal(err.kind, "browserUnavailable");
+      assert.notEqual(err.kind, "cancelled");
+      assert.match(err.message, /ENOENT/);
+      return true;
+    },
+  );
+});
+
+test("browserUnavailable fails fast rather than sitting out the callback deadline", async () => {
+  const net = identity();
+  const ui: FakeBrowser = {
+    resolved: [],
+    opened: [],
+    resolveExternalUri: async (url) => url,
+    openExternal: async () => {
+      throw new Error("spawn xdg-open ENOENT");
+    },
+  };
+
+  // The deadline is 30s; a flow that waited it out instead of surfacing the
+  // open failure would make the fallback unusable in practice.
+  const started = Date.now();
+  await assert.rejects(() => runAuthorizationFlow(cluster(), deps(net, ui, { timeoutMs: 30_000 })));
+  assert.ok(Date.now() - started < 2_000, "the flow waited for a callback that can never arrive");
+});
+
 test("a refused token exchange reports exchangeRejected with the server's sentence", async () => {
   const net = identity({
     tokenStatus: 400,

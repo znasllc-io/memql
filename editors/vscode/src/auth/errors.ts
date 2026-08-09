@@ -41,6 +41,21 @@
 //                       a UI should say nothing louder than "sign-in
 //                       cancelled".
 //
+//   browserUnavailable  This host could not open a browser at all -- either
+//                       asExternalUri could not resolve the URL for it, or
+//                       openExternal failed. An ENVIRONMENT LIMITATION, not a
+//                       refusal: a headless box, a container with no desktop
+//                       session, an SSH session with nothing to hand the URL
+//                       to. Nobody declined anything and no code exists.
+//
+//                       It is deliberately NOT `cancelled`, and the distinction
+//                       is a contract rather than a nicety. The device-code
+//                       fallback (memql#3411) triggers on environment
+//                       limitations and explicitly does NOT trigger on user
+//                       cancellation, so filing this under `cancelled` would
+//                       strand precisely the headless user the fallback exists
+//                       to serve. This kind is a FALLBACK TRIGGER.
+//
 //   authorizationDenied The callback arrived carrying an OAuth error envelope
 //                       (?error=access_denied&...). The server or the user
 //                       refused. No code was issued.
@@ -67,6 +82,7 @@ export type AuthFlowErrorKind =
   | "bindFailed"
   | "timeout"
   | "cancelled"
+  | "browserUnavailable"
   | "authorizationDenied"
   | "stateMismatch"
   | "invalidCallback"
