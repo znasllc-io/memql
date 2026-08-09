@@ -218,10 +218,36 @@ stronger than backlog, and the reason is the same one in both cases:
 **filter injection is unconditional and caller-blind**, and both
 concepts carry reads that must run *before an actor exists*.
 
-- **`v1:identity:identity`** is the credential concept. Every
-  `*ByKeyHash` lookup -- PAT, worker token, badge, node token -- is how
-  the actor gets **built**. A predicate comparing against `actor.userId`
-  is circular there, and there is no read-side escape to spare it.
+- **`v1:identity:identity`** is the credential concept, and it carries
+  **three** independent blockers (memql#3349), each measured by declaring
+  `@rowAuthz(owner="userId")` and running the existing gates:
+
+  1. **`userId` is not an ownership claim.**
+     `TestDeclaredOwnerFieldsAreServerStamped` reports **seven** mutations
+     writing it from caller args and **zero** stamping it from the actor.
+     That is the field's meaning, not a bug: an admin mints a PAT / worker
+     token / badge *for another user*, and a node token's `userId` is a
+     machine binding. It names the credential's **subject**.
+  2. **Four pre-actor reads build the actor** -- `patIdentityByKeyHash`,
+     `workerTokenByKeyHash`, `badgeByKeyHash`,
+     `nodeTokenIdentityByBinding`. `component/identity/pat/verifier.go`
+     says it outright: *"This is a pre-actor read, so it cannot be
+     caller-scoped."* With the tier declared,
+     `TestRowAuthzEnforcementLandGate` reports **nine of the eleven** reads
+     undecidable -- credential verification itself is in the blast radius.
+  3. **It is a union of eight credential kinds** with different subjects.
+     `node_token` and `voice_agent_token` authenticate a *process*;
+     `nodeTokenIdentities` is an operator listing of every node credential
+     in the cluster and is caller-scopable by nobody.
+
+  The interim answer is an **inventory**, not an annotation:
+  `component/memql/identity_credential_rowauthz_inventory_3349_test.go`
+  pins all eleven reads with a class (pre-actor / self-scoped /
+  admin-scoped / machine-credential) and a reason, derived from the loaded
+  registry so a new read must classify itself. The second closing option
+  in the list below -- **splitting the concept by credential kind** -- is
+  the one specific to this concept, and it is a data migration plus a
+  wire-contract change across every caller, not a one-line annotation.
 - **`v1:identity:user`** adds two more obstacles: `userByEmail` /
   `userByIdSystem` are pre-actor for the same reason, and
   `userDisplayById` (`@public`) plus `usersActiveInSpace` are

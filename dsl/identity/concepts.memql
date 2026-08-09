@@ -200,7 +200,50 @@ concept delegation {
 /// An account or credential set owned by a v1:identity:user. One user can have many identities: a
 /// magic-link verified email, OAuth accounts on external apps, API keys (Personal Access Tokens),
 /// or service accounts. Agents borrow identities to act on the user's behalf via
-/// v1:identity:delegation. Global scope: lives in _system and is readable from any partition.
+/// v1:identity:delegation. Cluster-wide: one row set, the same from every caller's view.
+//
+// NO @rowAuthz TIER, AND IT CANNOT CARRY AN `owner` ONE (memql#3349).
+// This is the recorded decision the issue asked for, not a backlog entry.
+// Each blocker below was MEASURED by declaring @rowAuthz(owner="userId")
+// here and running the existing gates; the inventory of all eleven reads
+// lives in component/memql/identity_credential_rowauthz_inventory_3349_test.go.
+//
+//  1. `userId` IS NOT AN OWNERSHIP CLAIM. TestDeclaredOwnerFieldsAreServerStamped
+//     reports SEVEN mutations writing it from caller args and ZERO stamping
+//     it from actor.userId (createBadgeIdentity, createIdentity,
+//     createNodeTokenIdentity, createPATIdentity, createVoiceAgentTokenIdentity,
+//     createWorkerTokenIdentity, updateIdentity). That is the field's MEANING,
+//     not a bug: an admin mints a PAT / worker token / badge FOR another user,
+//     and a node token's userId is a machine binding. It names the credential's
+//     SUBJECT. Stamping it from the actor would break admin issuance.
+//
+//  2. FOUR PRE-ACTOR READS BUILD THE ACTOR -- patIdentityByKeyHash,
+//     workerTokenByKeyHash, badgeByKeyHash, nodeTokenIdentityByBinding.
+//     component/identity/pat/verifier.go says it outright: "This is a pre-actor
+//     read, so it cannot be caller-scoped (#2800, #2984)." enforceRowAuthzOnPlan
+//     takes NO context and has no escape (the write path's rowAuthzWriteEscape
+//     has no read-side counterpart), so a tier ANDs userId==actor.userId into
+//     credential verification itself and every PAT / worker-token / badge /
+//     node-token login fails. Measured: TestRowAuthzEnforcementLandGate reports
+//     NINE of the eleven reads undecidable with the tier declared.
+//
+//  3. THE CONCEPT IS A UNION OF EIGHT CREDENTIAL KINDS with different subjects.
+//     node_token and voice_agent_token authenticate a PROCESS, not a person;
+//     nodeTokenIdentities is an operator listing of every node credential in
+//     the cluster and is caller-scopable by nobody.
+//
+// Not open reads: every construct carries its own filter predicate. But a
+// per-query predicate is exactly what @rowAuthz exists to stop relying on --
+// it is author-enforced, and the next query starts from zero. The inventory
+// test is the interim answer: a new read over this concept must classify
+// itself, so it starts from a stated position instead.
+//
+// What would close it, in dependency order: (a) a read-path escape mirroring
+// rowAuthzWriteEscape, so the pre-actor reads survive injection -- all four
+// already stamp internal origin, the read path just cannot consult it;
+// (b) a SPLIT by credential kind, so person-owned credentials carry
+// owner="userId" and machine credentials carry clusterOwner. (b) is a data
+// migration plus a wire-contract change, not an annotation.
 concept identity {
   active          bool    @default("true")  @description("Soft-delete flag. Revoked credentials stay around for audit but are inactive.")
   userId          string!  @description("Owning v1:identity:user. Every identity must belong to exactly one user; a user can own many identities.")
