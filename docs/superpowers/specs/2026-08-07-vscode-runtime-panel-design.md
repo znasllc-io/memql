@@ -344,9 +344,18 @@ The role matrix is the cockpit's, unchanged:
 
 | Action | Required role |
 |---|---|
-| View | any |
+| View deployment status | owner, admin |
 | Cut version, deploy | developer, admin, owner |
 | Roll back | **owner only** |
+
+The View row was written as "any" while this spec was drafted. That was
+never what the engine enforced -- `GetDeploymentStatus` has been gated to
+owner/admin since #728, and memql#3332 settled the discrepancy in favour
+of the code. Topology, deployment history and per-tier composition are
+ordinary concept rows and remain readable by any role, so a developer
+sees those and gets an explanation in place of the status block. The
+authoritative table lives in
+[`docs/public/operate/deployment-console.md`](../../public/operate/deployment-console.md).
 
 Enforcement is server-side on both the streamed and unary paths. The UI
 hides or disables what the caller cannot do, but the gate is the

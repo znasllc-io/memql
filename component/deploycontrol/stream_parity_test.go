@@ -26,17 +26,23 @@ import (
 // one gate rather than two that agree today -- and these tests are what keeps
 // it that way as RPCs are added.
 //
-// The locked role matrix (epic #1871 / #1876):
+// The locked role matrix (epic #1871 / #1876), read off service.go's gate
+// helpers:
 //
-//	view (get_status)                    -> owner, admin
-//	suggest / cut version / deploy       -> owner, admin, developer
-//	rollback (both flavours)             -> owner ONLY, not even admin
+//	suggest / cut_version / deploy       -> owner, admin, developer  (authorizeDeploy)
+//	get_status / deploy_staging /
+//	  promote / rollback / rollout_action -> owner, admin            (authorize)
+//	rollback_deployment                  -> owner ONLY, not even admin (authorizeOwner)
 //
-// Note the "view" row: the issue's summary table says any role may view, but
-// the SHIPPED unary gate on GetDeploymentStatus is owner/admin (#728). Parity
-// with the unary path is the property under test, so the table records what
-// the code enforces. Loosening the read gate is a deliberate change to make on
-// BOTH paths at once -- which, because they share the gate, is one edit.
+// Note the "get_status" row. Earlier summary tables (issues #3311 / #3312 and
+// deployment-console.md) said any role may view; the SHIPPED unary gate on
+// GetDeploymentStatus has been owner/admin since #728, and #3311 preserved it
+// rather than loosening a read gate on a deploy-control surface. memql#3332
+// settled that in favour of the CODE and corrected the docs, so this table and
+// the operator guide now agree with what runs. Do not "fix" the gate to match
+// an old table: loosening it is a deliberate product decision to make on BOTH
+// paths at once, and TestGetDeploymentStatusStaysOwnerAdminOnBothPaths is here
+// to make sure it cannot happen by accident.
 
 // allRoles is the full role spectrum the gate discriminates over. Every role
 // not listed in a case's allowed set must be denied, on both paths.
@@ -294,6 +300,81 @@ func TestStreamedAndUnaryGateParity(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestGetDeploymentStatusStaysOwnerAdminOnBothPaths pins the one row of the
+// matrix that has been argued about (memql#3332).
+//
+// The docs and issues #3311 / #3312 said "View: any" for two releases while
+// the code said owner/admin. The decision recorded in #3332 is that the CODE
+// is authoritative -- loosening a read gate on a deploy-control surface is the
+// dangerous direction, and #728 tightened it deliberately -- and the docs were
+// corrected to match. This test is what stops the next reader of an old table
+// from "fixing" the code back: it names the roles explicitly rather than
+// deriving them from parityCases, so relaxing the gate cannot be done by
+// editing one `allowed` slice and watching everything stay green.
+//
+// It asserts on BOTH transports, because parity is the property the bridge
+// exists to preserve: admitting a developer on the stream while the unary
+// service refuses one is precisely the privilege-escalation hole #3311 was
+// built to be free of.
+func TestGetDeploymentStatusStaysOwnerAdminOnBothPaths(t *testing.T) {
+	statusMsg := func() *memqlv1.DeployControlMsg {
+		return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
+			GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "staging"},
+		}}
+	}
+
+	t.Run("refused", func(t *testing.T) {
+		// Developer is the load-bearing case: developer MAY cut and deploy,
+		// so "can act" does not imply "can read the status".
+		for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader} {
+			t.Run(string(role), func(t *testing.T) {
+				unarySvc, _, unaryEng := newParityService(t)
+				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+				if got := status.Code(err); got != codes.PermissionDenied {
+					t.Errorf("unary GetDeploymentStatus for %s = %v, want PermissionDenied", role, got)
+				}
+
+				streamSvc, _, streamEng := newParityService(t)
+				res := Dispatch(ctxWithRole(role), streamSvc, statusMsg())
+				if got := codes.Code(res.GetErrorCode()); got != codes.PermissionDenied {
+					t.Errorf("streamed GetDeploymentStatus for %s = %v, want PermissionDenied", role, got)
+				}
+				if res.GetOk() || res.GetDeploymentStatus() != nil {
+					t.Errorf("streamed denial for %s leaked a status payload: ok=%v result=%T",
+						role, res.GetOk(), res.GetResult())
+				}
+				// Fails closed: a refused read never reaches the overlay or
+				// kubectl, so there is nothing to leak even by timing.
+				if len(unaryEng.queries) != 0 || len(streamEng.queries) != 0 {
+					t.Errorf("refused read touched the engine: unary=%v streamed=%v",
+						unaryEng.queries, streamEng.queries)
+				}
+			})
+		}
+	})
+
+	t.Run("admitted", func(t *testing.T) {
+		// The other half: a gate that refused everyone would satisfy the
+		// denial rows above while making the console useless.
+		for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
+			t.Run(string(role), func(t *testing.T) {
+				unarySvc, _, _ := newParityService(t)
+				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+				if got := status.Code(err); got == codes.PermissionDenied || got == codes.Unauthenticated {
+					t.Errorf("unary GetDeploymentStatus must ADMIT %s, got %v", role, got)
+				}
+
+				streamSvc, _, _ := newParityService(t)
+				res := Dispatch(ctxWithRole(role), streamSvc, statusMsg())
+				if got := codes.Code(res.GetErrorCode()); got == codes.PermissionDenied || got == codes.Unauthenticated {
+					t.Errorf("streamed GetDeploymentStatus must ADMIT %s, got %v (%q)",
+						role, got, res.GetErrorMessage())
+				}
+			})
+		}
+	})
 }
 
 // TestStreamedDenialEmitsBlockedAuditLikeUnary checks the other half of the

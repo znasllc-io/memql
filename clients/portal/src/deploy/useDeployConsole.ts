@@ -42,6 +42,12 @@ import { useMyAccess } from "../cluster/useMyAccess";
 //   cut + deploy                            developer / admin / owner
 //   roll back                               OWNER ONLY -- not even admin
 //
+// The view row reads admin/owner on purpose. Older summary tables said any
+// role could view; the shipped gate never did, and memql#3332 settled it in
+// favour of the code. A developer therefore sees deployment history (ordinary
+// concept rows) with the status block replaced by an explanation -- the
+// designed surface, not a degraded one.
+//
 // See docs/public/operate/deployment-console.md.
 
 const CAN_VIEW: readonly Role[] = ["owner", "admin"];

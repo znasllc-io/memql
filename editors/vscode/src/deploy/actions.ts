@@ -10,21 +10,21 @@
 // ever drifts from the service, the consequence is a button that turns out to
 // be refused -- never an action that should have been refused and was not.
 //
-// The tiers are read off the SERVICE, not off the issue's summary table, and
-// the two do not fully agree. Recorded here because the difference is
-// load-bearing:
+// The tiers are read off the SERVICE:
 //
 //   suggest_version, cut_version, deploy   -> authorizeDeploy (developer+)
 //   promote, rollout_action, get_status    -> authorize       (admin+)
 //   rollback_deployment                    -> authorizeOwner  (owner ONLY)
 //
-// The issue's matrix says "View: any". The SHIPPED gate on GetDeploymentStatus
-// is owner/admin (#728), and #3311 deliberately preserved that parity rather
-// than loosening the read through the new surface. So a developer-or-below
-// caller can be refused the STATUS read while still seeing topology and
-// deployment history, which are ordinary concept rows and never went near this
-// gate. The panel degrades to a message for that case rather than to an empty
-// pane.
+// The get_status row used to disagree with the summary tables in #3311 / #3312
+// and in deployment-console.md, which said "View: any". The SHIPPED gate on
+// GetDeploymentStatus is owner/admin (#728), #3311 deliberately preserved that
+// parity rather than loosening the read through the new surface, and memql#3332
+// resolved the discrepancy in favour of the code and corrected the docs. So a
+// developer-or-below caller is refused the STATUS read while still seeing
+// topology and deployment history, which are ordinary concept rows and never
+// went near this gate. The panel degrading to a message for that case is the
+// DESIGNED surface, not a fallback for a broken one.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
