@@ -168,37 +168,97 @@ Rules:
   other keyword-arg annotation (`@relationship(field="x")`,
   `@displayCard(primary="name")`).
 
-### Status: Phase 1 is inert (memql#2920)
+### Status: the tier IS enforced (memql#3172 / #3174 / #3175)
 
-**Nothing is enforced.** The tier is parsed, validated, and carried on
-the concept; no predicate is injected anywhere and no query returns a
-different row set than it did before. `TestRowAuthzIsInert` enforces
-that by walking the Go tree and failing if any file outside the
-allow-list reads the row-authz surface.
+> **Corrected (memql#3350).** This section previously read
+> "**Nothing is enforced.**" and described Phase 1 as inert. That has
+> been false since memql#3172. It also told you to `sed` the allow-list
+> out of `TestRowAuthzIsInert`, a gate **retired by that same issue** --
+> the command printed nothing. Both are fixed below; do not calibrate
+> against any copy of this page that still says the tier is inert.
 
-**The allow-list is not reproduced here.** Read it from the gate:
+A declared tier is enforced on four paths. Read the behaviour off these
+files, not off prose:
 
-```
-sed -n '/Files permitted to reference/,/^\t}/p' \
-  component/database/memory-nodes/concept_rowauthz_test.go
-```
+| Mechanism | File | Covers |
+|---|---|---|
+| Filter injection | `component/memql/rowauthz_enforce.go` (`enforceRowAuthzOnPlan`) | every read whose plan has a **bound concept**; the predicate is ANDed at the **root**, so an author's `a \|\| b` becomes `((a) \|\| (b)) && (authz)` |
+| Row admission | same file (`rowAuthzAdmits`) | reads with **no** bound concept -- a raw client-supplied query string -- **and** graph expansion, which has no filter to AND anything into |
+| Anonymous refusal | same file (`refuseRowAuthzWithoutActor`) | a read carrying no caller identity **errors** rather than comparing against `""` and returning rows owned by nobody |
+| Write guard | `component/memql/rowauthz_write_guard.go` | `update` / status-flip / a raw `insert(` onto an existing id -- the engine resolves the target row and refuses when its owner is not the actor |
+| Create stamping | `component/memql/rowauthz_insert_stamp.go` | the raw-`insert(` create path that bypasses accept/stamp |
 
-It is longer than a sentence suggests, and the block comment the range
-starts at is the justification for the whole list -- which a paraphrase
-drops. (The range deliberately starts at that comment, not at the map
-literal: a version of this command that started at `allowed :=` printed
-the entries and discarded the reasoning, which is the very thing this
-paragraph says a paraphrase loses.) This
-document twice carried a hand-written version of that list: once a phase
-behind (it named only the detector, loader and codemod), and once
-corrected to a version that was still three files short on the day it
-shipped. The second is why this points at the source instead
-(memql#2984). Enforcement arriving without a decision is what the gate
-exists to catch, so what counts as permitted is the gate's to state.
+Escapes from the **write** guard are enumerated in exactly one place
+(`rowAuthzWriteEscape`): internal origin stamped per-write by an
+allow-listed package, and cluster owner. Nothing else. `admin` is
+deliberately not among them.
+
+**The read path has no such escape.** `enforceRowAuthzOnPlan` takes no
+context, so filter injection cannot be waived for a trusted caller. That
+asymmetry is not an oversight to route around -- it is the constraint
+that decides which concepts can carry a tier at all (see
+[Concepts that cannot carry a tier](#concepts-that-cannot-carry-a-tier-memql3349--memql3350)).
+
+The land-time gate that replaced `TestRowAuthzIsInert` is
+`component/memql/rowauthz_enforce_gate_test.go`; it re-derives at PR head
+that every construct over a declared concept already carries the tier's
+term as a top-level conjunct.
 
 A concept with no declaration still loads. It produces one aggregated
-boot **warning** naming every undeclared concept; escalation to a load
+boot **warning** naming every undeclared concept, and the undeclared
+population is pinned shrink-only by
+`component/memql/rowauthz_undeclared_gate_test.go`. Escalation to a load
 error is a later phase, once the tree is clean.
+
+### Concepts that cannot carry a tier (memql#3349 / memql#3350)
+
+An undeclared concept is not "safe" and not "unchanged" -- it is
+**unmeasured**. But two identity concepts are undeclared for a reason
+stronger than backlog, and the reason is the same one in both cases:
+**filter injection is unconditional and caller-blind**, and both
+concepts carry reads that must run *before an actor exists*.
+
+- **`v1:identity:identity`** is the credential concept. Every
+  `*ByKeyHash` lookup -- PAT, worker token, badge, node token -- is how
+  the actor gets **built**. A predicate comparing against `actor.userId`
+  is circular there, and there is no read-side escape to spare it.
+- **`v1:identity:user`** adds two more obstacles: `userByEmail` /
+  `userByIdSystem` are pre-actor for the same reason, and
+  `userDisplayById` (`@public`) plus `usersActiveInSpace` are
+  **legitimate cross-user reads for ordinary callers** -- they render one
+  participant's name in another's chat. Its admin reads
+  (`searchUsers`, `userById`) are an admin **roll-up**, which `owned`
+  cannot express: the owned predicate is ANDed with no cluster-owner
+  escape, so declaring it would narrow an admin's user list to the
+  admin's own row and return a confidently wrong answer.
+
+The recorded decision for `v1:identity:user` is therefore: **role-gating
+for that concept lives at the projection, not at the row.** Users may
+legitimately see each other; what they may not see is each other's
+`@pii`. The named queries already draw exactly that line, with their
+**shapes**.
+
+Which left one surface uncovered, and it was a real exposure: the
+**generic concept browse** (`browseConceptPage`) sends a raw query
+string, projects no shape, and returns the full payload. Over
+`v1:identity:user` that handed every authenticated caller, of any role,
+all eight `@pii` fields. It is closed at row admission for **unbound
+reads only** (`component/memql/rowauthz_pii_unbound.go`): a row whose
+concept declares `@pii` fields and declares **no** tier is admitted only
+to the row's own subject or to an owner/admin. Bound reads are
+untouched, so `userDisplayById` still works.
+
+That gate is keyed off the `@pii` annotation rather than a concept list,
+so a concept that grows a `@pii` field is covered the moment it does --
+the same property the hard-delete PII scrub (memql#1711) already relies
+on. `v1:identity:user` is currently the **only** `@pii`-bearing concept
+in the tree, asserted by `TestPIIBearingConceptPopulation`.
+
+What would let a tier be declared on either concept, in dependency
+order: **(a)** a read-path escape mirroring `rowAuthzWriteEscape`, so the
+pre-actor and system reads survive injection; **(b)** a tier that
+composes self-access with an admin roll-up, since `owned` cannot express
+one. Neither was a prerequisite for closing the browse hole.
 
 ### Shadow mode (memql#2921)
 

@@ -262,6 +262,15 @@ const (
 func rowAuthzAdmits(ctx context.Context, conceptName string, id string, payload []byte) rowAuthzAdmission {
 	decl := rowAuthzDeclFor(conceptName)
 	if decl == nil {
+		// UNDECLARED. Not "safe" and not "unchanged" -- unmeasured, in the
+		// undeclared gate's own words. Admitting unconditionally is fine
+		// for a concept whose rows carry nothing personal; it is how
+		// memql#3350's generic-browse hole over v1:identity:user's eight
+		// @pii fields existed. One narrowing, on the unbound read path
+		// only: rowauthz_pii_unbound.go.
+		if rowAuthzPIIUnboundDenies(ctx, conceptName, id) {
+			return rowAuthzDeny
+		}
 		return rowAuthzAdmit
 	}
 	switch decl.Tier {

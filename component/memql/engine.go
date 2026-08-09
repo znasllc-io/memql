@@ -686,6 +686,18 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		return nil, err
 	}
 
+	// Record HOW this read resolved its concept, for the row gate
+	// downstream (memql#3350). A plan with no declared binding is a raw
+	// client-supplied query string -- the generic concept browse -- and
+	// the row gate is the only enforcement it gets, since filter
+	// injection above resolves from plan.BoundConcept and therefore does
+	// nothing for it.
+	//
+	// Stamped HERE so "unbound" means exactly what enforceRowAuthzOnPlan
+	// means by it: one field, read at one seam, rather than two places
+	// re-deriving boundness and drifting.
+	ctx = contextWithRowAuthzBinding(ctx, plan.BoundConcept)
+
 	effectiveTimestamp := plan.Timestamp
 
 	limit := e.effectiveWindow(plan.Limit, e.defaultListLimit(plan))
@@ -860,10 +872,37 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 		return ""
 	}
 	signature := canonicalExpression(plan.Root)
-	if plan.RowAuthzInjected || e.planReferencesActor(plan.Root) {
+	if plan.RowAuthzInjected || e.planReferencesActor(plan.Root) || planIsUnbound(plan) {
 		signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
 	}
 	return signature
+}
+
+// planIsUnbound reports whether the plan resolved no declared concept
+// binding -- a raw client-supplied query string.
+//
+// It is a CACHE-KEY input because such a read is now actor-dependent
+// (memql#3350). Neither existing condition catches it: filter injection
+// resolves from plan.BoundConcept, so an unbound plan never sets
+// RowAuthzInjected, and the raw browse string
+// (`sort(paginate(concept==v1:identity:user, 200), ...)`) references no
+// actor for planReferencesActor to find. The row gate nonetheless drops
+// rows from it per caller, so without this term one caller's result is
+// cached and served to the next -- an admin's full user list handed to a
+// reader, which is the exact hole the gate exists to close, reopened one
+// layer up.
+//
+// Keyed on boundness rather than on "does this query touch a PII
+// concept", deliberately. Answering the narrower question needs
+// extractConceptFromExpression, which memql#3172 finding 1 records as
+// unreliable by construction -- it answers "" for a top-level `||`, a
+// negated concept, or a row named by id, so a cache key resting on it
+// would fail OPEN on precisely the spellings that motivated the row gate.
+// Boundness is a single field the planner already computed. The cost is
+// cache-key granularity on the raw-query surface, which is the operator
+// inspector path, not a hot path.
+func planIsUnbound(plan *QueryPlan) bool {
+	return plan != nil && strings.TrimSpace(plan.BoundConcept) == ""
 }
 
 // executeCountPlan computes a numeric {count: N} aggregate for a query
