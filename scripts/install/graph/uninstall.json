@@ -1,0 +1,135 @@
+{
+  "name": "uninstall",
+  "kind": "uninstall",
+  "description": "Take back exactly what the install graph put on this machine, in the reverse of the order install built it: the cluster goes before the hosts entries it answered on and the checkout it was reconciled from, and each tool outlives the artifact it is needed to remove.",
+  "steps": [
+    {
+      "id": "removeCluster",
+      "script": "install.removeArtifact",
+      "description": "Delete the local k3d cluster.",
+      "params": {
+        "kind": "stack"
+      },
+      "reverses": "clusterUp",
+      "elevation": "none",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "stack"
+      }
+    },
+    {
+      "id": "removeCheckout",
+      "script": "install.removeArtifact",
+      "description": "Remove the pinned source checkout.",
+      "params": {
+        "kind": "checkout",
+        "prune-empty-parents": "1"
+      },
+      "dependsOn": [
+        "removeCluster"
+      ],
+      "reverses": "stackCheckout",
+      "elevation": "none",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "checkout"
+      }
+    },
+    {
+      "id": "removeHostsBlock",
+      "script": "install.removeArtifact",
+      "description": "Delete the installer's marked block from the system hosts file, leaving every other line alone.",
+      "params": {
+        "kind": "hostsEntries",
+        "marker": "memql"
+      },
+      "dependsOn": [
+        "removeCluster"
+      ],
+      "reverses": "hostsBlock",
+      "elevation": "sudo",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "hostsEntries"
+      }
+    },
+    {
+      "id": "removeLocalCA",
+      "script": "install.removeArtifact",
+      "description": "Uninstall the local mkcert CA from the system trust stores and delete its key material.",
+      "params": {
+        "kind": "mkcertCA"
+      },
+      "dependsOn": [
+        "removeCluster"
+      ],
+      "reverses": "localCA",
+      "elevation": "user-trust",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "mkcertCA"
+      }
+    },
+    {
+      "id": "removeToolK3d",
+      "script": "install.removeArtifact",
+      "description": "Remove the installed k3d binary -- after the cluster it manages is gone.",
+      "params": {
+        "kind": "binary",
+        "prune-empty-parents": "1"
+      },
+      "dependsOn": [
+        "removeCluster"
+      ],
+      "reverses": "toolK3d",
+      "elevation": "none",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "binary"
+      }
+    },
+    {
+      "id": "removeToolKubectl",
+      "script": "install.removeArtifact",
+      "description": "Remove the installed kubectl binary -- after the cluster it talks to is gone.",
+      "params": {
+        "kind": "binary",
+        "prune-empty-parents": "1"
+      },
+      "dependsOn": [
+        "removeCluster"
+      ],
+      "reverses": "toolKubectl",
+      "elevation": "none",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "binary"
+      }
+    },
+    {
+      "id": "removeToolMkcert",
+      "script": "install.removeArtifact",
+      "description": "Remove the installed mkcert binary -- after the CA it is needed to uninstall is gone.",
+      "params": {
+        "kind": "binary",
+        "prune-empty-parents": "1"
+      },
+      "dependsOn": [
+        "removeLocalCA"
+      ],
+      "reverses": "toolMkcert",
+      "elevation": "none",
+      "verify": {
+        "kind": "resultEquals",
+        "field": "result.kind",
+        "value": "binary"
+      }
+    }
+  ]
+}

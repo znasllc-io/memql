@@ -60,14 +60,23 @@ func BuiltinSurfaces() []surfaceresolver.Surface {
 	}
 }
 
-// deployPackPrefixes are the DSL-tree path prefixes whose authored actions
+// runnerSurfacePrefixes are the DSL-tree path prefixes whose authored actions
 // default (policy tier) to the cockpit/runner surface. I8 lands the deployment
 // pack's actions under one of these and they inherit the cockpit/runner default
 // with NO per-action annotation. (Origin is "<path>:<name>".)
-var deployPackPrefixes = []string{
+//
+// `install/` is here for a stronger reason than deploy's (#3371). A deploy
+// action MUST run outside the cluster it deploys; an INSTALL action has no
+// cluster to run inside -- it places k3d on the operator's laptop, edits
+// /etc/hosts and installs a trust-store CA, all before anything memQL exists to
+// host it. Resolving an install action anywhere but the runner is not a policy
+// preference that could reasonably go the other way; it is the only placement
+// that can execute at all.
+var runnerSurfacePrefixes = []string{
 	"deployment/",
 	"deploy/",
 	"actions/deploy/",
+	"install/",
 }
 
 // deployControlCapabilityPrefixes are capability namespaces that are control-
@@ -85,27 +94,28 @@ var deployControlCapabilityPrefixes = []string{
 // availability). It is "" when no policy applies -- the resolver then falls
 // through to availability failover.
 //
-// Deployment-pack actions (by DSL-tree origin) and control-plane capabilities
-// (argocd/github orchestration) default to the cockpit/runner surface so they
-// run outside the target cluster.
+// Deployment- and install-pack actions (by DSL-tree origin) and control-plane
+// capabilities (argocd/github orchestration) default to the cockpit/runner
+// surface so they run outside the target cluster -- or, for install, before one
+// exists at all.
 func PolicyDefaultSurface(a *Action) string {
 	if a == nil {
 		return ""
 	}
-	if isDeployPackOrigin(a.Origin) || hasDeployControlCapability(a.Capability) {
+	if isRunnerSurfaceOrigin(a.Origin) || hasDeployControlCapability(a.Capability) {
 		return CockpitRunnerSurface
 	}
 	return ""
 }
 
-// isDeployPackOrigin reports whether an action's origin ("<path>:<name>") is
-// under one of the deployment-pack DSL-tree prefixes.
-func isDeployPackOrigin(origin string) bool {
+// isRunnerSurfaceOrigin reports whether an action's origin ("<path>:<name>") is
+// under one of the DSL-tree prefixes that default to the cockpit runner.
+func isRunnerSurfaceOrigin(origin string) bool {
 	path := origin
 	if i := strings.LastIndexByte(origin, ':'); i >= 0 {
 		path = origin[:i]
 	}
-	for _, p := range deployPackPrefixes {
+	for _, p := range runnerSurfacePrefixes {
 		if strings.HasPrefix(path, p) {
 			return true
 		}

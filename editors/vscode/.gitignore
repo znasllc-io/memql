@@ -5,6 +5,8 @@ bin/
 .vscode-test/
 dist-test/
 dist-host/
+# The bundled install CLI (npm run build:install-cli) -- build output, not source.
+dist-install/
 
 # The repo-root .gitignore ignores package.json / package-lock.json (this is a
 # Go repo); re-include the VS Code extension's manifest + lockfile, which must

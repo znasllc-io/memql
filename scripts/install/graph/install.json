@@ -1,0 +1,133 @@
+{
+  "name": "install",
+  "kind": "install",
+  "description": "Bring a local memQL cluster up on a fresh machine: inventory it, place the pinned tools, open the front door, check the stack out, start it, and hand back a sign-in link.",
+  "steps": [
+    {
+      "id": "detect",
+      "script": "install.detect",
+      "description": "Inventory the machine: OS/arch support, docker daemon, port availability, free disk.",
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {"kind": "resultTrue", "field": "result.supported"}
+    },
+
+    {
+      "id": "toolK3d",
+      "script": "install.binary",
+      "description": "Install the pinned k3d binary, verified against its committed sha256.",
+      "params": {"tool": "k3d"},
+      "dependsOn": ["detect"],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {"kind": "resultTrue", "field": "result.installed"}
+    },
+    {
+      "id": "toolKubectl",
+      "script": "install.binary",
+      "description": "Install the pinned kubectl binary, verified against its committed sha256.",
+      "params": {"tool": "kubectl"},
+      "dependsOn": ["detect"],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {"kind": "resultTrue", "field": "result.installed"}
+    },
+    {
+      "id": "toolMkcert",
+      "script": "install.binary",
+      "description": "Install the pinned mkcert binary, verified against its committed sha256.",
+      "params": {"tool": "mkcert"},
+      "dependsOn": ["detect"],
+      "elevation": "none",
+      "receipt": "binary",
+      "preExistingPath": "result.preExisting",
+      "verify": {"kind": "resultTrue", "field": "result.installed"}
+    },
+
+    {
+      "id": "hostsBlock",
+      "script": "install.hostsEntries",
+      "description": "Point the front-door hostnames at 127.0.0.1 inside a marked block in the system hosts file.",
+      "params": {"action": "add", "confirm": "add-memql-hosts"},
+      "dependsOn": ["detect"],
+      "elevation": "sudo",
+      "receipt": "hostsEntries",
+      "preExistingPath": "none",
+      "verify": {"kind": "resultTrue", "field": "result.blockPresent"}
+    },
+    {
+      "id": "localCA",
+      "script": "install.mkcert",
+      "description": "Ensure a trusted local CA and issue the front-door wildcard certificate.",
+      "params": {"confirm": "install-memql-ca"},
+      "dependsOn": ["toolMkcert"],
+      "elevation": "user-trust",
+      "receipt": "mkcertCA",
+      "preExistingPath": "result.caPreExisting",
+      "verify": {"kind": "resultNonEmpty", "field": "result.certFile"}
+    },
+    {
+      "id": "stackCheckout",
+      "script": "install.cloneStack",
+      "description": "Check the memQL stack out at a release tag into the pinned local source directory.",
+      "dependsOn": ["detect"],
+      "elevation": "none",
+      "receipt": "checkout",
+      "preExistingPath": "!result.cloned",
+      "verify": {"kind": "resultNonEmpty", "field": "result.commit"}
+    },
+    {
+      "id": "providerKey",
+      "script": "install.verifyProviderKey",
+      "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it.",
+      "params": {"provider": "anthropic"},
+      "dependsOn": ["detect"],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {"kind": "resultTrue", "field": "result.valid"}
+    },
+
+    {
+      "id": "clusterUp",
+      "script": "k3d.up",
+      "description": "Create the k3d cluster, install ArgoCD, seed secrets and reconcile the local overlay.",
+      "dependsOn": ["toolK3d", "toolKubectl", "hostsBlock", "localCA", "stackCheckout", "providerKey"],
+      "elevation": "none",
+      "receipt": "stack",
+      "preExistingPath": "!result.clusterCreated",
+      "verify": {"kind": "resultTrue", "field": "result.argocdReady"}
+    },
+
+    {
+      "id": "seedBootstrap",
+      "script": "install.seedBootstrap",
+      "description": "Write the identity bootstrap values and the AI provider key into the cluster, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "dependsOn": ["clusterUp"],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {"kind": "resultTrue", "field": "result.bootstrapComplete"}
+    },
+
+    {
+      "id": "frontDoor",
+      "script": "install.verifyFrontDoor",
+      "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname.",
+      "dependsOn": ["seedBootstrap"],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {"kind": "resultTrue", "field": "result.allPassed"}
+    },
+    {
+      "id": "magicLink",
+      "script": "install.magicLink",
+      "description": "Recover the cluster owner's magic link from the identity pod so the operator can sign in.",
+      "params": {"local": "1"},
+      "dependsOn": ["frontDoor"],
+      "readOnly": true,
+      "elevation": "none",
+      "verify": {"kind": "resultNonEmpty", "field": "result.link"}
+    }
+  ]
+}

@@ -91,10 +91,11 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/component/identity/web":          10,  // static/* legal/*.md (admin-settings-branding.js went with the settings page, memql#3324)
 	"github.com/znasllc-io/memql/component/mcp":                   1,   // icon.svg
 	"github.com/znasllc-io/memql/docs":                            1,   // public/language/memql.md
-	"github.com/znasllc-io/memql/dsl":                             229, // all:<domain> x35 (+campaigns, +integrations -- memql#3323; +portalviews -- memql#3320)
+	"github.com/znasllc-io/memql/dsl":                             231, // all:<domain> x36 (+campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371)
 	"github.com/znasllc-io/memql/examples/deploypack":             3,   // all:dsl
 	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
 	"github.com/znasllc-io/memql/integrations":                    1,   // *.json
+	"github.com/znasllc-io/memql/scripts/install/graph":           2,   // install.json uninstall.json (memql#3369)
 }
 
 // embedModulePath is the selector root. Spelled as the module pattern, not

@@ -77,6 +77,37 @@ var capabilityScriptAllowlist = map[string]string{
 	"overlay.pinDigests": "scripts/deploy/pin-overlay-digests.sh",
 	"overlay.revert":     "scripts/deploy/revert-overlay.sh",
 	"argocd.sync":        "scripts/deploy/argo-sync.sh",
+
+	// Local-cluster install/uninstall substrate (epic #3357, install(11) /
+	// #3368). Registration here is what makes an install script REACHABLE from
+	// the in-engine action path -- an unregistered script still runs fine from
+	// a human shell or the host executor, but the runner rejects its id before
+	// exec, so the capability is silently inert on the engine path while
+	// looking healthy everywhere else. install_allowlist_test.go walks
+	// scripts/install/ and fails on any unregistered cap_init id, so adding an
+	// install capability is a two-file change by construction.
+	"install.refreshPins":       "scripts/install/refresh-tool-pins.sh",
+	"install.detect":            "scripts/install/detect.sh",
+	"install.binary":            "scripts/install/install-binary.sh",
+	"install.hostsEntries":      "scripts/install/hosts-entries.sh",
+	"install.mkcert":            "scripts/install/mkcert-setup.sh",
+	"install.cloneStack":        "scripts/install/clone-stack.sh",
+	"install.seedBootstrap":     "scripts/install/seed-bootstrap.sh",
+	"install.verifyProviderKey": "scripts/install/verify-provider-key.sh",
+	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
+	"install.magicLink":         "scripts/install/magic-link.sh",
+	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
+
+	// install.e2eBaseline is CI's INSTRUMENT rather than a step of any install
+	// graph: it fingerprints the four surfaces an install touches so the
+	// round-trip workflow can prove the machine came back byte-identical
+	// (install(17), #3374). It is registered here for the same reachability
+	// reason as the rest -- install_allowlist_test.go walks scripts/install/
+	// and fails on any capability script missing from this map -- and it is
+	// deliberately the one install.* capability with NO DSL action, because no
+	// graph runs it and dsl_agreement_test.go asserts every action belongs to a
+	// real install.
+	"install.e2eBaseline": "scripts/install/e2e-baseline.sh",
 }
 
 // scriptParamKey is the reserved rendered-arg key that names the capability

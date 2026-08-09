@@ -1,0 +1,202 @@
+name: install-e2e
+
+# The install/uninstall ROUND TRIP on a clean machine.
+#
+# The install receipt is a promise: everything the installer put on this
+# machine can be taken back. "The uninstall looked clean" is an opinion, so
+# this workflow holds the promise to account the only way it can be held --
+# fingerprint the machine, install, uninstall, fingerprint again, DIFF. A
+# difference is a receipt that lied.
+#
+# ============================ WHAT THIS PROVES ============================
+#
+#   * The graph reader, the runner and the executor drive the REAL capability
+#     scripts end to end, not a mock of them.
+#   * install.binary places the three pinned tools, and remove-artifact.sh
+#     takes them back, leaving ~/.memql with no files in it.
+#   * hosts-entries.sh writes its marked block into the REAL /etc/hosts and
+#     remove-artifact.sh removes exactly that block, leaving the file
+#     byte-identical -- every other line in a shared system file untouched.
+#   * install.cloneStack checks the stack out at a TAG and the removal takes
+#     the checkout back.
+#   * The receipt survives the round trip and is what the uninstall reads its
+#     --path and --pre-existing from. It is uploaded as an artifact so a
+#     failure can be read afterwards.
+#
+# ========================== WHAT IT DOES NOT PROVE ========================
+#
+# Be honest about the gaps rather than let a green tick imply more than it is:
+#
+#   * THE CLUSTER LANE DOES NOT RUN. clusterUp / seedBootstrap / frontDoor /
+#     magicLink need a real k3d cluster reconciled by ArgoCD from images this
+#     workflow does not build, and providerKey needs a real Anthropic key that
+#     a fork's pull request cannot have. Skipping providerKey removes it and,
+#     through the graph's own dependencies, everything downstream of it. So
+#     two of the four surfaces -- dockerImages and k3dClusters -- are
+#     TRIVIALLY unchanged here: nothing that ran could have touched them. They
+#     are still snapshotted and diffed, because the day the cluster lane does
+#     run they are the surfaces that matter, and a diff that only exists when
+#     it is convenient proves nothing.
+#   * THE TRUST STORE IS NOT EXERCISED. localCA is skipped: `mkcert -install`
+#     writes a CA into the system trust store, which is a fifth surface this
+#     snapshot does not describe, and a partial round trip there would be
+#     worse than none.
+#   * THE SNAPSHOT IS NOT A WHOLE-FILESYSTEM DIFF. It describes four named
+#     surfaces. Anything the installer touched outside them -- a kubeconfig,
+#     apt state, $HOME outside ~/.memql -- is invisible to it.
+#   * ONE PLATFORM. ubuntu-latest / linux-amd64 only; tool-pins.env pins
+#     linux/amd64 artifacts.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "scripts/install/**"
+      - "scripts/lib/capability.sh"
+      - "editors/vscode/src/install/**"
+      - ".github/workflows/install-e2e.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  round-trip:
+    name: install -> uninstall -> diff
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # cloneStack fetches a TAG from this checkout, which needs the object
+          # history a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # The tag rule is not waived for CI.
+      #
+      # clone-stack.sh refuses a branch: a branch moves, so two installs of the
+      # "same version" would differ, and an installer that cannot say what it
+      # installed is not an installer. CI is not an exception to that -- so the
+      # workflow TAGS ITS OWN CHECKOUT and installs from the tag, exactly as an
+      # operator installs from a release tag. Using --repo=$GITHUB_WORKSPACE
+      # keeps it to the tree under test instead of whatever is on the remote.
+      - name: Tag this checkout so the install has a real tag to pin
+        id: tag
+        run: |
+          set -euo pipefail
+          TAG="e2e-${GITHUB_SHA::12}"
+          git -c user.email=ci@example.com -c user.name=ci tag -f "$TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # The hosted runner ships kubectl on PATH, and a future runner image may
+      # ship the others.
+      #
+      # install.binary's pre-existence flag is PATH-WIDE: it means "the machine
+      # already had this tool", not "there is already a file at the destination
+      # we are about to write". So a preinstalled kubectl makes the receipt say
+      # the artifact pre-existed, and remove-artifact.sh then REFUSES to delete
+      # the copy we placed under ~/.memql/bin -- conservative, deliberate, and
+      # not the thing this workflow is here to measure. (It is also a real
+      # asymmetry worth knowing about: our own file outlives the uninstall
+      # whenever a same-named binary exists anywhere else on PATH.)
+      #
+      # Move any of the three aside BEFORE the baseline is taken, so the
+      # baseline describes the machine the install actually runs against.
+      - name: Take preinstalled pinned tools out of the way
+        run: |
+          set -euo pipefail
+          for tool in k3d kubectl mkcert; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              found="$(command -v "$tool")"
+              sudo mv "$found" "$RUNNER_TEMP/${tool}.preinstalled"
+              echo "moved preinstalled $tool aside (was $found)"
+            fi
+          done
+
+      - name: Build the install CLI
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run build:install-cli
+
+      - name: Snapshot the machine BEFORE
+        run: ./scripts/install/e2e-baseline.sh --mode=snapshot --out="$RUNNER_TEMP/before.txt"
+
+      # Run as root: hostsBlock writes /etc/hosts. HOME is preserved so
+      # ~/.memql stays the same directory the before/after snapshots describe.
+      # The receipt is deliberately written OUTSIDE ~/.memql: it is the record
+      # OF the install, not an artifact of it, and uninstall does not delete the
+      # evidence it just consumed -- leaving it under ~/.memql would show up as
+      # drift for the one file that is supposed to survive.
+      - name: Install
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js install \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --repo="$GITHUB_WORKSPACE" \
+              --tag="${{ steps.tag.outputs.tag }}" \
+              --skip=providerKey,localCA \
+              --timeout=600
+          # Running the CLI as root means everything it wrote is root-owned,
+          # including the receipt -- and every step after this one runs as the
+          # runner. The first real execution of this workflow died here with
+          # "cat: install-receipt.json: Permission denied", which skipped the
+          # uninstall and the diff and then failed the artifact upload too, so
+          # the run produced no evidence about the thing it exists to test.
+          # Hand the receipt back before anyone else needs to read it.
+          #
+          # Only the receipt: ~/.memql stays root-owned on purpose, because the
+          # uninstall below also runs under sudo and must remove exactly what
+          # the install created, as the same user that created it.
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/install-receipt.json"
+
+      - name: Show what the install recorded
+        run: cat "$RUNNER_TEMP/install-receipt.json"
+
+      # A mid-flight snapshot is what makes the final one meaningful: if the
+      # install changed nothing, the after-diff would pass for the wrong reason.
+      - name: The install actually changed the machine
+        run: |
+          set -euo pipefail
+          if ./scripts/install/e2e-baseline.sh --mode=compare \
+              --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/during.txt"; then
+            echo "ERROR: the install left the machine identical -- the round trip below would prove nothing" >&2
+            exit 1
+          fi
+          echo "the install changed the machine, as it must"
+
+      - name: Uninstall
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js uninstall \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --timeout=600
+
+      # THE ASSERTION. Everything above is setup for this line.
+      - name: Snapshot the machine AFTER, and diff
+        run: |
+          ./scripts/install/e2e-baseline.sh --mode=compare \
+            --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/after.txt"
+
+      - name: Upload the receipt and the snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-e2e-evidence
+          path: |
+            ${{ runner.temp }}/before.txt
+            ${{ runner.temp }}/during.txt
+            ${{ runner.temp }}/after.txt
+            ${{ runner.temp }}/install-receipt.json
+          if-no-files-found: warn

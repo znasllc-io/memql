@@ -381,6 +381,16 @@ patches:
     target:
       kind: Deployment
       name: identity
+  # Installer-seeded bootstrap values (#3375): the MEMQL_IDENTITY_BOOTSTRAP_*
+  # set that lets identity create the cluster owner with no /setup visit, plus
+  # the AI provider key the rest of the mesh reads. Seeded by
+  # scripts/install/seed-bootstrap.sh, `optional: true` so a cluster brought up
+  # without the installer behaves exactly as it does today. Targeted by name
+  # regex at the engine nodes that carry an envFrom list.
+  - path: patches/bootstrap-secret-envfrom.yaml
+    target:
+      kind: Deployment
+      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent)$"
   # Worker nodes: override MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER to the local
   # identity issuer (must be byte-identical to identity's BASE_URL above).
   # Using JSON 6902 `add` (with merge semantics for existing keys in env) is
