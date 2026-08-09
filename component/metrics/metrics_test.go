@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 	"testing"
 )
 
@@ -108,4 +109,55 @@ func readGauge(t *testing.T, name string) float64 {
 	}
 	t.Fatalf("gauge %q not found", name)
 	return 0
+}
+
+// TestSetIdentitySigningKey covers the honest-unknown contract (memql#3381).
+// The gauge exists because signing-key rotation cannot happen from inside a
+// deployed cluster, so an operator's only pressure to run the manual runbook
+// is an alert on key age. A gauge that reported process start as the key's
+// birthday would reset to "0 days old" on every pod restart -- healthy-looking
+// precisely where rotation never happens -- so unknown must read as unknown.
+func TestSetIdentitySigningKey(t *testing.T) {
+	minted := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+
+	t.Run("known age in env-seed mode", func(t *testing.T) {
+		SetIdentitySigningKey(minted, true, false)
+		created, known, rotates := IdentitySigningKeyValues()
+		if created != float64(minted.Unix()) {
+			t.Fatalf("created = %v, want %v", created, float64(minted.Unix()))
+		}
+		if known != 1 {
+			t.Fatalf("age_known = %v, want 1", known)
+		}
+		if rotates != 0 {
+			t.Fatalf("rotation_supported = %v, want 0", rotates)
+		}
+	})
+
+	t.Run("unknown age publishes zero, not a timestamp", func(t *testing.T) {
+		// A caller with a boot-time fallback in hand must not be able to
+		// leak it into the gauge by passing createdAtKnown=false.
+		SetIdentitySigningKey(time.Now(), false, false)
+		created, known, _ := IdentitySigningKeyValues()
+		if known != 0 {
+			t.Fatalf("age_known = %v, want 0", known)
+		}
+		if created != 0 {
+			t.Fatalf("created = %v, want 0 when the date is not known", created)
+		}
+	})
+
+	t.Run("zero time is unknown even when claimed known", func(t *testing.T) {
+		SetIdentitySigningKey(time.Time{}, true, true)
+		created, known, rotates := IdentitySigningKeyValues()
+		if known != 0 {
+			t.Fatalf("age_known = %v, want 0 for the zero time", known)
+		}
+		if created != 0 {
+			t.Fatalf("created = %v, want 0", created)
+		}
+		if rotates != 1 {
+			t.Fatalf("rotation_supported = %v, want 1", rotates)
+		}
+	})
 }

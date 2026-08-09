@@ -184,6 +184,7 @@ CLUSTER_SECRET_STATE=""
 CLUSTER_MASTER_KEY=""
 CLUSTER_GENESIS_B64=""
 CLUSTER_SIGNING_KEY_B64=""
+CLUSTER_SIGNING_KEY_CREATED_AT=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -228,6 +229,18 @@ function load_cluster_secret_snapshot() {
         CLUSTER_SIGNING_KEY_B64="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
         [ -n "$CLUSTER_SIGNING_KEY_B64" ] \
             || cap_fail 5 "memql-secrets holds a MEMQL_IDENTITY_SIGNING_KEY_B64 that could not be base64-decoded; refusing to overwrite it blind."
+    fi
+
+    # The seed's mint date (memql#3381). Not irreplaceable -- it is a
+    # timestamp, not key material -- so an unreadable value is not fatal; it
+    # just means this run re-stamps. But a REUSED seed must keep its original
+    # date, or every `make secrets` would silently reset the key's apparent
+    # age to today, which is the exact false signal the metric exists to
+    # avoid.
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT}' 2>/dev/null || true)"
+    if [ -n "$raw" ]; then
+        CLUSTER_SIGNING_KEY_CREATED_AT="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
     fi
 }
 
@@ -407,6 +420,25 @@ readonly SIGNING_KEY_B64_RE='^[A-Za-z0-9+/]{43}=$'
 
 RESOLVED_SIGNING_KEY_B64=""
 RESOLVED_SIGNING_KEY_SOURCE=""
+RESOLVED_SIGNING_KEY_CREATED_AT=""
+
+# resolve_signing_key_created_at stamps the seed with its mint date
+# (memql#3381). A bare 32-byte seed carries no metadata, so this is the only
+# way identity can report how old its signing key is -- and key age is the
+# only automated pressure toward the manual rotation runbook that every
+# deployed cluster depends on. Local seeds it too, so the "age is known" path
+# is the one the parity cluster actually exercises.
+#
+# A REUSED seed keeps whatever date it already had; a new or replaced seed is
+# stamped now. Getting that backwards would reset the key's apparent age on
+# every `make secrets`.
+function resolve_signing_key_created_at() {
+    if [ "$RESOLVED_SIGNING_KEY_SOURCE" = "cluster" ] && [ -n "$CLUSTER_SIGNING_KEY_CREATED_AT" ]; then
+        RESOLVED_SIGNING_KEY_CREATED_AT="$CLUSTER_SIGNING_KEY_CREATED_AT"
+        return
+    fi
+    RESOLVED_SIGNING_KEY_CREATED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
 
 function is_valid_signing_key() {
     [[ "$1" =~ $SIGNING_KEY_B64_RE ]]
@@ -601,10 +633,11 @@ function seed_db_creds() {
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
-    local genesis_b64 master_key signing_key db_dsn db_direct_dsn
+    local genesis_b64 master_key signing_key signing_key_created_at db_dsn db_direct_dsn
     genesis_b64="$RESOLVED_GENESIS_B64"
     master_key="$RESOLVED_MASTER_KEY"
     signing_key="$RESOLVED_SIGNING_KEY_B64"
+    signing_key_created_at="$RESOLVED_SIGNING_KEY_CREATED_AT"
     # Database DSN: local in-cluster Postgres.
     # The connection string uses 'disable' sslmode because the local Postgres
     # container does not have TLS configured (dev only).
@@ -618,6 +651,7 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_MASTER_KEY=$master_key" \
         --from-literal="MEMQL_GENESIS_B64=$genesis_b64" \
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
+        --from-literal="MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT=$signing_key_created_at" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
@@ -776,6 +810,7 @@ function main() {
     load_cluster_secret_snapshot
     resolve_master_key
     resolve_signing_key
+    resolve_signing_key_created_at
     resolve_genesis_b64
 
     seed_internal_ca

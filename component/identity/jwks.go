@@ -50,6 +50,12 @@ func BuildJWKS(km *KeyManager, now time.Time) JWKS {
 // different fingerprints, so a cross-replica `max != min` over
 // memql_jwks_keyset_fingerprint is the JWKS-incoherence alert signal that
 // the 2026-06-16 silent auth failure lacked (memql#1523).
+// It also publishes the signing-key AGE surface (memql#3381): when the
+// active key was created, whether that date is trustworthy, and whether
+// this process can rotate at all. Rotation in a deployed cluster is a
+// manual re-seal-and-roll (see KeyManager.RotationSupported), so an
+// age gauge an operator can alert on is the only automated pressure
+// toward ever performing it.
 func EmitKeysetMetric(km *KeyManager, now time.Time) {
 	doc := BuildJWKS(km, now)
 	kids := make([]string, 0, len(doc.Keys))
@@ -57,6 +63,9 @@ func EmitKeysetMetric(km *KeyManager, now time.Time) {
 		kids = append(kids, k.Kid)
 	}
 	metrics.SetJWKSKeyset(kids)
+
+	createdAt, known := km.CurrentKeyCreatedAt()
+	metrics.SetIdentitySigningKey(createdAt, known, km.RotationSupported())
 }
 
 // JWKSHandler returns an http.Handler that serves the live JWKS
