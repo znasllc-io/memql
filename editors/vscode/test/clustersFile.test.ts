@@ -18,7 +18,7 @@ import {
   setSelectedCluster,
   upsertCluster,
 } from "../src/clusters/file.js";
-import { isOidcOnly, needsAuth } from "../src/clusters/model.js";
+import { needsAuth } from "../src/clusters/model.js";
 
 async function tempFile(contents: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
@@ -33,7 +33,7 @@ clusters:
     display_name: local.znas.io
     domain: local.znas.io
     endpoint: cockpit.local.znas.io:443
-    pat: mql_pat_abc
+    token: eyJhbGci.eyJzdWIi.sig
   - name: staging
     domain: staging.example.com
     endpoint: cockpit.staging.example.com:443
@@ -50,7 +50,7 @@ test("reads clusters and the selected cluster", async () => {
   assert.equal(parsed.clusters[0]?.name, "local");
   assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
   assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
-  assert.equal(parsed.clusters[0]?.pat, "mql_pat_abc");
+  assert.equal(parsed.clusters[0]?.token, "eyJhbGci.eyJzdWIi.sig");
   assert.equal(parsed.clusters[1]?.clientId, "cockpit");
 });
 
@@ -104,7 +104,7 @@ test("setSelectedCluster preserves comments", async () => {
 
 test("setSelectedCluster preserves unknown keys written by a newer cockpit", async () => {
   const f = await tempFile(
-    SAMPLE.replace("    pat: mql_pat_abc\n", "    pat: mql_pat_abc\n    future_field: keep-me\n"),
+    SAMPLE.replace("    token: eyJhbGci.eyJzdWIi.sig\n", "    token: eyJhbGci.eyJzdWIi.sig\n    future_field: keep-me\n"),
   );
   await setSelectedCluster(f, "staging");
   assert.match(await fs.readFile(f, "utf8"), /future_field: keep-me/);
@@ -233,13 +233,13 @@ test("upsertCluster deletes a key the caller explicitly cleared", async () => {
   await upsertCluster(f, {
     name: "local",
     endpoint: "cockpit.local.znas.io:443",
-    pat: "",
+    token: "",
   });
   const parsed = await readClustersFile(f);
-  assert.equal(parsed.clusters[0]?.pat, undefined, "the cleared PAT must be gone from the model");
+  assert.equal(parsed.clusters[0]?.token, undefined, "the cleared PAT must be gone from the model");
   assert.doesNotMatch(
     await fs.readFile(f, "utf8"),
-    /mql_pat_abc/,
+    /eyJhbGci\.eyJzdWIi\.sig/,
     "the revoked token must not remain on disk",
   );
 });
@@ -248,8 +248,8 @@ test("upsertCluster leaves an omitted key alone (undefined is not a clear)", asy
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" });
   assert.equal(
-    (await readClustersFile(f)).clusters[0]?.pat,
-    "mql_pat_abc",
+    (await readClustersFile(f)).clusters[0]?.token,
+    "eyJhbGci.eyJzdWIi.sig",
     "a field the caller never supplied must survive the write",
   );
 });
@@ -263,7 +263,7 @@ test("clearing one field does not disturb the others", async () => {
   });
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters[0]?.domain, undefined);
-  assert.equal(parsed.clusters[0]?.pat, "mql_pat_abc");
+  assert.equal(parsed.clusters[0]?.token, "eyJhbGci.eyJzdWIi.sig");
   assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
 });
 
@@ -273,26 +273,26 @@ test("a cleared field on a NEW cluster is simply not written", async () => {
     name: "prod",
     endpoint: "cockpit.prod.example.com:443",
     domain: "",
-    pat: "",
+    token: "",
   });
   const parsed = await readClustersFile(f);
   const prod = parsed.clusters.find((c) => c.name === "prod");
   assert.ok(prod);
   assert.equal(prod.domain, undefined);
-  assert.equal(prod.pat, undefined);
+  assert.equal(prod.token, undefined);
 });
 
 test("a rename and a clear applied together both take effect", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(
     f,
-    { name: "local-dev", endpoint: "cockpit.local.znas.io:443", pat: "" },
+    { name: "local-dev", endpoint: "cockpit.local.znas.io:443", token: "" },
     "local",
   );
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters.length, 2);
   assert.equal(parsed.clusters[0]?.name, "local-dev");
-  assert.equal(parsed.clusters[0]?.pat, undefined);
+  assert.equal(parsed.clusters[0]?.token, undefined);
   assert.equal(parsed.selectedCluster, "local-dev");
 });
 
@@ -303,23 +303,28 @@ test("writes create the file and its parent directory when absent", async () => 
   assert.equal((await readClustersFile(f)).clusters[0]?.name, "local");
 });
 
-test("needsAuth is false for a cluster with an endpoint and a PAT", () => {
-  assert.equal(needsAuth({ name: "l", endpoint: "h:443", pat: "mql_pat_x" }), false);
+test("needsAuth is false for a cluster with an endpoint and a token", () => {
+  assert.equal(needsAuth({ name: "l", endpoint: "h:443", token: "eyJhbGci.eyJzdWIi.sig" }), false);
 });
 
-test("needsAuth is false for a cluster with an endpoint, issuer and client id", () => {
+test("needsAuth is false for a cluster holding only a refresh token", () => {
+  // A refresh token IS a credential: the resolver exchanges it for an access
+  // token before dialing (memql#3385), so the row must not read as unconfigured.
+  assert.equal(needsAuth({ name: "l", endpoint: "h:443", refreshToken: "rt" }), false);
+});
+
+test("needsAuth is TRUE for an issuer/clientId pair with no token", () => {
+  // memql#3383. An issuer and a client id name WHERE tokens come from; they are
+  // not a token. Counting them as "configured" is what let a credential-less
+  // cluster look ready and then fail at the handshake with nothing useful said.
   assert.equal(
     needsAuth({ name: "s", endpoint: "h:443", issuer: "https://i", clientId: "cockpit" }),
-    false,
+    true,
   );
 });
 
 test("needsAuth is true without an endpoint", () => {
-  assert.equal(needsAuth({ name: "l", endpoint: "", pat: "mql_pat_x" }), true);
-});
-
-test("needsAuth is true with an issuer but no client id", () => {
-  assert.equal(needsAuth({ name: "s", endpoint: "h:443", issuer: "https://i" }), true);
+  assert.equal(needsAuth({ name: "l", endpoint: "", token: "eyJhbGci.eyJzdWIi.sig" }), true);
 });
 
 // --- The identity field is exempt from the "" -> delete rule ---------------
@@ -347,8 +352,8 @@ test("a refused empty name leaves the target node completely intact", async () =
   assert.deepEqual(parsed.clusters.map((c) => c.name), ["local", "staging"]);
   assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
   assert.equal(
-    parsed.clusters[0]?.pat,
-    "mql_pat_abc",
+    parsed.clusters[0]?.token,
+    "eyJhbGci.eyJzdWIi.sig",
     "the node's credentials must not be left stranded behind an unresolvable entry",
   );
   assert.equal(parsed.selectedCluster, "local");
@@ -394,13 +399,13 @@ test("a refused add does not clear the existing cluster's PAT or domain", async 
   // name and leaves the optional inputs blank: empties, which upsertCluster
   // would have read as explicit clears.
   await assert.rejects(() =>
-    addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443", domain: "", pat: "" }),
+    addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443", domain: "", token: "" }),
   );
 
   const parsed = await readClustersFile(f);
   assert.equal(
-    parsed.clusters[0]?.pat,
-    "mql_pat_abc",
+    parsed.clusters[0]?.token,
+    "eyJhbGci.eyJzdWIi.sig",
     "an add must not revoke the token on the cluster it collided with",
   );
   assert.equal(parsed.clusters[0]?.domain, "local.znas.io");
@@ -412,37 +417,41 @@ test("addCluster still refuses an empty name", async () => {
   await assert.rejects(() => addCluster(f, { name: "", endpoint: "x:443" }), /name is required/);
 });
 
-// --- isOidcOnly ------------------------------------------------------------
+// --- the refresh token round trip (memql#3385) ------------------------------
 //
-// Both callers (ConnectionManager's error message, the Clusters tree tooltip)
-// check isOidcOnly BEFORE needsAuth, so an isOidcOnly that ignored the
-// endpoint told an operator to "authenticate in the memQL Cockpit" when the
-// truth was "this cluster has nowhere to dial".
+// `refresh_token:` in the shared file is an INGEST path, not storage: the
+// credential resolver presents it once, moves the rotated token into VS Code's
+// SecretStorage, and then CLEARS this key. Both halves of that have to work
+// through the same read/write rules every other field uses.
 
-test("isOidcOnly is true for an OIDC cluster with an endpoint and no PAT", () => {
-  assert.equal(
-    isOidcOnly({ name: "s", endpoint: "h:443", issuer: "https://i", clientId: "cockpit" }),
-    true,
-  );
+test("a refresh token round-trips through the wire spelling", async () => {
+  const f = await tempFile(SAMPLE);
+  await upsertCluster(f, { name: "local", refreshToken: "rt-abc" });
+  assert.match(await fs.readFile(f, "utf8"), /refresh_token: rt-abc/);
+  assert.equal((await readClustersFile(f)).clusters[0]?.refreshToken, "rt-abc");
 });
 
-test("isOidcOnly is false once a PAT is present", () => {
-  assert.equal(
-    isOidcOnly({
-      name: "s",
-      endpoint: "h:443",
-      issuer: "https://i",
-      clientId: "cockpit",
-      pat: "mql_pat_x",
-    }),
-    false,
-  );
+test("clearing the refresh token deletes it from disk, leaving the access token", async () => {
+  const f = await tempFile(SAMPLE);
+  await upsertCluster(f, { name: "local", refreshToken: "rt-abc" });
+  await upsertCluster(f, { name: "local", token: "eyJ.fresh.sig", refreshToken: "" });
+
+  const raw = await fs.readFile(f, "utf8");
+  assert.doesNotMatch(raw, /rt-abc/, "the long-lived secret must not linger in plaintext");
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.refreshToken, undefined);
+  assert.equal(parsed.clusters[0]?.token, "eyJ.fresh.sig");
 });
 
-test("isOidcOnly is false without an endpoint, so the message is 'not configured'", () => {
-  const cluster = { name: "s", endpoint: "", issuer: "https://i", clientId: "cockpit" };
-  assert.equal(isOidcOnly(cluster), false);
-  assert.equal(needsAuth(cluster), true, "and needsAuth must be the one that answers instead");
+test("a name-only update leaves every other field alone", async () => {
+  // The shape the credential resolver writes: one field, identified by name,
+  // with no endpoint restated.
+  const f = await tempFile(SAMPLE);
+  await upsertCluster(f, { name: "local", token: "eyJ.fresh.sig" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
+  assert.equal(parsed.clusters[0]?.token, "eyJ.fresh.sig");
 });
 
 // -----------------------------------------------------------------------------
@@ -513,7 +522,7 @@ test("upsertCluster DELETES local when an edit turns it off", async () => {
 });
 
 test("upsertCluster leaves local alone when the write does not mention it", async () => {
-  // The PAT-only edit path. Undefined still means "not supplied" for a
+  // The token-only edit path. Undefined still means "not supplied" for a
   // boolean, exactly as for a string -- otherwise changing an endpoint would
   // silently clear the flag.
   const f = await tempFile("clusters:\n  - name: dev\n    endpoint: h:443\n    local: true\n");

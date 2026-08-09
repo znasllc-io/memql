@@ -8,7 +8,8 @@
 import * as vscode from "vscode";
 
 import type { ClusterConfig } from "../clusters/model.js";
-import { displayLabel, isOidcOnly, needsAuth } from "../clusters/model.js";
+import { displayLabel } from "../clusters/model.js";
+import { clusterRowStatus, type ClusterRowIcon } from "../clusters/status.js";
 import { readClustersFileSafe } from "../clusters/file.js";
 import type { ConnectionManager } from "../connection/manager.js";
 
@@ -80,53 +81,34 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
       title: "Select Cluster",
       arguments: [node],
     };
-    item.iconPath = this.iconFor(node);
-    item.tooltip = this.tooltipFor(node);
+    // Both the icon and the tooltip come from ONE decision, taken in a module
+    // that can be unit-tested (src/clusters/status.ts). This method is only the
+    // mapping onto VS Code's icon vocabulary.
+    const status = clusterRowStatus(node.cluster, this.connections.state);
+    item.iconPath = themeIconFor(status.icon);
+    item.tooltip = status.tooltip;
     return item;
   }
+}
 
-  private iconFor(node: ClusterNode): vscode.ThemeIcon {
-    const state = this.connections.state;
-    const isActive =
-      state.status !== "disconnected" && state.clusterName === node.cluster.name;
-
-    if (isActive && state.status === "connected") {
-      return new vscode.ThemeIcon(
-        "circle-filled",
-        new vscode.ThemeColor("charts.green"),
-      );
-    }
-    if (isActive && state.status === "connecting") {
+// The `credential` icon is deliberately NOT the red error dot. memql#3385:
+// "an operator ... sees a red cluster icon with no indication that the
+// CREDENTIAL is what expired, as distinct from the cluster going away." A key
+// says which of the two it is at a glance, and yellow says it is fixable from
+// here rather than being an outage.
+function themeIconFor(icon: ClusterRowIcon): vscode.ThemeIcon {
+  switch (icon) {
+    case "connected":
+      return new vscode.ThemeIcon("circle-filled", new vscode.ThemeColor("charts.green"));
+    case "connecting":
       return new vscode.ThemeIcon("loading~spin");
-    }
-    if (isActive && state.status === "error") {
-      return new vscode.ThemeIcon(
-        "error",
-        new vscode.ThemeColor("charts.red"),
-      );
-    }
-    if (needsAuth(node.cluster)) {
-      return new vscode.ThemeIcon(
-        "warning",
-        new vscode.ThemeColor("charts.yellow"),
-      );
-    }
-    return new vscode.ThemeIcon("circle-outline");
-  }
-
-  private tooltipFor(node: ClusterNode): string {
-    const state = this.connections.state;
-    if (state.status !== "disconnected" && state.clusterName === node.cluster.name) {
-      if (state.status === "connected") return `Connected (node ${state.nodeId})`;
-      if (state.status === "connecting") return "Connecting...";
-      if (state.status === "error") return `ERROR: ${state.message}`;
-    }
-    if (isOidcOnly(node.cluster)) {
-      return "Configured for OIDC. Authenticate in the memQL Cockpit, or add a PAT.";
-    }
-    if (needsAuth(node.cluster)) {
-      return "Not configured. Set an endpoint and a PAT.";
-    }
-    return node.cluster.endpoint;
+    case "failed":
+      return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
+    case "credential":
+      return new vscode.ThemeIcon("key", new vscode.ThemeColor("charts.yellow"));
+    case "unconfigured":
+      return new vscode.ThemeIcon("warning", new vscode.ThemeColor("charts.yellow"));
+    case "idle":
+      return new vscode.ThemeIcon("circle-outline");
   }
 }

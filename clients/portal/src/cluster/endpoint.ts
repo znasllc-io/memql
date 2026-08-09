@@ -15,10 +15,11 @@
 // ===========================================================================
 //
 // The VS Code panel reads its clusters from ~/.memql/clusters.yaml and
-// authenticates with a PAT out of that file. A browser can do neither: it has
-// no filesystem, and a long-lived PAT sitting where page JavaScript can read
-// it would be strictly worse than the OAuth flow the identity service already
-// runs. So the portal needed its own answer, and there were three:
+// authenticates with a JWT access token out of that file (memql#3383 -- a PAT
+// cannot authenticate against a bff at all). A browser can do neither: it has
+// no filesystem, and a bearer sitting where page JavaScript can read it would
+// be strictly worse than the OAuth flow the identity service already runs. So
+// the portal needed its own answer, and there were three:
 //
 //   1. DERIVE FROM THE ORIGIN -- the cluster is wherever this page came from.
 //   2. A SERVER-SIDE REGISTRY -- v1:cluster:* rows an operator maintains, so

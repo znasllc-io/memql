@@ -40,22 +40,65 @@ Click a cluster to make it the working cluster. The selection persists to
 |---|---|
 | Filled green circle | Connected |
 | Spinner | Connecting |
-| Red error icon | Connection failed; hover for the message |
-| Yellow warning | Not configured -- no endpoint, or no credential |
+| Red error icon | The cluster is the problem -- unreachable, or the connection died |
+| Yellow key | The CREDENTIAL is the problem -- expired, missing, or the wrong class |
+| Yellow warning | Not configured -- no endpoint |
 | Hollow circle | Configured, not connected |
 
-**Add Cluster** and **Edit Cluster** collect a name, domain, endpoint and
-PAT. Writes preserve comments and any field a newer cockpit wrote,
-because the file is shared.
+The key and the red dot are deliberately different pictures. "Your token
+ran out" and "the cluster went away" have completely different next
+actions, and rendering both as a red dot made the first one unreadable
+(memql#3385).
+
+**Add Cluster** and **Edit Cluster** collect a name, domain, endpoint,
+access token and (optionally) refresh token. Writes preserve comments and
+any field a newer cockpit wrote, because the file is shared.
 
 ### Authentication
 
-This panel authenticates with the `pat` field. Mint a token at the
-identity binary's `/me/tokens`.
+The panel dials with the `token` field, which must hold an
+**identity-issued JWT access token** -- the `access_token` from
+`POST <identity>/oauth/token`.
 
-A cluster configured for OIDC with no PAT reports that it must be
-authenticated in the memQL Cockpit first -- the panel cannot yet read the
-cockpit's keyring credential store.
+**A Personal Access Token does not work here, and cannot.** PAT
+verification is a database lookup wired only into the identity binary, so
+every mesh node (bff, voice, cognition, agent, planner) rejects an
+`mql_pat_...` bearer *before* looking anything up. The panel detects one
+in the `token` field and refuses it by name rather than letting it fail as
+an unexplained handshake error (memql#3383).
+
+Access tokens are short-lived -- identity issues them with a 900-second
+TTL. Set `refresh_token` alongside the token and the panel renews it
+itself: proactively before each connect, and in place on a live stream via
+the SDK's re-auth hook, so a long session never has to be re-credentialed
+by hand (memql#3385).
+
+The refresh token is a 30-day credential, so the panel does not leave it
+in `clusters.yaml`. The `refresh_token` key is an **ingest path only**: on
+the first successful exchange the rotated token is moved into VS Code's
+`SecretStorage` and the plaintext key is deleted from the file. The access
+token stays in the file, because it is short-lived and because the memQL
+Cockpit shares this registry and needs to see it.
+
+A cluster entry therefore looks like this:
+
+```yaml
+clusters:
+  - name: local
+    domain: local.znas.io
+    endpoint: cockpit.local.znas.io:443
+    issuer: https://identity.local.znas.io   # optional; derived from domain
+    client_id: cockpit                       # optional
+    token: eyJhbGciOiJSUzI1NiIsImtpZCI6...   # JWT access token
+    refresh_token: <ingest only -- moved to SecretStorage on first use>
+    local: true
+selected_cluster: local
+```
+
+`issuer` is where the refresh exchange is POSTed. When it is absent the
+panel derives `https://identity.<domain>` (or the `identity.` sibling of a
+`cockpit.<host>` endpoint); a cluster with neither is told which field to
+supply rather than having a host guessed for it.
 
 ## Concepts
 

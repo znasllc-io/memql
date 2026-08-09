@@ -29,7 +29,7 @@
 // CSP means an escaping bug cannot become script execution. The postMessage
 // channel is untrusted too, so every handler validates shape at runtime.
 //
-// THE PAT IS NEVER RENDERED HERE. Nothing in this file reads a ClusterConfig.
+// THE CREDENTIAL IS NEVER RENDERED HERE. Nothing in this file reads a ClusterConfig.
 
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
