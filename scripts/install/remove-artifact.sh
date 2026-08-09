@@ -62,6 +62,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
+_CAP_PRUNED=()
 cap_init "install.removeArtifact" \
     "Remove one installer-created artifact: binary | checkout | hostsEntries | mkcertCA | stack | images."
 cap_spec_param "kind"         "what to remove: binary | checkout | hostsEntries | mkcertCA | stack | images"
@@ -72,6 +73,7 @@ cap_spec_param "marker"       "hosts block marker (default memql; matches '# BEG
 cap_spec_param "caroot"       "mkcert CA root directory (default: whatever 'mkcert -CAROOT' reports)"
 cap_spec_param "cluster"      "k3d cluster name for kind=stack (default memql)"
 cap_spec_param "image-prefix" "repository prefix for kind=images (default memql)"
+cap_spec_param "prune-empty-parents" "after removing, rmdir up to two now-empty parent dirs (flag)"
 
 #=============================================================================
 # THE GUARD -- called at the point of action in EVERY removal path
@@ -108,7 +110,54 @@ function remove_binary() {
     rm -f "$path" || cap_fail 5 "could not remove ${path}"
     cap_changed
     cap_info "Removed ${path}."
+    prune_empty_parents "$path"
     finish binary "$path" true "removed"
+}
+
+#=============================================================================
+# EMPTY-PARENT PRUNING (opt-in, bounded)
+#=============================================================================
+
+# prune_empty_parents <removed-path>
+#
+# The installer does not only write files, it writes the directories that hold
+# them: install.binary --dest creates ~/.memql/bin, install.cloneStack creates
+# ~/.memql/src, and both create ~/.memql itself. Removing only the contents
+# leaves that tree behind, so a machine whose baseline had NO ~/.memql does not
+# get back to baseline -- which the round-trip E2E caught as a memqlHome drift
+# after every artifact inside had been correctly removed.
+#
+# This is deliberately NOT automatic. It runs only with --prune-empty-parents,
+# which the uninstall graph passes for the steps whose artifacts live under the
+# memQL home, so an operator removing a binary from /usr/local/bin can never
+# have a parent directory disappear as a side effect they did not ask for.
+#
+# Three bounds, because "walk up deleting empty directories" is a dangerous
+# shape: at most TWO levels (bin -> home is the deepest real case), each level
+# must be genuinely empty, and the walk stops at $HOME, a filesystem root, or
+# any path shallower than two components. rmdir rather than rm -rf: it fails
+# rather than recurses if the directory turns out not to be empty.
+function prune_empty_parents() {
+    [[ -n "$(cap_flag prune-empty-parents)" ]] || return 0
+
+    local dir level=0
+    dir="$(dirname "$1")"
+    while [[ "$level" -lt 2 ]]; do
+        [[ -d "$dir" ]] || break
+        local resolved
+        resolved="$(cd "$dir" 2>/dev/null && pwd -P)" || break
+        case "$resolved" in
+            /|"${HOME%/}"|/home|/Users|/root|/usr|/usr/local|/usr/local/bin|/bin|/etc|/opt|/var|/tmp)
+                break ;;
+        esac
+        # Shallower than two components is a system location, not ours.
+        [[ "$(printf '%s' "${resolved#/}" | tr -cd '/' | wc -c)" -ge 1 ]] || break
+        rmdir "$resolved" 2>/dev/null || break
+        cap_info "Pruned the now-empty ${resolved}."
+        _CAP_PRUNED+=("$resolved")
+        dir="$(dirname "$resolved")"
+        level=$((level + 1))
+    done
 }
 
 #=============================================================================
@@ -151,6 +200,7 @@ function remove_checkout() {
     rm -rf "$resolved" || cap_fail 5 "could not remove ${resolved}"
     cap_changed
     cap_info "Removed the checkout at ${resolved}."
+    prune_empty_parents "$resolved"
     finish checkout "$resolved" true "checkout removed"
 }
 
@@ -335,6 +385,17 @@ function finish() {
     cap_result_set     target  "$2"
     cap_result_set_raw removed "$3"
     cap_result_set     detail  "$4"
+    # Pruned parents are reported, never silent: an uninstall that removes a
+    # directory says which one.
+    local pruned="[" first=1 d
+    for d in "${_CAP_PRUNED[@]:-}"; do
+        [[ -z "$d" ]] && continue
+        [[ "$first" == "1" ]] || pruned+=","
+        first=0
+        pruned+="\"$(cap_json_escape "$d")\""
+    done
+    pruned+="]"
+    cap_result_set_raw prunedDirs "$pruned"
     cap_ok
 }
 

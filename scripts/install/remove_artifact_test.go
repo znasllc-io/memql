@@ -834,3 +834,116 @@ func TestRemoveArtifactHostsRoundTripIsByteIdentical(t *testing.T) {
 		})
 	}
 }
+
+// TestRemoveArtifactPrunesEmptyParents covers the opt-in --prune-empty-parents
+// walk, which exists because the round-trip E2E caught a real gap: the
+// installer creates ~/.memql, ~/.memql/bin and ~/.memql/src, and removing only
+// the artifacts INSIDE them left the tree behind. A machine whose baseline had
+// no ~/.memql did not get back to baseline even though every artifact had been
+// correctly removed.
+//
+// "Walk up deleting empty directories" is a dangerous shape, so the bounds are
+// asserted as hard as the behaviour: it does nothing without the flag, it stops
+// at a NON-empty directory rather than recursing into it, and it never climbs
+// more than two levels.
+func TestRemoveArtifactPrunesEmptyParents(t *testing.T) {
+	w := raNewWorld(t, raClusterList, raImageList)
+
+	t.Run("prunes bin and the memql home when both fall empty", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), ".memql")
+		bin := filepath.Join(home, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		tool := filepath.Join(bin, "k3d")
+		if err := os.WriteFile(tool, []byte("#!/bin/sh\n"), 0o755); err != nil {
+			t.Fatalf("seed tool: %v", err)
+		}
+
+		stdout, stderr, code := raRun(t, w.env,
+			"--kind=binary", "--path="+tool, "--prune-empty-parents")
+		if code != 0 {
+			t.Fatalf("exit %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+		}
+		if _, err := os.Stat(bin); !os.IsNotExist(err) {
+			t.Errorf("%s survived: the now-empty bin dir was not pruned", bin)
+		}
+		if _, err := os.Stat(home); !os.IsNotExist(err) {
+			t.Errorf("%s survived: the now-empty memQL home was not pruned", home)
+		}
+	})
+
+	t.Run("does nothing without the flag", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), ".memql")
+		bin := filepath.Join(home, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		tool := filepath.Join(bin, "k3d")
+		if err := os.WriteFile(tool, []byte("x"), 0o755); err != nil {
+			t.Fatalf("seed tool: %v", err)
+		}
+
+		if _, _, code := raRun(t, w.env, "--kind=binary", "--path="+tool); code != 0 {
+			t.Fatalf("exit %d, want 0", code)
+		}
+		if _, err := os.Stat(bin); err != nil {
+			t.Errorf("%s was pruned WITHOUT --prune-empty-parents: the walk must be opt-in", bin)
+		}
+	})
+
+	t.Run("stops at a directory that is not empty", func(t *testing.T) {
+		home := filepath.Join(t.TempDir(), ".memql")
+		bin := filepath.Join(home, "bin")
+		if err := os.MkdirAll(bin, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		tool := filepath.Join(bin, "k3d")
+		if err := os.WriteFile(tool, []byte("x"), 0o755); err != nil {
+			t.Fatalf("seed tool: %v", err)
+		}
+		// Something the operator put there. bin falls empty and goes; the home
+		// does NOT, and must survive with its contents intact.
+		theirs := filepath.Join(home, "config.yaml")
+		if err := os.WriteFile(theirs, []byte("keep me"), 0o644); err != nil {
+			t.Fatalf("seed operator file: %v", err)
+		}
+
+		if _, _, code := raRun(t, w.env,
+			"--kind=binary", "--path="+tool, "--prune-empty-parents"); code != 0 {
+			t.Fatalf("exit %d, want 0", code)
+		}
+		if _, err := os.Stat(bin); !os.IsNotExist(err) {
+			t.Errorf("%s survived: it was empty and should have been pruned", bin)
+		}
+		if _, err := os.Stat(home); err != nil {
+			t.Errorf("%s was removed even though it still held a file: %v", home, err)
+		}
+		got, err := os.ReadFile(theirs)
+		if err != nil || string(got) != "keep me" {
+			t.Errorf("the operator's own file did not survive the prune: %v / %q", err, string(got))
+		}
+	})
+
+	t.Run("climbs no more than two levels", func(t *testing.T) {
+		root := t.TempDir()
+		deep := filepath.Join(root, "a", "b", "c")
+		if err := os.MkdirAll(deep, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		tool := filepath.Join(deep, "k3d")
+		if err := os.WriteFile(tool, []byte("x"), 0o755); err != nil {
+			t.Fatalf("seed tool: %v", err)
+		}
+
+		if _, _, code := raRun(t, w.env,
+			"--kind=binary", "--path="+tool, "--prune-empty-parents"); code != 0 {
+			t.Fatalf("exit %d, want 0", code)
+		}
+		// c and b go (two levels); a must remain.
+		if _, err := os.Stat(filepath.Join(root, "a")); err != nil {
+			t.Errorf("the walk climbed past two levels and removed %s: %v",
+				filepath.Join(root, "a"), err)
+		}
+	})
+}
