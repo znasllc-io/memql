@@ -18,6 +18,10 @@
 //     fingerprint over the sorted kid set. Two identity replicas that
 //     serve DIFFERENT key sets report different fingerprints, so a
 //     cross-replica `max != min` is the JWKS-incoherence signal.
+//   - memql_identity_signing_key_created_timestamp_seconds,
+//     memql_identity_signing_key_age_known,
+//     memql_identity_signing_key_rotation_supported -- the signing-key
+//     age surface (memql#3381). See SetIdentitySigningKey.
 //
 // Everything registers on a package-local registry (not the global
 // default) so tests stay isolated and the /metrics endpoint is fully
@@ -29,6 +33,7 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"sort"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -114,6 +119,27 @@ var (
 		Name:      "enabled",
 		Help:      "1 when authentication is enforced on this node, 0 when disabled via MEMQL_IDENTITY_ENABLED=false (troubleshooting only -- never staging/prod). Alert on any 0.",
 	})
+
+	identitySigningKeyCreatedTimestamp = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "identity",
+		Name:      "signing_key_created_timestamp_seconds",
+		Help:      "Unix timestamp at which the ACTIVE Ed25519 signing key was created. Key age is time() minus this. Meaningful only while memql_identity_signing_key_age_known is 1; it is 0 otherwise.",
+	})
+
+	identitySigningKeyAgeKnown = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "identity",
+		Name:      "signing_key_age_known",
+		Help:      "1 when this replica knows when its active signing key was really created, 0 when it does not. An env-provided seed (MEMQL_IDENTITY_SIGNING_KEY_B64) carries no creation date, so without MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT the only date available is process start -- which measures pod uptime, not key age. Alert on 0: key age is UNOBSERVABLE, not zero.",
+	})
+
+	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
+		Namespace: namespace,
+		Subsystem: "identity",
+		Name:      "signing_key_rotation_supported",
+		Help:      "1 when this replica can rotate its own signing key (on-disk MEMQL_IDENTITY_KEY_DIR mode, dev), 0 when it cannot (env-seed mode -- staging/prod). At 0 the in-process 90-day rotation scheduler is INERT and rotation is the manual re-seal-and-roll runbook (memql#3381).",
+	})
 )
 
 func init() {
@@ -124,6 +150,9 @@ func init() {
 		jwksKeysetKeys,
 		jwksKeysetFingerprint,
 		authEnabled,
+		identitySigningKeyCreatedTimestamp,
+		identitySigningKeyAgeKnown,
+		identitySigningKeyRotationSupported,
 	)
 	// Explicit zero so the series exists before the first keyset is
 	// observed; an alert on a missing series is harder to reason about
@@ -133,6 +162,60 @@ func init() {
 	// Auth is enforced by default; app/configAndAuth pins this to 0 when
 	// the master toggle disables auth for troubleshooting.
 	authEnabled.Set(1)
+	// The signing-key series are written ONLY by the identity binary
+	// (identity.EmitKeysetMetric). Every other node exports them at these
+	// zeros, which is honest -- a bff holds no signing key -- so every
+	// alert over them must select app="identity".
+	identitySigningKeyCreatedTimestamp.Set(0)
+	identitySigningKeyAgeKnown.Set(0)
+	identitySigningKeyRotationSupported.Set(0)
+}
+
+// SetIdentitySigningKey publishes the age surface for the ACTIVE Ed25519
+// signing key (memql#3381). Called by the identity service at startup, on
+// every JWKS serve, and after a rotation.
+//
+// createdAtKnown is the load-bearing argument. In env-seed mode
+// (MEMQL_IDENTITY_SIGNING_KEY_B64) the seed is 32 bytes and nothing else --
+// it carries no creation date, and the KeyManager fills CreatedAt with
+// time.Now() at construction. Publishing THAT as the key's creation date
+// would make a five-year-old key report an age of "since the last pod
+// restart": a metric that always looks healthy in exactly the environments
+// where rotation never happens, which is the same false-signal shape as the
+// dormant scheduler this metric exists to compensate for. So when the
+// operator has not stamped MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT, age is
+// reported as UNKNOWN (age_known=0, timestamp=0) rather than as zero.
+func SetIdentitySigningKey(createdAt time.Time, createdAtKnown, rotationSupported bool) {
+	if createdAtKnown && !createdAt.IsZero() {
+		identitySigningKeyCreatedTimestamp.Set(float64(createdAt.Unix()))
+		identitySigningKeyAgeKnown.Set(1)
+	} else {
+		identitySigningKeyCreatedTimestamp.Set(0)
+		identitySigningKeyAgeKnown.Set(0)
+	}
+	if rotationSupported {
+		identitySigningKeyRotationSupported.Set(1)
+	} else {
+		identitySigningKeyRotationSupported.Set(0)
+	}
+}
+
+// IdentitySigningKeyValues returns the current
+// (createdTimestampSeconds, ageKnown, rotationSupported) gauge values.
+// An introspection/testing aid; production code only ever calls
+// SetIdentitySigningKey.
+func IdentitySigningKeyValues() (createdTimestamp, ageKnown, rotationSupported float64) {
+	return gaugeValue(identitySigningKeyCreatedTimestamp),
+		gaugeValue(identitySigningKeyAgeKnown),
+		gaugeValue(identitySigningKeyRotationSupported)
+}
+
+func gaugeValue(g prometheus.Gauge) float64 {
+	var m dto.Metric
+	if err := g.Write(&m); err != nil {
+		return 0
+	}
+	return m.GetGauge().GetValue()
 }
 
 // SetAuthEnabled records whether authentication is enforced on this node.

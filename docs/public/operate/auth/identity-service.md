@@ -120,6 +120,7 @@ Identity-tagged binary:
 | `MEMQL_IDENTITY_ENABLED`                 | yes (`true`)              | Gates the whole service.                                                               |
 | `MEMQL_IDENTITY_BASE_URL`                | yes                       | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and email links.    |
 | `MEMQL_IDENTITY_SIGNING_KEY_B64`         | **yes for >=2 replicas**  | Shared base64-std 32-byte Ed25519 seed (#550). Every replica derives the SAME key + kid + JWKS. REQUIRED for any multi-replica / HA deployment -- see "Key management" below. |
+| `MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT`  | **strongly recommended with the seed** | RFC3339 date the seed was minted (memql#3381). A 32-byte seed carries no metadata, so without this the service falls back to process start and key age reads as pod uptime. Unset means age is reported UNKNOWN, and the overdue-rotation alert cannot fire. Same value on every replica; re-stamp on every re-seal. |
 | `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY`     | dev / single-node only    | Opt into per-pod ephemeral file keys (no shared seed). Default `false`. Only safe for one replica or a shared key volume. |
 | `MEMQL_IDENTITY_KEY_DIR`                 | recommended               | Where the on-disk Ed25519 key files live (file-key mode). Default `var/identity/keys`. |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`      | yes in non-localhost prod | Master secret (>=16 bytes) wrapping the on-disk private key (file-key mode).            |
@@ -336,30 +337,157 @@ production": if `MEMQL_IDENTITY_BASE_URL` is not a localhost origin and
 `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` is empty, startup fails. Don't try
 to defeat the guard.
 
-### Rotation
+### Rotating the signing key
 
-Two paths:
+**Read this before rotating anything.** Rotation behaves completely
+differently in the two key modes, and the mode staging and production run
+is the one with no automation in it.
 
-- **Cron**: a goroutine triggers `KeyManager.Rotate` every
-  `MEMQL_IDENTITY_KEY_ROTATION_DAYS` (default 90). The retired key
-  stays in JWKS for `MEMQL_IDENTITY_JWKS_OVERLAP_HOURS` (default 24).
-- **Admin "Rotate now"**: button in the admin UI's JWKS panel
-  calls `Service.RotateNow`. Same code path; same overlap.
+#### Which regime am I in?
 
-The retired key is hard-removed by the rotation goroutine's sweep
-once `RetiresAt < now`. Other nodes pick up the new kid on the
-next JWKS background refresh (every 5 min by default), or on
-demand when they encounter a token signed under an unknown kid.
+| | File-key mode (dev) | Env-seed mode (**staging + production**) |
+|---|---|---|
+| Key source | `MEMQL_IDENTITY_KEY_DIR` on disk | `MEMQL_IDENTITY_SIGNING_KEY_B64` in the sealed envelope |
+| `KeyManager.RotationSupported()` | `true` | `false` |
+| 90-day scheduler (`MEMQL_IDENTITY_KEY_ROTATION_DAYS`) | rotates | **inert -- no effect whatsoever** |
+| "Rotate now" surface | n/a (the admin control was removed) | none; `Service.RotateNow` returns an error |
+| JWKS overlap window (`MEMQL_IDENTITY_JWKS_OVERLAP_HOURS`) | applied | **bypassed** |
+| How you rotate | it happens by itself | manual re-seal + roll, below |
+
+The boot log says which one you are in: `jwt_signing_key_rotation_scheduler_active`
+or `jwt_signing_key_rotation_scheduler_inert`. So does
+`memql_identity_signing_key_rotation_supported` (1 / 0).
+
+In file-key mode a goroutine calls `KeyManager.Rotate` every
+`MEMQL_IDENTITY_KEY_ROTATION_DAYS` (default 90); the retiring key stays in
+JWKS for `MEMQL_IDENTITY_JWKS_OVERLAP_HOURS` (default 24) and is then swept.
+Other nodes pick up the new kid on their next background JWKS refresh (5 min)
+or immediately on the first token carrying an unknown kid.
+
+#### Recorded decision (memql#3381): the manual path stays
+
+The gap is real -- in every deployed environment there is no way to rotate
+the signing key from inside the running system. Two options were on the
+table:
+
+1. **Build a rotation surface that works in env mode** -- mint the successor
+   in-process, publish both through the overlap window, retire the old one.
+2. **Accept the manual procedure** and close the gap with observability: a
+   key-age metric, an alert, this runbook, and honest naming so the dormant
+   scheduler stops implying coverage.
+
+**Option 2 was chosen.** The reasoning, so the next reader can re-open it on
+evidence rather than taste:
+
+- **Option 1 cannot be built without moving where signing material lives.**
+  Env mode exists (memql#550) so that N identity replicas derive an
+  *identical* key from one seed with no single writer -- that is what let
+  identity drop its ReadWriteOnce key PVC and scale past one replica. A
+  replica that minted a successor on its own would sign with a key its peers
+  neither hold nor publish, which is exactly the JWKS-incoherence failure of
+  memql#1523 / memql#3400 (roughly half of all auth failing, silently). So
+  in-env-mode rotation needs shared durable state for the keyset -- a
+  keystore -- not a rotation button. That is a different, larger design.
+- **Writing a new seed back into the envelope is not available to the
+  service.** The seed reaches the pod through `envFrom` on the `memql-secrets`
+  Secret, which an operator creates out of band; identity secrets are not
+  ESO/Key-Vault-backed (only livekit and telephony are). For the service to
+  re-seal itself it would need `patch` on Secrets in its own namespace --
+  handing the cluster's most security-sensitive pod the ability to rewrite
+  every other secret next to it, including the database password. And it
+  would not even work: `envFrom` is snapshotted at pod start, so a patched
+  Secret changes nothing until a roll. The overlap the option promises is
+  unreachable through the envelope.
+- **Rotation is genuinely rare.** A 90-day cadence on an Ed25519 signing key
+  is hygiene, not incident response. Compromise is handled by re-sealing
+  immediately and accepting the hard swap -- which is what you want in that
+  case anyway.
+
+**What option 2 owes you, and now delivers:** key age is observable
+(`memql_identity_signing_key_created_timestamp_seconds`), silence is earned
+rather than assumed (`memql_identity_signing_key_age_known`), the regime is
+legible (`memql_identity_signing_key_rotation_supported`), two alerts fire in
+`deploy/k8s/monitoring/prometheusrule-auth.yaml`, and the scheduler is
+labelled dev-only at its definition in `component/identity/identity.go` and at
+boot.
+
+**Follow-up left open:** the only shape option 1 could really take is a
+DB-backed keyset -- signing material in Postgres, which every replica already
+shares, wrapped at rest, with the seed demoted to a bootstrap credential.
+That would restore true overlap-window rotation in a deployed cluster. It was
+not attempted here; it re-opens where signing material lives, its at-rest
+encryption, and identity's boot ordering.
+
+#### The consequence you must plan for: a hard swap is lossier than a rotation
+
+The manual path writes a new seed and rolls. It never populates the
+KeyManager's `previous` slot, so **`MEMQL_IDENTITY_JWKS_OVERLAP_HOURS` does
+not apply** -- the old kid vanishes from JWKS the moment the new pods serve.
+The procedure is not merely unsurfaced; it is *lossier* than the code path it
+substitutes for. Every JWT signed by the old key becomes unverifiable at
+once. Anything holding an opaque token is unaffected.
+
+| Credential | Survives a hard swap? | What an operator must do |
+|---|---|---|
+| User access token (JWT, 15 min) | **No** | Nothing -- the SPA's next `/auth/refresh` mints a new one under the new key |
+| Refresh token (opaque, DB hash) | Yes | Nothing. This is why browser sessions self-heal |
+| Magic links, auth codes, device codes, invitations, PATs (`mql_pat_`), worker tokens (`mql_wkr_`), enrolment tokens (`mql_enr_`), account tokens, badge **ids** | Yes | Nothing -- all opaque, all verified by stored hash |
+| Mesh node token (JWT) | **No** | Usually nothing: on an auth rejection a node re-mints via `POST /node/bootstrap` immediately (memql#1521). **But only if `MEMQL_NODE_BOOTSTRAP_TOKEN` is configured.** A node given a pre-provisioned `MEMQL_NODE_TOKEN` cannot re-mint, and restarting does not help either -- you must re-issue that secret *and* restart |
+| `service_account` JWT | **No** | Re-mint each one by hand (`memql service-account-token mint`). There is no refresh path by design |
+| `voice_agent` JWT | **No** | Restart the voice-agent; the token is resolved once at boot |
+| `badge` grant token (10 min) | **No** | Worse than it looks: issuing a new grant requires a valid user JWT from the terminal, so the terminal has to sign in again first |
+| Identity web-UI cookie (`/me/*`, `/admin/*`) | **No** | Operators are bounced to `/login` and magic-link in again |
+
+Verifier-side recovery is fast and needs no restart: the per-node verifier
+force-refreshes JWKS synchronously on any unknown kid, with no negative
+caching, so the first request bearing a new-kid token pays one round-trip and
+then succeeds. Two caveats: the JWKS handler sends
+`Cache-Control: public, max-age=300`, so a caching proxy or CDN in front of
+identity can serve the pre-swap keyset for up to 5 minutes -- verify none is
+in the path; and concurrent unknown-kid requests serialize on the refresh
+mutex rather than coalescing, so expect a brief latency spike at the moment
+of the swap.
+
+#### Procedure (env-seed mode)
+
+Do it in a maintenance window. Everything in the "No" rows above breaks at
+step 3.
+
+1. **Generate a new seed** (32 bytes, base64-std):
+   `make identity-signing-key`
+2. **Re-seal it**, together with today's date, into the envelope / Secret the
+   identity Deployment reads:
+   - `MEMQL_IDENTITY_SIGNING_KEY_B64` -- the new seed
+   - `MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT` -- today, RFC3339
+     (e.g. `2026-08-09T00:00:00Z`). Re-stamp it every time; a stale stamp
+     silently disarms the overdue alert.
+   Both values must be identical across every identity replica -- they are
+   properties of the key, not of the pod.
+3. **Roll identity** and wait for Available:
+   `kubectl -n memql rollout restart deploy/identity && kubectl -n memql rollout status deploy/identity`
+4. **Confirm the new keyset** -- one kid, and the same one everywhere:
+   `kubectl -n memql exec deploy/identity -- curl -sS https://localhost:8085/.well-known/jwks.json`
+   Cross-replica agreement is what `make status` checks locally and what
+   `memql_jwks_keyset_fingerprint` (max == min) checks in the cluster.
+5. **Repair the credentials that cannot repair themselves**: re-mint every
+   `service_account` JWT, restart the voice-agent, and restart any node
+   pinned to a pre-provisioned `MEMQL_NODE_TOKEN` after re-issuing it.
+6. **Watch** `memql_auth_rejects_total{reason="unknown_kid"}` settle back to
+   zero, and confirm `memql_identity_signing_key_age_known` is 1 with a fresh
+   `..._created_timestamp_seconds`.
 
 ### Recovery
 
-If `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` is rotated incorrectly (the new
-secret can't decrypt the old envelope), the binary fails to load
-the key files at startup with a clear AES-GCM error. Restore the
-original secret from your secret store, redeploy, then perform a
-proper rotation: stand up the new secret, call "Rotate now" so a
-fresh key is minted under it, and only then retire the old
-secret.
+This applies to file-key mode only -- env-seed mode has nothing on disk to
+decrypt. If `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY` is rotated incorrectly (the
+new secret can't decrypt the old envelope), the binary fails to load the key
+files at startup with a clear AES-GCM error. Restore the original secret from
+your secret store and redeploy. Then rotate properly: stand up the new
+secret and let the scheduler mint a fresh key under it (or delete
+`jwt-current.ed25519` so the next boot generates one), and only then retire
+the old secret. There is no "Rotate now" control to press -- the admin
+console's button was removed in memql#3324 because it answered with an error
+in every environment that runs env-seed mode.
 
 ### Staging DB reset stays auth-coherent (#1522)
 
@@ -428,8 +556,17 @@ every request.
   manager has loaded.
 - `GET /.well-known/jwks.json` always reflects the current
   PublicKeySet (current + retiring during overlap).
-- The admin UI's JWKS panel shows live key metadata (kid,
-  createdAt, retiresAt) and the rotation cadence.
+- The portal's Keys page shows live key metadata (kid, role, algorithm) and
+  explains why there is no rotate control.
+- Prometheus, on the identity node (`component/metrics`):
+  `memql_identity_signing_key_created_timestamp_seconds` (key age is
+  `time()` minus this), `memql_identity_signing_key_age_known` (0 = the age
+  above is meaningless -- alert on it, because it means the overdue alert
+  cannot fire), and `memql_identity_signing_key_rotation_supported`
+  (0 = the in-process scheduler is inert; the manual runbook is the only
+  path). Alerts: `MemqlIdentitySigningKeyOverdue` and
+  `MemqlIdentitySigningKeyAgeUnknown` in
+  `deploy/k8s/monitoring/prometheusrule-auth.yaml`.
 - Audit events for every auth lifecycle moment land in
   `v1:identity:auditEvent` (in addition to slog). Retention is
   controlled by `MEMQL_IDENTITY_AUDIT_LOG_RETENTION_DAYS` (default 365).

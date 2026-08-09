@@ -113,13 +113,16 @@ export function KeysPage(): ReactNode {
 
       <Band title="How rotation works">
         <p className="max-w-3xl text-sm text-muted">
-          The cluster signs every access token with the current Ed25519 keypair
-          and rotates on a schedule. During rotation the previous key stays in
-          the feed for an overlap window, so tokens minted before the change keep
-          verifying until they expire. A second row in the table above means that
+          The cluster signs every access token with the current Ed25519 keypair.
+          When a key is rotated <em>in process</em>, the previous key stays in the
+          feed for an overlap window, so tokens minted before the change keep
+          verifying until they expire; a second row in the table above means that
           window is open right now. Verifier nodes refresh the feed in the
-          background and on any kid they have not seen, so a rotation reaches the
-          mesh without a restart.
+          background and on any kid they have not seen, so such a rotation reaches
+          the mesh without a restart. Read that as the development path, though —
+          a deployed cluster never takes it. There the scheduled rotation below
+          never runs, the manual re-seal has no overlap window, and a second row
+          will therefore never appear.
         </p>
       </Band>
 

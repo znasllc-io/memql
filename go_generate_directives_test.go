@@ -37,6 +37,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -47,6 +48,29 @@ type generateDirective struct {
 	dir  string // absolute directory the directive resolves paths against
 	line int
 	text string // everything after the `//go:generate ` prefix
+}
+
+// isNestedCheckout reports whether dir is the root of a git checkout that is
+// not this one -- a worktree (whose `.git` is a FILE) or a clone (whose `.git`
+// is a DIRECTORY). Both carry a full second copy of the tree.
+//
+// A nested copy is not part of this repository (memql#3346). This repo's own
+// .gitignore and CLAUDE.md put worktrees under `.claude/worktrees/`, so a
+// developer following the documented layout has one, and every walk that does
+// not skip it inspects that copy's files as though they were this checkout's.
+// For the directive walks below the effect is only duplicate reporting; for
+// TestEveryProtoPackageDelegatesToThePinnedGenerator it is a false failure,
+// because a STALE worktree still holding a since-deleted proto dir would be
+// reported against the current tree, and the suggested remediation would be to
+// edit a directory the current tree does not contain.
+//
+// CI never sees any of it: a CI checkout has no nested worktrees.
+func isNestedCheckout(root, dir string) bool {
+	if dir == root {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }
 
 // collectGenerateDirectives finds every `//go:generate` line in the tree.
@@ -61,6 +85,9 @@ func collectGenerateDirectives(t *testing.T, root string) []generateDirective {
 		if d.IsDir() {
 			switch d.Name() {
 			case ".git", "node_modules", "vendor", "testdata":
+				return fs.SkipDir
+			}
+			if isNestedCheckout(root, path) {
 				return fs.SkipDir
 			}
 			return nil
@@ -276,13 +303,14 @@ var bareProtocInvocation = regexp.MustCompile(`(^|[\s;&|"'(])protoc(\s|$)`)
 // bare `protoc` directive is an easy and natural thing to reach for and its
 // damage is invisible until someone with a different protoc runs it.
 //
-// Note this deliberately does not check the reverse (that every proto package
-// HAS a delegating directive). Discovering "proto packages" means discovering
-// directories containing .proto, and this tree has vendored google/api and
-// google/protobuf stubs plus an orphaned component/polyphon/proto that are not
-// generation targets. That guard would need a hand-maintained exclusion list --
-// the drift-prone parallel list this change removed from proto-gen.sh, re-added
-// in Go. The negative property needs no such list and is the one that matters.
+// The converse -- that every proto package HAS a delegating directive -- is
+// TestEveryProtoPackageDelegatesToThePinnedGenerator below. It was left unwritten
+// when this guard landed because the tree then held an orphaned
+// component/polyphon/proto alongside the vendored google stubs, so asserting it
+// needed a hand-maintained exclusion list: the drift-prone parallel list
+// memql#3251 had just removed from proto-gen.sh, re-added in Go. Deleting the
+// orphan (memql#3289) left only the google stubs, which are excluded by a
+// structural predicate rather than by name.
 func TestGoGenerateDirectivesDoNotInvokeBareProtoc(t *testing.T) {
 	root, err := os.Getwd()
 	if err != nil {
@@ -313,5 +341,164 @@ func TestGoGenerateDirectivesDoNotInvokeBareProtoc(t *testing.T) {
 			"per proto package:\n"+
 			"\t//go:generate sh -c \"cd ../.. && make proto-gen PROTO_GEN_ONLY=<this dir>\"",
 			d.file, d.line, d.text)
+	}
+}
+
+// pinnedGeneratorDelegation matches a directive that routes generation through
+// `make proto-gen`, the single pinned path (memql#3251). It is the positive
+// counterpart to bareProtocInvocation: that one names the route a directive
+// must not take, this one names the route it must.
+var pinnedGeneratorDelegation = regexp.MustCompile(`\bproto-gen\b`)
+
+// isVendoredProtoStub reports whether a directory of `.proto` files is a
+// vendored copy of a third-party import rather than a generation target of
+// this repository.
+//
+// The predicate is the proto IMPORT PATH, not a list of directories. A source
+// that writes `import "google/protobuf/timestamp.proto"` has protoc resolve
+// that exact string against --proto_path, so a vendored copy is only findable
+// at `<proto_path>/google/protobuf/timestamp.proto`. The `google/` segment is
+// forced by the import statement, which is what makes keying on it structural
+// rather than a naming convention someone could quietly break. protoc-gen-go
+// maps those files to the well-known types already compiled into
+// google.golang.org/protobuf, so nothing in this repository is generated from
+// them and a //go:generate directive over them would be a lie.
+//
+// A hand-maintained exclusion list is what this exists to avoid: the guard
+// below is only worth having if adding a proto dir cannot also add a line to
+// the guard that waves it through.
+func isVendoredProtoStub(dir string) bool {
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == "google" {
+			return true
+		}
+	}
+	return false
+}
+
+// protoDirs returns every directory holding a `.proto`, repo-relative and
+// slash-separated, mapped to one example file in it for the failure message.
+func protoDirs(t *testing.T, root string) map[string]string {
+	t.Helper()
+
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "vendor", "testdata":
+				return fs.SkipDir
+			}
+			if isNestedCheckout(root, path) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".proto") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		rel = filepath.ToSlash(rel)
+		dir := filepath.ToSlash(filepath.Dir(rel))
+		if _, seen := out[dir]; !seen {
+			out[dir] = rel
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk repository: %v", err)
+	}
+	return out
+}
+
+// TestEveryProtoPackageDelegatesToThePinnedGenerator is the converse of
+// TestGoGenerateDirectivesDoNotInvokeBareProtoc (znasllc-io/memql#3289).
+//
+// # What it catches
+//
+// A `.proto` that generates nothing. `component/polyphon/proto/polyphon.proto`
+// was one for the whole life of this repository: two gRPC services and
+// seventeen messages describing a memQL-to-Bridge-Agent contract, no `.pb.go`
+// ever produced from it in any commit, no Go symbol naming any of its types.
+// It still matched the `proto` bucket in ci.yml, so editing it scheduled the
+// drift gate over three trees it could not affect -- and, worse, it read as a
+// wire contract. A `.proto` in a directory called `proto/` is the strongest
+// available signal that a file is load-bearing. Someone changing Polyphon
+// behaviour there got a green CI and no effect.
+//
+// That is the same shape as the defect the sibling guard above exists for
+// (memql#3251: two generation paths, nothing naming which was authoritative)
+// and as memql#3215 (directives whose every referenced path was absent): an
+// artifact asserting something about how a package is maintained, with nothing
+// able to report that it stopped being true.
+//
+// # Why this can be asserted now and could not be before
+//
+// The obstacle was never the property, it was the exclusion list. Deciding
+// which proto dirs are generation targets meant enumerating the ones that are
+// not -- and a guard carrying a hand-maintained list of things it does not
+// check is one edit away from being talked out of checking anything.
+//
+// With the orphan deleted, every remaining non-target is a vendored google
+// stub, excluded by isVendoredProtoStub on the import path protoc itself
+// forces. Nothing here is a name somebody chose.
+func TestEveryProtoPackageDelegatesToThePinnedGenerator(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+
+	dirs := protoDirs(t, root)
+	if len(dirs) == 0 {
+		t.Fatal("found no .proto anywhere -- either the wire sources moved or " +
+			"this guard's discovery is broken. Failing closed rather than " +
+			"reporting a vacuous pass")
+	}
+
+	delegating := map[string]bool{}
+	for _, d := range collectGenerateDirectives(t, root) {
+		if pinnedGeneratorDelegation.MatchString(d.text) {
+			delegating[filepath.ToSlash(filepath.Dir(d.file))] = true
+		}
+	}
+	if len(delegating) == 0 {
+		t.Fatal("no //go:generate directive anywhere delegates to `make " +
+			"proto-gen` -- the pinned generation path has no entry point, or " +
+			"this guard's discovery is broken. Failing closed")
+	}
+
+	sorted := make([]string, 0, len(dirs))
+	for dir := range dirs {
+		sorted = append(sorted, dir)
+	}
+	sort.Strings(sorted)
+
+	for _, dir := range sorted {
+		if isVendoredProtoStub(dir) || delegating[dir] {
+			continue
+		}
+		t.Errorf("%s holds %q but no //go:generate directive that reaches the "+
+			"pinned generator, so nothing in this repository is generated from "+
+			"it.\n"+
+			"A .proto reads as a wire contract -- that is the whole reason to "+
+			"write one -- so an orphan is worse than a missing file: editing it "+
+			"to change behaviour produces a green CI and no effect, and it "+
+			"matches the `proto` bucket in ci.yml, scheduling the drift gate "+
+			"over trees it cannot affect (memql#3289).\n"+
+			"Resolve it in one of two directions:\n"+
+			"\t- it should generate: add a generate.go in %s carrying\n"+
+			"\t  //go:generate sh -c \"cd <repo root> && make proto-gen PROTO_GEN_ONLY=%s\",\n"+
+			"\t  add %s to PROTO_TARGETS in scripts/dev/proto-gen.sh, and add its\n"+
+			"\t  output tree to the `proto` bucket in .github/workflows/ci.yml;\n"+
+			"\t- it should not: delete it.\n"+
+			"Vendored third-party stubs are exempt, but only via the import path "+
+			"protoc forces (a `google/` segment) -- this guard deliberately "+
+			"carries no list of names to add yourself to.",
+			dir, dirs[dir], dir, dir, dir)
 	}
 }
