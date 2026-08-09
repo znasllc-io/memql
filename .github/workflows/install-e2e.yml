@@ -146,6 +146,18 @@ jobs:
               --tag="${{ steps.tag.outputs.tag }}" \
               --skip=providerKey,localCA \
               --timeout=600
+          # Running the CLI as root means everything it wrote is root-owned,
+          # including the receipt -- and every step after this one runs as the
+          # runner. The first real execution of this workflow died here with
+          # "cat: install-receipt.json: Permission denied", which skipped the
+          # uninstall and the diff and then failed the artifact upload too, so
+          # the run produced no evidence about the thing it exists to test.
+          # Hand the receipt back before anyone else needs to read it.
+          #
+          # Only the receipt: ~/.memql stays root-owned on purpose, because the
+          # uninstall below also runs under sudo and must remove exactly what
+          # the install created, as the same user that created it.
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/install-receipt.json"
 
       - name: Show what the install recorded
         run: cat "$RUNNER_TEMP/install-receipt.json"
