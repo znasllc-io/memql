@@ -4485,6 +4485,100 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 	return b.String()
 }
 
+// CreatePasskeyIdentity -- Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC COSE key -- there is no secret half to withhold.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
+type CreatePasskeyIdentityArgs struct {
+	IdentityId        string
+	UserId            string
+	Label             string
+	CredentialId      string
+	PublicKey         string
+	SignCount         int
+	Aaguid            string
+	Transports        []string
+	BackupEligible    bool
+	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
+	BackupState       bool
+	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
+	RegisteredBy      string
+}
+
+// CreatePasskeyIdentity calls the engine mutation createPasskeyIdentity.
+func (qc *QueryClient) CreatePasskeyIdentity(ctx context.Context, args CreatePasskeyIdentityArgs) (*Result, error) {
+	call := CreatePasskeyIdentityBuild(args)
+	return qc.executeNamed(ctx, "createPasskeyIdentity", call)
+}
+
+func CreatePasskeyIdentityBuild(args CreatePasskeyIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createPasskeyIdentity(")
+	b.WriteString("identityId: ")
+	b.WriteString(quoteMemQL(args.IdentityId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("userId: ")
+	b.WriteString(quoteMemQL(args.UserId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("label: ")
+	b.WriteString(quoteMemQL(args.Label))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("publicKey: ")
+	b.WriteString(quoteMemQL(args.PublicKey))
+	if args.SignCount != 0 {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("signCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	}
+	if args.Aaguid != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("aaguid: ")
+		b.WriteString(quoteMemQL(args.Aaguid))
+	}
+	if args.Transports != nil {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("transports: ")
+		b.WriteString(renderMemQLValue(args.Transports))
+	}
+	if args.BackupEligibleSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupEligible: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	}
+	if args.BackupStateSet {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("backupState: ")
+		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	}
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("registeredBy: ")
+	b.WriteString(quoteMemQL(args.RegisteredBy))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreatePlan -- Insert a v1:planner:plan row in status='queued'. Single write path for Plan creation across all trigger sources.
 //
 // Bound concept: v1:planner:plan (machine-readable: BoundConcepts["createPlan"] in generated_concepts.go).

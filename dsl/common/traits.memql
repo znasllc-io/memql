@@ -338,6 +338,20 @@ trait identityIsBadge {
   return identityType=="badge"
 }
 
+// ---- identityIsPasskey ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "passkey" -- a registered WebAuthn
+// discoverable credential (memql#3406). The registration ceremony
+// looks rows up by credentials.credentialId to reject a duplicate
+// enrolment, and the login ceremony (memql#3407) resolves a
+// usernameless assertion through the same key.
+
+/// Matches v1:identity:identity rows with identityType=='passkey'.
+trait identityIsPasskey {
+  return identityType=="passkey"
+}
+
 // ---- isDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

@@ -1743,6 +1743,64 @@ mutate identity revokeBadgeIdentity {
   }
 }
 
+// ---- mutations/v1/identity/createPasskeyIdentity.memql ----
+
+// createPasskeyIdentity
+// =====================
+//
+// Creates a v1:identity:identity row of identityType="passkey" -- an
+// enrolled WebAuthn discoverable credential (memql#3406). What lands
+// here is the PUBLIC half of a keypair whose private half never left the
+// authenticator, so unlike every keyHash sibling in this file there is
+// no plaintext being deliberately withheld: there is no secret to
+// withhold.
+//
+// Uniqueness of credentials.credentialId is the invariant the login
+// ceremony depends on (memql#3407 resolves a discoverable assertion
+// through that field alone), and it is enforced by the CALLER: the
+// register/finish handler runs passkeyByCredentialId first and refuses a
+// duplicate. Stated here because a raw invocation of this mutation
+// bypasses that check -- the write is gated to a system actor by the
+// memql#2513 credential-actor guard, which is what keeps the only
+// reachable path the one that checks.
+
+/// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
+/// COSE key -- there is no secret half to withhold.
+mutate identity createPasskeyIdentity {
+  args {
+    identityId      string!
+    userId          string!
+    label           string!
+    credentialId    string!
+    publicKey       string!
+    signCount       int
+    aaguid          string
+    transports      []string
+    backupEligible  bool
+    backupState     bool
+    registeredBy    string!
+  }
+  insert {
+    id: args.identityId
+    args.userId
+    identityType: "passkey"
+    credentials: {
+        credentialId: args.credentialId,
+        publicKey: args.publicKey,
+        signCount: args.signCount,
+        aaguid: args.aaguid,
+        transports: args.transports,
+        backupEligible: args.backupEligible,
+        backupState: args.backupState,
+        registeredBy: args.registeredBy,
+        lastUsedAt: ""
+      }
+    args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
 // ---- mutations/v1/identity/touchBadgeLastUsed.memql ----
 
 // touchBadgeLastUsed

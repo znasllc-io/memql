@@ -3155,6 +3155,45 @@ func ParticipantSessionBuild(args ParticipantSessionArgs) string {
 	return b.String()
 }
 
+// PasskeyByCredentialId -- Look up a passkey identity by its base64url credential id. Returns active + inactive rows.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["passkeyByCredentialId"] in generated_concepts.go).
+type PasskeyByCredentialIdArgs struct {
+	CredentialId string
+}
+
+// PasskeyByCredentialId calls the engine query passkeyByCredentialId.
+func (qc *QueryClient) PasskeyByCredentialId(ctx context.Context, args PasskeyByCredentialIdArgs) (*Result, error) {
+	call := PasskeyByCredentialIdBuild(args)
+	return qc.executeNamed(ctx, "passkeyByCredentialId", call)
+}
+
+func PasskeyByCredentialIdBuild(args PasskeyByCredentialIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query passkeyByCredentialId(")
+	b.WriteString("credentialId: ")
+	b.WriteString(quoteMemQL(args.CredentialId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// PasskeysForSelf -- List the CALLING user's own enrolled passkeys, newest first. Projects passkeySummary -- the recognisable fields plus the backup flags, never the COSE public key or the signature counter.
+//
+// Bound concept: v1:identity:identity (machine-readable: BoundConcepts["passkeysForSelf"] in generated_concepts.go).
+type PasskeysForSelfArgs struct {
+}
+
+// PasskeysForSelf calls the engine query passkeysForSelf.
+func (qc *QueryClient) PasskeysForSelf(ctx context.Context, args PasskeysForSelfArgs) (*Result, error) {
+	call := PasskeysForSelfBuild(args)
+	return qc.executeNamed(ctx, "passkeysForSelf", call)
+}
+
+func PasskeysForSelfBuild(args PasskeysForSelfArgs) string {
+	_ = args
+	return "query passkeysForSelf()"
+}
+
 // PatIdentitiesForSelf -- List the CALLING user's own PAT (api_key) identities, in patSummary shape (no credentials).
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["patIdentitiesForSelf"] in generated_concepts.go).
