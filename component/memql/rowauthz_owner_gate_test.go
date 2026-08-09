@@ -195,4 +195,33 @@ each carry an issue number for exactly that reason.`,
 //     request. The actual fix was three stamp lines.
 //   - If you must exempt, file the decision first and reference it here.
 //     Adding an entry without one is how a gate turns into decoration.
-var ownerGateExemptions = map[string]string{}
+//
+// NO LONGER EMPTY as of memql#3323. The single entry below is the OTHER
+// failure this gate reports -- not "a caller can write the field" but
+// "nothing writes this concept at all" -- and it is tracked rather than
+// papered over. See the entry's own comment.
+var ownerGateExemptions = map[string]string{
+	// memql#3348 -- the campaigns sending engine.
+	//
+	// NOTHING writes v1:campaigns:delivery, so no mutation stamps its owner and
+	// the tier rests on however a row was seeded. memql#3323 landed the
+	// campaign concepts and the authoring UI and deliberately shipped no writer
+	// for delivery: a delivery row is a per-recipient SEND OUTCOME, and the
+	// thing that produces one is the sending engine, split out because
+	// deliverability, suppression and rate limiting are product decisions
+	// rather than UI.
+	//
+	// The gate's first remedy -- re-stamp from the actor in every write -- has
+	// nothing to attach to. Its second -- drop the tier -- is wrong: these rows
+	// are genuinely one operator's, they carry a recipient's address under
+	// @pii, and dropping the tier would move the failure onto the undeclared
+	// gate while leaving the rows LESS protected.
+	//
+	// Inventing a recordDelivery mutation purely to turn this green was
+	// considered and rejected twice over: it would let any caller fabricate
+	// send outcomes for their own campaigns, and it would make the gate true by
+	// building the fragment of the engine #3323 declined to half-build. The
+	// exemption is the honest state -- the tier is right, the writer is
+	// missing. Delete this entry when memql#3348 supplies it.
+	"v1:campaigns:delivery": "memql#3348 -- no writer exists yet; the sending engine is what stamps ownerUserId",
+}

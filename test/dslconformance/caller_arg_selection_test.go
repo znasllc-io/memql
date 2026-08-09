@@ -207,10 +207,23 @@ var callerArgSelectionExemptions = map[string]string{
 	"identity/mutations.memql revokeWorkerTokenIdentity": "revokes any user's worker token.",
 	"identity/mutations.memql revokeBadgeIdentity":       "revokes any user's badge identity.",
 	"identity/mutations.memql revokeNodeTokenIdentity":   "revokes any node token identity.",
-	"identity/mutations.memql bumpPATLastUsedAt":         "stamps last-used on any PAT; server-side token path.",
-	"identity/mutations.memql touchBadgeLastUsed":        "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
-	"identity/mutations.memql stampNodeTokenBootstrap":   "stamps bootstrap state on any node token identity; server-side node path.",
-	"identity/queries.memql patIdentityById":             "returns a PAT identity row by id; server-side token verification path.",
+	// memql#3322. The same shape as the four revokes above, gated the same
+	// way: component/grpc/account_token_handlers.go resolves the row
+	// through accountTokenById (userId==actor.userId) AS THE CALLER and
+	// refuses before reaching this. @serverOnly is not available as the
+	// alternative -- component/grpc sits on call_origin_conformance_test.go's
+	// wire-path DENY list, so its only caller can never stamp the origin
+	// that annotation checks and the mutation would be unreachable. The
+	// blast radius is also the smallest in this group: no verifier and no
+	// interceptor admits an mql_acct_ bearer, so a raw wire call
+	// deactivates a credential that authorizes nothing. The fix for all
+	// five at once is @rowAuthz(owner="userId") on v1:identity:identity,
+	// which is memql#3173's scope rather than one family's.
+	"identity/mutations.memql revokeAccountTokenIdentity": "revokes any user's account token; ownership is checked in the handler and the credential authorizes nothing (memql#3322).",
+	"identity/mutations.memql bumpPATLastUsedAt":          "stamps last-used on any PAT; server-side token path.",
+	"identity/mutations.memql touchBadgeLastUsed":         "MISNAMED, and sharper than its name: it takes `credentials object!` and spreads it, so it overwrites the ENTIRE credentials block -- keyHash included -- of an arbitrary identity from caller input. Badge-credential substitution, not a timestamp stamp.",
+	"identity/mutations.memql stampNodeTokenBootstrap":    "stamps bootstrap state on any node token identity; server-side node path.",
+	"identity/queries.memql patIdentityById":              "returns a PAT identity row by id; server-side token verification path.",
 	// nodeTokenIdentityById's entry is GONE, and deliberately not replaced:
 	// memql#2987 moved it to @serverOnly, so this detector no longer reaches
 	// it and a lingering entry would fail the stale-exemption check. Its note

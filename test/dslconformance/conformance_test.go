@@ -504,6 +504,16 @@ var idBearingFieldExemptions = map[string]string{
 	"healing/healedOverride.baseConstructId": "non-node string key (stable construct slug e.g. 'deployStaging', FK-by-slug like rbac.capability.roleSlug); read + matched BARE at component/memql/healing_base_immutable_validation.go:64",
 	// --- nested variant field: @relationship (top-level-only canonicalization) can't reach it ---
 	"identity/identity.nodeId": "nested under payload.credentials.node_token @variant (not a top-level payload key); canonicalizeRelationshipFields walks top-level fields only, so a concept-level @relationship(field=\"nodeId\") is a structural no-op",
+	// memql#3322. Structurally identical to nodeId above -- nested under
+	// payload.credentials.account_token, so the concept-level annotation
+	// would be a no-op. Worth stating separately WHY the missing edge is
+	// harmless here: an outgoing @relationship to v1:identity:account is
+	// what would make the account reachable by graph expansion, and
+	// expansion is the one read path with no filter to AND row-authz into
+	// (docs/internal/design/account-isolation-model.md 3.1). Not declaring
+	// the edge keeps the credential row a leaf, which is the conservative
+	// direction for a field whose whole design note is about isolation.
+	"identity/identity.accountId": "nested under payload.credentials.account_token @variant; canonicalizeRelationshipFields walks top-level fields only, so a concept-level @relationship(field=\"accountId\") is a structural no-op -- and leaving the credential row a graph leaf is the conservative direction here (memql#3322)",
 	// --- deliberate short-form storage by write-side normalization ---
 	"forge/requestEvent.requestId": "bare-by-contract (#1859): recordRequestEvent/recordMentoredEvent store shortId(args.requestId) so the audit trail unifies whether the caller passes a canonical (automation) or short (tool) id; an @relationship would re-canonicalize on insert and re-split the trail (conf_1859_test asserts zero events under the canonical id)",
 }

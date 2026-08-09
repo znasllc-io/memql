@@ -1,0 +1,28 @@
+// campaigns domain -- reusable row predicates.
+//
+// Both are row-specs: they bind a concept in the signature, read its payload
+// fields bare, and compile into a SQL WHERE fragment. Neither is an
+// authorization predicate -- authorization in this domain is the
+// @rowAuthz(owner="ownerUserId") tier on every concept plus the
+// ownerUserId==actor.userId conjunct every query names, and both of those are
+// deliberately written at the call site rather than hidden inside a spec, so
+// the per-row-authz classifier can see them.
+//
+// What these two DO carry is the domain's one non-obvious rule: sendability.
+// "May this address be mailed" is a question with four possible answers on the
+// recipient row, and the answer being a single equality is exactly why it
+// belongs in one place -- the day a fifth state appears (a soft bounce that
+// ages out, say) the definition changes here and every caller inherits it.
+
+/// Matches recipients that may be mailed: subscription state 'subscribed', which is the only one of
+/// the four that is sendable. 'unsubscribed' is the recipient's own choice, 'bounced' and
+/// 'complained' are the provider's verdict, and all three suppress.
+spec recipient isSendableRecipient {
+  return subscriptionStatus=="subscribed"
+}
+
+/// Matches templates an operator has marked ready to attach to a campaign. Drafts stay out of the
+/// campaign editor's picker, so half-written copy cannot be scheduled by accident.
+spec template isReadyTemplate {
+  return status=="ready"
+}

@@ -1,0 +1,93 @@
+// campaigns domain -- row projections.
+//
+// One "Full" shape per concept, because every consumer of these rows today is
+// an operator surface that wants the whole row: the portal's campaign list,
+// its editor and its concept-browser fallback all read the same projection,
+// and a narrower shape would only mean the editor had to fetch twice.
+//
+// The two shapes carrying @pii fields (recipientFull, deliveryFull) are the
+// reason every query that binds them names ownerUserId==actor.userId as a
+// top-level conjunct -- the projection gate (memql#2883) requires a caller
+// constraint from any query projecting a PII-marked field, whatever its
+// filter otherwise says.
+
+/// Full audience projection: every payload field plus the row id and creation time. Backs the
+/// portal's audience list and the audience picker in the campaign editor.
+@row
+shape audience audienceFull {
+  row.id
+  ownerUserId
+  name
+  description
+  status
+  row.createdAt
+}
+
+/// Full recipient projection. Carries the @pii address and display name, so every query binding it
+/// gates on the caller.
+@row
+shape recipient recipientFull {
+  row.id
+  ownerUserId
+  audienceId
+  email
+  displayName
+  subscriptionStatus
+  unsubscribedAt
+  source
+  row.createdAt
+}
+
+/// Full template projection: the authored content plus its lifecycle. Backs the template list, the
+/// template editor and the campaign editor's preview.
+@row
+shape template templateFull {
+  row.id
+  ownerUserId
+  name
+  subject
+  textBody
+  htmlBody
+  status
+  row.createdAt
+}
+
+/// Full campaign projection: the authoring fields plus the send-state fields. The send-state half is
+/// written by nothing today (the sending engine is out of scope, memql#3323) and reads as zeros --
+/// projected anyway so the surface that eventually writes it needs no shape change.
+@row
+shape campaign campaignFull {
+  row.id
+  ownerUserId
+  name
+  audienceId
+  templateId
+  fromName
+  replyTo
+  scheduledAt
+  status
+  startedAt
+  completedAt
+  recipientCount
+  sentCount
+  failedCount
+  lastError
+  row.createdAt
+}
+
+/// Full per-recipient delivery projection. Carries the @pii address captured at send time, so every
+/// query binding it gates on the caller.
+@row
+shape delivery deliveryFull {
+  row.id
+  ownerUserId
+  campaignId
+  recipientId
+  email
+  status
+  outboundRequestId
+  skipReason
+  lastError
+  sentAt
+  row.createdAt
+}

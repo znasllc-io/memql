@@ -1,0 +1,218 @@
+// campaigns domain -- caller-scoped writes.
+//
+// Authz tier: owned. Every mutation stamps ownerUserId from actor.userId,
+// never from a caller argument, so a caller can neither create a row owned by
+// somebody else nor reassign an existing row's owner. Every update re-stamps
+// it for the same reason: an update that omitted it would leave the field to
+// the read-merge, and a row whose ownership depends on a merge is a row whose
+// ownership can drift.
+//
+// WHAT IS DELIBERATELY ABSENT: any mutation that sends. There is no
+// `startCampaign`, no `stageCampaignSend`, and no writer for
+// v1:campaigns:delivery. Sending is the follow-up issue -- see the concepts
+// file header for what it has to cover -- and a half-sender that stages mail
+// without rate limiting, suppression enforcement or bounce feedback is worse
+// than none. `scheduleCampaign` records an INTENT and nothing acts on it yet;
+// the portal says so on the campaign editor rather than implying a send.
+
+/// Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a
+/// caller can only ever create their own audiences.
+@actor
+mutate audience createAudience {
+  args {
+    audienceId   string!
+    name         string!
+    description  string
+  }
+  insert {
+    accept { name, description }
+    stamp {
+      id: args.audienceId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Archive an audience: keep it (and every delivery record naming it) readable, but drop it out of
+/// the campaign editor's picker. Owned -- ownerUserId is re-stamped from actor.userId, and the
+/// engine's row-authz write guard refuses the update outright when the target row's owner is
+/// somebody else.
+@actor
+mutate audience archiveAudience {
+  args {
+    audienceId  string!
+  }
+  update {
+    id: args.audienceId
+    ownerUserId: actor.userId
+    status: "archived"
+  }
+}
+
+/// Add one address to an audience. Owned. source defaults to 'manual' via ?? rather than via the
+/// concept's @default, which is never applied on insert.
+@actor
+mutate recipient addRecipient {
+  args {
+    recipientId  string!
+    audienceId   string!
+    email        string!
+    displayName  string
+    source       string
+  }
+  insert {
+    accept { audienceId, email, displayName }
+    stamp {
+      id: args.recipientId
+      ownerUserId: actor.userId
+      subscriptionStatus: "subscribed"
+      source: args.source ?? "manual"
+    }
+  }
+}
+
+/// Change one recipient's subscription state -- the write behind an operator honouring an
+/// unsubscribe by hand, and the write a future unsubscribe endpoint will reuse. Owned.
+///
+/// unsubscribedAt is threaded by the caller rather than stamped from `now`, because this same
+/// mutation records a state change that HAPPENED EARLIER (a bounce report processed hours later,
+/// an unsubscribe forwarded by support) and stamping the clock would date every one of those to
+/// the moment the operator got round to it.
+@actor
+mutate recipient setRecipientSubscription {
+  args {
+    recipientId         string!
+    subscriptionStatus  string!
+    unsubscribedAt      datetime
+  }
+  update {
+    accept { subscriptionStatus, unsubscribedAt }
+    stamp {
+      id: args.recipientId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create an email template owned by the caller. Lands as a draft; an operator marks it ready with
+/// updateTemplate once the copy is finished. Owned.
+@actor
+mutate template createTemplate {
+  args {
+    templateId  string!
+    name        string!
+    subject     string!
+    textBody    string!
+    htmlBody    string
+  }
+  insert {
+    accept { name, subject, textBody, htmlBody }
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+      status: "draft"
+    }
+  }
+}
+
+/// Edit a template's copy or move it along its lifecycle (draft -> ready -> archived). Owned.
+@actor
+mutate template updateTemplate {
+  args {
+    templateId  string!
+    name        string!
+    subject     string!
+    textBody    string!
+    htmlBody    string
+    status      string
+  }
+  update {
+    accept { name, subject, textBody, htmlBody, status }
+    stamp {
+      id: args.templateId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Create a campaign: one audience, one template, an optional intended time. Lands as a draft with
+/// its counters zeroed. Owned.
+@actor
+mutate campaign createCampaign {
+  args {
+    campaignId   string!
+    name         string!
+    audienceId   string!
+    templateId   string!
+    fromName     string
+    replyTo      string
+    scheduledAt  datetime
+  }
+  insert {
+    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt }
+    stamp {
+      id: args.campaignId
+      ownerUserId: actor.userId
+      status: "draft"
+      recipientCount: 0
+      sentCount: 0
+      failedCount: 0
+    }
+  }
+}
+
+/// Edit a draft campaign's authoring fields. Deliberately does NOT accept status or any send-state
+/// field: lifecycle moves through scheduleCampaign / cancelCampaign, and the counters belong to the
+/// sending engine. Owned.
+@actor
+mutate campaign updateCampaign {
+  args {
+    campaignId   string!
+    name         string!
+    audienceId   string!
+    templateId   string!
+    fromName     string
+    replyTo      string
+    scheduledAt  datetime
+  }
+  update {
+    accept { name, audienceId, templateId, fromName, replyTo, scheduledAt }
+    stamp {
+      id: args.campaignId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Commit a campaign to a time. Records the operator's intent; NOTHING ACTS ON IT YET -- the
+/// scheduler is part of the sending engine, which is a separate piece of work. Owned.
+@actor
+mutate campaign scheduleCampaign {
+  args {
+    campaignId   string!
+    scheduledAt  datetime!
+  }
+  update {
+    accept { scheduledAt }
+    stamp {
+      id: args.campaignId
+      ownerUserId: actor.userId
+      status: "scheduled"
+    }
+  }
+}
+
+/// Cancel a campaign. Terminal by intent: a cancelled campaign is kept for its history rather than
+/// deleted, and re-running it means authoring a new one. Owned.
+@actor
+mutate campaign cancelCampaign {
+  args {
+    campaignId  string!
+  }
+  update {
+    id: args.campaignId
+    ownerUserId: actor.userId
+    status: "cancelled"
+  }
+}

@@ -1,0 +1,127 @@
+// campaigns domain -- caller-scoped reads.
+//
+// Authz tier: owned. Every filter in this file names
+// ownerUserId==actor.userId as a TOP-LEVEL conjunct, never inside a when()
+// guard and never as one arm of an ||. That placement is the whole gate: a
+// guarded conjunct vanishes when its argument is absent, which is how a
+// query that looks scoped comes to return the whole table (memql#2883). No
+// argument here can widen the row set past the caller's own rows.
+//
+// The by-id reads are exempt from the pagination rule by shape rather than by
+// annotation: an unguarded row.id equality reads at most one row, so it is not
+// a list. The list reads all declare sort + paginate.
+
+/// The caller's campaigns, newest first. The portal's campaign list. Owned: the row set is gated by
+/// ownerUserId==actor.userId server-side, so cross-operator reads are impossible. Optional status
+/// filter narrows to one lifecycle bucket; omit it to see everything.
+@actor
+query campaign campaigns {
+  args {
+    status  string
+  }
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     campaignFull
+}
+
+/// One campaign by id, gated to its owner. Backs the campaign editor. Owned: ownerUserId==actor.userId
+/// is the load-bearing guard, so a caller cannot read another operator's campaign even with its id.
+@actor
+query campaign campaignById {
+  args {
+    campaignId  string!
+  }
+  filter  row.id==args.campaignId && ownerUserId==actor.userId
+  shape   campaignFull
+}
+
+/// The caller's audiences, newest first. Backs the audience list and the campaign editor's audience
+/// picker. Owned.
+@actor
+query audience audiences {
+  args {
+    status  string
+  }
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     audienceFull
+}
+
+/// One audience by id, gated to its owner. Owned.
+@actor
+query audience audienceById {
+  args {
+    audienceId  string!
+  }
+  filter  row.id==args.audienceId && ownerUserId==actor.userId
+  shape   audienceFull
+}
+
+/// The caller's templates, newest first. Backs the template list and the campaign editor's template
+/// picker. Owned.
+@actor
+query template templates {
+  args {
+    status  string
+  }
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     templateFull
+}
+
+/// One template by id, gated to its owner. Backs the template editor and the campaign editor's
+/// preview. Owned.
+@actor
+query template templateById {
+  args {
+    templateId  string!
+  }
+  filter  row.id==args.templateId && ownerUserId==actor.userId
+  shape   templateFull
+}
+
+/// Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which
+/// is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a
+/// filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the
+/// caller conjunct is doubly load-bearing here.
+@actor
+query recipient recipientsForAudience {
+  args {
+    audienceId  string!
+  }
+  filter    ownerUserId==actor.userId && audienceId==args.audienceId
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     recipientFull
+}
+
+/// The subset of an audience a send would actually reach: subscribed addresses only. Distinct from
+/// recipientsForAudience because the difference between the two counts IS the suppression rate, and
+/// an operator about to schedule a campaign wants both numbers. Owned; @pii projection.
+@actor
+query recipient sendableRecipientsForAudience {
+  args {
+    audienceId  string!
+  }
+  filter    ownerUserId==actor.userId && audienceId==args.audienceId && isSendableRecipient
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     recipientFull
+}
+
+/// Per-recipient outcomes for one campaign, newest first. Empty until the sending engine exists
+/// (memql#3323 scoped it out); the query ships with the schema so that work is additive. Owned;
+/// @pii projection.
+@actor
+query delivery deliveriesForCampaign {
+  args {
+    campaignId  string!
+  }
+  filter    ownerUserId==actor.userId && campaignId==args.campaignId
+  sort      "row.createdAt", "desc"
+  paginate  100
+  shape     deliveryFull
+}

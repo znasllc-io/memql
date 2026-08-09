@@ -1,0 +1,149 @@
+// campaigns domain -- email marketing campaigns as ordinary graph state
+// (memql#3323).
+//
+// The whole point of modelling a campaign as CONCEPTS rather than as a
+// bespoke table plus a bespoke API is that everything downstream then comes
+// for free: the rows are browsable in the portal's concept browser, they are
+// composable into views through the shared element library, they carry
+// history like every other row, and they are authorization-gated by the same
+// per-row machinery as the rest of the graph. A campaign editor is then a
+// layout over queries and mutations, not a new subsystem.
+//
+// FIVE CONCEPTS, and the split follows the four questions a send has to
+// answer -- who, what, when, and what happened:
+//
+//   audience   WHO       a named set of addresses
+//   recipient  WHO       one address in an audience, with its subscription state
+//   template   WHAT      the subject + bodies, authored once and reused
+//   campaign   WHEN      audience x template x schedule, plus the send state
+//   delivery   OUTCOME   one row per recipient per campaign
+//
+// PER-ROW AUTHZ TIER: owned, on all five. Every row carries ownerUserId,
+// every concept declares @rowAuthz(owner="ownerUserId"), every mutation
+// stamps that field from actor.userId rather than from a caller argument,
+// and every query names it as a top-level conjunct. A caller therefore
+// cannot read, create, retarget or delete another operator's campaign even
+// with its id. Shared / team-owned campaigns are a deliberate non-goal for
+// now: "owned" is the tier that is enforced end to end today, and widening it
+// later is a tier change plus a grant concept, not a re-model.
+//
+// WHAT IS NOT HERE: the sending engine. Nothing in this domain moves mail.
+// A send is staged as v1:platform:outboundRequest rows and drained by the
+// engine's existing outbound worker, and the scheduling, rate limiting,
+// unsubscribe handling and bounce feedback that a real sender needs are a
+// separate piece of work. `campaign` carries the send-state fields and
+// `delivery` carries the per-recipient outcome so that work adds no schema
+// migration -- but today those fields are written by nothing, and the portal
+// says so rather than showing an empty table that reads as "nothing sent".
+
+use identity.concepts.{ user }
+use platform.concepts.{ outboundRequest }
+
+/// A named set of email recipients -- the WHO of a campaign. Audiences are authored in the portal
+/// and referenced by campaigns; membership lives on v1:campaigns:recipient rows pointing back here
+/// rather than as a list on this row, so a hundred-thousand-address audience is a hundred thousand
+/// rows rather than one enormous payload. Per-row authz: owned -- ownerUserId is stamped from
+/// actor.userId on every write and every read gates on ownerUserId==actor.userId.
+@displayCard(primary="name", secondary="description", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept audience {
+  ownerUserId  string!  @description("v1:identity:user.id that owns this audience. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key.")
+  name         string!  @description("Short operator-facing name for the audience, e.g. 'Beta waitlist'. The primary display field; not required to be unique.")
+  description  string   @description("What this audience is and how someone lands in it. Free text, shown under the name in the portal's audience list.")
+  status       enum("active", "archived")  @default("active")  @description("Lifecycle. 'active' audiences are offered when authoring a campaign; 'archived' ones are kept for the history their past campaigns reference but are hidden from the picker. Audiences are never deleted -- a deleted audience would orphan every delivery record that names it.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// One email address in an audience, with the subscription state that decides whether it may be
+/// mailed. Subscription state is modelled here rather than derived at send time because it is a
+/// standing fact about a person, not a property of one campaign: an unsubscribe must suppress every
+/// future send, including sends of campaigns authored before the unsubscribe. Per-row authz: owned
+/// via ownerUserId, mirrored from the parent audience at create time.
+@displayCard(primary="email", secondary="displayName", tertiary="audienceId", status="subscriptionStatus")
+@rowAuthz(owner="ownerUserId")
+concept recipient {
+  ownerUserId         string!  @description("v1:identity:user.id that owns this recipient row -- the owner of the parent audience, stamped from actor.userId. The per-row authz key.")
+  audienceId          string!  @description("v1:campaigns:audience.id this address belongs to. A person in two audiences is two rows, so a per-audience unsubscribe is expressible and a global one is a sweep.")
+  email               string!  @pii  @description("The recipient's email address -- the delivery target and the identity of the row. Marked @pii: it is scrubbed by the deletion path and every query projecting it must constrain its caller.")
+  displayName         string   @pii  @description("Optional human name used to personalize the greeting. Marked @pii for the same reason as email.")
+  subscriptionStatus  enum("subscribed", "unsubscribed", "bounced", "complained")  @default("subscribed")  @description("Whether this address may be mailed. 'subscribed' is the only sendable state. 'unsubscribed' is the recipient's own choice and is permanent until they opt back in; 'bounced' and 'complained' are the provider's verdict and exist as distinct states because they mean different things to a deliverability review -- a bounce is a bad address, a complaint is a reputational event.")
+  unsubscribedAt      datetime  @description("When the address left the subscribed state. Empty while subscribed. Recorded rather than inferred from row history so a suppression check is one field read.")
+  source              enum("manual", "import", "signup")  @default("manual")  @description("How the address got here. 'manual' = typed into the portal, 'import' = bulk upload, 'signup' = a product flow added it. Provenance a deliverability review asks for first when complaint rates rise.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="audienceId", target=audience, direction="outgoing")
+}
+
+/// The authored content of a campaign -- subject line plus plain-text and optional HTML bodies. Kept
+/// separate from the campaign so one piece of content can be sent to several audiences without being
+/// retyped, and so editing copy is a different action (and a different authorization decision, later)
+/// from scheduling a send. Per-row authz: owned.
+@displayCard(primary="name", secondary="subject", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept template {
+  ownerUserId  string!  @description("v1:identity:user.id that owns this template. Stamped from actor.userId. The per-row authz key.")
+  name         string!  @description("Operator-facing name for the template, e.g. 'August product update'. Distinct from the subject line, which is what the recipient sees.")
+  subject      string!  @description("The email subject line. Rendered verbatim; the engine's email sender rejects control characters in it (header-injection barrier in integrations/email).")
+  textBody     string!  @description("The plain-text body. Required, not optional: a text alternative is what keeps a message out of the spam bucket and readable in a client that refuses HTML.")
+  htmlBody     string   @description("Optional HTML alternative. When present the message goes out as multipart/alternative with text first.")
+  status       enum("draft", "ready", "archived")  @default("draft")  @description("Authoring lifecycle. 'draft' is being written; 'ready' means an operator has decided it may be attached to a campaign; 'archived' keeps it readable for the campaigns that referenced it without offering it in the picker.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A campaign: one template addressed to one audience, optionally at a scheduled time, plus the state
+/// of its send. This is the row an operator thinks of as 'the campaign'. Per-row authz: owned.
+///
+/// The send-state fields (startedAt / completedAt / the three counters / lastError) are declared here
+/// and written by NOTHING today -- the sending engine that would stamp them is deliberately out of
+/// scope (see the file header). They are declared now so that work is additive.
+@displayCard(primary="name", secondary="scheduledAt", tertiary="audienceId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept campaign {
+  ownerUserId     string!  @description("v1:identity:user.id that owns this campaign. Stamped from actor.userId. The per-row authz key.")
+  name            string!  @description("Operator-facing campaign name. The primary display field.")
+  audienceId      string!  @description("v1:campaigns:audience.id this campaign is addressed to. Resolved to recipient rows at send time, not at authoring time, so an audience that grows between scheduling and sending is mailed as it stands when the send runs.")
+  templateId      string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
+  fromName        string   @description("Per-campaign display name on the From header, e.g. 'The memQL team'. A non-secret presentation setting: it overrides the integration-wide default (MEMQL_EMAIL_FROM_NAME) for this campaign only. The From ADDRESS is deliberately not settable here -- it is bound to the configured mailbox credential and changing it is a deliverability decision, not a campaign one.")
+  replyTo         string   @description("Optional Reply-To address for this campaign. Non-secret; empty means replies go to the configured sender address.")
+  scheduledAt     datetime  @description("When the send should begin. Empty means the campaign is not scheduled -- it is a draft an operator will start by hand.")
+  status          enum("draft", "scheduled", "sending", "paused", "sent", "cancelled", "failed")  @default("draft")  @description("Campaign lifecycle. 'draft' is being authored; 'scheduled' is committed to a time; 'sending' / 'paused' / 'sent' / 'failed' are send-engine states; 'cancelled' is an operator stopping it before or during a send. Only 'draft' and 'scheduled' are reachable today -- the transitions past them belong to the sending engine.")
+  startedAt       datetime  @description("When the send actually began. Empty until it does. Distinct from scheduledAt: the gap between the two is the queue latency a deliverability review looks at.")
+  completedAt     datetime  @description("When the last recipient reached a terminal delivery state.")
+  recipientCount  int  @default("0")  @description("How many recipients the audience resolved to when the send started. Frozen at send time so the counters below add up even if the audience changes afterwards.")
+  sentCount       int  @default("0")  @description("Deliveries the transport accepted. Denormalized from v1:campaigns:delivery so a campaign list does not have to aggregate per row.")
+  failedCount     int  @default("0")  @description("Deliveries that reached a terminal failure.")
+  lastError       string   @description("The most recent send-level error -- a refused configuration, an exhausted allowlist -- as opposed to a per-recipient failure, which lives on the delivery row. Empty on a clean send.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="interactsWith", field="templateId", target=template, direction="outgoing")
+}
+
+/// One recipient's outcome for one campaign -- the per-recipient audit trail a deliverability review
+/// is actually made of. Written by the sending engine, which does not exist yet (see the file
+/// header); the schema is declared now so it lands without a migration. Per-row authz: owned.
+///
+/// outboundRequestId is the seam to the engine's existing delivery machinery: a send stages a
+/// v1:platform:outboundRequest row and records its id here, so the transport-level status
+/// (pending / sending / sent / retrying / failed, with attempts and lastError) is readable from the
+/// row the outbound worker already maintains rather than mirrored into a second lifecycle here.
+@displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
+@rowAuthz(owner="ownerUserId")
+concept delivery {
+  ownerUserId        string!  @description("v1:identity:user.id that owns this delivery record -- the owner of the campaign, mirrored so the row is gated without a join. The per-row authz key.")
+  campaignId         string!  @description("v1:campaigns:campaign.id this delivery belongs to.")
+  recipientId        string!  @description("v1:campaigns:recipient.id that was targeted.")
+  email              string!  @pii  @description("The address the send targeted, captured at send time rather than read back from the recipient row -- an address that changes afterwards must not rewrite what was actually mailed. Marked @pii.")
+  status             enum("pending", "sent", "failed", "skipped")!  @description("Terminal outcome for this recipient. 'skipped' is the suppression case -- unsubscribed, bounced or complained -- and is distinct from 'failed' because it is a correct outcome rather than an error. Required: a delivery row with no stated outcome would be indistinguishable from one that was never attempted.")
+  outboundRequestId  string   @description("v1:platform:outboundRequest.id carrying this message, when one was staged. Empty for a 'skipped' delivery, which never reaches the transport.")
+  skipReason         string   @description("Why a 'skipped' delivery was suppressed, e.g. 'unsubscribed'. Empty otherwise.")
+  lastError          string   @description("The transport's error for a 'failed' delivery, truncated. Empty otherwise.")
+  sentAt             datetime  @description("When the transport accepted the message. Empty unless status is 'sent'.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
+  @relationship(type="interactsWith", field="recipientId", target=recipient, direction="outgoing")
+  @relationship(type="interactsWith", field="outboundRequestId", target=outboundRequest, direction="outgoing")
+}
