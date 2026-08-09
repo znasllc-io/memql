@@ -211,6 +211,23 @@ const undeclared3406PasskeyReason = "memql#3406 -- passkey reads (one self-scope
 // which is why the entries are here.
 const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lookups; the polling read is pre-actor and approvedByUserId is empty when the page read runs, so no owner tier fits"
 
+// undeclared3409SignInRoutesReason covers the one construct memql#3409 added
+// for the passkey management surface.
+//
+// `signInIdentitiesForSelf` filters `userId==actor.userId`, so it is the same
+// self-scoped shape as `passkeysForSelf` and `badgesForSelf` and lands here
+// for the same single reason the whole list exists: `v1:identity:identity`
+// declares no `@rowAuthz` tier.
+//
+// It is worth naming what the read is FOR, because it is the one read on this
+// list whose purpose is to protect the user rather than to serve them: before
+// /me/devices revokes a passkey it counts what would remain as a way back in,
+// and a read that returned a WIDER set than the caller's own rows would tell
+// somebody their account is recoverable on the strength of a stranger's
+// credentials. Self-scoping is the correctness property here, not only the
+// authorization one.
+const undeclared3409SignInRoutesReason = "memql#3409 -- self-scoped sign-in-route count behind the last-credential warning; v1:identity:identity still declares no tier"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -410,6 +427,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"patIdentityById":            {"v1:identity:identity", undeclaredGrandfatherReason},
 	"passkeyByCredentialId":      {"v1:identity:identity", undeclared3406PasskeyReason},
 	"passkeysForSelf":            {"v1:identity:identity", undeclared3406PasskeyReason},
+	"signInIdentitiesForSelf":    {"v1:identity:identity", undeclared3409SignInRoutesReason},
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},

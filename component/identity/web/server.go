@@ -200,6 +200,12 @@ type Server struct {
 	deviceVerifyLimiterVal  *abuse.IPRateLimiter
 	deviceVerifyLimiterOnce sync.Once
 
+	// Passkey management for the /me/devices page (memql#3409). Wired
+	// by the integration layer once the engine is up. Nil renders
+	// /me/devices as the plain sessions shell and leaves the management
+	// routes unmounted.
+	mePasskeys *MePasskeys
+
 	// SSO auth-code minter -- when wired, signed-in users hitting
 	// /login?return_to=<registered-client> get a fresh auth code
 	// minted from their existing session and bounced straight to
@@ -368,6 +374,15 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	if s.deviceFlow != nil && s.deviceFlow.Adapter != nil {
 		mux.HandleFunc("GET /device", wrap(s.handleDeviceGet))
 		mux.HandleFunc("POST /device", wrap(s.handleDevicePost))
+	}
+
+	// memql#3409: passkey management on /me/devices. The GET is the
+	// same route registered above -- handleMeDevices branches on
+	// whether the adapter is wired -- so only the two writes are
+	// conditional here.
+	if s.passkeysWired() {
+		mux.HandleFunc("POST /me/devices/passkeys/rename", wrap(s.handleMePasskeysRename))
+		mux.HandleFunc("POST /me/devices/passkeys/revoke", wrap(s.handleMePasskeysRevoke))
 	}
 
 	if s.Logger != nil {

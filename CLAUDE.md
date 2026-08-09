@@ -1044,6 +1044,18 @@ node-type binary (`make identity`) and owns:
   as a progressive enhancement; the magic-link form remains the path when
   no passkey exists, WebAuthn is unavailable, or no relying party is in
   scope.
+- Passkey **management** on `/me/devices` (memql#3409): list (label,
+  added, last used, AAGUID-derived model, and the backup posture that
+  says whether losing the device loses the credential), rename, revoke,
+  and enrol another via the #3406 ceremony. Revoke is a SOFT delete
+  (`active=false`) -- the row is audit history and its credential id must
+  stay taken, because revoking a row does not make the authenticator
+  forget its private key. A revoke that would leave the account with NO
+  sign-in route (no `magic_link` identity, no other passkey) is warned
+  about explicitly before it happens; `component/identity/web/me_passkeys.go`
+  resolves the target out of the caller's OWN self-scoped list, which is
+  the ownership check, while the write runs under the system credential
+  actor the memql#2513 guard requires.
 - OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/login`, `/auth/complete`, `/setup`,
