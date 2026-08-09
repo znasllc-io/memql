@@ -5,7 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/types/known/structpb"
+
 	"github.com/znasllc-io/memql/component/auth"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
@@ -217,38 +220,96 @@ func TestOwnerAndAdminReachTheEngine(t *testing.T) {
 	}
 }
 
-// The @serverOnly reads and writes this surface drives are only reachable with
+// The @serverOnly reads AND writes this surface drives are only reachable with
 // an internal-origin stamp, and the stamp's whole safety argument is that the
-// gate ran first. Asserted behaviourally at the engine seam rather than by
-// grepping the source: a reordered argument or a second call site defeats a
-// source scan silently (the lesson memql#2991 recorded).
+// gate ran first.
+//
+// THIS TEST IS THE RELOCATED memql#2991 GUARD. It used to live in
+// component/identity/admin as TestAdminUpdateUserStampsInternalOrigin, pinned
+// on the templ console's one call site; that call site is gone and this is the
+// only path to `updateUser` now, so the guard moves rather than disappearing.
+//
+// Behavioural at the Engine seam, not a source scan, for the reasons that file
+// recorded at length: a scan was defeated three separate ways in review -- a
+// second unstamped call site (only the first matched), a comment naming the
+// helper with the real call unstamped, and reordering the fmt args so nothing
+// matched and the test SKIPPED, which reads as a pass. Recording EVERY call's
+// origin is indifferent to all three.
 func TestAdmittedWritesStampInternalOrigin(t *testing.T) {
-	svc, eng, _ := newTestService(t)
-	svc.Engine = &originRecordingEngine{inner: eng}
-
-	// The profile read is the first engine call an admitted caller makes.
-	_ = svc.UpdateUserProfile(ctxAs("admin"), UserProfile{UserId: "v1:identity:user:target", DisplayName: "T"})
-
-	rec, _ := svc.Engine.(*originRecordingEngine)
-	if len(rec.origins) == 0 {
-		t.Fatal("no engine call was made")
+	rec := &originRecordingEngine{}
+	audit := &capturingAudit{}
+	svc, err := New(&Service{Engine: rec, Audit: audit})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
-	for i, o := range rec.origins {
-		if o != auth.OriginInternal {
-			t.Errorf("engine call %d (%s) ran with origin %v, want internal",
-				i, firstWords(rec.inner.queries[i]), o)
+
+	res := svc.UpdateUserProfile(ctxAs("admin"), UserProfile{
+		UserId:      "v1:identity:user:target",
+		DisplayName: "Target Person",
+	})
+	if !res.OK {
+		t.Fatalf("the write failed against the stub engine: %s", res.ErrorMessage)
+	}
+
+	// Both halves must be present: the @serverOnly READ that finds the row and
+	// the @serverOnly WRITE that changes it. Asserting only over "every call"
+	// would stay green if the write never happened at all.
+	var sawRead, sawWrite bool
+	for i, call := range rec.calls {
+		if strings.Contains(call.query, "userByIdSystem(") {
+			sawRead = true
 		}
+		if strings.Contains(call.query, "updateUser(") {
+			sawWrite = true
+		}
+		if call.origin.IsInternal() {
+			continue
+		}
+		t.Errorf("call %d of %d ran with origin %v, not internal: %s\n"+
+			"@serverOnly is enforced as `fn.ServerOnly && "+
+			"!auth.OriginFromContext(ctx).IsInternal()`, so this call is REFUSED at runtime "+
+			"and fails in the console rather than in any test (memql#2991).",
+			i+1, len(rec.calls), call.origin, firstWords(call.query))
+	}
+	if !sawRead {
+		t.Error("no call named userByIdSystem -- if the read was renamed, move this guard with it")
+	}
+	if !sawWrite {
+		t.Error("no call named updateUser -- if the mutation was renamed, move this guard with it")
 	}
 }
 
+// originRecordingEngine answers the profile read with one row and records the
+// origin of every call. A slice rather than a map keyed by construct: a map is
+// last-write-wins, so an unstamped call placed BEFORE a stamped one would be
+// overwritten and vanish -- the mirror of the "only sees the first" flaw the
+// source scan this replaces had.
 type originRecordingEngine struct {
-	inner   *recordingEngine
-	origins []auth.CallOrigin
+	calls []struct {
+		query  string
+		origin auth.CallOrigin
+	}
 }
 
 func (e *originRecordingEngine) Execute(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
-	e.origins = append(e.origins, auth.OriginFromContext(ctx))
-	return e.inner.Execute(ctx, q)
+	e.calls = append(e.calls, struct {
+		query  string
+		origin auth.CallOrigin
+	}{q, auth.OriginFromContext(ctx)})
+
+	if strings.Contains(q, "userByIdSystem(") {
+		return &memqlengine.ExecuteResult{
+			Bundle: &memqlv1.GraphBundle{Nodes: []*memqlv1.MemoryNode{{
+				Id: "v1:identity:user:target",
+				Payload: &structpb.Struct{Fields: map[string]*structpb.Value{
+					"primaryEmail": structpb.NewStringValue("target@example.test"),
+					"role":         structpb.NewStringValue("reader"),
+					"active":       structpb.NewBoolValue(true),
+				}},
+			}}},
+		}, nil
+	}
+	return &memqlengine.ExecuteResult{}, nil
 }
 
 func firstWords(q string) string {

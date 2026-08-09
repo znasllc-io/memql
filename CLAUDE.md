@@ -1023,8 +1023,13 @@ node-type binary (`make identity`) and owns:
 - The JWKS feed at `/.well-known/jwks.json`.
 - A public web UI (`/auth/login`, `/auth/complete`, `/setup`,
   `/legal/*`, `/me/*`).
-- An admin web app at `/admin/*` (users, sessions, audit, JWKS,
-  cluster settings, partition management).
+- What remains of the admin web app at `/admin/*`: the sign-in pages
+  and `/admin/deployments`. The other six screens moved into the
+  memQL portal (memql#3324) along with their writes, whose
+  owner/admin gate now lives in `component/identity/adminops` and
+  rides `IdentityAdminMsg` on `MemqlService.Stream`. Deployments
+  stayed because `DeployControlService` shells out against an
+  on-disk overlay checkout, so it exists only on the identity node.
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 

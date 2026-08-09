@@ -57,13 +57,15 @@ import (
 //     allowlisted package. None exists today -- component/automations'
 //     originForSource is unexported -- but exporting one would open a hole
 //     this cannot see.
-//     (component/identity/admin's HTTP gate was listed here as a third gap: the
-//     gate is the only thing making its allowlist entry safe, and nothing
-//     asserted it. memql#2934 closed that --
-//     component/identity/admin/route_gate_test.go now asserts both that every
-//     mounted route goes through `gated` and that `gated` actually turns away a
-//     caller who is not owner or admin. It is no longer an unasserted
-//     precondition, so it is no longer a gap here.)
+//     (The identity-admin gate was listed here as a third gap: the gate is the
+//     only thing making its allowlist entry safe, and nothing asserted it.
+//     memql#2934 closed that for the templ console's HTTP routes, and
+//     memql#3324 moved the writes to component/identity/adminops and moved the
+//     assertion with them -- gate_test.go drives EVERY operation with every
+//     role and asserts the engine is not reached below owner/admin, which is a
+//     tighter statement than "every route is registered with `gated`" because
+//     it is about the code path rather than the registration. The one
+//     surviving templ surface, /admin/deployments, keeps route_gate_test.go.)
 //
 // WHY IT CATCHES MORE THAN THE COMPILER WOULD. go/parser ignores build
 // constraints, so this sees files no CI lane compiles. app/integrations_identity.go
@@ -94,7 +96,7 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 		"component/auth":           "defines the stamp, and resolves an identity from claims before any actor exists",
 		"component/automations":    "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
 		"component/identity":       "identity store internals, server-initiated",
-		"component/identity/admin": "admin HTTP handler -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every route behind requireAdmin) is asserted by component/identity/admin/route_gate_test.go, memql#2934",
+		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
 		"component/identity/pat":   "personal-access-token store, server-initiated",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
 		// of this entry said, "a credential store whose reads are

@@ -136,7 +136,6 @@ func newRouteGateServer(t *testing.T) (*AdminServer, *identity.JWTIssuer, *route
 		Logger:    logger,
 		Issuer:    iss,
 		Engine:    eng,
-		Keys:      km,
 		WebServer: web,
 		Audit:     audit,
 	})
@@ -174,29 +173,11 @@ type adminRoute struct {
 // route added there without being added here fails rather than going untested.
 var gatedRoutes = []adminRoute{
 	{method: "GET", path: "/admin/"},
-	{method: "GET", path: "/admin/users"},
-	{method: "GET", path: "/admin/users/detail"},
-	{method: "POST", path: "/admin/users/profile"},
-	{method: "POST", path: "/admin/users/role"},
-	{method: "POST", path: "/admin/users/suspend"},
-	{method: "POST", path: "/admin/users/unsuspend"},
-	{method: "GET", path: "/admin/audit"},
 	{method: "GET", path: "/admin/deployments"},
 	{method: "POST", path: "/admin/deployments/deploy-staging"},
 	{method: "POST", path: "/admin/deployments/promote"},
 	{method: "POST", path: "/admin/deployments/rollback"},
 	{method: "POST", path: "/admin/deployments/rollout"},
-	{method: "GET", path: "/admin/tokens"},
-	{method: "POST", path: "/admin/tokens/revoke"},
-	{method: "POST", path: "/admin/tokens/node/revoke"},
-	{method: "GET", path: "/admin/jwks"},
-	{method: "POST", path: "/admin/jwks/rotate"},
-	{method: "GET", path: "/admin/settings"},
-	{method: "POST", path: "/admin/settings"},
-	{method: "GET", path: "/admin/sessions"},
-	{method: "GET", path: "/admin/invitations"},
-	{method: "GET", path: "/admin/partition-grants"},
-	{method: "GET", path: "/admin/access-requests"},
 }
 
 // ungatedRoutes cannot require a session: they are how one is established.
@@ -373,7 +354,7 @@ func TestAdminGateDoesNotAuditAnAdmittedCaller(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, routeGateRequest(
-		adminRoute{method: "GET", path: "/admin/users"},
+		adminRoute{method: "GET", path: "/admin/deployments"},
 		routeGateToken(t, iss, "admin")))
 
 	for _, ev := range audit.snapshot() {
@@ -389,22 +370,37 @@ func TestAdminGateDoesNotAuditAnAdmittedCaller(t *testing.T) {
 func TestAdminGateAdmitsAdminRole(t *testing.T) {
 	for _, role := range []string{"owner", "admin"} {
 		t.Run(role, func(t *testing.T) {
-			srv, iss, eng, _ := newRouteGateServer(t)
+			srv, iss, _, _ := newRouteGateServer(t)
 			mux := http.NewServeMux()
 			srv.Mount(mux)
 
 			rec := httptest.NewRecorder()
 			mux.ServeHTTP(rec, routeGateRequest(
-				adminRoute{method: "GET", path: "/admin/users"},
+				adminRoute{method: "GET", path: "/admin/"},
 				routeGateToken(t, iss, role)))
 
+			// THE REACH SENTINEL IS THE REDIRECT TARGET, not an engine call.
+			//
+			// It used to be "the handler executed a query", which worked while
+			// this console had pages that read rows. It has one page left --
+			// /admin/deployments, whose reader is a nil port under test -- so
+			// no surviving handler touches the engine and that sentinel would
+			// now be permanently zero (memql#3324).
+			//
+			// Location is a better one anyway, because it distinguishes the
+			// two outcomes a bare status code cannot: BOTH a refused and an
+			// admitted caller get 303 from /admin/, and they differ only in
+			// where they are sent. /admin/login means the gate turned this
+			// caller away; /admin/deployments means handleRoot itself ran,
+			// which is only reachable past requireAdmin.
 			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
 				t.Fatalf("role=%q was rejected with %d; the gate must admit owner and admin, "+
 					"otherwise the rejection tests above prove nothing", role, rec.Code)
 			}
-			if eng.calls.Load() == 0 {
-				t.Error("handler body never ran for an admitted role -- the reach sentinel " +
-					"cannot distinguish a working gate from an unreachable route")
+			if got := rec.Header().Get("Location"); got != "/admin/deployments" {
+				t.Errorf("admitted %q was sent to %q, want /admin/deployments -- the handler "+
+					"body never ran, so this cannot tell a working gate from an unreachable route",
+					role, got)
 			}
 		})
 	}

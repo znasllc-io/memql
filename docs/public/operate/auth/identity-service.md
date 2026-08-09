@@ -16,8 +16,13 @@ the cluster. It runs as its own node-type binary
 - The public auth web pages (login, registration, magic-link,
   legal docs, `/me/*` self-service).
 - The OAuth-style token endpoints (`/oauth/token`, `/auth/refresh`).
-- The admin web app at `/admin/*` (users, sessions, audit, JWKS,
-  cluster settings, partition management).
+- What is left of the admin web app at `/admin/*`: the sign-in
+  pages and `/admin/deployments`. Its other six screens (users,
+  tokens, audit, JWKS, cluster settings, and the dashboard) moved
+  into the memQL portal in memql#3324, writes and owner/admin gate
+  together -- see [../portal.md](../portal.md). Deployments stayed
+  because `DeployControlService` runs against an on-disk overlay
+  checkout and therefore exists only on this node.
 - The JWKS feed at `/.well-known/jwks.json` that every other node
   binary fetches to verify access tokens.
 - The Personal Access Token (PAT) layer for CLI clients.
