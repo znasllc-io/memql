@@ -141,7 +141,6 @@ function campaignRows(status = "draft"): Row[] {
   ];
 }
 
-const CAMPAIGN_ROWS: Row[] = campaignRows();
 
 const AUTH_DISABLED_CLUSTER = {
   identityUrl: "",
