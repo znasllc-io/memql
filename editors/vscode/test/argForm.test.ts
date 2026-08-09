@@ -171,3 +171,40 @@ test("coerceArgs -- a construct with no arguments coerces to an empty map", () =
   assert.ok(result.ok);
   assert.deepEqual(result.values, {});
 });
+
+// -----------------------------------------------------------------------------
+// @autoInjected (memql#3333)
+// -----------------------------------------------------------------------------
+
+// The flag is per FIELD now. Before #3333 the language server did not report
+// it, so the form carried a blanket notice disclaiming every field on a tool;
+// it marks the one or two fields it is actually true of instead.
+test("buildFields -- carries the per-field autoInjected flag through", () => {
+  const fields = buildFields([
+    { name: "filename", type: "string", required: true },
+    { name: "ownerUserId", type: "string", required: false, autoInjected: true },
+  ]);
+  assert.equal(fields[0]?.autoInjected, false);
+  assert.equal(fields[1]?.autoInjected, true);
+});
+
+// Always a boolean, never undefined, so the renderer can branch on it without
+// a guard at every use -- the same reason enumValues is always an array.
+test("buildFields -- autoInjected defaults to false, never undefined", () => {
+  for (const field of buildFields(ARGS)) {
+    assert.equal(field.autoInjected, false);
+  }
+});
+
+// The value is STILL SENT. The engine drops it at dispatch; dropping it here
+// too would be an invisible divergence -- and a form that silently discards
+// what the user typed is exactly the mystery the flag exists to remove.
+test("coerceArgs -- an auto-injected field's value is still submitted", () => {
+  const args: RunnableArg[] = [
+    { name: "filename", type: "string", required: true },
+    { name: "ownerUserId", type: "string", required: false, autoInjected: true },
+  ];
+  const out = coerceArgs(args, { filename: "report.csv", ownerUserId: "u-1" });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.ok ? out.values : {}, { filename: "report.csv", ownerUserId: "u-1" });
+});

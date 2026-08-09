@@ -362,3 +362,36 @@ test("run -- a second run supersedes the first, including its in-flight step fra
   assert.equal(firstTrace.steps.length, 0);
   assert.equal(firstTrace.complete, undefined);
 });
+
+// The @disabled flag reaches the refusal from the LENS, not from the reply.
+// The engine answers @disabled and a @filter miss with the same
+// FAILED_PRECONDITION and nothing in the reply separates them, so what the
+// language server said about the construct is the only thing that can
+// (memql#3333).
+test("run -- a @disabled target marks its refusal so the cause can be named", async () => {
+  const engine: AutomationRunEngine = {
+    runAutomation: async () => {
+      throw new AutomationRunError("autoJoinSI", 9, "automation is disabled", "run-11");
+    },
+  };
+  const h = harness({ engine });
+  const trace = new StepTraceModel();
+  const outcome = await h.runner.run({ ...TARGET, disabled: true }, {}, trace);
+  assert.equal(outcome.status, "refused");
+  assert.equal(trace.refusal?.disabled, true);
+});
+
+// An enabled target must NOT claim the flag: asserting "@disabled" over what
+// was really a filter miss sends the developer to re-enable a construct that
+// was never disabled.
+test("run -- an enabled target leaves the disabled flag off its refusal", async () => {
+  const engine: AutomationRunEngine = {
+    runAutomation: async () => {
+      throw new AutomationRunError("autoJoinSI", 9, "filter rejected the event", "run-12");
+    },
+  };
+  const h = harness({ engine });
+  const trace = new StepTraceModel();
+  await h.runner.run(TARGET, {}, trace);
+  assert.equal(trace.refusal?.disabled, undefined);
+});

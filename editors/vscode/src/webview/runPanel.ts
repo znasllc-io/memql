@@ -36,7 +36,7 @@ import {
 import type { RunTarget } from "../constructs/runnable.js";
 import type { RunOutcome } from "../run/orchestrator.js";
 import {
-  AUTO_INJECTED_NOTICE,
+  AUTO_INJECTED_FIELD_NOTE,
   buildFields,
   coerceArgs,
   orphanedValueNames,
@@ -206,13 +206,6 @@ export class RunPanel {
   private render(): void {
     const nonce = nonceValue();
     const fieldsHtml = this.fields.map((f) => this.fieldHtml(f)).join("\n");
-    // A tool's form carries the auto-injected caveat: the language server
-    // cannot tell an @autoInjected field from an ordinary one, so the honest
-    // move is to say so once rather than pretend the distinction is drawn.
-    const toolNotice =
-      this.target.kind === "tool"
-        ? `<div class="notice">${escapeHtml(AUTO_INJECTED_NOTICE)}</div>`
-        : "";
     const noticeHtml =
       this.notice === "" ? "" : `<div class="notice">${escapeHtml(this.notice)}</div>`;
 
@@ -230,6 +223,8 @@ ${panelChrome()}
   .field .req { color: var(--vscode-errorForeground); margin-left: 4px; }
   .field .type { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 8px; }
   .field .desc { color: var(--vscode-descriptionForeground); margin: 2px 0 6px; }
+  .field .auto { color: var(--vscode-descriptionForeground); font-style: italic; margin: 2px 0 6px; }
+  .field .autotag { color: var(--vscode-descriptionForeground); font-weight: 400; margin-left: 8px; }
   .field .err { color: var(--vscode-errorForeground); margin-top: 4px; }
   input, select, textarea { width: 100%; box-sizing: border-box; font-family: var(--vscode-editor-font-family);
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);
@@ -244,7 +239,6 @@ ${panelChrome()}
   <strong>${escapeHtml(this.target.kind)} ${escapeHtml(this.target.name)}</strong>
   <span>${this.fields.length} argument${this.fields.length === 1 ? "" : "s"}</span>
 </div>
-${toolNotice}
 ${noticeHtml}
 <div class="pane">
   <form id="form">
@@ -276,6 +270,15 @@ ${fieldsHtml === "" ? '<div class="placeholder">This construct takes no argument
     const id = `arg-${escapeHtml(f.name)}`;
     const required = f.required ? '<span class="req" title="required">*</span>' : "";
     const desc = f.description === "" ? "" : `<div class="desc">${escapeHtml(f.description)}</div>`;
+    // The @autoInjected marker sits on the FIELD, not on the form. The label
+    // gets the tag so it is visible without reading, and the caption below
+    // says what it means. The input stays editable and the value is still
+    // submitted -- the engine drops it, and pretending otherwise here would put
+    // the extension and the engine out of step (memql#3333).
+    const autoTag = f.autoInjected ? '<span class="autotag" title="@autoInjected">engine-supplied</span>' : "";
+    const autoNote = f.autoInjected
+      ? `<div class="auto">${escapeHtml(AUTO_INJECTED_FIELD_NOTE)}</div>`
+      : "";
     const error = this.errors[f.name];
     const errorHtml = error === undefined ? "" : `<div class="err">${escapeHtml(error)}</div>`;
 
@@ -298,8 +301,9 @@ ${fieldsHtml === "" ? '<div class="placeholder">This construct takes no argument
     }
 
     return `<div class="field">
-  <label for="${id}">${escapeHtml(f.name)}${required}<span class="type">${escapeHtml(f.type)}</span></label>
+  <label for="${id}">${escapeHtml(f.name)}${required}<span class="type">${escapeHtml(f.type)}</span>${autoTag}</label>
   ${desc}
+  ${autoNote}
   ${control}
   ${errorHtml}
 </div>`;

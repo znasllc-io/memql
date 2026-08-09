@@ -666,3 +666,123 @@ func TestRunnableConstructs_CoversTheLiveCorpus(t *testing.T) {
 			len(missing), scanned, strings.Join(missing, "\n  "))
 	}
 }
+
+// lifecycleFixture carries the two states memql#3333 added to the contract:
+// `@autoInjected` tool fields, and `@disabled` on each runnable kind that can
+// take it. It is kept separate from runnableFixture so the existing projection
+// assertions keep asserting the DEFAULT (both flags false) on constructs that
+// carry neither annotation.
+const lifecycleFixture = `use cognition.concepts.{ space }
+
+@description("Produce a file deliverable")
+@handler(type="function", function="produceArtifact")
+tool produceArtifact {
+  filename     string  @required @description("Name of the file to write")
+  ownerUserId  string  @autoInjected @description("Server-stamped owner")
+  partitionId  string  @required @autoInjected @description("Server-stamped partition")
+}
+
+@disabled
+@description("A tool the loader skips")
+@handler(type="query", query="concept==v1:memql:backend:user")
+tool retiredSearch {
+  limit  integer
+}
+
+@disabled
+@description("A query the loader skips")
+query space disabledSpaceLookup {
+  args {
+    spaceId  string  @required
+  }
+  filter  row.id==args.spaceId
+  shape   spaceCard
+}
+
+@disabled
+@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
+automation disabledBootstrap {
+  step decide {
+    logic bootstrapSession ( event )
+  }
+}
+
+@enabled
+@description("An explicitly-enabled logic")
+logic enabledLogic {
+  args {
+    event object @required
+  }
+  body {
+    return ensureDailySpaceForUser(userId: args.event.payload.id)
+  }
+}
+`
+
+// A tool field's @autoInjected has to arrive as a PER-FIELD flag. The engine
+// stamps those values server-side and drops whatever the caller sent, so a
+// client that cannot tell them apart has to disclaim the whole form -- which is
+// how the extension's blanket notice came to exist (memql#3333).
+//
+// The flagged fields stay IN the arg list. Filtering them out here would hide a
+// field the tool's own schema declares and diverge from what dispatch does.
+func TestRunnableConstructs_ToolAutoInjectedFieldsAreFlagged(t *testing.T) {
+	rc := byName(t, newRunnableService().RunnableConstructs(lifecycleFixture), "produceArtifact")
+	want := []RunnableArg{
+		{Name: "filename", Type: "string", Required: true, Description: "Name of the file to write"},
+		{Name: "ownerUserId", Type: "string", Required: false, Description: "Server-stamped owner", AutoInjected: true},
+		{Name: "partitionId", Type: "string", Required: true, Description: "Server-stamped partition", AutoInjected: true},
+	}
+	if !reflect.DeepEqual(rc.Args, want) {
+		t.Errorf("tool args = %+v;\nwant %+v", rc.Args, want)
+	}
+}
+
+// query / mutate / logic args have no @autoInjected annotation at all, so the
+// flag must never come back true for them -- a client that marks an ordinary
+// arg as engine-supplied tells the developer their value is ignored when it is
+// not.
+func TestRunnableConstructs_NonToolArgsAreNeverAutoInjected(t *testing.T) {
+	got := newRunnableService().RunnableConstructs(runnableFixture)
+	for _, name := range []string{"spaceParticipants", "mutationCreateSpace", "logicProvisionDailySpace"} {
+		for _, a := range byName(t, got, name).Args {
+			if a.AutoInjected {
+				t.Errorf("%s arg %q autoInjected = true; want false (only a tool field can carry @autoInjected)", name, a.Name)
+			}
+		}
+	}
+}
+
+// @disabled means the construct is not loaded at runtime right now, so a run of
+// it can only be refused. Reporting it lets a client render the state instead
+// of surfacing it as a FAILED_PRECONDITION after the click, where it is
+// indistinguishable from a @filter miss.
+//
+// It is reported, NOT filtered: @disabled is a reversible switch and the
+// construct is still a real declaration in the buffer.
+func TestRunnableConstructs_DisabledIsReported(t *testing.T) {
+	got := newRunnableService().RunnableConstructs(lifecycleFixture)
+	for _, name := range []string{"retiredSearch", "disabledSpaceLookup", "disabledBootstrap"} {
+		if !byName(t, got, name).Disabled {
+			t.Errorf("%s disabled = false; want true (@disabled)", name)
+		}
+	}
+}
+
+// ENABLED is the ABSENCE of @disabled, not the presence of @enabled: @enabled
+// is the explicit-on default and a no-op, and the overwhelming majority of the
+// corpus carries neither annotation.
+func TestRunnableConstructs_EnabledAndUnannotatedAreNotDisabled(t *testing.T) {
+	explicit := newRunnableService().RunnableConstructs(lifecycleFixture)
+	if byName(t, explicit, "enabledLogic").Disabled {
+		t.Error("enabledLogic disabled = true; want false (@enabled is the explicit-on default)")
+	}
+	if byName(t, explicit, "produceArtifact").Disabled {
+		t.Error("produceArtifact disabled = true; want false (carries no lifecycle annotation)")
+	}
+	for _, rc := range newRunnableService().RunnableConstructs(runnableFixture) {
+		if rc.Disabled {
+			t.Errorf("%s %s disabled = true; want false (the fixture disables nothing)", rc.Kind, rc.Name)
+		}
+	}
+}
