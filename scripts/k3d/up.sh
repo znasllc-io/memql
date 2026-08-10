@@ -71,6 +71,7 @@ cap_spec_param "overlay-path"   "kustomize overlay path within the repo"
 cap_spec_param "extra-ports"    "additional host:container loadbalancer port mappings, comma-separated"
 cap_spec_param "app-project"    "ArgoCD AppProject the Application belongs to"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
+cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
 
 #=============================================================================
@@ -84,8 +85,15 @@ ARGOCD_VERSION="v2.13.3"
 NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 ARGOCD_NAMESPACE="argocd"
 
-# The Application's targetRevision: defaults to the current git branch.
-TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")}"
+# The Application's targetRevision is resolved in main(), AFTER --repo-root is
+# known -- it is read out of that checkout's git HEAD, so deriving it here would
+# read the wrong tree whenever the param is supplied.
+#
+# It used to be derived here with `|| echo "main"` swallowing the git failure.
+# That is what made a packaged run silently reconcile against whatever `main`
+# happened to be instead of the intended revision: no path exists, git errors,
+# the fallback fires, nothing is reported. require_checkout below now refuses
+# that case outright rather than guessing (memql#3491).
 REPO_URL="${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}"
 OVERLAY_PATH="${MEMQL_K3D_OVERLAY_PATH:-deploy/k8s/overlays/local}"
 APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
@@ -481,12 +489,41 @@ function gate_voice_lane_post_sync() {
     bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --gate-voice-lane-only >&2 || true
 }
 
+# require_checkout <dir> -- refuse a root that is not a real memQL checkout.
+#
+# A BEHAVIOUR CHANGE, stated plainly: this script used to proceed with whatever
+# it derived. It now fails.
+#
+# The reason is that the two obvious failures are not the dangerous one. A
+# missing deploy/argocd/bootstrap makes `kubectl apply -k` fail loudly and
+# anyone testing once would see it. The silent one is the target revision: it is
+# read from `git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD`, and a directory
+# that is not a git tree used to make that fall through to "main" with nothing
+# reported -- so a run would reconcile the cluster against whatever main
+# happened to be, having been asked for something else.
+#
+# That cannot be fixed by shipping more files, because the problem is not which
+# files are present: the root has to BE a checkout. So the honest move is to
+# refuse, with exit 4 (prerequisite missing) naming what is wrong, rather than
+# guess a revision.
+function require_checkout() {
+    local root="$1"
+    if [[ ! -d "$root" ]]; then
+        cap_fail 4 "repo-root ${root} does not exist"
+    fi
+    if ! git -C "$root" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        cap_fail 4 "repo-root ${root} is not a git checkout, so the ArgoCD target revision cannot be read from it -- pass --repo-root=<a memQL checkout> (the install graph passes the directory install.cloneStack created)"
+    fi
+    if [[ ! -d "${root}/deploy/argocd/bootstrap" ]]; then
+        cap_fail 4 "repo-root ${root} has no deploy/argocd/bootstrap -- it is a git checkout, but not of memQL"
+    fi
+}
+
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
     CLUSTER_NAME="$(cap_param cluster "${MEMQL_K3D_CLUSTER:-memql}")"
-    TARGET_REVISION="$(cap_param revision "${TARGET_REVISION}")"
     NAMESPACE="$(cap_param namespace "${MEMQL_K3D_NAMESPACE:-memql}")"
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-https://github.com/znasllc-io/memql.git}")"
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
@@ -496,7 +533,19 @@ function main() {
     OVERLAY_PATH="$(cap_param overlay-path "${OVERLAY_PATH}")"
     EXTRA_PORTS="$(cap_param extra-ports "${EXTRA_PORTS}")"
     APP_PROJECT="$(cap_param app-project "${APP_PROJECT}")"
-    PROJECT_MANIFEST="$(cap_param project-manifest "${PROJECT_MANIFEST}")"
+    # The checkout this run reads deploy/ and its target revision FROM.
+    #
+    # Defaults to the derived root, so `make up` and every CI lane that calls
+    # this script from a checkout with no params behave exactly as before.
+    #
+    # A packaged extension has no checkout of its own -- the staged tree it runs
+    # from carries scripts/ and nothing else -- so the install graph passes the
+    # directory `install.cloneStack` put on disk (memql#3491).
+    REPO_ROOT="$(cap_param repo-root "${REPO_ROOT}")"
+    require_checkout "$REPO_ROOT"
+    # Derived from REPO_ROOT, so it is resolved AFTER the param, not before.
+    TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)}"
+    TARGET_REVISION="$(cap_param revision "${TARGET_REVISION}")"
     local skip_secrets
     skip_secrets="$(cap_flag no-secrets)"
 
