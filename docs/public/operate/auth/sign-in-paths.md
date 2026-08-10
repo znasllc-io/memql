@@ -255,8 +255,18 @@ Where the resulting tokens live is a deliberate split:
 `SecretStorage` cannot be enumerated -- there is `get`, `store` and `delete` and
 no way to ask what keys exist -- so the store keeps its own index of the clusters
 it has written for, and offers a rename-as-move and a reconcile sweep over it.
-Neither of those two is called from the extension today; see
-[Not implemented](#not-implemented).
+Both are wired (memql#3515):
+
+- **Renaming a cluster moves its credential.** `memQL: Edit Cluster` goes
+  through `saveClusterEdit`, which writes the entry and then moves the
+  `SecretStorage` half to the new name. The file write runs first, because it is
+  the half that can fail -- a secret moved to a name no entry carries is the
+  orphan the move exists to prevent.
+- **A sweep runs once at activation**, deleting the secrets of clusters
+  `clusters.yaml` no longer carries. It is what cleans up after a cluster
+  deleted by the Cockpit or by hand. A registry that cannot be **parsed** sweeps
+  nothing, deliberately: "I could not read it" and "there are none" must not
+  delete the same credentials.
 
 ### Reaching the device grant from the editor
 
@@ -265,13 +275,14 @@ only) runs the device grant deliberately, skipping loopback. Use it when you
 already know this host cannot do a browser round trip -- otherwise you sit
 through the callback deadline first only to be told so.
 
-The extension also carries a fallback rule for deciding automatically. It is
-**not currently reached from memQL: Sign In** (see
-[Not implemented](#not-implemented)), but it is the rule to expect if you drive
-`signInWithDeviceCodeFallback` yourself, and it is worth knowing because it says
-which failures are environment limitations and which are refusals. It triggers
-on **environment limitations only**, branching on the failure's `kind` and never
-on message text:
+**memQL: Sign In** reaches the same grant by itself when the browser round trip
+proves impossible (memql#3515) -- both commands run through one sign-in shell
+that differs only in which flow it starts. Which one ran is announced rather
+than silently substituted: the progress notification says it is switching, and
+an information message names the reason. The rule for when it switches is worth
+knowing because it says which failures are environment limitations and which are
+refusals. It triggers on **environment limitations only**, branching on the
+failure's `kind` and never on message text:
 
 - `bindFailed` -- the one-shot loopback listener could not bind `127.0.0.1:0`.
 - `timeout` -- the listener bound and the browser was opened, but nothing came
@@ -416,15 +427,6 @@ Stated here so nobody plans against it:
 - **There is no passkey-only account model.** A user row still carries a primary
   email; the enrolment link removes email from the sign-in path, not from the
   data model.
-- **The editor's automatic device-code fallback is not reachable from Sign In.**
-  `signInWithDeviceCodeFallback` is implemented and tested, but **memQL: Sign
-  In** runs the loopback flow alone. The device grant is reached through the
-  separate **memQL: Sign In With a Device Code** command, which skips loopback
-  deliberately.
-- **Renaming a signed-in cluster in the editor does not move its refresh
-  token.** `renameClusterCredentials` and `reconcileClusterCredentials` are both
-  implemented and neither is called, so the secret is orphaned under the old
-  cluster name. Sign in again after a rename.
 - **The editor's "+" Install / Repair actions do not run an installer.** They
   print the CLI command with a Copy Command button and say so.
 
