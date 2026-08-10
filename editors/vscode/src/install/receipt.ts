@@ -305,8 +305,27 @@ export function removalParams(entry: ReceiptEntry): Record<string, string> | nul
  * is the bug this exists to fix.
  */
 export function recordedProviderKeyFile(receipt: Receipt | null): string {
+  return recordedProviderParam(receipt, "key-file");
+}
+
+/**
+ * The VENDOR a previous run verified its key against (memql#3473).
+ *
+ * Travels with the path above, and has to: the wizard now collects the provider
+ * rather than pinning `anthropic`, so a repair that read the key file back and
+ * re-asserted the DEFAULT vendor would verify an OpenAI key against Anthropic's
+ * API. That is an exit 3 -- REFUSED, "the provider rejected the key" -- about a
+ * key that is perfectly good, which is the most misleading answer available.
+ *
+ * Empty means the same thing it means above: nothing to go on, so ask.
+ */
+export function recordedProvider(receipt: Receipt | null): string {
+  return recordedProviderParam(receipt, "provider");
+}
+
+function recordedProviderParam(receipt: Receipt | null, name: string): string {
   if (receipt === null) return "";
   const entry = entryFor(receipt, "providerKey");
-  const recorded = entry?.params["key-file"];
+  const recorded = entry?.params[name];
   return typeof recorded === "string" ? recorded : "";
 }

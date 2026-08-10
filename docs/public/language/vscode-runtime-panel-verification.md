@@ -396,8 +396,18 @@ order below and you get all three from one cluster.
       skipped rather than being done twice
 - [ ] The cluster panel's primary control offers **Repair** for a local
       cluster that is not answering, and opens the same page
+- [ ] The collect form offers the AI provider as a **choice** (anthropic /
+      openai), pre-answered, and the provider chosen is the one the run
+      verifies the key against -- pick `openai` with an OpenAI key and the run
+      passes wave 2
+- [ ] A repair asks for nothing that is already recorded: it needs no key file
+      and no provider, both of which come back off the receipt
+- [ ] Every step of the graph is on screen from the start, the ones ahead
+      marked pending -- not a list that grows as each step begins
 - [ ] A failed step shows its exit status and the script's own stderr verbatim
       in a disclosure, and offers a retry in place rather than a restart
+- [ ] Retry actually re-runs: fix the cause, press it, and the step executes
+      again rather than the screen merely repainting
 - [ ] Cancelling a part-finished install still leaves a receipt, and the
       uninstall preview can read it
 
@@ -421,13 +431,18 @@ this surface is reading one as the other:
 - [ ] After the uninstall the cluster is gone from the tree as well as from
       the machine
 
-WARNING: two items this section does not ask for, because they are not
-finished and the row would fail. The AI provider key is collected but is
-**not** verified with a live call before the run starts (memql#3473), so a
-wrong key surfaces later, as a failing step. And when two steps running
-concurrently both fail, which of them is presented as *the* failure is
-arbitrary (memql#3474) -- both are in the log, but do not read the headline
-as "the first thing that went wrong".
+Both of the caveats that used to sit here are closed, and what replaced them
+is worth checking rather than assuming:
+
+- The provider key IS verified with one live call, and nothing has touched the
+  machine when it happens (memql#3473). It is not a preflight ahead of the run
+  -- it is `providerKey`, alone in wave 2, with every mutating step declaring
+  `dependsOn: [..., providerKey]`. `hostsBlock` needs sudo and used to sit in
+  the same wave, so a bad key could cost a password prompt and an `/etc/hosts`
+  edit before anything mentioned it.
+- A wave with several failures explains EACH of them (memql#3474). The headline
+  counts them and leads with the earliest, on the ground that the others may be
+  consequences of it.
 
 ## 3. Running a construct (B2, memql#3309)
 

@@ -100,12 +100,42 @@ test("an install needs everything up front; a repair needs only the domain", () 
     "ownerFirstName",
     "ownerLastName",
     "ownerEmail",
+    "provider",
     "providerKeyFile",
   ]);
   assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
   assert.deepEqual(requiredFields("repair"), ["domain"]);
   assert.deepEqual(requiredFields("uninstall"), []);
   assert.deepEqual(requiredFields("connect"), []);
+});
+
+test("the provider is one of the fields collected, and it is pre-answered", () => {
+  // It used to be neither. `provider` was hardcoded in the panel AND pinned in
+  // install.json, where graph params win -- so an operator holding an OpenAI
+  // key had no route through this wizard, though verify-provider-key.sh
+  // supports one. Every test enumerated the other five fields, so "collected on
+  // one pass" read as satisfied at a glance.
+  assert.ok(requiredFields("install").includes("provider"));
+  assert.equal(
+    new AddClusterState().inputs.provider,
+    "anthropic",
+    "a choice from a closed set gets a default; the four personal fields do not",
+  );
+});
+
+test("a provider memQL cannot verify is refused here, in the operator's terms", () => {
+  // The second wall. The control is a select, so the wrong answer is not
+  // expressible by clicking -- but the postMessage channel is untrusted, and
+  // the alternative to refusing here is exit 2 out of the script, whose
+  // guidance correctly says "a fault in memQL rather than in your machine or
+  // your answers". That is the wrong sentence about a value the operator chose.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("provider", "gemini");
+  assert.match(s.errors.find((e) => e.field === "provider")?.message ?? "", /anthropic or openai/);
+
+  s.setInput("provider", "openai");
+  assert.deepEqual(s.errors, [], "a provider the script does support is accepted");
 });
 
 test("a run cannot begin while a required field is empty", () => {
