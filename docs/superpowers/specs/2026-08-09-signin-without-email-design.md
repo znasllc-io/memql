@@ -428,6 +428,53 @@ wizard's BYO-domain path (its D5 "Advanced"). This gates the **wording** of the
 enrolment UI, not the ceremony code, so it must resolve before Unit B's page
 copy is written — but it does not block Units A, C, D or E.
 
+> **Partial finding (memql#3405, 2026-08-09).** The question splits into two
+> legs needing different instruments. One is now settled; the other still needs
+> hardware, so the spike stays open.
+>
+> **Leg 1 — the browser's RP ID validator: SETTLED. It accepts `.localhost`.**
+> `navigator.credentials.create()` rejects with `SecurityError` unless `rp.id`
+> "is a registrable domain suffix of, or is equal to" the caller's effective
+> domain, which delegates to HTML's [*is a registrable domain suffix of or is
+> equal to*][html-rds] algorithm. Both shapes pass:
+>
+> - **RP ID == effective domain** (`identity.memql.localhost` on
+>   `https://identity.memql.localhost`): the algorithm's step 4 is guarded by
+>   "if hostSuffix does not equal originalHost", so the whole step — including
+>   every Public Suffix List consultation inside it — is skipped. **No PSL
+>   lookup happens at all**, and an exact-match RP ID cannot fail this check for
+>   any hostname.
+> - **RP ID is a parent** (`memql.localhost` on
+>   `https://identity.memql.localhost` — the shape D5 wants, so one passkey
+>   covers `identity.`, `cockpit.` and `bff.`): step 4 runs and passes, because
+>   **`localhost` is not on the Public Suffix List**. Verified against the live
+>   list on 2026-08-09: 0 matches in 16,409 lines, with `com` present as a
+>   control. With no rule matching, the PSL's prevailing `*` rule makes
+>   `localhost` the public suffix of `memql.localhost`, making the latter a
+>   registrable domain rather than a public suffix.
+>
+> Note the **direction** of that result: `.localhost` passes *because it is
+> unlisted* — because nobody has asserted anything about it. That is a thinner
+> guarantee than a spec carve-out, and it is exactly why leg 2 must be measured
+> rather than reasoned about: a browser may special-case `.localhost` outside
+> the PSL and this analysis would not see it.
+>
+> **Leg 2 — the authenticators: NOT ANSWERED.** Whether the iOS and Android
+> passkey providers accept it over hybrid transport, and whether Chrome and
+> Safari agree, needs a physical iOS device, a physical Android device, and a
+> person to scan a QR code. The mechanism is sound in principle — §5.3's "the
+> phone never contacts the cluster" is correct, the RP ID reaches the phone as
+> an opaque string over the tunnel — but "sound in principle" is what this spike
+> exists to stop us shipping on.
+>
+> **Consequence, pending leg 2.** The conservative branch shipped: memql#3408's
+> `/enroll` page names the platform authenticator and says nothing about phones,
+> and `docs/public/operate/auth/sign-in-paths.md` documents the split rather
+> than promising cross-device enrolment. A one-command harness with an empty
+> results table is at `scripts/spikes/webauthn-rpid/`.
+>
+> [html-rds]: https://html.spec.whatwg.org/multipage/browsers.html#is-a-registrable-domain-suffix-of-or-is-equal-to
+
 **`go-webauthn` dependency.** New Go module (BSD-3). Needs a license and CI
 vendoring check.
 
