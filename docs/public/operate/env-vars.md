@@ -718,6 +718,25 @@ The old row is soft-deleted (`active=false`); `lastUsedAt` /
 `rotatedAt` get stamped on the new row. The next decrypt picks the
 new value; nothing else has to restart.
 
+#### The one exception: the campaign unsubscribe signing key
+
+`MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` does not rotate like the keys above,
+because what it signs lives **outside** the cluster: an RFC 8058 unsubscribe
+link sits in the recipient's mailbox for as long as they keep the message.
+Replacing the value on its own invalidates every such link ever sent, which is
+a compliance failure rather than a degraded feature.
+
+It is therefore a **two-variable** rotation (memql#3458). Set
+`MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` to the outgoing value in the same
+change, and then leave it set — it is a permanent second *reader* key, not a
+migration window. An old link keeps working forever, until a **second**
+rotation retires the key that signed it; the window is counted in rotations,
+not days. The worker warns at boot if this deployment has already sent campaign
+mail while holding only one key.
+
+Full procedure and reasoning:
+[campaign-sending.md](campaign-sending.md#rotating-the-unsubscribe-signing-key).
+
 ### Backing up state before a wipe
 
 ```bash

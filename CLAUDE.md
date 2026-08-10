@@ -2092,6 +2092,19 @@ its base64-MIME form -- Graph's structured payload only carries `x-`
 headers, and `List-Unsubscribe` is not one. `GET+POST /unsubscribe` is a
 documented HTTP exception (see the table above).
 
+**The unsubscribe token names its key** (`u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>`,
+memql#3458), and the node verifies against a ring of two:
+`MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` signs, `..._SECRET_PREVIOUS` only
+verifies. The key id is a truncated HMAC **of the key**, not a slot or a
+counter -- a link minted today is clicked on a node where that secret has since
+become the previous one, so a positional label would be wrong exactly when it
+matters. `_PREVIOUS` is a permanent second reader key, NOT a migration window:
+an unsubscribe link has no expiry, so an old link keeps working forever until a
+SECOND rotation retires the key that signed it. The window is counted in
+rotations, not days; rotate at most once for any reason short of key
+compromise. The worker warns at boot when a deployment that has already sent
+holds only one key.
+
 Not built: an automated warming ramp (needs reputation telemetry that does
 not exist) and a scheduler for `scheduledAt`. Runbook:
 [docs/public/operate/campaign-sending.md](docs/public/operate/campaign-sending.md).

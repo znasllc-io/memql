@@ -2,6 +2,8 @@ package campaigns
 
 import (
 	"context"
+	"encoding/hex"
+	"errors"
 	"html"
 	"log/slog"
 	"net/http"
@@ -97,11 +99,46 @@ func (h *UnsubscribeHandler) ServeHTTP(rw http.ResponseWriter, r *http.Request) 
 
 func (h *UnsubscribeHandler) serveGet(rw http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(r.URL.Query().Get("token"))
-	if _, _, _, err := ParseUnsubscribeToken(h.cfg.UnsubscribeSecret, token); err != nil {
+	if _, _, _, err := h.parseToken(token); err != nil {
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return
 	}
 	h.render(rw, http.StatusOK, pageConfirm, token)
+}
+
+// parseToken verifies the token against the configured key ring and
+// reports the one failure an operator can act on.
+//
+// A refused token is always the same page to the recipient. The split
+// here is for the LOG: "the MAC did not match" is a prober, while "this
+// node holds no key with that id" is a rotation that dropped a secret
+// which had already signed live links -- the memql#3458 failure, which is
+// otherwise invisible from our side and maximally visible from theirs.
+// Neither branch logs the token or any secret.
+func (h *UnsubscribeHandler) parseToken(token string) (ownerUserID, recipientID, campaignID string, err error) {
+	ownerUserID, recipientID, campaignID, err = ParseUnsubscribeToken(h.cfg.UnsubscribeKeys(), token)
+	if errors.Is(err, errUnknownUnsubscribeKey) {
+		h.logger.Warn("campaigns: refused an unsubscribe link signed by a key this node no longer holds; "+
+			"the signing secret was rotated without keeping the old value in MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS, "+
+			"so a recipient could not opt out",
+			"keyId", unsubscribeKeyIDOf(token))
+	}
+	return ownerUserID, recipientID, campaignID, err
+}
+
+// unsubscribeKeyIDOf pulls the (public, non-secret) key id out of a token
+// for the log line above, so an operator can tell one dropped key from
+// another. It returns "" for anything that is not shaped like a token --
+// the log must never echo attacker-chosen bytes.
+func unsubscribeKeyIDOf(token string) string {
+	parts := strings.Split(strings.TrimSpace(token), ".")
+	if len(parts) != 6 || parts[0] != unsubscribeTokenVersion {
+		return ""
+	}
+	if _, err := hex.DecodeString(parts[1]); err != nil || len(parts[1]) != unsubscribeKeyIDBytes*2 {
+		return ""
+	}
+	return parts[1]
 }
 
 func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) {
@@ -114,7 +151,7 @@ func (h *UnsubscribeHandler) servePost(rw http.ResponseWriter, r *http.Request) 
 		_ = r.ParseForm()
 		token = strings.TrimSpace(r.PostFormValue("token"))
 	}
-	ownerUserID, recipientID, campaignID, err := ParseUnsubscribeToken(h.cfg.UnsubscribeSecret, token)
+	ownerUserID, recipientID, campaignID, err := h.parseToken(token)
 	if err != nil {
 		h.render(rw, http.StatusBadRequest, pageInvalid, "")
 		return

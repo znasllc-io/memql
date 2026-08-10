@@ -76,6 +76,17 @@ export interface SessionOptions {
   ownerFirstName?: string;
   ownerLastName?: string;
   registrationMode?: string;
+  /**
+   * Where `install.cloneStack` puts the memQL checkout, and therefore the root
+   * `k3d.up` reads deploy/ and its target revision from (memql#3491).
+   *
+   * ONE VALUE FEEDS BOTH STEPS, from here, rather than each defaulting
+   * independently: the two scripts have their own defaults and a caller that
+   * set only one would point the cluster bring-up at a directory the checkout
+   * did not land in. That is the divergence this field exists to make
+   * impossible.
+   */
+  stackDir?: string;
   /** Escape hatch: per-step flag overrides. */
   stepParams: Record<string, Record<string, string>>;
   timeoutMs?: number;
@@ -118,10 +129,19 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
     if (opts.skip.has(step.id)) {
       return { action: "skip", reason: `skipped: ${step.id}` };
     }
+    const stackDir = resolveStackDir(opts);
     let params: Record<string, string> = {};
     switch (step.id) {
       case "stackCheckout":
-        params = present({ tag: opts.tag, repo: opts.repo });
+        params = present({ tag: opts.tag, repo: opts.repo, dest: stackDir });
+        break;
+      case "clusterUp":
+        // The checkout stackCheckout just created. Without it k3d.up derives a
+        // root from its own location, which in a packaged extension is the
+        // staged tree -- no deploy/, and not a git tree, so the ArgoCD target
+        // revision silently became "main". The graph already declares the
+        // dependency; this is the value finally flowing along it.
+        params = present({ "repo-root": stackDir });
         break;
       case "providerKey":
         params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });
@@ -275,6 +295,19 @@ function childEnv(opts: SessionOptions): NodeJS.ProcessEnv {
   const home = process.env.HOME ?? "";
   const toolDir = opts.toolDir ?? path.join(home, ".memql", "bin");
   return { ...process.env, PATH: `${toolDir}${path.delimiter}${process.env.PATH ?? ""}` };
+}
+
+/**
+ * The checkout directory both stackCheckout and clusterUp are given.
+ *
+ * Mirrors clone-stack.sh's own default (~/.memql/src) rather than leaving each
+ * script to apply its own, so the two cannot disagree about where the stack
+ * landed. The script default remains for a bare CLI invocation with no --dest.
+ */
+function resolveStackDir(opts: SessionOptions): string {
+  const explicit = (opts.stackDir ?? "").trim();
+  if (explicit !== "") return explicit;
+  return path.join(process.env.HOME ?? "", ".memql", "src");
 }
 
 async function loadGraphFor(kind: GraphKind, opts: SessionOptions): Promise<Graph> {

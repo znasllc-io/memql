@@ -65,6 +65,7 @@ cap_spec_param "namespace" "k8s namespace to seed into"
 cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
 cap_spec_param "tls-key"   "front-door TLS private key path (issued with mkcert when absent)"
 cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-door pair"
+cap_spec_param "repo-root"      "the memQL checkout to read deploy/ from (default: this script's own repository)"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
@@ -777,6 +778,14 @@ function main() {
     cap_parse_flags "$@"
 
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
+    # The checkout deploy/k8s/base/tls/gen-internal-ca.sh is read from. Defaults
+    # to the derived root so a run from a checkout is unchanged; the install
+    # graph passes the cloned stack (memql#3491).
+    #
+    # NOTE: only the deploy/ read moves. The mkcert-setup.sh read below stays on
+    # the derived root, because scripts/ IS staged at that relative position --
+    # repointing it would break the packaged path this change exists to fix.
+    REPO_ROOT="$(cap_param repo-root "$REPO_ROOT")"
     cap_require namespace "$NAMESPACE"
 
     # Env feeds the DEFAULT slot; cap_param has no environment tier of its own.
