@@ -128,6 +128,18 @@ var gateInputs = []struct {
 	// It is routed via the `go` bucket to db-tests instead -- the lane that
 	// actually runs it. A row here would assert the wrong lane.
 	{"arch.yaml", "component/architecture", "TestArchitectureModelIsNotStale"},
+	// The three paths that were EXEMPTED as "no gate reads it" until
+	// memql#3451 made an exemption's reason checkable against the tree
+	// (scripts/ci/gate_corpus_test.go). Each is read by a Go test under
+	// scripts/, and each therefore needs its own `gates` glob: `scripts/**`
+	// covers the package the test lives in, not the file the test opens.
+	//
+	// A row here is what stops the glob being deleted again on the "it is only
+	// a Dockerfile / only .gitignore" reasoning that put them on the allow
+	// list in the first place.
+	{".gitignore", "scripts/dev", "TestLockfileNegationsHaveATrackedFileBehindThem"},
+	{"Dockerfile", "scripts/ci", "TestDockerfileDeclaresThePortalStageSelector"},
+	{"cmd/deploy-gate-check/Dockerfile", "scripts/ci", "TestDockerfilesCopyEveryNestedModuleManifest"},
 }
 
 // changesFilters returns the parsed filter block the `changes` job wires its
