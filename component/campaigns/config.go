@@ -123,6 +123,20 @@ type Config struct {
 	UnsubscribeSecret  string
 	UnsubscribeBaseURL string
 
+	// FeedbackSources maps an inbound webhook source name onto the feedback
+	// format its payloads are in (memql#3461). Empty means no source on
+	// this deployment is trusted to drive suppression, which is the safe
+	// default and also the state that ships nothing working -- so the
+	// runbook says how to fill it.
+	//
+	// THIS MAP IS THE AUTHORIZATION for the ingestion path. Deciding that
+	// "ses-feedback" is a bounce feed is a deployment-level judgement made
+	// by whoever holds the env and the shared HMAC secret -- the same tier
+	// as the cluster-wide suppression list it writes to -- rather than a
+	// per-call role check on a caller who is, in the end, only asking us to
+	// re-read a webhook we already verified.
+	FeedbackSources map[string]string
+
 	// UnsubscribeSecretPrevious is the secret this node still VERIFIES
 	// with but never signs with -- the other half of a rotation
 	// (memql#3458). Empty on a deployment that has never rotated, which
@@ -184,6 +198,7 @@ func (c Config) CanRotateUnsubscribeSecret() bool {
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL
+//	MEMQL_CAMPAIGNS_FEEDBACK_SOURCES
 //
 // The names are spelled out here rather than composed in prose because
 // the reader builds each one from a prefix plus a suffix, so the full
@@ -242,7 +257,48 @@ func LoadConfig() Config {
 	if s, ok := reader.String("UNSUBSCRIBE_BASE_URL"); ok {
 		cfg.UnsubscribeBaseURL = s
 	}
+	if s, ok := reader.String("FEEDBACK_SOURCES"); ok {
+		cfg.FeedbackSources = parseFeedbackSources(s)
+	}
 	return cfg
+}
+
+// parseFeedbackSources reads `source=format,source=format`.
+//
+// An entry naming an unsupported format is DROPPED rather than defaulted,
+// and FeedbackFormatFor's caller reports the source as unconfigured. A
+// typo'd format silently resolving to "the standard one" would mean parsing
+// SES JSON as a DSN, which produces no reports and looks exactly like a
+// deployment with no bounces -- the failure this whole task exists to
+// remove.
+func parseFeedbackSources(raw string) map[string]string {
+	out := map[string]string{}
+	for _, entry := range strings.Split(raw, ",") {
+		name, format, ok := strings.Cut(strings.TrimSpace(entry), "=")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		format = strings.ToLower(strings.TrimSpace(format))
+		if name == "" {
+			continue
+		}
+		for _, supported := range SupportedFeedbackFormats() {
+			if format == supported {
+				out[name] = format
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// FeedbackFormatFor reports the format configured for an inbound source, or
+// "" when the source is not a trusted feedback feed on this deployment.
+func (c Config) FeedbackFormatFor(source string) string {
+	return c.FeedbackSources[strings.TrimSpace(source)]
 }
 
 // RequireUnsubscribe reports the reason a send cannot legally start, or

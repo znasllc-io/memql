@@ -443,26 +443,89 @@ Author a new campaign.
 
 Bounces and complaints arrive out of band — Microsoft Graph's `sendMail`
 returns `202 Accepted` and the bounce comes back to the sending mailbox
-later. Wire the provider's feedback webhook to `POST /inbound/{source}`
-([inbound delivery](inbound-delivery.md)) and have a DSL automation over
-`v1:platform:inboundRequest` call:
+later. **Two formats parse out of the box** (memql#3461):
+
+| Format | What it covers | Who produces it |
+|---|---|---|
+| `rfc3464` | Bounces, hard and soft | The standard delivery status notification. Microsoft Graph / Exchange, Postfix, essentially every SMTP-era relay. Cannot express a complaint — nothing bounced, so there is no DSN. |
+| `ses` | Bounces **and complaints** | Amazon SES feedback over SNS. Carries the complaint feedback loop a DSN structurally cannot. |
+
+Anything else needs a parser, and the honest consequence of not writing one
+is that its bounces never reach the suppression list.
+
+### Wiring a feed
+
+1. Point the provider's feedback webhook at `POST /inbound/{source}`
+   ([inbound delivery](inbound-delivery.md)) and configure that source's
+   allowlist entry and signing secret there.
+2. Name it as a feedback feed:
+
+   ```bash
+   MEMQL_CAMPAIGNS_FEEDBACK_SOURCES=postmaster=rfc3464,ses-feedback=ses
+   ```
+
+That is the whole wiring. A shipped automation
+(`ingestCampaignFeedback`) fires on every staged inbound row and offers it
+to `campaignIngestFeedback`, which parses and applies it.
+
+**Listing the source here is the authorization**, and there is deliberately
+no role check on top of it. The call asserts nothing: every address and every
+verdict comes out of a body the provider signed with a secret you configured,
+arriving at a source you allowlisted, in a format you named — three
+deployment-level decisions, all made by whoever holds the env. A payload from
+a source configured `scheme=none` is refused, because unauthenticated input
+must not write a cluster-wide list. The most anyone can do by calling the
+builtin directly is re-process a webhook you already trusted, which is
+idempotent.
+
+### Hard vs soft is the provider's word, not ours
+
+| Provider says | Result |
+|---|---|
+| DSN `Status: 5.x.x`, or `Action: failed` | hard bounce → **suppressed** |
+| DSN `Status: 4.x.x`, or `Action: delayed` | soft bounce → recorded, not suppressed |
+| SES `bounceType: Permanent` | hard bounce → **suppressed** |
+| SES `bounceType: Transient` or `Undetermined` | soft bounce → not suppressed |
+| SES complaint | **suppressed** |
+
+`Undetermined` counts as transient on purpose: SES is saying it could not
+tell, and a permanent suppression on "could not tell" costs a real
+subscriber, while the other error costs at most a few more attempts at a dead
+address. Nothing anywhere classifies by reading the diagnostic **text** — a
+parser that looked for "user unknown" would be inventing a verdict.
+
+A bounce is attributed to its send through the `X-Campaign-Id` header the
+sender stamps, which a DSN quotes back and SES echoes in `mail.headers`.
+Best-effort: attribution improves a review and is never a precondition for
+suppressing.
+
+### What happens to a payload we cannot read
+
+It is **not dropped**. The inbound row is stamped `failed` with the reason and
+the call errors, so:
+
+```
+query inboundRequestsByStatus(status: "failed")
+```
+
+is the list of feedback this deployment could not understand. A payload that
+reads fine and carries no bounce — a delivery receipt, an SNS subscription
+confirmation — is stamped `processed` with what it was, because recording
+that as a failure would teach you to ignore failures. An SNS
+`SubscriptionConfirmation` says to visit its `SubscribeURL`, which is the one
+message that means the wiring is working.
+
+### By hand
+
+An operator can still enter a report or suppress directly:
 
 ```
 builtin campaignRecordFeedback(email: "...", kind: "hard_bounce", campaignId: "...")
-```
-
-The automation has to present an **admin service-account credential**
-([service-account JWT](auth/service-account-jwt.md)) — the suppression list is
-cluster-wide, so writing it is a deployment-level action and the gate is a
-role rather than a row predicate.
-
-An operator can also suppress by hand:
-
-```
 builtin campaignSuppress(email: "...", reason: "manual", note: "...")
 ```
 
----
+Both are admin-or-cluster-owner, because there the caller **is** asserting a
+verdict.
 
 ## Warming a new sending domain
 
@@ -495,6 +558,7 @@ The manual procedure works today and uses the same knob:
 | Scheduled campaign did not send | Read the campaign row's `lastError` — the fire-time preflight records its reason there. An environment refusal (no sender, no unsubscribe config) retries; an authoring one leaves the campaign `failed`. |
 | Scheduled campaign sent later than its time | Expected after downtime: a late send is sent rather than dropped. The log line carries `lateBy`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |
+| Bounces never appear on the suppression list | The source is not in `MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`, or its format is misspelled (a misspelling is dropped, not defaulted). Check `inboundRequestsByStatus(status: "failed")` for payloads that arrived and could not be read. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | Boot warns "holds only ONE unsubscribe signing key" | This deployment has sent campaign mail and has no `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Nothing is broken yet; the next rotation of the secret alone would break every link already sent. |

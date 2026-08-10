@@ -387,6 +387,13 @@ variables:
     default: "3"
     description: "Per-recipient delivery attempts before the delivery row goes terminal failed. Lower than the outbound worker's 5: a marketing message has a shelf life, and the eighth retry of a soft-bouncing address costs reputation rather than buying delivery."
 
+  - name: MEMQL_CAMPAIGNS_FEEDBACK_SOURCES
+    component: campaigns
+    scope: node
+    optional: true
+    default: ""
+    description: "Which inbound webhook sources carry campaign bounce/complaint feedback, and in what format (memql#3461). Comma-separated source=format pairs, e.g. 'postmaster=rfc3464,ses-feedback=ses'. The source name is the {source} path segment of POST /inbound/{source} and must also be in MEMQL_INBOUND_SOURCE_ALLOWLIST with its own signing secret. Formats: rfc3464 (the standard delivery status notification every SMTP-era relay including Microsoft Graph produces) and ses (Amazon SES feedback over SNS, which additionally carries complaints). THIS IS THE AUTHORIZATION for the ingestion path -- listing a source here is the deployment-level decision that its signed payloads may write the cluster-wide suppression list. Empty means nothing is trusted to do so, which is the safe default and also the state in which no bounce ever reaches the list. An entry naming an unsupported format is dropped rather than defaulted, because a typo resolving to 'the standard one' would parse SES JSON as a DSN, report nothing, and look exactly like a deployment with no bounces."
+
   - name: MEMQL_CAMPAIGNS_MAX_AUDIENCE
     component: campaigns
     scope: node

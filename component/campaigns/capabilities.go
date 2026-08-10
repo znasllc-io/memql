@@ -92,6 +92,14 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "ingestFeedback",
+			Description: "Read a provider's bounce / complaint webhook off a staged v1:platform:inboundRequest row and apply it. Gated by configuration rather than by role: the source must be listed in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES and the delivery must have been signature-verified.",
+			Handler:     w.handleIngestFeedback,
+			ArgsSchema: map[string]string{
+				"inboundRequestId": "string (required) - the staged v1:platform:inboundRequest row to read",
+			},
+		},
+		{
 			Name:        "recordFeedback",
 			Description: "Record a bounce or complaint report from the mail provider. Admin only. A hard bounce or complaint suppresses the address cluster-wide; a soft bounce is recorded and does not.",
 			Handler:     w.handleRecordFeedback,
