@@ -78,6 +78,8 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	switch {
 	case strings.HasPrefix(q, "query drainableSendJobs"):
 		return rowsEnvelope(e.jobs), nil
+	case strings.HasPrefix(q, "query recentSendJobs"):
+		return rowsEnvelope(e.jobs), nil
 	case strings.HasPrefix(q, "query sendJobById"):
 		return rowsEnvelope(e.jobs), nil
 	case strings.HasPrefix(q, "query campaignById"):
