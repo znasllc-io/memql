@@ -60,6 +60,13 @@ export interface FailureGuidance {
  *      capability.sh's EXIT trap emits a failure envelope for any non-zero
  *      abort, so a `set -e` death lands here too.
  *
+ * -- PLUS every code memQL SYNTHESISES for itself, named in
+ * `runner.SYNTHESISED_EXIT_CODES`: 124 (the step outran its ceiling), 127 (the
+ * script could not be spawned) and 128 (the child died on a signal nobody here
+ * sent). A number memQL assigned itself and then cannot explain is the worst
+ * version of this failure, and `installProgress.test.ts` derives its reachable
+ * set from that object rather than from a list written out beside it.
+ *
  * Both were once falling through to the default branch, which told the
  * operator memQL "cannot say what it means" about the two cases it understands
  * best. That is the confident-wrong-advice failure this function exists to
@@ -129,6 +136,21 @@ export function failureGuidance(exitCode: number | null): FailureGuidance {
           "machine, and retrying will not change it. Please report it with the " +
           "output below.",
         retryable: false,
+      };
+    case 128:
+      // Also ours, and the one that stayed unexplained longest: runner.ts
+      // reports 128 when the child dies on a signal and reports no code of its
+      // own. It is NOT the timeout -- that path reports 124 and says so -- which
+      // is precisely what makes it worth its own sentence rather than a
+      // near-enough mapping onto one.
+      return {
+        headline: "Something outside memQL stopped this step.",
+        advice:
+          "The step was killed by a signal memQL did not send -- a Ctrl-C in the " +
+          "window behind this one, a system running out of memory, or a process " +
+          "supervisor. Nothing about the step itself failed. Retry is safe: every " +
+          "step checks first and skips what is already done.",
+        retryable: true,
       };
     case 2:
       return {

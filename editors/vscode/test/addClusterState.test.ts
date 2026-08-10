@@ -179,6 +179,62 @@ test("steps appear as the run reports them, in order", () => {
   );
 });
 
+test("the plan is on screen before anything runs, every step pending", () => {
+  // `pending` was UNREACHABLE in a forward run: a step first appeared when it
+  // STARTED, so the checklist grew from empty and never said how much was left.
+  // All six states rendered correctly and all six were unit-tested by feeding
+  // them in directly; none of that made one visible ahead of its turn.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.beginRun();
+  s.apply({
+    type: "runStarted",
+    steps: [
+      { id: "detect", description: "look at the machine" },
+      { id: "binary", description: "place a tool" },
+      { id: "cluster", description: "create the cluster" },
+    ],
+  } as ExecEvent);
+
+  assert.deepEqual(
+    s.steps.map((p) => [p.id, p.state]),
+    [
+      ["detect", "pending"],
+      ["binary", "pending"],
+      ["cluster", "pending"],
+    ],
+    "every step in the graph is visible, in graph order, before the first one starts",
+  );
+
+  s.apply({ type: "stepStarted", step: step("detect"), params: {} } as ExecEvent);
+  assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending", "the steps ahead stay ahead");
+});
+
+test("a re-run keeps what the previous attempt established", () => {
+  // Retry re-runs the WHOLE graph, so `runStarted` arrives a second time. If it
+  // reset the list, every step the operator had watched succeed would blink back
+  // to pending -- a display of the event rather than of the machine.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.beginRun();
+  const plan = {
+    type: "runStarted",
+    steps: [
+      { id: "binary", description: "place a tool" },
+      { id: "cluster", description: "create the cluster" },
+    ],
+  } as ExecEvent;
+
+  s.apply(plan);
+  s.apply(finished("binary"));
+  s.apply(finished("cluster", { status: "failed", exitCode: 5 }));
+  s.retry();
+  s.apply(plan);
+
+  assert.equal(s.steps.find((p) => p.id === "binary")?.state, "done");
+  assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending");
+});
+
 test("every executor status reaches the screen, including preserved", () => {
   // Six states, not two. `preserved` in particular cannot be folded into
   // success or failure -- it is the uninstall keeping something the operator
@@ -248,6 +304,49 @@ test("retry puts the failed step back in the queue and returns to the run", () =
   assert.equal(s.screen, "running");
   assert.equal(s.steps.find((p) => p.id === "cluster")?.state, "pending");
   assert.equal(s.failed, undefined, "the failure is cleared once it is being retried");
+});
+
+test("a wave with two failures reports both, and leads with the first", () => {
+  // The executor runs a wave under Promise.all and deliberately lets
+  // independent branches finish, so several steps can fail in one wave. The
+  // headline used to be whichever resolved LAST -- a scheduling accident -- and
+  // the guidance shown was that one step's, out of N, though the exit codes ask
+  // for genuinely different things.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.beginRun();
+  s.apply(finished("binary", { status: "failed", exitCode: 4 }));
+  s.apply(finished("hosts", { status: "failed", exitCode: 3 }));
+
+  assert.deepEqual(
+    s.failures.map((f) => [f.id, f.exitCode]),
+    [
+      ["binary", 4],
+      ["hosts", 3],
+    ],
+    "every failure is available to render, with its own exit code",
+  );
+  assert.equal(
+    s.failed?.id,
+    "binary",
+    "the page leads with the EARLIEST failure -- the others may be consequences of it",
+  );
+});
+
+test("retry puts every failed step back, not only the one being led with", () => {
+  // The retry re-runs the whole graph, so a failure left marked `failed` would
+  // be a stale verdict about a step being attempted again in front of the
+  // operator.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.beginRun();
+  s.apply(finished("binary", { status: "failed", exitCode: 4 }));
+  s.apply(finished("hosts", { status: "failed", exitCode: 3 }));
+
+  s.retry();
+  assert.deepEqual(s.failures, [], "no step may still read as failed once it is being retried");
+  assert.equal(s.steps.find((p) => p.id === "binary")?.state, "pending");
+  assert.equal(s.steps.find((p) => p.id === "hosts")?.state, "pending");
 });
 
 test("retry clears the previous attempt's output", () => {

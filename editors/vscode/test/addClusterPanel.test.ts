@@ -429,6 +429,95 @@ test("every step is invoked with a non-zero timeout", async () => {
 });
 
 // -----------------------------------------------------------------------------
+// The steps AHEAD, and every failure rather than one of them (memql#3474)
+// -----------------------------------------------------------------------------
+
+test("the steps ahead are on screen while the first one is still running", () => {
+  // `pending` was unreachable in a forward run: a step first appeared when it
+  // STARTED. All six states rendered correctly and all six were unit-tested by
+  // feeding them in directly, and none of that put one on screen ahead of its
+  // turn -- so an operator ten minutes into an install could not see how much
+  // was left.
+  //
+  // The gate is what makes this observable: the first step does not return
+  // until the assertion has been made, so the run is genuinely mid-flight.
+  return (async () => {
+    const runner = await fakeRunner();
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const inner = runner.run;
+    let entered = 0;
+    let gated = true;
+    runner.run = async (run) => {
+      entered += 1;
+      if (gated) {
+        gated = false;
+        await gate;
+      }
+      return inner(run);
+    };
+
+    const h = open({ runner });
+    try {
+      beginInstall(h);
+      // `calls` is recorded by the inner runner, which the gate is holding --
+      // so the wrapper's own counter is what says the step is in flight.
+      await until(() => entered > 0, "the first step to be in flight");
+      // Drain the render that followed `stepStarted`.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const html = h.html();
+      assert.match(html, /detect/, "the running step is on screen");
+      assert.match(
+        html,
+        /enrolmentLink|enrolment/i,
+        "so is the LAST step of the graph, which has not started and may never",
+      );
+
+      release();
+      await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+    } finally {
+      release();
+      h.close();
+    }
+  })();
+});
+
+test("a wave with several failures explains each of them, not one at random", async () => {
+  // The executor runs a wave under Promise.all and deliberately lets
+  // independent branches finish, so the operator sees every failure this run
+  // has. The failure SCREEN then showed guidance for whichever one resolved
+  // last -- a scheduling accident -- though the codes ask for different things:
+  // exit 4 says go and install something, exit 3 says the step protected
+  // something and will refuse again.
+  const runner = await fakeRunner({ "install.binary": 4, "install.hostsEntries": 3 });
+  const h = open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /data-act="retry"/.test(h.html()), "the failed-step screen");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    const html = h.html();
+    assert.match(html, /steps failed/, "the heading counts them rather than naming one");
+    assert.match(
+      html,
+      /Something this step needs is not on this machine/,
+      "exit 4's guidance, for the tool steps",
+    );
+    assert.match(html, /The step refused to act/, "exit 3's guidance, for the hosts block");
+    assert.match(
+      html,
+      /Retry these steps/,
+      'the label must not say "this step" in front of four failures',
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
 // The hand-off gate, which the same shape of defect would hide
 // -----------------------------------------------------------------------------
 

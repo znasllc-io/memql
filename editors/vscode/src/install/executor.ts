@@ -114,6 +114,22 @@ export type StepPlan =
     };
 
 export type ExecEvent =
+  /**
+   * The whole plan, in graph order, before anything runs (memql#3474).
+   *
+   * WHY A RUN ANNOUNCES ITSELF. Without it, a front end learns a step exists
+   * only when that step STARTS -- so the checklist grows from an empty list and
+   * `pending` is unreachable in a forward run, which is exactly the state a
+   * progress display exists to show. An operator ten minutes into an install
+   * needs to know how much is left, and a list that only ever contains what has
+   * already happened cannot say.
+   *
+   * It carries the graph's own order rather than the wave schedule: the waves
+   * are how the executor SCHEDULES, and a list that reordered itself as
+   * concurrency resolved would be a display of the executor rather than of the
+   * install.
+   */
+  | { type: "runStarted"; steps: { id: string; description: string }[] }
   | { type: "waveStarted"; index: number; ids: string[] }
   | { type: "stepStarted"; step: Step; params: Record<string, string> }
   | { type: "stepLog"; step: Step; line: string }
@@ -164,6 +180,13 @@ export async function executeGraph(options: ExecuteOptions): Promise<ExecutionRe
   const plan = options.plan ?? ((): StepPlan => ({ action: "run", params: {} }));
   const waves = topoOrder(graph);
   const outcomes = new Map<string, StepOutcome>();
+
+  // Announced BEFORE the first wave, and after topoOrder has accepted the
+  // graph: a plan that cannot be scheduled is not a plan to show anyone.
+  await emit(options, {
+    type: "runStarted",
+    steps: graph.steps.map((s) => ({ id: s.id, description: s.description })),
+  });
 
   let cancelled = false;
   for (const [index, wave] of waves.entries()) {

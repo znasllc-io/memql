@@ -1068,7 +1068,15 @@ ${body}
   }
 
   /**
-   * A step failed, and what that means.
+   * A step failed, and what that means -- for EVERY step that failed.
+   *
+   * ONE BLOCK PER FAILURE (memql#3474). A wave runs under `Promise.all` and the
+   * executor deliberately lets independent branches finish, so a run can arrive
+   * here with several failures. This screen used to render guidance for
+   * whichever one resolved last, which is a scheduling accident: the exit codes
+   * genuinely differ, and a refusal (3) asks for something entirely different
+   * from a missing prerequisite (4). Showing one of N is confident advice about
+   * a step the operator may not even be looking at.
    *
    * BOTH RECOVERIES ARE ALWAYS OFFERED. `failureGuidance().retryable` says
    * whether an UNCHANGED retry could plausibly differ -- it does not gate the
@@ -1076,17 +1084,39 @@ ${body}
    * while this panel sat here, and we cannot know that.
    */
   private failedHtml(): string {
-    const failed = this.state.failed;
-    if (failed === undefined) return this.runHtml();
-    const guidance = failureGuidance(failed.exitCode);
+    const failures = this.state.failures;
+    if (failures.length === 0) return this.runHtml();
 
-    return `<h1>${escapeHtml(failed.description === "" ? failed.id : failed.description)} failed</h1>
+    const many = failures.length > 1;
+    const heading = many
+      ? `${failures.length} steps failed`
+      : `${failures[0]!.description === "" ? failures[0]!.id : failures[0]!.description} failed`;
+
+    // Each failure keeps its own name above its own guidance. With one failure
+    // the name is already the heading, so repeating it would be noise.
+    const blocks = failures
+      .map((failure) => {
+        const guidance = failureGuidance(failure.exitCode);
+        const name = failure.description === "" ? failure.id : failure.description;
+        return `${many ? `<h2>${escapeHtml(name)}</h2>` : ""}
 <p class="lede">${escapeHtml(guidance.headline)}</p>
-<p>${escapeHtml(guidance.advice)}</p>
+<p>${escapeHtml(guidance.advice)}</p>`;
+      })
+      .join("");
+
+    // The labels count. "Retry this step" in front of three failures names one
+    // thing and does another -- the recovery re-runs the graph, and every failed
+    // step goes back into it.
+    return `<h1>${escapeHtml(heading)}</h1>
+${blocks}
 ${renderToHtml(renderInstallSteps(toStepViews(this.state.steps)))}
 <div class="actions">
-  <button class="primary" type="button" data-act="retry">Retry this step</button>
-  <button class="secondary" type="button" data-act="guided">Switch this step to guided</button>
+  <button class="primary" type="button" data-act="retry">${
+    many ? "Retry these steps" : "Retry this step"
+  }</button>
+  <button class="secondary" type="button" data-act="guided">${
+    many ? "Switch these steps to guided" : "Switch this step to guided"
+  }</button>
   <button class="secondary" type="button" data-act="cancel">Cancel</button>
 </div>`;
   }
