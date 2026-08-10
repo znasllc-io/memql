@@ -1,8 +1,10 @@
 // The callable run seam: install, uninstall, and the uninstall preview.
 //
-// Until now the orchestration lived inside cli.ts, reachable only by spawning
-// `npm run install-cli`. That is why the "+" button reported a command for the
-// operator to copy instead of running one -- there was no function to call.
+// The orchestration once lived inside cli.ts, reachable only by spawning
+// `npm run install-cli`, which is why the "+" button reported a command for the
+// operator to copy instead of running one -- there was no function to call. The
+// stub that did the reporting is gone (memql#3478); these functions are what
+// replaced it.
 //
 // The property these cases exist to protect is that there is ONE run path. The
 // CLI and the webview must not be able to diverge into "it worked from the

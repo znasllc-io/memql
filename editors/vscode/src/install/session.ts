@@ -3,10 +3,11 @@
 // WHY THIS FILE EXISTS. The graph, the runner, the executor and the receipt
 // have described a complete install since the substrate epic (#3357) -- but the
 // only way to START one was to spawn `npm run install-cli`. That is the whole
-// reason the "+" button reported a command for the operator to copy instead of
-// running one: src/extension.ts had nothing to call. Its own comment named this
-// as the seam it was waiting for ("WHAT REPLACES IT: the install wizard ... the
-// body of this function becomes the call to it").
+// reason the "+" button once reported a command for the operator to copy
+// instead of running one: src/extension.ts had nothing to call. That stub named
+// this file as the seam it was waiting for, and it was deleted the moment the
+// page ran a graph over these functions (memql#3478) -- no path in the Clusters
+// surface hands the operator a command to run in a terminal any more.
 //
 // ONE RUN PATH, TWO FRONT ENDS. Everything below was lifted out of cli.ts
 // rather than written beside it, and cli.ts now parses argv and prints, over

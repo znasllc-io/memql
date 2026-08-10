@@ -38,14 +38,9 @@ import {
   type SignInTokenStore,
 } from './auth/signin.js';
 import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
-import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
+import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
-import {
-  ClusterPresence,
-  addClusterMenu,
-  type AddClusterAction,
-  type PresenceVerdict,
-} from './clusters/presence.js';
+import { ClusterPresence } from './clusters/presence.js';
 import { removeClusterCompletely } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
@@ -441,18 +436,20 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
     // remote cluster -- for an operator who may have no cluster at all, or one
     // already installed and running. It now branches on EVIDENCE
-    // (src/clusters/presence.ts) and the remote path below is unchanged: it is
-    // what the "Connect to an existing cluster..." choice runs.
-    commands.registerCommand('memql.clusters.add', async () => {
-      // The "+" opens a PAGE now (memql#3472), not a quick pick. A palette
-      // entry is the wrong shape for a decision that depends on the state of
-      // the machine and is followed by ten minutes of work -- there is no room
-      // in a list of three sentences to say what this machine actually is.
+    // (src/clusters/presence.ts), and registering a remote cluster is one card
+    // among them: the "Connect to an existing cluster..." choice.
+    commands.registerCommand('memql.clusters.add', () => {
+      // The "+" opens a PAGE (memql#3472), not a quick pick. A palette entry is
+      // the wrong shape for a decision that depends on the state of the machine
+      // and is followed by ten minutes of work -- there is no room in a list of
+      // three sentences to say what this machine actually is.
       //
-      // The quick-pick path below it is retired in #3478, once every branch
-      // the page carries has landed. The remote branch is already off it: the
-      // page's own form registers the cluster (memql#3475), so nothing on this
-      // path reaches promptForCluster's input-box sequence any more.
+      // THE QUICK PICK IS GONE, not kept beside this (memql#3478). It had one
+      // caller, this one, and every branch it offered now belongs to the page:
+      // the remote branch to the page's own form (memql#3475), install and
+      // repair to the run screen over the callable seam (memql#3474), uninstall
+      // to the dry-run preview (memql#3476). Leaving a second route into the
+      // same four decisions would be a second wizard over one machine.
       AddClusterPanel.show(context, presence, addClusterDeps());
     }),
     // The irreversible half of the pair D1 keeps apart (memql#3476). It is
@@ -1285,98 +1282,6 @@ async function writeCluster(
     return;
   }
   clustersTree.refresh();
-}
-
-// pickAddClusterAction resolves the verdict and asks the operator what they
-// meant by "+".
-//
-// A DETECTION THAT FAILS READS AS `installed-unreachable`, never as `absent`.
-// detectPresence already answers rather than rejects, so this catch is the
-// belt to that braces -- and the direction it fails in is the one that cannot
-// destroy anything: `absent` is the only verdict whose menu offers to install,
-// and an install run over an existing cluster rebuilds a k3d stack, a hosts
-// block and a trust-store CA underneath a working one.
-async function pickAddClusterAction(
-  presence: ClusterPresence
-): Promise<AddClusterAction | undefined> {
-  let verdict: PresenceVerdict;
-  try {
-    verdict = (await presence.get()).verdict;
-  } catch {
-    verdict = 'installed-unreachable';
-  }
-  return showAddClusterMenu(verdict);
-}
-
-/**
- * Renders the "+" menu for a verdict.
- *
- * Exported for the Extension Development Host smoke lane, which drives it
- * against a real quick pick -- the one thing about this function that a unit
- * test structurally cannot reach is whether the workbench actually shows it.
- *
- * A ONE-ITEM MENU IS NOT SHOWN. `installed-healthy` leaves exactly one thing
- * to do, and a single-item quick pick asks the user to confirm the absence of
- * a decision. See addClusterMenu for why that item is never the installer.
- */
-export async function showAddClusterMenu(
-  verdict: PresenceVerdict
-): Promise<AddClusterAction | undefined> {
-  const choices = addClusterMenu(verdict);
-  if (choices.length === 1) {
-    return choices[0].action;
-  }
-  const picked = await window.showQuickPick(
-    choices.map((choice) => ({ label: choice.label, detail: choice.detail, choice })),
-    { placeHolder: 'Add a memQL cluster', ignoreFocusOut: true }
-  );
-  return picked?.choice.action;
-}
-
-/**
- * THE INSTALL SEAM (memql#3412).
- *
- * This is the single named function the "Install a local cluster..." and
- * "Repair local cluster..." branches call, and it is deliberately the ONLY
- * thing about those branches that is provisional. The install substrate
- * (memql#3374) currently exposes its graph runner as a plain-node CLI --
- * src/install/cli.ts, reached through `npm run install-cli` -- and no callable
- * in-editor entry point exists yet, so this reports the command instead of
- * running it: a graph run wants elevation prompts, a provider key and a
- * progress surface, and inventing a half of that here is worse than naming the
- * supported path.
- *
- * WHAT REPLACES IT: the install wizard from the install-substrate epic. When
- * that entry point is callable, the body of this function becomes the call to
- * it and nothing else in this file changes -- the menu, the verdict, and the
- * invalidate() that follows a completed run are all already wired.
- *
- * `repair` runs the same graph as `install`: every step is idempotent and
- * verifies its own postcondition, so re-running it over a cluster that stopped
- * answering is the repair. Only the wording differs.
- */
-async function launchLocalClusterInstaller(
-  mode: 'install' | 'installGuided' | 'repair' | 'uninstall'
-): Promise<void> {
-  // The stub reports the command it would run, so it has to report the RIGHT
-  // one. Telling an operator who asked to uninstall to run `install` would be
-  // worse than the stub already is -- it would rebuild the cluster they asked
-  // to remove.
-  const command =
-    mode === 'uninstall' ? 'npm run install-cli -- uninstall' : 'npm run install-cli -- install';
-  const what = {
-    install: 'Installing a local memQL cluster',
-    installGuided: 'Installing a local memQL cluster (guided)',
-    repair: 'Repairing the local memQL cluster',
-    uninstall: 'Uninstalling the local memQL cluster',
-  }[mode];
-  const choice = await window.showInformationMessage(
-    `memQL: ${what} runs the installer from editors/vscode:\n\n    ${command}\n\nAn in-editor wizard is not wired up yet.`,
-    'Copy Command'
-  );
-  if (choice === 'Copy Command') {
-    await env.clipboard.writeText(command);
-  }
 }
 
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
