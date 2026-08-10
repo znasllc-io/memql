@@ -34,7 +34,7 @@
 
 import { WebSocket as NodeWebSocket } from "ws";
 
-import { webSocketUrlFor } from "../connection/endpoint.js";
+import { composeEndpointFromDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
 import { readClustersFileSafe } from "./file.js";
 import type { ClusterConfig } from "./model.js";
@@ -174,8 +174,9 @@ async function registryEvidence(
  *   1. the registered local cluster's endpoint -- an operator who wrote one
  *      down is naming the front door they actually use;
  *   2. the domain the install recorded (`seedBootstrap` carries `--domain`),
- *      lifted to the front-door hostname by the same `cockpit.<domain>`
- *      convention the endpoint composer uses;
+ *      lifted to the front-door hostname by composeEndpointFromDomain -- the
+ *      one spelling of the `cockpit.<domain>` convention (memql#3475), which
+ *      this function used to carry a private copy of;
  *   3. the installer's own default.
  */
 export function probeEndpointFor(
@@ -186,8 +187,10 @@ export function probeEndpointFor(
   if (registered !== "") return registered;
 
   for (const entry of receipt?.entries ?? []) {
-    const domain = (entry.params.domain ?? "").trim().replace(/^\.+|\.+$/g, "");
-    if (domain !== "") return `cockpit.${domain}:443`;
+    // An entry that recorded no domain composes to "", which is this loop's
+    // "keep looking" -- the emptiness check the copy here used to make.
+    const composed = composeEndpointFromDomain(entry.params.domain ?? "");
+    if (composed !== "") return composed;
   }
   return DEFAULT_LOCAL_ENDPOINT;
 }

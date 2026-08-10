@@ -19,7 +19,7 @@
 // run needs (its `done` slot is boolean), so the element those issues use is
 // theirs to choose, and this shell must not presume it.
 //
-// Refs: #3472 #3470 #3471 #3469 #3463
+// Refs: #3475 #3472 #3470 #3471 #3469 #3463
 
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
@@ -31,6 +31,7 @@ import {
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
 
+import { addCluster, readClustersFileSafe } from "../clusters/file.js";
 import {
   addClusterMenu,
   type AddClusterAction,
@@ -38,7 +39,12 @@ import {
   type ClusterPresence,
   type PresenceVerdict,
 } from "../clusters/presence.js";
-import { AddClusterState, requiredFields, type InputField } from "../state/addCluster.js";
+import {
+  AddClusterState,
+  requiredFields,
+  type ConnectField,
+  type InputField,
+} from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -67,6 +73,42 @@ const FIELD_LABELS: Record<InputField, string> = {
   providerKeyFile: "AI provider key file",
 };
 
+/**
+ * The registration form's fields, and its actions -- each a literal list of
+ * its own (memql#3475).
+ *
+ * SEPARATE LISTS RATHER THAN A WIDER ONE. The postMessage channel is
+ * untrusted: anything running in the webview can post any shape at all, so
+ * every value that reaches the state machine has to be recognised by
+ * comparison against a name written out here. Folding these into
+ * INPUT_FIELDS/`data-act` would have been fewer lines and would also have
+ * meant one list guarding two unrelated screens -- the point at which nobody
+ * can say what widening it costs.
+ */
+const CONNECT_FIELDS: readonly ConnectField[] = ["name", "domain", "endpoint", "token"];
+
+const CONNECT_ACTIONS = ["save", "discard"] as const;
+
+const CONNECT_LABELS: Record<ConnectField, string> = {
+  name: "Cluster name",
+  domain: "Domain",
+  endpoint: "gRPC endpoint",
+  token: "Access token",
+};
+
+const CONNECT_HINTS: Record<ConnectField, string> = {
+  name: "How this cluster is stored in clusters.yaml, and what every other memQL command calls it.",
+  domain:
+    "Optional, e.g. staging.example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
+  endpoint:
+    "The gRPC front door as host:port -- cockpit.<domain>:443 for a cluster behind the usual ingress.",
+  token:
+    'Optional. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "memQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
+};
+
+/** The token is the one field on this page that should not render as plain text. */
+const CONNECT_SECRET_FIELDS: readonly ConnectField[] = ["token"];
+
 /** What each field is for, in one line. */
 const FIELD_HINTS: Record<InputField, string> = {
   domain: "The cluster answers at cockpit.<domain>. Defaults are fine if you have no preference.",
@@ -77,6 +119,21 @@ const FIELD_HINTS: Record<InputField, string> = {
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
 };
 
+/**
+ * What this page needs from the extension host to register a cluster.
+ *
+ * Passed in rather than reached for, because the two things a completed
+ * registration touches -- the registry file and the tree that renders it --
+ * are both owned by activation, and a panel that resolved them itself would be
+ * a second opinion about where clusters.yaml lives.
+ */
+export interface AddClusterDeps {
+  /** ~/.memql/clusters.yaml, resolved once at activation. */
+  clustersPath: string;
+  /** Repaints the Clusters view once an entry lands. */
+  refreshTree: () => void;
+}
+
 export class AddClusterPanel {
   private static open_: AddClusterPanel | undefined;
 
@@ -85,6 +142,7 @@ export class AddClusterPanel {
   private readonly disposables: vscode.Disposable[] = [];
   private verdict: PresenceVerdict = "installed-unreachable";
   private disposed = false;
+  private saving = false;
 
   /**
    * Opens the page, or reveals the one already open.
@@ -93,13 +151,17 @@ export class AddClusterPanel {
    * same machine, and two runs against one k3d cluster is not a state anything
    * downstream is prepared for.
    */
-  static show(context: vscode.ExtensionContext, presence: ClusterPresence): AddClusterPanel {
+  static show(
+    context: vscode.ExtensionContext,
+    presence: ClusterPresence,
+    deps: AddClusterDeps,
+  ): AddClusterPanel {
     const existing = AddClusterPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
       return existing;
     }
-    const panel = new AddClusterPanel(context, presence);
+    const panel = new AddClusterPanel(context, presence, deps);
     AddClusterPanel.open_ = panel;
     return panel;
   }
@@ -107,6 +169,7 @@ export class AddClusterPanel {
   private constructor(
     context: vscode.ExtensionContext,
     private readonly presence: ClusterPresence,
+    private readonly deps: AddClusterDeps,
   ) {
     this.panel = vscode.window.createWebviewPanel(
       "memqlAddCluster",
@@ -152,14 +215,45 @@ export class AddClusterPanel {
 
   private onMessage(msg: unknown): void {
     if (msg === null || typeof msg !== "object") return;
-    const { type, value } = msg as { type?: unknown; value?: unknown };
+    const { type, value, fields } = msg as {
+      type?: unknown;
+      value?: unknown;
+      fields?: unknown;
+    };
 
     if (type === "choose" && typeof value === "string") {
       const action = CHOICE_ACTIONS.find((known) => known === value);
       if (action === undefined) return;
       this.state.chooseAction(action);
+      // The duplicate-name check needs a registry to check against, and this
+      // is the moment it becomes worth reading one. Nothing waits on it: the
+      // read is fast, the operator has four fields to fill first, and a
+      // registry that never arrives costs the inline refusal but not the
+      // write-time one.
+      if (action === "connect") void this.loadRegistry();
       this.render();
       return;
+    }
+    // The registration form's own channel (memql#3475), recognised against
+    // CONNECT_ACTIONS -- see that list for why it is a second one rather than
+    // a wider first.
+    if (typeof type === "string") {
+      const connectAction = CONNECT_ACTIONS.find((known) => known === type);
+      if (connectAction !== undefined) {
+        // Absorb the whole form BEFORE acting on the action. Every message
+        // from this screen carries every field, because render() replaces the
+        // webview's HTML wholesale and the DOM is therefore not where form
+        // state lives; taking the values first is what stops a click on Save
+        // from acting on a form one keystroke out of date.
+        this.absorbConnectFields(fields);
+        if (connectAction === "discard") {
+          this.state.discardConnect();
+          this.render();
+          return;
+        }
+        void this.saveConnect();
+        return;
+      }
     }
     if (type === "back") {
       this.state.back();
@@ -202,6 +296,95 @@ export class AddClusterPanel {
       this.state.cancel();
       this.render();
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // registering an existing cluster (memql#3475)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Reads the field values out of a message, BY THE NAMES IN CONNECT_FIELDS.
+   *
+   * The iteration direction is the security property. Walking the list and
+   * asking the payload for each name means an extra key on the wire reaches
+   * nothing at all -- there is no branch it can take. Walking the payload's own
+   * keys instead would make the guard a filter over attacker-chosen input,
+   * which is the same shape of mistake as casting it.
+   */
+  private absorbConnectFields(raw: unknown): void {
+    if (raw === null || typeof raw !== "object") return;
+    const supplied = raw as Record<string, unknown>;
+    for (const field of CONNECT_FIELDS) {
+      const text = supplied[field];
+      if (typeof text === "string") this.state.setConnectInput(field, text);
+    }
+  }
+
+  /**
+   * Loads the registry the inline duplicate check reads.
+   *
+   * readClustersFileSafe, so a clusters.yaml that will not parse yields no
+   * names rather than a rejection nobody is waiting on. The consequence is
+   * exactly that the inline refusal cannot fire -- `addCluster` re-reads the
+   * file at write time and refuses there, which is the wall that has to hold
+   * anyway, since the Cockpit writes this file too.
+   */
+  private async loadRegistry(): Promise<void> {
+    const result = await readClustersFileSafe(this.deps.clustersPath);
+    if (result.ok) this.state.setRegistry(result.file);
+  }
+
+  /**
+   * Validates the form and, if it holds, writes the entry.
+   *
+   * addCluster rather than upsertCluster, deliberately: this is an ADD, and
+   * upsert would quietly turn a name collision into an edit of the cluster
+   * already there -- deleting, as it went, every field this form does not
+   * collect. That is the destructive case addCluster exists to refuse.
+   *
+   * THE PAGE CLOSES ON SUCCESS. Registering was the whole of what the operator
+   * came here to do; leaving the filled-in form on screen afterwards invites a
+   * second click on Save, which would now be refused as a duplicate of what it
+   * just wrote.
+   */
+  private async saveConnect(): Promise<void> {
+    // A second Save while the first is still in the filesystem would be two
+    // read-modify-write passes over the same file racing each other.
+    if (this.saving) return;
+    const draft = this.state.connectDraft();
+    if (draft === undefined) {
+      this.render();
+      return;
+    }
+
+    this.saving = true;
+    try {
+      await addCluster(this.deps.clustersPath, draft);
+    } catch (err) {
+      // The form is intact, so the operator revises and tries again. This is
+      // the wall the inline check cannot be: between that check and this write
+      // the Cockpit may have added the very name being registered.
+      this.state.failConnect(err instanceof Error ? err.message : String(err));
+      this.render();
+      return;
+    } finally {
+      this.saving = false;
+    }
+
+    this.deps.refreshTree();
+    // The verdict is memoized from evidence that includes clusters.yaml. A
+    // remote registration does not change it today -- the entry carries no
+    // `local` flag, which is what registry evidence looks for -- but the memo
+    // is derived from a file this just wrote, and every other writer of that
+    // file drops the memo rather than reasoning about which reads it affects.
+    this.presence.invalidate();
+    void vscode.window.showInformationMessage(
+      `memQL: registered "${draft.name}" at ${draft.endpoint}. ` +
+        (draft.token === undefined
+          ? 'Run "memQL: Sign In" to authenticate.'
+          : "Select it in the Clusters view to connect."),
+    );
+    this.dispose();
   }
 
   // ---------------------------------------------------------------------------
@@ -252,6 +435,9 @@ ${viewKitStyles}
   .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
   .error { color: var(--vscode-inputValidation-errorForeground,
                    var(--vscode-editorError-foreground)); margin-top: 3px; }
+  /* A refusal that belongs to the whole form rather than to one box, so it
+     sits away from the fields instead of looking like the last one's. */
+  .form-error { margin: 14px 0 0; }
   .field[data-invalid="true"] input { border-color: var(--vscode-editorError-foreground); }
   .actions { display: flex; gap: 8px; margin-top: 16px; }
   button.primary, button.secondary {
@@ -267,9 +453,25 @@ ${viewKitStyles}
 ${this.bodyHtml()}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
+  // The registration form's values, ALL of them, on every message it sends.
+  // Setting webview.html repaints the whole document, so the DOM cannot be
+  // where form state lives -- an action that carried only its own field would
+  // hand the extension a form missing everything typed since the last repaint.
+  function connectFields() {
+    const out = {};
+    for (const el of document.querySelectorAll('[data-connect-field]')) {
+      out[el.dataset.connectField] = el.value;
+    }
+    return out;
+  }
   document.addEventListener('click', (e) => {
     const card = e.target.closest('[data-choose]');
     if (card) { vscode.postMessage({ type: 'choose', value: card.dataset.choose }); return; }
+    const connect = e.target.closest('[data-connect-act]');
+    if (connect) {
+      vscode.postMessage({ type: connect.dataset.connectAct, fields: connectFields() });
+      return;
+    }
     const act = e.target.closest('[data-act]');
     if (act) vscode.postMessage({ type: act.dataset.act });
   });
@@ -277,6 +479,14 @@ ${this.bodyHtml()}
     const field = e.target.closest('[data-field]');
     if (field) vscode.postMessage({
       type: 'input', value: { field: field.dataset.field, text: field.value } });
+  });
+  // Escape acts only where a screen has ASKED for it. A page-wide handler
+  // would also cancel a screen that never opted in, and "the keystroke did
+  // something the screen never offered" is the failure this attribute avoids.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    const owner = document.querySelector('[data-escape-act]');
+    if (owner) vscode.postMessage({ type: owner.dataset.escapeAct });
   });
 </script>
 </body>
@@ -294,6 +504,7 @@ ${this.bodyHtml()}
       case "failedStep":
         return this.failedHtml();
       case "connect":
+        return this.connectHtml();
       case "uninstallPreview":
       case "done":
         return this.placeholderHtml();
@@ -425,12 +636,62 @@ ${fields}
   }
 
   /**
+   * The registration form (memql#3475).
+   *
+   * WHAT IT REPLACES: five input boxes shown one after another. That sequence
+   * could not be navigated backwards -- seeing the endpoint question does not
+   * let you fix the name you fumbled two boxes ago -- and Escape at any point
+   * discarded every answer given so far. Both are properties of the widget, not
+   * of the code behind it, which is why the fix is a form and not more
+   * validation.
+   *
+   * VALIDATION RUNS ON SAVE, not on each keystroke, and that is a deliberate
+   * consequence of the surface: a repaint here replaces the webview's whole
+   * document, so validating as the operator types would reload the page under
+   * their cursor. Checking everything at once is also what the argument form
+   * does, and for the better reason -- all the problems arrive together
+   * instead of one per attempt.
+   */
+  private connectHtml(): string {
+    const values = this.state.connectInputs;
+    const errors = this.state.connectErrors;
+    const failure = this.state.connectFailure;
+
+    const fields = CONNECT_FIELDS.map((field) => {
+      const error = errors.find((e) => e.field === field);
+      const secret = CONNECT_SECRET_FIELDS.includes(field);
+      return `<div class="field" data-invalid="${error !== undefined}">
+  <label for="c-${field}">${escapeHtml(CONNECT_LABELS[field])}</label>
+  <input id="c-${field}" type="${secret ? "password" : "text"}"
+         data-connect-field="${field}" value="${escapeHtml(values[field])}">
+  <div class="hint">${escapeHtml(CONNECT_HINTS[field])}</div>
+  ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
+</div>`;
+    }).join("");
+
+    // data-escape-act is what makes Escape mean "discard" HERE and nowhere
+    // else on this page: the key listener looks for the attribute rather than
+    // acting on every Escape, so a screen that has not opted in -- a run in
+    // progress, say -- is not cancelled by a keystroke aimed at a form.
+    return `<h1>Connect to an existing cluster</h1>
+<p class="lede">Registering a cluster records how to reach it. Nothing is installed and nothing on the cluster is touched.</p>
+<div data-escape-act="discard">
+${fields}
+${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`}
+<div class="actions">
+  <button class="primary" type="button" data-connect-act="save">Save cluster</button>
+  <button class="secondary" type="button" data-connect-act="discard">Cancel</button>
+</div>
+</div>`;
+  }
+
+  /**
    * The slot the remaining screens fill.
    *
-   * Left as a plain region on purpose: #3474 (progress), #3475 (the remote
-   * form) and #3476 (the uninstall preview) each render their own HTML into
-   * it. Guessing at their markup here would be a second thing for them to
-   * unpick.
+   * Left as a plain region on purpose: #3474 (progress) and #3476 (the
+   * uninstall preview) each render their own HTML into it. Guessing at their
+   * markup here would be a second thing for them to unpick. The remote form
+   * has since claimed its own screen off this slot (connectHtml, #3475).
    */
   private placeholderHtml(): string {
     return `<h1>${escapeHtml(this.state.action ?? "")}</h1>
