@@ -22,6 +22,8 @@
 package campaigns
 
 import (
+	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -99,6 +101,42 @@ const (
 	// attempt, so one unresponsive provider connection cannot hold the
 	// batch (and therefore the claim) open.
 	defaultSendTimeoutSeconds = 30
+
+	// The warming ramp's defaults (memql#3462). The ladder is the shape the
+	// runbook's manual procedure already recommended -- start at a few per
+	// minute on a new domain and raise it over days -- with the last step at
+	// the configured send rate's usual ceiling.
+	defaultWarmupSteps = "5,10,25,50,100,200"
+
+	// defaultWarmupMinHoursPerStep is how long a step must run before it can
+	// advance. A day, because that is the granularity providers form an
+	// opinion at; a step they have not seen through a full daily cycle has
+	// not been judged.
+	defaultWarmupMinHoursPerStep = 24
+
+	// defaultWarmupMinVolumePerStep is the volume a step must produce before
+	// its rates mean anything. THE condition that stops an empty numerator
+	// reading as a clean bill of health: four messages with no bounces is a
+	// hard bounce rate of 0.0 and no evidence at all.
+	defaultWarmupMinVolumePerStep = 200
+
+	// defaultWarmupMinDomainVolume is how much a single domain must have
+	// received before its own rate is allowed to hold the ramp. Without it,
+	// one bounce at a domain we sent three messages to reads as 33% and pins
+	// the ramp permanently.
+	defaultWarmupMinDomainVolume = 50
+
+	// defaultWarmupMaxHardBounceRate is the per-domain permanent-bounce
+	// ceiling. 2% is the conventional "you are being watched" line; past 5%
+	// a sender is usually already in trouble, so holding well under it is
+	// the point of ramping at all.
+	defaultWarmupMaxHardBounceRate = 0.02
+
+	// defaultWarmupMaxComplaintRate is an order of magnitude tighter than
+	// the bounce ceiling, and that asymmetry is the providers' own: a bad
+	// address is a hygiene problem, a complaint is a person saying they did
+	// not want this. 0.1% is the widely-published threshold.
+	defaultWarmupMaxComplaintRate = 0.001
 )
 
 // Config is the sending engine's tunable policy, resolved from
@@ -136,6 +174,35 @@ type Config struct {
 	// per-call role check on a caller who is, in the end, only asking us to
 	// re-read a webhook we already verified.
 	FeedbackSources map[string]string
+
+	// SendingIdentity labels the reputation counters and the warming ramp
+	// (memql#3462). One deployment normally has exactly one sending mailbox
+	// -- the argument the cluster-wide suppression list rests on -- so the
+	// default is derived from the configured sender address and an operator
+	// sets this only when that derivation is wrong.
+	SendingIdentity string
+
+	// NodeID names the replica whose reputation counters this process
+	// writes. Not a tuning knob: it is MEMQL_NODE_ID, the same value every
+	// pod already carries, and it exists here because counters are written
+	// per replica rather than into one contended row.
+	NodeID string
+
+	// The warming ramp (memql#3462). OFF by default: an established sending
+	// domain does not want its rate re-derived by a control loop that has
+	// never seen it.
+	WarmupEnabled           bool
+	WarmupSteps             []int
+	WarmupMinHoursPerStep   time.Duration
+	WarmupMinVolumePerStep  int
+	WarmupMinDomainVolume   int
+	WarmupMaxHardBounceRate float64
+	WarmupMaxComplaintRate  float64
+
+	// WarmupStepsError records a malformed MEMQL_CAMPAIGNS_WARMUP_STEPS, so
+	// the worker can say so once at boot instead of the ramp being silently
+	// absent.
+	WarmupStepsError string
 
 	// UnsubscribeSecretPrevious is the secret this node still VERIFIES
 	// with but never signs with -- the other half of a rotation
@@ -199,6 +266,14 @@ func (c Config) CanRotateUnsubscribeSecret() bool {
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL
 //	MEMQL_CAMPAIGNS_FEEDBACK_SOURCES
+//	MEMQL_CAMPAIGNS_SENDING_IDENTITY
+//	MEMQL_CAMPAIGNS_WARMUP_ENABLED
+//	MEMQL_CAMPAIGNS_WARMUP_STEPS
+//	MEMQL_CAMPAIGNS_WARMUP_MIN_HOURS_PER_STEP
+//	MEMQL_CAMPAIGNS_WARMUP_MIN_VOLUME_PER_STEP
+//	MEMQL_CAMPAIGNS_WARMUP_MIN_DOMAIN_VOLUME
+//	MEMQL_CAMPAIGNS_WARMUP_MAX_HARD_BOUNCE_RATE
+//	MEMQL_CAMPAIGNS_WARMUP_MAX_COMPLAINT_RATE
 //
 // The names are spelled out here rather than composed in prose because
 // the reader builds each one from a prefix plus a suffix, so the full
@@ -217,7 +292,14 @@ func LoadConfig() Config {
 		ClaimTTL:          defaultClaimTTLSeconds * time.Second,
 		DefaultThrottle:   defaultThrottleSeconds * time.Second,
 		SendTimeout:       defaultSendTimeoutSeconds * time.Second,
+
+		WarmupMinHoursPerStep:   defaultWarmupMinHoursPerStep * time.Hour,
+		WarmupMinVolumePerStep:  defaultWarmupMinVolumePerStep,
+		WarmupMinDomainVolume:   defaultWarmupMinDomainVolume,
+		WarmupMaxHardBounceRate: defaultWarmupMaxHardBounceRate,
+		WarmupMaxComplaintRate:  defaultWarmupMaxComplaintRate,
 	}
+	cfg.WarmupSteps, _ = parseWarmupSteps(defaultWarmupSteps)
 	if b, err := reader.OptionalBool("ENABLED"); err == nil && b != nil {
 		cfg.Enabled = *b
 	}
@@ -260,7 +342,84 @@ func LoadConfig() Config {
 	if s, ok := reader.String("FEEDBACK_SOURCES"); ok {
 		cfg.FeedbackSources = parseFeedbackSources(s)
 	}
+	if s, ok := reader.String("SENDING_IDENTITY"); ok {
+		cfg.SendingIdentity = strings.TrimSpace(s)
+	}
+	if cfg.SendingIdentity == "" {
+		cfg.SendingIdentity = derivedSendingIdentity()
+	}
+	cfg.NodeID = strings.TrimSpace(os.Getenv("MEMQL_NODE_ID"))
+	if b, err := reader.OptionalBool("WARMUP_ENABLED"); err == nil && b != nil {
+		cfg.WarmupEnabled = *b
+	}
+	if s, ok := reader.String("WARMUP_STEPS"); ok {
+		steps, err := parseWarmupSteps(s)
+		if err != nil {
+			// The ramp is left OFF rather than run on a ladder we invented
+			// from a malformed one. A misconfigured pacer that silently
+			// picks its own rates is worse than one that does not run.
+			cfg.WarmupEnabled = false
+			cfg.WarmupStepsError = err.Error()
+		} else {
+			cfg.WarmupSteps = steps
+		}
+	}
+	if v, err := reader.OptionalInt("WARMUP_MIN_HOURS_PER_STEP"); err == nil && v != nil && *v > 0 {
+		cfg.WarmupMinHoursPerStep = time.Duration(*v) * time.Hour
+	}
+	if v, err := reader.OptionalInt("WARMUP_MIN_VOLUME_PER_STEP"); err == nil && v != nil && *v > 0 {
+		cfg.WarmupMinVolumePerStep = *v
+	}
+	if v, err := reader.OptionalInt("WARMUP_MIN_DOMAIN_VOLUME"); err == nil && v != nil && *v > 0 {
+		cfg.WarmupMinDomainVolume = *v
+	}
+	if v, ok := reader.String("WARMUP_MAX_HARD_BOUNCE_RATE"); ok {
+		if rate, err := parseRate(v); err == nil {
+			cfg.WarmupMaxHardBounceRate = rate
+		}
+	}
+	if v, ok := reader.String("WARMUP_MAX_COMPLAINT_RATE"); ok {
+		if rate, err := parseRate(v); err == nil {
+			cfg.WarmupMaxComplaintRate = rate
+		}
+	}
 	return cfg
+}
+
+// derivedSendingIdentity labels the counters with the mailbox they are about,
+// without the operator having to say it twice. The campaign path never picks
+// the From address -- the sender does, from its own credential -- so this
+// reads the same variables the sender reads.
+func derivedSendingIdentity() string {
+	for _, name := range []string{"MEMQL_EMAIL_SENDER", "MAIL_SENDER", "SMTP_FROM_ADDR"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return strings.ToLower(v)
+		}
+	}
+	// A label, not a lie: one deployment with one mailbox needs no name for
+	// it, and inventing a plausible-looking address would be worse.
+	return "default"
+}
+
+// parseRate reads a threshold as a fraction (0.02) or a percentage ("2%").
+// Both spellings appear in deliverability documentation and an operator who
+// types the one this did not expect should not silently get a threshold two
+// orders of magnitude off.
+func parseRate(raw string) (float64, error) {
+	value := strings.TrimSpace(raw)
+	percent := strings.HasSuffix(value, "%")
+	value = strings.TrimSuffix(value, "%")
+	var f float64
+	if _, err := fmt.Sscanf(value, "%g", &f); err != nil {
+		return 0, fmt.Errorf("%q is not a rate", raw)
+	}
+	if percent {
+		f /= 100
+	}
+	if f < 0 || f > 1 {
+		return 0, fmt.Errorf("rate %q is outside 0..1", raw)
+	}
+	return f, nil
 }
 
 // parseFeedbackSources reads `source=format,source=format`.

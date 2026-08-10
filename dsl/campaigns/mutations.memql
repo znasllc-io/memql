@@ -453,3 +453,70 @@ mutate suppression recordSuppression {
     }
   }
 }
+
+/// ENGINE: write one replica's counters for one (sending identity, domain, day) bucket (memql#3462).
+///
+/// ABSOLUTE VALUES, NOT INCREMENTS, and that is the whole concurrency design. Each worker accumulates
+/// in memory and writes the running total for its OWN row, so there is no read-modify-write on the
+/// send path and no interleaving to lose counts to. Two replicas never touch one row; a reader sums
+/// across nodeIds, which it was going to do across domains and days regardless.
+///
+/// The id is derived from (sendingIdentity, domain, windowStart, nodeId), each part hashed before
+/// concatenation (authoring rule 20) so no separator in a domain can alias two buckets onto one
+/// timeline. A re-write appends a version to the same row, which is what makes "write the running
+/// total" correct rather than duplicating.
+///
+/// clusterOwner tier: these are the deployment's numbers, not an operator's.
+mutate reputationWindow recordReputationWindow {
+  args {
+    sendingIdentity  string!
+    domain           string!
+    windowStart      string!
+    nodeId           string!
+    accepted         int
+    hardBounce       int
+    softBounce       int
+    complaint        int
+  }
+  insert {
+    accept { sendingIdentity, domain, windowStart, nodeId }
+    stamp {
+      id: hash(concat(hash(args.sendingIdentity), hash(args.domain), hash(args.windowStart), hash(args.nodeId)))
+      accepted: args.accepted ?? 0
+      hardBounce: args.hardBounce ?? 0
+      softBounce: args.softBounce ?? 0
+      complaint: args.complaint ?? 0
+    }
+  }
+}
+
+/// ENGINE: record what the warming ramp just decided and why (memql#3462). One row per sending
+/// identity, id = the identity, so a restart or a second replica lands on the same timeline rather
+/// than starting a competing ramp.
+///
+/// `reason` is written on every evaluation including the ones that change nothing, because "held" is
+/// the ramp's common state and an operator seeing a step that has not moved for two days needs to
+/// read why rather than guess.
+///
+/// clusterOwner tier.
+mutate warmupState recordWarmupState {
+  args {
+    sendingIdentity  string!
+    step             int
+    ratePerMinute    int
+    decision         string
+    reason           string
+    evaluatedAt      datetime
+    stepEnteredAt    datetime
+    acceptedInStep   int
+  }
+  insert {
+    accept { sendingIdentity, decision, reason, evaluatedAt, stepEnteredAt }
+    stamp {
+      id: args.sendingIdentity
+      step: args.step ?? 0
+      ratePerMinute: args.ratePerMinute ?? 0
+      acceptedInStep: args.acceptedInStep ?? 0
+    }
+  }
+}

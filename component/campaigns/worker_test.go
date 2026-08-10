@@ -63,10 +63,10 @@ type fakeEngine struct {
 	// wrongly picked up.
 	scheduledJobs []map[string]any
 	campaign      map[string]any
-	template    map[string]any
-	roster      []map[string]any
-	ledger      []map[string]any
-	suppression map[string]map[string]any // digest -> row
+	template      map[string]any
+	roster        []map[string]any
+	ledger        []map[string]any
+	suppression   map[string]map[string]any // digest -> row
 	// pageSize bounds one roster page. Zero means "everything in one page",
 	// which is the pre-paging shape most tests still want.
 	pageSize int
@@ -329,9 +329,10 @@ func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 			UnsubscribeSecret:  "test-signing-secret-not-a-credential",
 			UnsubscribeBaseURL: "https://example.test",
 		},
-		now:     time.Now,
-		readyCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		now:        time.Now,
+		readyCh:    make(chan struct{}),
+		doneCh:     make(chan struct{}),
+		reputation: newReputationCollector("sender@example.test", "n1"),
 	}
 	w.limiter = newRateLimiter(w.cfg.SendRatePerMinute, w.now)
 	return w

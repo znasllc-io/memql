@@ -96,3 +96,32 @@ func (l *rateLimiter) Allow() bool {
 	l.tokens--
 	return true
 }
+
+// SetRate changes the steady-state rate, keeping whatever tokens are
+// already in the bucket (clamped to the new capacity).
+//
+// Exists for the warming ramp (memql#3462), which is the only thing that
+// moves this at runtime. Tokens are KEPT rather than reset because a ramp
+// step is a change of pace, not a fresh start: refilling the bucket on
+// every advance would hand out a free burst each time the ramp moved, and
+// draining it would stall a send for a minute every time the evidence said
+// things were going well.
+func (l *rateLimiter) SetRate(ratePerMinute int) {
+	if ratePerMinute <= 0 {
+		ratePerMinute = 1
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.capacity = float64(ratePerMinute)
+	l.perSec = l.capacity / 60
+	if l.tokens > l.capacity {
+		l.tokens = l.capacity
+	}
+}
+
+// Rate reports the current steady-state rate per minute.
+func (l *rateLimiter) Rate() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return int(l.capacity)
+}

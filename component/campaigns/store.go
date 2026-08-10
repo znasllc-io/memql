@@ -859,3 +859,127 @@ func sortedRecipientIDs(m map[string]LedgerEntry) []string {
 	sort.Strings(out)
 	return out
 }
+
+// --- reputation + warming (memql#3462) ----------------------------------
+
+// ReputationWindow is one (identity, domain, day, node) counter row.
+type ReputationWindow struct {
+	SendingIdentity string
+	Domain          string
+	WindowStart     string
+	NodeID          string
+	Accepted        int
+	HardBounce      int
+	SoftBounce      int
+	Complaint       int
+}
+
+// WarmupState is the ramp's persisted position.
+type WarmupState struct {
+	Step          int
+	RatePerMinute int
+	Decision      string
+	Reason        string
+	EvaluatedAt   time.Time
+	StepEnteredAt time.Time
+	// AcceptedAtStepStart is the deployment-wide accepted total as it stood
+	// when the current step began. Stored as a WATERMARK rather than as a
+	// running per-step counter because the counters themselves live in
+	// per-replica rows: subtracting a watermark from the current total gives
+	// the step's volume without any replica having to know what the others
+	// sent.
+	AcceptedAtStepStart int
+}
+
+// ReputationSince reads every counter row from a UTC day onward.
+// clusterOwner-tier.
+func (s *Store) ReputationSince(ctx context.Context, since string) ([]ReputationWindow, error) {
+	rows, err := s.rows(ctx, call("query", "reputationWindowsSince", arg{"since", since}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReputationWindow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ReputationWindow{
+			SendingIdentity: str(r, "sendingIdentity"),
+			Domain:          str(r, "domain"),
+			WindowStart:     str(r, "windowStart"),
+			NodeID:          str(r, "nodeId"),
+			Accepted:        integer(r, "accepted"),
+			HardBounce:      integer(r, "hardBounce"),
+			SoftBounce:      integer(r, "softBounce"),
+			Complaint:       integer(r, "complaint"),
+		})
+	}
+	return out, nil
+}
+
+// ReputationForBucket reads what THIS node already wrote for one bucket, so
+// a restart mid-day seeds from it instead of clobbering it with a total that
+// began again at zero.
+func (s *Store) ReputationForBucket(ctx context.Context, key reputationKey, nodeID string) (reputationCounts, error) {
+	rows, err := s.ReputationSince(ctx, key.day)
+	if err != nil {
+		return reputationCounts{}, err
+	}
+	for _, r := range rows {
+		if r.WindowStart == key.day && r.Domain == key.domain && r.NodeID == nodeID && r.SendingIdentity == key.identity {
+			return reputationCounts{
+				accepted:   r.Accepted,
+				hardBounce: r.HardBounce,
+				softBounce: r.SoftBounce,
+				complaint:  r.Complaint,
+			}, nil
+		}
+	}
+	return reputationCounts{}, nil
+}
+
+// RecordReputationWindow writes this node's running total for one bucket.
+// clusterOwner-tier. Absolute values -- see the mutation's doc for why that
+// is the concurrency design rather than a shortcut.
+func (s *Store) RecordReputationWindow(ctx context.Context, key reputationKey, nodeID string, counts reputationCounts) error {
+	return s.exec(ctx, call("mutation", "recordReputationWindow",
+		arg{"sendingIdentity", key.identity},
+		arg{"domain", key.domain},
+		arg{"windowStart", key.day},
+		arg{"nodeId", nodeID},
+		arg{"accepted", counts.accepted},
+		arg{"hardBounce", counts.hardBounce},
+		arg{"softBounce", counts.softBounce},
+		arg{"complaint", counts.complaint},
+	))
+}
+
+// WarmupState reads the ramp's position for one sending identity.
+// clusterOwner-tier.
+func (s *Store) WarmupState(ctx context.Context, identity string) (WarmupState, bool, error) {
+	rows, err := s.rows(ctx, call("query", "warmupStateForIdentity", arg{"sendingIdentity", identity}))
+	if err != nil || len(rows) == 0 {
+		return WarmupState{}, false, err
+	}
+	r := rows[len(rows)-1]
+	return WarmupState{
+		Step:                integer(r, "step"),
+		RatePerMinute:       integer(r, "ratePerMinute"),
+		Decision:            str(r, "decision"),
+		Reason:              str(r, "reason"),
+		EvaluatedAt:         parseTime(str(r, "evaluatedAt")),
+		StepEnteredAt:       parseTime(str(r, "stepEnteredAt")),
+		AcceptedAtStepStart: integer(r, "acceptedInStep"),
+	}, true, nil
+}
+
+// RecordWarmupState persists a ramp decision. clusterOwner-tier.
+func (s *Store) RecordWarmupState(ctx context.Context, identity string, d warmupDecision) error {
+	return s.exec(ctx, call("mutation", "recordWarmupState",
+		arg{"sendingIdentity", identity},
+		arg{"step", d.Step},
+		arg{"ratePerMinute", d.RatePerMinute},
+		arg{"decision", d.Decision},
+		arg{"reason", d.Reason},
+		arg{"evaluatedAt", time.Now().UTC().Format(time.RFC3339)},
+		arg{"stepEnteredAt", d.StepEnteredAt.UTC().Format(time.RFC3339)},
+		arg{"acceptedInStep", d.AcceptedInStep},
+	))
+}

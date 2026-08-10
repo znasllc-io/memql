@@ -298,3 +298,35 @@ query delivery deliveryLedgerForCampaign {
   paginate  5000
   shape     deliveryLedgerEntry
 }
+
+/// ENGINE: reputation counters from a given UTC day onward, oldest first (memql#3462). The read the
+/// warming ramp evaluates and the one an operator runs to answer "what is our complaint rate at
+/// gmail.com this week". Cluster-owner gated, and it spans owners for the same reason the suppression
+/// list does: one deployment, one sending mailbox, one reputation. The rows carry a domain and four
+/// integers and no address.
+///
+/// windowStart is compared as a STRING because the bucket key is one -- YYYY-MM-DD orders lexically
+/// exactly as it orders chronologically, which is the property that makes a string key legitimate
+/// here rather than a shortcut.
+@actor
+query reputationWindow reputationWindowsSince {
+  args {
+    since  string!
+  }
+  filter    windowStart>=args.since && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  5000
+  shape     reputationWindowFull
+}
+
+/// ENGINE: the warming ramp's state for one sending identity (the id IS the identity). Cluster-owner
+/// gated. Backs both the ramp's own evaluation and an operator asking which step it is on and why it
+/// last held.
+@actor
+query warmupState warmupStateForIdentity {
+  args {
+    sendingIdentity  string!
+  }
+  filter  row.id==args.sendingIdentity && actor.isClusterOwner==true
+  shape   warmupStateFull
+}

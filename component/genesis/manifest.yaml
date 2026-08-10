@@ -387,6 +387,62 @@ variables:
     default: "3"
     description: "Per-recipient delivery attempts before the delivery row goes terminal failed. Lower than the outbound worker's 5: a marketing message has a shelf life, and the eighth retry of a soft-bouncing address costs reputation rather than buying delivery."
 
+  - name: MEMQL_CAMPAIGNS_SENDING_IDENTITY
+    component: campaigns
+    scope: node
+    optional: true
+    default: ""
+    description: "Label for the sending mailbox the reputation counters and the warming ramp belong to (memql#3462). Defaults to the configured sender address (MEMQL_EMAIL_SENDER / MAIL_SENDER / SMTP_FROM_ADDR), or 'default' when none resolves. One deployment normally has exactly one sending mailbox -- the same fact the cluster-wide suppression list rests on -- so this is set only when that derivation is wrong."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_ENABLED
+    component: campaigns
+    scope: node
+    optional: true
+    default: "false"
+    description: "Turn on the evidence-driven warming ramp (memql#3462). OFF by default: an established sending domain does not want its rate re-derived by a control loop that has never seen it. When on, the effective send rate is min(the ramp's current step, MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE) -- the ramp can hold the configured rate down and can never raise it past what you allowed."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_STEPS
+    component: campaigns
+    scope: node
+    optional: true
+    default: "5,10,25,50,100,200"
+    description: "The ramp's ladder, in messages per minute, ascending. A non-ascending or non-numeric list is REFUSED and leaves the ramp disabled with a boot warning rather than being sorted -- sorting it would run a ladder you did not write, and the value you typed is the one you will read back when you ask why the rate is what it is."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_MIN_HOURS_PER_STEP
+    component: campaigns
+    scope: node
+    optional: true
+    default: "24"
+    description: "How long a ramp step must run before it may advance. A day, because that is the granularity mailbox providers form an opinion at; a step they have not seen through a full daily cycle has not been judged however clean it looks."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_MIN_VOLUME_PER_STEP
+    component: campaigns
+    scope: node
+    optional: true
+    default: "200"
+    description: "How many messages a ramp step must produce before its rates mean anything. THE condition that stops an empty numerator reading as a clean bill of health: four messages with no bounces is a hard bounce rate of 0.0 and no evidence at all."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_MIN_DOMAIN_VOLUME
+    component: campaigns
+    scope: node
+    optional: true
+    default: "50"
+    description: "How much mail a single recipient domain must have received before its own rate is allowed to hold the ramp. Without it, one bounce at a domain we sent three messages to reads as 33% and pins the ramp permanently. The stated cost: a genuinely bad small domain is invisible to the ramp until it grows."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_MAX_HARD_BOUNCE_RATE
+    component: campaigns
+    scope: node
+    optional: true
+    default: "0.02"
+    description: "Per-domain permanent-bounce ceiling the ramp holds on, as a fraction or a percentage ('0.02' or '2%'). 2% is the conventional 'you are being watched' line. Evaluated PER DOMAIN, never in aggregate -- one badly-performing domain inside a large healthy total is exactly what an aggregate hides and what gets a sending domain blocked."
+
+  - name: MEMQL_CAMPAIGNS_WARMUP_MAX_COMPLAINT_RATE
+    component: campaigns
+    scope: node
+    optional: true
+    default: "0.001"
+    description: "Per-domain spam-complaint ceiling, as a fraction or a percentage. An order of magnitude tighter than the bounce ceiling, and that asymmetry is the providers' own: a bad address is a hygiene problem, a complaint is a person saying they did not want this. A domain over either ceiling REDUCES the ramp a step rather than merely holding it."
+
   - name: MEMQL_CAMPAIGNS_FEEDBACK_SOURCES
     component: campaigns
     scope: node

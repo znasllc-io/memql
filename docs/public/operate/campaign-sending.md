@@ -72,6 +72,12 @@ Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
 `_CLAIM_TTL_SECONDS`, `_THROTTLE_SECONDS`, `_SEND_TIMEOUT_SECONDS`,
 `_ENABLED`.
 
+Feedback and warming (both opt-in, both off with no value):
+`MEMQL_CAMPAIGNS_FEEDBACK_SOURCES` ([feeding bounces back
+in](#feeding-bounces-back-in)), `_WARMUP_ENABLED` and the `_WARMUP_*` ladder
+and thresholds ([warming](#warming-a-new-sending-domain)),
+`_SENDING_IDENTITY`.
+
 Rotating the unsubscribe signing key is a two-variable operation, and doing it
 with one variable breaks every link already sent. The procedure is
 [below](#rotating-the-unsubscribe-signing-key).
@@ -527,25 +533,108 @@ builtin campaignSuppress(email: "...", reason: "manual", note: "...")
 Both are admin-or-cluster-owner, because there the caller **is** asserting a
 verdict.
 
-## Warming a new sending domain
+## Reputation telemetry
 
-There is **no automated warming ramp**, and that is a deliberate omission
-rather than an oversight: a correct ramp is driven by reputation telemetry —
-per-domain deliverability, complaint rate, throttle frequency over time —
-which this deployment does not collect. A ramp built on a fixed schedule
-instead is a guess with a schedule attached.
+Every send and every piece of provider feedback is counted per **(sending
+identity, recipient domain, day)** on `v1:campaigns:reputationWindow`
+(memql#3462). That is the breakdown that matters: mailbox providers judge a
+sender independently, so "our bounce rate is 1%" is not a number any of them
+acts on, while "our complaint rate at gmail.com is 0.4% this week" is.
 
-The manual procedure works today and uses the same knob:
+```
+query reputationWindowsSince(since: "2026-08-01")
+```
 
-1. Start `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE` low (a few per minute) on a
-   new domain.
-2. Send to your most engaged recipients first — split the audience rather than
-   sampling it, so the send order is deliberate.
-3. Raise the rate over days, watching the skipped/failed counts on the
-   campaign rows and the `domain` breakdown on the suppression list.
-4. Back off on any rise in complaints.
+Cluster-owner gated, and it carries a domain and four integers — no address
+anywhere, the same property that makes the suppression list safe to keep
+cluster-wide.
+
+Two things it deliberately does **not** claim:
+
+- **`accepted` is not `delivered`.** It counts what the transport took;
+  Graph answers `202` and the bounce arrives hours later through the feedback
+  path. Delivery is inferred as accepted minus bounces, and there is no
+  `delivered` column because nothing on this side could honestly produce one.
+- **Unsubscribes are not counted.** The one-click endpoint is a separate
+  handler with its own store, so a column for them would be a column nothing
+  writes. The ramp thresholds on bounces and complaints, which is what the
+  providers themselves act on.
+
+There is one counter row **per replica** (`nodeId`), written as an absolute
+running total rather than an increment. Two replicas incrementing one shared
+row would need a read-modify-write on the send path and would lose counts to
+the interleaving; one row each, summed at read time, has neither problem.
 
 ---
+
+## Warming a new sending domain
+
+Warming is raising volume gradually on a new sending identity, so a provider
+sees a growing trickle rather than a cold blast.
+
+**There is now an automated ramp, and it is off by default.**
+
+```bash
+MEMQL_CAMPAIGNS_WARMUP_ENABLED=true
+MEMQL_CAMPAIGNS_WARMUP_STEPS=5,10,25,50,100,200
+```
+
+An established sending domain does not want its rate re-derived by a control
+loop that has never seen it, which is why you have to ask for it.
+
+**It can only ever slow you down.** The effective rate is min(the current
+step, `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`). The ramp holds your configured
+rate down while the evidence is thin; it never raises it past what you
+allowed.
+
+### It advances on evidence, not on a clock
+
+A fixed-schedule ramp is a guess with a schedule attached, and it produces
+the worst kind of false confidence — an operator believing they are warming
+safely while the system has no idea whether it is working. This one advances
+a step only when **all** of these hold:
+
+| Condition | Knob | Why |
+|---|---|---|
+| The step has run long enough | `_WARMUP_MIN_HOURS_PER_STEP` (24) | Providers judge over time. A step they have not seen through a daily cycle has not been judged, however clean it looks. |
+| It has sent enough to judge | `_WARMUP_MIN_VOLUME_PER_STEP` (200) | Four messages with no bounces is a hard bounce rate of 0.0 and no evidence at all. This is the condition that stops an empty numerator reading as a clean bill of health. |
+| Every measurable domain is inside its thresholds | `_WARMUP_MAX_HARD_BOUNCE_RATE` (2%), `_WARMUP_MAX_COMPLAINT_RATE` (0.1%) | **Per domain, never in aggregate.** One bad domain inside a large healthy total is exactly what an aggregate hides, and it is the shape that gets a sending domain blocked. |
+
+A domain over threshold **reduces** the ramp a step rather than merely
+holding it. Holding at a rate that is already producing complaints is not a
+neutral act.
+
+A domain with less than `_WARMUP_MIN_DOMAIN_VOLUME` (50) of its own is
+ignored, or one bounce at a domain we sent three messages to would read as
+33% and pin the ramp forever. The cost — a genuinely bad small domain is
+invisible to the ramp until it grows — is a real gap rather than a hidden
+one.
+
+### Reading what it decided
+
+```
+query warmupStateForIdentity(sendingIdentity: "sender@example.com")
+```
+
+carries the current `step`, its `ratePerMinute`, the last `decision`
+(`started` / `held` / `advanced` / `reduced`) and a `reason` in words. `held`
+is the common and healthy state, so the reason is written on every
+evaluation: an operator looking at a step that has not moved for two days
+should read why rather than guess.
+
+A malformed `_WARMUP_STEPS` leaves the ramp **disabled** with a boot warning,
+rather than being sorted into a ladder you did not write.
+
+### Doing it by hand instead
+
+Still perfectly reasonable, and unchanged:
+
+1. Start `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE` low (a few per minute).
+2. Send to your most engaged recipients first — split the audience rather
+   than sampling it, so the send order is deliberate.
+3. Raise the rate over days, watching `reputationWindowsSince` and the
+   `domain` breakdown on the suppression list.
+4. Back off on any rise in complaints.
 
 ## Troubleshooting
 
@@ -558,6 +647,8 @@ The manual procedure works today and uses the same knob:
 | Scheduled campaign did not send | Read the campaign row's `lastError` — the fire-time preflight records its reason there. An environment refusal (no sender, no unsubscribe config) retries; an authoring one leaves the campaign `failed`. |
 | Scheduled campaign sent later than its time | Expected after downtime: a late send is sent rather than dropped. The log line carries `lateBy`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |
+| The warming ramp never advances | Read `warmupStateForIdentity`'s `reason` — it names which condition is unmet. Most often the step has not sent `_WARMUP_MIN_VOLUME_PER_STEP` messages yet, which is the ramp refusing to treat a clean rate over four messages as evidence. |
+| The warming ramp is enabled and nothing paces | Check the boot log for a malformed `MEMQL_CAMPAIGNS_WARMUP_STEPS`; the ramp disables itself rather than inventing a ladder. |
 | Bounces never appear on the suppression list | The source is not in `MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`, or its format is misspelled (a misspelling is dropped, not defaulted). Check `inboundRequestsByStatus(status: "failed")` for payloads that arrived and could not be read. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |

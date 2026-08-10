@@ -146,6 +146,11 @@ func (w *Worker) applyFeedbackReport(ctx context.Context, report FeedbackReport)
 	if digest == "" {
 		return false, fmt.Errorf("%q is not a usable email address", redactAddress(report.Email))
 	}
+	// Counted BEFORE the suppression decision, and counted for every kind
+	// including the soft bounce that does not suppress (memql#3462). The
+	// ramp needs the denominator's whole story: a domain whose soft bounces
+	// are climbing is information even while nothing is being suppressed.
+	w.reputation.observe(time.Now().UTC(), report.Email, report.Kind)
 	switch report.Kind {
 	case "soft_bounce":
 		// Transient. Suppressing on one is how a sender loses a real

@@ -290,3 +290,68 @@ concept suppression {
 
   @relationship(type="interactsWith", field="sourceCampaignId", target=campaign, direction="outgoing")
 }
+
+/// Per-(sending identity, recipient domain, day) counters -- the reputation telemetry a warming ramp
+/// has to be driven by, and the thing memql#3462 says has to exist before a ramp is anything but a
+/// hardcoded table pretending to be a control loop.
+///
+/// WHY PER DOMAIN. Mailbox providers judge a sender independently. "Our bounce rate is 1%" is not a
+/// number any of them acts on; "our complaint rate at gmail.com is 0.4% this week" is. It is also the
+/// question an operator asks long before they want anything automated, which is why this half is
+/// worth having on its own.
+///
+/// WHY A ROW PER REPLICA (nodeId). Counters are accumulated in each worker's memory and written as
+/// ABSOLUTE values to that replica's own row. Two replicas incrementing one shared row would need a
+/// read-modify-write on the send path and would lose counts to the interleaving; one row each, summed
+/// at read time, has neither problem. The cost is that a reader must aggregate, which it was going to
+/// do anyway across domains and days.
+///
+/// WHAT `accepted` IS NOT. It counts messages the TRANSPORT accepted, which is not delivery -- Graph
+/// answers 202 and the bounce arrives later. Delivery is therefore inferred (accepted minus bounces)
+/// and the field is named for what it actually observes. A `delivered` column would be a number
+/// nothing on this side can honestly produce.
+///
+/// UNSUBSCRIBES ARE NOT COUNTED HERE, deliberately: the one-click endpoint is a separate HTTP handler
+/// with its own store and no collector, so a field for them would be a field nothing writes -- the
+/// exact shape this issue exists to remove. The ramp's thresholds are the bounce and complaint rates,
+/// which are what the providers themselves act on.
+///
+/// clusterOwner tier, for the same reason the suppression list is: one deployment, one sending
+/// mailbox, one reputation. It is not an operator's number and no operator's authority should decide
+/// what it says. It carries no address -- a domain and four integers.
+@displayCard(primary="domain", secondary="windowStart", tertiary="sendingIdentity", status="sendingIdentity")
+@rowAuthz(clusterOwner)
+concept reputationWindow {
+  sendingIdentity  string!  @description("Which sending mailbox these counters belong to. One deployment normally has exactly one, and the default is derived from the configured sender address; the dimension exists so a future multi-mailbox deployment is a value change rather than a re-model.")
+  domain           string!  @description("The recipient's domain, lowercased -- gmail.com, outlook.com. The only human-readable field, and it identifies nobody, which is the same property that makes the suppression list safe to keep cluster-wide.")
+  windowStart      string!  @description("The UTC day these counters cover, as YYYY-MM-DD. A string rather than a datetime because it is a BUCKET KEY that has to be compared for equality and ordered lexically, and because it participates in the derived row id.")
+  nodeId           string!  @description("The replica that accumulated these counts. Part of the row id; see the concept doc for why one row per replica beats one shared row.")
+  accepted         int  @default("0")  @description("Messages the transport accepted for this domain in this window. NOT deliveries -- Graph answers 202 and a bounce arrives later. Delivery is inferred as accepted minus bounces.")
+  hardBounce       int  @default("0")  @description("Permanent bounces reported for this domain, from the provider's own classification (memql#3461). The numerator of the rate a ramp holds on.")
+  softBounce       int  @default("0")  @description("Transient bounces. Watched but not thresholded: a full mailbox is not a reputational event.")
+  complaint        int  @default("0")  @description("Spam complaints reported for this domain. The most damaging signal a mailbox provider tracks, and the one whose threshold is an order of magnitude tighter than the bounce rate's.")
+}
+
+/// The warming ramp's own state -- one row per sending identity, id = the sending identity
+/// (memql#3462).
+///
+/// A RAMP THAT ADVANCES ON A CLOCK IS A GUESS WITH A SCHEDULE ATTACHED, and the issue is explicit
+/// that the reason no ramp shipped with memql#3348 was the absence of the evidence one would need.
+/// So this row records a decision rather than a countdown: a step advances only when the previous
+/// step produced enough volume, held long enough, and stayed inside the bounce and complaint
+/// thresholds. `decision` and `reason` are what the row is FOR -- an operator who cannot see why the
+/// ramp last held has a control loop they have to trust rather than read.
+///
+/// clusterOwner, like the counters it reads: the ramp paces the deployment's one sending mailbox.
+@displayCard(primary="sendingIdentity", secondary="ratePerMinute", tertiary="evaluatedAt", status="decision")
+@rowAuthz(clusterOwner)
+concept warmupState {
+  sendingIdentity  string!  @description("The sending mailbox this ramp paces. Also the row id, so there is exactly one ramp per identity and no way to accumulate competing ones.")
+  step             int  @default("0")  @description("Index into MEMQL_CAMPAIGNS_WARMUP_STEPS. Zero is the starting trickle a new sending domain begins on.")
+  ratePerMinute    int  @default("0")  @description("The send rate the current step allows. The worker takes the LOWER of this and MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE, so the ramp can only ever slow the configured rate down, never raise it past what the operator allowed.")
+  decision         enum("advanced", "held", "reduced", "started")  @description("What the last evaluation did. 'held' is the common and healthy state -- a step waits for volume and time before it may advance.")
+  reason           string  @description("Why, in words, stated for a person: which threshold was exceeded, or how much volume the step still needs. An automated pacer whose decisions cannot be read is one an operator has to trust rather than check.")
+  evaluatedAt      datetime  @description("When the ramp last looked at the evidence.")
+  stepEnteredAt    datetime  @description("When the current step began. The minimum-hold clock runs from here.")
+  acceptedInStep   int  @default("0")  @description("Messages accepted since the current step began -- the volume half of the advance condition. A step that has sent nothing has produced no evidence, and advancing on no evidence is what this design exists to avoid.")
+}

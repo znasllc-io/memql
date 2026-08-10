@@ -110,6 +110,13 @@ type Worker struct {
 	now      func() time.Time
 	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
 
+	// reputation accumulates the per-domain counters this replica observes
+	// (memql#3462), flushed once per drain pass.
+	reputation *reputationCollector
+	// warmupEvaluatedAt bounds how often the ramp re-reads the evidence.
+	// Guarded by mu.
+	warmupEvaluatedAt time.Time
+
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	startOnce   sync.Once
@@ -132,15 +139,16 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 	cfg := LoadConfig()
 	return &Worker{
-		store:   NewStore(engine),
-		claimer: claimer,
-		resolve: resolveSender,
-		logger:  logger.With("component", string(WorkerComponent)),
-		cfg:     cfg,
-		limiter: newRateLimiter(cfg.SendRatePerMinute, time.Now),
-		now:     time.Now,
-		readyCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		store:      NewStore(engine),
+		claimer:    claimer,
+		resolve:    resolveSender,
+		logger:     logger.With("component", string(WorkerComponent)),
+		cfg:        cfg,
+		limiter:    newRateLimiter(cfg.SendRatePerMinute, time.Now),
+		reputation: newReputationCollector(cfg.SendingIdentity, cfg.NodeID),
+		now:        time.Now,
+		readyCh:    make(chan struct{}),
+		doneCh:     make(chan struct{}),
 	}
 }
 
@@ -167,6 +175,16 @@ func (w *Worker) Start(_ context.Context) {
 		// buried in a boot log.
 		if reason := w.cfg.RequireUnsubscribe(); reason != "" {
 			w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
+		}
+		// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
+		// operator who configured warming and got none should learn it here
+		// rather than by watching a rate that never moves.
+		if w.cfg.WarmupStepsError != "" {
+			w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
+				"error", w.cfg.WarmupStepsError)
+		} else if w.cfg.WarmupEnabled {
+			w.logger.Info("campaigns worker: warming ramp enabled",
+				"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
 		}
 		runCtx, cancel := context.WithCancel(context.Background())
 		w.mu.Lock()
@@ -282,6 +300,10 @@ func (w *Worker) DrainOnce(ctx context.Context) {
 	// in the SAME pass rather than waiting a further poll interval to start
 	// (memql#3459).
 	w.promoteDueSchedules(ctx, systemCtx)
+	// The ramp reads the evidence and sets the pace BEFORE any batch, so a
+	// step change takes effect on this pass rather than the next
+	// (memql#3462). It self-limits to warmupEvalInterval internally.
+	w.applyWarmup(systemCtx, w.nowUTC())
 	jobs, err := w.store.DrainableJobs(systemCtx)
 	if err != nil {
 		w.logger.Debug("campaigns worker: scan failed (engine likely not ready)", "error", err)
@@ -295,6 +317,9 @@ func (w *Worker) DrainOnce(ctx context.Context) {
 		}
 		w.processJob(ctx, systemCtx, job)
 	}
+	// After the pass, so one write covers everything the pass observed
+	// rather than one per message.
+	w.flushReputation(systemCtx)
 }
 
 func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job SendJob) {
@@ -557,6 +582,9 @@ func (w *Worker) processRecipient(
 	if err == nil {
 		job.SentCount++
 		w.sentTotal.Add(1)
+		// `accepted`, not `delivered`: the transport took it, and whether it
+		// lands is what the feedback path reports later (memql#3462).
+		w.reputation.observe(now, r.Email, "accepted")
 		if derr := w.store.RecordDelivery(ownerCtx, Delivery{
 			CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 			Status: "sent", SentAt: now, Attempts: attempts,
