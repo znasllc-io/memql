@@ -46,6 +46,7 @@ import {
   type AddClusterAction,
   type PresenceVerdict,
 } from './clusters/presence.js';
+import { removeClusterCompletely } from './clusters/registry.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
@@ -426,6 +427,67 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // existing cluster must be refused, not silently turned into an edit
       // that deletes every field this form left blank. See addCluster.
       await writeCluster(clustersTree, () => addCluster(clustersPath, created));
+    }),
+    // Removing a cluster from the LIST -- the reversible half of the pair the
+    // tree offers. It forgets the entry, its stored credential and its live
+    // connection, and touches no machine.
+    //
+    // It is a SEPARATE command from uninstalling a local cluster (#3476), which
+    // tears down k3d, /etc/hosts and the mkcert CA. Different label, different
+    // icon, different menu, different confirmation -- a single action that asked
+    // which one you meant would put the irreversible operation one click away
+    // from a routine one (design D1).
+    commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      const name = target.cluster.name;
+
+      // Modal, and the detail says what is NOT happening. The whole risk in
+      // this surface is an operator reading "remove" as "uninstall", so the
+      // confirmation spends its second line ruling that out rather than asking
+      // a generic "are you sure?".
+      const confirmed = await window.showWarningMessage(
+        `Remove "${name}" from the cluster list?`,
+        {
+          modal: true,
+          detail:
+            'This editor forgets the cluster and deletes the credential it stored for it. ' +
+            'Nothing is uninstalled, and no data on the cluster is touched. ' +
+            'You can add it back at any time.',
+        },
+        'Remove'
+      );
+      if (confirmed !== 'Remove') {
+        return;
+      }
+
+      // Only a LIVE connection to this cluster counts. A disconnected state can
+      // still name the cluster it was last dialled to, and disconnecting again
+      // on the strength of that would be a no-op at best.
+      const state = connections?.state;
+      const connectedClusterName =
+        state !== undefined && state.status !== 'disconnected' ? state.clusterName : undefined;
+
+      try {
+        await removeClusterCompletely(clustersPath, name, {
+          secrets: context.secrets,
+          connectedClusterName,
+          disconnect: () => connections?.disconnect(),
+        });
+      } catch (err) {
+        window.showErrorMessage(
+          `memQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        );
+        return;
+      }
+
+      // A removal changes what the "+" should offer -- deterministically, so it
+      // must not wait out the memo window (see presence.ts invalidate).
+      presence.invalidate();
+      clustersTree.refresh();
+      window.showInformationMessage(`memQL: removed "${name}" from the cluster list.`);
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
