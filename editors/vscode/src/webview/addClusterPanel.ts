@@ -175,14 +175,13 @@ export class AddClusterPanel {
       return;
     }
     if (type === "begin") {
-      // The run itself is #3474. Validation and the transition are this
-      // panel's, so an incomplete form is refused here rather than nine
-      // minutes into a graph.
-      if (this.state.beginRun()) {
-        void vscode.window.showInformationMessage(
-          "memQL: collected. Running the install graph lands in #3474.",
-        );
-      }
+      // Validation and the transition are this panel's, so an incomplete form
+      // is refused here rather than nine minutes into a graph.
+      //
+      // No toast. The run screen itself says what state the run is in, and a
+      // popup that announced a run which has not started would be the same lie
+      // in a second place -- one the operator cannot dismiss by looking again.
+      this.state.beginRun();
       this.render();
       return;
     }
@@ -318,12 +317,18 @@ ${this.bodyHtml()}
     const settled = runIsSettled(steps);
     const repair = this.state.action === "repair";
 
-    // Before the first event lands there is nothing to draw but a promise that
-    // something is happening. Saying so beats an empty panel that reads as a
-    // wizard which has quietly died.
+    // NO STEPS MEANS NOTHING IS RUNNING, and this must not pretend otherwise.
+    //
+    // `AddClusterState.apply()` is what populates the list, and nothing calls
+    // it yet -- driving `session.ts` needs an install root a packaged extension
+    // does not have (memql#3487). An earlier version of this screen said
+    // "Starting. The first step will appear here as it begins", which was a
+    // claim about a run that had not begun and could not begin. A wizard that
+    // reports work it is not doing is worse than one that reports nothing: the
+    // operator waits on it.
     const body =
       steps.length === 0
-        ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
+        ? `<p class="lede">Nothing has been run. Starting an install from the editor is not wired up in this build -- see memql#3487.</p>`
         : renderToHtml(renderInstallSteps(toStepViews(steps)));
 
     // Cancel is offered for exactly as long as there is something to stop.

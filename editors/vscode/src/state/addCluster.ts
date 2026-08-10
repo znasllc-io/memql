@@ -338,13 +338,24 @@ export class AddClusterState {
   // recovery
   // ---------------------------------------------------------------------------
 
-  /** Puts the failed step back to pending and returns to the run. */
+  /**
+   * Puts the failed step back to pending and returns to the run.
+   *
+   * THE LOG IS CLEARED WITH THE REST. `apply()` APPENDS each `stepLog` line, so
+   * a retry that kept the previous attempt's output would render both runs
+   * concatenated inside one disclosure with no boundary between them -- and the
+   * failure being read would be the one that is no longer happening. Every
+   * other trace of the last attempt (state, reason, exit code) is dropped here;
+   * the log was the one that was not, which made it the only misleading field
+   * on the screen.
+   */
   retry(): void {
     const entry = this.progress.find((p) => p.id === this.failedId);
     if (entry === undefined) return;
     entry.state = "pending";
     entry.reason = "";
     entry.exitCode = null;
+    entry.log = "";
     this.failedId = undefined;
     this.currentScreen = "running";
   }
@@ -355,6 +366,10 @@ export class AddClusterState {
    * PER STEP, deliberately. An operator who would rather run the one command
    * that needs sudo by hand should not be dropped into a fully manual install
    * for the other eleven.
+   *
+   * Clears the previous attempt's log for the same reason `retry()` does: the
+   * step is about to run again, and keeping the old output would show the
+   * operator a failure that is no longer happening.
    */
   switchToGuided(): void {
     const entry = this.progress.find((p) => p.id === this.failedId);
@@ -363,6 +378,7 @@ export class AddClusterState {
     entry.state = "pending";
     entry.reason = "";
     entry.exitCode = null;
+    entry.log = "";
     this.failedId = undefined;
     this.currentScreen = "running";
   }
