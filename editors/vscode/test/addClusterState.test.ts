@@ -250,6 +250,41 @@ test("retry puts the failed step back in the queue and returns to the run", () =
   assert.equal(s.failed, undefined, "the failure is cleared once it is being retried");
 });
 
+test("retry clears the previous attempt's output", () => {
+  // `apply()` APPENDS each stepLog line, so a retry that kept the old log would
+  // render both attempts concatenated in one disclosure with no boundary --
+  // and the failure the operator reads would be the one that is no longer
+  // happening. Every other trace of the last attempt is dropped; the log was
+  // the one that was not.
+  const s = new AddClusterState();
+  s.chooseAction("repair");
+  s.beginRun();
+  s.apply({ type: "stepStarted", step: step("cluster"), params: {} } as ExecEvent);
+  s.apply({ type: "stepLog", step: step("cluster"), line: "E: first attempt" } as ExecEvent);
+  s.apply(finished("cluster", { status: "failed", exitCode: 5 }));
+
+  s.retry();
+  assert.equal(s.steps.find((p) => p.id === "cluster")?.log, "");
+
+  s.apply({ type: "stepLog", step: step("cluster"), line: "E: second attempt" } as ExecEvent);
+  const log = s.steps.find((p) => p.id === "cluster")?.log ?? "";
+  assert.match(log, /second attempt/);
+  assert.ok(!log.includes("first attempt"), "the retried step still carries the old output");
+});
+
+test("switching to guided clears the previous attempt's output too", () => {
+  // Same reasoning as retry: the step is about to run again.
+  const s = new AddClusterState();
+  s.chooseAction("repair");
+  s.beginRun();
+  s.apply({ type: "stepStarted", step: step("cluster"), params: {} } as ExecEvent);
+  s.apply({ type: "stepLog", step: step("cluster"), line: "E: needs sudo" } as ExecEvent);
+  s.apply(finished("cluster", { status: "failed", exitCode: 3 }));
+
+  s.switchToGuided();
+  assert.equal(s.steps.find((p) => p.id === "cluster")?.log, "");
+});
+
 test("switching one step to guided marks that step and nothing else", () => {
   // The escape hatch is PER STEP: an operator who wants to run the one command
   // that needs sudo by hand should not be dropped into a fully manual install.

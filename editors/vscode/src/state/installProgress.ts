@@ -47,13 +47,57 @@ export interface FailureGuidance {
 }
 
 /**
- * The capability-script contract's exit codes.
+ * What a failed step's exit code means for the operator.
  *
- * Source: docs/internal/design/capability-script-contract.md -- 0 ok, 2 bad
- * param, 3 refused, 4 prerequisite missing, 5 operation failed.
+ * Source: docs/internal/design/capability-script-contract.md -- 2 bad param,
+ * 3 refused, 4 prerequisite missing, 5 operation failed -- PLUS the two codes
+ * that reach a failed outcome without being contract classifications:
+ *
+ *   0  the script succeeded and its VERIFY did not hold. executor.ts treats a
+ *      zero exit as a precondition and nothing more, so this is the shape most
+ *      real failures take here rather than an edge case.
+ *   1  the catch-all. `cap_fail` clamps any out-of-range code to 1, and
+ *      capability.sh's EXIT trap emits a failure envelope for any non-zero
+ *      abort, so a `set -e` death lands here too.
+ *
+ * Both were once falling through to the default branch, which told the
+ * operator memQL "cannot say what it means" about the two cases it understands
+ * best. That is the confident-wrong-advice failure this function exists to
+ * prevent, inverted into confidently disclaiming knowledge the system has.
  */
 export function failureGuidance(exitCode: number | null): FailureGuidance {
   switch (exitCode) {
+    case 0:
+      // THE NORMAL FAILURE SHAPE FOR THIS INSTALLER, and the one this function
+      // originally had no case for. `executor.ts` records a FAILED outcome
+      // carrying exit 0 whenever a script exits cleanly and its verify
+      // predicate does not hold -- "an exit code of 0 is a precondition and
+      // nothing more". All 13 install steps verify a `result.*` field, so this
+      // is the path most real failures take. `verify-frontdoor.sh
+      // --report-only` is the worked example: it warns, calls cap_ok, and
+      // returns exit 0 with `allPassed=false`.
+      return {
+        headline: "The step ran without error, but the machine is not in the state it checks for.",
+        advice:
+          "The script itself succeeded -- what it was supposed to achieve did not " +
+          "hold when it checked. That is usually something taking longer than the " +
+          "step waits for, or a change that did not take effect. The output below " +
+          "says which check failed.",
+        retryable: true,
+      };
+    case 1:
+      // `cap_fail` clamps any out-of-range code to 1, and capability.sh's EXIT
+      // trap emits a failure envelope for any non-zero abort -- so 1 is where
+      // both an unclassified failure and a `set -e` abort land. It is a real
+      // code with a real meaning, not an unknown one.
+      return {
+        headline: "The step stopped without classifying what went wrong.",
+        advice:
+          "This is the catch-all: either the script failed in a way it does not " +
+          "have a specific code for, or it aborted partway. The output below is " +
+          "the only account of what happened, so read it before retrying.",
+        retryable: true,
+      };
     case 2:
       return {
         headline: "The installer passed this step something it would not accept.",
