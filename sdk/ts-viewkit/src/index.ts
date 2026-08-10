@@ -29,6 +29,7 @@ export {
   renderRemovalPreview,
   type InstallStepState,
   type InstallStepView,
+  type RemovalElevation,
   type RemovalItemKind,
   type RemovalItemView,
 } from "./install.js";

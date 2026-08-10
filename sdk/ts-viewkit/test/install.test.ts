@@ -196,6 +196,60 @@ test("an empty receipt says so rather than rendering a blank panel", () => {
   assert.match(renderToHtml(renderRemovalPreview([])), /removes? nothing/);
 });
 
+// --------------------------------------------------------------------------
+// elevation
+// --------------------------------------------------------------------------
+
+test("a privileged removal is visible in the list the operator approves", () => {
+  // The preview IS the confirmation (D6): there is no yes/no box afterwards,
+  // so this list is the only moment consent happens. Consent to "delete a
+  // directory" is not consent to "edit /etc/hosts as root".
+  const html = renderToHtml(
+    renderRemovalPreview([item({ id: "removeHostsBlock", elevation: "sudo" })]),
+  );
+  assert.match(html, /data-elevation="sudo"/);
+  assert.match(html, /\[sudo\]/);
+  assert.match(html, /title="[^"]*needs root/);
+});
+
+test("user-trust is distinguished from sudo, not merged into one warning", () => {
+  // Both prompt, but for different things and against different state, and an
+  // operator deciding whether to walk away needs to know which.
+  const html = renderToHtml(
+    renderRemovalPreview([item({ id: "removeLocalCA", elevation: "user-trust" })]),
+  );
+  assert.match(html, /data-elevation="user-trust"/);
+  assert.match(html, /title="[^"]*certificate authority/);
+});
+
+test("an omitted elevation renders nothing and does NOT become `none`", () => {
+  // The load-bearing one. "I was not told" and "this needs no privileges" are
+  // different claims; promoting the first into the second is how a preview
+  // promises something the run breaks by stopping for a password.
+  const html = renderToHtml(renderRemovalPreview([item({})]));
+  assert.ok(!html.includes("data-elevation"), "absent elevation reached the markup");
+  assert.ok(!html.includes("none"), "absent elevation was defaulted to none");
+});
+
+test("an explicit `none` is asserted in the data but draws no marker", () => {
+  // The host keeps full control -- all three values reach the attribute -- but
+  // `[none]` beside five of seven rows trains the eye to skip the column the
+  // other two need it to stop at.
+  const html = renderToHtml(renderRemovalPreview([item({ elevation: "none" })]));
+  assert.match(html, /data-elevation="none"/);
+  assert.ok(!html.includes("[none]"), "a no-op elevation drew a marker");
+});
+
+test("elevation is independent of kind", () => {
+  // A preserved artifact can still be one whose removal WOULD have needed
+  // privilege; the two axes do not constrain each other.
+  const html = renderToHtml(
+    renderRemovalPreview([item({ kind: "preserved", elevation: "sudo" })]),
+  );
+  assert.match(html, /data-kind="preserved"/);
+  assert.match(html, /data-elevation="sudo"/);
+});
+
 test("labels are escaped", () => {
   const html = renderToHtml(renderRemovalPreview([item({ label: "<script>x</script>" })]));
   assert.ok(!html.includes("<script>"));

@@ -364,6 +364,21 @@ const coreStyles = `
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+/* The privilege marker -- \`[sudo]\`, \`[user-trust]\`. Bordered like .vk-flag
+   because it is the same kind of thing: a short marker whose literal text says
+   which one it is. It sits at the END of the row and does not shrink, so the
+   two rows that change machine-wide state stay scannable down the right edge
+   of a list whose labels are all different lengths. Not muted -- this is the
+   one thing on the row the operator is being asked to consent to. */
+.vk-removal-elevation {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.8em;
+  padding: 0 4px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+}
 `;
 
 // The element library's stylesheet, appended to viewKitStyles below. Split

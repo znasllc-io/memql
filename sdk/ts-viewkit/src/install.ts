@@ -51,6 +51,19 @@ export type InstallStepState = "pending" | "running" | "done" | "skipped" | "fai
 /** Whether an uninstall will take an artifact, or deliberately leave it. */
 export type RemovalItemKind = "removed" | "preserved";
 
+/**
+ * What privilege removing an artifact needs, straight off the uninstall graph's
+ * `elevation` field.
+ *
+ * This exists because the preview IS the confirmation (design D6): there is no
+ * separate yes/no box afterwards, so the list is the ONLY moment the operator
+ * consents. Consent to "delete a directory" is not consent to "remove a CA
+ * from your system trust store" or "edit /etc/hosts as root" -- and two of the
+ * seven uninstall steps change machine-wide state outside memQL's own
+ * footprint. Invisible here means approved unseen.
+ */
+export type RemovalElevation = "none" | "sudo" | "user-trust";
+
 // One step of an install or repair run, already projected by the caller.
 export interface InstallStepView {
   /** The graph step id. Emitted as data-step-id for the host's delegation. */
@@ -96,6 +109,16 @@ export interface RemovalItemView {
    * decision.
    */
   reason?: string;
+  /**
+   * The privilege this removal needs.
+   *
+   * OMITTING THIS RENDERS NOTHING -- it does NOT default to "none". "I was not
+   * told" and "this needs no privileges" are different claims, and quietly
+   * promoting the first into the second is how a preview promises something
+   * the run then breaks by stopping for a password. A caller that knows says
+   * so explicitly, including when the answer is "none".
+   */
+  elevation?: RemovalElevation;
 }
 
 /**
@@ -186,6 +209,10 @@ export function renderRemovalPreview(items: RemovalItemView[]): VNode {
         "data-item-id": item.id,
         "data-kind": item.kind,
       };
+      // Absent stays absent -- see the field's note. All three values reach the
+      // attribute when given, so a host keeps full control of the styling even
+      // for "none"; only the visible marker below is selective.
+      if (item.elevation !== undefined) attrs["data-elevation"] = item.elevation;
 
       const children: VNode[] = [
         h("span", { class: "vk-removal-marker", "data-kind": item.kind }, [
@@ -212,9 +239,42 @@ export function renderRemovalPreview(items: RemovalItemView[]): VNode {
         children.push(h("span", { class: "vk-removal-reason" }, [text(item.reason)]));
       }
 
+      // The VISIBLE marker is drawn only where there is something to warn
+      // about. "none" beside five of seven rows is noise that trains the eye
+      // to skip the column the other two need it to stop at -- and `none` is
+      // still on the data attribute above for a host that wants it. This is a
+      // presentation choice about emphasis, not a judgement about the value:
+      // the renderer is told the elevation and never derives it.
+      if (item.elevation !== undefined && item.elevation !== "none") {
+        children.push(
+          h(
+            "span",
+            { class: "vk-removal-elevation", "data-elevation": item.elevation, title: elevationMeaning(item.elevation) },
+            [text(`[${item.elevation}]`)],
+          ),
+        );
+      }
+
       return h("li", attrs, children);
     }),
   );
+}
+
+/**
+ * What an elevation will actually do to the operator's machine, as a tooltip.
+ *
+ * The bare word is the warning; this is the specifics. "sudo" and "user-trust"
+ * both mean "you will be prompted", but they prompt for different things and
+ * change different state, and an operator deciding whether to approve the list
+ * unattended needs to know which.
+ */
+function elevationMeaning(elevation: Exclude<RemovalElevation, "none">): string {
+  switch (elevation) {
+    case "sudo":
+      return "needs root -- this edits a system file outside memQL's own footprint";
+    case "user-trust":
+      return "needs your trust store -- this removes a certificate authority your browsers trust";
+  }
 }
 
 /** The text marker for a step state. Kept next to the type so a new state cannot be added without one. */
