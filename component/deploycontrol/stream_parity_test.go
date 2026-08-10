@@ -77,24 +77,40 @@ type parityCase struct {
 	action bool
 
 	// invalidStream / invalidUnary build the SAME RPC carrying an argument the
-	// request parser rejects. They exist for the four RPCs memql#3457
-	// re-ordered -- DeployStaging, Promote, Rollback, RolloutAction -- and
-	// drive TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited.
+	// request parser rejects, and drive
+	// TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited.
 	//
-	// Nil elsewhere, deliberately and NOT as an oversight. The remaining five
-	// RPCs still validate before their gate; #3457 scoped itself to the four
-	// whose ordering it changed, so a nil here records "out of this issue's
-	// scope", not "already correct". TestBelowFloorInvalidArgumentCoverage
-	// pins the count so the set cannot silently shrink.
+	// EVERY RPC on this surface carries the pair. memql#3457 re-ordered four
+	// (DeployStaging, Promote, Rollback, RolloutAction) and left five with a
+	// nil here recording "out of that issue's scope"; memql#3505 finished the
+	// surface, so a nil now means an RPC with no argument a caller can get
+	// wrong -- and there are none. TestBelowFloorInvalidArgumentCoverage pins
+	// the set so it cannot silently shrink.
 	invalidStream func() *memqlv1.DeployControlMsg
 	invalidUnary  func(ctx context.Context, svc *Service) error
 }
 
+// deniedRoles is every role this case's gate refuses. The invalid-argument
+// test walks it rather than probing with `reader` alone, because "below the
+// floor" is a PER-ACTION fact: developer may cut and deploy but not roll back
+// an overlay commit, and admin may do everything except RollbackDeployment.
+// Those are the rows where a reader-only probe would pass while the
+// interesting caller still slipped through the parser first.
+func deniedRoles(c parityCase) []auth.Role {
+	var out []auth.Role
+	for _, role := range allRoles {
+		if !roleAllowed(c, role) {
+			out = append(out, role)
+		}
+	}
+	return out
+}
+
 func parityCases() []parityCase {
-	// Arguments are deliberately VALID everywhere. Several RPCs validate
-	// argument shape BEFORE the auth gate, so a malformed request would be
-	// rejected with InvalidArgument and the test would pass while testing
-	// nothing about the gate.
+	// Arguments on the `stream` / `unary` pair are deliberately VALID
+	// everywhere, so the admitted legs reach real work rather than stopping at
+	// an argument error. The invalid shapes live on the invalidStream /
+	// invalidUnary pair, which is a separate test with a separate point.
 	ownerAdmin := []auth.Role{auth.RoleOwner, auth.RoleAdmin}
 	deployTier := []auth.Role{auth.RoleOwner, auth.RoleAdmin, auth.RoleDeveloper}
 	ownerOnly := []auth.Role{auth.RoleOwner}
@@ -113,6 +129,19 @@ func parityCases() []parityCase {
 			},
 			allowed:   ownerAdmin,
 			auditVerb: "get_status",
+			// An env outside {staging, prod}. GetDeploymentStatus is a READ,
+			// and it is the read that makes the point: probing it below the
+			// floor used to be the cheapest way to touch this surface without
+			// leaving a trace.
+			invalidStream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
+					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"},
+				}}
+			},
+			invalidUnary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"})
+				return err
+			},
 		},
 		{
 			rpc: "SuggestNextVersion",
@@ -127,6 +156,15 @@ func parityCases() []parityCase {
 			},
 			allowed:   deployTier,
 			auditVerb: "suggest_version",
+			invalidStream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
+					SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "nowhere"},
+				}}
+			},
+			invalidUnary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{Env: "nowhere"})
+				return err
+			},
 		},
 		{
 			rpc: "DeployStaging",
@@ -244,6 +282,19 @@ func parityCases() []parityCase {
 			allowed:   deployTier,
 			auditVerb: "cut_version",
 			action:    true,
+			// A bump that is neither major, minor nor patch. CutVersion has
+			// three validators (env, explicit version, bump); this one is
+			// reached with a valid env beside it so the bump is unambiguously
+			// what fails.
+			invalidStream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_CutVersion{
+					CutVersion: &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"},
+				}}
+			},
+			invalidUnary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"})
+				return err
+			},
 		},
 		{
 			rpc: "Deploy",
@@ -259,6 +310,16 @@ func parityCases() []parityCase {
 			allowed:   deployTier,
 			auditVerb: "deploy",
 			action:    true,
+			// An empty deployment_id is the shape the request parser rejects.
+			invalidStream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Deploy{
+					Deploy: &memqlv1.DeployRequest{},
+				}}
+			},
+			invalidUnary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.Deploy(ctx, &memqlv1.DeployRequest{})
+				return err
+			},
 		},
 		{
 			rpc: "RollbackDeployment",
@@ -274,8 +335,50 @@ func parityCases() []parityCase {
 			allowed:   ownerOnly,
 			auditVerb: "rollback_deployment",
 			action:    true,
+			// An empty to_deployment_id. This is the sharpest row on the
+			// surface: admin is below THIS floor and nowhere else, so an
+			// unaudited argument rejection here hides a probe by the one
+			// caller with every other deploy power.
+			invalidStream: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_RollbackDeployment{
+					RollbackDeployment: &memqlv1.RollbackDeploymentRequest{},
+				}}
+			},
+			invalidUnary: func(ctx context.Context, svc *Service) error {
+				_, err := svc.RollbackDeployment(ctx, &memqlv1.RollbackDeploymentRequest{})
+				return err
+			},
 		},
 	}
+}
+
+// deployControlRpcNames reads the service's method set off the GENERATED
+// interface, so both coverage guards below extend themselves when an RPC is
+// added to deploy_control.proto instead of needing to be remembered.
+func deployControlRpcNames(t *testing.T) []string {
+	t.Helper()
+	iface := reflect.TypeOf((*memqlv1.DeployControlServiceServer)(nil)).Elem()
+
+	var rpcs []string
+	for i := 0; i < iface.NumMethod(); i++ {
+		name := iface.Method(i).Name
+		// The generated interface carries the forward-compat embed marker
+		// alongside the real RPCs.
+		if strings.HasPrefix(name, "mustEmbedUnimplemented") {
+			continue
+		}
+		rpcs = append(rpcs, name)
+	}
+	// Without this the guards pass vacuously if the reflection ever stops
+	// seeing methods (a generator change, a renamed embed marker): an empty
+	// rpcs list makes "nothing missing" trivially true, which is the exact
+	// failure mode a coverage guard must not have.
+	if len(rpcs) < 9 {
+		t.Fatalf("reflection found only %d DeployControlService RPCs (%v); "+
+			"the coverage guard cannot work with an empty method set", len(rpcs), rpcs)
+	}
+	sort.Strings(rpcs)
+	return rpcs
 }
 
 func roleAllowed(c parityCase, role auth.Role) bool {
@@ -484,10 +587,11 @@ func TestStreamedDenialEmitsBlockedAuditLikeUnary(t *testing.T) {
 	}
 }
 
-// TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited closes the one
-// hole in "every denied attempt is audited" (memql#3457).
+// TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited closes the hole
+// in "every denied attempt is audited" (memql#3457, widened to the whole
+// surface by memql#3505).
 //
-// Four RPCs used to validate their arguments BEFORE calling the gate, so a
+// These RPCs used to validate their arguments BEFORE calling the gate, so a
 // caller below the role floor who sent a bad argument got INVALID_ARGUMENT and
 // left NO trail. The attempt achieved nothing -- the argument was invalid, so
 // no deployment moved -- which is exactly why it was easy to leave alone. But
@@ -499,6 +603,12 @@ func TestStreamedDenialEmitsBlockedAuditLikeUnary(t *testing.T) {
 //
 // Gate-first is the safer order on its own terms too -- an unauthorized caller
 // now learns nothing from the shape of the argument parser.
+//
+// Every DENIED role is walked, not `reader` alone. Below-the-floor is a
+// per-action fact: developer may cut and deploy, and admin may do everything
+// except RollbackDeployment. A reader-only probe would go green while the
+// caller who actually has reason to probe -- an admin, on the one action
+// denied them -- still reached the parser first.
 //
 // Both surfaces are asserted, because #3311's parity property is what makes the
 // bridge safe: a fix that reached only the unary path would leave the browser
@@ -521,56 +631,59 @@ func TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *testing.T) 
 				t.Errorf("an admitted caller's argument error wrote %d audit events, want 0", len(okAudit.events))
 			}
 
-			// reader is denied by every case in the matrix.
-			ctx := ctxWithRole(auth.RoleReader)
+			for _, role := range deniedRoles(c) {
+				t.Run(string(role), func(t *testing.T) {
+					ctx := ctxWithRole(role)
 
-			unarySvc, unaryAudit, unaryEng := newParityService(t)
-			unaryErr := c.invalidUnary(ctx, unarySvc)
-			if code := status.Code(unaryErr); code != codes.PermissionDenied {
-				t.Fatalf("unary %s for a below-floor caller with a bad argument = %v, want PermissionDenied "+
-					"(the gate must run before the argument parser)", c.rpc, code)
-			}
+					unarySvc, unaryAudit, unaryEng := newParityService(t)
+					unaryErr := c.invalidUnary(ctx, unarySvc)
+					if code := status.Code(unaryErr); code != codes.PermissionDenied {
+						t.Fatalf("unary %s for a below-floor %s with a bad argument = %v, want PermissionDenied "+
+							"(the gate must run before the argument parser)", c.rpc, role, code)
+					}
 
-			streamSvc, streamAudit, streamEng := newParityService(t)
-			res := Dispatch(ctx, streamSvc, c.invalidStream())
-			if code := codes.Code(res.GetErrorCode()); code != codes.PermissionDenied {
-				t.Fatalf("streamed %s for a below-floor caller with a bad argument = %v, want PermissionDenied",
-					c.rpc, code)
-			}
-			if res.GetOk() || res.GetResult() != nil {
-				t.Errorf("streamed refusal carried a result: ok=%v result=%T", res.GetOk(), res.GetResult())
-			}
+					streamSvc, streamAudit, streamEng := newParityService(t)
+					res := Dispatch(ctx, streamSvc, c.invalidStream())
+					if code := codes.Code(res.GetErrorCode()); code != codes.PermissionDenied {
+						t.Fatalf("streamed %s for a below-floor %s with a bad argument = %v, want PermissionDenied",
+							c.rpc, role, code)
+					}
+					if res.GetOk() || res.GetResult() != nil {
+						t.Errorf("streamed refusal carried a result: ok=%v result=%T", res.GetOk(), res.GetResult())
+					}
 
-			// The point of the whole exercise: the attempt is RECORDED, once,
-			// on both surfaces, attributed to the caller who made it.
-			if len(unaryAudit.events) != 1 || len(streamAudit.events) != 1 {
-				t.Fatalf("want exactly one blocked audit event per surface, got unary=%d streamed=%d",
-					len(unaryAudit.events), len(streamAudit.events))
-			}
-			u, s := unaryAudit.events[0], streamAudit.events[0]
-			if u.Outcome != identity.AuditOutcomeBlocked || s.Outcome != identity.AuditOutcomeBlocked {
-				t.Errorf("outcomes = unary %q / streamed %q, want blocked on both", u.Outcome, s.Outcome)
-			}
-			if want := "deployment_console_" + c.auditVerb; u.Action != want || s.Action != want {
-				t.Errorf("audit action = unary %q / streamed %q, want %q", u.Action, s.Action, want)
-			}
-			if u.ActorRole != string(auth.RoleReader) || s.ActorRole != string(auth.RoleReader) {
-				t.Errorf("audit actorRole = unary %q / streamed %q, want reader", u.ActorRole, s.ActorRole)
-			}
+					// The point of the whole exercise: the attempt is RECORDED,
+					// once, on both surfaces, attributed to the caller who made it.
+					if len(unaryAudit.events) != 1 || len(streamAudit.events) != 1 {
+						t.Fatalf("want exactly one blocked audit event per surface, got unary=%d streamed=%d",
+							len(unaryAudit.events), len(streamAudit.events))
+					}
+					u, s := unaryAudit.events[0], streamAudit.events[0]
+					if u.Outcome != identity.AuditOutcomeBlocked || s.Outcome != identity.AuditOutcomeBlocked {
+						t.Errorf("outcomes = unary %q / streamed %q, want blocked on both", u.Outcome, s.Outcome)
+					}
+					if want := "deployment_console_" + c.auditVerb; u.Action != want || s.Action != want {
+						t.Errorf("audit action = unary %q / streamed %q, want %q", u.Action, s.Action, want)
+					}
+					if u.ActorRole != string(role) || s.ActorRole != string(role) {
+						t.Errorf("audit actorRole = unary %q / streamed %q, want %s", u.ActorRole, s.ActorRole, role)
+					}
 
-			// And the caller can quote it (memql#3334): the refusal is a
-			// refusal in full, id included, not a degraded one.
-			if got := AuditEventIdFromError(unaryErr); got != u.CorrelationId {
-				t.Errorf("unary refusal audit id = %q, want %q", got, u.CorrelationId)
-			}
-			if got := res.GetAuditEventId(); got != s.CorrelationId {
-				t.Errorf("streamed refusal audit id = %q, want %q", got, s.CorrelationId)
-			}
+					// And the caller can quote it (memql#3334): the refusal is a
+					// refusal in full, id included, not a degraded one.
+					if got := AuditEventIdFromError(unaryErr); got != u.CorrelationId {
+						t.Errorf("unary refusal audit id = %q, want %q", got, u.CorrelationId)
+					}
+					if got := res.GetAuditEventId(); got != s.CorrelationId {
+						t.Errorf("streamed refusal audit id = %q, want %q", got, s.CorrelationId)
+					}
 
-			// Fails closed, as the valid-argument denial does.
-			if len(unaryEng.queries) != 0 || len(streamEng.queries) != 0 {
-				t.Errorf("denied call touched the engine: unary=%v streamed=%v",
-					unaryEng.queries, streamEng.queries)
+					// Fails closed, as the valid-argument denial does.
+					if len(unaryEng.queries) != 0 || len(streamEng.queries) != 0 {
+						t.Errorf("denied call touched the engine: unary=%v streamed=%v",
+							unaryEng.queries, streamEng.queries)
+					}
+				})
 			}
 		})
 	}
@@ -579,12 +692,19 @@ func TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *testing.T) 
 // TestBelowFloorInvalidArgumentCoverage pins the SET the test above walks.
 //
 // Without it the loop degrades silently: drop an invalidStream and the suite
-// stays green while testing one fewer RPC. The four are the ones memql#3457
-// re-ordered; adding a fifth means fixing that RPC's ordering too, and this
-// count is what forces the two to move together.
+// stays green while testing one fewer RPC. memql#3457 re-ordered four RPCs and
+// this guard held the set at those four so a fifth could not be added without
+// fixing its ordering too; memql#3505 did exactly that for the remaining five,
+// so the set is now the WHOLE service.
+//
+// It is derived from the generated interface rather than hand-listed, which is
+// what makes it self-extending: a new RPC on deploy_control.proto arrives here
+// with no invalid-argument case and fails, instead of quietly re-opening the
+// hole this pair of issues closed.
 func TestBelowFloorInvalidArgumentCoverage(t *testing.T) {
-	want := map[string]bool{
-		"DeployStaging": true, "Promote": true, "Rollback": true, "RolloutAction": true,
+	want := map[string]bool{}
+	for _, rpc := range deployControlRpcNames(t) {
+		want[rpc] = true
 	}
 	got := map[string]bool{}
 	for _, c := range parityCases() {
@@ -600,7 +720,7 @@ func TestBelowFloorInvalidArgumentCoverage(t *testing.T) {
 		got[c.rpc] = true
 	}
 	if !reflect.DeepEqual(want, got) {
-		t.Fatalf("gate-before-validation coverage = %v, want %v", got, want)
+		t.Fatalf("gate-before-validation coverage = %v, want %v (every RPC on this surface, memql#3505)", got, want)
 	}
 }
 
@@ -750,26 +870,7 @@ func TestDispatchRoutesEachRequestToItsOwnRpc(t *testing.T) {
 // here fails immediately -- which is the only way a newly added, ungated RPC
 // gets caught before it ships on both surfaces.
 func TestEveryRpcHasAParityCase(t *testing.T) {
-	iface := reflect.TypeOf((*memqlv1.DeployControlServiceServer)(nil)).Elem()
-
-	var rpcs []string
-	for i := 0; i < iface.NumMethod(); i++ {
-		name := iface.Method(i).Name
-		// The generated interface carries the forward-compat embed marker
-		// alongside the real RPCs.
-		if strings.HasPrefix(name, "mustEmbedUnimplemented") {
-			continue
-		}
-		rpcs = append(rpcs, name)
-	}
-	// Without this the whole guard passes vacuously if the reflection ever
-	// stops seeing methods (a generator change, a renamed embed marker): an
-	// empty rpcs list makes "nothing missing" trivially true, which is the
-	// exact failure mode a coverage guard must not have.
-	if len(rpcs) < 9 {
-		t.Fatalf("reflection found only %d DeployControlService RPCs (%v); "+
-			"the coverage guard cannot work with an empty method set", len(rpcs), rpcs)
-	}
+	rpcs := deployControlRpcNames(t)
 
 	covered := map[string]bool{}
 	for _, c := range parityCases() {

@@ -34,11 +34,13 @@ import (
 // denial emits a blocked audit event via authorizeDeploy).
 func (s *Service) SuggestNextVersion(ctx context.Context, req *memqlv1.SuggestNextVersionRequest) (*memqlv1.SuggestNextVersionResult, error) {
 	consoleEnv := req.GetEnv()
-	if !validEnvs[consoleEnv] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", consoleEnv)
-	}
+	// Gate before validation (memql#3505; see the block comment in
+	// service.go).
 	if _, err := s.authorizeDeploy(ctx, "suggest_version", map[string]any{"env": consoleEnv}); err != nil {
 		return nil, err
+	}
+	if !validEnvs[consoleEnv] {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", consoleEnv)
 	}
 
 	current, _, source := s.currentVersionForEnv(ctx, consoleEnv)
@@ -75,16 +77,26 @@ func (s *Service) SuggestNextVersion(ctx context.Context, req *memqlv1.SuggestNe
 // duplicate versions are rejected.
 func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest) (*memqlv1.ActionResult, error) {
 	consoleEnv := req.GetEnv()
-	if !validEnvs[consoleEnv] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", consoleEnv)
-	}
 	bump := strings.TrimSpace(req.GetBump())
 	explicit := strings.TrimSpace(req.GetVersion())
 
-	// Argument-shape validation BEFORE the auth gate (mirrors the other
-	// write RPCs, which reject empty/invalid args before authorize). An
-	// explicit version must be clean semver; otherwise the bump part must
-	// be valid. Both are caller errors -> InvalidArgument, not audited.
+	detail := map[string]any{"env": consoleEnv, "bump": bump, "requestedVersion": explicit}
+	// Cutting a version is a forward-deploy action: developer-or-above
+	// (#1876). The gate runs BEFORE argument validation (memql#3505; see the
+	// block comment in service.go). This comment used to say the opposite --
+	// that validating first "mirrors the other write RPCs, which reject
+	// empty/invalid args before authorize" -- which memql#3457 made wrong for
+	// four of its neighbours and #3505 made wrong for the rest. The detail map
+	// is built first precisely so an invalid `bump` or `version` is recorded
+	// AS SENT on a refusal.
+	act, err := s.authorizeDeploy(ctx, "cut_version", detail)
+	if err != nil {
+		return nil, err
+	}
+
+	// Argument shape, now that the caller has cleared the floor. An explicit
+	// version must be clean semver; otherwise the bump part must be valid.
+	// Both are caller errors -> InvalidArgument, not audited.
 	if explicit != "" {
 		if _, err := parseSemver(explicit); err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "deploy console: %v", err)
@@ -92,13 +104,8 @@ func (s *Service) CutVersion(ctx context.Context, req *memqlv1.CutVersionRequest
 	} else if _, err := (semver{}).bump(bump); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "deploy console: %v", err)
 	}
-
-	detail := map[string]any{"env": consoleEnv, "bump": bump, "requestedVersion": explicit}
-	// Cutting a version is a forward-deploy action: developer-or-above
-	// (#1876).
-	act, err := s.authorizeDeploy(ctx, "cut_version", detail)
-	if err != nil {
-		return nil, err
+	if !validEnvs[consoleEnv] {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", consoleEnv)
 	}
 
 	// Resolve the target version + the set of versions already taken for

@@ -25,7 +25,7 @@
 // Refs: #3465 #3464 #3463
 
 import { ClusterCredentialStore, type SecretStore } from "../auth/store.js";
-import { readClustersFile, removeCluster } from "./file.js";
+import { readClustersFile, removeCluster, upsertCluster } from "./file.js";
 import type { ClusterConfig } from "./model.js";
 
 export interface RemoveClusterDeps {
@@ -102,6 +102,47 @@ export async function removeClusterCompletely(
   await new ClusterCredentialStore(deps.secrets).clear(name);
 
   return removeCluster(clustersPath, name);
+}
+
+/**
+ * Saves an edited cluster COMPLETELY, moving its credentials when the name
+ * changed (memql#3515).
+ *
+ * The same three-things problem as removal, from the other side. A cluster's
+ * credentials are keyed by NAME and only half of them live in the file: #3404
+ * puts the access token on the entry (so the file write carries it along
+ * automatically) and the refresh token plus the expiry in SecretStorage (so
+ * nothing carries them at all). Renaming through `upsertCluster` alone left the
+ * thirty-day credential stranded under the old name -- invisible, because
+ * SecretStorage cannot be enumerated, and then deleted by the next reconcile as
+ * belonging to a cluster that does not exist. The operator's symptom was a
+ * cluster they had signed into asking them to sign in again after a rename.
+ *
+ * `renameClusterCredentials` existed for this, correct and tested, with no
+ * callers -- which is the same defect as the unreachable device-code fallback
+ * #3515 was filed about, in a second place.
+ *
+ * ORDER: the file write runs FIRST. It is the step that can fail (a
+ * clusters.yaml the Cockpit is mid-write, a read-only home directory), and a
+ * secret moved to a name no entry carries is exactly the orphan this exists to
+ * prevent. The secret move cannot fail loudly -- rename() swallows keyring
+ * failures like every other secret operation here -- so running it second means
+ * a failure leaves the credential under the OLD name, which is where the entry
+ * still is.
+ *
+ * A no-op rename (same name) skips the move rather than renaming a key onto
+ * itself.
+ */
+export async function saveClusterEdit(
+  clustersPath: string,
+  previousName: string,
+  edited: ClusterConfig,
+  deps: Pick<RemoveClusterDeps, "secrets">,
+): Promise<void> {
+  await upsertCluster(clustersPath, edited, previousName);
+  if (edited.name !== previousName) {
+    await new ClusterCredentialStore(deps.secrets).rename(previousName, edited.name);
+  }
 }
 
 /**

@@ -215,9 +215,11 @@ func wrapActionErr(verb string, err error) error {
 // one. An admin resolves it against the audit log; holding it grants nothing
 // on its own.
 //
-// "" is a normal answer. An INVALID_ARGUMENT rejection runs before the gate
-// and writes no event, so there is nothing to report; a transport failure
-// never reached the service at all. Empty means "no event", not "id lost".
+// "" is a normal answer. An INVALID_ARGUMENT is a caller error the gate does
+// not record, so there is nothing to report -- and since memql#3505 it also
+// tells you the caller cleared the role floor, because the gate now runs first
+// on every RPC. A transport failure never reached the service at all. Empty
+// means "no event", not "id lost".
 //
 // The wrapping this file does is %w, so the status survives the unwrap chain
 // and this works on the errors the client's own methods return.

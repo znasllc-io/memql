@@ -24,6 +24,7 @@ package memql
 import (
 	"context"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -169,9 +170,9 @@ func runHopOnContext(
 }
 
 // rollbackMsg is the owner-only action, and therefore the sharpest probe of the
-// matrix. Arguments are VALID: several RPCs validate shape BEFORE the gate, and
-// a malformed request would be rejected with InvalidArgument, passing the test
-// while testing nothing about authorization.
+// matrix. Arguments are VALID so an admitted caller reaches real work; the
+// malformed shapes live in TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited,
+// which is about a different property.
 func rollbackMsg() *memqlv1.DeployControlMsg {
 	return &memqlv1.DeployControlMsg{
 		RequestId: "req-rollback",
@@ -324,12 +325,12 @@ func TestForwardedRefusalCarriesItsAuditEventId(t *testing.T) {
 }
 
 // TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited is the
-// cross-node half of memql#3457.
+// cross-node half of memql#3457, widened to the whole surface by memql#3505.
 //
-// The four RPCs below used to validate their arguments before calling the gate,
-// so a below-floor caller who sent a bad argument got INVALID_ARGUMENT and left
-// no trail. This is the path where that matters most: the portal is served by
-// the bff, so EVERY refusal an operator meets in the console is decided on the
+// The RPCs below used to validate their arguments before calling the gate, so a
+// below-floor caller who sent a bad argument got INVALID_ARGUMENT and left no
+// trail. This is the path where that matters most: the portal is served by the
+// bff, so EVERY refusal an operator meets in the console is decided on the
 // identity node and travels this hop. An unaudited probe over the mesh is one
 // nobody can see from either end -- the caller reads an argument error, and the
 // admin reading the trail reads nothing.
@@ -339,16 +340,30 @@ func TestForwardedRefusalCarriesItsAuditEventId(t *testing.T) {
 // a REAL *deploycontrol.Service, so what is asserted is that the ORIGINATING
 // caller's role reached a gate that ran before the argument parser.
 func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *testing.T) {
-	// The four RPCs memql#3457 re-ordered, each carrying the argument its own
-	// validator rejects. All four sit on the owner/admin tier.
+	// Every RPC on the service, each carrying the argument its own validator
+	// rejects, and each naming the roles ITS gate denies. The denied set is
+	// per-action: developer may cut and deploy forward but not touch the
+	// owner/admin tier, and admin may do everything except roll a deployment
+	// back. A single shared role list would test the easy rows and skip the
+	// interesting ones.
+	ownerAdminDenies := []auth.Role{auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader}
+	deployTierDenies := []auth.Role{auth.RoleWriter, auth.RoleReader}
+	ownerOnlyDenies := []auth.Role{auth.RoleAdmin, auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader}
+
 	cases := []struct {
-		name string
-		verb string
-		msg  func() *memqlv1.DeployControlMsg
+		// rpc is the DeployControlServiceServer method name, checked against
+		// the generated interface below so this list extends itself.
+		rpc    string
+		name   string
+		verb   string
+		denied []auth.Role
+		msg    func() *memqlv1.DeployControlMsg
 	}{
 		{
-			name: "DeployStaging (empty version)",
-			verb: "deployment_console_deploy_staging",
+			rpc:    "DeployStaging",
+			name:   "DeployStaging (empty version)",
+			verb:   "deployment_console_deploy_staging",
+			denied: ownerAdminDenies,
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-deploy-staging",
 					Request: &memqlv1.DeployControlMsg_DeployStaging{
@@ -357,8 +372,10 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			},
 		},
 		{
-			name: "Promote (empty version)",
-			verb: "deployment_console_promote",
+			rpc:    "Promote",
+			name:   "Promote (empty version)",
+			verb:   "deployment_console_promote",
+			denied: ownerAdminDenies,
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-promote",
 					Request: &memqlv1.DeployControlMsg_Promote{
@@ -367,8 +384,10 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			},
 		},
 		{
-			name: "Rollback (unknown env)",
-			verb: "deployment_console_rollback",
+			rpc:    "Rollback",
+			name:   "Rollback (unknown env)",
+			verb:   "deployment_console_rollback",
+			denied: ownerAdminDenies,
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollback",
 					Request: &memqlv1.DeployControlMsg_Rollback{
@@ -377,8 +396,10 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			},
 		},
 		{
-			name: "RolloutAction (unknown action)",
-			verb: "deployment_console_rollout_action",
+			rpc:    "RolloutAction",
+			name:   "RolloutAction (unknown action)",
+			verb:   "deployment_console_rollout_action",
+			denied: ownerAdminDenies,
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollout",
 					Request: &memqlv1.DeployControlMsg_RolloutAction{
@@ -386,14 +407,109 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 					}}
 			},
 		},
+		// The five memql#3505 added.
+		{
+			rpc:    "GetDeploymentStatus",
+			name:   "GetDeploymentStatus (unknown env)",
+			verb:   "deployment_console_get_status",
+			denied: ownerAdminDenies,
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-get-status",
+					Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
+						GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"},
+					}}
+			},
+		},
+		{
+			rpc:    "SuggestNextVersion",
+			name:   "SuggestNextVersion (unknown env)",
+			verb:   "deployment_console_suggest_version",
+			denied: deployTierDenies,
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-suggest",
+					Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
+						SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "nowhere"},
+					}}
+			},
+		},
+		{
+			rpc:    "CutVersion",
+			name:   "CutVersion (unknown bump)",
+			verb:   "deployment_console_cut_version",
+			denied: deployTierDenies,
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-cut",
+					Request: &memqlv1.DeployControlMsg_CutVersion{
+						CutVersion: &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"},
+					}}
+			},
+		},
+		{
+			rpc:    "Deploy",
+			name:   "Deploy (empty deployment_id)",
+			verb:   "deployment_console_deploy",
+			denied: deployTierDenies,
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-deploy",
+					Request: &memqlv1.DeployControlMsg_Deploy{
+						Deploy: &memqlv1.DeployRequest{},
+					}}
+			},
+		},
+		{
+			// The sharpest row on the surface: admin is below THIS floor and
+			// no other, so this is the one probe available over the mesh to a
+			// caller holding every other deploy power.
+			rpc:    "RollbackDeployment",
+			name:   "RollbackDeployment (empty to_deployment_id)",
+			verb:   "deployment_console_rollback_deployment",
+			denied: ownerOnlyDenies,
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollback-deployment",
+					Request: &memqlv1.DeployControlMsg_RollbackDeployment{
+						RollbackDeployment: &memqlv1.RollbackDeploymentRequest{},
+					}}
+			},
+		},
 	}
 
-	// developer is the load-bearing role here: it may cut and deploy forward,
-	// so "below the floor" is a per-action fact rather than a global one. writer
-	// and reader walk the rest of the spectrum.
+	// The set is derived from the generated interface, not hand-listed: an RPC
+	// added to deploy_control.proto arrives here with no case and fails, rather
+	// than silently travelling the hop with no cross-node coverage of its gate
+	// order. This mirrors deploycontrol's TestBelowFloorInvalidArgumentCoverage
+	// -- the local suite and the mesh suite have to widen together, because a
+	// fix that reached only the local path leaves the browser path (the one an
+	// operator actually uses) unaudited.
+	covered := map[string]bool{}
+	for _, tc := range cases {
+		if tc.rpc == "" {
+			t.Fatalf("case %q names no RPC", tc.name)
+		}
+		if covered[tc.rpc] {
+			t.Errorf("duplicate forwarded invalid-argument case for %s", tc.rpc)
+		}
+		covered[tc.rpc] = true
+	}
+	iface := reflect.TypeOf((*memqlv1.DeployControlServiceServer)(nil)).Elem()
+	var rpcs []string
+	for i := 0; i < iface.NumMethod(); i++ {
+		if name := iface.Method(i).Name; !strings.HasPrefix(name, "mustEmbedUnimplemented") {
+			rpcs = append(rpcs, name)
+		}
+	}
+	if len(rpcs) < 9 {
+		t.Fatalf("reflection found only %d DeployControlService RPCs (%v); the guard cannot work "+
+			"with an empty method set", len(rpcs), rpcs)
+	}
+	for _, rpc := range rpcs {
+		if !covered[rpc] {
+			t.Errorf("no forwarded invalid-argument case for %s: its gate order is unverified over the mesh hop", rpc)
+		}
+	}
+
 	for _, tc := range cases {
 		tc := tc
-		for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader} {
+		for _, role := range tc.denied {
 			role := role
 			t.Run(tc.name+"/"+string(role), func(t *testing.T) {
 				h, audit := newForwardFixture(t)

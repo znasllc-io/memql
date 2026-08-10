@@ -73,6 +73,49 @@ export type AuthFlowRunner = (
   signal: AbortSignal | undefined,
 ) => Promise<AuthFlowTokens>;
 
+/**
+ * Which grant a sign-in should run.
+ *
+ * `auto` is what `memQL: Sign In` uses. `deviceCode` is the deliberate command
+ * (memql#3411) for a user who already knows their host cannot do loopback and
+ * should not spend the callback deadline finding out.
+ */
+export type SignInFlow = "auto" | "deviceCode";
+
+/**
+ * The two grants, injected. The editor binds them; this file only chooses.
+ */
+export interface SignInFlowRunners {
+  /**
+   * Loopback, FALLING BACK to the device grant when the host proves it cannot
+   * do loopback. Named for what it does rather than for loopback alone, because
+   * the whole of memql#3515 is that these two are not the same runner and were
+   * treated as if they were.
+   */
+  loopbackWithDeviceFallback: AuthFlowRunner;
+  /** The device grant, deliberately, with no loopback attempt. */
+  deviceCode: AuthFlowRunner;
+}
+
+/**
+ * selectSignInRunner picks the grant for a flow.
+ *
+ * A three-line function with a test, because the three lines are exactly what
+ * was wrong. Until memql#3515 the default sign-in ran `runAuthorizationFlow` --
+ * loopback ALONE -- while an unreachable, identically-named function two files
+ * away ran the fallback, and the verification runbook documented the fallback as
+ * not actually reached. Nothing failed: a host that could do loopback signed in
+ * fine, and a host that could not waited out the callback deadline and was told
+ * it had failed with the remedy sitting unused in the same repository.
+ *
+ * Pulling the choice out of extension.ts is what makes it assertable at all:
+ * everything around it in that file needs a live editor, so the one decision
+ * worth pinning was the one nothing could reach.
+ */
+export function selectSignInRunner(flow: SignInFlow, runners: SignInFlowRunners): AuthFlowRunner {
+  return flow === "deviceCode" ? runners.deviceCode : runners.loopbackWithDeviceFallback;
+}
+
 export interface PerformSignInDeps {
   runFlow: AuthFlowRunner;
   persistClientId: ClientIdWriter;

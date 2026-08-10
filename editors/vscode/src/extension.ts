@@ -28,20 +28,34 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
-import { signInWithDeviceCode } from './auth/deviceCodeUi.js';
-import { runAuthorizationFlow } from './auth/flow.js';
+import {
+  runDeviceCodeFlow,
+  signInWithDeviceCodeFallback,
+  type DeviceAuthorization,
+} from './auth/deviceCode.js';
+import {
+  announceDeviceCodeFallback,
+  deviceCodeProgressLine,
+  showDeviceCodeActions,
+} from './auth/deviceCodeUi.js';
 import {
   canSignIn,
   describeSignInFailure,
   performSignIn,
+  selectSignInRunner,
   signInCanRecover,
+  type SignInFlow,
   type SignInTokenStore,
 } from './auth/signin.js';
-import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
+import {
+  persistSignIn,
+  reconcileClusterCredentials,
+  signOut as signOutCredentials,
+} from './auth/store.js';
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
-import { removeClusterCompletely } from './clusters/registry.js';
+import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { composeEndpointFromDomain } from './connection/endpoint.js';
@@ -318,6 +332,36 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
   };
 
+  // sweepOrphanedCredentials deletes SecretStorage entries whose cluster is no
+  // longer in clusters.yaml (memql#3515).
+  //
+  // It is the other half of "SecretStorage cannot be enumerated". #3404 keeps an
+  // index precisely so a sweep is possible, and then nothing ever swept: a
+  // cluster removed by hand from clusters.yaml, or by the Cockpit, left its
+  // refresh token behind for the life of the profile. The extension's own remove
+  // path clears credentials directly (removeClusterCompletely), so this is about
+  // the edits that did NOT come through it.
+  //
+  // Safe to call on any read: it only ever deletes secrets for names the file no
+  // longer carries. Failures are swallowed -- a keyring that is locked or absent
+  // is a normal state, and a housekeeping sweep is not worth a toast.
+  const sweepOrphanedCredentials = async (): Promise<void> => {
+    try {
+      const result = await readClustersFileSafe(clustersPath);
+      // A malformed file is NOT an empty one. Sweeping against a parse failure
+      // would read "no clusters" and delete every credential on the machine,
+      // which is the one way this function could do real damage.
+      if (!result.ok) return;
+      await reconcileClusterCredentials(
+        { secrets: context.secrets },
+        result.file.clusters.map((c) => c.name)
+      );
+    } catch {
+      // Deliberately silent; see above.
+    }
+  };
+  void sweepOrphanedCredentials();
+
   // What the "+" branches on. Held for the life of the surface rather than
   // built per click, because the memo (and the single-flight it wraps) is the
   // whole reason opening the menu twice does not dial twice.
@@ -544,7 +588,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (edited === undefined) {
         return;
       }
-      await writeCluster(clustersTree, () => upsertCluster(clustersPath, edited, originalName));
+      // saveClusterEdit rather than upsertCluster alone: the credentials are
+      // keyed by cluster NAME, and half of them do not live in the file
+      // (memql#3404 puts the refresh token and the expiry in SecretStorage), so
+      // a rename that only rewrites the entry strands the thirty-day credential
+      // under the old name. memql#3515's second half.
+      await writeCluster(clustersTree, () =>
+        saveClusterEdit(clustersPath, originalName, edited, { secrets: context.secrets })
+      );
     }),
     // The Cluster tab (memql#3312): topology, deployment history, and the
     // deploy actions. Reached from the Clusters tree's inline action, which
@@ -565,19 +616,26 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   );
 
   // The DELIBERATE device-code sign-in (memql#3411). The fallback fires by
-  // itself when the loopback flow proves this host cannot do it, but that
-  // costs a two-minute callback deadline first -- so a user who already knows
-  // their environment (a container, a hardened network, an SSH session with no
-  // browser) can ask for the device code straight away.
+  // itself when the loopback flow proves this host cannot do it -- since
+  // memql#3515 that is actually true of `memQL: Sign In`, where it had been
+  // documented but unreachable -- but it costs a callback deadline first, so a
+  // user who already knows their environment (a container, a hardened network,
+  // an SSH session with no browser) can ask for the device code straight away.
+  //
+  // Same shell as `memQL: Sign In`, differing only in which grant runs, so this
+  // command also refreshes the tree and reconnects the selected cluster. It used
+  // to reach a second sign-in implementation that did neither.
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.signInWithCode', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
-      if (target === undefined) {
+      if (target === undefined || target.cluster.name === '') {
         return;
       }
-      if (await signInWithDeviceCode(target.cluster, { clustersPath, secrets: context.secrets })) {
-        clustersTree.refresh();
-      }
+      await signInToCluster(
+        target.cluster,
+        { clustersPath, store: signInStore, clustersTree },
+        'deviceCode'
+      );
     })
   );
 
@@ -1324,6 +1382,23 @@ interface SignInDeps {
 // signInToCluster is the editor half of memql#3403's sign-in: progress,
 // cancellation, and the two vscode.env capabilities the flow needs injected.
 //
+// THIS IS THE ONLY SIGN-IN SHELL (memql#3515). There used to be two functions
+// with this name -- this one, and an exported one in auth/deviceCodeUi.ts that
+// ran the loopback-to-device-code fallback. The exported one had ZERO importers:
+// `memQL: Sign In` reached this one, which ran loopback alone, so a host that
+// genuinely could not do loopback (Remote-SSH onto a box whose browser is
+// elsewhere, a hardened network) waited out the callback deadline and was then
+// told it had failed, with the code to hand it a device code sitting unreachable
+// two files away.
+//
+// The fallback is adopted here rather than deleted, because the capability is
+// real and tested (auth/deviceCode.ts, signInWithDeviceCodeFallback). Merging in
+// this direction rather than the other keeps the three things a sign-in owes the
+// editor and the other shell never did: the tree refresh, the reconnect of the
+// SELECTED cluster only, and the kind-based failure levels from auth/signin.ts.
+// deviceCodeUi.ts keeps the part that is genuinely about a device code -- putting
+// it on screen and keeping it there.
+//
 // WHY THE PROGRESS IS CANCELLABLE AND WHAT CANCELLING ACTUALLY DOES.
 // A browser sign-in parks on a loopback listener for minutes at a time waiting
 // for a person to finish a page they may already have closed. A notification
@@ -1337,38 +1412,67 @@ interface SignInDeps {
 // until a human dismissed a notification, which makes the command unusable from
 // any automated caller (the host smoke lane included) and buys nothing -- the
 // message offers no choice to read back.
-async function signInToCluster(cluster: ClusterConfig, deps: SignInDeps): Promise<boolean> {
+async function signInToCluster(
+  cluster: ClusterConfig,
+  deps: SignInDeps,
+  flow: SignInFlow = 'auto'
+): Promise<boolean> {
   return window.withProgress(
     {
       location: ProgressLocation.Notification,
-      title: `memQL: signing in to ${displayLabel(cluster)}`,
+      title:
+        flow === 'deviceCode'
+          ? `memQL: signing in to ${displayLabel(cluster)} with a device code`
+          : `memQL: signing in to ${displayLabel(cluster)}`,
       cancellable: true,
     },
     async (progress, token) => {
       const aborter = new AbortController();
       const cancelSubscription = token.onCancellationRequested(() => aborter.abort());
+      // Read by the code notification at every step, so a flow that finished or
+      // was cancelled while the notification sat open does not re-summon it.
+      let settled = false;
+      // Both grants report the user code the same way, and the device code is
+      // the one thing a person has to READ off the screen and carry to another
+      // one -- so it goes on the progress line (undismissable, lives exactly as
+      // long as the polling) and into a message with the two actions a
+      // progress line cannot render.
+      const onUserCode = (authorization: DeviceAuthorization): void => {
+        progress.report({ message: deviceCodeProgressLine(authorization) });
+        showDeviceCodeActions(authorization, () => settled);
+      };
+      // asExternalUri is not decoration: under Remote-SSH, Codespaces or a dev
+      // container the browser runs on a different machine from this extension
+      // host, and the loopback URL has to be rewritten into one that machine
+      // can reach. toString(true) skips re-encoding -- the authorization URL's
+      // query is already percent-encoded and encoding it twice corrupts the
+      // PKCE challenge and the state.
+      const resolveExternalUri = async (url: string): Promise<string> =>
+        (await env.asExternalUri(Uri.parse(url))).toString(true);
       try {
-        progress.report({ message: 'opening your browser...' });
+        progress.report({
+          message: flow === 'deviceCode' ? 'requesting a device code...' : 'opening your browser...',
+        });
         await performSignIn(cluster, {
           signal: aborter.signal,
           store: deps.store,
           persistClientId: async (clusterName, clientId) => {
             await upsertCluster(deps.clustersPath, { name: clusterName, clientId });
           },
-          runFlow: (target, signal) =>
-            runAuthorizationFlow(target, {
-              signal,
-              // asExternalUri is not decoration: under Remote-SSH, Codespaces
-              // or a dev container the browser runs on a different machine
-              // from this extension host, and the loopback URL has to be
-              // rewritten into one that machine can reach. toString(true)
-              // skips re-encoding -- the authorization URL's query is already
-              // percent-encoded and encoding it twice corrupts the PKCE
-              // challenge and the state.
-              resolveExternalUri: async (url) =>
-                (await env.asExternalUri(Uri.parse(url))).toString(true),
-              openExternal: (url) => env.openExternal(Uri.parse(url)),
-            }),
+          // The choice of grant is selectSignInRunner's, in auth/signin.ts,
+          // where a test can reach it (memql#3515). This file binds the two
+          // runners to vscode; it does not decide between them.
+          runFlow: selectSignInRunner(flow, {
+            loopbackWithDeviceFallback: (target, signal) =>
+              signInWithDeviceCodeFallback(target, {
+                signal,
+                onUserCode,
+                resolveExternalUri,
+                openExternal: (url) => env.openExternal(Uri.parse(url)),
+                onFallback: (reason) => announceDeviceCodeFallback(progress, reason),
+              }),
+            deviceCode: (target, signal) => runDeviceCodeFlow(target, { signal, onUserCode }),
+          }),
         });
       } catch (err) {
         const report = describeSignInFailure(cluster.name, err);
@@ -1379,6 +1483,9 @@ async function signInToCluster(cluster: ClusterConfig, deps: SignInDeps): Promis
         }
         return false;
       } finally {
+        // Before the dispose, so a code notification still open when the flow
+        // resolves stops re-summoning itself rather than outliving the sign-in.
+        settled = true;
         cancelSubscription.dispose();
       }
 

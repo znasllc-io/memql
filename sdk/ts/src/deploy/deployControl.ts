@@ -182,9 +182,11 @@ export class DeployControlError extends Error {
    * roll back" needs a reference to quote, and until #3334 the one event they
    * most wanted to cite was the only one with no id.
    *
-   * Empty for anything that is not a gate refusal. An INVALID_ARGUMENT runs
-   * before the gate and writes no event; an UNAVAILABLE never reached the
-   * service. Empty means "nothing was audited", not "the id went missing".
+   * Empty for anything that is not a gate refusal. An INVALID_ARGUMENT is a
+   * caller error the gate does not record -- and since memql#3505 it also means
+   * the caller cleared the role floor, since the gate runs first on every RPC;
+   * an UNAVAILABLE never reached the service. Empty means "nothing was
+   * audited", not "the id went missing".
    *
    * Mirrors `IdentityAdminError.auditEventId`, which made the same call for
    * the same reason (memql#3324).

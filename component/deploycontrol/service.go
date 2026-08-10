@@ -255,9 +255,11 @@ func (s *Service) emitAudit(
 // Write RPCs
 // -----------------------------------------------------------------------------
 
-// GATE BEFORE VALIDATION (memql#3457). The four legacy console write RPCs
-// below call the role gate FIRST and validate their arguments only once the
-// caller has cleared it. The order used to be the other way round, which meant
+// GATE BEFORE VALIDATION (memql#3457, completed across the surface by
+// memql#3505). EVERY RPC on this service -- the seven writes and the two reads,
+// wherever they live in the package -- calls the role gate FIRST and validates
+// its arguments only once the caller has cleared it. The order used to be the
+// other way round, which meant
 // a below-floor caller who sent a bad argument received a plain
 // INVALID_ARGUMENT and left NO audit event -- the one hole in the "every
 // refused deploy action is audited" property memql#3334 established and pinned.
@@ -280,7 +282,12 @@ func (s *Service) emitAudit(
 //
 // TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited (unary +
 // streamed) and TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited
-// (over the memql#3380 mesh hop) hold this on all three surfaces.
+// (over the memql#3380 mesh hop) hold this on all three surfaces, for every
+// role each RPC denies -- not for `reader` alone, because below-the-floor is a
+// per-action fact (developer may cut and deploy; admin may do everything except
+// roll a deployment back). TestBelowFloorInvalidArgumentCoverage derives the
+// required set from the generated interface, so an RPC added later cannot
+// re-open the hole by being forgotten.
 
 // DeployStaging assembles + applies a release into the staging overlay
 // via promote.sh --env=staging.
@@ -416,15 +423,19 @@ func (s *Service) finishWrite(
 // blocked audit event via authorize.
 func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeploymentStatusRequest) (*memqlv1.DeploymentStatus, error) {
 	env := req.GetEnv()
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
-	}
 
-	// Owner/admin gate (#728). The read RPC is the API read-gate the
-	// console's portal view rides on; deny non-admins with a blocked
-	// audit event. Successful reads are not audited.
+	// Owner/admin gate (#728), BEFORE the env is validated (memql#3505). The
+	// read RPC is the API read-gate the console's portal view rides on; deny
+	// non-admins with a blocked audit event. Successful reads are not audited.
+	//
+	// This is a read, and it is the read that makes the widening worth doing:
+	// probing a status endpoint with a junk env was the cheapest way to touch
+	// this surface without leaving anything behind.
 	if _, err := s.authorize(ctx, "get_status", map[string]any{"env": env}); err != nil {
 		return nil, err
+	}
+	if !validEnvs[env] {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
 	}
 
 	out := &memqlv1.DeploymentStatus{Env: env}

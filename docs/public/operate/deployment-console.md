@@ -172,9 +172,9 @@ has a reference to quote rather than a timestamp to argue from.
 **An empty id means no event was written, not a lost one.** Only the role
 gate audits. An `Unavailable` never reached the service at all, and an
 `InvalidArgument` is a caller error the gate does not record -- so
-neither leaves a trail, and neither has an id to show. Note that on the
-four RPCs listed below, an `InvalidArgument` now means the caller
-*cleared* the role floor; a caller who did not never sees one.
+neither leaves a trail, and neither has an id to show. Note that an
+`InvalidArgument` from this service now means the caller *cleared* the
+role floor; a caller who did not never sees one (see below).
 
 Why the refused caller sees it rather than only an admin: the id is an
 opaque token that dereferences nothing (the audit log is admin-gated),
@@ -188,14 +188,14 @@ the same call the identity-admin console makes for its own refusals
 On the permitted path nothing changed: the id stays where it has always
 been, on `ActionResult.audit_event_id`.
 
-### The gate runs before argument validation (memql#3457)
+### The gate runs before argument validation (memql#3457, memql#3505)
 
-`DeployStaging`, `Promote`, `Rollback` and `RolloutAction` check the role
-floor **first** and validate their arguments only afterwards. They used
-to do it the other way round, and that left one hole in "every denied
-attempt is audited": a caller below the floor who sent a bad argument was
-rejected by the parser before the gate ever ran, so the attempt was never
-recorded.
+**Every RPC on this surface** -- all seven actions and both reads --
+checks the role floor **first** and validates its arguments only
+afterwards. They used to do it the other way round, and that left one
+hole in "every denied attempt is audited": a caller below the floor who
+sent a bad argument was rejected by the parser before the gate ever ran,
+so the attempt was never recorded.
 
 **This changes an error code you may observe.** Nothing about the request
 or reply *shape* changed -- same fields, same `audit_event_id`, same
@@ -217,8 +217,21 @@ argument parser from probing it. The audit event records the argument as
 sent, invalid values included, because the shape of a probe is the
 interesting part of it.
 
-The other five RPCs still validate first. They are not affected by this
-change, and the same re-order has not been applied to them.
+**Below the floor is a per-action fact.** memql#3457 shipped the re-order
+for `DeployStaging`, `Promote`, `Rollback` and `RolloutAction`; memql#3505
+finished the surface with `GetDeploymentStatus`, `SuggestNextVersion`,
+`CutVersion`, `Deploy` and `RollbackDeployment`. The last two of those are
+where it counts most:
+
+- `RollbackDeployment` is owner-only, so **admin** sits below that floor
+  and no other. Until #3505 an empty `to_deployment_id` was the one probe
+  of this surface an admin could make without leaving a trail.
+- `GetDeploymentStatus` is a read, and a read with a junk `env` was the
+  cheapest thing to send at all.
+
+A caller who *cleared* the floor sees exactly what they saw before, on
+every RPC: same code, same message, and still no audit event, because the
+gate records denials and not admissions.
 
 ### Reading status is owner/admin, deliberately (memql#3332)
 
