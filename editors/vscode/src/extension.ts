@@ -49,6 +49,7 @@ import {
 import { removeClusterCompletely } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
+import { composeEndpointFromDomain } from './connection/endpoint.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -415,8 +416,13 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // in a list of three sentences to say what this machine actually is.
       //
       // The quick-pick path below it is retired in #3478, once every branch
-      // the page carries has landed.
-      AddClusterPanel.show(context, presence);
+      // the page carries has landed. The remote branch is already off it: the
+      // page's own form registers the cluster (memql#3475), so nothing on this
+      // path reaches promptForCluster's input-box sequence any more.
+      AddClusterPanel.show(context, presence, {
+        clustersPath,
+        refreshTree: () => clustersTree.refresh(),
+      });
     }),
     commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -1467,7 +1473,10 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
 
   const endpoint = await window.showInputBox({
     prompt: 'gRPC endpoint (host:port)',
-    value: existing?.endpoint ?? (domain.trim() === '' ? '' : `cockpit.${domain.trim()}:443`),
+    // composeEndpointFromDomain, not a fourth copy of `cockpit.<domain>:443`
+    // (memql#3475). It answers "" for a blank domain, which is the same empty
+    // box the ternary here used to construct by hand.
+    value: existing?.endpoint ?? composeEndpointFromDomain(domain),
     ignoreFocusOut: true,
     validateInput: (v) => (v.trim() === '' ? 'An endpoint is required' : undefined),
   });
