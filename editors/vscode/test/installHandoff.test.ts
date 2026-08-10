@@ -145,7 +145,16 @@ test("a failed registry write still says where the cluster answers", async () =>
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.reachableAt, "cockpit.local.znas.io:443");
-    assert.match(result.message, /cockpit\.local\.znas\.io:443/);
+    // `includes`, not a regex. What is being asserted is that the sentence
+    // CONTAINS the endpoint, and a literal substring says that directly --
+    // whereas an unanchored pattern over a hostname is the shape of a host
+    // check that matches anywhere, which CodeQL flags (js/regex/missing-regexp-anchor)
+    // and is right to: the same expression in production code would admit
+    // arbitrary hosts either side of it.
+    assert.ok(
+      result.message.includes("cockpit.local.znas.io:443"),
+      `the message must say where the cluster answers: ${result.message}`,
+    );
     assert.match(result.message, /read-only/, "the underlying cause survives");
   }
 });
