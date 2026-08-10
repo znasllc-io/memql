@@ -51,7 +51,14 @@ func (a *App) wireWorkbenchForwarding(
 			return
 		}
 		if peerMgr == nil {
-			a.Logger.Warn("workbench forwarding: peerMgr nil on agent; skipping remote wiring")
+			// Loud, because since memql#3506 this is no longer a
+			// degrade-to-local: with the remote flag set and no router
+			// wired, every workbench call on this node REFUSES. That is
+			// the intended outcome (an operator who asked for isolation
+			// should not silently get the agent's own disk), but it is
+			// not a warning anyone should have to infer from tool errors.
+			a.Logger.Error("workbench forwarding: MEMQL_WORKBENCH_REMOTE is set but peerMgr is nil; " +
+				"no remote wiring is possible, so every workbench call on this node will be refused")
 			return
 		}
 		forwarder := workbench.NewForwardRouter(peerMgr, a.Logger)
@@ -81,7 +88,9 @@ func (a *App) wireWorkbenchForwarding(
 			integ.SetForwardRouter(forwarder)
 			a.Logger.Info("workbench forwarding: agent will dispatch to remote workbench peers")
 		} else {
-			a.Logger.Warn("workbench forwarding: integration not found; remote wiring incomplete")
+			a.Logger.Error("workbench forwarding: MEMQL_WORKBENCH_REMOTE is set but the workbench " +
+				"integration was not found; the router cannot be installed, so every workbench call " +
+				"on this node will be refused")
 		}
 
 	case node.NodeTypeWorkbench:

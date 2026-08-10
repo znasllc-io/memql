@@ -1758,7 +1758,13 @@ variables:
     component: workbench
     scope: node
     optional: true
-    description: "When truthy, agent nodes route workbench dispatch to a dedicated remote workbench node via NodeService.Stream instead of running the integration in-process."
+    description: "When truthy, agent nodes route workbench dispatch to a dedicated remote workbench node via NodeService.Stream instead of running the integration in-process. An ASSERTION rather than a preference (memql#3506): with no reachable workbench peer the call is refused (no_workbench_peer), not run on the agent's own disk."
+
+  - name: MEMQL_WORKBENCH_LOCAL_FALLBACK
+    component: workbench
+    scope: node
+    optional: true
+    description: "Explicit opt-in that restores the pre-memql#3506 degrade-to-local behaviour: in remote mode, run a workbench call on the agent node when no workbench peer is reachable instead of refusing. Off by default -- a fallback reachable by the ABSENCE of configuration is what hid memql#3450."
 
   # --- worker ---
 

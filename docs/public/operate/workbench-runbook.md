@@ -166,7 +166,40 @@ Idempotent: a Plan that never provisioned a workspace is a no-op.
 | Env var                    | Default                            | Effect |
 |----------------------------|------------------------------------|--------|
 | `MEMQL_WORKBENCH_ROOT`     | `/var/lib/memql/workbenches`       | Root directory for per-Plan workspaces. Override for dev (project-local path) or Docker volume mounts. |
-| `MEMQL_WORKBENCH_REMOTE`   | unset (false)                      | When truthy AND a `ForwardRouter` is wired, the agent's dispatch delegates to a remote workbench node via NodeService.Stream. See [production.md](../../internal/ops/workbench-production.md). Leave unset for the MVP path. |
+| `MEMQL_WORKBENCH_REMOTE`   | unset (false)                      | When truthy, the agent's dispatch delegates to a remote workbench node via NodeService.Stream. **This is an assertion, not a preference** -- see below. See [production.md](../../internal/ops/workbench-production.md). Leave unset for the MVP path. |
+| `MEMQL_WORKBENCH_LOCAL_FALLBACK` | unset (false)                | Opt-in escape valve: in remote mode, run the call on the agent node when no workbench peer is reachable, instead of refusing. Off by default. |
+
+### Remote mode refuses rather than degrades (memql#3506)
+
+`MEMQL_WORKBENCH_REMOTE=1` says **this work does not run on the agent**.
+So when no healthy workbench peer is reachable, a workbench call now
+**fails** with `no_workbench_peer` and a message naming the missing peer,
+`MEMQL_WORKER_PEERS`, and this escape valve. It does not fall back to the
+agent's own disk.
+
+It used to. That fallback is why memql#3450 was invisible for its entire
+life: the shipped `deploy/k8s/base/agent.yaml` sets both the remote flag
+*and* the peer seed, the seed was being dropped at parse time, so the
+router had no peer and **every** workbench tool call ran on the agent pod
+-- no error, no warning, correct-looking results. The operator asked for
+isolation and got none, and nothing anywhere said so.
+
+Degrading to local execution does not honour the assertion, it inverts
+it, and does so most readily in the case that matters: the workbench being
+unavailable. A sandbox that silently becomes not-a-sandbox is worth less
+than an error.
+
+If you *do* want local execution when the workbench is unreachable -- a
+reasonable thing to want in development -- set
+`MEMQL_WORKBENCH_LOCAL_FALLBACK=1`. The point is that "run this remotely"
+and "run it here if you must" are now spelled differently, so the second
+cannot happen because nobody configured anything.
+
+**Diagnosing a refusal.** `no_workbench_peer` means one of: no workbench
+node is running; `MEMQL_WORKER_PEERS` does not name it (`MEMQL_WORKER_PEERS=workbench=workbench:50060`);
+the workbench node is not reporting healthy. The agent also logs at ERROR
+at boot if the remote flag is set but the router could not be wired at all
+-- in that state every workbench call on that node refuses.
 
 ## 9. Files of interest
 
