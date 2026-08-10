@@ -39,6 +39,9 @@ export interface CampaignsState {
     htmlBody: string;
   }) => void;
   saveCampaign: (input: CampaignInput) => void;
+  // A builtin like the three send actions below, not a mutation (memql#3459):
+  // committing to a time enqueues the engine's own send job, and the same
+  // preflight refusals Start produces arrive here as actionError.
   scheduleCampaign: (input: { campaignId: string; scheduledAt: string }) => void;
   cancelCampaign: (campaignId: string) => void;
   // The three send actions (memql#3348). Builtins rather than mutations:
@@ -193,12 +196,18 @@ export function useCampaigns(): CampaignsState {
   const scheduleCampaign = useCallback(
     (input: { campaignId: string; scheduledAt: string }) =>
       run(
-        query ? runMutation(query, "scheduleCampaign", input) : null,
-        // Still said in full. Sending exists now, but nothing STARTS a
-        // campaign from a clock -- the drain worker drains jobs and no job is
-        // created by a schedule -- so an operator who reads "Scheduled." would
-        // still reasonably expect mail that never comes.
-        "Scheduled. This records the intended time; nothing starts a send from it yet -- press Start sending when you are ready.",
+        // A BUILTIN, not the scheduleCampaign mutation (memql#3459). The
+        // mutation writes the time onto the operator's own row and stops
+        // there, which is exactly why a scheduled campaign used to sit
+        // forever: nothing could find it. "Which campaigns are due" cannot be
+        // asked of an owned-tier concept at all, so the schedule has to be
+        // recorded on the engine's own send job -- and only Go holding a
+        // campaign it read under the caller's actor may write that.
+        query ? runBuiltin(query, "campaignScheduleSend", input) : null,
+        // Now says what actually happens. The preflight has already passed at
+        // this point -- template ready, sender configured, audience sane --
+        // so the remaining uncertainty is the provider's, not ours.
+        "Scheduled. The send starts on its own at that time; nothing else to press.",
       ),
     [query, run],
   );

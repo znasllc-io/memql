@@ -137,8 +137,8 @@ concept campaign {
   templateId      string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
   fromName        string   @description("Per-campaign display name on the From header, e.g. 'The memQL team'. A non-secret presentation setting: it overrides the integration-wide default (MEMQL_EMAIL_FROM_NAME) for this campaign only. The From ADDRESS is deliberately not settable here -- it is bound to the configured mailbox credential and changing it is a deliverability decision, not a campaign one.")
   replyTo         string   @description("Optional Reply-To address for this campaign. Non-secret; empty means replies go to the configured sender address.")
-  scheduledAt     datetime  @description("When the send should begin. Empty means the campaign is not scheduled -- it is a draft an operator will start by hand.")
-  status          enum("draft", "scheduled", "sending", "paused", "sent", "cancelled", "failed")  @default("draft")  @description("Campaign lifecycle. 'draft' is being authored; 'scheduled' is committed to a time; 'sending' / 'paused' / 'sent' / 'failed' are send-engine states; 'cancelled' is an operator stopping it before or during a send. Only 'draft' and 'scheduled' are reachable today -- the transitions past them belong to the sending engine.")
+  scheduledAt     datetime  @description("When the send should begin. Empty means the campaign is not scheduled -- it is a draft an operator will start by hand. THE AUTHORITY on when a scheduled send fires (memql#3459): the drain worker re-reads this field rather than trusting the copy on the send job, so moving the date here moves the send.")
+  status          enum("draft", "scheduled", "sending", "paused", "sent", "cancelled", "failed")  @default("draft")  @description("Campaign lifecycle. 'draft' is being authored; 'scheduled' is committed to a time and WILL fire on its own (memql#3459 -- the worker promotes the campaign's scheduled send job once scheduledAt has passed); 'sending' / 'paused' / 'sent' / 'failed' are send-engine states; 'cancelled' is an operator stopping it before or during a send.")
   startedAt       datetime  @description("When the send actually began. Empty until it does. Distinct from scheduledAt: the gap between the two is the queue latency a deliverability review looks at.")
   completedAt     datetime  @description("When the last recipient reached a terminal delivery state.")
   recipientCount  int  @default("0")  @description("How many recipients the audience resolved to when the send started. Frozen at send time so the counters below add up even if the audience changes afterwards.")
@@ -217,6 +217,18 @@ concept delivery {
 /// the same timeline rather than accumulating runs. Per-recipient idempotency does not live here --
 /// it lives on the delivery ledger (see v1:campaigns:delivery), which is what makes a resumed send
 /// safe even if this row is lost entirely.
+///
+/// A SCHEDULED CAMPAIGN IS A JOB IN THE `scheduled` STATUS (memql#3459), and that is why scheduling
+/// needed no new concept and no cross-owner scan. "Which campaigns are due?" is not a question an
+/// OWNED row can answer -- the owned tier injects ownerUserId==actor.userId into every read with no
+/// cluster-owner bypass -- so a clock-driven scan over v1:campaigns:campaign is not expressible at
+/// all. The scheduling builtin therefore does what campaignStartSend already does: it reads the
+/// campaign under the CALLER'S own actor, and writes a job here carrying the owner it derived. The
+/// worker then scans this concept, which it can, and asks the campaign row whether its time has come.
+///
+/// `scheduled` is deliberately NOT drainable (see isDrainableSendJob): a job in this status is
+/// inert until something promotes it to `queued`, so the row existing can never by itself mail
+/// anybody.
 @displayCard(primary="campaignId", secondary="status", tertiary="startedAt", status="status")
 @rowAuthz(clusterOwner)
 concept sendJob {
@@ -224,7 +236,8 @@ concept sendJob {
   campaignOwnerUserId  string!  @description("v1:identity:user.id the worker impersonates for every owned-tier read and write this job performs -- the campaign, its template, its audience's recipients, and the delivery ledger. SERVER-DERIVED ONLY: both writers read it off a campaign row they had already read under the caller's own actor, so it can never name a user the caller could not already act as. This is the single most security-load-bearing field in the domain.")
   audienceId           string!  @description("v1:campaigns:audience.id resolved to recipients each batch, so an audience that grows mid-send is mailed as it stands when the batch runs.")
   templateId           string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
-  status               enum("queued", "running", "paused", "completed", "failed", "cancelled")!  @description("Job lifecycle. 'queued' is enqueued and unclaimed; 'running' has had at least one batch; 'paused' is an operator stopping the drain without discarding the ledger; 'completed' means every recipient reached a terminal delivery state; 'failed' is a job-level refusal (no configured sender, no unsubscribe secret, audience over the ceiling); 'cancelled' follows the campaign being cancelled.")
+  status               enum("scheduled", "queued", "running", "paused", "completed", "failed", "cancelled")!  @description("Job lifecycle. 'scheduled' is committed to a time and NOT drainable -- the worker promotes it to 'queued' once the campaign row's scheduledAt has passed, so a scheduled job can never mail anybody by merely existing; 'queued' is enqueued and unclaimed; 'running' has had at least one batch; 'paused' is an operator stopping the drain without discarding the ledger; 'completed' means every recipient reached a terminal delivery state; 'failed' is a job-level refusal (no configured sender, no unsubscribe secret, audience over the ceiling); 'cancelled' follows the campaign being cancelled.")
+  scheduledAt          datetime  @description("The time this job was enqueued for, copied off the campaign at schedule time. A HINT for the operator and for the scan, never the authority: the worker re-reads the CAMPAIGN's scheduledAt at fire time, so an operator who moves the date with updateCampaign is obeyed rather than raced by a stale copy. Empty on a job started by hand.")
   recipientCount       int  @default("0")  @description("Recipients the audience resolved to on the most recent batch. Not frozen -- the campaign row carries the frozen count.")
   sentCount            int  @default("0")  @description("Deliveries the transport accepted so far.")
   skippedCount         int  @default("0")  @description("Recipients suppressed rather than mailed. The gap between this and sentCount IS the suppression rate a deliverability review asks for.")

@@ -30,11 +30,13 @@ import { NEW_CAMPAIGN_SLUG, campaignsPath } from "./urls";
 // arrive here as actionError, verbatim, because the engine's own wording is
 // more useful than anything this page could paraphrase.
 //
-// THE SCHEDULE BUTTON STILL DOES NOT SEND, and it still says so. It writes
-// `status: "scheduled"` and a time onto the row; nothing creates a send job
-// from a clock, so a scheduled campaign waits for someone to press Start. That
-// is the one piece of the sending surface memql#3348 left open, and the button
-// text is where an operator will actually encounter it.
+// SCHEDULING SENDS NOW TOO (memql#3459). The schedule button calls
+// `campaignScheduleSend`, which runs the SAME preflight as Start and enqueues
+// a send job the drain worker fires when the time arrives -- so the button no
+// longer has to carry a disclaimer, which is the whole point of the change.
+// It refuses a time already past, because that is far more often a typo in the
+// year or the offset than a request to send immediately, and there is an
+// unambiguous button for the latter.
 
 export function CampaignEditorPage(): ReactNode {
   const params = useParams();
@@ -183,8 +185,8 @@ export function CampaignEditorPage(): ReactNode {
         </div>
 
         <Field
-          label="Intended send time"
-          hint="RFC3339, e.g. 2026-09-01T09:00:00Z. Recorded on the row as your intent; nothing starts a send from it -- press Start sending when you are ready."
+          label="Send time"
+          hint="RFC3339, e.g. 2026-09-01T09:00:00Z. A value with no offset is read as UTC. Schedule below to commit to it -- the send then starts on its own."
         >
           <TextInput
             value={scheduledAt}
@@ -203,7 +205,7 @@ export function CampaignEditorPage(): ReactNode {
                 onClick={() => scheduleCampaign({ campaignId: routeId, scheduledAt })}
                 disabled={busy || scheduledAt.trim() === ""}
               >
-                Record schedule (does not send)
+                Schedule send
               </MetaButton>
               {/* One control, three states. A single button whose label and
                   action follow the campaign's status, rather than three

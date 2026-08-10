@@ -115,6 +115,7 @@ shape sendJob sendJobFull {
   audienceId
   templateId
   status
+  scheduledAt
   recipientCount
   sentCount
   skippedCount

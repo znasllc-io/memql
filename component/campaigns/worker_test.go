@@ -54,8 +54,14 @@ type recordedCall struct {
 type fakeEngine struct {
 	mu sync.Mutex
 
-	jobs        []map[string]any
-	campaign    map[string]any
+	jobs []map[string]any
+	// scheduledJobs backs `scheduledSendJobs` (memql#3459). A separate slice
+	// rather than a status filter over `jobs`, because the two queries answer
+	// different questions and a test that conflated them could not tell a
+	// scheduled job that was correctly left alone from one the drain path
+	// wrongly picked up.
+	scheduledJobs []map[string]any
+	campaign      map[string]any
 	template    map[string]any
 	roster      []map[string]any
 	ledger      []map[string]any
@@ -78,6 +84,8 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	switch {
 	case strings.HasPrefix(q, "query drainableSendJobs"):
 		return rowsEnvelope(e.jobs), nil
+	case strings.HasPrefix(q, "query scheduledSendJobs"):
+		return rowsEnvelope(e.scheduledJobs), nil
 	case strings.HasPrefix(q, "query recentSendJobs"):
 		return rowsEnvelope(e.jobs), nil
 	case strings.HasPrefix(q, "query sendJobById"):

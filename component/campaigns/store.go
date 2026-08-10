@@ -64,6 +64,12 @@ type SendJob struct {
 	RecipientCount      int
 	ThrottledUntil      time.Time
 	StartedAt           time.Time
+
+	// ScheduledAt is the time this job was enqueued for, copied off the
+	// campaign at schedule time (memql#3459). A HINT, never the authority:
+	// the worker re-reads the campaign's own scheduledAt at fire time, so an
+	// operator who moves the date is obeyed rather than raced by this copy.
+	ScheduledAt time.Time
 }
 
 // Progress is the count of terminal outcomes so far. It doubles as the
@@ -83,6 +89,11 @@ type Campaign struct {
 	FromName    string
 	ReplyTo     string
 	Status      string
+
+	// ScheduledAt is THE authority on when a scheduled send fires
+	// (memql#3459). The job row carries a copy for the operator to look at;
+	// this is the one the worker compares against the clock.
+	ScheduledAt time.Time
 }
 
 // Template is the authored content.
@@ -192,7 +203,29 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 		FromName:    str(r, "fromName"),
 		ReplyTo:     str(r, "replyTo"),
 		Status:      str(r, "status"),
+		ScheduledAt: parseTime(str(r, "scheduledAt")),
 	}, true, nil
+}
+
+// ScheduledJobs returns every send job still waiting for its time, oldest
+// first. clusterOwner-tier: issue under the engine's operator identity.
+//
+// Unfiltered by due-ness on purpose (memql#3459). The row carries a COPY of
+// the campaign's scheduledAt, and an operator moving the date with
+// updateCampaign never touches it -- so filtering here would either fire a
+// send the operator had postponed or sit on one they had brought forward.
+// The worker reads them all and asks the campaign, which is affordable
+// because the set is one row per pending scheduled campaign.
+func (s *Store) ScheduledJobs(ctx context.Context) ([]SendJob, error) {
+	rows, err := s.rows(ctx, "query scheduledSendJobs()")
+	if err != nil {
+		return nil, err
+	}
+	jobs := make([]SendJob, 0, len(rows))
+	for _, r := range rows {
+		jobs = append(jobs, sendJobFromRow(r))
+	}
+	return jobs, nil
 }
 
 // TemplateByID reads a template. OWNED tier.
@@ -283,13 +316,25 @@ func (s *Store) SuppressionByDigest(ctx context.Context, digest string) (Suppres
 
 // EnqueueSend creates (or re-creates) the send job for a campaign.
 // clusterOwner-tier.
+//
+// job.Status selects between the two ways a job comes into existence
+// (memql#3459): empty or "queued" for a send starting now, "scheduled" for
+// one committed to a time. A scheduled job is inert -- isDrainableSendJob
+// does not match it -- so writing one can never by itself mail anybody.
 func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
-	return s.exec(ctx, call("mutation", "enqueueCampaignSend",
-		arg{"campaignId", job.CampaignID},
-		arg{"campaignOwnerUserId", job.CampaignOwnerUserID},
-		arg{"audienceId", job.AudienceID},
-		arg{"templateId", job.TemplateID},
-	))
+	args := []arg{
+		{"campaignId", job.CampaignID},
+		{"campaignOwnerUserId", job.CampaignOwnerUserID},
+		{"audienceId", job.AudienceID},
+		{"templateId", job.TemplateID},
+	}
+	if job.Status != "" {
+		args = append(args, arg{"status", job.Status})
+	}
+	if !job.ScheduledAt.IsZero() {
+		args = append(args, arg{"scheduledAt", job.ScheduledAt.UTC().Format(time.RFC3339)})
+	}
+	return s.exec(ctx, call("mutation", "enqueueCampaignSend", args...))
 }
 
 // SendJobPatch is the set of send-job fields a caller means to change.
@@ -384,6 +429,19 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 	args = appendStr(args, "lastError", p.LastError)
 	args = appendTime(args, "completedAt", p.CompletedAt)
 	return s.exec(ctx, call("mutation", "updateCampaignProgress", args...))
+}
+
+// ScheduleCampaign commits a campaign to a time. OWNED tier: the caller's
+// own identity, because this is the operator's row.
+//
+// Separate from SetCampaignStatus because it carries a value rather than
+// only a transition -- and the value it carries is the one the drain
+// worker treats as authoritative when it decides whether a send is due.
+func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time.Time) error {
+	return s.exec(ctx, call("mutation", "scheduleCampaign",
+		arg{"campaignId", campaignID},
+		arg{"scheduledAt", at.UTC().Format(time.RFC3339)},
+	))
 }
 
 // SetCampaignStatus drives the operator-visible lifecycle transitions.
@@ -528,6 +586,7 @@ func sendJobFromRow(r map[string]any) SendJob {
 		RecipientCount:      integer(r, "recipientCount"),
 		ThrottledUntil:      parseTime(str(r, "throttledUntil")),
 		StartedAt:           parseTime(str(r, "startedAt")),
+		ScheduledAt:         parseTime(str(r, "scheduledAt")),
 	}
 }
 

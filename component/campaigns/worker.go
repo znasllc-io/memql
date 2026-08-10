@@ -278,6 +278,10 @@ func (w *Worker) WarnOnUnrotatableUnsubscribeSecret(ctx context.Context) {
 // than racing a ticker.
 func (w *Worker) DrainOnce(ctx context.Context) {
 	systemCtx := w.systemActorContext(ctx)
+	// Schedules first, so a campaign that comes due is promoted and drained
+	// in the SAME pass rather than waiting a further poll interval to start
+	// (memql#3459).
+	w.promoteDueSchedules(ctx, systemCtx)
 	jobs, err := w.store.DrainableJobs(systemCtx)
 	if err != nil {
 		w.logger.Debug("campaigns worker: scan failed (engine likely not ready)", "error", err)
@@ -591,6 +595,16 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message) error {
 		return w.sendHook(ctx, sender, msg)
 	}
 	return sender.Send(ctx, msg)
+}
+
+// nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests
+// construct one by struct literal to drive a single handler, and a nil `now`
+// there would be a panic in a code path that has nothing to do with time.
+func (w *Worker) nowUTC() time.Time {
+	if w.now == nil {
+		return time.Now().UTC()
+	}
+	return w.now().UTC()
 }
 
 func (w *Worker) resolveSender() email.Sender {

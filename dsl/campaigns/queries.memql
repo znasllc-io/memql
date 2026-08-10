@@ -171,6 +171,24 @@ query sendJob recentSendJobs {
   shape     sendJobFull
 }
 
+/// ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner
+/// gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due"
+/// is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned
+/// tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why
+/// the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+///
+/// It deliberately does NOT filter on the due time. The authority on when a send fires is the
+/// CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row
+/// hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is
+/// small by nature (one row per pending scheduled campaign), which is what makes that affordable.
+@actor
+query sendJob scheduledSendJobs {
+  filter    isScheduledSendJob && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  200
+  shape     sendJobFull
+}
+
 /// ENGINE: one send job by id (the id is the campaign's bare short id). Cluster-owner gated. Read
 /// after a claim so the worker acts on the row as it stands now rather than as the scan saw it.
 @actor

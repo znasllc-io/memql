@@ -7,7 +7,8 @@
 // carrying a quote or a newline cannot break the statement around it -- and
 // the two honesty properties the surface promises: that rows render through
 // the shared element library rather than through markup this repo drew, and
-// that "schedule" never claims to have sent anything.
+// that "schedule" says exactly what it does -- which changed in memql#3459,
+// when it started doing the thing.
 //
 // memql#3348 added the SEND actions, and with them a third property worth
 // asserting from the browser side: the one irreversible control on this
@@ -330,7 +331,7 @@ describe("the campaign editor", () => {
     expect(call).toBe('query campaigns(audienceId: "aud-1")');
   });
 
-  it("says out loud that recording a schedule does not send anything", async () => {
+  it("commits a schedule through the builtin that actually fires it", async () => {
     const { calls } = renderAt("/integrations/campaigns/camp-1");
     await waitFor(() =>
       expect((screen.getByPlaceholderText("August product update") as HTMLInputElement).value).toBe(
@@ -341,13 +342,18 @@ describe("the campaign editor", () => {
     fireEvent.change(screen.getByPlaceholderText("2026-09-01T09:00:00Z"), {
       target: { value: "2026-09-01T09:00:00Z" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /Record schedule/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Schedule send/ }));
 
-    await waitFor(() => expect(callsNamed(calls, "scheduleCampaign").length).toBe(1));
-    // Sending exists now (memql#3348), but nothing STARTS a send from a clock,
-    // so the confirmation still has to say that in words -- an operator who
-    // reads "Scheduled." will otherwise expect mail that never comes.
-    expect(await screen.findByText(/nothing starts a send from it yet/)).toBeTruthy();
+    // The BUILTIN, not the mutation of the same-ish name (memql#3459). The
+    // mutation writes the time onto the operator's own row and nothing can
+    // find it from there -- "which campaigns are due" is not a question an
+    // owned-tier concept can answer -- so committing to a time has to enqueue
+    // the engine's own send job, which only the builtin does.
+    await waitFor(() => expect(callsNamed(calls, "campaignScheduleSend").length).toBe(1));
+    expect(callsNamed(calls, "scheduleCampaign").length).toBe(0);
+    // And the confirmation no longer carries a disclaimer, because there is
+    // nothing left to disclaim.
+    expect(await screen.findByText(/starts on its own at that time/)).toBeTruthy();
   });
 
   it("explains an empty delivery list rather than implying a send reached nobody", async () => {

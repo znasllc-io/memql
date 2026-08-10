@@ -31,10 +31,14 @@ campaigns deliberately do not use — see below)
   operator                engine                          recipient
   ────────                ──────                          ─────────
   campaignStartSend  ──▶  preflight (sender? unsubscribe?
-                          template ready? audience sane?)
+  campaignScheduleSend    template ready? audience sane?)
                             │ refuses here, or
                             ▼
-                          v1:campaigns:sendJob   (queued)
+                          v1:campaigns:sendJob
+                          (queued — or `scheduled`, which
+                           the worker promotes to queued
+                           once the campaign's scheduledAt
+                           has passed)
                             │
        drain worker  ──────▶│  every 15s, one batch per job
                             │
@@ -342,6 +346,60 @@ builtin campaignResumeSend(campaignId: "<id>")
 Pausing leaves the ledger alone, so resuming continues exactly where it
 stopped.
 
+### Scheduling one
+
+```
+builtin campaignScheduleSend(campaignId: "<id>", scheduledAt: "2026-09-01T09:00:00Z")
+```
+
+or the **Schedule send** button in the editor. The send then starts on its own;
+nothing else has to be pressed.
+
+`scheduledAt` is an RFC 3339 instant. A value with no offset is read as **UTC** —
+guessing a local zone from a node's `TZ` would make one string mean different
+moments on different replicas.
+
+Four things are worth knowing about it:
+
+**The preflight runs when you schedule, and again when it fires.** Both, and
+that is the point of scheduling being a builtin rather than a stored date: a
+campaign whose template is still a draft is refused while you are looking at
+the screen, not at 3am.
+
+**A time already past is refused.** Use `campaignStartSend` to send now. A
+backdated schedule is far more often a typo in the year or the offset than a
+request to send immediately.
+
+**The campaign row decides when it fires.** The send job carries a copy of the
+time for you to look at; the worker compares the clock against
+`v1:campaigns:campaign.scheduledAt`. So moving the date — with the editor, or
+with `updateCampaign` — moves the send, and a schedule you postponed does not
+go out on its original time.
+
+**A campaign whose time passed while the cluster was down still sends**, when
+the cluster comes back. There is no window past which a late send is dropped,
+deliberately: a silently-skipped campaign is the failure this replaced. If you
+no longer want it, cancel it — a campaign sitting in `scheduled` is a campaign
+that is going to send.
+
+If the fire-time preflight refuses, the reason lands on the **campaign row's
+`lastError`**, where the operator who scheduled it is looking, and the two
+kinds of refusal are treated differently by who can fix them:
+
+| Refusal | Kind | What happens |
+|---|---|---|
+| Template un-readied, audience emptied or over the ceiling | authoring | campaign goes `failed` with the reason; fix and schedule again |
+| No sender registered on the node, one-click unsubscribe unconfigured | environment | the send **waits** and retries each tick, reason stamped on the row |
+
+The split is by who can fix it, not by severity. Failing a campaign because a
+node booted without its mail credentials would make an operator re-author a
+schedule to recover from a bad deploy.
+
+Cross-replica, a due campaign fires once — and the claim is the least of the
+three reasons. The send job's id **is** the campaign's id, so two replicas
+promoting it write one row; the drain claim admits one replica per (job,
+progress); and the delivery ledger is per (campaign, recipient) underneath both.
+
 **Re-sending a campaign is not a thing.** The ledger is per (campaign,
 recipient), so a second run finds every recipient terminal and mails nobody.
 Author a new campaign.
@@ -401,6 +459,8 @@ The manual procedure works today and uses the same knob:
 | `startSend` refuses: "no email sender registered" | Neither the Graph nor the SMTP credentials resolved on this node; the `LogSender` is not a sender for this purpose. |
 | `startSend` refuses: template not ready | Mark the template `ready`. |
 | Job `failed`, "audience has reached the ceiling" | Split the audience, or raise `MEMQL_CAMPAIGNS_MAX_AUDIENCE` **and** the `paginate` bound on `audienceRosterForSend` **and** `MEMORY_ENGINE_MAX_WINDOW`. |
+| Scheduled campaign did not send | Read the campaign row's `lastError` — the fire-time preflight records its reason there. An environment refusal (no sender, no unsubscribe config) retries; an authoring one leaves the campaign `failed`. |
+| Scheduled campaign sent later than its time | Expected after downtime: a late send is sent rather than dropped. The log line carries `lateBy`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
