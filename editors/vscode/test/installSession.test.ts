@@ -335,6 +335,15 @@ test("previewUninstall reports a pre-existing artifact as PRESERVED, not removed
     preview.preserved.map((s) => s.id),
     ["removeCluster"],
   );
+  // The preview is the confirmation, so a preserved row has to say WHY it is
+  // being left alone. Only this layer knows -- it is holding the receipt's
+  // pre-existence verdict -- so an empty reason would push that sentence into
+  // whichever consumer rendered the row.
+  assert.match(
+    preview.preserved[0]?.reason ?? "",
+    /already on this machine/,
+    "a preserved step must carry its own reason",
+  );
   assert.deepEqual(
     preview.removals.map((s) => s.id),
     ["removeBinary"],

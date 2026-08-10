@@ -321,7 +321,11 @@ export interface PlannedStep {
   elevation: Elevation;
   action: "run" | "skip";
   params: Record<string, string>;
-  /** Why it will be skipped. Empty for a step that will run. */
+  /**
+   * Why this step will not remove anything: it was skipped, or the artifact is
+   * being preserved. Empty only for a step that will genuinely remove
+   * something.
+   */
   reason: string;
   /** The artifact pre-existed the install, so it stays. */
   preserved: boolean;
@@ -381,6 +385,7 @@ export async function previewUninstall(
       };
     }
     const params = { ...decision.params, ...(step.params ?? {}) };
+    const preserved = decision.preservedOnRefusal === true;
     return {
       id: step.id,
       description: step.description,
@@ -389,8 +394,14 @@ export async function previewUninstall(
       elevation: step.elevation,
       action: "run",
       params,
-      reason: "",
-      preserved: decision.preservedOnRefusal === true,
+      // A PRESERVED step carries its reason too, not just a skip. The preview
+      // IS the confirmation, so the preserved rows are where the operator
+      // learns what the uninstall is deliberately declining to touch and why --
+      // and the only place that knows why is here, where the receipt's
+      // pre-existence verdict is in hand. Leaving it empty pushed that sentence
+      // into whichever consumer rendered the row.
+      reason: preserved ? "the installer found it already on this machine" : "",
+      preserved,
       target: describeTarget(params),
     };
   });
