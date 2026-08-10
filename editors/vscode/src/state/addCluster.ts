@@ -18,6 +18,7 @@ import type { ExecEvent } from "../install/executor.js";
 import type { AddClusterAction } from "../clusters/presence.js";
 import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
+import type { HandoffResult } from "../install/handoff.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -272,6 +273,7 @@ export class AddClusterState {
   private connectErrorList: ConnectFieldError[] = [];
   private connectFailureMessage = "";
   private registry: ClustersFile | undefined;
+  private handoffResult: HandoffResult | undefined;
 
   get screen(): Screen {
     return this.currentScreen;
@@ -311,6 +313,20 @@ export class AddClusterState {
   }
   get succeeded(): boolean {
     return this.didSucceed;
+  }
+  /**
+   * What became of the cluster once the run finished (#3477).
+   *
+   * Undefined until the hand-off has run, and undefined forever for an action
+   * that has no hand-off -- an uninstall registers nothing.
+   */
+  get handoff(): HandoffResult | undefined {
+    return this.handoffResult;
+  }
+
+  setHandoff(result: HandoffResult): void {
+    this.handoffResult = result;
+    this.currentScreen = "done";
   }
 
   // ---------------------------------------------------------------------------
@@ -398,6 +414,8 @@ export class AddClusterState {
     this.failedId = undefined;
     this.wasCancelled = false;
     this.didSucceed = false;
+    // A second run must not show the first run's outcome while it is going.
+    this.handoffResult = undefined;
     return true;
   }
 
