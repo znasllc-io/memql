@@ -318,21 +318,25 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 		return 0, fmt.Errorf("campaigns.%s: template %q is %q, not \"ready\". Mark it ready once the copy is final", op, tmpl.ID, tmpl.Status)
 	}
 
-	roster, err := w.store.Roster(ctx, campaign.AudienceID)
+	// A server-side COUNT, not the length of a read (memql#3460). The
+	// difference is the whole issue: measuring a bounded page and calling it
+	// a total is what made 5000 a ceiling, and a count query has no window
+	// to be bounded by.
+	size, err := w.store.RosterSize(ctx, campaign.AudienceID)
 	if err != nil {
 		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
 	}
-	if len(roster) == 0 {
+	if size == 0 {
 		return 0, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
 	}
-	if len(roster) >= w.cfg.MaxAudience {
+	if size > w.cfg.MaxAudience {
 		return 0, fmt.Errorf(
-			"campaigns.%s: audience %q has %d recipients, at or over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE). "+
-				"The send reads the roster whole on every batch, so it would silently mail a prefix. Split the audience, or raise the "+
-				"ceiling together with the paginate bound on audienceRosterForSend",
-			op, campaign.AudienceID, len(roster), w.cfg.MaxAudience)
+			"campaigns.%s: audience %q has %d recipients, over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE). "+
+				"The ceiling is a deliberate refusal, not a technical bound -- the send pages through the roster, so no size is unsafe. "+
+				"A send this large is more often a mis-scoped audience than an intent, and it cannot be recalled. Raise the ceiling if you mean it",
+			op, campaign.AudienceID, size, w.cfg.MaxAudience)
 	}
-	return len(roster), nil
+	return size, nil
 }
 
 func (w *Worker) handlePauseSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

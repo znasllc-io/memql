@@ -134,6 +134,16 @@ func ContextWithCursor(ctx context.Context, cursor string) context.Context {
 	return context.WithValue(ctx, inboundCursorKey{}, strings.TrimSpace(cursor))
 }
 
+// CursorFromContext returns the inbound pagination cursor threaded onto the
+// context by ContextWithCursor, or "" when there is none.
+//
+// Exported for the in-process callers that page a named query themselves --
+// the campaign sending engine walks an audience of any size this way
+// (memql#3460) -- and, in particular, so their tests can fake the engine
+// seam. A fake that cannot see the cursor cannot page, and a paging walk
+// tested against a fake that returns everything at once is not tested at all.
+func CursorFromContext(ctx context.Context) string { return cursorFromContext(ctx) }
+
 // cursorFromContext returns the inbound cursor threaded by the request handler.
 func cursorFromContext(ctx context.Context) string {
 	if ctx == nil {

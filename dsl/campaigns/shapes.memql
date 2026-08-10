@@ -124,6 +124,8 @@ shape sendJob sendJobFull {
   startedAt
   completedAt
   throttledUntil
+  rosterCursor
+  rosterOutstanding
   row.createdAt
 }
 

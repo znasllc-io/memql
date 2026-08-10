@@ -391,8 +391,8 @@ variables:
     component: campaigns
     scope: node
     optional: true
-    default: "5000"
-    description: "Audience ceiling for a send. The worker reads the roster WHOLE on every batch and diffs it against the delivery ledger, so a larger audience would be silently truncated; a send over the ceiling is refused instead. Raising it alone is not enough -- the paginate bound on audienceRosterForSend and MEMORY_ENGINE_MAX_WINDOW have to move with it."
+    default: "250000"
+    description: "Audience ceiling for a send. Since memql#3460 this is a deliberate product refusal rather than a correctness guard: the send WALKS the roster one page at a time and reads the delivery ledger per page, so no audience size is unsafe. What the ceiling stops is a mis-scoped audience or a bad import going out at a scale that cannot be recalled. Raising it is a decision about how large a send this deployment means to make; nothing else has to move with it."
 
   - name: MEMQL_CAMPAIGNS_POLL_SECONDS
     component: campaigns

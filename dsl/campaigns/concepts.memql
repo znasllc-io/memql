@@ -245,6 +245,8 @@ concept sendJob {
   lastError            string  @description("The most recent job-level error, truncated. Empty on a clean run.")
   startedAt            datetime  @description("When the first batch ran.")
   completedAt          datetime  @description("When the job reached a terminal status.")
+  rosterCursor         string  @description("Where the roster walk resumes (memql#3460). An OPAQUE engine keyset cursor -- the (createdAt, id) position of the last recipient examined, encoded by the engine's own pagination codec -- so a send through a large audience does not re-scan from the start on every 15-second tick. Empty means 'start a fresh pass'. It is an OPTIMIZATION, never a correctness mechanism: the delivery ledger decides who gets mailed, so a cursor lost, stale or refused by a codec change costs one re-scan and nothing else.")
+  rosterOutstanding    bool  @description("Whether the pass currently in progress has seen ANY recipient still to deal with -- unmailed, or pending a retry that is not yet due (memql#3460). It is what makes completion decidable without holding the whole roster in memory: a pass that reaches the end of the audience with this false has proved there is nothing left, and the job completes. Reset at the start of each pass.")
   throttledUntil       datetime  @description("When the provider's own throttle response says we may resume. Set from a 429/503 Retry-After; the worker leaves the job alone until it passes. Distinct from our own pacing, which is a per-process token bucket and needs no row.")
 
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")

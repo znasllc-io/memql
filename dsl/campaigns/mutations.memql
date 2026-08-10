@@ -412,12 +412,14 @@ mutate sendJob updateSendJob {
     skippedCount    int
     failedCount     int
     lastError       string
-    startedAt       datetime
-    completedAt     datetime
-    throttledUntil  datetime
+    startedAt         datetime
+    completedAt       datetime
+    throttledUntil    datetime
+    rosterCursor      string
+    rosterOutstanding bool
   }
   update {
-    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil }
+    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil, rosterCursor, rosterOutstanding }
     stamp {
       id: args.sendJobId
     }

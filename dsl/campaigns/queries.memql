@@ -214,15 +214,23 @@ query suppression suppressionByDigest {
   shape   suppressionFull
 }
 
-/// ENGINE (owner-scoped): every recipient in the audience a send is working through, oldest first --
+/// ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first --
 /// including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed
 /// rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
 ///
-/// The 5000 bound is the send's AUDIENCE CEILING, not a page: the worker reads the roster whole on
-/// every batch and diffs it against the delivery ledger, so a larger audience would be silently
-/// truncated. campaignStartSend refuses a send whose audience exceeds MEMQL_CAMPAIGNS_MAX_AUDIENCE
-/// (default 5000, matched to this bound and to MEMORY_ENGINE_MAX_WINDOW) rather than mailing a
-/// prefix of it. Lifting the ceiling means keyset-cursoring the roster, which is a follow-up.
+/// THE 500 IS A PAGE, NOT A CEILING (memql#3460). It used to be 5000 and it used to be the largest
+/// audience this engine could send to: the worker read the roster WHOLE on every batch and diffed it
+/// against the ledger, so anything past the bound would have been silently truncated and
+/// campaignStartSend refused the send rather than mail a prefix. The worker now walks this query with
+/// the engine's keyset cursor, so the roster is unbounded and the number here only decides how much
+/// of it is in memory at once.
+///
+/// The ascending `row.createdAt` ordering is load-bearing under concurrent roster edits, which is the
+/// question a cursor over versioned rows has to answer. Reads collapse to the latest version per id
+/// (DISTINCT ON), so editing a recipient mid-send moves it FORWARD in this enumeration -- never
+/// backward past the cursor. A row can therefore be seen twice in one pass and can never be MISSED,
+/// and the worker de-duplicates within a batch. That asymmetry is the whole safety argument: a
+/// duplicate costs a wasted comparison, a skip costs somebody their mail.
 @actor
 query recipient audienceRosterForSend {
   args {
@@ -230,14 +238,56 @@ query recipient audienceRosterForSend {
   }
   filter    ownerUserId==actor.userId && audienceId==args.audienceId
   sort      "row.createdAt", "asc"
-  paginate  5000
+  paginate  500
   shape     recipientFull
 }
 
-/// ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection
-/// -- recipient, outcome, attempts, retry due-time and nothing else. This is the read that makes a
-/// resumed send safe: the worker diffs it against the roster and mails only what is missing or due.
-/// Owned, read under the campaign owner's actor. Same 5000 ceiling and the same reason.
+/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate
+/// (memql#3460). Computed server-side, so it is the one question about a large audience that needs
+/// no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it
+/// rather than measuring the length of a bounded read. Measuring a page and calling it a total is
+/// how the 5000 ceiling came to be load-bearing in the first place. Owned.
+@actor
+query recipient audienceRosterSize {
+  args {
+    audienceId  string!
+  }
+  filter  ownerUserId==actor.userId && audienceId==args.audienceId
+  count
+}
+
+/// ENGINE (owner-scoped): the delivery ledger for ONE PAGE OF RECIPIENTS, in the slim projection --
+/// recipient, outcome, attempts, retry due-time and nothing else. THE read that makes a resumed send
+/// safe: the worker diffs it against the roster page it just read and mails only what is missing or
+/// due (memql#3460).
+///
+/// Bounded by the CALLER'S id list rather than by a page of its own, and that is what lets the send
+/// scale. Reading the whole ledger for a campaign is exactly as unbounded as reading the whole
+/// roster, so cursoring one and not the other would have moved the ceiling rather than removed it.
+/// The slice of the ledger a batch needs is precisely the slice of the roster it is looking at.
+///
+/// recipientIds are CANONICAL ids. The relationship-canonicalizing pre-walk rewrites a bare id only
+/// on a scalar comparison, not on a list, so a bare id here would compare against a stored
+/// `v1:campaigns:recipient:...` and match nothing -- which would read as "nobody has been mailed"
+/// and re-mail the page. The worker passes the ids exactly as the roster row returned them.
+///
+/// Owned, read under the campaign owner's actor. @pii-free projection.
+@actor
+query delivery deliveriesForRecipients {
+  args {
+    campaignId    string!
+    recipientIds  array!
+  }
+  filter    ownerUserId==actor.userId && campaignId==args.campaignId && recipientId in args.recipientIds
+  sort      "row.createdAt", "asc"
+  paginate  1000
+  shape     deliveryLedgerEntry
+}
+
+/// ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection.
+/// Retained for the operator-facing read of a whole run; the SEND path pages through
+/// deliveriesForRecipients instead, because a whole-ledger read is as unbounded as a whole-roster one.
+/// Owned, read under the campaign owner's actor.
 @actor
 query delivery deliveryLedgerForCampaign {
   args {

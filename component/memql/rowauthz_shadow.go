@@ -246,6 +246,18 @@ func unwrapToFilter(expr ExpressionNode) ExpressionNode {
 			expr = n.Target
 		case *DepthExpression:
 			expr = n.Target
+		case *CountExpression:
+			// A `count` query's loaded Expr still carries this wrapper, and
+			// the runtime does not: applyDirectiveWrappers peels it onto
+			// plan.Count BEFORE enforcement injects the tier's term into
+			// plan.Root, so a count over a declared concept IS gated. Not
+			// peeling it here made the analyzer report `undecidable` for a
+			// construct enforcement handles perfectly well -- a gate failing
+			// on its own blindness rather than on the filter (found by
+			// audienceRosterSize, memql#3460). Peeling it keeps the analyzer
+			// looking at the same expression the injector does, which is the
+			// property this whole file depends on.
+			expr = n.Target
 		default:
 			return expr
 		}

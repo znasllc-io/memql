@@ -70,6 +70,16 @@ type SendJob struct {
 	// the worker re-reads the campaign's own scheduledAt at fire time, so an
 	// operator who moves the date is obeyed rather than raced by this copy.
 	ScheduledAt time.Time
+
+	// RosterCursor is where the roster walk resumes (memql#3460) -- an
+	// opaque engine keyset cursor. An OPTIMIZATION only: losing it costs one
+	// re-scan, because the ledger is what decides who gets mailed.
+	RosterCursor string
+
+	// RosterOutstanding records whether the pass in progress has seen
+	// anything still to deal with. It is what makes completion decidable
+	// without holding the whole roster in memory.
+	RosterOutstanding bool
 }
 
 // Progress is the count of terminal outcomes so far. It doubles as the
@@ -107,7 +117,14 @@ type Template struct {
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	ID                 string
+	ID string
+	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
+	// alongside the bare id because the ledger page read compares a LIST of
+	// recipient ids, and the engine's relationship-canonicalizing pre-walk
+	// rewrites a bare id only on a scalar comparison -- so a bare id in that
+	// list would match nothing, which reads as "nobody has been mailed"
+	// (memql#3460).
+	CanonicalID        string
 	Email              string
 	DisplayName        string
 	SubscriptionStatus string
@@ -244,25 +261,116 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	}, true, nil
 }
 
-// Roster reads the whole audience, suppressed members included -- a
-// `skipped` delivery row is an outcome the operator is owed rather than a
+// RosterPage reads ONE PAGE of the audience, suppressed members included --
+// a `skipped` delivery row is an outcome the operator is owed rather than a
 // silence. OWNED tier.
-func (s *Store) Roster(ctx context.Context, audienceID string) ([]Recipient, error) {
-	rows, err := s.rows(ctx, call("query", "audienceRosterForSend", arg{"audienceId", audienceID}))
+//
+// cursor is the engine's opaque keyset token from the previous page, or ""
+// to start. The returned cursor is empty when the audience is exhausted,
+// which is the signal the walk terminates on (memql#3460).
+func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Recipient, string, error) {
+	rows, next, err := s.rowsPage(ctx, cursor, call("query", "audienceRosterForSend", arg{"audienceId", audienceID}))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]Recipient, 0, len(rows))
 	for _, r := range rows {
+		canonical := str(r, "id")
 		out = append(out, Recipient{
-			ID:                 bare(str(r, "id")),
+			ID:                 bare(canonical),
+			CanonicalID:        canonical,
 			Email:              str(r, "email"),
 			DisplayName:        str(r, "displayName"),
 			SubscriptionStatus: str(r, "subscriptionStatus"),
 		})
 	}
-	return out, nil
+	return out, next, nil
 }
+
+// Roster reads the whole audience by walking every page. OWNED tier.
+//
+// Retained for the callers that genuinely want the set rather than a batch:
+// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// DOES NOT USE IT -- it walks RosterPage, because materializing a
+// hundred-thousand-address audience once per batch is the shape memql#3460
+// removed. maxRows bounds it so "the whole audience" cannot become an
+// unbounded allocation in a caller that only needed one row.
+func (s *Store) Roster(ctx context.Context, audienceID string) ([]Recipient, error) {
+	var out []Recipient
+	cursor := ""
+	for {
+		page, next, err := s.RosterPage(ctx, audienceID, cursor)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if next == "" || len(out) >= rosterWalkCap {
+			return out, nil
+		}
+		cursor = next
+	}
+}
+
+// rosterWalkCap bounds the whole-audience read above. Deliberately far
+// larger than the old 5000 ceiling and deliberately not a product limit:
+// it exists so a bug in the cursor loop is a bounded allocation rather
+// than an OOM.
+const rosterWalkCap = 100000
+
+// RosterSize returns how many recipients an audience holds, as a
+// server-side count. OWNED tier.
+//
+// A count query rather than the length of a read, and that distinction is
+// the memql#3460 lesson in one line: measuring a bounded page and calling it
+// a total is how the 5000 ceiling came to be load-bearing.
+func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
+	res, err := s.engine.Execute(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	if err != nil {
+		return 0, fmt.Errorf("campaigns: query audienceRosterSize: %w", err)
+	}
+	for _, row := range memql.MaterializeRows(res) {
+		if _, ok := row["count"]; ok {
+			return integer(row, "count"), nil
+		}
+	}
+	return 0, nil
+}
+
+// LedgerFor reads the delivery ledger for exactly the recipients named,
+// keyed by bare recipient id. THE read that makes a resumed send safe, and
+// the one that keeps a batch's cost proportional to the batch rather than to
+// the campaign (memql#3460). OWNED tier.
+//
+// canonicalIDs must be the stored canonical form -- see Recipient.CanonicalID
+// for why a bare id here would silently match nothing.
+func (s *Store) LedgerFor(ctx context.Context, campaignID string, canonicalIDs []string) (map[string]LedgerEntry, error) {
+	if len(canonicalIDs) == 0 {
+		return map[string]LedgerEntry{}, nil
+	}
+	rows, err := s.rows(ctx, call("query", "deliveriesForRecipients",
+		arg{"campaignId", campaignID},
+		arg{"recipientIds", canonicalIDs},
+	))
+	if err != nil {
+		return nil, err
+	}
+	// The query's own paginate is the only thing that could truncate this
+	// read, and a truncated ledger reads as "these recipients have never been
+	// mailed" -- which would re-mail them. Reads collapse to one row per id,
+	// so a result at or over the bound means the page size and the bound have
+	// drifted apart, and refusing is the only safe answer.
+	if len(rows) >= ledgerPageBound {
+		return nil, fmt.Errorf(
+			"campaigns: the delivery-ledger page returned %d rows, at the query's %d bound; refusing to diff a possibly-truncated ledger",
+			len(rows), ledgerPageBound)
+	}
+	return ledgerFromRows(rows), nil
+}
+
+// ledgerPageBound mirrors the `paginate` on deliveriesForRecipients. It is
+// headroom over the roster page size, not a page in its own right: the read
+// returns at most one row per named recipient.
+const ledgerPageBound = 1000
 
 // Ledger reads the delivery ledger for one campaign, keyed by bare
 // recipient id. THE read that makes a resumed send safe. OWNED tier.
@@ -271,25 +379,30 @@ func (s *Store) Ledger(ctx context.Context, campaignID string) (map[string]Ledge
 	if err != nil {
 		return nil, err
 	}
+	return ledgerFromRows(rows), nil
+}
+
+// ledgerFromRows keys a ledger projection by bare recipient id.
+//
+// LAST WRITE WINS on a duplicate. The query sorts oldest-first and a
+// re-attempt appends a new version under the SAME row id, so the later row is
+// the current state. Reading the first would resume against a stale outcome
+// and re-mail somebody.
+func ledgerFromRows(rows []map[string]any) map[string]LedgerEntry {
 	out := make(map[string]LedgerEntry, len(rows))
 	for _, r := range rows {
 		recipientID := bare(str(r, "recipientId"))
 		if recipientID == "" {
 			continue
 		}
-		entry := LedgerEntry{
+		out[recipientID] = LedgerEntry{
 			RecipientID:   recipientID,
 			Status:        str(r, "status"),
 			Attempts:      integer(r, "attempts"),
 			NextAttemptAt: parseTime(str(r, "nextAttemptAt")),
 		}
-		// LAST WRITE WINS on a duplicate. The query sorts oldest-first and
-		// a re-attempt appends a new version under the SAME row id, so the
-		// later row is the current state. Reading the first would resume
-		// against a stale outcome and re-mail somebody.
-		out[recipientID] = entry
 	}
-	return out, nil
+	return out
 }
 
 // SuppressionByDigest asks the cluster-wide list about one address.
@@ -351,6 +464,11 @@ type SendJobPatch struct {
 	StartedAt      *time.Time
 	CompletedAt    *time.Time
 	ThrottledUntil *time.Time
+
+	// RosterCursor and RosterOutstanding carry the walk's position and
+	// whether the current pass has seen outstanding work (memql#3460).
+	RosterCursor      *string
+	RosterOutstanding *bool
 }
 
 // UpdateJob stamps a patch onto a send job. clusterOwner-tier.
@@ -365,6 +483,8 @@ func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPa
 	args = appendTime(args, "startedAt", patch.StartedAt)
 	args = appendTime(args, "completedAt", patch.CompletedAt)
 	args = appendTime(args, "throttledUntil", patch.ThrottledUntil)
+	args = appendStr(args, "rosterCursor", patch.RosterCursor)
+	args = appendBool(args, "rosterOutstanding", patch.RosterOutstanding)
 	return s.exec(ctx, call("mutation", "updateSendJob", args...))
 }
 
@@ -517,6 +637,14 @@ func call(kind, name string, args ...arg) string {
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(v))
 		case int:
 			rendered = append(rendered, fmt.Sprintf("%s: %d", a.name, v))
+		case bool:
+			rendered = append(rendered, fmt.Sprintf("%s: %t", a.name, v))
+		case []string:
+			quoted := make([]string, 0, len(v))
+			for _, item := range v {
+				quoted = append(quoted, langparser.QuoteString(item))
+			}
+			rendered = append(rendered, a.name+": ["+strings.Join(quoted, ", ")+"]")
 		default:
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(fmt.Sprintf("%v", v)))
 		}
@@ -525,6 +653,13 @@ func call(kind, name string, args ...arg) string {
 }
 
 func appendStr(args []arg, name string, v *string) []arg {
+	if v == nil {
+		return args
+	}
+	return append(args, arg{name, *v})
+}
+
+func appendBool(args []arg, name string, v *bool) []arg {
 	if v == nil {
 		return args
 	}
@@ -554,6 +689,52 @@ func (s *Store) rows(ctx context.Context, q string) ([]map[string]any, error) {
 		return nil, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	return memql.MaterializeRows(res), nil
+}
+
+// rowsPage issues a paginated read at the given continuation point and
+// returns the rows plus the engine's next cursor (memql#3460).
+//
+// The cursor rides the CONTEXT rather than the query text, because that is
+// the engine's own contract: `paginate` in the DSL declares a page size, and
+// the continuation is a runtime value the executor lifts off the context and
+// compiles into a `(createdAt, id)` keyset predicate. There is no grammar for
+// it and there should not be -- a cursor spelled into a query string would be
+// a caller-supplied scan position on an owned-tier read.
+func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]any, string, error) {
+	if cursor != "" {
+		ctx = memql.ContextWithCursor(ctx, cursor)
+	}
+	res, err := s.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+	}
+	return memql.MaterializeRows(res), cursorFromResult(res), nil
+}
+
+// cursorFromResult lifts the continuation token off whatever the engine seam
+// handed back. Two shapes, and both are real: the in-process engine returns
+// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
+// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
+// can). A result with neither is an exhausted page, which is the safe reading
+// -- it ends the walk rather than continuing from a position nobody supplied.
+func cursorFromResult(res any) string {
+	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
+	if carrier, ok := res.(metaCarrier); ok {
+		if meta := carrier.GetMeta(); meta != nil {
+			return strings.TrimSpace(meta.Cursor)
+		}
+	}
+	if envelope, ok := res.(map[string]any); ok {
+		if raw, ok := envelope["cursor"].(string); ok {
+			return strings.TrimSpace(raw)
+		}
+		if meta, ok := envelope["meta"].(map[string]any); ok {
+			if raw, ok := meta["cursor"].(string); ok {
+				return strings.TrimSpace(raw)
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -587,6 +768,19 @@ func sendJobFromRow(r map[string]any) SendJob {
 		ThrottledUntil:      parseTime(str(r, "throttledUntil")),
 		StartedAt:           parseTime(str(r, "startedAt")),
 		ScheduledAt:         parseTime(str(r, "scheduledAt")),
+		RosterCursor:        str(r, "rosterCursor"),
+		RosterOutstanding:   boolean(r, "rosterOutstanding"),
+	}
+}
+
+func boolean(m map[string]any, key string) bool {
+	switch v := m[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
 	}
 }
 

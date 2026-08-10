@@ -61,14 +61,25 @@ const (
 	// buying delivery.
 	defaultMaxAttempts = 3
 
-	// defaultMaxAudience is the send's audience ceiling, matched to the
-	// `paginate 5000` on audienceRosterForSend and to the engine's
-	// MEMORY_ENGINE_MAX_WINDOW default. The worker reads the roster WHOLE
-	// on every batch and diffs it against the ledger, so an audience past
-	// the bound would be silently truncated -- campaignStartSend refuses
-	// the send instead. Raising this env alone is NOT enough; the query's
-	// paginate bound and the engine window have to move with it.
-	defaultMaxAudience = 5000
+	// defaultMaxAudience is the send's audience ceiling, and since
+	// memql#3460 it means something different from what it used to.
+	//
+	// It WAS a correctness guard at 5000: the worker read the roster whole
+	// on every batch, the read was bounded by a `paginate 5000`, and past
+	// that bound the send would have diffed a truncated audience and
+	// declared itself complete having never seen the tail. Refusing was the
+	// only safe answer, and "5000 is the largest mailing list this can send
+	// to" was the price.
+	//
+	// The send now WALKS the roster and reads the ledger per page, so no
+	// audience size is unsafe and nothing here is load-bearing for
+	// correctness. What remains is a deliberate refusal: a send this large
+	// is more often a mis-scoped audience or a bad import than an intent,
+	// and a mistake at this scale cannot be recalled. So the ceiling stays,
+	// two orders of magnitude higher, and raising it is now a decision about
+	// how large a send this deployment means to make -- not a thing you have
+	// to do in three places to avoid silent truncation.
+	defaultMaxAudience = 250000
 
 	// defaultClaimTTLSeconds leases the cross-replica claim. Sized like
 	// the outbound worker's: well above how long one live batch can take

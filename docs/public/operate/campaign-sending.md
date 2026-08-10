@@ -42,7 +42,7 @@ campaigns deliberately do not use — see below)
                             │
        drain worker  ──────▶│  every 15s, one batch per job
                             │
-                            ├── roster  ⨯ delivery ledger  = who is left
+                            ├── roster page ⨯ its ledger   = who is left
                             ├── cluster suppression list   = who may not
                             ├── token bucket               = how fast
                             └── send ─────────────────────────────────▶ inbox
@@ -136,6 +136,39 @@ A **soft** bounce does neither. It is transient — a full mailbox, a greylistin
 relay — and suppressing on one loses a real subscriber to a bad afternoon. The
 per-recipient retry budget (`MEMQL_CAMPAIGNS_MAX_ATTEMPTS`) is what bounds
 those.
+
+### The audience is walked, not held
+
+The send reads the roster **one page at a time**, through the engine's keyset
+cursor, and reads the delivery ledger **for that page** rather than for the
+campaign. Both halves matter: the ledger for a large campaign is exactly as
+large as its roster, so cursoring one and not the other would move the ceiling
+rather than remove it.
+
+Before this, both reads were whole and bounded at 5000 rows — and a bounded
+read of an unbounded set is a truncation, so a larger audience would have been
+mailed as a silent prefix. The send refused instead, and "5000 is the largest
+mailing list this can send to" was the price.
+
+**Why ascending order is safe while the roster is being edited.** Reads
+collapse to the latest version per id, so editing a recipient mid-send — which
+this worker does, converging a suppressed address — moves it to a *newer*
+timestamp, i.e. forward in an ascending walk, never backward past the cursor.
+A row can therefore be seen twice and can never be missed. A duplicate costs a
+comparison; a skip costs somebody their mail. Duplicates inside one batch are
+de-duplicated, because those would be mailed before either send was recorded.
+
+**The cursor is an optimization, not the idempotency mechanism.** It lives on
+the send job so a tick resumes instead of re-scanning from the start. Losing
+it, or having the engine refuse a stale one, costs one re-scan. What decides
+who gets mailed is the ledger, below.
+
+**`MEMQL_CAMPAIGNS_MAX_AUDIENCE` still exists, and now means something
+different.** It was a correctness guard at 5000. It is now a deliberate
+refusal at 250,000: no size is unsafe, but a send that large is more often a
+mis-scoped audience or a bad import than an intent, and it cannot be recalled.
+Raising it is a decision about how large a send you mean to make — not
+something you have to do in three places to avoid silent truncation.
 
 ### Idempotency is the ledger, not a retry flag
 
@@ -458,7 +491,7 @@ The manual procedure works today and uses the same knob:
 | `startSend` refuses: "no one-click unsubscribe" | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` / `_BASE_URL` unset. |
 | `startSend` refuses: "no email sender registered" | Neither the Graph nor the SMTP credentials resolved on this node; the `LogSender` is not a sender for this purpose. |
 | `startSend` refuses: template not ready | Mark the template `ready`. |
-| Job `failed`, "audience has reached the ceiling" | Split the audience, or raise `MEMQL_CAMPAIGNS_MAX_AUDIENCE` **and** the `paginate` bound on `audienceRosterForSend` **and** `MEMORY_ENGINE_MAX_WINDOW`. |
+| `startSend` refuses: "over the ceiling" | The audience is larger than `MEMQL_CAMPAIGNS_MAX_AUDIENCE` (default 250,000). Nothing is technically wrong with a send that size — raise it if you mean it, or check the audience is scoped the way you think. |
 | Scheduled campaign did not send | Read the campaign row's `lastError` — the fire-time preflight records its reason there. An environment refusal (no sender, no unsubscribe config) retries; an authoring one leaves the campaign `failed`. |
 | Scheduled campaign sent later than its time | Expected after downtime: a late send is sent rather than dropped. The log line carries `lateBy`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |

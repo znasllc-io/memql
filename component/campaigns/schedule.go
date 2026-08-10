@@ -219,17 +219,17 @@ func (w *Worker) fireTimePreflight(ownerCtx context.Context, campaign Campaign) 
 		return fmt.Sprintf("template %q is %q rather than \"ready\"; it was un-readied after the campaign was scheduled", tmpl.ID, tmpl.Status), true
 	}
 
-	roster, err := w.store.Roster(ownerCtx, campaign.AudienceID)
+	size, err := w.store.RosterSize(ownerCtx, campaign.AudienceID)
 	if err != nil {
-		return "could not read the audience roster: " + err.Error(), false
+		return "could not count the audience: " + err.Error(), false
 	}
-	if len(roster) == 0 {
+	if size == 0 {
 		return fmt.Sprintf("audience %q has no recipients", campaign.AudienceID), true
 	}
-	if len(roster) >= w.cfg.MaxAudience {
+	if size > w.cfg.MaxAudience {
 		return fmt.Sprintf(
-			"audience %q has grown to %d recipients, at or over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE)",
-			campaign.AudienceID, len(roster), w.cfg.MaxAudience), true
+			"audience %q has grown to %d recipients, over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE)",
+			campaign.AudienceID, size, w.cfg.MaxAudience), true
 	}
 	return "", false
 }
