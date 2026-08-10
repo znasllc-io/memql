@@ -82,7 +82,6 @@
       "id": "providerKey",
       "script": "install.verifyProviderKey",
       "description": "Confirm the operator's AI-provider key is accepted before the cluster is built around it.",
-      "params": {"provider": "anthropic"},
       "dependsOn": ["detect"],
       "readOnly": true,
       "elevation": "none",

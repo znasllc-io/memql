@@ -62,12 +62,36 @@ export interface StepProgress {
   guided: boolean;
 }
 
+/**
+ * The AI providers an install can seed a key for (memql#3473).
+ *
+ * DERIVED FROM WHAT THE SCRIPT ACCEPTS, not from what the wizard felt like
+ * offering: `scripts/install/verify-provider-key.sh` supports exactly these
+ * two and exits 2 on anything else, which is a fault in memQL rather than in
+ * the operator's answer -- so the field is a CHOICE and this list is what it
+ * chooses from.
+ */
+export const SUPPORTED_PROVIDERS = ["anthropic", "openai"] as const;
+
+export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+
 /** What an install asks for. Collected once, before anything runs. */
 export interface Inputs {
   domain: string;
   ownerFirstName: string;
   ownerLastName: string;
   ownerEmail: string;
+  /**
+   * Which vendor the key below belongs to.
+   *
+   * COLLECTED, not pinned. It was hardcoded `anthropic` in the panel AND in
+   * `install.json`, where graph params win -- so an operator holding an OpenAI
+   * key had no route through this wizard at all, while every test enumerated
+   * the other five fields and the criterion read as satisfied at a glance.
+   * Which vendor a key belongs to is a fact about the OPERATOR'S KEY, which is
+   * run input like the path beside it, not policy the graph pins.
+   */
+  provider: string;
   /** A PATH. The key itself never enters this module -- see SessionOptions. */
   providerKeyFile: string;
 }
@@ -105,6 +129,10 @@ export const DEFAULT_INPUTS: Inputs = {
   ownerFirstName: "",
   ownerLastName: "",
   ownerEmail: "",
+  // The provider DOES get a default, unlike the four personal fields: it is a
+  // choice from a closed set rather than a fact about the operator, so a
+  // pre-selection is an answer they can accept rather than a guess about them.
+  provider: "anthropic",
   providerKeyFile: "",
 };
 
@@ -230,7 +258,14 @@ export function requiredFields(action: AddClusterAction): InputField[] {
   switch (action) {
     case "install":
     case "installGuided":
-      return ["domain", "ownerFirstName", "ownerLastName", "ownerEmail", "providerKeyFile"];
+      return [
+        "domain",
+        "ownerFirstName",
+        "ownerLastName",
+        "ownerEmail",
+        "provider",
+        "providerKeyFile",
+      ];
     case "repair":
       return ["domain"];
     case "uninstall":
@@ -244,6 +279,7 @@ const LABELS: Record<InputField, string> = {
   ownerFirstName: "first name",
   ownerLastName: "last name",
   ownerEmail: "email address",
+  provider: "AI provider",
   providerKeyFile: "provider key file",
 };
 
@@ -408,6 +444,12 @@ export class AddClusterState {
     }
     if (field === "domain" && /\s/.test(trimmed)) {
       return "A domain cannot contain spaces.";
+    }
+    // The refusal is HERE rather than at the script, which would report exit 2
+    // -- correctly worded as a fault in memQL rather than in the operator's
+    // answer, and therefore the wrong sentence for a value they chose.
+    if (field === "provider" && !SUPPORTED_PROVIDERS.some((p) => p === trimmed)) {
+      return `memQL can verify a key for ${SUPPORTED_PROVIDERS.join(" or ")}.`;
     }
     return undefined;
   }

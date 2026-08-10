@@ -237,6 +237,7 @@ function beginInstall(h: Harness): void {
   h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
   h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
   h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
+  h.post({ type: "input", value: { field: "provider", text: "anthropic" } });
   h.post({ type: "input", value: { field: "providerKeyFile", text: "/tmp/key" } });
   h.post({ type: "begin" });
 }
@@ -299,7 +300,7 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
           script: "install.verifyProviderKey",
           receipt: "",
           preExisting: false,
-          params: { provider: "anthropic", "key-file": "/home/ada/.anthropic-key" },
+          params: { provider: "openai", "key-file": "/home/ada/.openai-key" },
           result: { valid: true },
           changed: false,
           recordedAt: "2026-08-01T00:00:00Z",
@@ -317,8 +318,14 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
     const key = runner.calls.find((c) => c.capability === "install.verifyProviderKey")!;
     assert.equal(
       key.params["key-file"],
-      "/home/ada/.anthropic-key",
+      "/home/ada/.openai-key",
       "the recorded key path must reach the step -- an absent flag is exit 2",
+    );
+    assert.equal(
+      key.params.provider,
+      "openai",
+      "and the recorded VENDOR with it: re-asserting the wizard's default would " +
+        "check an OpenAI key against Anthropic and report the key as refused",
     );
   } finally {
     h.close();
@@ -423,6 +430,61 @@ test("every step is invoked with a non-zero timeout", async () => {
         `step ${call.capability} was given no timeout ceiling`,
       );
     }
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// The provider is COLLECTED, and what is collected is what runs (memql#3473)
+// -----------------------------------------------------------------------------
+
+test("the collect screen offers a provider, as a choice rather than a box", async () => {
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    const html = h.html();
+    assert.match(html, /<select[^>]*data-field="provider"/, "a free-text box could hold anything");
+    assert.match(html, /value="anthropic" selected/, "and one answer is already given");
+    assert.match(html, /value="openai"/, "the other vendor the script supports is reachable");
+  } finally {
+    h.close();
+  }
+});
+
+test("the provider the operator chose is the provider the step verifies", async () => {
+  // The whole of the defect: `provider` was hardcoded in this panel AND pinned
+  // in install.json, where GRAPH PARAMS WIN -- so even a caller-supplied value
+  // could not have overridden it. An operator with an OpenAI key had no route
+  // through the wizard at all.
+  const runner = await fakeRunner();
+  const h = open({ runner });
+  try {
+    h.post({ type: "choose", value: "install" });
+    h.post({ type: "input", value: { field: "domain", text: "local.znas.io" } });
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
+    h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
+    h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
+    h.post({ type: "input", value: { field: "provider", text: "openai" } });
+    h.post({ type: "input", value: { field: "providerKeyFile", text: "/tmp/key" } });
+    h.post({ type: "begin" });
+
+    await until(
+      () => runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
+      "the provider-key step",
+    );
+    const key = runner.calls.find((c) => c.capability === "install.verifyProviderKey")!;
+    assert.equal(key.params.provider, "openai");
+
+    // And it reaches the step that seeds the cluster, not only the one that
+    // checks the key -- a cluster seeded for the wrong vendor is a working
+    // install that cannot answer.
+    await until(
+      () => runner.calls.some((c) => c.capability === "install.seedBootstrap"),
+      "the bootstrap step",
+    );
+    const seed = runner.calls.find((c) => c.capability === "install.seedBootstrap")!;
+    assert.equal(seed.params.provider, "openai");
   } finally {
     h.close();
   }

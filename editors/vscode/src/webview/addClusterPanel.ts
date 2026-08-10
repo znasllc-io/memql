@@ -43,7 +43,7 @@ import {
 import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
-import { readReceipt, recordedProviderKeyFile } from "../install/receipt.js";
+import { readReceipt, recordedProvider, recordedProviderKeyFile } from "../install/receipt.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import {
@@ -57,6 +57,7 @@ import {
 import {
   AddClusterState,
   requiredFields,
+  SUPPORTED_PROVIDERS,
   type ConnectField,
   type InputField,
 } from "../state/addCluster.js";
@@ -78,8 +79,22 @@ const INPUT_FIELDS: readonly InputField[] = [
   "ownerFirstName",
   "ownerLastName",
   "ownerEmail",
+  "provider",
   "providerKeyFile",
 ];
+
+/**
+ * The fields rendered as a CHOICE rather than as a text box.
+ *
+ * `provider` is one because the set is closed and the script refuses anything
+ * outside it with exit 2 -- whose guidance says "a fault in memQL rather than
+ * in your machine or your answers", which would be a lie about a value the
+ * operator typed. A control that cannot express the wrong answer is the fix;
+ * `problemWith` is the second wall, for a message this page did not render.
+ */
+const CHOICE_FIELDS: Partial<Record<InputField, readonly string[]>> = {
+  provider: SUPPORTED_PROVIDERS,
+};
 
 /** The label each collected field carries. */
 const FIELD_LABELS: Record<InputField, string> = {
@@ -87,6 +102,7 @@ const FIELD_LABELS: Record<InputField, string> = {
   ownerFirstName: "First name",
   ownerLastName: "Last name",
   ownerEmail: "Email address",
+  provider: "AI provider",
   providerKeyFile: "AI provider key file",
 };
 
@@ -165,6 +181,8 @@ const FIELD_HINTS: Record<InputField, string> = {
   domain: "The cluster answers at cockpit.<domain>. Defaults are fine if you have no preference.",
   ownerFirstName: "The cluster owner -- you.",
   ownerLastName: "",
+  provider:
+    "Which vendor the key below belongs to. The installer makes one authenticated call to check it before anything on this machine changes.",
   ownerEmail: "Used to create the owner account. A local cluster sends no mail.",
   providerKeyFile:
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
@@ -528,8 +546,16 @@ export class AddClusterPanel {
     // is the record of what the install did, and `providerKey` writes an entry
     // even though it leaves no artifact, so the path is already on disk.
     let providerKeyFile = inputs.providerKeyFile;
+    let provider = inputs.provider;
     if (providerKeyFile === "") {
-      providerKeyFile = recordedProviderKeyFile(await readReceipt(this.deps.receiptFile));
+      const receipt = await readReceipt(this.deps.receiptFile);
+      providerKeyFile = recordedProviderKeyFile(receipt);
+      // The recorded vendor travels with the recorded path, and for the same
+      // reason: a repair that read the key file back but re-asserted the
+      // wizard's DEFAULT vendor would verify an OpenAI key against Anthropic
+      // and report a refusal (exit 3) -- "the key is bad", about a key that is
+      // fine.
+      provider = recordedProvider(receipt) || provider;
     }
     if (providerKeyFile === "") {
       // REFUSE RATHER THAN START. Without a key path the run cannot pass wave
@@ -558,9 +584,11 @@ export class AddClusterPanel {
           // about where it lives.
           receiptFile: this.deps.receiptFile,
           skip: new Set<string>(),
-          // The graph pins `anthropic` on the providerKey step; this is the
-          // same value, passed for the seedBootstrap step that also needs it.
-          provider: "anthropic",
+          // COLLECTED (memql#3473), and the graph no longer pins it -- which
+          // vendor a key belongs to is a fact about the operator's key, run
+          // input like the path beside it, not policy the graph decides. On a
+          // repair it comes off the receipt, with the key path.
+          provider,
           domain: inputs.domain,
           ownerEmail: inputs.ownerEmail,
           ownerFirstName: inputs.ownerFirstName,
@@ -936,7 +964,7 @@ ${viewKitStyles}
   .card[data-tone="destructive"] .card-label { color: var(--vscode-editorWarning-foreground); }
   .field { margin-bottom: 12px; }
   .field label { display: block; margin-bottom: 3px; }
-  .field input { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
+  .field input, .field select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
                  color: var(--vscode-input-foreground);
                  background: var(--vscode-input-background);
                  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
@@ -946,7 +974,8 @@ ${viewKitStyles}
   /* A refusal that belongs to the whole form rather than to one box, so it
      sits away from the fields instead of looking like the last one's. */
   .form-error { margin: 14px 0 0; }
-  .field[data-invalid="true"] input { border-color: var(--vscode-editorError-foreground); }
+  .field[data-invalid="true"] input, .field[data-invalid="true"] select {
+    border-color: var(--vscode-editorError-foreground); }
   .actions { display: flex; gap: 8px; margin-top: 16px; }
   button.primary, button.secondary {
     font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
@@ -983,11 +1012,19 @@ ${this.bodyHtml()}
     const act = e.target.closest('[data-act]');
     if (act) vscode.postMessage({ type: act.dataset.act });
   });
-  document.addEventListener('input', (e) => {
+  // BOTH events, because the collect screen now carries a select as well as
+  // text boxes. A select fires an input event in every browser this runs in,
+  // but change is the one it is specified around, and this handler is
+  // idempotent -- the extension records the value and repaints, so arriving
+  // twice costs a duplicate message and nothing else. (No backticks in here:
+  // this script is itself inside a template literal.)
+  function sendField(e) {
     const field = e.target.closest('[data-field]');
     if (field) vscode.postMessage({
       type: 'input', value: { field: field.dataset.field, text: field.value } });
-  });
+  }
+  document.addEventListener('input', sendField);
+  document.addEventListener('change', sendField);
   // Escape acts only where a screen has ASKED for it. A page-wide handler
   // would also cancel a screen that never opted in, and "the keystroke did
   // something the screen never offered" is the failure this attribute avoids.
@@ -1155,9 +1192,21 @@ ${cards}`;
       .map((field) => {
         const error = errors.find((e) => e.field === field);
         const hint = FIELD_HINTS[field];
+        const choices = CHOICE_FIELDS[field];
+        const control =
+          choices === undefined
+            ? `<input id="f-${field}" data-field="${field}" value="${escapeHtml(values[field])}">`
+            : `<select id="f-${field}" data-field="${field}">${choices
+                .map(
+                  (choice) =>
+                    `<option value="${escapeHtml(choice)}"${
+                      choice === values[field] ? " selected" : ""
+                    }>${escapeHtml(choice)}</option>`,
+                )
+                .join("")}</select>`;
         return `<div class="field" data-invalid="${error !== undefined}">
   <label for="f-${field}">${escapeHtml(FIELD_LABELS[field])}</label>
-  <input id="f-${field}" data-field="${field}" value="${escapeHtml(values[field])}">
+  ${control}
   ${hint === "" ? "" : `<div class="hint">${escapeHtml(hint)}</div>`}
   ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
 </div>`;
