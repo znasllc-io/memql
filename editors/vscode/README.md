@@ -25,7 +25,58 @@ uses), browse every registered concept grouped by domain, and inspect rows
 trusted workspace, since it reads credentials and opens a network
 connection. See [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
 
-## Install / update locally
+## Cluster lifecycle
+
+A cluster's whole life is reachable from the Clusters view: add it, repair
+it, remove it from the editor, or take it off the machine.
+
+**Add.** The **+** in the view title opens the **Add a cluster** page. What
+it offers depends on what is already here -- it looks for an install receipt,
+a `local: true` entry, and whether that cluster answers -- so a machine with
+nothing on it is offered an install, and a machine that already has a local
+cluster is offered a repair or an uninstall instead. Registering a cluster
+that runs somewhere else is one of the choices on the same page. Nothing in
+this surface hands you a command to paste into a terminal.
+
+**Repair.** The install graph, run again. Every step verifies before it acts
+and skips whatever is already satisfied, which is what makes re-running an
+install a repair rather than a second install: there is one graph and one run
+path, and only the wording differs. Reachable from the page, and from the
+cluster panel's primary control when the cluster is registered but not
+answering.
+
+**Remove.** The trash can beside a cluster row. It drops the registry entry
+from `~/.memql/clusters.yaml`, deletes the credential this editor stored for
+that cluster, and closes the connection if it was the live one. **Nothing on
+the machine is touched**: the cluster keeps running, its data is untouched,
+and you can add it back at any time.
+
+**Uninstall.** The row's context menu, on local clusters only. It reverses
+the install receipt -- the k3d cluster, the hosts-file entries, the mkcert
+CA, the pinned tools -- and there is no undo, because a deleted k3d cluster
+takes its database with it.
+
+Remove and Uninstall are separate commands with separate labels, menus and
+confirmations, and that separation is deliberate. One is a routine edit to a
+list and the other is irreversible; a single action that asked which you
+meant would put the irreversible one a click away from the routine one.
+Uninstall is contributed only on rows this editor installed and never as an
+inline icon, so aiming at the trash can cannot land on it. It confirms
+against an itemised dry run rather than a yes/no prompt: every artifact the
+receipt names, what will happen to it, and which steps will ask for
+elevation. Anything the install *found* rather than created -- an mkcert CA
+that was already on the machine -- is listed as preserved and left alone.
+
+The same install runs from a terminal for scripted and CI use, and is not
+deprecated: `npm run install-cli -- install` and `... -- uninstall`. It is
+not a second implementation. `src/install/session.ts` holds the
+orchestration and both the page and `src/install/cli.ts` are callers of it,
+so there is no second run path to drift out of step.
+
+Operator-facing detail, including what the page collects before it starts:
+[VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
+
+## Install / update the extension locally
 
 One command builds the extension (building a fresh `memql-lsp`) and
 (re)installs it into VS Code:
@@ -96,6 +147,10 @@ make vscode-test-host   # host smoke lane -- downloads and drives a real VS Code
 
 The two lanes answer different questions. `vscode-test` covers the modules that
 do not import `vscode`; it is fast and dependency-light and must stay that way.
+It also covers `package.json` itself, because the tree's context menus are
+decided by `when` clauses the workbench evaluates and no host API can read back
+the entries it drew -- a clause edited to match no row would otherwise remove an
+action from the product with nothing noticing (`test/clusterMenus.test.ts`).
 `vscode-test-host` (`editors/vscode/test-host/`) launches a real Extension
 Development Host to assert what a unit test structurally cannot reach -- that
 activation survives the host's runtime, that every command the manifest
