@@ -19,13 +19,12 @@ import {
   type InputField,
 } from "../src/state/addCluster.js";
 
-const ALL_FIELDS: InputField[] = [
-  "domain",
-  "ownerFirstName",
-  "ownerLastName",
-  "ownerEmail",
-  "providerKeyFile",
-];
+// DERIVED, never hand-listed. A hand-maintained array leaves any field added
+// later silently uncovered by the secret-hygiene test below -- which is the one
+// test whose whole value is that it keeps holding for fields nobody has written
+// yet. Reading the keys off the defaults means a new field is covered the
+// moment it exists.
+const ALL_FIELDS = Object.keys(DEFAULT_INPUTS) as InputField[];
 
 // ---------------------------------------------------------------------------
 // defaults
@@ -99,20 +98,37 @@ test("no validation message ever quotes the value it rejected", () => {
   // error -- `That path (${value}) does not exist` -- is exactly how a value
   // reaches a log, a telemetry payload or a screenshot. Refusing to interpolate
   // values at all is a rule that cannot be got wrong by degrees.
-  const distinctive = "ZZ-do-not-echo-me-9f3b7c2a";
-  const state = new AddClusterState();
-  state.chooseAction("install");
+  //
+  // BOTH MESSAGE SOURCES ARE DRIVEN, and separately, because filling every
+  // field makes the required-field branch unreachable -- an earlier version of
+  // this test filled everything and so only ever exercised one shape error.
+  const sentinel = "ZZ-do-not-echo-me-9f3b7c2a";
 
-  for (const field of ALL_FIELDS) {
-    state.setInput(field, distinctive);
-  }
-  // Force the required-field pass too, so both message sources are covered.
-  state.beginRun();
-
-  for (const error of state.errors) {
+  // (a) shape errors: a value that is present and wrong. The trailing space
+  // trips the domain rule as well as the email one, so more than a single
+  // field produces a message.
+  const shaped = new AddClusterState();
+  shaped.chooseAction("install");
+  for (const field of ALL_FIELDS) shaped.setInput(field, `${sentinel} x`);
+  assert.ok(shaped.errors.length > 0, "no shape errors were produced to check");
+  for (const error of shaped.errors) {
     assert.ok(
-      !error.message.includes(distinctive),
-      `${error.field}'s message echoed the entered value: ${error.message}`,
+      !error.message.includes(sentinel),
+      `${error.field}'s shape message echoed the value: ${error.message}`,
+    );
+  }
+
+  // (b) required-field errors: the branch (a) cannot reach. Every field left
+  // empty, then forced through validate() by attempting to start.
+  const empty = new AddClusterState();
+  empty.chooseAction("install");
+  for (const field of ALL_FIELDS) empty.setInput(field, "");
+  assert.equal(empty.beginRun(), false);
+  assert.ok(empty.errors.length > 0, "no required-field errors were produced to check");
+  for (const error of empty.errors) {
+    assert.ok(
+      !error.message.includes(sentinel),
+      `${error.field}'s required message echoed a value: ${error.message}`,
     );
   }
 });

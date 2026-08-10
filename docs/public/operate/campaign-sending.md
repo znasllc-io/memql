@@ -57,7 +57,8 @@ Minimum to send anything:
 
 | Variable | Why |
 |---|---|
-| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` | Signs the one-click unsubscribe link. **Required** — a send is refused without it. |
+| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` | Signs the one-click unsubscribe link. **Required** — a send is refused without it. Rotating it needs the variable below; see [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
+| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` | The previous signing key: **verified against, never signed with**. Optional, and unset only on a deployment that has never rotated. |
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://cockpit.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. |
 | An email sender | `MEMQL_EMAIL_AZURE_*` + `MEMQL_EMAIL_SENDER` (Microsoft Graph), or `SMTP_*`. With neither, the node runs the `LogSender` and a send is refused. |
 
@@ -67,10 +68,9 @@ Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
 `_CLAIM_TTL_SECONDS`, `_THROTTLE_SECONDS`, `_SEND_TIMEOUT_SECONDS`,
 `_ENABLED`.
 
-**Rotating the unsubscribe secret invalidates every unsubscribe link already
-sitting in a recipient's inbox.** There is no key-id or previous-secret
-fallback. Set it once per deployment and treat it as a key without a rotation
-story until one exists.
+Rotating the unsubscribe signing key is a two-variable operation, and doing it
+with one variable breaks every link already sent. The procedure is
+[below](#rotating-the-unsubscribe-signing-key).
 
 ---
 
@@ -195,6 +195,84 @@ compliance failure dressed as hygiene.
 The endpoint is HTTP, which is a documented exception to the gRPC-first rule
 for the same reason `POST /inbound/{source}` is: the caller is the recipient's
 mail client, and there is no gRPC version of that conversation.
+
+### Rotating the unsubscribe signing key
+
+The token names the key that signed it, and the node verifies against a ring of
+two — `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` and the optional
+`MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Only the first ever signs.
+
+```
+u2.<keyId>.<owner>.<recipient>.<campaign>.<tag>
+   ^^^^^^^ first 4 bytes of HMAC-SHA256(secret, "memql/campaigns/unsubscribe/key-id"), hex
+```
+
+The key id is a digest **of the key**, not a slot number or a counter. That is
+deliberate: a link minted today is clicked on a node where that same secret has
+since become the *previous* one, so a label like "current" would be wrong
+exactly when it is needed, and a counter is one more value an operator can set
+inconsistently across replicas. A digest of the key is true wherever the key is.
+It leaks nothing — anyone holding a token already holds a 128-bit MAC over known
+plaintext under the same secret.
+
+**The procedure**
+
+1. Set `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` to the **current** value of
+   `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET`.
+2. Set `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` to the new value.
+3. Apply **both in the same change** and roll every node that mints or serves
+   unsubscribe links (the campaign worker and the bff).
+4. **Leave `_PREVIOUS` set. Do not remove it later.**
+
+Step 4 is where this differs from every other key rotation in the system, and it
+is the whole reason this page has a section.
+
+**How long does an old link keep working? Forever — until a second rotation.**
+
+The window is counted in *rotations*, not in days. There is no time-based expiry
+anywhere in the token, and adding one would defeat the point.
+
+The usual advice — "drop the previous value once no unsent mail references it" —
+has no true form here. An unsubscribe link does not expire when the send
+finishes; it lives in the recipient's mailbox for as long as they keep the
+message, which for a mailing list is indefinitely. So there is no date after
+which retiring the old key is safe, and `_PREVIOUS` is not a migration window
+that closes. It is a permanent second **reader** key.
+
+What that buys, stated plainly:
+
+| | Links signed by |
+|---|---|
+| Current key | keep working |
+| Previous key | keep working |
+| Any key retired by an earlier rotation | **dead, permanently** |
+
+So the standing rule is **rotate at most once for any reason short of
+compromise.** A second rotation retires the oldest key and does break every link
+it signed — which is acceptable in exactly one case: the key leaked, and killing
+those links is the point. If a routine second rotation is unavoidable, treat the
+messages signed by the retiring key as messages whose opt-out is now
+mailto-only, and say so in the next send's footer.
+
+**What the engine tells you**
+
+- At boot, the campaign worker warns once when this deployment holds only one
+  key *and* has already sent campaign mail:
+
+  ```
+  WARN campaigns: this cluster has already sent campaign mail and holds only ONE
+  unsubscribe signing key. MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS is unset,
+  so changing MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET would invalidate every
+  unsubscribe link already sitting in a recipient's mailbox ...
+  ```
+
+  It is silent before the first send (setting `_PREVIOUS` then costs nothing)
+  and silent once `_PREVIOUS` is set.
+
+- When a link arrives signed by a key nobody holds, the endpoint renders the
+  ordinary "This link is not valid" page — never a 500 — and logs a warning
+  carrying the token's `keyId` (which is not secret). One of those lines means a
+  rotation dropped a key that had already signed live mail.
 
 ### SPF / DKIM alignment is structural
 
@@ -325,4 +403,5 @@ The manual procedure works today and uses the same knob:
 | Job `failed`, "audience has reached the ceiling" | Split the audience, or raise `MEMQL_CAMPAIGNS_MAX_AUDIENCE` **and** the `paginate` bound on `audienceRosterForSend` **and** `MEMORY_ENGINE_MAX_WINDOW`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
-| Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the secret was rotated after the message was sent. |
+| Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
+| Boot warns "holds only ONE unsubscribe signing key" | This deployment has sent campaign mail and has no `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Nothing is broken yet; the next rotation of the secret alone would break every link already sent. |
