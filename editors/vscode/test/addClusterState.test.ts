@@ -314,6 +314,18 @@ import * as path from "node:path";
 import { addCluster, readClustersFile } from "../src/clusters/file.js";
 import type { ClustersFile } from "../src/clusters/model.js";
 
+// A stand-in for the pasted access token, deliberately NOT shaped like a JWT.
+//
+// The field really does hold one in production, and an earlier version of these
+// fixtures used a structurally valid but empty JWT for that realism. It tripped
+// gitleaks, which reads a `header.payload.signature` triple next to the word
+// `token` as a credential and cannot know the payload is `{}`. Realism bought
+// nothing here: `validateConnect` only refuses a `mql_pat_` prefix and embedded
+// whitespace, so nothing in the code under test parses this value. A fixture
+// that trains the secret scanner to expect false positives in this file is a
+// worse trade than a fixture that looks less like the real thing.
+const FAKE_TOKEN = "not-a-real-access-token";
+
 function registry(...names: string[]): ClustersFile {
   return {
     clusters: names.map((name) => ({ name, endpoint: `cockpit.${name}.example.com:443` })),
@@ -339,12 +351,12 @@ test("a complete form produces the entry to write", () => {
   const s = connectForm({
     name: "staging",
     endpoint: "cockpit.staging.example.com:443",
-    token: "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+    token: FAKE_TOKEN,
   });
   assert.deepEqual(s.connectDraft(), {
     name: "staging",
     endpoint: "cockpit.staging.example.com:443",
-    token: "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+    token: FAKE_TOKEN,
   });
 });
 
@@ -482,7 +494,7 @@ test("a field can be revised after it was refused, and the rest of the form surv
   const s = connectForm({
     name: "staging",
     endpoint: "https://cockpit.staging.example.com",
-    token: "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+    token: FAKE_TOKEN,
   });
   s.setRegistry(registry("staging"));
   assert.equal(s.connectDraft(), undefined);
@@ -494,7 +506,7 @@ test("a field can be revised after it was refused, and the rest of the form surv
   assert.deepEqual(s.connectDraft(), {
     name: "staging-2",
     endpoint: "cockpit.staging.example.com:443",
-    token: "eyJhbGciOiJSUzI1NiJ9.e30.sig",
+    token: FAKE_TOKEN,
   });
 });
 
