@@ -3647,6 +3647,23 @@ func RecentAuditEventsBuild(args RecentAuditEventsArgs) string {
 	return b.String()
 }
 
+// RecentSendJobs -- ENGINE: the most recent send jobs in any status, newest first. Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- the question it answers is about the cluster, not about one operator. Backs one thing only: the boot-time check behind the unsubscribe-secret rotation warning (memql#3458), which needs to know whether this deployment has ever put a signed unsubscribe link in front of a recipient. The row carries no recipient data.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["recentSendJobs"] in generated_concepts.go).
+type RecentSendJobsArgs struct {
+}
+
+// RecentSendJobs calls the engine query recentSendJobs.
+func (qc *QueryClient) RecentSendJobs(ctx context.Context, args RecentSendJobsArgs) (*Result, error) {
+	call := RecentSendJobsBuild(args)
+	return qc.executeNamed(ctx, "recentSendJobs", call)
+}
+
+func RecentSendJobsBuild(args RecentSendJobsArgs) string {
+	_ = args
+	return "query recentSendJobs()"
+}
+
 // RecipientsForAudience -- Every recipient in one of the caller's audiences, newest first -- including suppressed ones, which is the point: an operator reviewing an audience needs to see the unsubscribes and bounces, not a filtered view that makes them invisible. Owned, and the projection carries @pii fields, so the caller conjunct is doubly load-bearing here.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["recipientsForAudience"] in generated_concepts.go).

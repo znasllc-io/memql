@@ -133,6 +133,35 @@ func (s *Store) DrainableJobs(ctx context.Context) ([]SendJob, error) {
 	return jobs, nil
 }
 
+// AnyCampaignEverSent reports whether this cluster has ever put a
+// campaign message in front of a recipient -- which is the same question
+// as "does an unsubscribe link signed by the current secret exist in
+// somebody's mailbox" (memql#3458). clusterOwner-tier: it deliberately
+// spans owners, so it is issued under the engine's operator identity.
+//
+// The signal is sentCount, not the presence of a job: a queued job that
+// never drained mailed nobody, and warning about it would train an
+// operator to ignore the warning.
+//
+// It reads the newest recentSendJobs page rather than counting the whole
+// history, and that bound is honest about what this is: a boot-time
+// nudge, not an audit. A cluster whose newest 200 send jobs all delivered
+// zero messages while an older one delivered some is a cluster the
+// warning misses -- and the cost of that miss is one missing log line,
+// not a wrong action.
+func (s *Store) AnyCampaignEverSent(ctx context.Context) (bool, error) {
+	rows, err := s.rows(ctx, "query recentSendJobs()")
+	if err != nil {
+		return false, err
+	}
+	for _, r := range rows {
+		if integer(r, "sentCount") > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // JobByID re-reads one job after the claim, so the worker acts on the row
 // as it stands now rather than as the scan saw it -- an operator may have
 // paused the campaign in between.

@@ -190,6 +190,30 @@ jobs:
               # file itself -- so editing it ran zero lanes until memql#3440
               # made it tracked and the coverage guard noticed.
               - '.claude/settings.json'
+              # The three paths that were allow-listed as "no gate reads it"
+              # until memql#3451 made that claim checkable and it turned out to
+              # be false of each. All three are read by a Go test in
+              # scripts/ci or scripts/dev, which `scripts/**` above puts in
+              # THIS lane -- but `scripts/**` does not match the files
+              # themselves, so a PR editing only one of them ran zero lanes and
+              # handed the failure to whoever pushed next.
+              #
+              #   .gitignore  -> scripts/dev/repo_hygiene_test.go. Dropping the
+              #                  `!sdk/ts/package-lock.json` negation, or
+              #                  un-ignoring .claude/settings.local.json, reds
+              #                  that test.
+              #   Dockerfile  -> scripts/ci/dockerfile_module_manifests_test.go
+              #                  (a nested module's COPY line) and
+              #                  portal_image_wiring_test.go (the portal stage
+              #                  selector). No PR lane BUILDS these images --
+              #                  that part of the old reason was true -- but
+              #                  the guards over them are Go tests, and those
+              #                  have to run.
+              #   cmd/deploy-gate-check/Dockerfile -> the same manifest guard,
+              #                  which asserts on both Dockerfiles by name.
+              - '.gitignore'
+              - 'Dockerfile'
+              - 'cmd/deploy-gate-check/Dockerfile'
               - 'scripts/secrets/manifest.yaml'
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'
@@ -497,6 +521,54 @@ jobs:
               - 'app/**'
               - 'cmd/**'
               - 'main.go'
+
+  # Routing guard -- the ONE lane in this workflow with no `if:` and no
+  # `needs:` (memql#3451).
+  #
+  # Everything above routes: a lane runs when the diff matches the bucket its
+  # `if:` reads. That is the #856 win and it is kept. But it cannot be applied
+  # to the guard that objects to a file matching NO bucket, because such a file
+  # sets every bucket false -- so the guard would be switched off by exactly
+  # the diff it exists to catch.
+  #
+  # That is not hypothetical. It is how `.claude/settings.json` became tracked,
+  # matched no consumed bucket, scheduled zero lanes, merged green, and then
+  # reddened `main` for an unrelated author days later. The guard was correct
+  # throughout; it simply did not run on the PR that could have acted on it.
+  #
+  # A catch-all `**` bucket would be the other obvious fix and this repository
+  # already rejects that shape: TestNoBucketMatchesEveryTrackedFile fails any
+  # bucket true for every tracked file, on the stated grounds that "a bucket
+  # that genuinely must always fire should be an unconditional lane, not a
+  # filter". So it is a lane.
+  #
+  # Deliberately TINY, because it runs on every PR: two packages of static
+  # guards over ci.yml and the tracked-file list, ~3.5s of tests, no database,
+  # no npm, no CGO, no build of the module. It duplicates work that go-tests
+  # also does on a Go PR; that duplication is the price of the guard being
+  # unconditional, and it is seconds.
+  #
+  # -count=1 for the reason the root package carries it: these guards sweep
+  # `git ls-files` in a subprocess, and Go's test cache records the files a
+  # test OPENS, not the set a subprocess returned -- so a newly tracked file
+  # leaves the cache key unchanged and the guard reports a stale green over a
+  # path it never scored. That is this lane's whole failure mode, cached.
+  #
+  # scripts/dev/path_routing_lane_scope_test.go asserts the shape of this lane:
+  # no condition, no dependency, both packages covered, no -run selector, no
+  # swallowed failure.
+  path-routing:
+    name: path-routing
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - name: go test (path routing + CI-configuration guards)
+        run: go test -count=1 -timeout=300s ./scripts/ci/ ./scripts/dev/
 
   # Consolidated CGO-free Go lane. One job, one warm GOCACHE, every
   # CGO-free Go check run in sequence. The job runs when `go` OR `dsl`
@@ -1505,6 +1577,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - changes
+      - path-routing
       - go-checks
       - go-tests
       - build-voice

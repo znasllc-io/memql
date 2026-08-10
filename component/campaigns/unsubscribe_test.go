@@ -40,7 +40,12 @@ func unsubscribeFixture() *fakeEngine {
 
 func validToken(t *testing.T) string {
 	t.Helper()
-	tok, err := MintUnsubscribeToken(testSecret, testOwner, "r-1", testCampaign)
+	return mustMint(t, testSecret, testOwner, "r-1", testCampaign)
+}
+
+func mustMint(t *testing.T, secret, owner, recipient, campaign string) string {
+	t.Helper()
+	tok, err := MintUnsubscribeToken(secret, owner, recipient, campaign)
 	if err != nil {
 		t.Fatalf("MintUnsubscribeToken: %v", err)
 	}
@@ -125,10 +130,9 @@ func TestTamperedTokenIsRefusedAndWritesNothing(t *testing.T) {
 		case "flipped id":
 			// Re-encode with a DIFFERENT owner, keeping the original tag:
 			// the shape an attacker would try to aim the impersonation.
-			good := validToken(t)
-			parts := strings.Split(good, ".")
-			forged, _ := MintUnsubscribeToken(testSecret, "someone-else", "r-1", testCampaign)
-			tok = strings.Join(append(strings.Split(forged, ".")[:4], parts[4]), ".")
+			good := strings.Split(validToken(t), ".")
+			forged := strings.Split(mustMint(t, testSecret, "someone-else", "r-1", testCampaign), ".")
+			tok = strings.Join(append(forged[:len(forged)-1], good[len(good)-1]), ".")
 		case "truncated tag":
 			good := validToken(t)
 			tok = good[:len(good)-1]
@@ -158,14 +162,14 @@ func TestTokenBindsAllThreeIds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
-	owner, recipient, campaign, err := ParseUnsubscribeToken(testSecret, tok)
+	owner, recipient, campaign, err := ParseUnsubscribeToken([]string{testSecret}, tok)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	if owner != "owner-a" || recipient != "rec-a" || campaign != "camp-a" {
 		t.Fatalf("round trip lost a field: %q %q %q", owner, recipient, campaign)
 	}
-	if _, _, _, err := ParseUnsubscribeToken("a-different-secret", tok); err == nil {
+	if _, _, _, err := ParseUnsubscribeToken([]string{"a-different-secret"}, tok); err == nil {
 		t.Error("a token verified under the wrong secret")
 	}
 }
@@ -186,7 +190,7 @@ func TestTokenSeparatorCannotBeSmuggled(t *testing.T) {
 	if a == b {
 		t.Fatal("two different (owner, recipient) pairs produced the same token")
 	}
-	owner, recipient, _, err := ParseUnsubscribeToken(testSecret, a)
+	owner, recipient, _, err := ParseUnsubscribeToken([]string{testSecret}, a)
 	if err != nil || owner != "x.y" || recipient != "z" {
 		t.Fatalf("a separator-bearing id did not round-trip: %q %q %v", owner, recipient, err)
 	}

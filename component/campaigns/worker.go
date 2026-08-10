@@ -214,6 +214,10 @@ func (w *Worker) loop(ctx context.Context) {
 	}
 	ticker := time.NewTicker(w.cfg.Poll)
 	defer ticker.Stop()
+	// Boot-time, once, and HERE rather than in Start: the check has to
+	// ask the graph a question, and at Start the engine is still coming
+	// up. This is the first moment a read can succeed.
+	w.WarnOnUnrotatableUnsubscribeSecret(ctx)
 	w.DrainOnce(ctx)
 	for {
 		select {
@@ -224,6 +228,49 @@ func (w *Worker) loop(ctx context.Context) {
 			w.DrainOnce(ctx)
 		}
 	}
+}
+
+// WarnOnUnrotatableUnsubscribeSecret says, once at boot, when this
+// deployment has mailed people while holding exactly ONE unsubscribe
+// signing secret (memql#3458).
+//
+// That state is not broken today and nothing else reports it, which is
+// the problem: the operator finds out by rotating the secret, at which
+// point every unsubscribe link in every mailbox this cluster has ever
+// mailed stops working -- retroactively, silently on our side, and with
+// the recipient's spam button as the next event. The condition is
+// deliberately narrow so the line means something when it appears:
+//
+//	previous secret set        nothing to warn about -- a rotation survives
+//	nothing ever sent          no links exist yet; setting _PREVIOUS now costs nothing
+//	one secret AND sent mail   one careless rotation from breaking every link
+//
+// Exported so a test drives it directly rather than racing the loop's
+// startup timer. A read failure is a debug line, not a warning: at this
+// point in boot the likeliest cause is an engine that is not ready, and
+// crying wolf about a rotation because a query lost a race is worse than
+// silence.
+func (w *Worker) WarnOnUnrotatableUnsubscribeSecret(ctx context.Context) {
+	if w.cfg.CanRotateUnsubscribeSecret() {
+		return
+	}
+	if w.store == nil || w.store.engine == nil {
+		return
+	}
+	sent, err := w.store.AnyCampaignEverSent(w.systemActorContext(ctx))
+	if err != nil {
+		w.logger.Debug("campaigns: could not check whether any campaign has sent (engine likely not ready)", "error", err)
+		return
+	}
+	if !sent {
+		return
+	}
+	w.logger.Warn("campaigns: this cluster has already sent campaign mail and holds only ONE unsubscribe signing key. "+
+		"MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS is unset, so changing MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET would "+
+		"invalidate every unsubscribe link already sitting in a recipient's mailbox -- a compliance failure, not a "+
+		"degraded feature. Rotate by setting _PREVIOUS to the current value FIRST. "+
+		"See docs/public/operate/campaign-sending.md",
+		"currentKeyId", UnsubscribeKeyID(w.cfg.UnsubscribeSecret))
 }
 
 // DrainOnce runs one pass over every drainable job. Exported so a test

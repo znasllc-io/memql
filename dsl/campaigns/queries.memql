@@ -158,6 +158,19 @@ query sendJob drainableSendJobs {
   shape     sendJobFull
 }
 
+/// ENGINE: the most recent send jobs in any status, newest first. Cluster-owner gated, and it spans
+/// owners for the same reason drainableSendJobs does -- the question it answers is about the cluster,
+/// not about one operator. Backs one thing only: the boot-time check behind the unsubscribe-secret
+/// rotation warning (memql#3458), which needs to know whether this deployment has ever put a signed
+/// unsubscribe link in front of a recipient. The row carries no recipient data.
+@actor
+query sendJob recentSendJobs {
+  filter    actor.isClusterOwner==true
+  sort      "row.createdAt", "desc"
+  paginate  200
+  shape     sendJobFull
+}
+
 /// ENGINE: one send job by id (the id is the campaign's bare short id). Cluster-owner gated. Read
 /// after a claim so the worker acts on the row as it stands now rather than as the scan saw it.
 @actor

@@ -23,6 +23,7 @@ import * as path from "node:path";
 import { loadGraph, type Graph } from "../src/install/graph.js";
 import type { RunScript } from "../src/install/runner.js";
 import {
+  installPlan,
   previewUninstall,
   runInstall,
   runUninstall,
@@ -372,4 +373,76 @@ test("previewUninstall skips a step whose install left no receipt entry", async 
 test("previewUninstall refuses without a receipt", async () => {
   const { run } = okRunner();
   await assert.rejects(() => previewUninstall(options(), { graph: UNINSTALL_GRAPH, run }), /receipt/);
+});
+
+// -----------------------------------------------------------------------------
+// the checkout both steps have to agree about (memql#3491)
+// -----------------------------------------------------------------------------
+
+test("clusterUp is told where the checkout is, rather than deriving it", async () => {
+  // The packaged case. k3d.up derives its root from its own location, which in
+  // an installed extension is the staged tree -- scripts/ and nothing else. No
+  // deploy/, and not a git tree, so the ArgoCD target revision fell through to
+  // "main" with nothing reported. The graph has always declared clusterUp's
+  // dependency on stackCheckout; this asserts the VALUE now flows along it.
+  const plan = installPlan(options({ stackDir: "/opt/memql/src" }));
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  if (decision.action === "run") {
+    assert.equal(decision.params["repo-root"], "/opt/memql/src");
+  }
+});
+
+test("both steps are given the SAME directory", async () => {
+  // The divergence this exists to prevent: each script has its own default, so
+  // a caller that set only one would point the cluster bring-up at a directory
+  // the checkout never landed in -- and the failure would be a missing deploy/
+  // rather than anything naming the real mistake.
+  const plan = installPlan(options({ stackDir: "/opt/memql/src" }));
+  const checkout = plan({
+    id: "stackCheckout",
+    script: "install.cloneStack",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+  const cluster = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(checkout.action, "run");
+  assert.equal(cluster.action, "run");
+  if (checkout.action === "run" && cluster.action === "run") {
+    assert.equal(checkout.params.dest, cluster.params["repo-root"]);
+  }
+});
+
+test("the root a packaged run passes is NOT the script's own parent", async () => {
+  // The acceptance criterion, stated as the property rather than a path: a
+  // staged tree's derived root would be <extension>/staged, and what matters is
+  // that the value supplied is independent of wherever the script happens to
+  // live.
+  const plan = installPlan(options({ stackDir: "/home/op/.memql/src" }));
+  const cluster = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+  if (cluster.action === "run") {
+    assert.ok(!cluster.params["repo-root"].includes("staged"));
+    assert.ok(cluster.params["repo-root"].endsWith(".memql/src"));
+  }
 });
