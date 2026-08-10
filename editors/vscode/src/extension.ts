@@ -62,6 +62,7 @@ import {
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { resolveInstallRoot } from './install/root.js';
+import { defaultReceiptPath } from './install/receipt.js';
 import {
   AutomationRunner,
   type AutomationRunEngine,
@@ -422,6 +423,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       AddClusterPanel.show(context, presence, {
         clustersPath,
         refreshTree: () => clustersTree.refresh(),
+        installRoot: installRootFor(context),
+        receiptFile: defaultReceiptPath(),
       });
     }),
     commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
