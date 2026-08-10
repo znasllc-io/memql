@@ -411,7 +411,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (action === undefined) {
         return;
       }
-      if (action === 'install' || action === 'repair') {
+      // Everything except `connect` is a local-cluster lifecycle action and
+      // goes to the installer seam. Listing them positively rather than
+      // testing for `connect` means a new action added to AddClusterAction
+      // fails the type check here instead of silently falling through to the
+      // remote-registration form, which is what would have happened when
+      // memql#3471 added installGuided and uninstall.
+      if (
+        action === 'install' ||
+        action === 'installGuided' ||
+        action === 'repair' ||
+        action === 'uninstall'
+      ) {
         await launchLocalClusterInstaller(action);
         // The two events that change the verdict deterministically. Waiting
         // out the memo window would show someone who just installed a cluster
@@ -1316,12 +1327,21 @@ export async function showAddClusterMenu(
  * verifies its own postcondition, so re-running it over a cluster that stopped
  * answering is the repair. Only the wording differs.
  */
-async function launchLocalClusterInstaller(mode: 'install' | 'repair'): Promise<void> {
-  const command = 'npm run install-cli -- install';
-  const what =
-    mode === 'install'
-      ? 'Installing a local memQL cluster'
-      : 'Repairing the local memQL cluster';
+async function launchLocalClusterInstaller(
+  mode: 'install' | 'installGuided' | 'repair' | 'uninstall'
+): Promise<void> {
+  // The stub reports the command it would run, so it has to report the RIGHT
+  // one. Telling an operator who asked to uninstall to run `install` would be
+  // worse than the stub already is -- it would rebuild the cluster they asked
+  // to remove.
+  const command =
+    mode === 'uninstall' ? 'npm run install-cli -- uninstall' : 'npm run install-cli -- install';
+  const what = {
+    install: 'Installing a local memQL cluster',
+    installGuided: 'Installing a local memQL cluster (guided)',
+    repair: 'Repairing the local memQL cluster',
+    uninstall: 'Uninstalling the local memQL cluster',
+  }[mode];
   const choice = await window.showInformationMessage(
     `memQL: ${what} runs the installer from editors/vscode:\n\n    ${command}\n\nAn in-editor wizard is not wired up yet.`,
     'Copy Command'

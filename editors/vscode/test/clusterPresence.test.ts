@@ -236,18 +236,48 @@ test("the menu matches the table in the issue", () => {
   assert.deepEqual(
     addClusterMenu("absent").map((c) => c.action),
     // Install first: it is the recommended action for a machine with no
-    // cluster, and a quick pick preselects its first item.
-    ["install", "connect"]
+    // cluster, and the page renders the first card as the primary one.
+    // Guided is its own entry rather than a mode toggle inside the run, because
+    // the choice is made before any work starts and changes what the first
+    // screen asks for (memql#3471).
+    ["install", "installGuided", "connect"]
   );
   assert.deepEqual(
     addClusterMenu("installed-healthy").map((c) => c.action),
-    // Exactly one, which is what tells the caller not to show a picker at all.
-    ["connect"]
+    ["connect", "uninstall"]
   );
   assert.deepEqual(
     addClusterMenu("installed-unreachable").map((c) => c.action),
-    ["connect", "repair"]
+    ["repair", "uninstall", "connect"]
   );
+});
+
+test("uninstall is offered exactly when a cluster is here to uninstall", () => {
+  // The gap this closes: a local cluster that existed and did not answer could
+  // be offered a repair, but there was no way to take it off the machine at
+  // all. The substrate has had `cli.js uninstall` since #3357; nothing in the
+  // editor could reach it.
+  assert.ok(
+    !addClusterMenu("absent")
+      .map((c) => c.action)
+      .includes("uninstall"),
+    "nothing is installed, so there is nothing to uninstall",
+  );
+  for (const verdict of ["installed-healthy", "installed-unreachable"] as const) {
+    assert.ok(
+      addClusterMenu(verdict)
+        .map((c) => c.action)
+        .includes("uninstall"),
+      `${verdict} must offer an uninstall`,
+    );
+  }
+});
+
+test("repair leads on the verdict that describes a broken cluster", () => {
+  // An operator whose cluster is installed and not answering came to the "+"
+  // to fix that, not to register a second cluster. Ordering is the only
+  // recommendation a card list can make.
+  assert.equal(addClusterMenu("installed-unreachable")[0]?.action, "repair");
 });
 
 test("every menu item carries a label and a detail", () => {
