@@ -4,15 +4,16 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/events"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 const (
@@ -42,9 +43,11 @@ type WorkerTarget struct {
 }
 
 // isWorkerType reports whether the given node type is a worker the BFF
-// should dial for forwarding purposes. Currently all non-BFF types;
-// kept as a predicate so we can narrow it later (e.g. skip planner if
-// it stops serving forwarded requests).
+// should dial to forward AI work to. Kept as a predicate so we can narrow it
+// later (e.g. skip planner if it stops serving forwarded requests).
+//
+// This is the AiForwardRequest set specifically, NOT "everything the dialer
+// may reach" -- see isDialableType for that.
 func isWorkerType(t NodeType) bool {
 	switch t {
 	case NodeTypeAgent, NodeTypeVoice, NodeTypeCognition, NodeTypePlanner:
@@ -55,7 +58,21 @@ func isWorkerType(t NodeType) bool {
 }
 
 // isDialableType reports whether the dialer may open an outbound stream to a
-// node of this type. It is isWorkerType plus the identity node (memql#3380).
+// node of this type. It is isWorkerType plus the identity node (memql#3380)
+// and the workbench node (memql#3450).
+//
+// WORKBENCH (memql#3450). The workbench node receives WorkbenchForwardRequest,
+// not AiForwardRequest, and the caller is an agent node running a dialer
+// narrowed with SetDialTypes(NodeTypeWorkbench) -- the bff never forwards
+// workbench work. So it is a node we dial without being a worker in the
+// isWorkerType sense, which is exactly the distinction this predicate exists
+// to carry. Its absence here made the documented cluster-mode configuration
+// (MEMQL_WORKBENCH_REMOTE=1 + MEMQL_WORKER_PEERS=workbench=workbench:50060,
+// both shipped in deploy/k8s/base/agent.yaml) parse and then vanish: the seed
+// was dropped here and the DB-discovery path filtered the v1:cluster:node row
+// out on the same predicate, so the agent's ForwardRouter never had a peer.
+//
+// IDENTITY (memql#3380).
 //
 // Identity is NOT a mesh worker and deliberately stays out of ValidNodeTypes:
 // it is the node-token ISSUER, it never dials a parent, and it must never
@@ -72,21 +89,67 @@ func isWorkerType(t NodeType) bool {
 // (isMeshEventParticipant), so joining the bff's peer table does not start
 // fanning graph events at the auth service.
 func isDialableType(t NodeType) bool {
-	return isWorkerType(t) || t == NodeTypeIdentity
+	switch t {
+	case NodeTypeIdentity, NodeTypeWorkbench:
+		return true
+	default:
+		return isWorkerType(t)
+	}
+}
+
+// dialableTypeNames returns the sorted list of node-type spellings
+// isDialableType accepts. It exists to make the rejection warning actionable:
+// telling an operator their key is unknown without telling them the valid set
+// is half a diagnostic. Kept in sync with isDialableType by
+// TestDialableTypeNames_MatchesPredicate.
+func dialableTypeNames() []string {
+	names := []string{
+		string(NodeTypeAgent),
+		string(NodeTypeCognition),
+		// Not in ValidNodeTypes -- identity is the node-token issuer, not a
+		// mesh worker -- but it is dialable (memql#3380).
+		string(NodeTypeIdentity),
+		string(NodeTypePlanner),
+		string(NodeTypeVoice),
+		string(NodeTypeWorkbench),
+	}
+	slices.Sort(names)
+	return names
+}
+
+// WorkerPeerIssue is one MEMQL_WORKER_PEERS entry that produced no dial
+// target, paired with why. ParseWorkerPeers returns these instead of logging
+// so it stays pure and trivially testable; the caller (app.workerPeerSeeds)
+// turns each one into a boot-time warning.
+//
+// memql#3450: rejected entries used to be dropped in silence, which meant a
+// documented configuration could do nothing while looking correct.
+type WorkerPeerIssue struct {
+	// Entry is the offending text, verbatim (trimmed) as the operator wrote
+	// it, so it can be grepped for in the deployment manifest.
+	Entry string
+	// Reason is an operator-facing explanation of why it was rejected.
+	Reason string
 }
 
 // ParseWorkerPeers parses the MEMQL_WORKER_PEERS env-var format:
 //
 //	"voice=voice:50059,agent=agent:50055,cognition=cognition:50054"
 //
-// Whitespace around entries and pairs is tolerated. Unknown node types
-// are silently skipped; malformed entries log-worthy at the call site
-// if wanted, but we keep this pure to stay trivially testable.
-func ParseWorkerPeers(raw string) []WorkerTarget {
+// Whitespace around entries and pairs is tolerated. It returns the usable dial
+// targets plus one WorkerPeerIssue per entry it could not use -- unknown or
+// non-dialable node type, missing "=", empty half, or an exact duplicate of an
+// earlier entry. Empty entries (a stray comma) are formatting, not a mistake,
+// and stay quiet.
+func ParseWorkerPeers(raw string) ([]WorkerTarget, []WorkerPeerIssue) {
 	var out []WorkerTarget
+	var issues []WorkerPeerIssue
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return nil
+		return nil, nil
+	}
+	reject := func(entry, reason string) {
+		issues = append(issues, WorkerPeerIssue{Entry: entry, Reason: reason})
 	}
 	seen := make(map[string]bool)
 	for _, part := range strings.Split(raw, ",") {
@@ -96,25 +159,34 @@ func ParseWorkerPeers(raw string) []WorkerTarget {
 		}
 		typeStr, addr, ok := strings.Cut(part, "=")
 		if !ok {
+			reject(part, `malformed entry: expected "<nodeType>=<host:port>"`)
 			continue
 		}
 		typeStr = strings.TrimSpace(strings.ToLower(typeStr))
 		addr = strings.TrimSpace(addr)
-		if typeStr == "" || addr == "" {
+		if typeStr == "" {
+			reject(part, "empty node type")
+			continue
+		}
+		if addr == "" {
+			reject(part, "empty address")
 			continue
 		}
 		nodeType := NodeType(typeStr)
 		if !isDialableType(nodeType) {
+			reject(part, fmt.Sprintf("node type %q is not dialable; valid types: %s",
+				typeStr, strings.Join(dialableTypeNames(), ", ")))
 			continue
 		}
 		key := string(nodeType) + "@" + addr
 		if seen[key] {
+			reject(part, "duplicate of an earlier entry")
 			continue
 		}
 		seen[key] = true
 		out = append(out, WorkerTarget{NodeType: nodeType, Address: addr})
 	}
-	return out
+	return out, issues
 }
 
 // WorkerDialer opens outbound NodeService streams from a BFF to each

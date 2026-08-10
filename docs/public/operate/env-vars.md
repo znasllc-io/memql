@@ -274,7 +274,7 @@ them.
 | `MEMQL_IDENTITY_SIGNING_KEY_B64`     | identity binary running **>=2 replicas** | Shared base64-std 32-byte Ed25519 seed (#550) -- every replica derives the SAME key + JWKS. **REQUIRED for any multi-replica deployment**; without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail with `unknown kid` (the 2026-06-16 staging outage, #1515). `Config.Validate()` fail-fast refuses to boot without it unless the issuer is a LOOPBACK host (`localhost` / `127.0.0.1` / `::1` / `0.0.0.0` / `*.localhost` -- one process, no possible second replica) or `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. A `*.local.<domain>` issuer is NOT exempt: it is a local cluster's front door, and exempting it is memql#3400. Generate: `make identity-signing-key`. Delivered through the `memql-secrets` Secret (a key on it, or inside the sealed genesis envelope it carries) in every environment; `make secrets` generates and preserves it locally. |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`  | identity binary in non-localhost prod (file-key mode) | Master secret (>=16 bytes) wrapping the on-disk Ed25519 signing keypair. Only the file-key (no-seed) path. Sourced from `v1:platform:globalSecret` of the same name in production.        |
 | `MEMQL_IDENTITY_VERIFIER_BASE_URL`   | non-identity binaries, prod auth          | URL the per-node verifier fetches JWKS from. Empty -> dev no-auth identity (`local-dev@memql.local`).                                                  |
-| `MEMQL_WORKER_PEERS`           | cluster mode, BFF first boot             | Comma-separated `type=host:port` seed list (e.g. `agent=agent:50055,cognition=cognition:50054,planner=planner:50056`). DB-based discovery via `v1:cluster:node` takes over once peers register. Without it the BFF can't find workers on first boot. |
+| `MEMQL_WORKER_PEERS`           | cluster mode, first boot of any dialing node | Comma-separated `type=host:port` seed list (e.g. `agent=agent:50055,cognition=cognition:50054,planner=planner:50056`). Dialable types: `agent`, `cognition`, `identity`, `planner`, `voice`, `workbench`; anything else is ignored with a boot-time WARN naming the entry (memql#3450). DB-based discovery via `v1:cluster:node` takes over once peers register. Without it the BFF can't find workers on first boot. |
 | `MEMQL_PARENT_ADDRESS`         | cluster mode, every non-BFF node         | `bff:50058` -- so the worker's outbound stream reaches BFF for event forwarding.                                                                   |
 
 ### Optional with sensible defaults
@@ -616,11 +616,16 @@ each worker:
 - `MEMQL_PARENT_ADDRESS` -- set on every worker (cognition, agent,
   planner, voice). Tells the worker to dial BFF for outbound event
   forwarding.
-- `MEMQL_WORKER_PEERS` -- set on BFF (and on cognition for its
-  agent-only narrowing). Comma-separated `type=address` list. First-
-  boot seed only; once peers register themselves into
-  `v1:cluster:node` (a global concept), DB-based discovery takes
-  over.
+- `MEMQL_WORKER_PEERS` -- set on every node that dials peers: BFF, and
+  cognition + planner for their agent-only narrowing, and agent for its
+  workbench-only narrowing under `MEMQL_WORKBENCH_REMOTE=1`. Comma-
+  separated `type=address` list. First-boot seed only; once peers
+  register themselves into `v1:cluster:node` (a global concept),
+  DB-based discovery takes over. An entry whose type is not dialable
+  (`agent`, `cognition`, `identity`, `planner`, `voice`, `workbench`)
+  or is otherwise unparseable is ignored, and the node logs a WARN
+  naming the entry -- so a typo in the seed list is visible in the boot
+  log rather than presenting as a peer that never appears (memql#3450).
 
 Both are bootstrap envelope vars -- they have to be in the env
 before the gRPC server starts.

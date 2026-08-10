@@ -350,7 +350,7 @@ func (a *App) cluster() {
 			// cover first-boot before v1:cluster:node is populated;
 			// DB discovery (via engine query + event subscription)
 			// takes over once the cluster has registered its nodes.
-			seeds := node.ParseWorkerPeers(os.Getenv("MEMQL_WORKER_PEERS"))
+			seeds := a.workerPeerSeedsFromEnv()
 			if dialer := node.NewWorkerDialer(
 				nodeIdentity,
 				peerMgr,
@@ -407,7 +407,7 @@ func (a *App) cluster() {
 					parentConnector.SetAiForwardResponseSink(forwarder)
 				}
 
-				seeds := node.ParseWorkerPeers(os.Getenv("MEMQL_WORKER_PEERS"))
+				seeds := a.workerPeerSeedsFromEnv()
 				if dialer := node.NewWorkerDialer(
 					nodeIdentity,
 					peerMgr,

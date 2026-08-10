@@ -41,6 +41,15 @@ node + a workbench address in `MEMQL_WORKER_PEERS`. With both set,
 the integration's dispatch delegates to the remote node; without them
 it stays local.
 
+> Until memql#3450, setting both did nothing: `workbench` was in
+> neither of `worker_dialer.go`'s dial predicates, so the seed and the
+> `v1:cluster:node` row were both filtered out and the agent's
+> `ForwardRouter` never found a peer. Because a peerless router returns
+> `ErrNoWorkbenchPeer` and the integration reads that as "dispatch
+> locally," the tool call still succeeded -- on the agent pod's disk.
+> If you tested the remote path on an engine older than that fix, the
+> result you observed was the local path.
+
 ## 2. Storage model: ephemeral scratch + durable blob
 
 ### Durability design

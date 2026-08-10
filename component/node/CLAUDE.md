@@ -295,7 +295,7 @@ directions once the mesh is up.
 | `MEMQL_NODE_ID` | Generated UUID | Unique node identifier |
 | `MEMQL_NODE_ADDRESS` | — | Advertised NodeService gRPC address |
 | `MEMQL_PARENT_ADDRESS` | — | Optional upstream address for ParentConnector (when a node wants a single outbound stream to its "parent") |
-| `MEMQL_WORKER_PEERS` | — | BFF-only: comma-separated `type=address` list for first-boot dialing (e.g. `voice=voice:50059,agent=agent:50055`). After DB discovery populates `v1:cluster:node`, this becomes a redundant seed. |
+| `MEMQL_WORKER_PEERS` | — | Comma-separated `type=address` list for first-boot dialing (e.g. `voice=voice:50059,agent=agent:50055`). Set on any node that runs a `WorkerDialer`: the bff (all dialable types), cognition + planner (narrowed to `agent`), and agent when `MEMQL_WORKBENCH_REMOTE=1` (narrowed to `workbench`). Dialable types: `agent`, `cognition`, `identity`, `planner`, `voice`, `workbench` — an entry naming anything else is ignored **with a boot-time WARN** (memql#3450). After DB discovery populates `v1:cluster:node`, this becomes a redundant seed. |
 | `MEMQL_NODE_SERVICE_ADDRESS` | `:50052` | NodeService listen address |
 | `MEMQL_NODE_LABELS` | — | Comma-separated key=value metadata |
 

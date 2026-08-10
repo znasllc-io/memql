@@ -64,7 +64,7 @@ func (a *App) wireWorkbenchForwarding(
 		// Outbound dialer narrowed to workbench peers so the router
 		// has a *peerConnection to Send on. Mirrors the cognition /
 		// planner -> agent dialer pattern in cluster.go.
-		seeds := node.ParseWorkerPeers(os.Getenv("MEMQL_WORKER_PEERS"))
+		seeds := a.workerPeerSeedsFromEnv()
 		if dialer := node.NewWorkerDialer(
 			nodeIdentity,
 			peerMgr,
