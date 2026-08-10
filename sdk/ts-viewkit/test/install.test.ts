@@ -37,7 +37,14 @@ function item(over: Partial<RemovalItemView> = {}): RemovalItemView {
   return { id: "removeCluster", label: "k3d cluster memql-local", kind: "removed", ...over };
 }
 
-const ALL_STATES: InstallStepState[] = ["pending", "running", "done", "skipped", "failed"];
+const ALL_STATES: InstallStepState[] = [
+  "pending",
+  "running",
+  "done",
+  "skipped",
+  "preserved",
+  "failed",
+];
 
 // --------------------------------------------------------------------------
 // steps
@@ -64,12 +71,29 @@ test("each state draws a distinct marker", () => {
   assert.equal(new Set(markers).size, ALL_STATES.length, `markers collide: ${markers.join(" ")}`);
 });
 
-test("`preserved` is not a step state", () => {
-  // Guards the two-axis split at the type level AND at runtime. `preserved`
-  // belongs to an artifact in an uninstall preview, not to progress through a
-  // run; allowing it here would resurrect the conflation the design rejected.
-  const states: readonly string[] = ALL_STATES;
-  assert.ok(!states.includes("preserved"));
+test("a step can end `preserved`, because the executor produces that outcome", () => {
+  // An uninstall step whose script refuses on --pre-existing=true exits 3, and
+  // executor.ts records `preserved` rather than a failure. A renderer that
+  // could not spell it would force the run to report the operator's own k3d
+  // cluster as either removed or broken.
+  const html = renderToHtml(
+    renderInstallSteps([
+      step({ id: "removeToolK3d", state: "preserved", detail: "it existed before the install" }),
+    ]),
+  );
+  assert.match(html, /data-state="preserved"/);
+  assert.match(html, /it existed before the install/);
+});
+
+test("a preserved OUTCOME and a preserved KIND stay on separate types", () => {
+  // The axis, not the word, is what is kept apart. `removed` is not "further
+  // along" than `preserved`, so the preview keeps its own two-valued type
+  // rather than borrowing six step states and leaving four meaningless.
+  const kinds: readonly string[] = ["removed", "preserved"];
+  for (const state of ALL_STATES) {
+    if (state === "preserved") continue;
+    assert.ok(!kinds.includes(state), `${state} leaked onto the removal axis`);
+  }
 });
 
 test("the caller's order is the rendered order", () => {

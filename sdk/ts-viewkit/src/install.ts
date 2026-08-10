@@ -22,16 +22,28 @@
 //     graph row and inventing a synthetic concept to describe one would put a
 //     fake schema in front of a real record.
 //
-// WHY TWO TYPES AND NOT ONE SIX-VALUED ENUM
+// WHY TWO TYPES, WHEN `preserved` APPEARS IN BOTH
 //
-// `preserved` is NOT a sixth step state. It is a different QUESTION about a
-// different noun. A step's state is progress through a run; an artifact's kind
-// is whether the uninstall will touch it at all. An artifact that predates the
-// install -- a Docker the operator already had, a checkout they keep -- is
-// preserved BY DESIGN (design D6, and executor.ts models `preserved` as its own
-// status rather than a flavour of failure). Putting it on the progress axis
-// would make "we deliberately left this alone" render as a step that did not
-// finish.
+// Because they are two different MOMENTS, not two names for one fact:
+//
+//   - `RemovalItemView.kind` is a CLASSIFICATION, made from the receipt before
+//     anything runs. It answers "will the uninstall touch this at all?", and it
+//     is what the operator approves -- the preview IS the confirmation (D6).
+//   - `InstallStepState` is an OUTCOME, observed after a step has run.
+//     `executor.ts` reports `preserved` when an uninstall step's script refuses
+//     on `--pre-existing=true`, which is the system working as designed rather
+//     than a failure.
+//
+// So the preview says "this WILL be kept" and the run says "this WAS kept", and
+// a surface that folded them would lose the difference between a plan and a
+// result -- which is exactly the difference an operator checks when a run does
+// not match what they approved.
+//
+// What stays separate is the AXIS. An artifact's kind is not a degree of
+// progress: `removed` is not "further along" than `preserved`. So the preview
+// keeps its own type instead of borrowing the step states and leaving three of
+// them meaningless. An install run, for its part, never produces `preserved`
+// at all.
 //
 // NO JUDGEMENT LIVES HERE, per the rule cluster.ts states: this module is
 // handed strings and enum members a caller already decided, and draws them. It
@@ -45,8 +57,28 @@
 
 import { h, text, type VNode } from "./vnode.js";
 
-/** How far a single graph step has got. Progress only -- see the module note. */
-export type InstallStepState = "pending" | "running" | "done" | "skipped" | "failed";
+/**
+ * How far a single graph step has got.
+ *
+ * `preserved` is here because the executor genuinely produces it as a step
+ * OUTCOME: an uninstall step whose script refuses on `--pre-existing=true`
+ * exits 3, and `executor.ts` records that as `preserved` rather than a
+ * failure, because it is the system working as designed. A run cannot report
+ * what this type cannot spell.
+ *
+ * That does NOT make it the same thing as `RemovalItemView.kind` -- see the
+ * module note. The two are different moments: the kind is a CLASSIFICATION
+ * made from the receipt before anything runs, and this is an OUTCOME observed
+ * after a step has run. An install run never produces `preserved`; only an
+ * uninstall does.
+ */
+export type InstallStepState =
+  | "pending"
+  | "running"
+  | "done"
+  | "skipped"
+  | "preserved"
+  | "failed";
 
 /** Whether an uninstall will take an artifact, or deliberately leave it. */
 export type RemovalItemKind = "removed" | "preserved";
@@ -288,6 +320,8 @@ function stepMarker(state: InstallStepState): string {
       return "[x]";
     case "skipped":
       return "[-]";
+    case "preserved":
+      return "[=]";
     case "failed":
       return "[!]";
   }
