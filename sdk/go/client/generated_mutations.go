@@ -7106,6 +7106,7 @@ func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 
 // EnqueueCampaignSend -- ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart lands on the same timeline rather than accumulating runs.
 // campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization. Nothing in this mutation's arguments is trusted to say who owns anything.
+// `status` exists so ONE mutation covers both ways a job is created (memql#3459): 'queued' for a send starting now, 'scheduled' for one committed to a time. It defaults to 'queued' via ?? rather than being required, so every existing caller is unchanged and the shortest spelling is still the one that sends now. A 'scheduled' job is inert until the worker promotes it.
 // clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at all requires the engine's own operator identity.
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["enqueueCampaignSend"] in generated_concepts.go).
@@ -7114,6 +7115,8 @@ type EnqueueCampaignSendArgs struct {
 	CampaignOwnerUserId string
 	AudienceId          string
 	TemplateId          string
+	Status              string
+	ScheduledAt         string
 }
 
 // EnqueueCampaignSend calls the engine mutation enqueueCampaignSend.
@@ -7142,6 +7145,18 @@ func EnqueueCampaignSendBuild(args EnqueueCampaignSendArgs) string {
 	}
 	b.WriteString("templateId: ")
 	b.WriteString(quoteMemQL(args.TemplateId))
+	if args.Status != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("scheduledAt: ")
+	b.WriteString(quoteMemQL(args.ScheduledAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -9116,6 +9131,81 @@ func RecordPlannerInvocationBuild(args RecordPlannerInvocationArgs) string {
 	return b.String()
 }
 
+// RecordReputationWindow -- ENGINE: write one replica's counters for one (sending identity, domain, day) bucket (memql#3462).
+// ABSOLUTE VALUES, NOT INCREMENTS, and that is the whole concurrency design. Each worker accumulates in memory and writes the running total for its OWN row, so there is no read-modify-write on the send path and no interleaving to lose counts to. Two replicas never touch one row; a reader sums across nodeIds, which it was going to do across domains and days regardless.
+// The id is derived from (sendingIdentity, domain, windowStart, nodeId), each part hashed before concatenation (authoring rule 20) so no separator in a domain can alias two buckets onto one timeline. A re-write appends a version to the same row, which is what makes "write the running total" correct rather than duplicating.
+// clusterOwner tier: these are the deployment's numbers, not an operator's.
+//
+// Bound concept: v1:campaigns:reputationWindow (machine-readable: BoundConcepts["recordReputationWindow"] in generated_concepts.go).
+type RecordReputationWindowArgs struct {
+	SendingIdentity string
+	Domain          string
+	WindowStart     string
+	NodeId          string
+	Accepted        int
+	HardBounce      int
+	SoftBounce      int
+	Complaint       int
+}
+
+// RecordReputationWindow calls the engine mutation recordReputationWindow.
+func (qc *QueryClient) RecordReputationWindow(ctx context.Context, args RecordReputationWindowArgs) (*Result, error) {
+	call := RecordReputationWindowBuild(args)
+	return qc.executeNamed(ctx, "recordReputationWindow", call)
+}
+
+func RecordReputationWindowBuild(args RecordReputationWindowArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordReputationWindow(")
+	b.WriteString("sendingIdentity: ")
+	b.WriteString(quoteMemQL(args.SendingIdentity))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("domain: ")
+	b.WriteString(quoteMemQL(args.Domain))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("windowStart: ")
+	b.WriteString(quoteMemQL(args.WindowStart))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nodeId: ")
+	b.WriteString(quoteMemQL(args.NodeId))
+	if args.Accepted != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("accepted: ")
+		b.WriteString(fmt.Sprintf("%v", args.Accepted))
+	}
+	if args.HardBounce != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("hardBounce: ")
+		b.WriteString(fmt.Sprintf("%v", args.HardBounce))
+	}
+	if args.SoftBounce != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("softBounce: ")
+		b.WriteString(fmt.Sprintf("%v", args.SoftBounce))
+	}
+	if args.Complaint != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("complaint: ")
+		b.WriteString(fmt.Sprintf("%v", args.Complaint))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecordRequestEvent -- Append a v1:forge:requestEvent (the time-series audit trail). actorUserId + actorRole stamped from actor. requestId is normalized to the short id form (shortId()) so the trail keys consistently whether the caller passes a canonical node id (automation path) or a bare short id (tool path) -- #1859.
 //
 // Bound concept: v1:forge:requestEvent (machine-readable: BoundConcepts["recordRequestEvent"] in generated_concepts.go).
@@ -9518,6 +9608,82 @@ func RecordTrunkBuild(args RecordTrunkArgs) string {
 		}
 		b.WriteString("secretRef: ")
 		b.WriteString(quoteMemQL(args.SecretRef))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordWarmupState -- ENGINE: record what the warming ramp just decided and why (memql#3462). One row per sending identity, id = the identity, so a restart or a second replica lands on the same timeline rather than starting a competing ramp.
+// `reason` is written on every evaluation including the ones that change nothing, because "held" is the ramp's common state and an operator seeing a step that has not moved for two days needs to read why rather than guess.
+// clusterOwner tier.
+//
+// Bound concept: v1:campaigns:warmupState (machine-readable: BoundConcepts["recordWarmupState"] in generated_concepts.go).
+type RecordWarmupStateArgs struct {
+	SendingIdentity string
+	Step            int
+	RatePerMinute   int
+	Decision        string
+	Reason          string
+	EvaluatedAt     string
+	StepEnteredAt   string
+	AcceptedInStep  int
+}
+
+// RecordWarmupState calls the engine mutation recordWarmupState.
+func (qc *QueryClient) RecordWarmupState(ctx context.Context, args RecordWarmupStateArgs) (*Result, error) {
+	call := RecordWarmupStateBuild(args)
+	return qc.executeNamed(ctx, "recordWarmupState", call)
+}
+
+func RecordWarmupStateBuild(args RecordWarmupStateArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordWarmupState(")
+	b.WriteString("sendingIdentity: ")
+	b.WriteString(quoteMemQL(args.SendingIdentity))
+	if args.Step != 0 {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("step: ")
+		b.WriteString(fmt.Sprintf("%v", args.Step))
+	}
+	if args.RatePerMinute != 0 {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("ratePerMinute: ")
+		b.WriteString(fmt.Sprintf("%v", args.RatePerMinute))
+	}
+	if args.Decision != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("decision: ")
+		b.WriteString(quoteMemQL(args.Decision))
+	}
+	if args.Reason != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("reason: ")
+		b.WriteString(quoteMemQL(args.Reason))
+	}
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("evaluatedAt: ")
+	b.WriteString(quoteMemQL(args.EvaluatedAt))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("stepEnteredAt: ")
+	b.WriteString(quoteMemQL(args.StepEnteredAt))
+	if args.AcceptedInStep != 0 {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("acceptedInStep: ")
+		b.WriteString(fmt.Sprintf("%v", args.AcceptedInStep))
 	}
 	b.WriteString(")")
 	return b.String()
@@ -10515,7 +10681,8 @@ func ScheduleAccountDeletionBuild(args ScheduleAccountDeletionArgs) string {
 	return b.String()
 }
 
-// ScheduleCampaign -- Commit a campaign to a time. Records the operator's intent; NOTHING ACTS ON IT YET -- the scheduler is part of the sending engine, which is a separate piece of work. Owned.
+// ScheduleCampaign -- Commit a campaign to a time. Owned.
+// scheduledAt written here is THE AUTHORITY on when the send fires (memql#3459) -- the drain worker re-reads this row rather than trusting the copy it stamped on the send job, so moving the date moves the send. What this mutation does not do by itself is create the job the worker scans; `campaignScheduleSend` does both, and is the path the portal takes.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["scheduleCampaign"] in generated_concepts.go).
 type ScheduleCampaignArgs struct {
@@ -13700,16 +13867,19 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 //
 // Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.go).
 type UpdateSendJobArgs struct {
-	SendJobId      string
-	Status         string
-	RecipientCount int
-	SentCount      int
-	SkippedCount   int
-	FailedCount    int
-	LastError      string
-	StartedAt      string
-	CompletedAt    string
-	ThrottledUntil string
+	SendJobId            string
+	Status               string
+	RecipientCount       int
+	SentCount            int
+	SkippedCount         int
+	FailedCount          int
+	LastError            string
+	StartedAt            string
+	CompletedAt          string
+	ThrottledUntil       string
+	RosterCursor         string
+	RosterOutstanding    bool
+	RosterOutstandingSet bool // set true to send rosterOutstanding; required because zero-value bool is ambiguous
 }
 
 // UpdateSendJob calls the engine mutation updateSendJob.
@@ -13780,6 +13950,20 @@ func UpdateSendJobBuild(args UpdateSendJobArgs) string {
 	}
 	b.WriteString("throttledUntil: ")
 	b.WriteString(quoteMemQL(args.ThrottledUntil))
+	if args.RosterCursor != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("rosterCursor: ")
+		b.WriteString(quoteMemQL(args.RosterCursor))
+	}
+	if args.RosterOutstandingSet {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("rosterOutstanding: ")
+		b.WriteString(fmt.Sprintf("%v", args.RosterOutstanding))
+	}
 	b.WriteString(")")
 	return b.String()
 }
