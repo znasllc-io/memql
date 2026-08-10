@@ -428,6 +428,7 @@ var BoundConcepts = map[string]string{
 	"pruneHarnessSemanticMemory":            "v1:harness:semanticMemory",
 	"readyHarnessStep":                      "v1:harness:step",
 	"recentAuditEvents":                     "v1:identity:auditEvent",
+	"recentSendJobs":                        "v1:campaigns:sendJob",
 	"recipientsForAudience":                 "v1:campaigns:recipient",
 	"recordActionCandidate":                 "v1:actions:candidate",
 	"recordBundleDryRun":                    "v1:authoring:bundle",
