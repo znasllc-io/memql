@@ -103,3 +103,67 @@ export async function removeClusterCompletely(
 
   return removeCluster(clustersPath, name);
 }
+
+/**
+ * What has to happen once a local cluster is off the MACHINE (memql#3476).
+ *
+ * The uninstall graph takes back the k3d cluster, the hosts block, the mkcert
+ * CA and the pinned checkout. Three things this editor believes are then false,
+ * and each is false for its own reason:
+ *
+ *   the ENTRY    -- clusters.yaml still names a cluster that no longer exists,
+ *                   and every command that reads the registry would offer to
+ *                   connect to it. Removing it goes through the whole operation
+ *                   above, so the credential and the live connection go too.
+ *   the MEMO     -- ClusterPresence caches its verdict for thirty seconds, and
+ *                   an uninstall is exactly the event presence.ts documents as
+ *                   requiring invalidate(): the answer changed deterministically
+ *                   and the operator must not be shown the menu for a machine
+ *                   that still has a cluster.
+ *   the TREE     -- it renders the registry, which just changed.
+ *
+ * THE ORDER IS LOAD-BEARING, and so is the fact that the last two are
+ * unconditional. Dropping the entry is the one step that can fail (a
+ * clusters.yaml the Cockpit is mid-write, a read-only home directory), and it
+ * runs first so a failure is reported before anything says the surface is up to
+ * date. But the memo and the tree are refreshed whether it succeeded or not:
+ * the MACHINE has changed either way, and leaving a thirty-second memo claiming
+ * a healthy local cluster because a YAML write failed would compound one problem
+ * with a second, unrelated lie.
+ *
+ * Returns the problem sentence, or "" when there was none -- rather than
+ * throwing, because by the time this runs the uninstall itself has SUCCEEDED,
+ * and a rejection here would present a clean machine as a failed removal.
+ */
+export interface UninstallFollowUp {
+  /**
+   * The registry name of the local cluster, or undefined when none is
+   * registered. Absent is an ordinary case: an operator can install a cluster
+   * without ever adding it to clusters.yaml.
+   */
+  clusterName: string | undefined;
+  /** Drops the entry, its stored credential and its live connection. */
+  removeEntry: (name: string) => Promise<unknown>;
+  /** Drops the presence memo. */
+  invalidatePresence: () => void;
+  /** Repaints the Clusters view. */
+  refreshTree: () => void;
+}
+
+export async function completeLocalUninstall(follow: UninstallFollowUp): Promise<string> {
+  let problem = "";
+  const name = follow.clusterName;
+  if (name !== undefined && name !== "") {
+    try {
+      await follow.removeEntry(name);
+    } catch (err) {
+      problem =
+        `the cluster is off this machine, but "${name}" could not be removed from the ` +
+        `cluster list: ${err instanceof Error ? err.message : String(err)}`;
+    }
+  }
+
+  follow.invalidatePresence();
+  follow.refreshTree();
+  return problem;
+}

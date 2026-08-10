@@ -14,9 +14,11 @@
 //   4. nothing absent from the preview is ever in the output
 //   5. every preserved row carries a reason
 //   6. labels name the step and its already-rendered target
+//   7. every row says what removing it will ask of the operator
 //
-// The fixtures are built from the SHIPPED uninstall graph's descriptions and
-// step ids, so a label asserted here is a label an operator would really read.
+// The fixtures are built from the SHIPPED uninstall graph's descriptions, step
+// ids AND elevations, so a label asserted here is a label an operator would
+// really read and a `sudo` asserted here is the one the graph declares.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -31,6 +33,7 @@ function step(over: Partial<PreviewStep> = {}): PreviewStep {
     reason: "",
     preserved: false,
     target: "cluster memql-local",
+    elevation: "none",
     ...over,
   };
 }
@@ -49,15 +52,19 @@ const CHECKOUT = step({
   description: "Remove the pinned source checkout.",
   target: "path /home/dev/.memql/stack",
 });
+// The two privileged steps, with the elevations scripts/install/graph/
+// uninstall.json actually declares. They are the reason rule 7 exists.
 const HOSTS = step({
   id: "removeHostsBlock",
   description: "Delete the installer's marked block from the system hosts file, leaving every other line alone.",
   target: "hosts-file /etc/hosts",
+  elevation: "sudo",
 });
 const CA = step({
   id: "removeLocalCA",
   description: "Uninstall the local mkcert CA from the system trust stores and delete its key material.",
   target: "caroot /home/dev/.local/share/mkcert",
+  elevation: "user-trust",
 });
 const K3D = step({
   id: "removeToolK3d",
@@ -314,6 +321,67 @@ test("rule 6 -- a step with neither words nor target still gets a name", () => {
 });
 
 // -----------------------------------------------------------------------------
+// rule 7 -- every row says what removing it will ask of the operator
+// -----------------------------------------------------------------------------
+
+test("rule 7 -- the graph's elevation reaches every row, for all seven steps", () => {
+  // The preview IS the confirmation: this list is the only moment consent is
+  // given, so "you will be asked for your root password" and "your browsers
+  // will be asked to stop trusting a CA" have to be visible BEFORE the run, not
+  // discovered as prompts during it.
+  const items = removalPreviewItems(fullPreview());
+  assert.deepEqual(
+    items.map((i) => [i.id, i.elevation]),
+    [
+      ["removeCluster", "none"],
+      ["removeCheckout", "none"],
+      ["removeHostsBlock", "sudo"],
+      ["removeLocalCA", "user-trust"],
+      ["removeToolK3d", "none"],
+      ["removeToolKubectl", "none"],
+      ["removeToolMkcert", "none"],
+    ],
+  );
+});
+
+test("rule 7 -- `none` is stated, never left absent", () => {
+  // The renderer draws NOTHING for an absent elevation and deliberately does
+  // not default it to "none", because "I was not told" and "this needs no
+  // privileges" are different claims. A row that dropped the value would look
+  // exactly like an unprivileged one -- which is the failure this assertion
+  // exists to catch, since both render the same and only one is honest.
+  for (const item of removalPreviewItems(fullPreview())) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(item, "elevation"),
+      `${item.id} carries no elevation key at all -- the renderer would draw no marker and the operator would read that as "this asks for nothing"`,
+    );
+    assert.notEqual(item.elevation, undefined);
+  }
+});
+
+test("rule 7 -- a preserved row carries its elevation too", () => {
+  // A preserved step still RUNS -- it is the script's refusal on
+  // --pre-existing=true that keeps the artifact -- so what it will ask for is
+  // the same question it would have asked to remove it.
+  const items = removalPreviewItems(preview([{ ...CA, preserved: true }, { ...HOSTS, preserved: true }]));
+  assert.deepEqual(
+    items.map((i) => [i.id, i.kind, i.elevation]),
+    [
+      ["removeLocalCA", "preserved", "user-trust"],
+      ["removeHostsBlock", "preserved", "sudo"],
+    ],
+  );
+});
+
+test("rule 7 -- the value is copied, never inferred from the step", () => {
+  // Nothing here reads the id, the script or the target to work out what a step
+  // will need. The graph declares it; a second derivation would be free to
+  // disagree with the run, which is the one disagreement this row cannot afford.
+  const surprising = step({ id: "removeToolK3d", description: "Remove the installed k3d binary.", elevation: "sudo" });
+  assert.equal(removalPreviewItems(preview([surprising]))[0].elevation, "sudo");
+});
+
+// -----------------------------------------------------------------------------
 // the shape the view kit renders
 // -----------------------------------------------------------------------------
 
@@ -323,13 +391,18 @@ test("an item carries exactly the view-model fields, and no others", () => {
     id: "removeCluster",
     label: "Delete the local k3d cluster (cluster memql-local)",
     kind: "removed",
+    elevation: "none",
   });
 
-  const [preserved] = removalPreviewItems(preview([{ ...CLUSTER, preserved: true, reason: "the cluster pre-dates the install" }]));
+  const [preserved] = removalPreviewItems(
+    preview([{ ...CA, preserved: true, reason: "the CA pre-dates the install" }]),
+  );
   assert.deepEqual(preserved, {
-    id: "removeCluster",
-    label: "Delete the local k3d cluster (cluster memql-local)",
+    id: "removeLocalCA",
+    label:
+      "Uninstall the local mkcert CA from the system trust stores and delete its key material (caroot /home/dev/.local/share/mkcert)",
     kind: "preserved",
-    reason: "the cluster pre-dates the install",
+    reason: "the CA pre-dates the install",
+    elevation: "user-trust",
   });
 });

@@ -106,13 +106,49 @@ test("a step with nothing to add carries no detail at all", () => {
 // the failure taxonomy
 // ---------------------------------------------------------------------------
 
-test("each contract exit code gets its own explanation", () => {
-  // 2 bad param, 3 refused, 4 prerequisite missing, 5 operation failed. Four
-  // codes, four different next actions.
-  const headlines = [2, 3, 4, 5].map((c) => failureGuidance(c).headline);
-  assert.equal(new Set(headlines).size, 4, `codes share wording: ${headlines.join(" | ")}`);
+test("each reachable exit code gets its own explanation", () => {
+  // Six, not four. 2/3/4/5 are the contract's classifications; 0 and 1 reach a
+  // failed outcome without being one, and both are real.
+  const codes = [0, 1, 2, 3, 4, 5];
+  const headlines = codes.map((c) => failureGuidance(c).headline);
+  assert.equal(new Set(headlines).size, codes.length, `codes share wording: ${headlines.join(" | ")}`);
   assert.match(failureGuidance(4).advice, /prerequisite|missing/i);
   assert.match(failureGuidance(3).headline, /refus/i);
+});
+
+test("exit 0 is explained, because it is how most real failures arrive", () => {
+  // THE ONE THIS FUNCTION GOT WRONG. executor.ts records a FAILED outcome
+  // carrying exit 0 whenever a script exits cleanly and its verify does not
+  // hold -- "an exit code of 0 is a precondition and nothing more". All 13
+  // install steps verify a result field, so this is the common path, not an
+  // edge case. It previously fell to the default branch and told the operator
+  // memQL "cannot say what it means" about the case it understands best.
+  const g = failureGuidance(0);
+  assert.match(g.headline, /ran without error|not in the state/i);
+  assert.ok(!/cannot say/i.test(g.advice), "exit 0 still reaching the unknown-code branch");
+  assert.equal(g.retryable, true);
+});
+
+test("exit 1 is explained as the catch-all, not as unknown", () => {
+  // `cap_fail` clamps any out-of-range code to 1 and capability.sh's EXIT trap
+  // emits a failure envelope for any non-zero abort, so 1 is where an
+  // unclassified failure and a `set -e` death both land.
+  const g = failureGuidance(1);
+  assert.ok(!/cannot say/i.test(g.advice), "exit 1 still reaching the unknown-code branch");
+  assert.equal(g.retryable, true);
+});
+
+test("only a genuinely unknown code reaches the unknown-code branch", () => {
+  // Guards the fix from regressing by someone adding a code to the contract
+  // and not to this function: every code the installer can actually produce
+  // must be claimed, and nothing else should be.
+  for (const code of [0, 1, 2, 3, 4, 5]) {
+    assert.ok(
+      !/cannot say/i.test(failureGuidance(code).advice),
+      `exit ${code} is reachable but unexplained`,
+    );
+  }
+  assert.match(failureGuidance(99).advice, /cannot say/i);
 });
 
 test("a bad parameter is named as memQL's fault, not the operator's", () => {
