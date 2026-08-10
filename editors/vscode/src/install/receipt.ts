@@ -282,3 +282,31 @@ export function removalParams(entry: ReceiptEntry): Record<string, string> | nul
   params["pre-existing"] = entry.preExisting ? "true" : "false";
   return params;
 }
+
+/**
+ * The provider-key PATH a previous run recorded, if there is one (memql#3512).
+ *
+ * WHY THIS EXISTS. memql#3473 made `providerKey` a gate: every mutating step
+ * declares `dependsOn: [..., providerKey]`, so nothing runs until the key
+ * verifies. A REPAIR collects only the domain -- deliberately, since a repair
+ * re-runs a graph over a machine that already recorded these answers -- which
+ * left the step with no `--key-file` and failed it with exit 2 before anything
+ * else could start. Every repair, every time.
+ *
+ * The answer is the receipt, which is precisely the record of what the install
+ * did. `executor.ts` writes an entry for every step that returns an envelope,
+ * `params` included, and `providerKey` returns one even though it is
+ * `readOnly` and leaves no artifact -- so the path the operator gave the
+ * install is on disk, and a repair can use it without asking again.
+ *
+ * Returns "" when there is nothing to go on: no receipt, no `providerKey`
+ * entry, or an entry that recorded no `key-file`. The caller must treat that
+ * as "ask" rather than as "proceed" -- starting a run that cannot pass wave 2
+ * is the bug this exists to fix.
+ */
+export function recordedProviderKeyFile(receipt: Receipt | null): string {
+  if (receipt === null) return "";
+  const entry = entryFor(receipt, "providerKey");
+  const recorded = entry?.params["key-file"];
+  return typeof recorded === "string" ? recorded : "";
+}

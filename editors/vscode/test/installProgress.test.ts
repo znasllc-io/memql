@@ -203,3 +203,41 @@ test("a run with no steps yet is NOT settled", () => {
   // stretch of the longest operation the wizard performs.
   assert.equal(runIsSettled([]), false);
 });
+
+// ---------------------------------------------------------------------------
+// the codes memQL synthesises for itself (memql#3474 review)
+// ---------------------------------------------------------------------------
+
+test("a timed-out step is explained, not disclaimed", () => {
+  // 124 is OURS: runner.ts kills a step that outruns its timeout and reports
+  // 124/SIGKILL. Letting it fall to the default branch had memQL say it
+  // "cannot say what it means" about a code memQL assigned itself -- to an
+  // operator whose install just stopped dead after ten minutes.
+  const g = failureGuidance(124);
+  assert.match(g.headline, /ran out of time|stopped/i);
+  assert.ok(!/cannot say/i.test(g.advice), "124 still reaching the unknown-code branch");
+  assert.equal(g.retryable, true);
+});
+
+test("a step that could not be started is named as an installer fault", () => {
+  // 127 is also ours: runner.ts reports it when the script cannot be launched.
+  // That is a broken package, not a broken machine, and retrying cannot help.
+  const g = failureGuidance(127);
+  assert.ok(!/cannot say/i.test(g.advice), "127 still reaching the unknown-code branch");
+  assert.match(g.advice, /fault in this memQL build|memQL build/i);
+  assert.equal(g.retryable, false);
+});
+
+test("every code the installer can produce is claimed", () => {
+  // The guard, widened. 2/3/4/5 come from the capability contract, 0 and 1
+  // from the executor's own verify/abort handling, and 124/127 are synthesised
+  // by runner.ts. A code memQL can emit and cannot explain is the defect this
+  // pins.
+  for (const code of [0, 1, 2, 3, 4, 5, 124, 127]) {
+    assert.ok(
+      !/cannot say/i.test(failureGuidance(code).advice),
+      `exit ${code} is reachable but unexplained`,
+    );
+  }
+  assert.match(failureGuidance(99).advice, /cannot say/i);
+});

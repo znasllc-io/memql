@@ -43,7 +43,11 @@ import {
 import { defaultClustersPath, upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
-import { defaultReceiptPath } from "../install/receipt.js";
+import {
+  defaultReceiptPath,
+  readReceipt,
+  recordedProviderKeyFile,
+} from "../install/receipt.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import {
   previewUninstall,
@@ -410,13 +414,29 @@ export class AddClusterPanel {
     // the state machine rather than behaviour local to this panel, so the CLI
     // and a future front end recover the same way.
     if (type === "retry") {
+      // RE-INVOKE, do not merely repaint. `state.retry()` puts the failed step
+      // back to `pending` and returns to the run screen -- but without
+      // starting a run, the operator fixes the cause, presses Retry, and
+      // watches a screen that never changes again. That is the whole of
+      // "recoverable in place" (#3473) and "Retry is offered on every failure"
+      // (#3474), and both were being satisfied by a repaint.
+      //
+      // Re-running the WHOLE graph is correct rather than lazy: every step
+      // verifies first and skips when already satisfied, which is the same
+      // property that makes repair an install re-run. The steps that passed
+      // report `skipped`; only the one that failed does work.
       this.state.retry();
       this.render();
+      void this.startRun();
       return;
     }
     if (type === "guided") {
+      // Same re-invocation as Retry, for the same reason. The guided flag is
+      // per-step and rides on the step's own record, so the run picks it up
+      // rather than this needing a second code path.
       this.state.switchToGuided();
       this.render();
+      void this.startRun();
       return;
     }
     if (type === "cancel") {
@@ -458,9 +478,36 @@ export class AddClusterPanel {
     const action = this.state.action;
     if (action !== "install" && action !== "installGuided" && action !== "repair") return;
 
+    const inputs = this.state.inputs;
+
+    // A REPAIR HAS NO KEY FIELD, SO IT READS ONE OFF THE RECEIPT (memql#3512).
+    //
+    // `requiredFields("repair")` is `["domain"]` on purpose -- a repair re-runs
+    // the graph over a machine that already recorded these answers. But
+    // memql#3473's gate put `providerKey` in front of every mutating step, and
+    // `session.ts` drops empty params, so a repair reached wave 2 with no
+    // `--key-file` and died there with exit 2 on every invocation. The receipt
+    // is the record of what the install did, and `providerKey` writes an entry
+    // even though it leaves no artifact, so the path is already on disk.
+    let providerKeyFile = inputs.providerKeyFile;
+    if (providerKeyFile === "") {
+      providerKeyFile = recordedProviderKeyFile(await readReceipt(defaultReceiptPath()));
+    }
+    if (providerKeyFile === "") {
+      // REFUSE RATHER THAN START. Without a key path the run cannot pass wave
+      // 2, and the failure it would produce is exit 2 -- whose guidance
+      // correctly says "a fault in memQL rather than in your machine", which
+      // would be a lie here. Say the true thing before anything runs.
+      this.runError =
+        "memQL has no record of an AI provider key for this machine. " +
+        "Install rather than repair, so the key can be collected and verified.";
+      this.state.finish({ ok: false });
+      this.render();
+      return;
+    }
+
     const controller = new AbortController();
     this.runAbort = controller;
-    const inputs = this.state.inputs;
 
     let report: ExecutionReport | undefined;
     let failure: string | undefined;
@@ -480,8 +527,9 @@ export class AddClusterPanel {
           ownerEmail: inputs.ownerEmail,
           ownerFirstName: inputs.ownerFirstName,
           ownerLastName: inputs.ownerLastName,
-          // A PATH, never the key. argv is world-readable in `ps`.
-          providerKeyFile: inputs.providerKeyFile,
+          // A PATH, never the key. argv is world-readable in `ps`. On a
+          // repair this is the path the receipt recorded (memql#3512).
+          providerKeyFile,
           stepParams: {},
           timeoutMs: STEP_TIMEOUT_MS,
         },
@@ -517,6 +565,22 @@ export class AddClusterPanel {
     // "did the whole graph run?" needs both fields. Handing off on `ok` alone
     // would have the wizard claim an install the operator deliberately stopped.
     const succeeded = report?.ok === true && report?.cancelled !== true;
+
+    // A FAILED STEP STAYS ON THE FAILED-STEP SCREEN. `finish()` moves to
+    // `done`, which reads "Finished / Nothing further to do" -- and calling it
+    // after a failure took the operator off the one screen carrying Retry and
+    // Switch-to-Guided, then told them the run was over. Between them, that and
+    // the inert handlers meant a failed install could not be recovered from at
+    // all, while every unit underneath was green.
+    //
+    // The run is genuinely over either way; what differs is whether there is
+    // something left to do about it. `state.failed` is the executor's answer to
+    // that, and `retry()` / `switchToGuided()` clear it when the operator acts.
+    if (!succeeded && this.state.failed !== undefined) {
+      this.render();
+      return;
+    }
+
     this.state.finish({ ok: report?.ok === true, cancelled: report?.cancelled === true });
 
     // THE HAND-OFF, and the gate in front of it is the whole point (#3477).

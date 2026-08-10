@@ -98,6 +98,38 @@ export function failureGuidance(exitCode: number | null): FailureGuidance {
           "the only account of what happened, so read it before retrying.",
         retryable: true,
       };
+    case 124:
+      // SYNTHESISED BY US, not by the script. runner.ts kills a step that
+      // outruns its timeout and reports 124 with SIGKILL. Leaving it to the
+      // default branch had memQL say it "cannot say what it means" about a
+      // code memQL assigned itself -- and to an operator whose install just
+      // stopped after ten minutes, that is the least useful moment to be
+      // vague.
+      return {
+        headline: "The step ran out of time and was stopped.",
+        advice:
+          "It exceeded the ten minutes any one step is allowed and was killed, " +
+          "so it did not finish what it was doing. A slow network is the usual " +
+          "cause on the download and clone steps; a wedged Docker daemon is the " +
+          "usual cause on the cluster step. Retry is safe -- every step checks " +
+          "first and skips what is already done.",
+        retryable: true,
+      };
+    case 127:
+      // Also ours: runner.ts reports 127 when the script could not be started
+      // or run at all. That is an installer-side problem -- a missing or
+      // unexecutable capability script -- not something the operator's machine
+      // did wrong, and it is the signature of a broken package rather than a
+      // broken install.
+      return {
+        headline: "The installer could not start this step at all.",
+        advice:
+          "The script behind this step could not be launched -- missing, or not " +
+          "executable. That is a fault in this memQL build rather than in your " +
+          "machine, and retrying will not change it. Please report it with the " +
+          "output below.",
+        retryable: false,
+      };
     case 2:
       return {
         headline: "The installer passed this step something it would not accept.",
