@@ -496,7 +496,30 @@ export class AddClusterPanel {
     // `ok` means nothing FAILED, which a cancelled run usually satisfies -- so
     // "did the whole graph run?" needs both fields. Handing off on `ok` alone
     // would have the wizard claim an install the operator deliberately stopped.
+    const succeeded = report?.ok === true && report?.cancelled !== true;
     this.state.finish({ ok: report?.ok === true, cancelled: report?.cancelled === true });
+
+    // THE HAND-OFF, and the gate in front of it is the whole point (#3477).
+    //
+    // `ok` alone is not enough twice over. A CANCELLED run is normally `ok` --
+    // every step that ran, worked -- so handing off on `ok` would register the
+    // cluster and offer "Sign in as owner" for an install the operator
+    // deliberately stopped: worse than doing nothing, because it looks like
+    // success. `AddClusterState` treats the two separately for this reason, and
+    // a test pins `{ok: true, cancelled: true}` reporting `succeeded === false`.
+    //
+    // `ok` also does not mean the machine CHANGED: it is
+    // `outcomes.every(o => o.status !== "failed")`, so a run where every step
+    // verified as already-satisfied is `ok` with nothing done. Handing off
+    // anyway is DELIBERATE, not incidental -- that is exactly the repair case,
+    // and the write is `upsertCluster`, so registering a cluster that is
+    // already registered updates the entry rather than duplicating it.
+    if (succeeded) {
+      const domain = inputs.domain;
+      await this.handOffAfterInstall(domain);
+      return;
+    }
+
     this.render();
   }
 
