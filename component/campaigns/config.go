@@ -22,6 +22,7 @@
 package campaigns
 
 import (
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/core/env"
@@ -110,6 +111,49 @@ type Config struct {
 	SendTimeout        time.Duration
 	UnsubscribeSecret  string
 	UnsubscribeBaseURL string
+
+	// UnsubscribeSecretPrevious is the secret this node still VERIFIES
+	// with but never signs with -- the other half of a rotation
+	// (memql#3458). Empty on a deployment that has never rotated, which
+	// is also the state the worker warns about at boot once any campaign
+	// has sent: from there, changing UnsubscribeSecret alone invalidates
+	// every unsubscribe link already in a mailbox.
+	UnsubscribeSecretPrevious string
+}
+
+// UnsubscribeKeys is the verification ring, in preference order: the
+// current secret first (the common case matches on the first try), then
+// the previous one if a rotation is in effect.
+//
+// Deduplicated, because "previous == current" is a rotation somebody
+// started and did not finish, and it should cost one comparison rather
+// than two. Blank entries are dropped: an unset variable is not a key,
+// and an empty HMAC key would verify a token minted by anybody who
+// noticed.
+func (c Config) UnsubscribeKeys() []string {
+	keys := make([]string, 0, 2)
+	for _, candidate := range []string{c.UnsubscribeSecret, c.UnsubscribeSecretPrevious} {
+		if strings.TrimSpace(candidate) == "" {
+			continue
+		}
+		duplicate := false
+		for _, held := range keys {
+			if held == candidate {
+				duplicate = true
+			}
+		}
+		if !duplicate {
+			keys = append(keys, candidate)
+		}
+	}
+	return keys
+}
+
+// CanRotateUnsubscribeSecret reports whether this node holds a previous
+// secret -- that is, whether the NEXT rotation can be survived by links
+// already in a mailbox.
+func (c Config) CanRotateUnsubscribeSecret() bool {
+	return strings.TrimSpace(c.UnsubscribeSecretPrevious) != ""
 }
 
 // LoadConfig resolves the policy from the MEMQL_CAMPAIGNS_* env vars, all
@@ -127,6 +171,7 @@ type Config struct {
 //	MEMQL_CAMPAIGNS_THROTTLE_SECONDS
 //	MEMQL_CAMPAIGNS_SEND_TIMEOUT_SECONDS
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET
+//	MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS
 //	MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL
 //
 // The names are spelled out here rather than composed in prose because
@@ -179,6 +224,9 @@ func LoadConfig() Config {
 	}
 	if s, ok := reader.String("UNSUBSCRIBE_SECRET"); ok {
 		cfg.UnsubscribeSecret = s
+	}
+	if s, ok := reader.String("UNSUBSCRIBE_SECRET_PREVIOUS"); ok {
+		cfg.UnsubscribeSecretPrevious = s
 	}
 	if s, ok := reader.String("UNSUBSCRIBE_BASE_URL"); ok {
 		cfg.UnsubscribeBaseURL = s
