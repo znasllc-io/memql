@@ -20,6 +20,19 @@ export {
   type TallyRowView,
   type DeploymentHistoryView,
 } from "./cluster.js";
+// Install run + uninstall preview (memql#3474, #3476). Like the cluster
+// renderers above, these take projected view objects rather than concept rows:
+// an install step is not a graph row. See install.ts for why they are not
+// renderChecklist.
+export {
+  renderInstallSteps,
+  renderRemovalPreview,
+  type InstallStepState,
+  type InstallStepView,
+  type RemovalElevation,
+  type RemovalItemKind,
+  type RemovalItemView,
+} from "./install.js";
 export type { ConceptLike, DisplayCardHints, RowLike } from "./types.js";
 export { viewKitStyles, VIEW_KIT_CSS_VARIABLES } from "./styles.js";
 
