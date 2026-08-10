@@ -26,54 +26,47 @@
 //                           the operator: only the install knows where the
 //                           artifact landed and whether it was already there.
 //
+// WHAT MOVED, AND WHY (memql#3469). The ORCHESTRATION -- the plan functions,
+// the child environment, the decision to load a graph and execute it -- now
+// lives in ./session.ts, because the "+" button needed to start an install
+// without spawning a process and there was no function to call. What is left
+// here is what makes this a CLI and nothing else: argv parsing, and printing.
+// The plan functions are re-exported so this module stays the CLI's single
+// import surface.
+//
 // Free of `vscode` imports: this runs as plain node.
 //
-// Refs: #3374 #3357
+// Refs: #3469 #3374 #3357
 
 import * as path from "node:path";
 
+import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind, type Step } from "./graph.js";
+import { defaultReceiptPath } from "./receipt.js";
+import { type ExecEvent, type ExecutionReport, type StepPlan } from "./executor.js";
 import {
-  graphDocumentPath,
-  loadGraphFile,
-  type Graph,
-  type GraphKind,
-  type Step,
-} from "./graph.js";
-import {
-  defaultReceiptPath,
-  entryFor,
-  readReceipt,
-  removalParams,
-  type Receipt,
-} from "./receipt.js";
-import { capabilityScriptPath } from "./runner.js";
-import { executeGraph, type ExecEvent, type ExecutionReport, type StepPlan } from "./executor.js";
+  installPlan,
+  previewUninstall,
+  runInstall,
+  runUninstall,
+  uninstallPlan,
+  type SessionOptions,
+} from "./session.js";
+
+// The plan functions are the session's, and are re-exported rather than
+// re-implemented: two copies would be exactly the divergence #3469 exists to
+// prevent.
+export { installPlan, uninstallPlan } from "./session.js";
 
 export class CliError extends Error {}
 
-export interface CliOptions {
+/**
+ * What the CLI has that a session does not: which command was typed, and the
+ * two output modes. Everything else is a run input and lives in SessionOptions.
+ */
+export interface CliOptions extends SessionOptions {
   command: "install" | "uninstall";
-  /** Repository root holding scripts/ and the graph documents. */
-  root: string;
-  receiptFile: string;
-  /** Step ids the operator explicitly does not want run. */
-  skip: Set<string>;
-  /** Directory the pinned tools go into; prepended to the child PATH. */
-  toolDir?: string;
-  tag?: string;
-  repo?: string;
-  providerKeyFile?: string;
-  provider: string;
-  domain?: string;
-  ownerEmail?: string;
-  ownerFirstName?: string;
-  ownerLastName?: string;
-  registrationMode?: string;
-  /** Escape hatch: --param=<stepId>.<flag>=<value>. */
-  stepParams: Record<string, Record<string, string>>;
   json: boolean;
   dryRun: boolean;
-  timeoutMs?: number;
 }
 
 /** Flags that take a value, mapped to their CliOptions field. */
@@ -167,162 +160,45 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
 }
 
 // --------------------------------------------------------------------------
-// planning
-// --------------------------------------------------------------------------
-
-/** Only set keys reach the params map: an empty flag is not the same as none. */
-function present(params: Record<string, string | undefined>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(params)) {
-    if (v !== undefined && v !== "") out[k] = v;
-  }
-  return out;
-}
-
-/**
- * The install plan: the run-time half of each step's params.
- *
- * Nothing here is invented for a step the graph already pins. seedBootstrap
- * gets whatever owner fields the operator supplied, complete or not, because
- * seed-bootstrap.sh is the one place that decides what a complete bootstrap set
- * is -- and it exits 2 with the missing names when it is not.
- */
-export function installPlan(opts: CliOptions): (step: Step) => StepPlan {
-  return (step: Step): StepPlan => {
-    if (opts.skip.has(step.id)) {
-      return { action: "skip", reason: `--skip=${step.id}` };
-    }
-    let params: Record<string, string> = {};
-    switch (step.id) {
-      case "stackCheckout":
-        params = present({ tag: opts.tag, repo: opts.repo });
-        break;
-      case "providerKey":
-        params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });
-        break;
-      case "seedBootstrap":
-        params = present({
-          domain: opts.domain,
-          "owner-email": opts.ownerEmail,
-          "owner-first-name": opts.ownerFirstName,
-          "owner-last-name": opts.ownerLastName,
-          "registration-mode": opts.registrationMode,
-          provider: opts.providerKeyFile ? opts.provider : undefined,
-          "provider-key-file": opts.providerKeyFile,
-        });
-        break;
-      case "enrolmentLink":
-        // The account to enrol is the owner seedBootstrap just created, and
-        // the link has to point at the PUBLIC identity host rather than the
-        // in-cluster one, so the domain the operator gave the installer is
-        // where it comes from. Both are already CLI options; nothing new is
-        // asked of the operator to get a passkey out of the install.
-        params = present({
-          "user-email": opts.ownerEmail,
-          "base-url": opts.domain ? `https://identity.${opts.domain}` : undefined,
-        });
-        break;
-      default:
-        break;
-    }
-    if (opts.toolDir && step.script === "install.binary") {
-      params = { ...params, dest: opts.toolDir };
-    }
-    return { action: "run", params: { ...params, ...(opts.stepParams[step.id] ?? {}) } };
-  };
-}
-
-/**
- * The uninstall plan: read straight off the receipt.
- *
- * Two facts only the install knows, and both come back from here:
- *
- *   - WHERE the artifact landed, as the `--path` / `--caroot` / `--cluster`
- *     the removal needs;
- *   - WHETHER the installer created it. `--pre-existing=true` is an
- *     unconditional refusal inside remove-artifact.sh, so passing the recorded
- *     verdict faithfully is what keeps a developer's own k3d cluster, mkcert CA
- *     or checkout when they uninstall memQL. When the receipt says the artifact
- *     pre-existed, the refusal that follows is the expected outcome, so the
- *     step is planned as preservedOnRefusal and reports `preserved` instead of
- *     failing the run.
- *
- * A step whose install counterpart left no receipt has nothing to remove. That
- * skip is SATISFIED: the state it would have established already holds, so the
- * removals waiting on it still run. Without that, an install that stopped
- * before the cluster would leave an uninstall that takes nothing back at all.
- */
-export function uninstallPlan(receipt: Receipt, skip: Set<string> = new Set()): (step: Step) => StepPlan {
-  return (step: Step): StepPlan => {
-    if (skip.has(step.id)) return { action: "skip", reason: `--skip=${step.id}` };
-
-    const installStep = step.reverses ?? "";
-    const entry = installStep ? entryFor(receipt, installStep) : undefined;
-    if (!entry) {
-      return { action: "skip", reason: `the receipt has no ${installStep || "matching"} entry -- nothing to remove`, satisfied: true };
-    }
-    const params = removalParams(entry);
-    if (!params) {
-      return { action: "skip", reason: `${installStep} left no artifact behind`, satisfied: true };
-    }
-    return { action: "run", params, preservedOnRefusal: entry.preExisting };
-  };
-}
-
-// --------------------------------------------------------------------------
 // running
 // --------------------------------------------------------------------------
 
 export async function run(opts: CliOptions, log: (line: string) => void = (l) => console.error(l)): Promise<number> {
   const kind: GraphKind = opts.command === "install" ? "install" : "uninstall";
-  const graph = await loadGraphFile(graphDocumentPath(kind, opts.root));
 
-  let plan: (step: Step) => StepPlan;
-  if (kind === "install") {
-    plan = installPlan(opts);
-  } else {
-    const receipt = await readReceipt(opts.receiptFile);
-    if (!receipt) {
-      throw new CliError(
-        `no receipt at ${opts.receiptFile} -- an uninstall removes what an install recorded, ` +
-          `and without that record it would be guessing at the operator's machine`,
-      );
-    }
-    plan = uninstallPlan(receipt, opts.skip);
-  }
-
+  // The dry run stays here rather than moving into the session, because it is
+  // PRINTING -- and for uninstall it is now printed from the same structured
+  // preview the wizard renders (previewUninstall), so the two can never
+  // describe different removals.
   if (opts.dryRun) {
-    printPlan(graph, plan, log);
+    if (kind === "uninstall") {
+      const preview = await previewUninstall(opts);
+      log(`${preview.graph}: ${preview.steps.length} steps`);
+      for (const step of preview.steps) {
+        if (step.action === "skip") {
+          log(`  - ${step.id}  SKIP (${step.reason})`);
+          continue;
+        }
+        const flags = Object.entries(step.params).map(([k, v]) => `--${k}=${v}`);
+        const tier = step.preserved ? "  PRESERVED" : "";
+        log(`  - ${step.id}${tier}  ${step.script} ${flags.join(" ")}`.trimEnd());
+      }
+      return 0;
+    }
+    const graph = await loadGraphFile(graphDocumentPath(kind, opts.root));
+    printPlan(graph, installPlan(opts), log);
     return 0;
   }
 
-  const report = await executeGraph({
-    graph,
-    plan,
-    scriptPath: (step) => capabilityScriptPath(step.script, opts.root),
-    receiptFile: kind === "install" ? opts.receiptFile : undefined,
-    timeoutMs: opts.timeoutMs,
-    env: childEnv(opts),
-    onEvent: (event) => logEvent(event, log),
-  });
+  const report =
+    kind === "install"
+      ? await runInstall(opts, { onEvent: (event) => logEvent(event, log) })
+      : await runUninstall(opts, { onEvent: (event) => logEvent(event, log) });
 
   printSummary(report, log);
   if (opts.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-  return report.ok ? 0 : 1;
-}
-
-/**
- * The tools the installer just placed are not on PATH.
- *
- * install.binary drops k3d / kubectl / mkcert into ~/.memql/bin, which no
- * shell has ever heard of, and the very next steps (mkcert -install, k3d
- * cluster create) look them up on PATH. Prepending the directory for the child
- * processes is what makes the graph's own ordering mean anything.
- */
-function childEnv(opts: CliOptions): NodeJS.ProcessEnv {
-  const home = process.env.HOME ?? "";
-  const toolDir = opts.toolDir ?? path.join(home, ".memql", "bin");
-  return { ...process.env, PATH: `${toolDir}${path.delimiter}${process.env.PATH ?? ""}` };
+  // A cancelled run did not do what was asked, even when nothing failed.
+  return report.ok && report.cancelled !== true ? 0 : 1;
 }
 
 function printPlan(graph: Graph, plan: (step: Step) => StepPlan, log: (line: string) => void): void {
