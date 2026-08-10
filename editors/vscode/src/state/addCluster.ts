@@ -76,8 +76,29 @@ export interface FieldError {
   message: string;
 }
 
-const EMPTY_INPUTS: Inputs = {
-  domain: "",
+/**
+ * What the form starts with (#3473).
+ *
+ * A DEFAULT IS OFFERED, THE FIELD IS NOT SKIPPED. The domain is how the
+ * cluster is addressed and a run pointed at the wrong one is not the run the
+ * operator asked for, so it stays visible and editable rather than becoming
+ * something the wizard decides silently.
+ *
+ * `local.znas.io` is not invented here. It is the installer's OWN default:
+ * `scripts/install/hosts-entries.sh` writes
+ * `cockpit.local.znas.io,identity.local.znas.io,local.znas.io` when given no
+ * `--hostnames`, and `verify-frontdoor.sh` checks the same two hosts. Picking
+ * any other value here would make the form disagree with the scripts it is
+ * about to run.
+ *
+ * THE OTHER FOUR ARE DELIBERATELY BLANK. A person's name, their email and
+ * where they keep an API key are facts about them, and a wizard that guessed
+ * would either be wrong or would prefill somebody else's details on a shared
+ * machine. `seed-bootstrap.sh` agrees -- it defaults every owner field to the
+ * empty string and exits 2 naming what is missing.
+ */
+export const DEFAULT_INPUTS: Inputs = {
+  domain: "local.znas.io",
   ownerFirstName: "",
   ownerLastName: "",
   ownerEmail: "",
@@ -134,7 +155,7 @@ export class AddClusterState {
   private currentScreen: Screen = "landing";
   private chosen: AddClusterAction | undefined;
   private guidedRun = false;
-  private values: Inputs = { ...EMPTY_INPUTS };
+  private values: Inputs = { ...DEFAULT_INPUTS };
   private fieldErrors: FieldError[] = [];
   private progress: StepProgress[] = [];
   private failedId: string | undefined;
