@@ -859,9 +859,6 @@ ${this.bodyHtml()}
         return this.runHtml();
       case "failedStep":
         return this.failedHtml();
-      case "done":
-        return this.doneHtml();
-      // Still the shared slot: #3475 fills `connect`, #3476 `uninstallPreview`.
       case "connect":
         return this.connectHtml();
       case "uninstallPreview":

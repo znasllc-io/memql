@@ -145,14 +145,22 @@ test("a failed registry write still says where the cluster answers", async () =>
   assert.equal(result.ok, false);
   if (!result.ok) {
     assert.equal(result.reachableAt, "cockpit.local.znas.io:443");
-    // `includes`, not a regex. What is being asserted is that the sentence
-    // CONTAINS the endpoint, and a literal substring says that directly --
-    // whereas an unanchored pattern over a hostname is the shape of a host
-    // check that matches anywhere, which CodeQL flags (js/regex/missing-regexp-anchor)
-    // and is right to: the same expression in production code would admit
-    // arbitrary hosts either side of it.
+    // Compared against the result's OWN field, not a literal address.
+    //
+    // Two rewrites got here. A regex over the hostname was
+    // js/regex/missing-regexp-anchor (matches anywhere); `includes` against a
+    // string literal was js/incomplete-url-substring-sanitization (a substring
+    // test on a URL is not a host check). Both flags are false positives here
+    // -- this is a message assertion, not sanitization -- but both were right
+    // about the SHAPE, and a third spelling of "compare a URL to a constant"
+    // would just find a third rule.
+    //
+    // The requirement was never "the message contains this address". It is "the
+    // message says where the cluster answers", and `reachableAt` is where that
+    // answer lives. Asserting one field of the result against another states it
+    // exactly, and no analyser reads it as validating a host.
     assert.ok(
-      result.message.includes("cockpit.local.znas.io:443"),
+      result.message.includes(result.reachableAt),
       `the message must say where the cluster answers: ${result.message}`,
     );
     assert.match(result.message, /read-only/, "the underlying cause survives");
