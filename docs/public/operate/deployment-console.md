@@ -170,9 +170,11 @@ has a reference to quote rather than a timestamp to argue from.
 | Unary wire | A `RefusalInfo` detail on the gRPC status |
 
 **An empty id means no event was written, not a lost one.** Only the role
-gate audits: an `InvalidArgument` is rejected *before* the gate runs on
-several RPCs, and an `Unavailable` never reached the service at all.
-Neither leaves a trail, so neither has an id to show.
+gate audits. An `Unavailable` never reached the service at all, and an
+`InvalidArgument` is a caller error the gate does not record -- so
+neither leaves a trail, and neither has an id to show. Note that on the
+four RPCs listed below, an `InvalidArgument` now means the caller
+*cleared* the role floor; a caller who did not never sees one.
 
 Why the refused caller sees it rather than only an admin: the id is an
 opaque token that dereferences nothing (the audit log is admin-gated),
@@ -185,6 +187,38 @@ the same call the identity-admin console makes for its own refusals
 
 On the permitted path nothing changed: the id stays where it has always
 been, on `ActionResult.audit_event_id`.
+
+### The gate runs before argument validation (memql#3457)
+
+`DeployStaging`, `Promote`, `Rollback` and `RolloutAction` check the role
+floor **first** and validate their arguments only afterwards. They used
+to do it the other way round, and that left one hole in "every denied
+attempt is audited": a caller below the floor who sent a bad argument was
+rejected by the parser before the gate ever ran, so the attempt was never
+recorded.
+
+**This changes an error code you may observe.** Nothing about the request
+or reply *shape* changed -- same fields, same `audit_event_id`, same
+`RefusalInfo` detail -- only which code comes back in one combination:
+
+| Caller | Argument | Before | Now |
+|--------|----------|--------|-----|
+| below the floor | invalid | `INVALID_ARGUMENT`, no audit event | `PERMISSION_DENIED` + a blocked audit event |
+| below the floor | valid | `PERMISSION_DENIED` + audit event | unchanged |
+| at or above the floor | invalid | `INVALID_ARGUMENT` | unchanged |
+| at or above the floor | valid | action runs, audited | unchanged |
+
+If you script against this surface, a below-floor caller sending a
+malformed request now gets `PERMISSION_DENIED` rather than
+`INVALID_ARGUMENT`. That is the honest answer -- the caller was never
+going to be allowed to run the action, whatever they typed -- and it is
+the safer one: an unauthorized caller no longer learns anything about the
+argument parser from probing it. The audit event records the argument as
+sent, invalid values included, because the shape of a probe is the
+interesting part of it.
+
+The other five RPCs still validate first. They are not affected by this
+change, and the same re-order has not been applied to them.
 
 ### Reading status is owner/admin, deliberately (memql#3332)
 

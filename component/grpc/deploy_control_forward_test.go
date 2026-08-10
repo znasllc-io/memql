@@ -323,6 +323,142 @@ func TestForwardedRefusalCarriesItsAuditEventId(t *testing.T) {
 	}
 }
 
+// TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited is the
+// cross-node half of memql#3457.
+//
+// The four RPCs below used to validate their arguments before calling the gate,
+// so a below-floor caller who sent a bad argument got INVALID_ARGUMENT and left
+// no trail. This is the path where that matters most: the portal is served by
+// the bff, so EVERY refusal an operator meets in the console is decided on the
+// identity node and travels this hop. An unaudited probe over the mesh is one
+// nobody can see from either end -- the caller reads an argument error, and the
+// admin reading the trail reads nothing.
+//
+// The hop is not assumed to work by construction. The handler runs on a bare
+// context with none of the originating node's state, and the gate under test is
+// a REAL *deploycontrol.Service, so what is asserted is that the ORIGINATING
+// caller's role reached a gate that ran before the argument parser.
+func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *testing.T) {
+	// The four RPCs memql#3457 re-ordered, each carrying the argument its own
+	// validator rejects. All four sit on the owner/admin tier.
+	cases := []struct {
+		name string
+		verb string
+		msg  func() *memqlv1.DeployControlMsg
+	}{
+		{
+			name: "DeployStaging (empty version)",
+			verb: "deployment_console_deploy_staging",
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-deploy-staging",
+					Request: &memqlv1.DeployControlMsg_DeployStaging{
+						DeployStaging: &memqlv1.DeployStagingRequest{},
+					}}
+			},
+		},
+		{
+			name: "Promote (empty version)",
+			verb: "deployment_console_promote",
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-promote",
+					Request: &memqlv1.DeployControlMsg_Promote{
+						Promote: &memqlv1.PromoteRequest{},
+					}}
+			},
+		},
+		{
+			name: "Rollback (unknown env)",
+			verb: "deployment_console_rollback",
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollback",
+					Request: &memqlv1.DeployControlMsg_Rollback{
+						Rollback: &memqlv1.RollbackRequest{Env: "nowhere", CommitSha: "abc1234"},
+					}}
+			},
+		},
+		{
+			name: "RolloutAction (unknown action)",
+			verb: "deployment_console_rollout_action",
+			msg: func() *memqlv1.DeployControlMsg {
+				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollout",
+					Request: &memqlv1.DeployControlMsg_RolloutAction{
+						RolloutAction: &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "bogus"},
+					}}
+			},
+		},
+	}
+
+	// developer is the load-bearing role here: it may cut and deploy forward,
+	// so "below the floor" is a per-action fact rather than a global one. writer
+	// and reader walk the rest of the spectrum.
+	for _, tc := range cases {
+		tc := tc
+		for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader} {
+			role := role
+			t.Run(tc.name+"/"+string(role), func(t *testing.T) {
+				h, audit := newForwardFixture(t)
+
+				res, err := runHop(t, h, principalForRole(t, role), tc.msg())
+				if err != nil {
+					t.Fatalf("the hop itself must succeed; a refusal travels INSIDE the result: %v", err)
+				}
+				if got := codes.Code(res.GetErrorCode()); got != codes.PermissionDenied {
+					t.Fatalf("forwarded %s for %s = %v, want PermissionDenied -- the gate must run "+
+						"before the argument parser on the receiving node too (message %q)",
+						tc.name, role, got, res.GetErrorMessage())
+				}
+				if res.GetOk() {
+					t.Error("a refused forward came back ok=true")
+				}
+
+				events := audit.all()
+				if len(events) != 1 || events[0].Outcome != identity.AuditOutcomeBlocked {
+					t.Fatalf("want exactly one blocked audit event on the identity node, got %+v", events)
+				}
+				if events[0].Action != tc.verb {
+					t.Errorf("audit action = %q, want %q", events[0].Action, tc.verb)
+				}
+				if events[0].ActorRole != string(role) {
+					t.Errorf("audit actor role = %q, want %s -- the attempt must be attributed to the "+
+						"ORIGINATING caller, not the relaying node", events[0].ActorRole, role)
+				}
+				// The operator's reference survives the hop, exactly as it does
+				// for a valid-argument refusal (memql#3334).
+				if got, want := res.GetAuditEventId(), events[0].CorrelationId; got != want {
+					t.Errorf("forwarded audit_event_id = %q, want %q", got, want)
+				}
+				if res.GetRequestId() != tc.msg().GetRequestId() {
+					t.Errorf("request_id = %q, want the caller's own id echoed back", res.GetRequestId())
+				}
+			})
+		}
+	}
+
+	// The other half of the table: a caller AT the floor still gets
+	// InvalidArgument for the same request, and still writes nothing. Without
+	// this, a gate that refused everyone would satisfy every row above.
+	t.Run("owner still gets InvalidArgument and no audit event", func(t *testing.T) {
+		for _, tc := range cases {
+			h, audit := newForwardFixture(t)
+			res, err := runHop(t, h, principalForRole(t, auth.RoleOwner), tc.msg())
+			if err != nil {
+				t.Fatalf("%s hop: %v", tc.name, err)
+			}
+			if got := codes.Code(res.GetErrorCode()); got != codes.InvalidArgument {
+				t.Errorf("owner + %s = %v, want InvalidArgument still (message %q)",
+					tc.name, got, res.GetErrorMessage())
+			}
+			if events := audit.all(); len(events) != 0 {
+				t.Errorf("an admitted caller's argument error wrote audit events: %+v", events)
+			}
+			if res.GetAuditEventId() != "" {
+				t.Errorf("an argument rejection carried audit_event_id %q; an empty id is the honest "+
+					"answer when no event was written", res.GetAuditEventId())
+			}
+		}
+	})
+}
+
 // TestForwardedTransportFailureCarriesNoAuditEventId is the negative that
 // keeps the field honest across the hop.
 //
