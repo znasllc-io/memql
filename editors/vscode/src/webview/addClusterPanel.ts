@@ -40,7 +40,9 @@ import {
   type ClusterPresence,
   type PresenceVerdict,
 } from "../clusters/presence.js";
+import { defaultClustersPath, upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
+import { completeInstallHandoff } from "../install/handoff.js";
 import { defaultReceiptPath } from "../install/receipt.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import {
@@ -406,6 +408,10 @@ export class AddClusterPanel {
       this.runAbort?.abort();
       this.state.cancel();
       this.render();
+      return;
+    }
+    if (type === "signInAsOwner") {
+      void this.signInAsOwner();
     }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
@@ -858,7 +864,7 @@ ${this.bodyHtml()}
       case "uninstallPreview":
         return this.uninstallHtml();
       case "done":
-        return this.placeholderHtml();
+        return this.doneHtml();
     }
   }
 
@@ -1238,16 +1244,81 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   }
 
   /**
-   * The slot the remaining screens fill.
+   * Registers the cluster the run just built, and moves to the hand-off screen.
    *
-   * Left as a plain region on purpose: #3474 (progress) and #3476 (the
-   * uninstall preview) each render their own HTML into it. Guessing at their
-   * markup here would be a second thing for them to unpick. The remote form
-   * has since claimed its own screen off this slot (connectHtml, #3475).
+   * THE SEAM #3474 CALLS when a run finishes successfully. The ordering and the
+   * failure semantics are in src/install/handoff.ts, where they are tested; this
+   * only supplies the effects, and it supplies them through COMMANDS rather than
+   * through injected collaborators so the panel needs no new constructor
+   * arguments to do it.
    */
-  private placeholderHtml(): string {
-    return `<h1>${escapeHtml(this.state.action ?? "")}</h1>
-<p class="lede">This screen lands with its own issue. Nothing has been run.</p>
+  async handOffAfterInstall(domain: string): Promise<void> {
+    const result = await completeInstallHandoff(
+      { domain },
+      {
+        // upsertCluster, never addCluster: a repair or a second run over an
+        // already-registered cluster must update the entry, and addCluster
+        // refuses a duplicate name by design.
+        write: (update) => upsertCluster(defaultClustersPath(), update),
+        invalidatePresence: () => this.presence.invalidate(),
+        refreshTree: () => void vscode.commands.executeCommand("memql.clusters.refresh"),
+        select: async (name) => {
+          await vscode.commands.executeCommand("memql.clusters.select", {
+            cluster: { name, endpoint: "", local: true },
+            selected: false,
+          });
+        },
+      },
+    );
+    this.state.setHandoff(result);
+    this.render();
+  }
+
+  /** Reaches the existing sign-in flow. No new credential path (#3401). */
+  private async signInAsOwner(): Promise<void> {
+    const handoff = this.state.handoff;
+    if (handoff === undefined || !handoff.ok) return;
+    await vscode.commands.executeCommand("memql.clusters.signIn", {
+      cluster: handoff.cluster,
+      selected: true,
+    });
+  }
+
+  private doneHtml(): string {
+    const handoff = this.state.handoff;
+
+    if (handoff !== undefined && !handoff.ok) {
+      // A failed registry write is NOT a failed install. Say where the cluster
+      // answers, so ten minutes of work are not read as wasted.
+      return `<h1>Installed, but not added to your list</h1>
+<p class="lede">${escapeHtml(handoff.message)}</p>
+<div class="actions">
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+    }
+
+    if (handoff !== undefined && handoff.ok) {
+      const signIn = handoff.canSignIn
+        ? `<button class="primary" type="button" data-act="signInAsOwner">Sign in as owner</button>`
+        : "";
+      return `<h1>Your cluster is ready</h1>
+<p class="lede">${escapeHtml(
+        `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
+      )}</p>
+<div class="actions">
+  ${signIn}
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+    }
+
+    // Terminal without a hand-off: a cancel, or an action that registers
+    // nothing. Saying "cancelled" plainly beats an empty success screen.
+    return `<h1>${escapeHtml(this.state.cancelled ? "Cancelled" : "Finished")}</h1>
+<p class="lede">${escapeHtml(
+      this.state.cancelled
+        ? "Whatever had already run is recorded, and can be uninstalled."
+        : "Nothing further to do.",
+    )}</p>
 <div class="actions">
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
