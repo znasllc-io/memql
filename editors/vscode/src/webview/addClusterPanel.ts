@@ -40,19 +40,17 @@ import {
   type ClusterPresence,
   type PresenceVerdict,
 } from "../clusters/presence.js";
-import { defaultClustersPath, upsertCluster } from "../clusters/file.js";
+import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
-import {
-  defaultReceiptPath,
-  readReceipt,
-  recordedProviderKeyFile,
-} from "../install/receipt.js";
+import { readReceipt, recordedProviderKeyFile } from "../install/receipt.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
+import type { RunScript } from "../install/runner.js";
 import {
   previewUninstall,
   runInstall,
   runUninstall,
+  type SessionHooks,
   type SessionOptions,
   type UninstallPreview,
 } from "../install/session.js";
@@ -198,6 +196,31 @@ export interface AddClusterDeps {
    * as `SessionOptions.root`; one root, resolved once.
    */
   installRoot: string;
+  /**
+   * ~/.memql/install-receipt.json, resolved once at activation.
+   *
+   * ONE VALUE, THREE READERS. The install writes it, the uninstall preview
+   * reads it, and a repair reads the provider key path back out of it
+   * (memql#3512). Each used to call `defaultReceiptPath()` for itself, which is
+   * three independent answers to "where is the record of this install" -- and
+   * the run that writes the receipt and the run that reverses it disagreeing
+   * about that is the one way an uninstall can silently take nothing back.
+   * Resolved beside `installRoot` for the same reason: it is activation's
+   * answer, not the page's.
+   */
+  receiptFile: string;
+  /**
+   * Injected by tests; the real spawn-based runner when absent.
+   *
+   * The same seam `SessionHooks.run` and `ExecuteOptions.run` already carry,
+   * threaded one layer further out so a case can drive this panel over the REAL
+   * graph document, the real plan, the real executor and the real receipt with
+   * only script EXECUTION faked (memql#3514). That is what makes the assertions
+   * worth anything: the wave-2 provider-key gate, the params a step is handed
+   * and the timeout it is given are all properties of the layers underneath,
+   * and a fake that replaced any of them would be the test talking to itself.
+   */
+  runScript?: RunScript;
   /**
    * Drops a cluster's registry entry, its stored credential and its live
    * connection, exactly as the "Remove from list" command does.
@@ -463,6 +486,16 @@ export class AddClusterPanel {
   }
 
   /**
+   * The hooks every session call gets: the caller's, plus the injected runner.
+   *
+   * One place, so a run started from Retry cannot end up on a different runner
+   * from the one `begin` used.
+   */
+  private hooks(own: SessionHooks): SessionHooks {
+    return { ...own, ...(this.deps.runScript ? { run: this.deps.runScript } : {}) };
+  }
+
+  /**
    * Drives `session.ts` and folds every event into the state machine.
    *
    * ONE RUN AT A TIME, guarded by `runAbort` rather than by the screen: the
@@ -479,6 +512,11 @@ export class AddClusterPanel {
     if (action !== "install" && action !== "installGuided" && action !== "repair") return;
 
     const inputs = this.state.inputs;
+    // A NEW RUN OWNS THE SCREEN. Whatever stopped the last one being attempted
+    // is about to be either fixed or repeated, and a stale sentence describing
+    // the previous attempt is the one thing on this page an operator has no way
+    // to tell apart from a current one.
+    this.runError = "";
 
     // A REPAIR HAS NO KEY FIELD, SO IT READS ONE OFF THE RECEIPT (memql#3512).
     //
@@ -491,7 +529,7 @@ export class AddClusterPanel {
     // even though it leaves no artifact, so the path is already on disk.
     let providerKeyFile = inputs.providerKeyFile;
     if (providerKeyFile === "") {
-      providerKeyFile = recordedProviderKeyFile(await readReceipt(defaultReceiptPath()));
+      providerKeyFile = recordedProviderKeyFile(await readReceipt(this.deps.receiptFile));
     }
     if (providerKeyFile === "") {
       // REFUSE RATHER THAN START. Without a key path the run cannot pass wave
@@ -515,10 +553,10 @@ export class AddClusterPanel {
       report = await runInstall(
         {
           root: this.deps.installRoot,
-          // The same default the uninstall side reads (#3476), so the run that
+          // The same value the uninstall side reads (#3476), so the run that
           // writes the receipt and the run that reverses it cannot disagree
           // about where it lives.
-          receiptFile: defaultReceiptPath(),
+          receiptFile: this.deps.receiptFile,
           skip: new Set<string>(),
           // The graph pins `anthropic` on the providerKey step; this is the
           // same value, passed for the seedBootstrap step that also needs it.
@@ -533,13 +571,13 @@ export class AddClusterPanel {
           stepParams: {},
           timeoutMs: STEP_TIMEOUT_MS,
         },
-        {
+        this.hooks({
           onEvent: (event) => {
             this.state.apply(event);
             this.render();
           },
           signal: controller.signal,
-        },
+        }),
       );
     } catch (err) {
       // A THROW IS NOT A FAILED STEP. Everything a step can do wrong arrives as
@@ -741,7 +779,7 @@ export class AddClusterPanel {
   private uninstallOptions(): SessionOptions {
     return {
       root: this.deps.installRoot,
-      receiptFile: defaultReceiptPath(),
+      receiptFile: this.deps.receiptFile,
       // Nothing is skipped. A skip list is how an operator narrows an INSTALL;
       // narrowing an uninstall would produce a machine in a state no receipt
       // describes, and this screen offers no such control.
@@ -785,7 +823,7 @@ export class AddClusterPanel {
       this.localClusterName = undefined;
     }
     try {
-      this.uninstallPreview = await previewUninstall(this.uninstallOptions());
+      this.uninstallPreview = await previewUninstall(this.uninstallOptions(), this.hooks({}));
     } catch (err) {
       this.uninstallProblem = err instanceof Error ? err.message : String(err);
     }
@@ -816,13 +854,16 @@ export class AddClusterPanel {
     this.render();
 
     try {
-      const report = await runUninstall(this.uninstallOptions(), {
-        onEvent: (event) => {
-          this.uninstall.apply(event);
-          this.render();
-        },
-        signal: controller.signal,
-      });
+      const report = await runUninstall(
+        this.uninstallOptions(),
+        this.hooks({
+          onEvent: (event) => {
+            this.uninstall.apply(event);
+            this.render();
+          },
+          signal: controller.signal,
+        }),
+      );
       this.uninstall.finish(report);
       if (report.ok && report.cancelled !== true) {
         await this.completeUninstall();
@@ -1009,14 +1050,6 @@ ${this.bodyHtml()}
           ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
           : `<p class="lede">Nothing has been run.</p>`;
 
-    // A run that could not be ATTEMPTED gets its own line. It is not a step
-    // failure -- there is no step to retry and no stderr to disclose -- so it
-    // must not be dressed as one.
-    const errorHtml =
-      this.runError === ""
-        ? ""
-        : `<p class="error">The install could not be started: ${escapeHtml(this.runError)}</p>`;
-
     // Cancel is offered for exactly as long as there is something to stop.
     // A cancelled run leaves a valid receipt -- what ran, ran, and an uninstall
     // can still take it back -- so this is safe at any point.
@@ -1030,7 +1063,6 @@ ${this.bodyHtml()}
         ? "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs."
         : "Each step proves itself before the next one starts.",
     )}</p>
-${errorHtml}
 ${body}
 <div class="actions">${actions}</div>`;
   }
@@ -1370,7 +1402,7 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
         // upsertCluster, never addCluster: a repair or a second run over an
         // already-registered cluster must update the entry, and addCluster
         // refuses a duplicate name by design.
-        write: (update) => upsertCluster(defaultClustersPath(), update),
+        write: (update) => upsertCluster(this.deps.clustersPath, update),
         invalidatePresence: () => this.presence.invalidate(),
         refreshTree: () => void vscode.commands.executeCommand("memql.clusters.refresh"),
         select: async (name) => {
@@ -1397,6 +1429,29 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
 
   private doneHtml(): string {
     const handoff = this.state.handoff;
+
+    // A RUN THAT WAS NEVER ATTEMPTED, and the reason it was not.
+    //
+    // This branch is first because BOTH paths that set `runError` end here:
+    // the refusal ahead of the provider-key gate (memql#3512) and a throw out
+    // of `runInstall` -- a missing graph document, an unreadable script -- each
+    // call `finish()`, which is this screen. The sentence used to be rendered
+    // only by `runHtml()`, which neither path can reach, so an operator
+    // repairing a cluster with no recorded key was told "Finished / Nothing
+    // further to do" -- the exact confident-wrong-report the honest message was
+    // written to replace. It said the true thing to nobody.
+    if (this.runError !== "") {
+      return `<h1>${escapeHtml(
+        this.state.action === "repair" ? "The repair did not start" : "The install did not start",
+      )}</h1>
+<p class="lede">${escapeHtml(this.runError)}</p>
+<p>${escapeHtml(
+        "Nothing has been changed on this machine -- the run was refused before its first step.",
+      )}</p>
+<div class="actions">
+  <button class="secondary" type="button" data-act="back">Back</button>
+</div>`;
+    }
 
     if (handoff !== undefined && !handoff.ok) {
       // A failed registry write is NOT a failed install. Say where the cluster

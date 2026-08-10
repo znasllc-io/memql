@@ -1,5 +1,5 @@
 // A hand-written stand-in for the editor-injected `vscode` module, used by the
-// activation cases (memql#3387) and by nothing else.
+// activation cases (memql#3387) and by the add-a-cluster panel (memql#3514).
 //
 // WHY IT EXISTS. Every other module in this package that carries logic is free
 // of `vscode` imports -- that is what lets the fast lane run under bare
@@ -18,11 +18,23 @@
 // type-checks the extension against the real @types/vscode; this file is a
 // runtime substitution only and deliberately does not implement vscode.d.ts.
 //
-// WHAT IT COVERS. The activation path and nothing more -- the members
-// activate() and registerRuntimeSurface() actually touch. A member reached only
-// from a command handler, a tree item render or a webview is absent on purpose:
-// an absent member fails loudly the moment a case wanders past what this stub
-// claims to model, which is the right outcome for a fake.
+// WHAT IT COVERS. The activation path, plus the WEBVIEW PANEL surface
+// src/webview/addClusterPanel.ts drives (memql#3514). A member reached only
+// from a command handler or a tree item render is absent on purpose: an absent
+// member fails loudly the moment a case wanders past what this stub claims to
+// model, which is the right outcome for a fake.
+//
+// WHY THE WEBVIEW SURFACE IS HERE AT ALL. `AddClusterPanel` is where the state
+// machine, the session layer, the graph and the workbench meet, and it was the
+// only layer of that stack with no test of any kind -- which is where four
+// defects reached main during epic #3463, each satisfied by something ADJACENT
+// to the requirement (a type existing, a state transition happening, a button
+// rendering) while the thing the operator needed did not happen. The host smoke
+// lane structurally cannot reach it: a card is a `<button data-choose=...>`
+// inside the webview's iframe and nothing host-side can dispatch a DOM event
+// into it. So the page's own script is the ONE part modelled by hand here --
+// `send()` posts what a click would post -- and everything below it, message
+// handling included, is the real panel.
 
 export interface StubDisposable {
   dispose(): void;
@@ -50,7 +62,23 @@ export const recorded = {
   commands: [] as string[],
   /** File-system watcher globs, as `<base>/<pattern>`. */
   watched: [] as string[],
+  /** Command ids passed to commands.executeCommand, in order. */
+  executed: [] as string[],
+  /** Every panel window.createWebviewPanel has produced, in order. */
+  webviews: [] as StubWebviewPanel[],
 };
+
+/** Drops everything `recorded` holds. Call between cases. */
+export function resetRecorded(): void {
+  recorded.errors.length = 0;
+  recorded.warnings.length = 0;
+  recorded.infos.length = 0;
+  recorded.treeViews.length = 0;
+  recorded.commands.length = 0;
+  recorded.watched.length = 0;
+  recorded.executed.length = 0;
+  recorded.webviews.length = 0;
+}
 
 /**
  * Settings the stubbed `workspace.getConfiguration(section).inspect(key)`
@@ -96,6 +124,132 @@ export class EventEmitter<T> {
   dispose(): void {
     this.listeners.clear();
   }
+}
+
+/**
+ * The disposable VS Code exposes as a CLASS, not just as an interface.
+ *
+ * `AddClusterPanel` constructs one (`new vscode.Disposable(() => ...)`) to hang
+ * its own teardown off the extension context, so the constructor form has to
+ * exist rather than only the shape.
+ */
+export class Disposable implements StubDisposable {
+  constructor(private readonly onDispose: () => void) {}
+
+  dispose(): void {
+    this.onDispose();
+  }
+}
+
+export const ViewColumn = {
+  Active: -1,
+  Beside: -2,
+  One: 1,
+  Two: 2,
+} as const;
+
+/**
+ * A webview panel, as a test drives it.
+ *
+ * `html` is what the extension last rendered -- the ONE thing worth asserting
+ * about a webview, since it is the entirety of what the operator can see and
+ * act on. `send()` is the direction the real host API does not offer: it plays
+ * the part of the page's own click handler, posting the message a
+ * `data-act`/`data-choose` button would post.
+ */
+export interface StubWebviewPanel {
+  viewType: string;
+  title: string;
+  /** The last HTML the extension assigned. Empty before the first render. */
+  html: string;
+  /** Posts a message from the PAGE to the extension, as a click would. */
+  send(message: unknown): void;
+  /** How many times the extension asked to bring this panel forward. */
+  revealCount: number;
+  disposed: boolean;
+  /** Closes the panel from the EDITOR's side, as clicking the tab's x does. */
+  close(): void;
+}
+
+/** The object handed to the extension. Its `html` writes land on the stub. */
+interface WebviewPanelSurface {
+  webview: {
+    html: string;
+    onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable;
+    postMessage(message: unknown): Promise<boolean>;
+  };
+  reveal(column?: number): void;
+  onDidDispose(handler: () => void, thisArg?: unknown, disposables?: StubDisposable[]): StubDisposable;
+  dispose(): void;
+}
+
+function createStubWebviewPanel(viewType: string, title: string): {
+  handle: StubWebviewPanel;
+  surface: WebviewPanelSurface;
+} {
+  const inbound: ((message: unknown) => void)[] = [];
+  const onDispose: (() => void)[] = [];
+
+  const handle: StubWebviewPanel = {
+    viewType,
+    title,
+    html: '',
+    revealCount: 0,
+    disposed: false,
+    send(message: unknown): void {
+      for (const listener of [...inbound]) listener(message);
+    },
+    close(): void {
+      surface.dispose();
+    },
+  };
+
+  const surface: WebviewPanelSurface = {
+    webview: {
+      // The extension assigns `panel.webview.html`; the assignment is the whole
+      // render, so it is captured on the handle rather than kept here.
+      get html(): string {
+        return handle.html;
+      },
+      set html(value: string) {
+        handle.html = value;
+      },
+      onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable {
+        inbound.push(handler);
+        return {
+          dispose: () => {
+            const at = inbound.indexOf(handler);
+            if (at >= 0) inbound.splice(at, 1);
+          },
+        };
+      },
+      postMessage(_message: unknown): Promise<boolean> {
+        // Nothing in the extension reads a reply to this, and modelling one
+        // would invent a channel the panel does not use.
+        return Promise.resolve(true);
+      },
+    },
+    reveal(_column?: number): void {
+      handle.revealCount += 1;
+    },
+    onDidDispose(
+      handler: () => void,
+      _thisArg?: unknown,
+      disposables?: StubDisposable[]
+    ): StubDisposable {
+      onDispose.push(handler);
+      const registration: StubDisposable = { dispose: () => undefined };
+      disposables?.push(registration);
+      return registration;
+    },
+    dispose(): void {
+      if (handle.disposed) return;
+      handle.disposed = true;
+      for (const handler of [...onDispose]) handler();
+    },
+  };
+
+  return { handle, surface };
 }
 
 export class Uri {
@@ -244,6 +398,20 @@ export const window = {
   showQuickPick(_items: unknown, _options?: unknown): Promise<undefined> {
     return Promise.resolve(undefined);
   },
+
+  // The add-a-cluster page (memql#3472, driven by memql#3514). Every panel it
+  // creates is kept on `recorded.webviews` so a case can read what was
+  // rendered and post what a click would post.
+  createWebviewPanel(
+    viewType: string,
+    title: string,
+    _column?: number,
+    _options?: unknown
+  ): WebviewPanelSurface {
+    const { handle, surface } = createStubWebviewPanel(viewType, title);
+    recorded.webviews.push(handle);
+    return surface;
+  },
 };
 
 // The progress-notification location src/extension.ts names for the sign-in
@@ -284,6 +452,16 @@ export const commands = {
   registerCommand(id: string, _handler: (...args: never[]) => unknown): StubDisposable {
     recorded.commands.push(id);
     return { dispose: () => undefined };
+  },
+
+  // RECORDS AND RESOLVES, rather than dispatching to the registered handler.
+  // The panel's hand-off reaches the tree and the sign-in flow this way
+  // (memql#3477), and both are surfaces of their own with their own tests --
+  // what the panel is responsible for is asking for them, in order, which is
+  // what the id list preserves.
+  executeCommand(id: string, ..._args: unknown[]): Promise<undefined> {
+    recorded.executed.push(id);
+    return Promise.resolve(undefined);
   },
 };
 
