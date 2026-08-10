@@ -162,6 +162,14 @@
         "icon": "$(trash)"
       },
       {
+        "command": "memql.clusters.uninstall",
+        "title": "memQL: Uninstall Local Cluster..."
+      },
+      {
+        "command": "memql.clusters.repair",
+        "title": "memQL: Repair Local Cluster"
+      },
+      {
         "command": "memql.clusters.signIn",
         "title": "memQL: Sign In",
         "icon": "$(sign-in)"
@@ -245,6 +253,14 @@
         },
         {
           "command": "memql.clusters.remove",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.uninstall",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.repair",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -356,6 +372,11 @@
           "command": "memql.clusters.signOut",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@2"
+        },
+        {
+          "command": "memql.clusters.uninstall",
+          "when": "view == memqlClusters && viewItem == memqlLocalCluster",
+          "group": "lifecycle@1"
         },
         {
           "command": "memql.runs.execute",
