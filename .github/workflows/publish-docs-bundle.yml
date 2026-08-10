@@ -25,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag to build and attach the bundle for (e.g. 0.14.0)'
+        description: 'Release tag to build and attach the bundle for. Either spelling works (0.14.0 or v0.15.0).'
         required: true
         type: string
 
@@ -61,9 +61,24 @@ jobs:
             echo "ERROR: could not resolve a release tag" >&2
             exit 1
           fi
-          # The site resolves bundles by bare X.Y.Z. Other tags in this repo do
-          # cut releases (e.g. memql-sdk-core-v*) and have no docs bundle -- skip
-          # those quietly rather than failing the run on an unrelated release.
+          # Release tags come in both spellings: 0.14.0 and earlier are bare,
+          # v0.15.0 (2026-08-07) added a `v` prefix. Both are engine releases and
+          # both must publish, so the prefix is stripped before validating. The
+          # two forms are then kept apart on purpose:
+          #
+          #   ref     -- the real git ref / release tag (v0.15.0). Feeds checkout
+          #              and `gh release upload`, which address the tag as named.
+          #   version -- the bare X.Y.Z (0.15.0). Feeds the bundle version and
+          #              therefore the asset name, because the site resolves
+          #              `docs-<bare>.tgz` and unpacks into src/content/docs/<bare>/.
+          #              Emitting docs-v0.15.0.tgz would be invisible to it.
+          #
+          # v0.15.0 was skipped by the original bare-only check: the workflow ran,
+          # went green in 12s, and attached nothing. A prefix change must not be
+          # able to silently cost a release its docs again.
+          #
+          # Other tags here do cut releases (e.g. memql-sdk-core-v*) and have no
+          # docs bundle -- those still skip quietly rather than failing the run.
           #
           # `[[ =~ ]]` rather than `grep -Eq`, and the difference is a security
           # boundary rather than a style preference: grep anchors ^ and $ PER
@@ -77,18 +92,24 @@ jobs:
           # Not reachable from the `release` trigger (a git ref cannot contain a
           # newline), but reachable from workflow_dispatch by anyone with repo
           # write -- which is below the code-owner bar /.github/ is gated at.
-          if [[ ! "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "INFO: '$TAG' is not a bare X.Y.Z engine release; nothing to publish"
+          VERSION="${TAG#v}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "INFO: '$TAG' is not an X.Y.Z engine release; nothing to publish"
             echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "INFO: building docs bundle for $TAG"
+          # Rebuild the ref from the VALIDATED version rather than echoing $TAG
+          # back out, so both outputs are provably one of X.Y.Z / vX.Y.Z and the
+          # whole-string guarantee above still covers everything downstream.
+          if [ "$TAG" = "$VERSION" ]; then REF="$VERSION"; else REF="v$VERSION"; fi
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "INFO: building docs bundle $VERSION from tag $REF"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: steps.target.outputs.skip != 'true'
         with:
-          ref: ${{ steps.target.outputs.tag }}
+          ref: ${{ steps.target.outputs.ref }}
           persist-credentials: false
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -103,16 +124,16 @@ jobs:
         # script BEFORE bash sees it, so the value is code; via env it is data.
         # This was the one step that did it the other way.
         env:
-          TAG: ${{ steps.target.outputs.tag }}
-        run: bash scripts/docs/build-docs-bundle.sh --version="$TAG"
+          VERSION: ${{ steps.target.outputs.version }}
+        run: bash scripts/docs/build-docs-bundle.sh --version="$VERSION"
 
       - name: verify bundle
         if: steps.target.outputs.skip != 'true'
         env:
-          TAG: ${{ steps.target.outputs.tag }}
+          VERSION: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
-          tarball="docs-${TAG}.tgz"
+          tarball="docs-${VERSION}.tgz"
           [ -f "$tarball" ] || { echo "ERROR: $tarball was not produced" >&2; exit 1; }
           # A bundle with no manifest is unusable to the site; fail loudly rather
           # than attaching a broken asset.
@@ -124,5 +145,8 @@ jobs:
         if: steps.target.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.target.outputs.tag }}
-        run: gh release upload "$TAG" "docs-${TAG}.tgz" --clobber
+          # REF addresses the release (the tag as GitHub knows it); VERSION names
+          # the asset (bare, the form the site fetches).
+          REF: ${{ steps.target.outputs.ref }}
+          VERSION: ${{ steps.target.outputs.version }}
+        run: gh release upload "$REF" "docs-${VERSION}.tgz" --clobber

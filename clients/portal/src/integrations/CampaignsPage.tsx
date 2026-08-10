@@ -23,13 +23,12 @@ import { campaignPath, newCampaignPath } from "./urls";
 // tables are the shared element library reading the cards the DSL declared,
 // exactly as the predefined views do.
 //
-// NOTHING HERE SENDS MAIL, and the page says so rather than leaving an
-// operator to discover it. Authoring and sending are separate pieces of work
-// and only the first one has landed: a campaign can be written, pointed at an
-// audience, and given an intended time, and then it sits there. A half-sender
-// -- one that stages mail with no rate limiting, no suppression enforcement
-// and no bounce feedback -- would be worse than none, which is why there is
-// not one.
+// SENDING LANDED IN memql#3348 and lives one level down, on the campaign
+// editor -- deliberately, rather than as a per-row action on these tables.
+// Starting a send is the one irreversible thing an operator can do here, and
+// an irreversible action reached by a button in a list row is reached by
+// accident. The editor is where the audience size, the template and the
+// suppression count are on screen at the same time.
 
 export function CampaignsPage(): ReactNode {
   const navigate = useNavigate();
@@ -62,8 +61,8 @@ export function CampaignsPage(): ReactNode {
           <p className="font-mono text-xs break-all text-subtle">{CAMPAIGN_CONCEPT_ID}</p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">Email campaigns</h1>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Audiences, templates and the campaigns that pair them. Authoring only — scheduling a
-            campaign records the intended time and nothing sends.
+            Audiences, templates and the campaigns that pair them. Open a campaign to send it —
+            scheduling records an intended time and does not start a send on its own.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

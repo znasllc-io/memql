@@ -26,3 +26,12 @@ spec recipient isSendableRecipient {
 spec template isReadyTemplate {
   return status=="ready"
 }
+
+/// Matches send jobs the drain worker still has work to do on: queued (enqueued, never batched) or
+/// running (batched at least once, not yet terminal). Paused / completed / failed / cancelled are
+/// all states where the worker must leave the row alone, and naming the two live ones positively is
+/// safer than excluding the four dead ones -- a sixth status added later defaults to "not drained"
+/// rather than to "drained".
+spec sendJob isDrainableSendJob {
+  return status=="queued" || status=="running"
+}

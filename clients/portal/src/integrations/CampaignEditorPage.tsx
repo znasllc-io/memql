@@ -22,13 +22,19 @@ import { NEW_CAMPAIGN_SLUG, campaignsPath } from "./urls";
 // components would be two implementations of the same form, and the second one
 // would be the one that forgot a field.
 //
-// THE SCHEDULE BUTTON DOES NOT SEND. It writes `status: "scheduled"` and a
-// time onto the row, and nothing reads that yet. The button says so, the
-// confirmation message says so, and the deliveries band says so. That is a
-// deliberate stopping point rather than an unfinished one: campaign sending
-// touches deliverability, unsubscribe handling and rate limits, all of which
-// are product decisions rather than UI, and shipping a sender that skipped
-// them would be worse than shipping none.
+// SENDING EXISTS NOW (memql#3348). "Start sending" calls the
+// `campaignStartSend` builtin, which preflights -- is an email sender
+// registered on this node, is one-click unsubscribe configured, is the
+// template marked ready, is the audience non-empty and inside the ceiling --
+// and refuses with the reason rather than partially sending. Those refusals
+// arrive here as actionError, verbatim, because the engine's own wording is
+// more useful than anything this page could paraphrase.
+//
+// THE SCHEDULE BUTTON STILL DOES NOT SEND, and it still says so. It writes
+// `status: "scheduled"` and a time onto the row; nothing creates a send job
+// from a clock, so a scheduled campaign waits for someone to press Start. That
+// is the one piece of the sending surface memql#3348 left open, and the button
+// text is where an operator will actually encounter it.
 
 export function CampaignEditorPage(): ReactNode {
   const params = useParams();
@@ -47,6 +53,9 @@ export function CampaignEditorPage(): ReactNode {
     saveCampaign,
     scheduleCampaign,
     cancelCampaign,
+    startSend,
+    pauseSend,
+    resumeSend,
   } = useCampaigns();
   const { descriptor } = useCampaignConcepts();
 
@@ -127,8 +136,7 @@ export function CampaignEditorPage(): ReactNode {
           {creating ? "New campaign" : name || routeId}
         </h1>
         <p className="mt-1 text-sm text-muted">
-          Status <span className="font-medium text-fg">{status}</span>. Authoring only — nothing
-          on this page sends mail.
+          Status <span className="font-medium text-fg">{status}</span>.
         </p>
       </header>
 
@@ -176,7 +184,7 @@ export function CampaignEditorPage(): ReactNode {
 
         <Field
           label="Intended send time"
-          hint="RFC3339, e.g. 2026-09-01T09:00:00Z. Recorded on the row; nothing acts on it yet."
+          hint="RFC3339, e.g. 2026-09-01T09:00:00Z. Recorded on the row as your intent; nothing starts a send from it -- press Start sending when you are ready."
         >
           <TextInput
             value={scheduledAt}
@@ -197,6 +205,28 @@ export function CampaignEditorPage(): ReactNode {
               >
                 Record schedule (does not send)
               </MetaButton>
+              {/* One control, three states. A single button whose label and
+                  action follow the campaign's status, rather than three
+                  buttons of which two are always wrong: the operator's
+                  question is "what can I do to this campaign now", and a row
+                  of disabled controls answers it worse than one enabled one.
+                  Terminal states (sent / cancelled) offer nothing, which is
+                  correct -- re-sending means authoring a new campaign, because
+                  the delivery ledger is per (campaign, recipient) and a second
+                  run would find every recipient terminal and mail nobody. */}
+              {status === "sending" ? (
+                <MetaButton onClick={() => pauseSend(routeId)} disabled={busy}>
+                  Pause sending
+                </MetaButton>
+              ) : status === "paused" ? (
+                <MetaButton onClick={() => resumeSend(routeId)} disabled={busy}>
+                  Resume sending
+                </MetaButton>
+              ) : status === "sent" || status === "cancelled" ? null : (
+                <MetaButton onClick={() => startSend(routeId)} disabled={busy}>
+                  Start sending
+                </MetaButton>
+              )}
               <MetaButton onClick={() => cancelCampaign(routeId)} disabled={busy} tone="danger">
                 Cancel campaign
               </MetaButton>
@@ -206,14 +236,14 @@ export function CampaignEditorPage(): ReactNode {
       </form>
 
       {creating ? null : (
-        <Band title="Per-recipient outcomes" meta="one row per recipient, once a send has run">
+        <Band title="Per-recipient outcomes" meta="one row per recipient, filled in as the send runs">
           {detail.error ? (
             <ErrorMessage>Could not read delivery records: {detail.error}</ErrorMessage>
           ) : detail.deliveries.length === 0 ? (
             <Empty>
-              No delivery records. Nothing has been sent, and nothing can be yet: the sending
-              engine is a separate piece of work. The schema is in place so that work adds rows
-              here rather than a migration.
+              {status === "sending"
+                ? "No delivery records yet. The send works through the audience in batches, so the first rows appear within a minute or so."
+                : "No delivery records. This campaign has not been sent. A row lands here for every recipient once it does — including the ones that are skipped, so a suppression is an outcome rather than a silence."}
             </Empty>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">

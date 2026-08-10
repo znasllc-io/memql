@@ -34,7 +34,7 @@
 
 import { WebSocket as NodeWebSocket } from "ws";
 
-import { webSocketUrlFor } from "../connection/endpoint.js";
+import { composeEndpointFromDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
 import { readClustersFileSafe } from "./file.js";
 import type { ClusterConfig } from "./model.js";
@@ -174,8 +174,9 @@ async function registryEvidence(
  *   1. the registered local cluster's endpoint -- an operator who wrote one
  *      down is naming the front door they actually use;
  *   2. the domain the install recorded (`seedBootstrap` carries `--domain`),
- *      lifted to the front-door hostname by the same `cockpit.<domain>`
- *      convention the endpoint composer uses;
+ *      lifted to the front-door hostname by composeEndpointFromDomain -- the
+ *      one spelling of the `cockpit.<domain>` convention (memql#3475), which
+ *      this function used to carry a private copy of;
  *   3. the installer's own default.
  */
 export function probeEndpointFor(
@@ -186,8 +187,10 @@ export function probeEndpointFor(
   if (registered !== "") return registered;
 
   for (const entry of receipt?.entries ?? []) {
-    const domain = (entry.params.domain ?? "").trim().replace(/^\.+|\.+$/g, "");
-    if (domain !== "") return `cockpit.${domain}:443`;
+    // An entry that recorded no domain composes to "", which is this loop's
+    // "keep looking" -- the emptiness check the copy here used to make.
+    const composed = composeEndpointFromDomain(entry.params.domain ?? "");
+    if (composed !== "") return composed;
   }
   return DEFAULT_LOCAL_ENDPOINT;
 }
@@ -414,7 +417,25 @@ export class ClusterPresence {
 // the menu the verdict produces
 // ---------------------------------------------------------------------------
 
-export type AddClusterAction = "install" | "connect" | "repair";
+/**
+ * What the "+" can offer.
+ *
+ * `install` and `installGuided` are separate actions rather than one action
+ * with a mode flag, because the choice is made BEFORE any work starts and
+ * changes what the first screen asks for: Automatic runs each step's capability
+ * and then verifies it, Guided renders the command, waits, and polls the same
+ * verify. Same graph, same verdict of done -- different screen.
+ *
+ * `uninstall` is the gap memql#3471 closes. `cli.js uninstall` has existed
+ * since the substrate epic (#3357); nothing in the editor could reach it, so a
+ * local cluster could be repaired but never removed from the machine.
+ */
+export type AddClusterAction =
+  | "install"
+  | "installGuided"
+  | "connect"
+  | "repair"
+  | "uninstall";
 
 export interface AddClusterChoice {
   action: AddClusterAction;
@@ -428,19 +449,30 @@ const CONNECT: AddClusterChoice = {
   detail: "Register a cluster you already have -- local, staging or production.",
 };
 
+const UNINSTALL: AddClusterChoice = {
+  action: "uninstall",
+  label: "Uninstall the local cluster...",
+  detail: "Remove it from this machine. You will see exactly what goes first.",
+};
+
 /**
  * What the "+" offers, given the verdict.
  *
  * INSTALL APPEARS FOR `absent` AND FOR NOTHING ELSE. That is the whole point
  * of the evidence pass: an install run over a cluster that already exists is
  * not a wasted click, it is a k3d cluster and a hosts block and a trust-store
- * CA rebuilt underneath a working parity stack.
+ * CA rebuilt underneath a working parity stack. Both install variants obey it.
  *
- * A ONE-ITEM RESULT MEANS NO PICKER. `installed-healthy` has nothing to choose
- * between -- there is a cluster, it answers, the only thing left to do is
- * register a connection -- and a single-item quick pick is a dialog that asks
- * the user to confirm the absence of a decision. The caller runs the sole
- * action directly; see src/extension.ts.
+ * UNINSTALL IS THE EXACT COMPLEMENT: offered for both verdicts that say
+ * something is here, and never for `absent`, where there is nothing to remove.
+ *
+ * ORDER IS THE ONLY RECOMMENDATION A CARD LIST CAN MAKE, so the first entry is
+ * what the operator most likely came for. On `installed-unreachable` that is
+ * repair -- they came to fix a broken cluster, not to register a second one.
+ *
+ * The one-item-means-no-picker rule this function used to carry is gone with
+ * the quick pick that needed it: `installed-healthy` now has two entries, and
+ * the caller renders cards rather than a picker either way (memql#3472).
  */
 export function addClusterMenu(verdict: PresenceVerdict): AddClusterChoice[] {
   switch (verdict) {
@@ -448,21 +480,29 @@ export function addClusterMenu(verdict: PresenceVerdict): AddClusterChoice[] {
       return [
         {
           action: "install",
-          label: "Install a local cluster...",
+          label: "Install a local cluster",
           detail: "Recommended. Build a local memQL cluster on this machine.",
+        },
+        {
+          action: "installGuided",
+          label: "Install a local cluster -- guided",
+          detail:
+            "Same steps, but each command is shown for you to run yourself. " +
+            "Use this when a step needs elevation you would rather grant by hand.",
         },
         CONNECT,
       ];
     case "installed-unreachable":
       return [
-        CONNECT,
         {
           action: "repair",
-          label: "Repair local cluster...",
+          label: "Repair the local cluster",
           detail: "A local cluster is installed but is not answering.",
         },
+        UNINSTALL,
+        CONNECT,
       ];
     case "installed-healthy":
-      return [CONNECT];
+      return [CONNECT, UNINSTALL];
   }
 }

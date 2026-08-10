@@ -69,6 +69,25 @@ export async function runMutation(
   await query.executeNamed(name, buildCall("mutation", name, args));
 }
 
+// runBuiltin is the third verb the comment above has always named. It landed
+// with campaign sending (memql#3348), where the operator actions are builtins
+// rather than mutations -- starting a send is a preflight across several rows
+// plus two writes, and neither is expressible in a mutation body.
+//
+// The reply is discarded here on purpose. A builtin answers with one synthetic
+// node, and every caller on this surface wants the FAILURE (which arrives as a
+// rejected promise carrying the engine's own refusal text -- "template is not
+// ready", "no email sender is registered") rather than the payload. A caller
+// that needs the payload should read it off executeNamed directly, as
+// useIntegrationStatus does.
+export async function runBuiltin(
+  query: QueryClient,
+  name: string,
+  args: Record<string, unknown> = {},
+): Promise<void> {
+  await query.executeNamed(name, buildCall("builtin", name, args));
+}
+
 // ---------------------------------------------------------------------------
 // The integration-status builtin's reply
 // ---------------------------------------------------------------------------

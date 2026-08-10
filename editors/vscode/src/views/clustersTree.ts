@@ -74,7 +74,15 @@ export class ClustersTreeProvider implements vscode.TreeDataProvider<ClusterNode
       displayLabel(node.cluster),
       vscode.TreeItemCollapsibleState.None,
     );
-    item.contextValue = "memqlCluster";
+    // Two context values, because the two kinds of row offer different actions:
+    // only a LOCAL cluster can be uninstalled from this machine, and a `when`
+    // clause is the only way to scope a menu entry to one of them.
+    //
+    // `=== true`, never a truthiness test, matching src/clusters/presence.ts and
+    // the field's own documentation: absent means NOT local, and every cluster
+    // registered before the flag existed carries no flag. Reading those as local
+    // would offer to uninstall an operator's staging cluster.
+    item.contextValue = node.cluster.local === true ? "memqlLocalCluster" : "memqlCluster";
     item.description = node.cluster.endpoint;
     item.command = {
       command: "memql.clusters.select",

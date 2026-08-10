@@ -196,32 +196,28 @@ each carry an issue number for exactly that reason.`,
 //   - If you must exempt, file the decision first and reference it here.
 //     Adding an entry without one is how a gate turns into decoration.
 //
-// NO LONGER EMPTY as of memql#3323. The single entry below is the OTHER
-// failure this gate reports -- not "a caller can write the field" but
-// "nothing writes this concept at all" -- and it is tracked rather than
-// papered over. See the entry's own comment.
-var ownerGateExemptions = map[string]string{
-	// memql#3348 -- the campaigns sending engine.
-	//
-	// NOTHING writes v1:campaigns:delivery, so no mutation stamps its owner and
-	// the tier rests on however a row was seeded. memql#3323 landed the
-	// campaign concepts and the authoring UI and deliberately shipped no writer
-	// for delivery: a delivery row is a per-recipient SEND OUTCOME, and the
-	// thing that produces one is the sending engine, split out because
-	// deliverability, suppression and rate limiting are product decisions
-	// rather than UI.
-	//
-	// The gate's first remedy -- re-stamp from the actor in every write -- has
-	// nothing to attach to. Its second -- drop the tier -- is wrong: these rows
-	// are genuinely one operator's, they carry a recipient's address under
-	// @pii, and dropping the tier would move the failure onto the undeclared
-	// gate while leaving the rows LESS protected.
-	//
-	// Inventing a recordDelivery mutation purely to turn this green was
-	// considered and rejected twice over: it would let any caller fabricate
-	// send outcomes for their own campaigns, and it would make the gate true by
-	// building the fragment of the engine #3323 declined to half-build. The
-	// exemption is the honest state -- the tier is right, the writer is
-	// missing. Delete this entry when memql#3348 supplies it.
-	"v1:campaigns:delivery": "memql#3348 -- no writer exists yet; the sending engine is what stamps ownerUserId",
-}
+// EMPTY AGAIN as of memql#3348, and the round trip is worth recording
+// because it is the one the header above argues for.
+//
+// memql#3323 added a single entry -- `v1:campaigns:delivery` -- for the
+// OTHER failure this gate reports: not "a caller can write the field"
+// but "nothing writes this concept at all", so the declared owner tier
+// rested on however a row happened to be seeded. The two remedies the
+// error message offers both misfired on it. Re-stamping from the actor
+// had nothing to attach to. Dropping the tier was wrong: delivery rows
+// are genuinely one operator's, they carry a recipient's address under
+// @pii, and dropping it would have moved the failure onto the
+// undeclared gate while leaving the rows LESS protected.
+//
+// The entry was therefore held open against the issue that would supply
+// the missing writer, rather than closed by inventing a `recordDelivery`
+// mutation to turn the gate green. memql#3348 supplied it:
+// `recordCampaignDelivery` (dsl/campaigns/mutations.memql) stamps
+// `ownerUserId` from `actor.userId`, and component/campaigns' drain
+// worker calls it under the CAMPAIGN OWNER'S actor -- so the value is
+// the campaign's owner, derived from a row the caller had already
+// proved they could read, and no caller argument can name a different
+// one. The exemption then had to come out, and the stale-entry check
+// below is what forced the issue: the gate fails on an entry that now
+// passes.
+var ownerGateExemptions = map[string]string{}

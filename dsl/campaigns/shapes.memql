@@ -91,3 +91,50 @@ shape delivery deliveryFull {
   sentAt
   row.createdAt
 }
+
+/// Slim delivery projection: just enough to answer "has this recipient already been dealt with, and
+/// is a retry due?". Deliberately NOT deliveryFull -- the drain worker reads the whole ledger for a
+/// campaign on every batch, and the full shape carries the @pii address it has no use for there. A
+/// projection is the cheapest place to not handle data you do not need.
+@row
+shape delivery deliveryLedgerEntry {
+  row.id
+  recipientId
+  status
+  attempts
+  nextAttemptAt
+}
+
+/// Full send-job projection. Everything the drain worker needs to resume a run it did not start,
+/// including the owner it must impersonate and the provider throttle deadline it must respect.
+@row
+shape sendJob sendJobFull {
+  row.id
+  campaignId
+  campaignOwnerUserId
+  audienceId
+  templateId
+  status
+  recipientCount
+  sentCount
+  skippedCount
+  failedCount
+  lastError
+  startedAt
+  completedAt
+  throttledUntil
+  row.createdAt
+}
+
+/// Full suppression projection. Carries no address -- the row id IS the digest, and `domain` is the
+/// most identifying thing in it.
+@row
+shape suppression suppressionFull {
+  row.id
+  reason
+  domain
+  suppressedAt
+  sourceCampaignId
+  note
+  row.createdAt
+}

@@ -38,15 +38,13 @@ import {
   type SignInTokenStore,
 } from './auth/signin.js';
 import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
-import { addCluster, defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
+import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
-import {
-  ClusterPresence,
-  addClusterMenu,
-  type AddClusterAction,
-  type PresenceVerdict,
-} from './clusters/presence.js';
+import { ClusterPresence } from './clusters/presence.js';
+import { removeClusterCompletely } from './clusters/registry.js';
+import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
+import { composeEndpointFromDomain } from './connection/endpoint.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
   COMMAND_RUN,
@@ -58,6 +56,7 @@ import {
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import { resolveInstallRoot } from './install/root.js';
 import {
   AutomationRunner,
   type AutomationRunEngine,
@@ -323,6 +322,40 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // whole reason opening the menu twice does not dial twice.
   const presence = new ClusterPresence({ clustersPath });
 
+  // "Forget this cluster", as one call: the entry, the stored credential and
+  // the live connection. Lifted out of the memql.clusters.remove handler
+  // because the add-a-cluster page needs the same operation after an uninstall
+  // -- a cluster that is off the machine must not stay in the list -- and two
+  // spellings of it would be two answers to "what does removing a cluster
+  // touch?" (memql#3476).
+  const removeRegistryEntry = (name: string): Promise<ClusterConfig> => {
+    // Only a LIVE connection to this cluster counts; a disconnected state can
+    // still name the cluster it was last dialled to.
+    const state = connections?.state;
+    const connectedClusterName =
+      state !== undefined && state.status !== 'disconnected' ? state.clusterName : undefined;
+    return removeClusterCompletely(clustersPath, name, {
+      secrets: context.secrets,
+      connectedClusterName,
+      disconnect: () => connections?.disconnect(),
+    });
+  };
+
+  // What the add-a-cluster page needs from activation. Built per open rather
+  // than held, so `installRootFor` is answered against the context that is
+  // actually running the extension.
+  const addClusterDeps = (): {
+    clustersPath: string;
+    refreshTree: () => void;
+    installRoot: string;
+    removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
+  } => ({
+    clustersPath,
+    refreshTree: () => clustersTree.refresh(),
+    installRoot: installRootFor(context),
+    removeRegistryEntry,
+  });
+
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
     commands.registerCommand('memql.clusters.disconnect', async () => {
@@ -403,29 +436,94 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // The "+" (memql#3412). It used to mean exactly one thing -- register a
     // remote cluster -- for an operator who may have no cluster at all, or one
     // already installed and running. It now branches on EVIDENCE
-    // (src/clusters/presence.ts) and the remote path below is unchanged: it is
-    // what the "Connect to an existing cluster..." choice runs.
-    commands.registerCommand('memql.clusters.add', async () => {
-      const action = await pickAddClusterAction(presence);
-      if (action === undefined) {
+    // (src/clusters/presence.ts), and registering a remote cluster is one card
+    // among them: the "Connect to an existing cluster..." choice.
+    commands.registerCommand('memql.clusters.add', () => {
+      // The "+" opens a PAGE (memql#3472), not a quick pick. A palette entry is
+      // the wrong shape for a decision that depends on the state of the machine
+      // and is followed by ten minutes of work -- there is no room in a list of
+      // three sentences to say what this machine actually is.
+      //
+      // THE QUICK PICK IS GONE, not kept beside this (memql#3478). It had one
+      // caller, this one, and every branch it offered now belongs to the page:
+      // the remote branch to the page's own form (memql#3475), install and
+      // repair to the run screen over the callable seam (memql#3474), uninstall
+      // to the dry-run preview (memql#3476). Leaving a second route into the
+      // same four decisions would be a second wizard over one machine.
+      AddClusterPanel.show(context, presence, addClusterDeps());
+    }),
+    // The irreversible half of the pair D1 keeps apart (memql#3476). It is
+    // contributed on `memqlLocalCluster` rows only and never as an inline icon,
+    // so it cannot be hit by aiming at the trash can next to it.
+    //
+    // THE TREE ROW IS NOT AN ARGUMENT. There is exactly one local cluster --
+    // the receipt describes one install and presence finds one `local: true`
+    // entry -- so the page uninstalls THE local cluster rather than the row
+    // that was clicked. From the palette, where no row exists, the behaviour is
+    // therefore identical; a machine with nothing installed gets the preview's
+    // own refusal, which names the missing receipt.
+    commands.registerCommand('memql.clusters.uninstall', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'uninstall');
+    }),
+    // Repair is the install graph re-run: every step verifies first and skips
+    // when already satisfied, so there is no second graph and no second run
+    // path -- only different wording. Registered as its own command because the
+    // cluster panel's primary control has to have something to invoke
+    // (memql#3476, design D5).
+    commands.registerCommand('memql.clusters.repair', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'repair');
+    }),
+    commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
         return;
       }
-      if (action === 'install' || action === 'repair') {
-        await launchLocalClusterInstaller(action);
-        // The two events that change the verdict deterministically. Waiting
-        // out the memo window would show someone who just installed a cluster
-        // the menu for someone who has none.
-        presence.invalidate();
+      const name = target.cluster.name;
+
+      // Modal, and the detail says what is NOT happening. The whole risk in
+      // this surface is an operator reading "remove" as "uninstall", so the
+      // confirmation spends its second line ruling that out rather than asking
+      // a generic "are you sure?".
+      const confirmed = await window.showWarningMessage(
+        `Remove "${name}" from the cluster list?`,
+        {
+          modal: true,
+          detail:
+            'This editor forgets the cluster and deletes the credential it stored for it. ' +
+            'Nothing is uninstalled, and no data on the cluster is touched. ' +
+            'You can add it back at any time.',
+        },
+        'Remove'
+      );
+      if (confirmed !== 'Remove') {
         return;
       }
-      const created = await promptForCluster();
-      if (created === undefined) {
+
+      // Only a LIVE connection to this cluster counts. A disconnected state can
+      // still name the cluster it was last dialled to, and disconnecting again
+      // on the strength of that would be a no-op at best.
+      const state = connections?.state;
+      const connectedClusterName =
+        state !== undefined && state.status !== 'disconnected' ? state.clusterName : undefined;
+
+      try {
+        await removeClusterCompletely(clustersPath, name, {
+          secrets: context.secrets,
+          connectedClusterName,
+          disconnect: () => connections?.disconnect(),
+        });
+      } catch (err) {
+        window.showErrorMessage(
+          `memQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        );
         return;
       }
-      // addCluster, not upsertCluster: an add whose name collides with an
-      // existing cluster must be refused, not silently turned into an edit
-      // that deletes every field this form left blank. See addCluster.
-      await writeCluster(clustersTree, () => addCluster(clustersPath, created));
+
+      // A removal changes what the "+" should offer -- deterministically, so it
+      // must not wait out the memo window (see presence.ts invalidate).
+      presence.invalidate();
+      clustersTree.refresh();
+      window.showInformationMessage(`memQL: removed "${name}" from the cluster list.`);
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -1186,89 +1284,6 @@ async function writeCluster(
   clustersTree.refresh();
 }
 
-// pickAddClusterAction resolves the verdict and asks the operator what they
-// meant by "+".
-//
-// A DETECTION THAT FAILS READS AS `installed-unreachable`, never as `absent`.
-// detectPresence already answers rather than rejects, so this catch is the
-// belt to that braces -- and the direction it fails in is the one that cannot
-// destroy anything: `absent` is the only verdict whose menu offers to install,
-// and an install run over an existing cluster rebuilds a k3d stack, a hosts
-// block and a trust-store CA underneath a working one.
-async function pickAddClusterAction(
-  presence: ClusterPresence
-): Promise<AddClusterAction | undefined> {
-  let verdict: PresenceVerdict;
-  try {
-    verdict = (await presence.get()).verdict;
-  } catch {
-    verdict = 'installed-unreachable';
-  }
-  return showAddClusterMenu(verdict);
-}
-
-/**
- * Renders the "+" menu for a verdict.
- *
- * Exported for the Extension Development Host smoke lane, which drives it
- * against a real quick pick -- the one thing about this function that a unit
- * test structurally cannot reach is whether the workbench actually shows it.
- *
- * A ONE-ITEM MENU IS NOT SHOWN. `installed-healthy` leaves exactly one thing
- * to do, and a single-item quick pick asks the user to confirm the absence of
- * a decision. See addClusterMenu for why that item is never the installer.
- */
-export async function showAddClusterMenu(
-  verdict: PresenceVerdict
-): Promise<AddClusterAction | undefined> {
-  const choices = addClusterMenu(verdict);
-  if (choices.length === 1) {
-    return choices[0].action;
-  }
-  const picked = await window.showQuickPick(
-    choices.map((choice) => ({ label: choice.label, detail: choice.detail, choice })),
-    { placeHolder: 'Add a memQL cluster', ignoreFocusOut: true }
-  );
-  return picked?.choice.action;
-}
-
-/**
- * THE INSTALL SEAM (memql#3412).
- *
- * This is the single named function the "Install a local cluster..." and
- * "Repair local cluster..." branches call, and it is deliberately the ONLY
- * thing about those branches that is provisional. The install substrate
- * (memql#3374) currently exposes its graph runner as a plain-node CLI --
- * src/install/cli.ts, reached through `npm run install-cli` -- and no callable
- * in-editor entry point exists yet, so this reports the command instead of
- * running it: a graph run wants elevation prompts, a provider key and a
- * progress surface, and inventing a half of that here is worse than naming the
- * supported path.
- *
- * WHAT REPLACES IT: the install wizard from the install-substrate epic. When
- * that entry point is callable, the body of this function becomes the call to
- * it and nothing else in this file changes -- the menu, the verdict, and the
- * invalidate() that follows a completed run are all already wired.
- *
- * `repair` runs the same graph as `install`: every step is idempotent and
- * verifies its own postcondition, so re-running it over a cluster that stopped
- * answering is the repair. Only the wording differs.
- */
-async function launchLocalClusterInstaller(mode: 'install' | 'repair'): Promise<void> {
-  const command = 'npm run install-cli -- install';
-  const what =
-    mode === 'install'
-      ? 'Installing a local memQL cluster'
-      : 'Repairing the local memQL cluster';
-  const choice = await window.showInformationMessage(
-    `memQL: ${what} runs the installer from editors/vscode:\n\n    ${command}\n\nAn in-editor wizard is not wired up yet.`,
-    'Copy Command'
-  );
-  if (choice === 'Copy Command') {
-    await env.clipboard.writeText(command);
-  }
-}
-
 async function pickCluster(clustersPath: string): Promise<ClusterNode | undefined> {
   // readClustersFileSafe, not readClustersFile: the Clusters TREE already
   // renders a malformed file as a readable row, and this path must agree with
@@ -1415,7 +1430,10 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
 
   const endpoint = await window.showInputBox({
     prompt: 'gRPC endpoint (host:port)',
-    value: existing?.endpoint ?? (domain.trim() === '' ? '' : `cockpit.${domain.trim()}:443`),
+    // composeEndpointFromDomain, not a fourth copy of `cockpit.<domain>:443`
+    // (memql#3475). It answers "" for a blank domain, which is the same empty
+    // box the ternary here used to construct by hand.
+    value: existing?.endpoint ?? composeEndpointFromDomain(domain),
     ignoreFocusOut: true,
     validateInput: (v) => (v.trim() === '' ? 'An endpoint is required' : undefined),
   });
@@ -1567,6 +1585,25 @@ function resolveServerPath(context: ExtensionContext): string | undefined {
   // undefined -- that lets the caller's friendly "not found" message fire
   // instead of surfacing a raw ENOENT from the spawned process.
   return resolveOnPath(binaryName());
+}
+
+// installRootFor answers what SessionOptions.root must be on THIS installation:
+// the staged copy of scripts/ inside a packaged extension, or the repository
+// root when the extension is running out of a checkout (memql#3487).
+//
+// The same stage-at-package-time / resolve-at-run-time shape as the bundled
+// memql-lsp binary above, and for the same reason: a .vsix contains only what is
+// under the extension directory, so anything the extension needs from elsewhere
+// in the repository has to be copied in at package time and found by its own
+// path at run time. `context.asAbsolutePath(p)` is `path.join(extensionPath, p)`,
+// which is why handing over the extension path loses nothing.
+//
+// The probe and the fallback live in src/install/root.ts rather than here
+// because they are LOGIC: this file may import `vscode` and therefore cannot be
+// unit-tested outside an editor, and "does a packaged extension find its scripts"
+// is precisely the question that must be answerable by a test.
+export function installRootFor(context: ExtensionContext): string {
+  return resolveInstallRoot(context.extensionPath);
 }
 
 // reportIgnoredWorkspaceServerPath tells the user, once per activation, that a

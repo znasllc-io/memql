@@ -45,6 +45,7 @@ var vscodeImportAllowList = []string{
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
 	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
+	"webview/addClusterPanel.ts", // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
 	"webview/clusterPanel.ts",    // WebviewPanel adapter over deploy/clusterPanelState.ts + state/topology.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts

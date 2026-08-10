@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"net/smtp"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/core/env"
 )
@@ -38,6 +37,23 @@ type Message struct {
 	// HTMLBody is optional; when set the message goes out as
 	// multipart/alternative with text first, HTML second.
 	HTMLBody string
+	// Headers carries additional RFC 5322 headers (memql#3348). Empty
+	// for transactional mail; the campaign sender uses it for the RFC
+	// 8058 one-click pair, `List-Unsubscribe` and
+	// `List-Unsubscribe-Post`.
+	//
+	// Setting it CHANGES WHICH GRAPH API IS USED. Graph's structured
+	// sendMail payload can only carry custom headers whose names begin
+	// with `x-`, which `List-Unsubscribe` does not and cannot, so a
+	// message with extras is rendered to RFC 5322 and sent through
+	// Graph's base64-MIME form instead. See mime.go.
+	//
+	// Names the renderer composes itself (From / To / Subject /
+	// MIME-Version / Content-Type) are REFUSED rather than overridden --
+	// an overridden From is a sender the mailbox did not authenticate
+	// as, which is the SPF/DKIM alignment the campaign path depends on
+	// being structural.
+	Headers map[string]string
 }
 
 // headerUnsafe reports whether v carries a character that would let a
@@ -73,7 +89,13 @@ func (m Message) Validate() error {
 	if strings.TrimSpace(m.TextBody) == "" {
 		return errors.New("email: TextBody is required")
 	}
-	return nil
+	// Extra headers are validated HERE as well as in the renderer
+	// (memql#3348). Not redundant: Validate is what a caller reaches for
+	// to check a message before queueing it, and a header problem
+	// discovered at the wire boundary can only be reported as a failed
+	// send. The renderer keeps its own check because it is the sink, and
+	// a sink that trusts its caller is safe only until the second caller.
+	return ValidateExtraHeaders(m.Headers)
 }
 
 // SMTPConfig configures the SMTPSender.
@@ -107,66 +129,19 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 	}
 
 	from := s.cfg.FromAddr
-	fromHeader := from
-	if s.cfg.FromName != "" {
-		fromHeader = fmt.Sprintf("%s <%s>", s.cfg.FromName, from)
-	}
+	fromHeader := FromHeader(from, s.cfg.FromName)
 
 	// Header injection barrier at the wire-format boundary: no header value
 	// reaches the SMTP payload without passing headerUnsafe. msg.Validate()
-	// already rejects an unsafe To/Subject up front; this re-checks every
-	// header value (including the config-derived From) at the point it is
-	// serialized, so the sink is safe by construction regardless of how the
-	// message was built.
-	var headerErr error
-	var body strings.Builder
-	boundary := fmt.Sprintf("memql-email-%d", time.Now().UnixNano())
-	writeHeaders := func(h map[string]string) {
-		for k, v := range h {
-			if headerUnsafe(v) {
-				headerErr = fmt.Errorf("email: header %q contains illegal control characters (header injection)", k)
-				return
-			}
-			body.WriteString(k)
-			body.WriteString(": ")
-			body.WriteString(v)
-			body.WriteString("\r\n")
-		}
-	}
-
-	if msg.HTMLBody == "" {
-		writeHeaders(map[string]string{
-			"From":         fromHeader,
-			"To":           msg.To,
-			"Subject":      msg.Subject,
-			"MIME-Version": "1.0",
-			"Content-Type": "text/plain; charset=UTF-8",
-		})
-		body.WriteString("\r\n")
-		body.WriteString(msg.TextBody)
-	} else {
-		writeHeaders(map[string]string{
-			"From":         fromHeader,
-			"To":           msg.To,
-			"Subject":      msg.Subject,
-			"MIME-Version": "1.0",
-			"Content-Type": fmt.Sprintf(`multipart/alternative; boundary="%s"`, boundary),
-		})
-		body.WriteString("\r\n")
-		body.WriteString("--")
-		body.WriteString(boundary)
-		body.WriteString("\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n")
-		body.WriteString(msg.TextBody)
-		body.WriteString("\r\n--")
-		body.WriteString(boundary)
-		body.WriteString("\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n")
-		body.WriteString(msg.HTMLBody)
-		body.WriteString("\r\n--")
-		body.WriteString(boundary)
-		body.WriteString("--\r\n")
-	}
-	if headerErr != nil {
-		return headerErr
+	// already rejects an unsafe To/Subject up front; the renderer re-checks
+	// every header value (including the config-derived From and any
+	// caller-supplied extras) at the point it is serialized, so the sink is
+	// safe by construction regardless of how the message was built. The
+	// rendering itself moved to mime.go in memql#3348 so the Graph MIME path
+	// produces byte-identical output.
+	body, err := RenderRFC5322(fromHeader, msg)
+	if err != nil {
+		return err
 	}
 
 	addr := s.cfg.Host + ":" + s.cfg.Port
@@ -182,8 +157,13 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 
-	if err := smtp.SendMail(addr, auth, from, []string{msg.To}, []byte(body.String())); err != nil {
-		return fmt.Errorf("smtp SendMail to %s: %w", s.cfg.Host, err)
+	if err := smtp.SendMail(addr, auth, from, []string{msg.To}, body); err != nil {
+		// Wrapped as an unclassified SendError rather than left bare
+		// (memql#3348): net/smtp gives no status code, so nothing here can
+		// honestly call a failure permanent. Zero StatusCode with neither
+		// flag set is exactly that statement, and IsPermanent reads it as
+		// retryable -- the safe direction, since giving up discards mail.
+		return &SendError{Detail: fmt.Sprintf("smtp SendMail to %s: %v", s.cfg.Host, err)}
 	}
 
 	if s.logger != nil {

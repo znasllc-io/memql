@@ -335,3 +335,30 @@ test("an empty cluster derives an empty picture rather than throwing", async () 
   assert.equal(state.topology.nodes.length, 0);
   assert.deepEqual(state.composition(), []);
 });
+
+// -----------------------------------------------------------------------------
+// Action enablement (memql#3468)
+// -----------------------------------------------------------------------------
+
+test("enablement starts ENABLED, so a healthy cluster is not greyed out on first paint", () => {
+  // The panel reads the registry asynchronously, so there is a moment before it
+  // knows which cluster it is showing. Defaulting to disabled would grey out
+  // every button for the operator whose cluster is perfectly healthy, on no
+  // evidence at all. Failing towards enabled is safe because none of this is a
+  // gate -- the engine refuses what the caller may not do.
+  const state = new ClusterPanelState();
+  assert.equal(state.enablement.enabled, true);
+  assert.equal(state.enablement.disabledReason, "");
+});
+
+test("enablement is what the panel was told, verdict and control together", () => {
+  const state = new ClusterPanelState();
+  state.setEnablement({
+    enabled: false,
+    disabledReason: 'Deploy actions need a live connection to "staging". Connect to run them.',
+    primaryControl: "connect",
+  });
+  assert.equal(state.enablement.enabled, false);
+  assert.equal(state.enablement.primaryControl, "connect");
+  assert.match(state.enablement.disabledReason, /staging/);
+});

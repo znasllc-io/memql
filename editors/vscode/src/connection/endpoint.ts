@@ -26,6 +26,48 @@ const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//;
 // colons make it impossible to tell where the host ends and a port begins.
 const BRACKETED_IPV6_RE = /^\[([^\]]+)\](?::(\d+))?$/;
 
+// The front door's port, everywhere. Local, staging and production all serve
+// the mesh behind TLS on 443 -- that is the environment-parity rule, not a
+// per-environment value -- so it is a constant here rather than a parameter.
+const FRONT_DOOR_PORT = "443";
+
+/**
+ * The domain as the rest of this module means it: no surrounding whitespace,
+ * no leading or trailing dots.
+ *
+ * Trailing dots are the reason this exists rather than a bare `.trim()`. A
+ * fully-qualified `staging.example.com.` is a legitimate spelling that DNS
+ * resolves identically, and an operator who types one composes
+ * `cockpit.staging.example.com.:443` and `https://identity.staging.example.com.`
+ * -- both of which work over the wire and neither of which matches the
+ * cluster the same operator registered without the dot. Normalizing once, here,
+ * is what keeps the two derivations agreeing about what a domain is.
+ */
+export function normalizeDomain(domain: string): string {
+  return domain.trim().replace(/^\.+|\.+$/g, "");
+}
+
+/**
+ * The gRPC endpoint a domain implies: `cockpit.<domain>:443`.
+ *
+ * THE CONVENTION HAS ONE SPELLING NOW. This composition was inlined in three
+ * places -- the add/edit prompt that prefilled the endpoint box, the presence
+ * probe that lifts an install receipt's `--domain` to a front door, and (as its
+ * `identity.` sibling) identityBaseUrlFor below. Three copies of a convention
+ * is three places for it to drift from the ingress that actually serves it, and
+ * the drift would be invisible: each copy produces a plausible hostname, and
+ * the failure surfaces as a cluster that will not dial rather than as a
+ * mismatch anyone can see.
+ *
+ * An EMPTY domain composes to an empty endpoint rather than to `cockpit.:443`.
+ * Every caller's next question is "did that name anything", so answering with
+ * a hostname built around a hole would only move the check downstream.
+ */
+export function composeEndpointFromDomain(domain: string): string {
+  const normalized = normalizeDomain(domain);
+  return normalized === "" ? "" : `cockpit.${normalized}:${FRONT_DOOR_PORT}`;
+}
+
 // identityBaseUrlFor names the identity service a refresh exchange must POST
 // to (memql#3385). It is a DIFFERENT host from the bff the stream dials --
 // `cockpit.<domain>` serves the gRPC/WS front door, `identity.<domain>` serves
@@ -49,7 +91,11 @@ export function identityBaseUrlFor(cluster: ClusterConfig): string | undefined {
   const issuer = (cluster.issuer ?? "").trim();
   if (issuer !== "") return issuer.replace(/\/+$/, "");
 
-  const domain = (cluster.domain ?? "").trim().replace(/^\.+|\.+$/g, "");
+  // Same normalization composeEndpointFromDomain applies, and deliberately the
+  // shared function rather than a second copy of the regex: this is the
+  // `identity.` half of the one convention, so the two must agree about what
+  // counts as the domain even though they differ about the prefix.
+  const domain = normalizeDomain(cluster.domain ?? "");
   if (domain !== "") return `https://identity.${domain}`;
 
   const host = hostOf(cluster.endpoint);

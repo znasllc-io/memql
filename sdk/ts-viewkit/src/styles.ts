@@ -71,6 +71,15 @@ export const VIEW_KIT_CSS_VARIABLES = [
   // The colour painted BETWEEN adjacent fills (the 2px gap on pie slices).
   // It has to match the surface the chart sits on, which only the host knows.
   "--vk-chart-surface",
+  // Install run + uninstall preview. The monospace face is a token rather than
+  // a hardcoded `monospace` because the surfaces that render shell output are
+  // editors that already have an editor font the operator chose -- VS Code
+  // maps --vscode-editor-font-family onto this and the step output matches the
+  // terminal it would otherwise have been read in.
+  "--vk-mono-font",
+  // The backing for an inset block of verbatim output. Distinct from
+  // --vk-hover-bg, which signals interactivity this block does not have.
+  "--vk-subtle-bg",
 ] as const;
 
 const coreStyles = `
@@ -269,6 +278,107 @@ const coreStyles = `
    NORMAL state (exactly one deployment is current), so it should not read as a
    warning the way an orphan flag does. */
 .vk-row-flag { flex: none; font-size: 0.8em; opacity: 0.9; }
+
+/* ---- Install run + uninstall preview (install.ts) --------------------------
+
+   Both lists are VALUE-AGNOSTIC here, like every other cluster surface: no
+   rule below turns failed red or preserved grey. The states and kinds ride
+   \`data-state\` / \`data-kind\`, and a host that wants a palette writes those
+   few rules against the attribute in its own sheet. That is what keeps the
+   install page and the uninstall preview from drifting into two different
+   colour vocabularies for the same idea. */
+
+/* An ordered list, because the order IS the dependency graph's wave order. */
+.vk-steps { list-style: none; margin: 0; padding: 0; counter-reset: vk-step; }
+
+.vk-step {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 6px;
+}
+
+/* Monospaced so the markers form a column the eye can run down, rather than
+   jittering with the width of each glyph. */
+.vk-step-marker {
+  flex: none;
+  font-family: var(--vk-mono-font, monospace);
+}
+
+.vk-step-label { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+
+.vk-step-state { flex: none; font-size: 0.8em; opacity: 0.8; }
+
+/* The exit code carries its meaning in a title attribute; the marker itself
+   stays terse so it does not crowd the label. */
+.vk-step-exit {
+  flex: none;
+  font-size: 0.8em;
+  padding: 0 4px;
+  border: 1px dashed var(--vk-border, currentColor);
+  border-radius: 3px;
+}
+
+.vk-step-detail {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  font-size: 0.9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Stderr, verbatim. Takes the full row so a wide traceback does not squeeze
+   the label, and scrolls rather than wrapping -- shell output is column-
+   aligned and rewrapping it destroys the alignment that makes it readable. */
+.vk-step-error { flex-basis: 100%; margin: 2px 0 0; font-size: 0.9em; }
+
+.vk-step-error pre {
+  margin: 4px 0 0;
+  padding: 6px;
+  overflow-x: auto;
+  font-family: var(--vk-mono-font, monospace);
+  background: var(--vk-subtle-bg, transparent);
+  border-radius: 3px;
+}
+
+/* The uninstall preview. Unordered: unlike the run, nothing here is a
+   sequence -- it is a set the operator is being asked to approve. */
+.vk-removals { list-style: none; margin: 0; padding: 0; }
+
+.vk-removal { display: flex; gap: 8px; align-items: baseline; padding: 2px 6px; }
+
+.vk-removal-marker {
+  flex: none;
+  font-family: var(--vk-mono-font, monospace);
+}
+
+.vk-removal-label { min-width: 0; overflow-wrap: anywhere; }
+
+.vk-removal-kind { flex: none; font-size: 0.8em; opacity: 0.8; }
+
+.vk-removal-reason {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  font-size: 0.9em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The privilege marker -- \`[sudo]\`, \`[user-trust]\`. Bordered like .vk-flag
+   because it is the same kind of thing: a short marker whose literal text says
+   which one it is. It sits at the END of the row and does not shrink, so the
+   two rows that change machine-wide state stay scannable down the right edge
+   of a list whose labels are all different lengths. Not muted -- this is the
+   one thing on the row the operator is being asked to consent to. */
+.vk-removal-elevation {
+  flex: none;
+  margin-left: auto;
+  font-size: 0.8em;
+  padding: 0 4px;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+}
 `;
 
 // The element library's stylesheet, appended to viewKitStyles below. Split

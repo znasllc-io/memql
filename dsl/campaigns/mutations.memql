@@ -7,13 +7,31 @@
 // the read-merge, and a row whose ownership depends on a merge is a row whose
 // ownership can drift.
 //
-// WHAT IS DELIBERATELY ABSENT: any mutation that sends. There is no
-// `startCampaign`, no `stageCampaignSend`, and no writer for
-// v1:campaigns:delivery. Sending is the follow-up issue -- see the concepts
-// file header for what it has to cover -- and a half-sender that stages mail
-// without rate limiting, suppression enforcement or bounce feedback is worse
-// than none. `scheduleCampaign` records an INTENT and nothing acts on it yet;
-// the portal says so on the campaign editor rather than implying a send.
+// THE SENDING WRITES ARE HERE NOW (memql#3348), and they are split from the
+// operator-facing ones above by WHO CALLS THEM rather than by what they touch:
+//
+//   - `startCampaign` / `pauseCampaign` / `resumeCampaign` move the campaign
+//     through its send lifecycle. An operator triggers them, but only ever
+//     through the `campaignStartSend` / `campaignPauseSend` /
+//     `campaignResumeSend` builtins, which do the preflight the operator
+//     cannot (is a sender configured, is one-click unsubscribe configured, is
+//     the audience within the ceiling) and enqueue the engine's own job row.
+//   - `recordCampaignDelivery` and `updateCampaignProgress` are written BY THE
+//     DRAIN WORKER, running under the campaign owner's actor. They are ordinary
+//     owned-tier mutations for exactly that reason: the worker borrows the
+//     owner's identity rather than out-ranking it, so `ownerUserId` is stamped
+//     from `actor.userId` here like everywhere else in this file. That is what
+//     makes v1:campaigns:delivery's declared owner tier true, and it is what
+//     took the concept off the owner-stamping gate's exemption list.
+//   - `enqueueCampaignSend` / `updateSendJob` / `recordSuppression` write the
+//     two clusterOwner-tier engine concepts. They take no actor: their rows
+//     have no owner, and reaching them at all requires the engine's own
+//     operator identity.
+//
+// `scheduleCampaign` still records an INTENT ONLY. A scheduled campaign is not
+// started by anything -- the drain worker drains jobs, and nothing creates a
+// job from a clock. That is the one piece of the sending surface memql#3348
+// left for a follow-up, and it is said here rather than implied.
 
 /// Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a
 /// caller can only ever create their own audiences.
@@ -214,5 +232,207 @@ mutate campaign cancelCampaign {
     id: args.campaignId
     ownerUserId: actor.userId
     status: "cancelled"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The sending writes (memql#3348).
+
+/// Move a campaign into the sending state and stamp when the run began. Called by the
+/// `campaignStartSend` builtin AFTER it has read the campaign under the caller's own actor, which is
+/// where the ownership check actually happens; this mutation re-stamps ownerUserId anyway, because a
+/// write whose ownership depends on a read-merge is a write whose ownership can drift. Owned.
+@actor
+mutate campaign startCampaign {
+  args {
+    campaignId  string!
+  }
+  update {
+    id: args.campaignId
+    ownerUserId: actor.userId
+    status: "sending"
+    startedAt: now
+    lastError: ""
+  }
+}
+
+/// Pause a running send. The delivery ledger is untouched, which is the whole point: a paused
+/// campaign resumes exactly where it stopped because "where it stopped" is the set of recipients
+/// with no delivery row, not a cursor that could go stale. Owned.
+@actor
+mutate campaign pauseCampaign {
+  args {
+    campaignId  string!
+  }
+  update {
+    id: args.campaignId
+    ownerUserId: actor.userId
+    status: "paused"
+  }
+}
+
+/// Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and
+/// completedAt is the number a deliverability review reads as "how long did this run take", and
+/// resetting it on every resume would erase the pause it is meant to reveal. Owned.
+@actor
+mutate campaign resumeCampaign {
+  args {
+    campaignId  string!
+  }
+  update {
+    id: args.campaignId
+    ownerUserId: actor.userId
+    status: "sending"
+  }
+}
+
+/// Stamp send progress onto the campaign row. Written by the drain worker under the campaign
+/// owner's actor, once per batch and once at completion, so the portal's campaign list shows live
+/// counters without aggregating the ledger per row. Owned -- ownerUserId is re-stamped from
+/// actor.userId, so the worker can only ever write this onto a campaign it was authorized to read.
+///
+/// Distinct from `updateCampaign`, which is the operator's authoring write and deliberately refuses
+/// to accept status or any counter. The two never overlap in what they accept.
+@actor
+mutate campaign updateCampaignProgress {
+  args {
+    campaignId      string!
+    status          string
+    recipientCount  int
+    sentCount       int
+    failedCount     int
+    lastError       string
+    completedAt     datetime
+  }
+  update {
+    accept { status, recipientCount, sentCount, failedCount, lastError, completedAt }
+    stamp {
+      id: args.campaignId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Record one recipient's outcome for one campaign. THE writer memql#3348 exists to supply: it is
+/// what stamps v1:campaigns:delivery's declared owner field from the actor, and its absence is why
+/// that concept sat on the owner-stamping gate's exemption list.
+///
+/// THE ID IS DERIVED, NOT PASSED, and that is the idempotency mechanism rather than a convenience.
+/// (campaignId, recipientId) hashes to exactly one row id, so a resumed, restarted or double-claimed
+/// send writes a new VERSION of the same row instead of a second delivery -- the ledger cannot
+/// double-count and the worker cannot double-mail, because the row's existence is what removes the
+/// recipient from the next batch. Each part is hashed before concatenation (authoring rule 20), so no
+/// separator in a caller-supplied id can make two different pairs collide onto one timeline.
+///
+/// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S
+/// actor, so the value is the campaign's owner and no caller can name a different one.
+@actor
+mutate delivery recordCampaignDelivery {
+  args {
+    campaignId         string!
+    recipientId        string!
+    email              string!
+    status             enum("pending", "sent", "failed", "skipped")!
+    skipReason         string
+    lastError          string
+    sentAt             datetime
+    attempts           int
+    nextAttemptAt      datetime
+    outboundRequestId  string
+  }
+  insert {
+    accept { campaignId, recipientId, email, status, skipReason, lastError, sentAt, nextAttemptAt, outboundRequestId }
+    stamp {
+      id: hash(concat(
+        hash(canonicalId(args.campaignId, campaign)),
+        hash(canonicalId(args.recipientId, recipient))
+      ))
+      ownerUserId: actor.userId
+      attempts: args.attempts ?? 0
+    }
+  }
+}
+
+/// ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart
+/// lands on the same timeline rather than accumulating runs.
+///
+/// campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth
+/// being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row
+/// UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever
+/// enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization.
+/// Nothing in this mutation's arguments is trusted to say who owns anything.
+///
+/// clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at
+/// all requires the engine's own operator identity.
+mutate sendJob enqueueCampaignSend {
+  args {
+    campaignId           string!
+    campaignOwnerUserId  string!
+    audienceId           string!
+    templateId           string!
+  }
+  insert {
+    accept { campaignId, campaignOwnerUserId, audienceId, templateId }
+    stamp {
+      id: args.campaignId
+      status: "queued"
+      recipientCount: 0
+      sentCount: 0
+      skippedCount: 0
+      failedCount: 0
+      lastError: ""
+      throttledUntil: ""
+    }
+  }
+}
+
+/// ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after
+/// each batch and on every terminal outcome. clusterOwner tier.
+mutate sendJob updateSendJob {
+  args {
+    sendJobId       string!
+    status          string
+    recipientCount  int
+    sentCount       int
+    skippedCount    int
+    failedCount     int
+    lastError       string
+    startedAt       datetime
+    completedAt     datetime
+    throttledUntil  datetime
+  }
+  update {
+    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil }
+    stamp {
+      id: args.sendJobId
+    }
+  }
+}
+
+/// ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex
+/// digest of the normalized address -- the address itself never reaches this mutation, which is what
+/// makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address
+/// appends a version to the same row rather than creating a second one, and the newest reason wins.
+///
+/// suppressedAt is stamped from the engine clock rather than threaded by the caller. That is the
+/// opposite of `setRecipientSubscription`, and deliberately: a recipient's unsubscribedAt can
+/// legitimately record something that happened hours earlier, but a suppression takes effect when it
+/// is written and dating it earlier would claim a protection that was not in force.
+///
+/// clusterOwner tier: a caller who could write this could silently suppress a competitor's audience.
+mutate suppression recordSuppression {
+  args {
+    emailDigest       string!
+    reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!
+    domain            string
+    sourceCampaignId  string
+    note              string
+  }
+  insert {
+    accept { reason, domain, sourceCampaignId, note }
+    stamp {
+      id: args.emailDigest
+      suppressedAt: now
+    }
   }
 }

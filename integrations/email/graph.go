@@ -3,6 +3,7 @@ package email
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -82,7 +83,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 	}
 
 	// First attempt with whatever's cached.
-	status, body, err := g.sendOnce(ctx, msg, false)
+	status, body, retryAfter, err := g.sendOnce(ctx, msg, false)
 	if err != nil {
 		return err
 	}
@@ -104,7 +105,7 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 				"sender", g.cfg.SenderAddr,
 			)
 		}
-		status, body, err = g.sendOnce(ctx, msg, true)
+		status, body, retryAfter, err = g.sendOnce(ctx, msg, true)
 		if err != nil {
 			return err
 		}
@@ -118,20 +119,47 @@ func (g *GraphSender) Send(ctx context.Context, msg Message) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("graph: sendMail %d: %s", status, string(body))
+	// CLASSIFIED rather than flattened to a string (memql#3348). Graph
+	// throttles with 429 + Retry-After, and a bulk send that cannot see
+	// that header degrades into retries the recipient reads as duplicates.
+	// The classification has to happen here because this is the only place
+	// the status and the header still exist.
+	return classifyHTTPSend(status, retryAfter, fmt.Sprintf("graph: sendMail %d: %s", status, string(body)))
 }
 
 // sendOnce performs a single Graph sendMail attempt. When forceRefresh
 // is true it invalidates the cached access token before fetching a
 // fresh one. Returns the response status, body, and any transport
 // error so the caller can decide whether to retry.
-func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bool) (int, []byte, error) {
+func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bool) (int, []byte, string, error) {
 	if forceRefresh {
 		g.invalidateToken()
 	}
 	token, err := g.getToken(ctx)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
+	}
+
+	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/sendMail",
+		url.PathEscape(g.cfg.SenderAddr))
+
+	// TWO REQUEST FORMS, chosen by whether the message carries extra
+	// headers (memql#3348).
+	//
+	// The structured JSON payload below is what transactional mail has
+	// always used. It cannot carry `List-Unsubscribe`: Graph exposes custom
+	// headers only through `internetMessageHeaders`, which refuses any name
+	// not beginning with `x-`. So a message with extras is rendered to RFC
+	// 5322 and POSTed base64-encoded with `Content-Type: text/plain`, which
+	// is Graph's other documented sendMail form and has no such limit.
+	//
+	// The structured form is kept for the no-extras case rather than
+	// routing everything through MIME, because it is the path every
+	// transactional message in this deployment already goes out on and
+	// swapping it wholesale would put the guest-invite lane behind an
+	// untested encoder for no gain.
+	if len(msg.Headers) > 0 {
+		return g.sendMIME(ctx, endpoint, token, msg)
 	}
 
 	// Graph takes exactly one body contentType. Prefer HTML when the
@@ -167,26 +195,47 @@ func (g *GraphSender) sendOnce(ctx context.Context, msg Message, forceRefresh bo
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return 0, nil, fmt.Errorf("graph: marshal payload: %w", err)
+		return 0, nil, "", fmt.Errorf("graph: marshal payload: %w", err)
 	}
+	return g.post(ctx, endpoint, token, "application/json", body)
+}
 
-	endpoint := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/sendMail",
-		url.PathEscape(g.cfg.SenderAddr))
+// sendMIME POSTs the message as a base64-encoded RFC 5322 document --
+// Graph's MIME sendMail form. The only path that can carry
+// `List-Unsubscribe`; see sendOnce for why.
+func (g *GraphSender) sendMIME(ctx context.Context, endpoint, token string, msg Message) (int, []byte, string, error) {
+	raw, err := RenderRFC5322(FromHeader(g.cfg.SenderAddr, g.cfg.FromName), msg)
+	if err != nil {
+		return 0, nil, "", err
+	}
+	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(raw)))
+	base64.StdEncoding.Encode(encoded, raw)
+	return g.post(ctx, endpoint, token, "text/plain", encoded)
+}
+
+// post issues one authenticated sendMail request and returns the raw
+// outcome -- status, body, and the Retry-After header, which the caller
+// needs to classify a throttle.
+func (g *GraphSender) post(ctx context.Context, endpoint, token, contentType string, body []byte) (int, []byte, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return 0, nil, fmt.Errorf("graph: build request: %w", err)
+		return 0, nil, "", fmt.Errorf("graph: build request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 
 	resp, err := g.http.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("graph: sendMail network: %w", err)
+		// A transport error never reached a status, so it cannot be
+		// classified as permanent. Returned as an error rather than a
+		// SendError because the caller's classifier only sees responses;
+		// the campaign worker treats any unclassified error as retryable.
+		return 0, nil, "", fmt.Errorf("graph: sendMail network: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, resp.Header.Get("Retry-After"), nil
 }
 
 // invalidateToken clears the cached access token. Called by Send on a

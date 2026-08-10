@@ -937,6 +937,23 @@ func InboundWebhookPaths() []string {
 	return pathsWithBase("/inbound/")
 }
 
+// UnsubscribePaths declares the RFC 8058 one-click unsubscribe endpoint
+// (memql#3348), mounted on the bff.
+//
+// EXACT, not a prefix. The route takes its token from a query parameter,
+// so nothing legitimate is ever mounted beneath it, and a prefix here
+// would bless a future `/unsubscribe/<anything>` nobody reviewed.
+//
+// Why the endpoint is HTTP at all: it is the same exception the inbound
+// webhook is. The caller is the RECIPIENT'S MAIL CLIENT -- Gmail,
+// Outlook, Yahoo -- which reads the `List-Unsubscribe` header and POSTs
+// `List-Unsubscribe=One-Click` to the URI it finds there. There is no
+// gRPC form of that conversation, and without it there is no one-click
+// unsubscribe, which the same providers now require of bulk senders.
+func UnsubscribePaths() []string {
+	return pathsWithBase("/unsubscribe")
+}
+
 func normalizeOrigins(origins []string) []string {
 	if len(origins) == 0 {
 		return []string{"*"}

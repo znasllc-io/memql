@@ -99,6 +99,44 @@ test("every uninstall step reverses a real install step", async () => {
   }
 });
 
+test("nothing touches the machine until the provider key is verified", async () => {
+  // memql#3473. The key check is a GATE, not a peer of the work: it is
+  // `readOnly` and writes no receipt, so ordering everything mutating behind it
+  // costs one ~1s API call ahead of tool downloads and buys the operator never
+  // being asked for a sudo password and then told their key is wrong.
+  //
+  // That was the real gap. `hostsBlock` is `elevation: "sudo"`, writes
+  // /etc/hosts, and used to sit in the SAME WAVE as providerKey -- so a bad key
+  // could cost a system-file edit and an elevation prompt before anything
+  // mentioned it. Binaries being receipt-recorded and reversible was never the
+  // whole story.
+  //
+  // Expressed in the graph rather than as a caller-supplied skip: "what must
+  // happen before what" already has a home, and #3469's property is that no
+  // front end decides anything.
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const waves = topoOrder(g);
+  const gateWave = waves.findIndex((w) => w.includes("providerKey"));
+  assert.ok(gateWave >= 0, "providerKey is not in the graph");
+
+  for (let i = 0; i <= gateWave; i++) {
+    for (const id of waves[i]!) {
+      const step = stepById(g, id);
+      assert.ok(
+        step?.readOnly === true,
+        `${id} runs in wave ${i + 1}, at or before the provider-key gate, but is not readOnly`,
+      );
+    }
+  }
+
+  // And the gate is worth having: something mutating really does follow it.
+  const after = waves.slice(gateWave + 1).flat();
+  assert.ok(
+    after.some((id) => stepById(g, id)?.readOnly !== true),
+    "no mutating step runs after the gate -- the ordering would be pointless",
+  );
+});
+
 test("waves are a real topological decomposition of the shipped graph", async () => {
   const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
   const waves = topoOrder(g);

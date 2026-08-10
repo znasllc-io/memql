@@ -44,7 +44,6 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { defaultClustersPath } from "../src/clusters/file.js";
 import { ClusterPresence, defaultEndpointProbe } from "../src/clusters/presence.js";
 import { ConnectionManager } from "../src/connection/manager.js";
-import { showAddClusterMenu } from "../src/extension.js";
 import type { AutomationTarget, RunTarget } from "../src/constructs/runnable.js";
 import { StepTraceModel } from "../src/state/stepTrace.js";
 import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPanel.js";
@@ -578,40 +577,15 @@ smoke("the sign-out command clears the stored credential", async () => {
 });
 
 // -----------------------------------------------------------------------------
-// The "+" menu (memql#3412)
+// The "+" page (memql#3472)
 // -----------------------------------------------------------------------------
-
-// WHAT ONLY A HOST CAN SAY ABOUT THIS MENU. Which items a verdict produces is
-// decided in a pure module and asserted in the fast lane
-// (test/clusterPresence.test.ts). What that lane structurally cannot reach is
-// whether the workbench actually renders the quick pick, whether the promise
-// it returns settles when an item is accepted, and -- the whole point of the
-// single-item rule -- whether the healthy case really shows no dialog at all.
-// A picker that opened and waited there would be indistinguishable from a
-// correct return value in a unit test, and would hang the button in practice.
-
-smoke("the + menu shows no picker when a healthy local cluster is already here", async () => {
-  await extension().activate();
-
-  // Nothing accepts, cancels or dismisses anything here. If a quick pick were
-  // shown, this promise would still be waiting when the deadline fires.
-  const settled = await Promise.race([
-    showAddClusterMenu("installed-healthy"),
-    new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 2_000)),
-  ]);
-  assert.equal(
-    settled,
-    "connect",
-    "installed-healthy must resolve straight to the connect path; a one-item quick pick asks the operator to confirm the absence of a decision (and this one never closed)"
-  );
-});
 
 // Every workbench command below is raced against a deadline. `waitFor` bounds
 // how long a condition may stay false, but it AWAITS its check -- so a command
-// that never resolves (a widget the workbench will not accept while the window
-// is unfocused, say) would hang the whole lane with no output at all, which is
-// the worst failure a CI can produce. A bounded command turns that into a
-// named assertion failure.
+// that never resolves (a handler parked on a dialog the workbench will not show
+// while the window is unfocused, say) would hang the whole lane with no output
+// at all, which is the worst failure a CI can produce. A bounded command turns
+// that into a named assertion failure.
 async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Promise<T> {
   const marker = Symbol("timeout");
   const raced = await Promise.race([
@@ -624,48 +598,120 @@ async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Pr
   return raced as T;
 }
 
-smoke("the + menu renders a real quick pick and the installer is its first item", async () => {
-  await extension().activate();
+/** The page's title, which the workbench also uses as its tab label. */
+const ADD_CLUSTER_TAB = "Add a memQL cluster";
 
-  let settled: string | undefined | "pending" = "pending";
-  const choice = showAddClusterMenu("absent").then((value) => {
-    settled = value;
-    return value;
-  });
-  // Swallow nothing, but do not let an unobserved rejection reach the host
-  // while the accept loop below is still running.
-  const observed = choice.catch(() => "pending" as const);
+/** Every open tab carrying the add-a-cluster page's label, across all groups. */
+function addClusterTabs(): vscode.Tab[] {
+  return vscode.window.tabGroups.all
+    .flatMap((group) => group.tabs)
+    .filter((tab) => tab.label === ADD_CLUSTER_TAB);
+}
+
+// WHAT ONLY A HOST CAN SAY ABOUT THE "+".
+//
+// Which cards a verdict produces is decided in a pure module and pinned in the
+// fast lane -- test/clusterPresence.test.ts deep-equals the whole menu for every
+// verdict, order included -- so re-proving it here would buy duplicate coverage
+// at the price of the flakiest thing in this lane. What that lane structurally
+// cannot reach is whether the workbench really opens the page when the command
+// runs, and whether a second "+" reveals the panel that is already open instead
+// of starting a second wizard over the same machine. Both are properties of the
+// tab model and `WebviewPanel.reveal`, and neither exists outside a host.
+//
+// WHAT THIS LANE CANNOT REACH EITHER, SAID PLAINLY. A landing card is a
+// `<button data-choose>` inside the webview's iframe, and the extension host has
+// no API that dispatches a DOM event into it: messages travel host -> webview
+// through `postMessage`, and the click direction exists only inside the page's
+// own script. Calling the panel's message handler from here would be this file
+// talking to itself, not the workbench doing anything, so it is not attempted --
+// which screen a chosen action lands on is state/addCluster.ts's decision and is
+// unit-tested there.
+//
+// THIS SECTION REPLACED THE QUICK-PICK CASES (memql#3478). They drove
+// `showAddClusterMenu` against a real quick pick; the menu, its one caller and
+// the installer stub behind it are gone, and a page is what the "+" opens now.
+smoke("the + opens the add-a-cluster page, and a second + reveals the one panel", async () => {
+  await extension().activate();
+  await closeAllTabs();
 
   try {
-    // The quick pick preselects its first item, so accepting without moving is
-    // what asserts the ORDER the menu is built in -- install first, because it
-    // is the recommended action on a machine with no cluster. The widget takes
-    // a moment to appear and the accept command is a no-op until it has, so
-    // this retries rather than sleeping a guessed interval.
-    await waitFor(
-      "the + quick pick to accept its preselected item",
-      async () => {
-        if (settled !== "pending") return true;
-        await withinDeadline(
-          "workbench.action.acceptSelectedQuickOpenItem",
-          Promise.resolve(
-            vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem")
-          ),
-          2_000
-        );
-        return settled !== "pending";
-      },
-      10_000,
-      250
-    );
-    assert.equal(await withinDeadline("the menu promise to settle", observed, 2_000), "install");
-  } finally {
-    // Whatever happened, do not leave a modal widget open for the cases below.
+    // executeCommand resolves with the handler's return value and REJECTS if it
+    // threw, so awaiting it is half the assertion: a panel constructor that
+    // reached for something the host does not provide fails here.
     await withinDeadline(
-      "workbench.action.closeQuickOpen",
-      Promise.resolve(vscode.commands.executeCommand("workbench.action.closeQuickOpen")),
-      2_000
-    ).catch(() => undefined);
+      "memql.clusters.add to resolve",
+      Promise.resolve(vscode.commands.executeCommand("memql.clusters.add")),
+      15_000
+    );
+
+    // Tabs appear asynchronously -- createWebviewPanel returns before the
+    // workbench has the tab in its model.
+    await waitFor(
+      `a "${ADD_CLUSTER_TAB}" tab to appear (saw: ${openTabLabels().join(", ")})`,
+      () => addClusterTabs().length > 0,
+      15_000
+    );
+
+    const input = addClusterTabs()[0]?.input;
+    assert.ok(
+      input instanceof vscode.TabInputWebview,
+      `the "${ADD_CLUSTER_TAB}" tab is not a webview; something else in this extension now claims that label`
+    );
+    // CONTAINS, not equals: the workbench namespaces the type it hands back
+    // (`mainThreadWebview-<viewType>`), so pinning the exact string would assert
+    // an internal naming convention rather than the extension's own view type.
+    assert.ok(
+      input.viewType.includes("memqlAddCluster"),
+      `the page opened under view type ${input.viewType}, which does not name memqlAddCluster`
+    );
+
+    // ONE PANEL. A second "Add a cluster" tab would be a second wizard over one
+    // machine, and two runs against one k3d cluster is not a state anything
+    // downstream is prepared for. The invariant lives in AddClusterPanel.show,
+    // which reveals the open panel instead of constructing another -- and a
+    // reveal is only observable against a real tab model.
+    await withinDeadline(
+      "a second memql.clusters.add to resolve",
+      Promise.resolve(vscode.commands.executeCommand("memql.clusters.add")),
+      15_000
+    );
+
+    // SETTLE FIRST, THEN HOLD. Two assertions in sequence, because there are
+    // two different things that could be wrong and only one of them is a bug.
+    //
+    // `show` reveals the open panel with ViewColumn.Beside, which MOVES it to
+    // another editor group. On VS Code 1.91.0 the tab model reports the panel
+    // in both groups while that move is in flight, so an assertion fired the
+    // instant the command resolves sees two tabs for one panel and fails --
+    // which it did, on 1.91.0 only, while stable passed. That is model lag, not
+    // a second wizard: a WebviewPanel owns exactly one tab, and `show` returned
+    // the existing panel rather than constructing anything.
+    //
+    // So: wait for the model to settle at one, which a genuine second panel can
+    // never satisfy because nothing would close it. THEN hold the assertion for
+    // two seconds, which is what catches a late second tab. Collapsing these
+    // into one poll would either fail on the transient or pass on the tab that
+    // has not appeared yet.
+    await waitFor(
+      `the tab model to settle at one "${ADD_CLUSTER_TAB}" tab after the reveal ` +
+        `(saw: ${openTabLabels().join(", ")})`,
+      () => addClusterTabs().length === 1,
+      10_000
+    );
+    for (let i = 0; i < 8; i += 1) {
+      assert.equal(
+        addClusterTabs().length,
+        1,
+        `a second "+" opened another page: ${openTabLabels().join(", ")}`
+      );
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    info(`the + opened exactly one ${ADD_CLUSTER_TAB} tab and revealed it on the second press`);
+  } finally {
+    // Whatever happened, do not leave the page open for the cases below.
+    await closeAllTabs();
   }
 });
 

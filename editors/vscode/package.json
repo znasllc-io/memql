@@ -157,6 +157,19 @@
         "icon": "$(edit)"
       },
       {
+        "command": "memql.clusters.remove",
+        "title": "memQL: Remove Cluster From List",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "memql.clusters.uninstall",
+        "title": "memQL: Uninstall Local Cluster..."
+      },
+      {
+        "command": "memql.clusters.repair",
+        "title": "memQL: Repair Local Cluster"
+      },
+      {
         "command": "memql.clusters.signIn",
         "title": "memQL: Sign In",
         "icon": "$(sign-in)"
@@ -236,6 +249,18 @@
         },
         {
           "command": "memql.clusters.edit",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.remove",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.uninstall",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.repair",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -325,23 +350,33 @@
       "view/item/context": [
         {
           "command": "memql.cluster.open",
-          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@1"
         },
         {
           "command": "memql.clusters.edit",
-          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@2"
         },
         {
+          "command": "memql.clusters.remove",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
+          "group": "inline@3"
+        },
+        {
           "command": "memql.clusters.signIn",
-          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@1"
         },
         {
           "command": "memql.clusters.signOut",
-          "when": "view == memqlClusters && viewItem == memqlCluster",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@2"
+        },
+        {
+          "command": "memql.clusters.uninstall",
+          "when": "view == memqlClusters && viewItem == memqlLocalCluster",
+          "group": "lifecycle@1"
         },
         {
           "command": "memql.runs.execute",
