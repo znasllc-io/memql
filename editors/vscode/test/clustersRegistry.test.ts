@@ -17,12 +17,13 @@ import * as path from "node:path";
 
 import {
   accessTokenExpirySecretKey,
+  reconcileClusterCredentials,
   refreshTokenSecretKey,
   credentialIndexKey,
   type SecretStore,
 } from "../src/auth/store.js";
 import { readClustersFile } from "../src/clusters/file.js";
-import { removeClusterCompletely } from "../src/clusters/registry.js";
+import { removeClusterCompletely, saveClusterEdit } from "../src/clusters/registry.js";
 
 class FakeSecrets implements SecretStore {
   readonly values = new Map<string, string>();
@@ -203,4 +204,102 @@ test("returns the removed cluster so the caller can report what went", async () 
 
   assert.equal(removed.name, "local");
   assert.equal(removed.local, true);
+});
+
+// -----------------------------------------------------------------------------
+// Saving an edit COMPLETELY: the entry AND the credentials, when the name moved
+// -----------------------------------------------------------------------------
+//
+// memql#3515's second half. `renameClusterCredentials` was written for exactly
+// this, correct and tested, with no callers -- so `memQL: Edit Cluster` rewrote
+// the YAML entry and left the refresh token behind under the old name.
+//
+// It was invisible from every angle. SecretStorage cannot be enumerated, so
+// nothing surfaced the orphan; the access token rides on the entry, so the
+// cluster kept working for the fifteen minutes that token had left; and the next
+// reconcile then deleted the stranded refresh token as belonging to a cluster
+// that does not exist. The operator's experience was a cluster they had signed
+// into asking them to sign in again, some time after a rename they had stopped
+// associating with it.
+
+test("a rename moves the credentials with the entry", async () => {
+  const file = await tempFile();
+  const secrets = signedIn("local");
+
+  await saveClusterEdit(
+    file,
+    "local",
+    { name: "parity", endpoint: "cockpit.local.znas.io:443", local: true },
+    { secrets },
+  );
+
+  const parsed = await readClustersFile(file);
+  assert.deepEqual(
+    parsed.clusters.map((c) => c.name),
+    ["parity", "staging"],
+  );
+  assert.equal(secrets.values.get(refreshTokenSecretKey("parity")), "refresh-token-value");
+  assert.equal(secrets.values.get(accessTokenExpirySecretKey("parity")), "1800000000");
+  // The load-bearing half: nothing left under the old name. A copy rather than a
+  // move would satisfy the assertions above and still leave the orphan.
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), undefined);
+  assert.equal(secrets.values.get(accessTokenExpirySecretKey("local")), undefined);
+  assert.deepEqual(JSON.parse(secrets.values.get(credentialIndexKey) ?? "[]"), ["parity"]);
+});
+
+test("the renamed cluster survives the next credential sweep", async () => {
+  // The consequence, stated as its own case: reconcile deletes secrets whose
+  // cluster is gone, so a rename that stranded them would present as a silent
+  // sign-out at an unrelated moment later.
+  const file = await tempFile();
+  const secrets = signedIn("local");
+
+  await saveClusterEdit(
+    file,
+    "local",
+    { name: "parity", endpoint: "cockpit.local.znas.io:443" },
+    { secrets },
+  );
+  const live = (await readClustersFile(file)).clusters.map((c) => c.name);
+  const swept = await reconcileClusterCredentials({ secrets }, live);
+
+  assert.deepEqual(swept, []);
+  assert.equal(secrets.values.get(refreshTokenSecretKey("parity")), "refresh-token-value");
+});
+
+test("an edit that does not rename leaves the credentials exactly where they are", async () => {
+  // Changing an endpoint is the common edit, and it must not move anything. A
+  // rename-onto-itself would read the key, delete it, and write it back -- three
+  // chances for a locked keyring to lose a credential nothing asked to touch.
+  const file = await tempFile();
+  const secrets = signedIn("local");
+  const before = new Map(secrets.values);
+
+  await saveClusterEdit(
+    file,
+    "local",
+    { name: "local", endpoint: "cockpit.elsewhere.example.com:443" },
+    { secrets },
+  );
+
+  assert.deepEqual([...secrets.values], [...before]);
+  const parsed = await readClustersFile(file);
+  assert.equal(
+    parsed.clusters.find((c) => c.name === "local")?.endpoint,
+    "cockpit.elsewhere.example.com:443",
+  );
+});
+
+test("with no SecretStorage a rename still rewrites the entry", async () => {
+  // A locked or absent keyring is a normal Linux condition. It must not make a
+  // cluster un-renameable -- the same trade removeClusterCompletely makes.
+  const file = await tempFile();
+
+  await saveClusterEdit(file, "local", { name: "parity", endpoint: "x:443" }, {});
+
+  const parsed = await readClustersFile(file);
+  assert.deepEqual(
+    parsed.clusters.map((c) => c.name),
+    ["parity", "staging"],
+  );
 });
