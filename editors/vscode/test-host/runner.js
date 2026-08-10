@@ -74,6 +74,45 @@ function makeWorkspace(root) {
   return workspace;
 }
 
+// The live half's configuration (memql#3337), resolved OUT HERE because the
+// host runs with HOME pointed at a temp directory: a `~/.memql/clusters.yaml`
+// would expand against that throwaway HOME inside the host and find nothing.
+// Resolving against the REAL home before launch is what makes the natural
+// spelling work.
+//
+// A path that does not exist is reported here rather than inside the host. The
+// live cases skip when nothing is configured, so a typo would otherwise read
+// as "skipped: no cluster configured" -- indistinguishable from not asking for
+// the live lane at all, which is the exact false signal this lane exists to
+// avoid.
+function liveClusterEnv() {
+  const raw = (process.env.MEMQL_HOST_SMOKE_CLUSTERS_FILE || "").trim();
+  if (raw === "") return {};
+
+  const expanded = raw.startsWith("~/") ? path.join(os.homedir(), raw.slice(2)) : raw;
+  const resolved = path.resolve(expanded);
+  if (!fs.existsSync(resolved)) {
+    console.error(`ERROR: MEMQL_HOST_SMOKE_CLUSTERS_FILE=${raw} does not exist (resolved: ${resolved})`);
+    process.exit(1);
+  }
+  console.log(`INFO: live cluster cases enabled from ${resolved}`);
+
+  const env = { MEMQL_HOST_SMOKE_CLUSTERS_FILE: resolved };
+  if (process.env.MEMQL_HOST_SMOKE_CLUSTER) {
+    env.MEMQL_HOST_SMOKE_CLUSTER = process.env.MEMQL_HOST_SMOKE_CLUSTER;
+  }
+  // Node does not read the OS trust store, so a cluster behind the mkcert
+  // wildcard is unreachable from the host without this. Forwarded explicitly
+  // rather than relied on to inherit, so the one variable the whole TLS story
+  // hangs on is visible at the seam it has to cross.
+  if (process.env.NODE_EXTRA_CA_CERTS) {
+    env.NODE_EXTRA_CA_CERTS = process.env.NODE_EXTRA_CA_CERTS;
+  } else {
+    console.log("WARNING: NODE_EXTRA_CA_CERTS is not set; a cluster behind a private CA will fail to dial");
+  }
+  return env;
+}
+
 async function main() {
   requireServerBinary();
 
@@ -128,6 +167,7 @@ async function main() {
         HOME: home,
         USERPROFILE: home,
         MEMQL_HOST_SMOKE_HOME: home,
+        ...liveClusterEnv(),
       },
     });
   } finally {

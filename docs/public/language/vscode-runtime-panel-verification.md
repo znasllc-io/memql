@@ -21,18 +21,54 @@ questions.
 |---|---|---|
 | Unit | `make vscode-test` | Does the logic compute the right answer? Fast, Electron-free, covers only modules that do not import `vscode`. |
 | Host smoke | `make vscode-test-host` | Does the extension survive a real VS Code? Activation, command registration, the activity-bar contributions, the host runtime's WebSocket story, watching a path outside the workspace, webview creation. Runs against both the declared `engines.vscode` floor and current stable. |
+| Host smoke, live half | `make vscode-test-host` with `MEMQL_HOST_SMOKE_CLUSTERS_FILE` set | Does the half downstream of a connection work at all? Dials a real cluster and does the READ-ONLY things: connect, list concepts, page rows, resolve a row's detail, validate a bundle and map its diagnostics, read the Cluster tab's three concept sets. Skips, loudly, when no registry is configured. |
 | This checklist | A human, `F5` | Does it *work*, and does it *look right*, against a live cluster? |
 
 The host smoke lane (memql#3302) exists because a whole class of defect passes
 every unit test and fails only in a host -- an unguarded global dereference on
 a runtime that lacks it, a file watcher that silently never fires. It caught
-three instances of that class. What it deliberately does **not** do is dial a
-cluster: it never connects, so everything downstream of a connection -- real
-rows, a real run, a real deployment -- is unverified until someone runs it.
-That is this document's job, and it is the reason the list below is longer than
-the smoke lane, not shorter.
+three instances of that class.
+
+Its live half (memql#3337) then dials a cluster and exercises the read-only
+part of what comes after, so that "the connection, the paging or the
+diagnostics mapping is broken" is found by a command rather than by a human an
+hour into this list. It is **read-only on purpose**: it runs no mutation,
+session-defines nothing and deploys nothing, because an automated lane pointed
+at whatever cluster an operator had selected must not be able to write to it.
+
+What neither lane can do is look at anything. "The icon turns to a filled green
+circle", "rows render through each concept's `@displayCard`", "the trace tab
+opens beside the form without stealing focus" are not assertions a process can
+make about itself, and neither is any item that needs a write. That is this
+document's job, and it is why the list below is longer than both lanes, not
+shorter.
+
+Run the live half before you start:
+
+```bash
+MEMQL_HOST_SMOKE_CLUSTERS_FILE=~/.memql/clusters.yaml \
+MEMQL_HOST_SMOKE_CLUSTER=vscode-local \
+NODE_EXTRA_CA_CERTS="$(mkcert -CAROOT)/rootCA.pem" \
+  make vscode-test-host
+```
 
 ## Setup
+
+### The short path
+
+```bash
+scripts/vscode/verification-setup.sh --install-tools
+```
+
+That is steps 1 to 5 below, in order: the pinned tools, the local CA, the
+extension and `memql-lsp` built, `make up`, the TLS check that memql#3384 was
+filed over, the discovery read that memql#3399 was filed over, two device-code
+sign-ins, and both cluster entries written through the extension's own
+`clusters.yaml` writer. It verifies nothing on this checklist -- it ends where
+your work begins.
+
+Read the five steps anyway if it fails: each one says what it is for, and the
+script's failure messages assume you have.
 
 Five steps, in order. Each one has stopped a reader before section 1 at least
 once (memql#3386), so none of them is optional and none of them can be guessed
@@ -480,3 +516,11 @@ could have caught it, and add the case if so. That lane lives in
 `editors/vscode/test-host/`; the three defects it already guards against are
 documented in its header, and each of them was found the same way: a human
 working through a list like this one.
+
+Which of the two files depends on what the case needs:
+
+- `index.ts` -- needs no cluster. Activation, contributions, the host runtime,
+  watchers, webview creation.
+- `live.ts` -- needs a connection, and must be **read-only**. A case that has
+  to write, or that can only be judged by looking, belongs on this checklist
+  instead. Say so in the case's comment when you leave it here.
