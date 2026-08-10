@@ -296,3 +296,306 @@ test("finishing a run reports whether it succeeded", () => {
   assert.equal(s.succeeded, true);
   assert.equal(s.cancelled, false);
 });
+
+// -----------------------------------------------------------------------------
+// registering an existing cluster (memql#3475)
+//
+// What these cover is the property the old input-box sequence could not have:
+// the form is a single object the operator revises. A sequence of prompts had
+// to validate one answer at a time, could not be walked backwards, and threw
+// everything away on Escape -- so "all the problems at once", "revise after a
+// refusal" and "discard writes nothing" are the cases, not extras.
+// -----------------------------------------------------------------------------
+
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
+
+import { addCluster, readClustersFile } from "../src/clusters/file.js";
+import type { ClustersFile } from "../src/clusters/model.js";
+
+// A stand-in for the pasted access token, deliberately NOT shaped like a JWT.
+//
+// The field really does hold one in production, and an earlier version of these
+// fixtures used a structurally valid but empty JWT for that realism. It tripped
+// gitleaks, which reads a `header.payload.signature` triple next to the word
+// `token` as a credential and cannot know the payload is `{}`. Realism bought
+// nothing here: `validateConnect` only refuses a `mql_pat_` prefix and embedded
+// whitespace, so nothing in the code under test parses this value. A fixture
+// that trains the secret scanner to expect false positives in this file is a
+// worse trade than a fixture that looks less like the real thing.
+const FAKE_TOKEN = "not-a-real-access-token";
+
+function registry(...names: string[]): ClustersFile {
+  return {
+    clusters: names.map((name) => ({ name, endpoint: `cockpit.${name}.example.com:443` })),
+    selectedCluster: "",
+  };
+}
+
+/** A state parked on the connect screen with the whole form filled in. */
+function connectForm(values: Partial<Record<"name" | "domain" | "endpoint" | "token", string>>) {
+  const s = new AddClusterState();
+  s.chooseAction("connect");
+  for (const [field, text] of Object.entries(values)) {
+    s.setConnectInput(field as "name" | "domain" | "endpoint" | "token", text);
+  }
+  return s;
+}
+
+function messageFor(s: AddClusterState, field: string): string | undefined {
+  return s.connectErrors.find((e) => e.field === field)?.message;
+}
+
+test("a complete form produces the entry to write", () => {
+  const s = connectForm({
+    name: "staging",
+    endpoint: "cockpit.staging.example.com:443",
+    token: FAKE_TOKEN,
+  });
+  assert.deepEqual(s.connectDraft(), {
+    name: "staging",
+    endpoint: "cockpit.staging.example.com:443",
+    token: FAKE_TOKEN,
+  });
+});
+
+test("a registered cluster carries NO local key", () => {
+  // `local: true` means "this cluster's data is disposable" -- it disables the
+  // mutation confirmation and, since memql#3466, decides whether the tree row
+  // offers an uninstall. Nothing about registering someone else's cluster
+  // knows that, so the field is absent rather than false: absent is what the
+  // reader means by "not local", and `local: false` is a key the Cockpit drops
+  // on its next write anyway.
+  const draft = connectForm({ name: "prod", endpoint: "cockpit.prod.example.com:443" }).connectDraft();
+  if (draft === undefined) throw new assert.AssertionError({ message: "the form was valid" });
+  assert.equal("local" in draft, false);
+});
+
+test("an empty optional field is omitted from the entry, not written as a clear", () => {
+  // "" and absent are the same file for a NEW entry but opposite instructions
+  // to upsertCluster, where "" DELETES the key.
+  const draft = connectForm({ name: "prod", endpoint: "cockpit.prod.example.com:443" }).connectDraft();
+  assert.deepEqual(draft, { name: "prod", endpoint: "cockpit.prod.example.com:443" });
+});
+
+test("the endpoint is composed from the domain when the box is left empty", () => {
+  const draft = connectForm({ name: "staging", domain: " staging.example.com. " }).connectDraft();
+  assert.deepEqual(draft, {
+    name: "staging",
+    domain: "staging.example.com",
+    endpoint: "cockpit.staging.example.com:443",
+  });
+});
+
+test("a typed endpoint wins over the one the domain would compose", () => {
+  const draft = connectForm({
+    name: "staging",
+    domain: "staging.example.com",
+    endpoint: "10.0.0.5:50051",
+  }).connectDraft();
+  assert.equal(draft?.endpoint, "10.0.0.5:50051");
+});
+
+// --- per-field validation ----------------------------------------------------
+
+test("a missing name is refused", () => {
+  const s = connectForm({ name: "   ", endpoint: "cockpit.x.example.com:443" });
+  assert.equal(s.connectDraft(), undefined);
+  assert.equal(messageFor(s, "name"), "A cluster name is required.");
+});
+
+test("a name already in the registry is refused, and the message names the conflict", () => {
+  const s = connectForm({ name: "staging", endpoint: "cockpit.staging.example.com:443" });
+  s.setRegistry(registry("local", "staging"));
+  assert.equal(s.connectDraft(), undefined);
+  assert.equal(
+    messageFor(s, "name"),
+    'a cluster named "staging" already exists; edit it instead of adding it again',
+  );
+});
+
+test("the duplicate check needs a registry, and without one the write-time wall is the only one", () => {
+  // clusters.yaml is shared with the Cockpit, so no read here stays
+  // authoritative -- which is why this check never became the only one. A
+  // clusters.yaml that would not parse simply leaves it silent.
+  const s = connectForm({ name: "staging", endpoint: "cockpit.staging.example.com:443" });
+  assert.notEqual(s.connectDraft(), undefined);
+});
+
+test("an endpoint that names nothing at all is refused", () => {
+  const s = connectForm({ name: "staging" });
+  assert.equal(s.connectDraft(), undefined);
+  assert.match(messageFor(s, "endpoint") ?? "", /An endpoint is required/);
+});
+
+test("the endpoint is judged by the dialer, and reports what the dialer said", () => {
+  // webSocketUrlFor is the function the connection layer actually calls, so
+  // its refusal is the field error -- minus the "cluster \"x\": " prefix it
+  // carries for callers with no field to attach a sentence to.
+  const s = connectForm({ name: "staging", endpoint: "https://cockpit.staging.example.com" });
+  assert.equal(s.connectDraft(), undefined);
+  assert.equal(
+    messageFor(s, "endpoint"),
+    'endpoint scheme must be ws:// or wss://, got "https://" -- store the gRPC host:port (or an explicit ws(s):// bridge URL), not a general-purpose URL',
+  );
+});
+
+test("a PAT in the token box is refused by name rather than left to fail at the handshake", () => {
+  const s = connectForm({
+    name: "staging",
+    endpoint: "cockpit.staging.example.com:443",
+    token: "mql_pat_abcdef",
+  });
+  assert.equal(s.connectDraft(), undefined);
+  assert.match(messageFor(s, "token") ?? "", /Personal Access Token/);
+});
+
+test("a token that picked up a line break is refused", () => {
+  const s = connectForm({
+    name: "staging",
+    endpoint: "cockpit.staging.example.com:443",
+    token: "eyJhbGciOi\nJSUzI1NiJ9",
+  });
+  assert.equal(s.connectDraft(), undefined);
+  assert.match(messageFor(s, "token") ?? "", /whitespace/);
+});
+
+test("a domain given as a URL is refused, and so is one with a space in it", () => {
+  const scheme = connectForm({ name: "s", domain: "https://staging.example.com" });
+  assert.equal(scheme.connectDraft(), undefined);
+  assert.match(messageFor(scheme, "domain") ?? "", /drop the scheme/);
+
+  const spaced = connectForm({ name: "s", domain: "staging example.com" });
+  assert.equal(spaced.connectDraft(), undefined);
+  assert.equal(messageFor(spaced, "domain"), "A domain cannot contain spaces.");
+});
+
+test("every field is checked, so all the problems arrive at once", () => {
+  // The sequence of input boxes this replaces could only ever report the box
+  // in front of the operator: four wrong answers meant four separate attempts.
+  const s = connectForm({
+    name: "staging",
+    domain: "https://staging.example.com",
+    endpoint: "https://cockpit.staging.example.com",
+    token: "mql_pat_abcdef",
+  });
+  s.setRegistry(registry("staging"));
+  assert.equal(s.connectDraft(), undefined);
+  assert.deepEqual(
+    s.connectErrors.map((e) => e.field).sort(),
+    ["domain", "endpoint", "name", "token"],
+  );
+});
+
+// --- revision ----------------------------------------------------------------
+
+test("a field can be revised after it was refused, and the rest of the form survives", () => {
+  const s = connectForm({
+    name: "staging",
+    endpoint: "https://cockpit.staging.example.com",
+    token: FAKE_TOKEN,
+  });
+  s.setRegistry(registry("staging"));
+  assert.equal(s.connectDraft(), undefined);
+
+  // Fix ONLY the two that were wrong. Everything else is still there -- which
+  // is the whole point of a form over a sequence of prompts.
+  s.setConnectInput("name", "staging-2");
+  s.setConnectInput("endpoint", "cockpit.staging.example.com:443");
+  assert.deepEqual(s.connectDraft(), {
+    name: "staging-2",
+    endpoint: "cockpit.staging.example.com:443",
+    token: FAKE_TOKEN,
+  });
+});
+
+test("editing a field drops the complaint that field was carrying", () => {
+  const s = connectForm({ name: "", endpoint: "cockpit.x.example.com:443" });
+  assert.equal(s.connectDraft(), undefined);
+  s.setConnectInput("name", "x");
+  assert.equal(messageFor(s, "name"), undefined);
+});
+
+test("going back to the cards clears the complaints but keeps what was typed", () => {
+  const s = connectForm({ name: "", endpoint: "cockpit.x.example.com:443" });
+  s.connectDraft();
+  s.back();
+  assert.equal(s.screen, "landing");
+  assert.deepEqual(s.connectErrors, []);
+  assert.equal(s.connectInputs.endpoint, "cockpit.x.example.com:443");
+});
+
+// --- discarding ---------------------------------------------------------------
+
+test("discarding empties the form and returns to the cards", () => {
+  const s = connectForm({ name: "staging", endpoint: "cockpit.staging.example.com:443" });
+  s.discardConnect();
+  assert.equal(s.screen, "landing");
+  assert.deepEqual(s.connectInputs, { name: "", domain: "", endpoint: "", token: "" });
+});
+
+test("a write refused after the fact is reported without losing the form", () => {
+  const s = connectForm({ name: "staging", endpoint: "cockpit.staging.example.com:443" });
+  s.failConnect('a cluster named "staging" already exists; edit it instead of adding it again');
+  assert.match(s.connectFailure, /already exists/);
+  assert.equal(s.connectInputs.name, "staging");
+  // ...and it goes away on the next attempt rather than lingering over a form
+  // that has since been corrected.
+  s.setConnectInput("name", "staging-2");
+  s.connectDraft();
+  assert.equal(s.connectFailure, "");
+});
+
+// --- what actually lands on disk ----------------------------------------------
+
+test("saving writes the entry, and the written YAML carries no local key", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-connect-"));
+  const file = path.join(dir, "clusters.yaml");
+
+  const draft = connectForm({
+    name: "staging",
+    domain: "staging.example.com",
+    endpoint: "cockpit.staging.example.com:443",
+  }).connectDraft();
+  if (draft === undefined) throw new assert.AssertionError({ message: "the form was valid" });
+  await addCluster(file, draft);
+
+  const written = await readClustersFile(file);
+  assert.deepEqual(written.clusters, [
+    { name: "staging", domain: "staging.example.com", endpoint: "cockpit.staging.example.com:443" },
+  ]);
+  // Not merely absent from the parse -- absent from the bytes, since `local`
+  // is what keeps the tree row `memqlCluster` rather than `memqlLocalCluster`.
+  assert.equal((await fs.readFile(file, "utf8")).includes("local"), false);
+});
+
+test("discarding writes nothing, not even a partial entry", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-connect-"));
+  const file = path.join(dir, "clusters.yaml");
+
+  const s = connectForm({ name: "staging" });
+  s.discardConnect();
+  // Nothing writes except an explicit save, and there is nothing left to save.
+  assert.equal(s.connectDraft(), undefined);
+  await assert.rejects(() => fs.stat(file));
+});
+
+test("the second wall still refuses a name the first one could not see", async () => {
+  // The registry snapshot is only true of the moment it was read, so the
+  // duplicate that arrives between the read and the write has to be caught by
+  // addCluster -- and it is caught with the same sentence the form uses.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-connect-"));
+  const file = path.join(dir, "clusters.yaml");
+  await addCluster(file, { name: "staging", endpoint: "cockpit.staging.example.com:443" });
+
+  const draft = connectForm({
+    name: "staging",
+    endpoint: "cockpit.staging.example.com:443",
+  }).connectDraft();
+  if (draft === undefined) throw new assert.AssertionError({ message: "no registry, no conflict" });
+  await assert.rejects(
+    () => addCluster(file, draft),
+    /a cluster named "staging" already exists; edit it instead of adding it again/,
+  );
+});
