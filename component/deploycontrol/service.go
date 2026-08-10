@@ -255,16 +255,43 @@ func (s *Service) emitAudit(
 // Write RPCs
 // -----------------------------------------------------------------------------
 
+// GATE BEFORE VALIDATION (memql#3457). The four legacy console write RPCs
+// below call the role gate FIRST and validate their arguments only once the
+// caller has cleared it. The order used to be the other way round, which meant
+// a below-floor caller who sent a bad argument received a plain
+// INVALID_ARGUMENT and left NO audit event -- the one hole in the "every
+// refused deploy action is audited" property memql#3334 established and pinned.
+// The attempt achieved nothing (the argument was invalid, so no deployment
+// moved), which is why it was easy to leave alone; but an audit trail on a
+// privileged surface exists to record ATTEMPTS, and it was invisible from both
+// ends -- the caller read an argument error, the admin reading the trail read
+// nothing.
+//
+// The re-order is deliberately observable: a below-floor caller with an invalid
+// argument now gets PERMISSION_DENIED (audited) where it used to get
+// INVALID_ARGUMENT (unaudited). A caller at or above the floor is unaffected --
+// same code, same message, still unaudited, because the gate audits denials and
+// not admissions. It is also the safer order on its own terms: an unauthorized
+// caller learns nothing from the shape of the argument parser.
+//
+// The audit detail map therefore carries the argument AS SENT, invalid values
+// included. That is the point -- the shape of a probe is the interesting part
+// of it.
+//
+// TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited (unary +
+// streamed) and TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited
+// (over the memql#3380 mesh hop) hold this on all three surfaces.
+
 // DeployStaging assembles + applies a release into the staging overlay
 // via promote.sh --env=staging.
 func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingRequest) (*memqlv1.ActionResult, error) {
 	version := req.GetVersion()
-	if version == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
-	}
 	act, err := s.authorize(ctx, "deploy_staging", map[string]any{"env": "staging", "version": version})
 	if err != nil {
 		return nil, err
+	}
+	if version == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
 	}
 	return s.promoteRelease(ctx, act, "deploy_staging", "staging", version), nil
 }
@@ -273,12 +300,12 @@ func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingR
 // (digest copy, no rebuild) via promote.sh --env=prod.
 func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*memqlv1.ActionResult, error) {
 	version := req.GetVersion()
-	if version == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
-	}
 	act, err := s.authorize(ctx, "promote", map[string]any{"env": "prod", "version": version})
 	if err != nil {
 		return nil, err
+	}
+	if version == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
 	}
 	return s.promoteRelease(ctx, act, "promote", "prod", version), nil
 }
@@ -307,17 +334,17 @@ func (s *Service) promoteRelease(ctx context.Context, act actor, verb, consoleEn
 // given environment via `git revert`.
 func (s *Service) Rollback(ctx context.Context, req *memqlv1.RollbackRequest) (*memqlv1.ActionResult, error) {
 	env := req.GetEnv()
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
-	}
 	sha := req.GetCommitSha()
-	if sha == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: commit_sha is required")
-	}
 	detail := map[string]any{"env": env, "commitSha": sha}
 	act, err := s.authorize(ctx, "rollback", detail)
 	if err != nil {
 		return nil, err
+	}
+	if !validEnvs[env] {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
+	}
+	if sha == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: commit_sha is required")
 	}
 	out, runErr := s.exec.RunRollback(ctx, env, sha)
 	return s.finishWrite(ctx, "rollback", act, detail, out, runErr,
@@ -327,21 +354,21 @@ func (s *Service) Rollback(ctx context.Context, req *memqlv1.RollbackRequest) (*
 // RolloutAction promotes or aborts an in-flight Argo Rollout.
 func (s *Service) RolloutAction(ctx context.Context, req *memqlv1.RolloutActionRequest) (*memqlv1.ActionResult, error) {
 	env := req.GetEnv()
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
-	}
 	rollout := req.GetRollout()
-	if rollout == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: rollout is required")
-	}
 	action := req.GetAction()
-	if action != "promote" && action != "abort" {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid action %q (want promote|abort)", action)
-	}
 	detail := map[string]any{"env": env, "rollout": rollout, "action": action}
 	act, err := s.authorize(ctx, "rollout_action", detail)
 	if err != nil {
 		return nil, err
+	}
+	if !validEnvs[env] {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
+	}
+	if rollout == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: rollout is required")
+	}
+	if action != "promote" && action != "abort" {
+		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid action %q (want promote|abort)", action)
 	}
 	out, runErr := s.exec.RunRolloutAction(ctx, env, rollout, action)
 	return s.finishWrite(ctx, "rollout_action", act, detail, out, runErr,
