@@ -466,7 +466,13 @@ func (w *Worker) processRecipient(
 		w.failJob(systemCtx, *job, "cannot mint an unsubscribe token: "+err.Error())
 		return true, err
 	}
-	msg := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token))
+	msg, err := renderMessage(campaign, tmpl, r, unsubscribeURL(w.cfg.UnsubscribeBaseURL, token))
+	if err != nil {
+		// Mirrors the mint failure above: a message we cannot render is a job
+		// that cannot proceed, not a recipient to skip silently.
+		w.failJob(systemCtx, *job, "cannot render the message: "+err.Error())
+		return true, err
+	}
 
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.SendTimeout)
 	err = w.deliver(sendCtx, msg)

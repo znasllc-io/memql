@@ -25,7 +25,10 @@ func renderFixture(displayName string) (text string, html string) {
 		HTMLBody: "<p>Hi {{displayName}}, welcome.</p>",
 	}
 	r := Recipient{ID: "r1", Email: "someone@example.com", DisplayName: displayName}
-	msg := renderMessage(c, t, r, "https://example.com/unsubscribe?token=abc")
+	msg, err := renderMessage(c, t, r, "https://example.com/unsubscribe?token=abc")
+	if err != nil {
+		panic(err)
+	}
 	return msg.TextBody, msg.HTMLBody
 }
 
@@ -68,5 +71,26 @@ func TestDisplayNameEscapingDoesNotAlterAnOrdinaryName(t *testing.T) {
 	}
 	if !strings.Contains(html, "Hi Ada Lovelace, welcome.") {
 		t.Errorf("html body: got %s", html)
+	}
+}
+
+func TestFooterNeutralisesAJavascriptURL(t *testing.T) {
+	// html/template's urlFilter is the reason the footer is a template rather
+	// than a Sprintf: html.EscapeString would pass `javascript:` through
+	// untouched, because nothing about that string needs HTML escaping. Only a
+	// context-aware renderer knows an href is a URL position.
+	c := Campaign{ID: "c1", OwnerUserID: "u1", Name: "Spring", FromName: "Acme"}
+	tpl := Template{ID: "t1", Subject: "s", TextBody: "t", HTMLBody: "<p>body</p>"}
+	r := Recipient{ID: "r1", Email: "a@example.com", DisplayName: "Ada"}
+
+	msg, err := renderMessage(c, tpl, r, "javascript:alert(1)")
+	if err != nil {
+		t.Fatalf("renderMessage: %v", err)
+	}
+	if strings.Contains(msg.HTMLBody, "javascript:alert(1)") {
+		t.Errorf("a javascript: scheme survived into the href.\ngot: %s", msg.HTMLBody)
+	}
+	if !strings.Contains(msg.HTMLBody, "#ZgotmplZ") {
+		t.Errorf("expected html/template's urlFilter to replace the scheme, got: %s", msg.HTMLBody)
 	}
 }

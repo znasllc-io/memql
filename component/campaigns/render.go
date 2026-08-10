@@ -3,6 +3,7 @@ package campaigns
 import (
 	"fmt"
 	"html"
+	texttemplate "html/template"
 	"net/url"
 	"strings"
 
@@ -72,7 +73,7 @@ const UnsubscribePath = "/unsubscribe"
 // an expression evaluator in that position is an injection surface with a
 // mailing list attached. A single named placeholder covers the one case
 // (a greeting) that actually recurs.
-func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) email.Message {
+func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) (email.Message, error) {
 	name := strings.TrimSpace(r.DisplayName)
 	if name == "" {
 		if at := strings.Index(r.Email, "@"); at > 0 {
@@ -107,16 +108,26 @@ func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) e
 		},
 	}
 	if strings.TrimSpace(t.HTMLBody) != "" {
-		html := substHTML.Replace(t.HTMLBody)
-		html += fmt.Sprintf(
-			`<hr><p style="font-size:12px;color:#666">You are receiving this because you subscribed to %s. <a href="%s">Unsubscribe</a>.</p>`,
-			htmlEscape(displayNameFor(c)), htmlEscape(unsubscribeURL))
-		msg.HTMLBody = html
+		// The footer goes through html/template rather than Sprintf + a manual
+		// escaper. Not scanner appeasement: `{{.URL}}` sits in an href, and
+		// html/template is CONTEXT-aware -- it applies URL escaping there and
+		// text escaping around it, and its urlFilter neutralises a `javascript:`
+		// scheme, none of which html.EscapeString knows to do. Hand-escaping
+		// into an attribute means re-deriving per call site which of those
+		// applies; this asks the standard library instead (memql#3348).
+		footer, err := footerTemplate(displayNameFor(c), unsubscribeURL)
+		if err != nil {
+			// Unreachable with a fixed template and string inputs; refusing to
+			// send beats mailing a body with no unsubscribe footer, which is the
+			// one thing RFC 8058 compliance cannot go out without.
+			return email.Message{}, err
+		}
+		msg.HTMLBody = substHTML.Replace(t.HTMLBody) + footer
 	}
 	if strings.TrimSpace(c.ReplyTo) != "" {
 		msg.Headers["Reply-To"] = strings.TrimSpace(c.ReplyTo)
 	}
-	return msg
+	return msg, nil
 }
 
 func displayNameFor(c Campaign) string {
@@ -143,4 +154,27 @@ func unsubscribeURL(baseURL, token string) string {
 // the context. The stdlib carries both guarantees for free.
 func htmlEscape(s string) string {
 	return html.EscapeString(s)
+}
+
+// unsubscribeFooter is parsed once. html/template is CONTEXT-aware: it knows
+// `{{.URL}}` sits inside an href and applies URL escaping plus its urlFilter
+// (which replaces a `javascript:` or `data:` scheme with "#ZgotmplZ"), while
+// `{{.Sender}}` in text position gets ordinary HTML escaping. That difference
+// is the reason this is a template rather than a Sprintf with a manual
+// escaper -- html.EscapeString applies one rule everywhere and cannot know
+// which context it landed in.
+var unsubscribeFooter = texttemplate.Must(texttemplate.New("unsubscribeFooter").Parse(
+	`<hr><p style="font-size:12px;color:#666">You are receiving this because ` +
+		`you subscribed to {{.Sender}}. <a href="{{.URL}}">Unsubscribe</a>.</p>`))
+
+// footerTemplate renders the RFC 8058 footer appended to every HTML body.
+func footerTemplate(sender, url string) (string, error) {
+	var b strings.Builder
+	if err := unsubscribeFooter.Execute(&b, struct {
+		Sender string
+		URL    string
+	}{Sender: sender, URL: url}); err != nil {
+		return "", fmt.Errorf("campaigns: rendering unsubscribe footer: %w", err)
+	}
+	return b.String(), nil
 }

@@ -1,11 +1,12 @@
 package email
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 )
 
 // mime.go -- RFC 5322 rendering, extracted so BOTH senders produce the
@@ -134,7 +135,15 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 	}
 
 	multipart := strings.TrimSpace(msg.HTMLBody) != ""
-	boundary := fmt.Sprintf("memql-email-%d", time.Now().UnixNano())
+	// CRYPTO-RANDOM, not a timestamp. The boundary is the only thing separating
+	// operator-authored body content from MIME structure, and a body that
+	// contains `\r\n--<boundary>` forges a part. The previous
+	// `time.Now().UnixNano()` made that a guessing problem rather than an
+	// impossible one; 128 bits of entropy makes it neither (memql#3348).
+	boundary, err := randomBoundary()
+	if err != nil {
+		return nil, fmt.Errorf("email: generating MIME boundary: %w", err)
+	}
 
 	write("From", fromHeader)
 	write("To", msg.To)
@@ -172,4 +181,19 @@ func RenderRFC5322(fromHeader string, msg Message) ([]byte, error) {
 	b.WriteString(boundary)
 	b.WriteString("--\r\n")
 	return []byte(b.String()), nil
+}
+
+// randomBoundary returns a MIME multipart boundary with 128 bits of entropy.
+//
+// Boundaries are structure, not content: everything between `--<boundary>` and
+// the next one is a body part, so a body able to contain the boundary can
+// declare parts of its own. Campaign bodies are operator-authored and reach
+// thousands of recipients, which is exactly the position where "an attacker
+// would have to guess a nanosecond" is the wrong amount of reassurance.
+func randomBoundary() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return "memql-email-" + hex.EncodeToString(b[:]), nil
 }
