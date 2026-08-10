@@ -66,8 +66,9 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 }
 
 // shippedAutomationCount is the number of automations the embedded tree
-// yields. Measured when the strict gate landed (memql#2830).
-const shippedAutomationCount = 31
+// yields. Measured when the strict gate landed (memql#2830); 31 -> 32 when
+// campaigns gained ingestCampaignFeedback (memql#3461).
+const shippedAutomationCount = 32
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the
