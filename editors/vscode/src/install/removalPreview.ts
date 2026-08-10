@@ -24,23 +24,19 @@
 //
 // Refs: #3476 #3469
 
+import type { RemovalElevation, RemovalItemView } from "@znasllc-io/memql-view-kit";
+
 /**
- * One row of the preview.
+ * The row type, re-exported so a caller of this mapping needs one import.
  *
- * This MIRRORS `RemovalItemView` from `@znasllc-io/memql-view-kit` and must
- * stay in sync with it. It is redeclared rather than imported because the
- * view-kit export lands on its own branch; the webview that renders these rows
- * is separate work, and this module is the pure half that needs neither.
+ * It used to be REDECLARED here, because the view-kit export was still on its
+ * own branch and a copy was the only way to be pure over a plain value. The
+ * export has landed, so the copy is gone: two declarations of one row shape are
+ * two things to keep in step, and the field they would have drifted on first is
+ * `elevation`, whose whole point is that a value missing from the view model is
+ * a warning the operator never sees.
  */
-export interface RemovalItemView {
-  /** The uninstall step this row is about. */
-  id: string;
-  /** The artifact, named as the operator would name it, with its target. */
-  label: string;
-  kind: "removed" | "preserved";
-  /** Why it is preserved. Always present on a preserved item. */
-  reason?: string;
-}
+export type { RemovalElevation, RemovalItemView };
 
 /**
  * The half of `PlannedStep` (session.ts, #3469) this mapping reads.
@@ -59,6 +55,17 @@ export interface PreviewStep {
   preserved: boolean;
   /** What will be removed, ALREADY in words -- e.g. `cluster memql`. */
   target: string;
+  /**
+   * What removing this artifact will ask of the operator.
+   *
+   * REQUIRED, not optional, and that is the point. The renderer draws nothing
+   * for an absent elevation rather than defaulting it to "none", because "I was
+   * not told" and "this needs no privileges" are different claims -- so an
+   * optional field here would let a producer that simply forgot present a
+   * sudo-taking step as one that takes nothing. `PlannedStep` has carried the
+   * value off the graph since #3469; the type makes passing it on unavoidable.
+   */
+  elevation: RemovalElevation;
 }
 
 /** The half of `UninstallPreview` (session.ts, #3469) this mapping reads. */
@@ -131,6 +138,15 @@ function itemFor(step: PreviewStep): RemovalItemView {
     id: step.id,
     label: label(step),
     kind: step.preserved ? "preserved" : "removed",
+    // SET ON EVERY ROW, "none" included. The preview IS the confirmation, so
+    // this list is the only moment the operator consents -- and two of the
+    // seven uninstall steps stop and ask for something outside memQL's own
+    // footprint (removeHostsBlock takes root to edit the system hosts file,
+    // removeLocalCA takes a trust-store prompt to withdraw a CA the browsers
+    // trust). A row that omitted the value would render no marker at all, which
+    // reads as "this needs nothing" -- consent obtained for a prompt the
+    // operator was never shown.
+    elevation: step.elevation,
   };
   if (step.preserved) {
     item.reason = step.reason.trim() !== "" ? step.reason : DEFAULT_PRESERVED_REASON;
