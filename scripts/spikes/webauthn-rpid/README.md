@@ -103,15 +103,21 @@ the `needs-human` label.
    127.0.0.1  identity.memql.localhost cockpit.memql.localhost bff.memql.localhost
    ```
 
-2. An mkcert wildcard certificate and a trusted local CA:
+2. An mkcert wildcard certificate and a trusted local CA. Generate it **outside
+   the repository** - `*.pem` is not gitignored here, so a private key written
+   into the repo root sits untracked next to your work and can be swept into a
+   commit:
 
    ```
    mkcert -install
+   mkdir -p /tmp/memql-spike-3405 && cd /tmp/memql-spike-3405
    mkcert "*.memql.localhost" memql.localhost
    ```
 
-   That writes `_wildcard.memql.localhost.pem` and
-   `_wildcard.memql.localhost-key.pem` into the current directory.
+   Because two names are passed, mkcert **suffixes the output with `+1`**: it
+   writes `_wildcard.memql.localhost+1.pem` and
+   `_wildcard.memql.localhost+1-key.pem` into the current directory. Use those
+   exact names below - the unsuffixed spelling does not exist.
 
 3. **A phone on the same Bluetooth range as the desktop** for the hybrid legs.
    Hybrid transport needs BLE for proximity attestation; being on the same
@@ -119,13 +125,23 @@ the `needs-human` label.
 
 ## Run
 
+Run from the repository root (`go run` needs the module), pointing at the
+certificate directory from step 2:
+
 ```bash
+CERTS=/tmp/memql-spike-3405
 go run ./scripts/spikes/webauthn-rpid \
   --rp-id=memql.localhost \
   --addr=127.0.0.1:8443 \
-  --cert=./_wildcard.memql.localhost.pem \
-  --key=./_wildcard.memql.localhost-key.pem
+  --cert=$CERTS/_wildcard.memql.localhost+1.pem \
+  --key=$CERTS/_wildcard.memql.localhost+1-key.pem
 ```
+
+Smoke-tested on 2026-08-09 (mkcert v1.4.4, macOS): the server comes up and
+`https://identity.memql.localhost:8443/` returns 200 with a CA-trusted
+certificate - verified with `curl --resolve` and *without* `-k`, so TLS trust is
+genuinely working rather than being bypassed. Everything up to the ceremony is
+confirmed good; the phones are the only untested variable left.
 
 Open `https://identity.memql.localhost:8443/` and work down the four buttons.
 Then re-run with `--rp-id=identity.memql.localhost` to measure Case A
