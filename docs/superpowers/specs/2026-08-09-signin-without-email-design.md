@@ -455,11 +455,46 @@ copy is written — but it does not block Units A, C, D or E.
 >
 > Note the **direction** of that result: `.localhost` passes *because it is
 > unlisted* — because nobody has asserted anything about it. That is a thinner
-> guarantee than a spec carve-out, and it is exactly why leg 2 must be measured
-> rather than reasoned about: a browser may special-case `.localhost` outside
-> the PSL and this analysis would not see it.
+> guarantee than a spec carve-out, and it is why the analysis alone was not
+> allowed to settle the question: a browser may special-case `.localhost`
+> outside the PSL, and reading the algorithm would not see it.
 >
-> **Leg 2 — the authenticators: NOT ANSWERED.** Whether the iOS and Android
+> **Leg 1 is now MEASURED, and Chrome does not special-case `.localhost`
+> (2026-08-10).** Chrome 151.0.7922.108 (headless build, `HeadlessChrome/
+> 151.0.0.0`) on macOS 26.5.1, driven at `https://identity.memql.localhost:8444`
+> over an mkcert-trusted certificate. Each case calls `create()` under an
+> `AbortController` that fires at 2.5s, so the probe reaches the browser's RP ID
+> validator — which runs *before* any authenticator is consulted — without
+> needing an authenticator to exist:
+>
+> | RP ID | Role | Result | Error |
+> |---|---|---|---|
+> | `memql.localhost` | Case B — parent (the shape D5 wants) | **accepted** | `AbortError` (our own 2.5s abort) |
+> | `identity.memql.localhost` | Case A — exact match | **accepted** | `AbortError` (our own 2.5s abort) |
+> | `localhost` | positive control | **rejected** | `SecurityError` |
+> | `example.com` | negative control | **rejected** | `SecurityError` |
+>
+> Both controls are load-bearing. The negative control proves the discriminator
+> actually fires — without it, "no `SecurityError`" would be evidence of nothing.
+> The **positive control is the stronger one**: `localhost` is refused *as an RP
+> ID for this very origin*, which is only true if `localhost` is being treated as
+> a public suffix — precisely the PSL fall-through the analysis derived. So the
+> browser is not merely permissive about `.localhost`; it is running the PSL
+> algorithm and arriving at the same place the derivation did, which is what
+> makes `memql.localhost` a registrable domain and Case B legal.
+>
+> Both `SecurityError` messages add that Chrome then tried, and failed, to fetch
+> `.well-known/webauthn` on the claimed RP ID — the Related Origin Requests
+> fallback. It changes no conclusion here, but it means a future cross-origin
+> shape has a second mechanism available.
+>
+> **What this measurement does not cover**, stated so it is not over-read: it is
+> the browser's *validator* only, in *headless* Chrome, on *Chrome alone*. It
+> says nothing about what a real authenticator does with the RP ID once the
+> ceremony proceeds, and Safari is unmeasured — WebKit is the likeliest place for
+> a divergent local-origin policy, so leg 2's run should start there.
+>
+> **Leg 2 — the authenticators: STILL NOT ANSWERED.** Whether the iOS and Android
 > passkey providers accept it over hybrid transport, and whether Chrome and
 > Safari agree, needs a physical iOS device, a physical Android device, and a
 > person to scan a QR code. The mechanism is sound in principle — §5.3's "the

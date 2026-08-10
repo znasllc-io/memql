@@ -67,9 +67,37 @@ only Case A would have survived.
 
 Note the direction of this result: `.localhost` passes **because** it is
 unlisted, i.e. because nobody has asserted anything about it. That is a thinner
-guarantee than a spec carve-out, and it is exactly why leg 2 still has to be
-measured rather than reasoned about - a browser is free to special-case
-`.localhost` outside the PSL, and this analysis would not see it.
+guarantee than a spec carve-out, and it is why the analysis was not allowed to
+settle the question on its own - a browser is free to special-case `.localhost`
+outside the PSL, and reading the algorithm would not see it.
+
+#### Leg 1 is now MEASURED in Chrome, and it agrees (2026-08-10)
+
+Chrome **151.0.7922.108** (headless build, `HeadlessChrome/151.0.0.0`) on
+**macOS 26.5.1**, at origin `https://identity.memql.localhost:8444` over an
+mkcert-trusted certificate. Each case calls `create()` under an
+`AbortController` firing at 2.5s, which reaches the RP ID validator - it runs
+*before* any authenticator is consulted - without an authenticator having to
+exist. That is what makes this leg automatable at all.
+
+| RP ID | Role | Result | Error |
+|---|---|---|---|
+| `memql.localhost` | Case B - parent (what the epic wants) | **accepted** | `AbortError` (our own abort) |
+| `identity.memql.localhost` | Case A - exact match | **accepted** | `AbortError` (our own abort) |
+| `localhost` | positive control | **rejected** | `SecurityError` |
+| `example.com` | negative control | **rejected** | `SecurityError` |
+
+Read the controls before the results. The negative control proves the
+discriminator fires at all - without it, "no `SecurityError`" would be evidence
+of nothing. The positive control is the stronger one: `localhost` is refused as
+an RP ID *for this very origin*, which happens only if `localhost` is being
+treated as a public suffix. That is exactly the PSL fall-through derived above,
+observed from the outside. Chrome is not being loosely permissive about
+`.localhost`; it is running the algorithm and landing where the derivation said
+it would.
+
+This covers the browser's validator, headless, Chrome only. It says nothing
+about what an authenticator does once the ceremony proceeds - that is leg 2.
 
 ### Leg 2 - the authenticators: NOT ANSWERABLE FROM CODE. Needs a human.
 
@@ -102,6 +130,14 @@ the `needs-human` label.
    ```
    127.0.0.1  identity.memql.localhost cockpit.memql.localhost bff.memql.localhost
    ```
+
+   **On macOS this step turned out to be unnecessary** - verified on 26.5.1 with
+   no such entries present: the system resolver already maps `*.localhost` to
+   `127.0.0.1`, so `curl https://identity.memql.localhost:8444/` returned 200
+   with no `--resolve` and no hosts file edit, and Safari inherits that. Chrome
+   maps `*.localhost` internally regardless of the resolver. Keep the entries
+   documented for other platforms, but do not burn a `sudo` on them here before
+   checking whether you need one.
 
 2. An mkcert wildcard certificate and a trusted local CA. Generate it **outside
    the repository** - `*.pem` is not gitignored here, so a private key written
@@ -168,6 +204,13 @@ different findings with different consequences for the wizard's copy.
 ## Results - FILL THIS IN
 
 Record browser versions exactly; a bare "Chrome" is not a result.
+
+**Do the Safari rows first.** Chrome's validator is already measured above, so
+Chrome can no longer surprise you on the browser leg; WebKit can, and it is also
+the engine behind the iOS half of hybrid transport. If Safari yields a
+`SecurityError` on row 1 or 5, that is a *browser*-leg divergence from Chrome and
+is the single most consequential outcome available here - stop and record it
+before touching a phone.
 
 | # | RP ID | Path | Browser + version | OS + version | Outcome | Error name (if any) |
 |---|---|---|---|---|---|---|
