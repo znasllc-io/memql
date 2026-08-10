@@ -8,6 +8,13 @@ dist-host/
 # The bundled install CLI (npm run build:install-cli) -- build output, not source.
 dist-install/
 
+# The staged copy of scripts/ that scripts/vscode/package.sh puts inside the
+# extension so a packaged .vsix carries the install graph and its capability
+# scripts (memql#3487). A BUILD ARTIFACT, exactly like bin/ above: scripts/ at
+# the repository root is the single source of truth and nobody edits the copy.
+# Tracking it would create a second one that silently drifts.
+staged/
+
 # The repo-root .gitignore ignores package.json / package-lock.json (this is a
 # Go repo); re-include the VS Code extension's manifest + lockfile, which must
 # be tracked.

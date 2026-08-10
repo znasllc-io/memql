@@ -60,6 +60,7 @@ import {
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import { resolveInstallRoot } from './install/root.js';
 import {
   AutomationRunner,
   type AutomationRunEngine,
@@ -1618,6 +1619,25 @@ function resolveServerPath(context: ExtensionContext): string | undefined {
   // undefined -- that lets the caller's friendly "not found" message fire
   // instead of surfacing a raw ENOENT from the spawned process.
   return resolveOnPath(binaryName());
+}
+
+// installRootFor answers what SessionOptions.root must be on THIS installation:
+// the staged copy of scripts/ inside a packaged extension, or the repository
+// root when the extension is running out of a checkout (memql#3487).
+//
+// The same stage-at-package-time / resolve-at-run-time shape as the bundled
+// memql-lsp binary above, and for the same reason: a .vsix contains only what is
+// under the extension directory, so anything the extension needs from elsewhere
+// in the repository has to be copied in at package time and found by its own
+// path at run time. `context.asAbsolutePath(p)` is `path.join(extensionPath, p)`,
+// which is why handing over the extension path loses nothing.
+//
+// The probe and the fallback live in src/install/root.ts rather than here
+// because they are LOGIC: this file may import `vscode` and therefore cannot be
+// unit-tested outside an editor, and "does a packaged extension find its scripts"
+// is precisely the question that must be answerable by a test.
+export function installRootFor(context: ExtensionContext): string {
+  return resolveInstallRoot(context.extensionPath);
 }
 
 // reportIgnoredWorkspaceServerPath tells the user, once per activation, that a
