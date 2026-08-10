@@ -40,6 +40,7 @@ import {
 } from "../state/deploymentHistory.js";
 import { buildTopology, liveNodeTypesFor, type Topology } from "../state/topology.js";
 import { roleVisibility, type RoleVisibility } from "./actions.js";
+import type { ActionEnablement } from "./enablement.js";
 import type { DeployOutcome } from "./controller.js";
 
 /** The environments the deploy console scopes to. */
@@ -79,6 +80,7 @@ export class ClusterPanelState {
   private versionSuggestion: NextVersionSuggestion | null = null;
 
   private visibilityState: RoleVisibility = roleVisibility(undefined);
+  private actionEnablementState: ActionEnablement = { enabled: true, disabledReason: "" };
   private environment: DeployEnv = "staging";
 
   private errorMessage = "";
@@ -124,6 +126,26 @@ export class ClusterPanelState {
 
   get visibility(): RoleVisibility {
     return this.visibilityState;
+  }
+
+  /**
+   * Whether the deploy actions can be pressed, and what to offer when not.
+   *
+   * DEFAULTS TO ENABLED, which is today's behaviour, and stays that way until
+   * the panel has actually read the cluster it is showing. The alternative --
+   * defaulting to disabled -- would grey out every button on first paint for
+   * the operator whose cluster is perfectly healthy, on no evidence at all.
+   * Failing towards "enabled" is safe here because nothing in this file is a
+   * gate: the engine refuses what the caller may not do, so the worst case is a
+   * button that turns out to be refused, which is the situation this whole
+   * feature is improving rather than one it can make worse.
+   */
+  get enablement(): ActionEnablement {
+    return this.actionEnablementState;
+  }
+
+  setEnablement(enablement: ActionEnablement): void {
+    this.actionEnablementState = enablement;
   }
 
   get env(): DeployEnv {
