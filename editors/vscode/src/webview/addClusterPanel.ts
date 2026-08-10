@@ -24,7 +24,12 @@
 import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 
-import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
+import {
+  escapeHtml,
+  renderInstallSteps,
+  renderToHtml,
+  viewKitStyles,
+} from "@znasllc-io/memql-view-kit";
 
 import {
   addClusterMenu,
@@ -34,6 +39,7 @@ import {
   type PresenceVerdict,
 } from "../clusters/presence.js";
 import { AddClusterState, requiredFields, type InputField } from "../state/addCluster.js";
+import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
 const CHOICE_ACTIONS: readonly AddClusterAction[] = [
@@ -180,6 +186,19 @@ export class AddClusterPanel {
       this.render();
       return;
     }
+    // The two recoveries from a failed step (#3474). Both are transitions on
+    // the state machine rather than behaviour local to this panel, so the CLI
+    // and a future front end recover the same way.
+    if (type === "retry") {
+      this.state.retry();
+      this.render();
+      return;
+    }
+    if (type === "guided") {
+      this.state.switchToGuided();
+      this.render();
+      return;
+    }
     if (type === "cancel") {
       this.state.cancel();
       this.render();
@@ -271,13 +290,81 @@ ${this.bodyHtml()}
         return this.landingHtml();
       case "collect":
         return this.collectHtml();
+      case "running":
+        return this.runHtml();
+      case "failedStep":
+        return this.failedHtml();
       case "connect":
       case "uninstallPreview":
-      case "running":
-      case "failedStep":
       case "done":
         return this.placeholderHtml();
     }
+  }
+
+  /**
+   * The run in progress.
+   *
+   * The step list is view-kit's `renderInstallSteps`, fed by a projection that
+   * lives in state/installProgress.ts -- this method adds no judgement of its
+   * own, which is what lets what an operator sees be asserted in the unit lane
+   * despite this file importing `vscode`.
+   *
+   * REPAIR IS THE SAME RUN WITH DIFFERENT WORDING. Every step verifies first
+   * and skips when satisfied, so re-running the graph IS the repair; only the
+   * heading and the lede differ, and there is no second code path below them.
+   */
+  private runHtml(): string {
+    const steps = this.state.steps;
+    const settled = runIsSettled(steps);
+    const repair = this.state.action === "repair";
+
+    // Before the first event lands there is nothing to draw but a promise that
+    // something is happening. Saying so beats an empty panel that reads as a
+    // wizard which has quietly died.
+    const body =
+      steps.length === 0
+        ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
+        : renderToHtml(renderInstallSteps(toStepViews(steps)));
+
+    // Cancel is offered for exactly as long as there is something to stop.
+    // A cancelled run leaves a valid receipt -- what ran, ran, and an uninstall
+    // can still take it back -- so this is safe at any point.
+    const actions = settled
+      ? `<button class="secondary" type="button" data-act="back">Back</button>`
+      : `<button class="secondary" type="button" data-act="cancel">Cancel</button>`;
+
+    return `<h1>${escapeHtml(repair ? "Repairing the local cluster" : "Installing a local cluster")}</h1>
+<p class="lede">${escapeHtml(
+      repair
+        ? "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs."
+        : "Each step proves itself before the next one starts.",
+    )}</p>
+${body}
+<div class="actions">${actions}</div>`;
+  }
+
+  /**
+   * A step failed, and what that means.
+   *
+   * BOTH RECOVERIES ARE ALWAYS OFFERED. `failureGuidance().retryable` says
+   * whether an UNCHANGED retry could plausibly differ -- it does not gate the
+   * button, because the operator may have fixed the cause in another window
+   * while this panel sat here, and we cannot know that.
+   */
+  private failedHtml(): string {
+    const failed = this.state.failed;
+    if (failed === undefined) return this.runHtml();
+    const guidance = failureGuidance(failed.exitCode);
+
+    return `<h1>${escapeHtml(failed.description === "" ? failed.id : failed.description)} failed</h1>
+<p class="lede">${escapeHtml(guidance.headline)}</p>
+<p>${escapeHtml(guidance.advice)}</p>
+${renderToHtml(renderInstallSteps(toStepViews(this.state.steps)))}
+<div class="actions">
+  <button class="primary" type="button" data-act="retry">Retry this step</button>
+  <button class="secondary" type="button" data-act="guided">Switch this step to guided</button>
+  <button class="secondary" type="button" data-act="cancel">Cancel</button>
+</div>`;
   }
 
   /** The cards, straight from addClusterMenu. */
