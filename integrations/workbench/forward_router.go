@@ -27,9 +27,16 @@ import (
 // WorkbenchForwardResponse (or ctx is cancelled).
 //
 // Single-node mode (the MVP -- no workbench peer in the mesh):
-// Forward returns ErrNoWorkbenchPeer immediately. The integration's
-// dispatch path interprets that as "fall back to local in-process
-// dispatch" rather than failing the tool call.
+// Forward returns ErrNoWorkbenchPeer immediately.
+//
+// What the integration does with that answer depends on what the
+// OPERATOR asked for (memql#3506). With MEMQL_WORKBENCH_REMOTE set,
+// ErrNoWorkbenchPeer is a FAILURE: the operator asserted the work does
+// not run on the agent, and quietly running it there inverts the
+// assertion in exactly the case that matters. Without it, there was no
+// assertion to honour and local dispatch is the MVP path. The old
+// degrade-to-local behaviour survives as its own opt-in,
+// MEMQL_WORKBENCH_LOCAL_FALLBACK.
 //
 // The router implements node.WorkbenchForwardResponseSink: the node
 // stream wires it as the sink for inbound WorkbenchForwardResponse
@@ -43,8 +50,9 @@ type ForwardRouter struct {
 }
 
 // ErrNoWorkbenchPeer signals the router couldn't find a healthy
-// workbench peer in the mesh. The caller should fall back to local
-// dispatch (when wired) or surface a clean error to the LLM.
+// workbench peer in the mesh. In remote mode this is a refusal
+// (memql#3506); only with the explicit MEMQL_WORKBENCH_LOCAL_FALLBACK
+// opt-in does the caller degrade to local dispatch.
 var ErrNoWorkbenchPeer = errors.New("workbench: no healthy peer available")
 
 // NewForwardRouter constructs an idle router. peerMgr must be the
@@ -213,9 +221,35 @@ func DecodeArgs(b []byte) (map[string]any, error) {
 // the ForwardRouter instead of executing locally. Default is local
 // (single-node mode) for backwards-compat with the MVP.
 //
+// Setting it is an ASSERTION -- "this work does not run on the agent"
+// -- not a preference, so an unreachable workbench refuses the call
+// rather than degrading to local execution (memql#3506).
+//
 // Truthy values: "1", "true", "yes", "on" (case-insensitive).
 // Anything else, including empty, is false.
 func remoteEnabled(env string) bool {
+	return truthy(env)
+}
+
+// localFallbackEnabled reads MEMQL_WORKBENCH_LOCAL_FALLBACK: the
+// explicit opt-in that restores the pre-memql#3506 behaviour of
+// running a workbench call on the agent node when no workbench peer is
+// reachable.
+//
+// It exists because "run it here if you must" is a legitimate thing to
+// want during development -- but it is a DIFFERENT intention from "run
+// it remotely", and the bug was that the two were spelled the same
+// way. Degrading on the ABSENCE of configuration means the failure
+// mode nobody configured is the one that silently fires; requiring a
+// variable means somebody typed it.
+//
+// Off unless explicitly truthy. Same parse as remoteEnabled.
+func localFallbackEnabled(env string) bool {
+	return truthy(env)
+}
+
+// truthy is the shared parse for both workbench mode flags.
+func truthy(env string) bool {
 	switch strings.ToLower(strings.TrimSpace(env)) {
 	case "1", "true", "yes", "on":
 		return true

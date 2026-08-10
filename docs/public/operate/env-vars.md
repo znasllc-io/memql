@@ -626,6 +626,17 @@ each worker:
   or is otherwise unparseable is ignored, and the node logs a WARN
   naming the entry -- so a typo in the seed list is visible in the boot
   log rather than presenting as a peer that never appears (memql#3450).
+- `MEMQL_WORKBENCH_REMOTE` -- set on the agent to require that workbench
+  tool calls run on a workbench node. It is an **assertion**, not a
+  preference: with it set and no reachable workbench peer, a workbench
+  call is REFUSED (`no_workbench_peer`) rather than run on the agent's
+  own disk (memql#3506). Silently degrading is what hid memql#3450 for
+  its whole life.
+- `MEMQL_WORKBENCH_LOCAL_FALLBACK` -- the explicit opt-in that restores
+  the old degrade-to-local behaviour for an unreachable workbench. Off by
+  default, which is the whole safety property: a fallback reachable by
+  the *absence* of configuration fires exactly when nobody meant it to.
+  See [workbench-runbook.md](workbench-runbook.md).
 
 Both are bootstrap envelope vars -- they have to be in the env
 before the gRPC server starts.

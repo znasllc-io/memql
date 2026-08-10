@@ -1014,6 +1014,15 @@ production cutover).
     Toggle: `MEMQL_WORKBENCH_REMOTE=1` on agent nodes +
     `MEMQL_WORKER_PEERS=workbench=<addr>` for the dialer. See
     `docs/internal/ops/workbench-production.md`.
+    **The remote flag is an ASSERTION, not a preference (memql#3506):**
+    with it set and no reachable workbench peer, a workbench call is
+    REFUSED (`no_workbench_peer`) rather than run on the agent's own
+    disk. It used to degrade silently, which is why memql#3450 -- the
+    peer seed being dropped at parse time, so every call ran on the
+    agent pod -- was invisible for its whole life. The old behaviour
+    survives as its own opt-in, `MEMQL_WORKBENCH_LOCAL_FALLBACK=1`, so
+    "run this remotely" and "run it here if you must" are spelled
+    differently.
 - **Routing preference:** the agent's prompt template
   (the pack's agent-reply template) and the workbench
   knowledge domain (5 chunks in

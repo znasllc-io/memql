@@ -463,11 +463,18 @@ func (a *App) cluster() {
 			//     WorkbenchForwardRequest envelopes dispatch into the
 			//     local Integration's exec/fs/http handlers.
 			//
-			// All wiring is best-effort -- a missing integration / engine
-			// / nodeServer logs and continues without breaking the boot
-			// path. The default (single-node) mode keeps working because
-			// the integration falls back to local dispatch when the
-			// router returns ErrNoWorkbenchPeer.
+			// All wiring is best-effort as far as the BOOT path goes -- a
+			// missing integration / engine / nodeServer logs and continues
+			// rather than failing startup. The default (single-node) mode
+			// keeps working because the integration dispatches locally when
+			// no remote mode was requested.
+			//
+			// What is NOT best-effort any more is the dispatch (memql#3506):
+			// with MEMQL_WORKBENCH_REMOTE set, a workbench call that cannot
+			// reach a workbench peer is REFUSED rather than run here. The
+			// wiring failures above therefore log at ERROR -- the node boots,
+			// but its workbench surface will refuse everything until the
+			// wiring is fixed.
 			a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
 		}
 	}

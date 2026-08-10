@@ -45,10 +45,20 @@ it stays local.
 > neither of `worker_dialer.go`'s dial predicates, so the seed and the
 > `v1:cluster:node` row were both filtered out and the agent's
 > `ForwardRouter` never found a peer. Because a peerless router returns
-> `ErrNoWorkbenchPeer` and the integration reads that as "dispatch
+> `ErrNoWorkbenchPeer` and the integration read that as "dispatch
 > locally," the tool call still succeeded -- on the agent pod's disk.
 > If you tested the remote path on an engine older than that fix, the
 > result you observed was the local path.
+>
+> memql#3506 closed the silence, which is the half that made the above
+> undetectable. Remote mode is now an assertion: an unreachable
+> workbench REFUSES the call (`no_workbench_peer`, naming the peer and
+> `MEMQL_WORKER_PEERS`) instead of quietly running it on the agent. If
+> you want the old degrade -- reasonable in development -- ask for it by
+> name with `MEMQL_WORKBENCH_LOCAL_FALLBACK=1`. The live check that the
+> hop actually lands on the workbench node is
+> `test/clustere2e/workbench_remote_hop_test.go`, which asserts on the
+> executing pod's `MEMQL_NODE_ID` rather than on command output.
 
 ## 2. Storage model: ephemeral scratch + durable blob
 
@@ -258,8 +268,17 @@ Items deliberately deferred; revisit at production cutover:
 
 If a cluster cutover causes issues, the rollback is one env var:
 remove `MEMQL_WORKBENCH_REMOTE` from the agent Deployment and
-re-deploy. The agent integration's dispatch falls back to local
-in-process mode immediately. The workbench Deployment can stay
+re-deploy. The agent integration's dispatch returns to local
+in-process mode immediately.
+
+Removing the flag is the correct rollback, and since memql#3506 it is
+the ONLY one that works: leaving the flag set while the workbench is
+unreachable now refuses every call rather than silently running it on
+the agent. Setting `MEMQL_WORKBENCH_LOCAL_FALLBACK=1` would also
+restore service, but it restores it by putting the work back on the
+agent's disk while the manifest still claims otherwise -- which is the
+state memql#3450 shipped in. Prefer removing the assertion you are no
+longer honouring. The workbench Deployment can stay
 running idle (or be scaled to zero) without affecting agent
 operation.
 

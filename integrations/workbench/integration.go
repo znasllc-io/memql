@@ -31,18 +31,28 @@ import (
 // Modes:
 //   - Single-node (default): the agent node runs this integration
 //     and dispatches workbench actions locally against its own disk.
-//     This is the MVP path and remains the fallback in cluster mode
-//     when no workbench peer is reachable.
+//     This is the MVP path.
 //   - Cluster mode (MEMQL_WORKBENCH_REMOTE=1 AND a ForwardRouter is
 //     installed): the agent node delegates dispatch to a remote
-//     workbench node-type binary via NodeService.Stream. The local
-//     Manager is kept for fallback so a transient peer outage
-//     doesn't break the tool.
+//     workbench node-type binary via NodeService.Stream. When no
+//     workbench peer is reachable the call is REFUSED (memql#3506) --
+//     the flag is an assertion that the work does not run on the agent,
+//     and running it here anyway would invert that assertion in exactly
+//     the case that matters. MEMQL_WORKBENCH_LOCAL_FALLBACK=1 restores
+//     the old degrade-to-local behaviour for anyone who wants it, as an
+//     explicit choice rather than as the consequence of missing config.
 type Integration struct {
 	manager *Manager
 	logger  *slog.Logger
 	router  *ForwardRouter
 	remote  bool
+	// localFallback is the MEMQL_WORKBENCH_LOCAL_FALLBACK opt-in
+	// (memql#3506). Only consulted in remote mode, where it restores the
+	// old degrade-to-local behaviour for an unreachable workbench. Off by
+	// default, which is the entire safety property: a fallback reachable
+	// by the ABSENCE of configuration is one that fires precisely when
+	// nobody meant it to.
+	localFallback bool
 	// engine is used by the memql#722 Library-promotion path to record
 	// a v1:library:generatedOutput row after a successful fs_write. Nil
 	// on builds / wiring paths that don't inject it (promotion is then a
@@ -72,9 +82,10 @@ type attachmentUploader interface {
 // provisioning and at warn on dispatch errors when present.
 func NewIntegration(logger *slog.Logger) *Integration {
 	return &Integration{
-		manager: NewManager(),
-		logger:  logger,
-		remote:  remoteEnabled(os.Getenv("MEMQL_WORKBENCH_REMOTE")),
+		manager:       NewManager(),
+		logger:        logger,
+		remote:        remoteEnabled(os.Getenv("MEMQL_WORKBENCH_REMOTE")),
+		localFallback: localFallbackEnabled(os.Getenv("MEMQL_WORKBENCH_LOCAL_FALLBACK")),
 	}
 }
 
@@ -185,13 +196,39 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 		return nil, fmt.Errorf("workbench: %s", reason)
 	}
 
-	// Cluster mode: try the remote forwarder first. On
-	// ErrNoWorkbenchPeer (no healthy workbench peer in the mesh) OR
-	// a configured-but-no-router state, fall through to local
-	// dispatch so the tool still works in degraded conditions.
-	if i.remote && i.router != nil {
-		if res, ok := i.tryForward(ctx, planId, action, innerArgs, args, started); ok {
-			return res, nil
+	// Cluster mode. MEMQL_WORKBENCH_REMOTE is an operator asserting
+	// THIS WORK DOES NOT RUN ON THE AGENT, so an unreachable workbench
+	// is a refusal, not a degrade (memql#3506).
+	//
+	// This used to fall through to local dispatch on ErrNoWorkbenchPeer
+	// or on a configured-but-no-router state, "so the tool still works
+	// in degraded conditions". It does not honour the assertion, it
+	// inverts it -- and most readily in the case that matters, which is
+	// the workbench being unavailable. It is also what made memql#3450
+	// invisible for its whole life: the shipped agent.yaml sets both the
+	// remote flag and the peer seed, the seed was dropped at parse time,
+	// so every workbench call ran on the agent pod with no error, no
+	// warning and correct-looking results.
+	//
+	// A local fallback is still reachable, but only by explicitly asking
+	// for it (MEMQL_WORKBENCH_LOCAL_FALLBACK), so "run this remotely"
+	// and "run it here if you must" stop being spelled the same way.
+	// Note the refusal happens BEFORE provisionForPlan: an error beside
+	// a workspace the agent quietly created would be the same bug with
+	// better logging.
+	if i.remote {
+		if i.router != nil {
+			if res, ok := i.tryForward(ctx, planId, action, innerArgs, args, started); ok {
+				return res, nil
+			}
+		}
+		if !i.localFallback {
+			return i.refuseNoWorkbenchPeer(ctx, planId, action, started), nil
+		}
+		if i.logger != nil {
+			i.logger.Warn("workbench: no remote peer; running LOCALLY on the agent node because "+
+				"MEMQL_WORKBENCH_LOCAL_FALLBACK is set. This is not the sandbox MEMQL_WORKBENCH_REMOTE asks for.",
+				slog.String("planId", planId), slog.String("action", action))
 		}
 	}
 
@@ -330,9 +367,40 @@ func (i *Integration) handleDispatchHost(ctx context.Context, args map[string]an
 	}}, nil
 }
 
+// refuseNoWorkbenchPeer is the memql#3506 refusal: remote mode was
+// requested and no workbench peer could be reached.
+//
+// The message names three things because an operator meeting this needs
+// all three to act, and the failure it replaces gave them none. WHICH
+// peer is missing (workbench), WHERE its address comes from
+// (MEMQL_WORKER_PEERS -- the exact knob memql#3450 was silently
+// dropping), and the way out if local execution really is what was
+// wanted (MEMQL_WORKBENCH_LOCAL_FALLBACK). "workbench unavailable" on
+// its own cannot distinguish a crashed pod from a seed the config never
+// delivered, and #3450 was precisely the second.
+//
+// Logged at ERROR: this is a deployment fault, not a tool-call outcome.
+func (i *Integration) refuseNoWorkbenchPeer(ctx context.Context, planId, action string, started time.Time) []memorynodes.MemoryNode {
+	msg := "workbench: MEMQL_WORKBENCH_REMOTE is set, so this call must run on a workbench node, " +
+		"but no healthy workbench peer is reachable. Check that a workbench node is running and that " +
+		"MEMQL_WORKER_PEERS names it (e.g. MEMQL_WORKER_PEERS=workbench=workbench:50060). " +
+		"Refusing rather than running on the agent node, because running here is not the isolation " +
+		"MEMQL_WORKBENCH_REMOTE asks for. To allow local execution when no peer is reachable, set " +
+		"MEMQL_WORKBENCH_LOCAL_FALLBACK=1 explicitly."
+	if i.logger != nil {
+		i.logger.LogAttrs(ctx, slog.LevelError, "workbench: refusing dispatch -- remote required, no peer reachable",
+			slog.String("planId", planId),
+			slog.String("action", action),
+			slog.String("remedy", "MEMQL_WORKER_PEERS=workbench=<addr>"),
+		)
+	}
+	return errorResultNode(planId, action, "no_workbench_peer", msg, started)
+}
+
 // tryForward attempts to dispatch via the remote forwarder. Returns
-// (result, true) on success and (nil, false) on ErrNoWorkbenchPeer
-// so the caller can fall back to local dispatch transparently. Any
+// (result, true) when the call was answered -- successfully or with a
+// structured failure -- and (nil, false) on ErrNoWorkbenchPeer, which
+// the caller turns into a refusal or (opt-in only) a local run. Any
 // other error is returned to the agent's tool loop wrapped in an
 // errored dispatchResult node so the LLM sees a structured failure
 // rather than a tool-loop crash.
@@ -377,10 +445,10 @@ func (i *Integration) tryForward(ctx context.Context, planId, action string, inn
 	}
 	resp, err := i.router.Forward(ctx, req)
 	if errors.Is(err, ErrNoWorkbenchPeer) {
-		if i.logger != nil {
-			i.logger.Info("workbench: no remote peer available, falling back to local dispatch",
-				slog.String("planId", planId), slog.String("action", action))
-		}
+		// Not decided here (memql#3506). The caller owns the choice
+		// between refusing and -- on the explicit opt-in only -- running
+		// locally, because that is a question about what the OPERATOR
+		// asked for rather than about this hop.
 		return nil, false
 	}
 	if err != nil {
