@@ -62,12 +62,36 @@ export interface StepProgress {
   guided: boolean;
 }
 
+/**
+ * The AI providers an install can seed a key for (memql#3473).
+ *
+ * DERIVED FROM WHAT THE SCRIPT ACCEPTS, not from what the wizard felt like
+ * offering: `scripts/install/verify-provider-key.sh` supports exactly these
+ * two and exits 2 on anything else, which is a fault in memQL rather than in
+ * the operator's answer -- so the field is a CHOICE and this list is what it
+ * chooses from.
+ */
+export const SUPPORTED_PROVIDERS = ["anthropic", "openai"] as const;
+
+export type SupportedProvider = (typeof SUPPORTED_PROVIDERS)[number];
+
 /** What an install asks for. Collected once, before anything runs. */
 export interface Inputs {
   domain: string;
   ownerFirstName: string;
   ownerLastName: string;
   ownerEmail: string;
+  /**
+   * Which vendor the key below belongs to.
+   *
+   * COLLECTED, not pinned. It was hardcoded `anthropic` in the panel AND in
+   * `install.json`, where graph params win -- so an operator holding an OpenAI
+   * key had no route through this wizard at all, while every test enumerated
+   * the other five fields and the criterion read as satisfied at a glance.
+   * Which vendor a key belongs to is a fact about the OPERATOR'S KEY, which is
+   * run input like the path beside it, not policy the graph pins.
+   */
+  provider: string;
   /** A PATH. The key itself never enters this module -- see SessionOptions. */
   providerKeyFile: string;
 }
@@ -105,6 +129,10 @@ export const DEFAULT_INPUTS: Inputs = {
   ownerFirstName: "",
   ownerLastName: "",
   ownerEmail: "",
+  // The provider DOES get a default, unlike the four personal fields: it is a
+  // choice from a closed set rather than a fact about the operator, so a
+  // pre-selection is an answer they can accept rather than a guess about them.
+  provider: "anthropic",
   providerKeyFile: "",
 };
 
@@ -230,7 +258,14 @@ export function requiredFields(action: AddClusterAction): InputField[] {
   switch (action) {
     case "install":
     case "installGuided":
-      return ["domain", "ownerFirstName", "ownerLastName", "ownerEmail", "providerKeyFile"];
+      return [
+        "domain",
+        "ownerFirstName",
+        "ownerLastName",
+        "ownerEmail",
+        "provider",
+        "providerKeyFile",
+      ];
     case "repair":
       return ["domain"];
     case "uninstall":
@@ -244,6 +279,7 @@ const LABELS: Record<InputField, string> = {
   ownerFirstName: "first name",
   ownerLastName: "last name",
   ownerEmail: "email address",
+  provider: "AI provider",
   providerKeyFile: "provider key file",
 };
 
@@ -297,6 +333,18 @@ export class AddClusterState {
   get failed(): StepProgress | undefined {
     const found = this.progress.find((p) => p.id === this.failedId);
     return found === undefined ? undefined : { ...found };
+  }
+  /**
+   * EVERY failed step, in graph order.
+   *
+   * A wave runs concurrently and independent branches are allowed to finish, so
+   * "the failure" is not always one thing. Guidance is per exit code and the
+   * codes genuinely differ -- a refusal asks for something different from a
+   * missing prerequisite -- so rendering one of N would hand the operator
+   * confident advice about a step they may not even be looking at.
+   */
+  get failures(): StepProgress[] {
+    return this.progress.filter((p) => p.state === "failed").map((p) => ({ ...p }));
   }
   get connectInputs(): ConnectInputs {
     return { ...this.connectValues };
@@ -396,6 +444,12 @@ export class AddClusterState {
     }
     if (field === "domain" && /\s/.test(trimmed)) {
       return "A domain cannot contain spaces.";
+    }
+    // The refusal is HERE rather than at the script, which would report exit 2
+    // -- correctly worded as a fault in memQL rather than in the operator's
+    // answer, and therefore the wrong sentence for a value they chose.
+    if (field === "provider" && !SUPPORTED_PROVIDERS.some((p) => p === trimmed)) {
+      return `memQL can verify a key for ${SUPPORTED_PROVIDERS.join(" or ")}.`;
     }
     return undefined;
   }
@@ -591,6 +645,19 @@ export class AddClusterState {
    */
   apply(event: ExecEvent): void {
     switch (event?.type) {
+      case "runStarted": {
+        // THE STEPS AHEAD, not just the ones behind. Seeding the list here is
+        // what makes `pending` reachable in a forward run at all -- without it
+        // a step first appears when it STARTS, so the checklist grows from
+        // empty and never says how much is left.
+        //
+        // upsert, so a RE-RUN (Retry, or a repair) keeps what the previous
+        // attempt established. The steps that already passed re-report as
+        // skipped; showing them blank again in between would be a display of
+        // this event rather than of the machine.
+        for (const step of event.steps) this.upsert(step.id, step.description);
+        return;
+      }
       case "stepStarted": {
         const entry = this.upsert(event.step.id, event.step.description);
         entry.state = "running";
@@ -607,7 +674,15 @@ export class AddClusterState {
         entry.reason = event.outcome.reason ?? "";
         entry.exitCode = event.outcome.exitCode;
         if (entry.state === "failed") {
-          this.failedId = entry.id;
+          // THE FIRST FAILURE IS KEPT, not the last to resolve. A wave runs
+          // under Promise.all and independent branches are deliberately allowed
+          // to finish, so several steps can fail in one wave -- and overwriting
+          // made the headline whichever one happened to settle last, a
+          // scheduling accident. The earliest failure is the one the others may
+          // be consequences of, which is the rule state/uninstallRun.ts already
+          // states. Every failure is rendered (see `failures`); this only
+          // decides which one the page LEADS with.
+          if (this.failedId === undefined) this.failedId = entry.id;
           this.currentScreen = "failedStep";
         }
         return;
@@ -642,48 +717,52 @@ export class AddClusterState {
   // ---------------------------------------------------------------------------
 
   /**
-   * Puts the failed step back to pending and returns to the run.
-   *
-   * THE LOG IS CLEARED WITH THE REST. `apply()` APPENDS each `stepLog` line, so
-   * a retry that kept the previous attempt's output would render both runs
-   * concatenated inside one disclosure with no boundary between them -- and the
-   * failure being read would be the one that is no longer happening. Every
-   * other trace of the last attempt (state, reason, exit code) is dropped here;
-   * the log was the one that was not, which made it the only misleading field
-   * on the screen.
+   * Puts every failed step back to pending and returns to the run.
    */
   retry(): void {
-    const entry = this.progress.find((p) => p.id === this.failedId);
-    if (entry === undefined) return;
-    entry.state = "pending";
-    entry.reason = "";
-    entry.exitCode = null;
-    entry.log = "";
+    // EVERY failed step, not only the one being led with. The retry re-runs the
+    // whole graph -- each step verifies first and skips when satisfied, which is
+    // the same property that makes repair an install re-run -- so leaving the
+    // other failures marked `failed` would show the operator a stale verdict
+    // about a step that is being attempted again in front of them.
+    const failed = this.progress.filter((p) => p.state === "failed");
+    if (failed.length === 0) return;
+    for (const entry of failed) this.resetForAnotherAttempt(entry);
     this.failedId = undefined;
     this.currentScreen = "running";
   }
 
   /**
-   * Marks the failed step guided, and only that step.
+   * Marks the failed steps guided, and only those steps.
    *
    * PER STEP, deliberately. An operator who would rather run the one command
    * that needs sudo by hand should not be dropped into a fully manual install
    * for the other eleven.
-   *
-   * Clears the previous attempt's log for the same reason `retry()` does: the
-   * step is about to run again, and keeping the old output would show the
-   * operator a failure that is no longer happening.
    */
   switchToGuided(): void {
-    const entry = this.progress.find((p) => p.id === this.failedId);
-    if (entry === undefined) return;
-    entry.guided = true;
+    const failed = this.progress.filter((p) => p.state === "failed");
+    if (failed.length === 0) return;
+    for (const entry of failed) {
+      entry.guided = true;
+      this.resetForAnotherAttempt(entry);
+    }
+    this.failedId = undefined;
+    this.currentScreen = "running";
+  }
+
+  /**
+   * Drops every trace of the attempt that just failed.
+   *
+   * THE LOG GOES WITH THE REST. `apply()` APPENDS each `stepLog` line, so an
+   * attempt that kept the previous output would render both runs concatenated
+   * inside one disclosure with no boundary -- and the failure being read would
+   * be the one that is no longer happening.
+   */
+  private resetForAnotherAttempt(entry: StepProgress): void {
     entry.state = "pending";
     entry.reason = "";
     entry.exitCode = null;
     entry.log = "";
-    this.failedId = undefined;
-    this.currentScreen = "running";
   }
 
   /**

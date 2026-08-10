@@ -217,6 +217,9 @@ function printPlan(graph: Graph, plan: (step: Step) => StepPlan, log: (line: str
 
 function logEvent(event: ExecEvent, log: (line: string) => void): void {
   switch (event.type) {
+    case "runStarted":
+      log(`==> ${event.steps.length} steps: ${event.steps.map((s) => s.id).join(", ")}`);
+      return;
     case "waveStarted":
       log(`==> wave ${event.index + 1}: ${event.ids.join(", ")}`);
       return;

@@ -137,6 +137,24 @@ test("nothing touches the machine until the provider key is verified", async () 
   );
 });
 
+test("the shipped graph pins no provider, because the vendor is run input", async () => {
+  // memql#3473. `providerKey.params` pinned `{"provider": "anthropic"}`, and
+  // graph params WIN over run-time ones -- deliberately, since what the graph
+  // pins is POLICY (which tool, which confirmation phrase). Which vendor a key
+  // belongs to is not policy: it is a fact about the operator's key, run input
+  // exactly like the path beside it. Pinned there, no caller could override it,
+  // so an operator with an OpenAI key had no route through the installer at all
+  // -- while verify-provider-key.sh supported one the whole time.
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const gate = stepById(g, "providerKey");
+  assert.ok(gate !== undefined);
+  assert.equal(
+    gate.params?.provider,
+    undefined,
+    "a pinned provider silently overrides whatever the operator chose",
+  );
+});
+
 test("waves are a real topological decomposition of the shipped graph", async () => {
   const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
   const waves = topoOrder(g);

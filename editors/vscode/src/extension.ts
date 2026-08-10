@@ -56,6 +56,7 @@ import {
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import { defaultReceiptPath } from './install/receipt.js';
 import { resolveInstallRoot } from './install/root.js';
 import {
   AutomationRunner,
@@ -348,11 +349,16 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     clustersPath: string;
     refreshTree: () => void;
     installRoot: string;
+    receiptFile: string;
     removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
   } => ({
     clustersPath,
     refreshTree: () => clustersTree.refresh(),
     installRoot: installRootFor(context),
+    // ONE receipt path for the install that writes it, the uninstall that
+    // reverses it and the repair that reads a key path back out of it. The
+    // page used to resolve it three times for itself.
+    receiptFile: defaultReceiptPath(),
     removeRegistryEntry,
   });
 

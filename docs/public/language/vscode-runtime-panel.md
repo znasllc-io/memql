@@ -152,13 +152,20 @@ locally-trusted certificate on it.
 
 **The Add a cluster page is the supported path.** Press **+** in the Clusters
 view and choose *Install a local cluster*. The page collects what an install
-needs before any work starts -- the domain, who owns the cluster, and an AI
-provider key -- because a wizard that stops to ask a question nine minutes in
-is a wizard people abandon. It then runs the install graph step by step, with
+needs before any work starts -- the domain, who owns the cluster, and which AI
+provider the key belongs to plus where that key is -- because a wizard that
+stops to ask a question nine minutes in is a wizard people abandon. The
+provider is a **choice** rather than a box: `anthropic` and `openai` are what
+the installer can verify a key against, and it is pre-answered, so an operator
+with no preference accepts the defaults and types four things. It then runs the install graph step by step, with
 each step's state visible and each failure carrying the exit status and the
 script's own stderr rather than a summary of it. A failed step can be retried
 in place; cancelling still leaves a valid receipt, so a cancelled install is
-still uninstallable.
+still uninstallable. Where several steps in one wave fail -- which the executor
+allows deliberately, so you see every failure rather than the first one and a
+shrug -- each is explained on its own terms, because the exit codes ask for
+genuinely different things: a refusal is the script protecting something, a
+missing prerequisite is something to go and install.
 
 Whatever the operator types, what reaches the install is a **file** and never
 a command-line argument. Process arguments are world-readable in `ps`, so a

@@ -15,9 +15,39 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
 
+import { SYNTHESISED_EXIT_CODES } from "../src/install/runner.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../src/state/installProgress.js";
 import type { StepProgress } from "../src/state/addCluster.js";
+
+// dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
+
+/**
+ * The exit codes the capability-script contract defines, READ OFF THE CONTRACT.
+ *
+ * Parsed from the document rather than copied out of it, so a code added to the
+ * standard table without a case in `failureGuidance` fails here. A list written
+ * out beside the function asserts that the list is complete, which is not the
+ * thing anyone wants to know.
+ */
+function contractExitCodes(): number[] {
+  const doc = fs.readFileSync(
+    path.join(REPO_ROOT, "docs", "internal", "design", "capability-script-contract.md"),
+    "utf8",
+  );
+  const table = doc.slice(doc.indexOf("## Standard exit codes"));
+  const codes: number[] = [];
+  for (const line of table.split("\n")) {
+    // The table's rows, and only those: `| 4    | precondition failed ... |`.
+    const match = /^\|\s*(\d+)\s*\|/.exec(line);
+    if (match) codes.push(Number(match[1]));
+    else if (codes.length > 0 && line.startsWith("#")) break;
+  }
+  return codes;
+}
 
 function step(over: Partial<StepProgress> = {}): StepProgress {
   return {
@@ -138,18 +168,6 @@ test("exit 1 is explained as the catch-all, not as unknown", () => {
   assert.equal(g.retryable, true);
 });
 
-test("only a genuinely unknown code reaches the unknown-code branch", () => {
-  // Guards the fix from regressing by someone adding a code to the contract
-  // and not to this function: every code the installer can actually produce
-  // must be claimed, and nothing else should be.
-  for (const code of [0, 1, 2, 3, 4, 5]) {
-    assert.ok(
-      !/cannot say/i.test(failureGuidance(code).advice),
-      `exit ${code} is reachable but unexplained`,
-    );
-  }
-  assert.match(failureGuidance(99).advice, /cannot say/i);
-});
 
 test("a bad parameter is named as memQL's fault, not the operator's", () => {
   // Exit 2 means the installer passed something wrong. Telling the operator to
@@ -228,16 +246,28 @@ test("a step that could not be started is named as an installer fault", () => {
   assert.equal(g.retryable, false);
 });
 
-test("every code the installer can produce is claimed", () => {
-  // The guard, widened. 2/3/4/5 come from the capability contract, 0 and 1
-  // from the executor's own verify/abort handling, and 124/127 are synthesised
-  // by runner.ts. A code memQL can emit and cannot explain is the defect this
-  // pins.
-  for (const code of [0, 1, 2, 3, 4, 5, 124, 127]) {
+test("every code the installer can produce is claimed -- derived, not listed", () => {
+  // THE SET IS DERIVED. Both halves of this used to be a hand-written array,
+  // which asserts that the array is complete rather than that the function is:
+  // a code added to the contract, or a fourth one synthesised by runner.ts,
+  // would keep the test green while an operator read "memQL cannot say what it
+  // means" about a number memQL had chosen.
+  //
+  // Two sources, because there are two: the capability contract's own table
+  // (parsed from the document that defines it) and runner.ts's own constants.
+  const reachable = new Set<number>([...contractExitCodes(), ...Object.values(SYNTHESISED_EXIT_CODES)]);
+  assert.ok(reachable.has(2) && reachable.has(5), "the contract table did not parse");
+  assert.ok(reachable.size >= 8, `only ${reachable.size} codes derived -- the sources did not both parse`);
+
+  for (const code of reachable) {
     assert.ok(
       !/cannot say/i.test(failureGuidance(code).advice),
       `exit ${code} is reachable but unexplained`,
     );
   }
+
+  // And the branch still exists for a code that genuinely is not ours: guessing
+  // would put confident wrong advice in front of an operator relying on it.
+  assert.ok(!reachable.has(99));
   assert.match(failureGuidance(99).advice, /cannot say/i);
 });

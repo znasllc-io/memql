@@ -113,6 +113,15 @@ export class UninstallRunState {
    */
   apply(event: ExecEvent): void {
     switch (event?.type) {
+      case "runStarted": {
+        // The removals ahead, in graph order, before any of them runs
+        // (memql#3474). It matters more here than on the install side: the
+        // operator has just consented to an itemized list, and a progress
+        // display that showed only what had already gone would not let them
+        // check the run against what they agreed to.
+        for (const step of event.steps) this.upsert(step.id, step.description);
+        return;
+      }
       case "stepStarted": {
         const row = this.upsert(event.step.id, event.step.description);
         row.state = "running";

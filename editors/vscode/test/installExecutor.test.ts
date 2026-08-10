@@ -201,6 +201,33 @@ function fakeRunner(
 
 const okPlan = (): StepPlan => ({ action: "run", params: {} });
 
+test("the run announces its whole plan before it runs anything", async () => {
+  // Without this, a front end learns a step exists only when that step STARTS,
+  // so a progress display grows from an empty list and can never say how much
+  // is left. `pending` is unreachable in a forward run for the same reason.
+  //
+  // The order is the GRAPH's, not the wave schedule's: the waves are how this
+  // executor schedules, and a list that reordered itself as concurrency
+  // resolved would be a display of the executor rather than of the install.
+  const g = graphOf([{ id: "a" }, { id: "b" }, { id: "c", dependsOn: ["a", "b"] }]);
+  const events: string[] = [];
+  let announced: string[] = [];
+
+  await executeGraph({
+    graph: g,
+    scriptPath: () => "/bin/true",
+    run: fakeRunner(() => ({})).run,
+    plan: okPlan,
+    onEvent: (ev) => {
+      events.push(ev.type);
+      if (ev.type === "runStarted") announced = ev.steps.map((step) => step.id);
+    },
+  });
+
+  assert.equal(events[0], "runStarted", "nothing may happen before the plan is announced");
+  assert.deepEqual(announced, ["a", "b", "c"]);
+});
+
 test("independent steps in a wave overlap", async () => {
   // Deliberately a DEADLOCK test: each of the two independent steps waits for
   // the other to have started. A serialising executor never finishes, so a
