@@ -671,9 +671,28 @@ smoke("the + opens the add-a-cluster page, and a second + reveals the one panel"
       15_000
     );
 
-    // A NEGATIVE assertion needs a grace period, or it passes on the second tab
-    // simply not having appeared yet. Poll instead of asserting once, and fail
-    // the moment a second one shows up rather than at the end.
+    // SETTLE FIRST, THEN HOLD. Two assertions in sequence, because there are
+    // two different things that could be wrong and only one of them is a bug.
+    //
+    // `show` reveals the open panel with ViewColumn.Beside, which MOVES it to
+    // another editor group. On VS Code 1.91.0 the tab model reports the panel
+    // in both groups while that move is in flight, so an assertion fired the
+    // instant the command resolves sees two tabs for one panel and fails --
+    // which it did, on 1.91.0 only, while stable passed. That is model lag, not
+    // a second wizard: a WebviewPanel owns exactly one tab, and `show` returned
+    // the existing panel rather than constructing anything.
+    //
+    // So: wait for the model to settle at one, which a genuine second panel can
+    // never satisfy because nothing would close it. THEN hold the assertion for
+    // two seconds, which is what catches a late second tab. Collapsing these
+    // into one poll would either fail on the transient or pass on the tab that
+    // has not appeared yet.
+    await waitFor(
+      `the tab model to settle at one "${ADD_CLUSTER_TAB}" tab after the reveal ` +
+        `(saw: ${openTabLabels().join(", ")})`,
+      () => addClusterTabs().length === 1,
+      10_000
+    );
     for (let i = 0; i < 8; i += 1) {
       assert.equal(
         addClusterTabs().length,
