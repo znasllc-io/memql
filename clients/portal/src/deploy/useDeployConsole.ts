@@ -124,9 +124,11 @@ export function describeDeployError(err: unknown): string {
  * console makes -- see WriteOutcome.tsx.
  *
  * "" for every other failure, and the emptiness is meaningful: an
- * INVALID_ARGUMENT is rejected before the gate and an UNAVAILABLE never
- * reached the service, so neither left a trail to point at. Rendering nothing
- * is then the honest thing to do.
+ * INVALID_ARGUMENT is a caller error the gate does not record (and since
+ * memql#3505 it also means the caller cleared the role floor, because the gate
+ * runs first on every RPC), and an UNAVAILABLE never reached the service, so
+ * neither left a trail to point at. Rendering nothing is then the honest thing
+ * to do.
  */
 export function deployErrorAuditEventId(err: unknown): string {
   return err instanceof DeployControlError ? err.auditEventId : "";
