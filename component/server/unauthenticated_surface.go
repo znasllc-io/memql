@@ -117,7 +117,14 @@ func HandlerAuthorizedPaths() []string {
 	// The credential is a per-source shared secret rather than a memQL
 	// identity, which is why this cannot be an ordinary authenticated route:
 	// the caller is a third party and has no user.
-	return append(paths, InboundWebhookPaths()...)
+	paths = append(paths, InboundWebhookPaths()...)
+	// GET+POST /unsubscribe -- authorized by the HMAC-signed token in the
+	// request, never by a bearer (memql#3348). Fails closed with no
+	// credentials in the only sense available to it: a request with no
+	// token, or with one whose tag does not verify, renders the
+	// "not valid" page and performs no write. There is no unauthenticated
+	// path through the handler that reaches a mutation.
+	return append(paths, UnsubscribePaths()...)
 }
 
 // SelfAuthenticatedPaths returns routes that must remain reachable on a
@@ -150,7 +157,15 @@ func SelfAuthenticatedPaths() []string {
 	// signature scheme. A source configured SIGNATURE_SCHEME=none accepts an
 	// unsigned request by design; see the qualification on
 	// AssertSelfAuthenticatedRoutesFailClosed.
-	return InboundWebhookPaths()
+	//
+	// GET+POST /unsubscribe -- the mail client that POSTs here holds no
+	// memQL credential and never will, so the verifier has to step aside
+	// for the same reason it does for a third-party webhook. The
+	// authorization is the HMAC-signed token: it is verified before any
+	// row is read, and the identity the handler then impersonates comes
+	// out of the signed payload rather than out of a parameter, so an
+	// unsigned request cannot aim it anywhere (memql#3348).
+	return append(InboundWebhookPaths(), UnsubscribePaths()...)
 }
 
 // ContractRoutes returns the request paths HandlerWithOptions registers.

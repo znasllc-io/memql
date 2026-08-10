@@ -1,0 +1,78 @@
+// campaigns domain -- the Go-backed sending surface (memql#3348).
+//
+// WHY THESE ARE BUILTINS AND NOT MUTATIONS. Everything else an operator
+// does to a campaign is a plain mutation, and that is the right default:
+// the concept treatment (browsable, view-composable, authorization-gated)
+// comes free, and a mutation is auditable in a way a Go call is not. Five
+// operations cannot be expressed that way, and each fails for a specific
+// reason rather than for convenience:
+//
+//   startSend    A PREFLIGHT SPANNING SEVERAL ROWS, then TWO WRITES.
+//                Is a sender registered on this node? Is one-click
+//                unsubscribe configured? Is the template marked ready? Is
+//                the audience non-empty and inside the ceiling? Every one
+//                is a read, and a mutation body cannot read. It then has
+//                to write the campaign (owned, the operator's row) AND
+//                the send job (clusterOwner, the engine's) -- two writes,
+//                one per mutation being the language's contract. The
+//                usual answer, an automation on the first write, does not
+//                work here: the automation actor is neither the owner nor
+//                a cluster owner, so it could not write the job, and
+//                making the job writable by it means making it writable
+//                by anyone -- and whichever row says "send campaign X as
+//                user Y" is an instruction the engine carries out under
+//                Y's authority.
+//
+//   pauseSend    Same two-writes problem, campaign plus job.
+//   resumeSend
+//
+//   suppress     Writes the CLUSTER-WIDE do-not-mail list, whose key is a
+//   recordFeedback SHA-256 digest of the address. The digesting has to
+//                happen server-side or the address travels instead of the
+//                digest, which defeats the point of a digest-keyed list.
+//                Both also carry an admin gate that is a role check
+//                rather than a row predicate, because the rows they write
+//                have no owner to gate on.
+//
+// AUTHORIZATION IS THE FIRST READ, in every one of the campaign-scoped
+// three. `campaignById` is owned-tier, so it returns a row only to its
+// owner; a caller who cannot read the campaign gets "not found" and
+// nothing further happens. Every value that reaches the send job -- the
+// owner, the audience, the template -- is copied off THAT row rather than
+// taken from an argument, so a caller can only ever start a send as a
+// user they could already act as.
+
+@description("Preflight and start a campaign send. Refuses -- rather than partially sending -- when no email sender is registered on the node, when one-click unsubscribe is not configured (MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET / _BASE_URL), when the template is not marked ready, or when the audience is empty or at the MEMQL_CAMPAIGNS_MAX_AUDIENCE ceiling. Authorization is the owned-tier read of the campaign: a caller who cannot read it cannot start it. Returns the recipient count the send will work through.")
+@executor("integration.campaigns.startSend")
+builtin campaignStartSend {
+  campaignId  string!  @description("The campaign to send. The caller must own it.")
+}
+
+@description("Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.")
+@executor("integration.campaigns.pauseSend")
+builtin campaignPauseSend {
+  campaignId  string!  @description("The campaign to pause. The caller must own it.")
+}
+
+@description("Resume a paused campaign send. Does not re-stamp startedAt: the gap between startedAt and completedAt is how long the run took, and resetting it on resume would erase the pause it exists to reveal.")
+@executor("integration.campaigns.resumeSend")
+builtin campaignResumeSend {
+  campaignId  string!  @description("The campaign to resume. The caller must own it.")
+}
+
+@description("Add an address to the CLUSTER-WIDE do-not-mail list, which outranks every audience and is consulted at the point of send. Admin or cluster owner only: the list spans every operator in the deployment, so adding to it is deployment policy rather than an owner-scoped action. The address is digested server-side and never stored -- the row keeps the digest and the domain, so 'which domains are bouncing' stays answerable while 'who unsubscribed' does not.")
+@executor("integration.campaigns.suppress")
+builtin campaignSuppress {
+  email   string!  @description("The address to suppress. Normalized (trimmed, lowercased) and SHA-256 digested before it reaches the graph.")
+  reason  string  @description("unsubscribed | hard_bounce | complaint | manual. Defaults to manual.")
+  note    string  @description("Free-text provenance. Never put the address here -- it is stored verbatim.")
+}
+
+@description("Record a bounce or complaint the mail provider reported. Admin or cluster owner only. A hard_bounce or complaint suppresses the address cluster-wide and the next send converges the operator's own recipient row onto that verdict; audience membership is NOT deleted, because deleting it destroys the audit trail and lets the next import resurrect a dead address. A soft_bounce is transient and does NOT suppress -- the per-recipient retry budget is what bounds those. Intended caller: an automation over a provider webhook landing on v1:platform:inboundRequest, presenting an admin service-account credential.")
+@executor("integration.campaigns.recordFeedback")
+builtin campaignRecordFeedback {
+  email       string!  @description("The address the provider reported.")
+  kind        string!  @description("hard_bounce | soft_bounce | complaint.")
+  campaignId  string  @description("The campaign the report came from, when the provider named one. Recorded on the suppression row so a deliverability review can attribute complaints to a send.")
+  note        string  @description("The provider's own classification string. Never the address.")
+}

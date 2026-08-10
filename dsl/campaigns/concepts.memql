@@ -9,32 +9,60 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// FIVE CONCEPTS, and the split follows the four questions a send has to
-// answer -- who, what, when, and what happened:
+// SEVEN CONCEPTS. Five answer the four questions a send has to answer --
+// who, what, when, and what happened -- and two are the sending engine's
+// own state (memql#3348):
 //
-//   audience   WHO       a named set of addresses
-//   recipient  WHO       one address in an audience, with its subscription state
-//   template   WHAT      the subject + bodies, authored once and reused
-//   campaign   WHEN      audience x template x schedule, plus the send state
-//   delivery   OUTCOME   one row per recipient per campaign
+//   audience     WHO        a named set of addresses
+//   recipient    WHO        one address in an audience, with its subscription state
+//   template     WHAT       the subject + bodies, authored once and reused
+//   campaign     WHEN       audience x template x schedule, plus the send state
+//   delivery     OUTCOME    one row per recipient per campaign
+//   sendJob      ENGINE     the per-campaign send run the worker drains
+//   suppression  ENGINE     the cluster-wide do-not-mail list, digest-keyed
 //
-// PER-ROW AUTHZ TIER: owned, on all five. Every row carries ownerUserId,
-// every concept declares @rowAuthz(owner="ownerUserId"), every mutation
-// stamps that field from actor.userId rather than from a caller argument,
-// and every query names it as a top-level conjunct. A caller therefore
-// cannot read, create, retarget or delete another operator's campaign even
-// with its id. Shared / team-owned campaigns are a deliberate non-goal for
-// now: "owned" is the tier that is enforced end to end today, and widening it
-// later is a tier change plus a grant concept, not a re-model.
+// PER-ROW AUTHZ TIER: owned, on the five operator-facing concepts. Every row
+// carries ownerUserId, every concept declares @rowAuthz(owner="ownerUserId"),
+// every mutation stamps that field from actor.userId rather than from a caller
+// argument, and every query names it as a top-level conjunct. A caller
+// therefore cannot read, create, retarget or delete another operator's
+// campaign even with its id. Shared / team-owned campaigns are a deliberate
+// non-goal for now: "owned" is the tier that is enforced end to end today, and
+// widening it later is a tier change plus a grant concept, not a re-model.
 //
-// WHAT IS NOT HERE: the sending engine. Nothing in this domain moves mail.
-// A send is staged as v1:platform:outboundRequest rows and drained by the
-// engine's existing outbound worker, and the scheduling, rate limiting,
-// unsubscribe handling and bounce feedback that a real sender needs are a
-// separate piece of work. `campaign` carries the send-state fields and
-// `delivery` carries the per-recipient outcome so that work adds no schema
-// migration -- but today those fields are written by nothing, and the portal
-// says so rather than showing an empty table that reads as "nothing sent".
+// THE TWO ENGINE CONCEPTS ARE clusterOwner, NOT owned, and the split is the
+// load-bearing part of the sending design (memql#3348).
+//
+//   `sendJob` is the queue the worker scans. A worker cannot scan an OWNED
+//   concept at all -- the owned tier injects `ownerUserId==actor.userId` into
+//   every read and has no cluster-owner bypass (rowauthz_enforce.go), so
+//   "find every campaign that wants sending" is not a question an owned row
+//   can answer. It is also not a question that SHOULD be answerable by a
+//   caller-writable row: whichever row says "send campaign X as user Y" is,
+//   by construction, an instruction the engine will carry out under Y's
+//   authority. So the job row is clusterOwner-tier and every write to it is
+//   internal-origin Go that derived campaignOwnerUserId from a row it had
+//   already read UNDER THE CALLER'S OWN ACTOR. The caller proves ownership by
+//   being able to read their own campaign; nothing they send is trusted.
+//
+//   `suppression` is the do-not-mail list, and it OUTRANKS EVERY AUDIENCE.
+//   That phrase only means something if the list is one list: an unsubscribe
+//   is a statement by a person to the operator of this deployment, and every
+//   campaign leaves through the same authenticated mailbox and the same SPF /
+//   DKIM records. A per-operator list would let operator B mail an address
+//   that unsubscribed from operator A under a From: header the recipient
+//   cannot tell apart -- one domain, one reputation, one complaint. So the
+//   list is cluster-wide, and it is keyed by a SHA-256 digest of the
+//   normalized address rather than by the address itself, so being
+//   cluster-wide costs nobody an address: a caller can ask "is this address
+//   suppressed" only about an address it already holds, and reading the whole
+//   table yields digests and domains, never a mailbox.
+//
+// WHAT THE SENDING ENGINE IS: component/campaigns (the drain worker) plus
+// integrations/campaigns (the DSL-callable surface). It sends DIRECTLY through
+// the email integration rather than staging v1:platform:outboundRequest rows,
+// which is a change from what this header said before memql#3348 -- see the
+// `delivery.outboundRequestId` field doc for the three reasons.
 
 use identity.concepts.{ user }
 use platform.concepts.{ outboundRequest }
@@ -95,9 +123,11 @@ concept template {
 /// A campaign: one template addressed to one audience, optionally at a scheduled time, plus the state
 /// of its send. This is the row an operator thinks of as 'the campaign'. Per-row authz: owned.
 ///
-/// The send-state fields (startedAt / completedAt / the three counters / lastError) are declared here
-/// and written by NOTHING today -- the sending engine that would stamp them is deliberately out of
-/// scope (see the file header). They are declared now so that work is additive.
+/// The send-state fields (startedAt / completedAt / the three counters / lastError) are written by
+/// the sending engine's drain worker through `updateCampaignProgress`, which runs under the
+/// CAMPAIGN OWNER'S actor -- so `ownerUserId` is re-stamped from `actor.userId` there exactly as it
+/// is on the operator-facing writes, and the counters land on a row the worker was authorized to
+/// touch rather than on one it reached past the owner tier.
 @displayCard(primary="name", secondary="scheduledAt", tertiary="audienceId", status="status")
 @rowAuthz(owner="ownerUserId")
 concept campaign {
@@ -122,13 +152,33 @@ concept campaign {
 }
 
 /// One recipient's outcome for one campaign -- the per-recipient audit trail a deliverability review
-/// is actually made of. Written by the sending engine, which does not exist yet (see the file
-/// header); the schema is declared now so it lands without a migration. Per-row authz: owned.
+/// is actually made of, and the LEDGER THAT MAKES A RESUMED SEND SAFE. Per-row authz: owned.
 ///
-/// outboundRequestId is the seam to the engine's existing delivery machinery: a send stages a
-/// v1:platform:outboundRequest row and records its id here, so the transport-level status
-/// (pending / sending / sent / retrying / failed, with attempts and lastError) is readable from the
-/// row the outbound worker already maintains rather than mirrored into a second lifecycle here.
+/// IDEMPOTENCY IS STRUCTURAL, not a retry flag. The row id is derived deterministically from
+/// (campaignId, recipientId) -- per-part hashed, so no separator can alias two pairs onto one id --
+/// which means a recipient has exactly one delivery row per campaign no matter how many times the
+/// send is resumed, restarted or raced between replicas. The worker's batch is "recipients of this
+/// audience with no delivery row, plus rows still `pending` whose nextAttemptAt has passed", so a
+/// recipient that already reached `sent` or `skipped` is simply not in the next batch. There is no
+/// "already sent?" flag to forget to check: the absence of the row IS the work queue.
+///
+/// Written by component/campaigns' drain worker through `recordCampaignDelivery`, which runs under
+/// the CAMPAIGN OWNER'S actor -- so `ownerUserId` is stamped from `actor.userId` like every other
+/// write in this domain, never from a caller argument. That is what memql#3348 supplies and what
+/// took v1:campaigns:delivery off the owner-stamping gate's exemption list.
+///
+/// outboundRequestId is EMPTY on every row this engine writes, and that is a decision rather than an
+/// omission (memql#3348). memql#3323 designed the send to stage v1:platform:outboundRequest rows and
+/// let the engine's outbound worker deliver them. Three things make that the wrong seam for bulk
+/// campaign mail: (1) the campaign worker has to SEE the provider's 429 + Retry-After to pace
+/// itself, and a queue drained by another worker turns that signal into an opaque retry -- which is
+/// exactly the "retries that look like duplicates to the recipient" failure; (2) a per-recipient
+/// TERMINAL outcome is the whole point of this row, and an async seam leaves every row `pending`
+/// until somebody writes a reconciler; (3) MEMQL_OUTBOUND_EMAIL_ALLOWLIST is a domain allowlist for
+/// TRANSACTIONAL mail, and a marketing audience is by definition arbitrary external domains -- so
+/// routing campaigns through it would either refuse every send or force that allowlist wide open and
+/// weaken the transactional egress control it exists to provide. The field stays on the schema
+/// because a future queued transport would populate it.
 @displayCard(primary="email", secondary="campaignId", tertiary="sentAt", status="status")
 @rowAuthz(owner="ownerUserId")
 concept delivery {
@@ -136,14 +186,92 @@ concept delivery {
   campaignId         string!  @description("v1:campaigns:campaign.id this delivery belongs to.")
   recipientId        string!  @description("v1:campaigns:recipient.id that was targeted.")
   email              string!  @pii  @description("The address the send targeted, captured at send time rather than read back from the recipient row -- an address that changes afterwards must not rewrite what was actually mailed. Marked @pii.")
-  status             enum("pending", "sent", "failed", "skipped")!  @description("Terminal outcome for this recipient. 'skipped' is the suppression case -- unsubscribed, bounced or complained -- and is distinct from 'failed' because it is a correct outcome rather than an error. Required: a delivery row with no stated outcome would be indistinguishable from one that was never attempted.")
-  outboundRequestId  string   @description("v1:platform:outboundRequest.id carrying this message, when one was staged. Empty for a 'skipped' delivery, which never reaches the transport.")
-  skipReason         string   @description("Why a 'skipped' delivery was suppressed, e.g. 'unsubscribed'. Empty otherwise.")
-  lastError          string   @description("The transport's error for a 'failed' delivery, truncated. Empty otherwise.")
+  status             enum("pending", "sent", "failed", "skipped")!  @description("Outcome for this recipient. 'sent' and 'skipped' and 'failed' are terminal; 'pending' means a retryable transport failure whose next attempt is due at nextAttemptAt (a row is never written as 'pending' before an attempt -- the ABSENCE of the row is the not-yet-attempted state, see the concept doc). 'skipped' is the suppression case -- unsubscribed, hard-bounced or complained -- and is distinct from 'failed' because it is a correct outcome rather than an error.")
+  outboundRequestId  string   @description("v1:platform:outboundRequest.id carrying this message, when a queued transport staged one. EMPTY on every row the current engine writes -- it delivers directly so it can observe the provider's throttle response. See the concept doc for the three reasons.")
+  skipReason         string   @description("Why a 'skipped' delivery was suppressed: 'unsubscribed' / 'hard_bounce' / 'complaint' / 'manual' when the cluster suppression list matched, or the recipient row's own subscriptionStatus when that was the gate. Empty otherwise.")
+  lastError          string   @description("The transport's error for a 'failed' or retrying 'pending' delivery, truncated to 4KB. Empty otherwise.")
   sentAt             datetime  @description("When the transport accepted the message. Empty unless status is 'sent'.")
+  attempts           int  @default("0")  @description("Delivery attempts made for this recipient. Incremented on each transport failure and bounded by MEMQL_CAMPAIGNS_MAX_ATTEMPTS, past which the row goes terminal 'failed'. Zero on a 'skipped' row, which never reaches the transport.")
+  nextAttemptAt      datetime  @description("When a retryable 'pending' row becomes eligible again -- bounded exponential backoff with jitter, or the provider's own Retry-After when it supplied one. Compared Go-side by the drain worker, which is why it is a stored instant rather than a computed one.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
   @relationship(type="interactsWith", field="recipientId", target=recipient, direction="outgoing")
   @relationship(type="interactsWith", field="outboundRequestId", target=outboundRequest, direction="outgoing")
+}
+
+/// The engine's own record of one send RUN -- the queue the drain worker scans, and the only row in
+/// this domain the worker can find without already knowing whose it is.
+///
+/// WHY THIS IS clusterOwner AND NOT owned. A worker cannot scan an owned concept: the owned tier
+/// injects `ownerUserId==actor.userId` into every read and there is no cluster-owner bypass on it
+/// (component/memql/rowauthz_enforce.go), so "which campaigns want sending" is not a question an
+/// owned row can answer. Nor should it be answerable from a row a caller can write: whichever row
+/// says "send campaign X as user Y" is an instruction the engine carries out under Y's authority, so
+/// a caller-writable one is an escalation with extra steps. Both writers of this concept
+/// (campaignStartSend and the worker) are Go that derived campaignOwnerUserId from a campaign row it
+/// had ALREADY READ under the caller's own actor -- the caller proves ownership by being able to
+/// read their own campaign, and nothing they typed is trusted.
+///
+/// One row per campaign, id = the campaign's bare short id, so pause / resume / restart all land on
+/// the same timeline rather than accumulating runs. Per-recipient idempotency does not live here --
+/// it lives on the delivery ledger (see v1:campaigns:delivery), which is what makes a resumed send
+/// safe even if this row is lost entirely.
+@displayCard(primary="campaignId", secondary="status", tertiary="startedAt", status="status")
+@rowAuthz(clusterOwner)
+concept sendJob {
+  campaignId           string!  @description("v1:campaigns:campaign.id this job drains. Stored canonical like every other @relationship field; the worker bare-ifies it (memql.BareShortId) before feeding it back to campaignById, because a named-query argument is the BARE-ids client contract.")
+  campaignOwnerUserId  string!  @description("v1:identity:user.id the worker impersonates for every owned-tier read and write this job performs -- the campaign, its template, its audience's recipients, and the delivery ledger. SERVER-DERIVED ONLY: both writers read it off a campaign row they had already read under the caller's own actor, so it can never name a user the caller could not already act as. This is the single most security-load-bearing field in the domain.")
+  audienceId           string!  @description("v1:campaigns:audience.id resolved to recipients each batch, so an audience that grows mid-send is mailed as it stands when the batch runs.")
+  templateId           string!  @description("v1:campaigns:template.id supplying the subject and bodies.")
+  status               enum("queued", "running", "paused", "completed", "failed", "cancelled")!  @description("Job lifecycle. 'queued' is enqueued and unclaimed; 'running' has had at least one batch; 'paused' is an operator stopping the drain without discarding the ledger; 'completed' means every recipient reached a terminal delivery state; 'failed' is a job-level refusal (no configured sender, no unsubscribe secret, audience over the ceiling); 'cancelled' follows the campaign being cancelled.")
+  recipientCount       int  @default("0")  @description("Recipients the audience resolved to on the most recent batch. Not frozen -- the campaign row carries the frozen count.")
+  sentCount            int  @default("0")  @description("Deliveries the transport accepted so far.")
+  skippedCount         int  @default("0")  @description("Recipients suppressed rather than mailed. The gap between this and sentCount IS the suppression rate a deliverability review asks for.")
+  failedCount          int  @default("0")  @description("Recipients that reached a terminal failure.")
+  lastError            string  @description("The most recent job-level error, truncated. Empty on a clean run.")
+  startedAt            datetime  @description("When the first batch ran.")
+  completedAt          datetime  @description("When the job reached a terminal status.")
+  throttledUntil       datetime  @description("When the provider's own throttle response says we may resume. Set from a 429/503 Retry-After; the worker leaves the job alone until it passes. Distinct from our own pacing, which is a per-process token bucket and needs no row.")
+
+  @relationship(type="parent", field="campaignId", target=campaign, direction="outgoing")
+  @relationship(type="interactsWith", field="campaignOwnerUserId", target=user, direction="outgoing")
+  @relationship(type="interactsWith", field="audienceId", target=audience, direction="outgoing")
+  @relationship(type="interactsWith", field="templateId", target=template, direction="outgoing")
+}
+
+/// The cluster-wide do-not-mail list. ONE address per row, keyed by the SHA-256 hex digest of the
+/// normalized address (lowercased, trimmed) -- the digest IS the row id, so a lookup is a by-id read
+/// and a re-suppression is a new version of the same row rather than a duplicate.
+///
+/// SUPPRESSION IS CLUSTER-WIDE, NOT PER-ACCOUNT, and that is the decision this concept exists to
+/// record (memql#3348). An unsubscribe is a statement by a person to the operator of THIS
+/// DEPLOYMENT: every campaign leaves through the same authenticated mailbox, under the same From
+/// address, signed by the same SPF and DKIM records. A per-operator list would let operator B mail
+/// an address that unsubscribed from operator A, in a message the recipient cannot tell apart from
+/// the one they already opted out of -- and the complaint lands on the one shared domain reputation.
+/// Legally the obligation attaches to the sender, and there is one sender.
+///
+/// BEING CLUSTER-WIDE COSTS NOBODY AN ADDRESS. The row stores no mailbox: the id is a non-reversible
+/// digest and the only human-readable field is the address's DOMAIN, which is what a deliverability
+/// review actually asks for ("which domains are bouncing?") and which identifies no one. A caller
+/// can therefore ask "is this address suppressed" only about an address it already holds.
+///
+/// Reads and writes are clusterOwner because the list must not be caller-writable: a caller who
+/// could insert digests could silently suppress a competitor's audience, and one who could delete
+/// them could un-suppress a complaint. Every write goes through the engine -- the unsubscribe
+/// endpoint, the feedback builtin, or an operator's explicit suppress call -- and each of those
+/// derives the address from something it verified rather than from an argument. An operator's own
+/// view of who left is their recipient rows' subscriptionStatus, which the worker converges onto
+/// this list on the next send.
+@displayCard(primary="domain", secondary="reason", tertiary="suppressedAt", status="reason")
+@rowAuthz(clusterOwner)
+concept suppression {
+  reason            enum("unsubscribed", "hard_bounce", "complaint", "manual")!  @description("Why this address may never be mailed again. 'unsubscribed' is the recipient's own choice, via the RFC 8058 one-click header or the link in the body. 'hard_bounce' and 'complaint' are the provider's verdict and are kept apart because they mean different things to a review -- a bounce is a dead address, a complaint is a reputational event. 'manual' is an operator adding one by hand.")
+  domain            string  @description("The domain part of the suppressed address, lowercased. Recorded rather than derived because the address itself is never stored: it is what makes 'which domains are bouncing' answerable without making 'who unsubscribed' answerable.")
+  suppressedAt      datetime!  @description("When the address entered the list. Stamped from the engine clock at write time, not threaded by a caller -- unlike a recipient row's unsubscribedAt, which can legitimately record a state change that happened earlier.")
+  sourceCampaignId  string  @description("v1:campaigns:campaign.id of the send that produced this suppression, when one did. Empty for an operator-entered row or a feedback report that named no campaign.")
+  note              string  @description("Free-text provenance for a 'manual' row, or the provider's bounce classification for a reported one. Never the address.")
+
+  @relationship(type="interactsWith", field="sourceCampaignId", target=campaign, direction="outgoing")
 }

@@ -7104,6 +7104,48 @@ func EmitTextChunkBuild(args EmitTextChunkArgs) string {
 	return b.String()
 }
 
+// EnqueueCampaignSend -- ENGINE: enqueue a send run. One row per campaign, id = the campaign's bare short id, so a restart lands on the same timeline rather than accumulating runs.
+// campaignOwnerUserId is the field that decides whose authority the worker borrows, so it is worth being explicit about where it comes from: the `campaignStartSend` builtin reads the campaign row UNDER THE CALLER'S OWN ACTOR and copies the owner off that row. A caller can therefore only ever enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization. Nothing in this mutation's arguments is trusted to say who owns anything.
+// clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at all requires the engine's own operator identity.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["enqueueCampaignSend"] in generated_concepts.go).
+type EnqueueCampaignSendArgs struct {
+	CampaignId          string
+	CampaignOwnerUserId string
+	AudienceId          string
+	TemplateId          string
+}
+
+// EnqueueCampaignSend calls the engine mutation enqueueCampaignSend.
+func (qc *QueryClient) EnqueueCampaignSend(ctx context.Context, args EnqueueCampaignSendArgs) (*Result, error) {
+	call := EnqueueCampaignSendBuild(args)
+	return qc.executeNamed(ctx, "enqueueCampaignSend", call)
+}
+
+func EnqueueCampaignSendBuild(args EnqueueCampaignSendArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation enqueueCampaignSend(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("campaignOwnerUserId: ")
+	b.WriteString(quoteMemQL(args.CampaignOwnerUserId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("templateId: ")
+	b.WriteString(quoteMemQL(args.TemplateId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ExpireAccessRequest -- Expire a pending access request (status=expired).
 //
 // Bound concept: v1:identity:accessRequest (machine-readable: BoundConcepts["expireAccessRequest"] in generated_concepts.go).
@@ -8146,6 +8188,28 @@ func MintSkillBuild(args MintSkillArgs) string {
 	return b.String()
 }
 
+// PauseCampaign -- Pause a running send. The delivery ledger is untouched, which is the whole point: a paused campaign resumes exactly where it stopped because "where it stopped" is the set of recipients with no delivery row, not a cursor that could go stale. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["pauseCampaign"] in generated_concepts.go).
+type PauseCampaignArgs struct {
+	CampaignId string
+}
+
+// PauseCampaign calls the engine mutation pauseCampaign.
+func (qc *QueryClient) PauseCampaign(ctx context.Context, args PauseCampaignArgs) (*Result, error) {
+	call := PauseCampaignBuild(args)
+	return qc.executeNamed(ctx, "pauseCampaign", call)
+}
+
+func PauseCampaignBuild(args PauseCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation pauseCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // PersistTaskState -- Persist a Task's working state for async parking + planner re-invocation. Called when a Task transitions to paused / awaitingFeedback.
 //
 // Bound concept: v1:planner:taskState (machine-readable: BoundConcepts["persistTaskState"] in generated_concepts.go).
@@ -8585,6 +8649,93 @@ func RecordCallBuild(args RecordCallArgs) string {
 	}
 	b.WriteString("costEstimate: ")
 	b.WriteString(renderMemQLValue(args.CostEstimate))
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordCampaignDelivery -- Record one recipient's outcome for one campaign. THE writer memql#3348 exists to supply: it is what stamps v1:campaigns:delivery's declared owner field from the actor, and its absence is why that concept sat on the owner-stamping gate's exemption list.
+// THE ID IS DERIVED, NOT PASSED, and that is the idempotency mechanism rather than a convenience. (campaignId, recipientId) hashes to exactly one row id, so a resumed, restarted or double-claimed send writes a new VERSION of the same row instead of a second delivery -- the ledger cannot double-count and the worker cannot double-mail, because the row's existence is what removes the recipient from the next batch. Each part is hashed before concatenation (authoring rule 20), so no separator in a caller-supplied id can make two different pairs collide onto one timeline.
+// Owned: ownerUserId is stamped from actor.userId. The worker runs this under the CAMPAIGN OWNER'S actor, so the value is the campaign's owner and no caller can name a different one.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["recordCampaignDelivery"] in generated_concepts.go).
+type RecordCampaignDeliveryArgs struct {
+	CampaignId  string
+	RecipientId string
+	Email       string
+	// Enum: pending | sent | failed | skipped
+	Status            string
+	SkipReason        string
+	LastError         string
+	SentAt            string
+	Attempts          int
+	NextAttemptAt     string
+	OutboundRequestId string
+}
+
+// RecordCampaignDelivery calls the engine mutation recordCampaignDelivery.
+func (qc *QueryClient) RecordCampaignDelivery(ctx context.Context, args RecordCampaignDeliveryArgs) (*Result, error) {
+	call := RecordCampaignDeliveryBuild(args)
+	return qc.executeNamed(ctx, "recordCampaignDelivery", call)
+}
+
+func RecordCampaignDeliveryBuild(args RecordCampaignDeliveryArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordCampaignDelivery(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recipientId: ")
+	b.WriteString(quoteMemQL(args.RecipientId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("email: ")
+	b.WriteString(quoteMemQL(args.Email))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
+	if args.SkipReason != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("skipReason: ")
+		b.WriteString(quoteMemQL(args.SkipReason))
+	}
+	if args.LastError != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastError: ")
+		b.WriteString(quoteMemQL(args.LastError))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("sentAt: ")
+	b.WriteString(quoteMemQL(args.SentAt))
+	if args.Attempts != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("attempts: ")
+		b.WriteString(fmt.Sprintf("%v", args.Attempts))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("nextAttemptAt: ")
+	b.WriteString(quoteMemQL(args.NextAttemptAt))
+	if args.OutboundRequestId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("outboundRequestId: ")
+		b.WriteString(quoteMemQL(args.OutboundRequestId))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -9256,6 +9407,61 @@ func RecordRouterCallBuild(args RecordRouterCallArgs) string {
 	return b.String()
 }
 
+// RecordSuppression -- ENGINE: add an address to the cluster-wide do-not-mail list. The argument is the SHA-256 hex digest of the normalized address -- the address itself never reaches this mutation, which is what makes a cluster-wide list safe to keep. The digest is the row id, so re-suppressing an address appends a version to the same row rather than creating a second one, and the newest reason wins.
+// suppressedAt is stamped from the engine clock rather than threaded by the caller. That is the opposite of `setRecipientSubscription`, and deliberately: a recipient's unsubscribedAt can legitimately record something that happened hours earlier, but a suppression takes effect when it is written and dating it earlier would claim a protection that was not in force.
+// clusterOwner tier: a caller who could write this could silently suppress a competitor's audience.
+//
+// Bound concept: v1:campaigns:suppression (machine-readable: BoundConcepts["recordSuppression"] in generated_concepts.go).
+type RecordSuppressionArgs struct {
+	EmailDigest string
+	// Enum: unsubscribed | hard_bounce | complaint | manual
+	Reason           string
+	Domain           string
+	SourceCampaignId string
+	Note             string
+}
+
+// RecordSuppression calls the engine mutation recordSuppression.
+func (qc *QueryClient) RecordSuppression(ctx context.Context, args RecordSuppressionArgs) (*Result, error) {
+	call := RecordSuppressionBuild(args)
+	return qc.executeNamed(ctx, "recordSuppression", call)
+}
+
+func RecordSuppressionBuild(args RecordSuppressionArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordSuppression(")
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
+	if args.Domain != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("domain: ")
+		b.WriteString(quoteMemQL(args.Domain))
+	}
+	if args.SourceCampaignId != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sourceCampaignId: ")
+		b.WriteString(quoteMemQL(args.SourceCampaignId))
+	}
+	if args.Note != "" {
+		if b.Len() > 27 {
+			b.WriteString(", ")
+		}
+		b.WriteString("note: ")
+		b.WriteString(quoteMemQL(args.Note))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecordTrunk -- Persist a LiveKit SIP trunk configuration. secretRef points at external-secrets, never a secret value.
 //
 // Bound concept: v1:telephony:trunk (machine-readable: BoundConcepts["recordTrunk"] in generated_concepts.go).
@@ -9866,6 +10072,28 @@ func ResolveApprovalRequestBuild(args ResolveApprovalRequestArgs) string {
 		b.WriteString("decisionReason: ")
 		b.WriteString(quoteMemQL(args.DecisionReason))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// ResumeCampaign -- Resume a paused send. Deliberately does NOT re-stamp startedAt -- the gap between startedAt and completedAt is the number a deliverability review reads as "how long did this run take", and resetting it on every resume would erase the pause it is meant to reveal. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["resumeCampaign"] in generated_concepts.go).
+type ResumeCampaignArgs struct {
+	CampaignId string
+}
+
+// ResumeCampaign calls the engine mutation resumeCampaign.
+func (qc *QueryClient) ResumeCampaign(ctx context.Context, args ResumeCampaignArgs) (*Result, error) {
+	call := ResumeCampaignBuild(args)
+	return qc.executeNamed(ctx, "resumeCampaign", call)
+}
+
+func ResumeCampaignBuild(args ResumeCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation resumeCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -11751,6 +11979,28 @@ func StampNodeTokenBootstrapBuild(args StampNodeTokenBootstrapArgs) string {
 	return b.String()
 }
 
+// StartCampaign -- Move a campaign into the sending state and stamp when the run began. Called by the `campaignStartSend` builtin AFTER it has read the campaign under the caller's own actor, which is where the ownership check actually happens; this mutation re-stamps ownerUserId anyway, because a write whose ownership depends on a read-merge is a write whose ownership can drift. Owned.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["startCampaign"] in generated_concepts.go).
+type StartCampaignArgs struct {
+	CampaignId string
+}
+
+// StartCampaign calls the engine mutation startCampaign.
+func (qc *QueryClient) StartCampaign(ctx context.Context, args StartCampaignArgs) (*Result, error) {
+	call := StartCampaignBuild(args)
+	return qc.executeNamed(ctx, "startCampaign", call)
+}
+
+func StartCampaignBuild(args StartCampaignArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation startCampaign(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // StartHarnessStep -- Claim a ready step (ready -> running). Stamps assignedAgent + startedAt. The engine step guard rejects the transition when the prior status is not 'ready'.
 //
 // Bound concept: v1:harness:step (machine-readable: BoundConcepts["startHarnessStep"] in generated_concepts.go).
@@ -12169,6 +12419,75 @@ func UpdateCampaignBuild(args UpdateCampaignArgs) string {
 	}
 	b.WriteString("scheduledAt: ")
 	b.WriteString(quoteMemQL(args.ScheduledAt))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateCampaignProgress -- Stamp send progress onto the campaign row. Written by the drain worker under the campaign owner's actor, once per batch and once at completion, so the portal's campaign list shows live counters without aggregating the ledger per row. Owned -- ownerUserId is re-stamped from actor.userId, so the worker can only ever write this onto a campaign it was authorized to read.
+// Distinct from `updateCampaign`, which is the operator's authoring write and deliberately refuses to accept status or any counter. The two never overlap in what they accept.
+//
+// Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["updateCampaignProgress"] in generated_concepts.go).
+type UpdateCampaignProgressArgs struct {
+	CampaignId     string
+	Status         string
+	RecipientCount int
+	SentCount      int
+	FailedCount    int
+	LastError      string
+	CompletedAt    string
+}
+
+// UpdateCampaignProgress calls the engine mutation updateCampaignProgress.
+func (qc *QueryClient) UpdateCampaignProgress(ctx context.Context, args UpdateCampaignProgressArgs) (*Result, error) {
+	call := UpdateCampaignProgressBuild(args)
+	return qc.executeNamed(ctx, "updateCampaignProgress", call)
+}
+
+func UpdateCampaignProgressBuild(args UpdateCampaignProgressArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateCampaignProgress(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if args.Status != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.RecipientCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.RecipientCount))
+	}
+	if args.SentCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sentCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SentCount))
+	}
+	if args.FailedCount != 0 {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failedCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.FailedCount))
+	}
+	if args.LastError != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastError: ")
+		b.WriteString(quoteMemQL(args.LastError))
+	}
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("completedAt: ")
+	b.WriteString(quoteMemQL(args.CompletedAt))
 	b.WriteString(")")
 	return b.String()
 }
@@ -13373,6 +13692,94 @@ func UpdateResponsibilityBuild(args UpdateResponsibilityArgs) string {
 		b.WriteString("enabled: ")
 		b.WriteString(fmt.Sprintf("%v", args.Enabled))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSendJob -- ENGINE: stamp a send job's progress or lifecycle transition. Called by the drain worker after each batch and on every terminal outcome. clusterOwner tier.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["updateSendJob"] in generated_concepts.go).
+type UpdateSendJobArgs struct {
+	SendJobId      string
+	Status         string
+	RecipientCount int
+	SentCount      int
+	SkippedCount   int
+	FailedCount    int
+	LastError      string
+	StartedAt      string
+	CompletedAt    string
+	ThrottledUntil string
+}
+
+// UpdateSendJob calls the engine mutation updateSendJob.
+func (qc *QueryClient) UpdateSendJob(ctx context.Context, args UpdateSendJobArgs) (*Result, error) {
+	call := UpdateSendJobBuild(args)
+	return qc.executeNamed(ctx, "updateSendJob", call)
+}
+
+func UpdateSendJobBuild(args UpdateSendJobArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSendJob(")
+	b.WriteString("sendJobId: ")
+	b.WriteString(quoteMemQL(args.SendJobId))
+	if args.Status != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
+	if args.RecipientCount != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.RecipientCount))
+	}
+	if args.SentCount != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("sentCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SentCount))
+	}
+	if args.SkippedCount != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("skippedCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.SkippedCount))
+	}
+	if args.FailedCount != 0 {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("failedCount: ")
+		b.WriteString(fmt.Sprintf("%v", args.FailedCount))
+	}
+	if args.LastError != "" {
+		if b.Len() > 23 {
+			b.WriteString(", ")
+		}
+		b.WriteString("lastError: ")
+		b.WriteString(quoteMemQL(args.LastError))
+	}
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("startedAt: ")
+	b.WriteString(quoteMemQL(args.StartedAt))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("completedAt: ")
+	b.WriteString(quoteMemQL(args.CompletedAt))
+	if b.Len() > 23 {
+		b.WriteString(", ")
+	}
+	b.WriteString("throttledUntil: ")
+	b.WriteString(quoteMemQL(args.ThrottledUntil))
 	b.WriteString(")")
 	return b.String()
 }
