@@ -254,12 +254,16 @@ times while every automated test was green.
 
 ## 2. Cluster registry editing (B1)
 
-- [ ] **Add Cluster** collects name, domain, endpoint, access token, refresh
-      token and the local flag, and the new cluster appears in the tree
-- [ ] The local-flag step is a two-option pick that says what the flag DOES,
-      and a new cluster defaults to "not local"
-- [ ] Adding a cluster whose name collides with an existing one is refused,
-      not silently turned into an edit
+- [ ] The **"+"** opens the **Add a cluster** page (its own subsection below),
+      and registering a cluster that already exists is its *Connect to an
+      existing cluster* branch -- the fields are collected in that page's own
+      form, not by a chain of editor prompts
+- [ ] Registering a cluster whose name collides with an existing one is
+      refused, not silently turned into an edit
+- [ ] **Edit Cluster** collects name, domain, endpoint, access token, refresh
+      token and the local flag through the editor's own inputs, and the edited
+      cluster keeps its place in the tree
+- [ ] Edit's local-flag step is a two-option pick that says what the flag DOES
 - [ ] **Edit Cluster** with the name field changed renames the existing entry
       rather than appending a second one
 - [ ] Clearing the token field in **Edit Cluster** removes the key from
@@ -279,7 +283,7 @@ times while every automated test was green.
       is renewed without a reconnect
 - [ ] **Disconnect** returns the icon to the hollow circle and empties Concepts
 
-### Sign-in, sign-out and the "+" menu (memql#3401)
+### Sign-in and sign-out (memql#3401)
 
 These items exercise the browser sign-in the extension now drives itself, so
 they are the one part of this checklist you can run **without** hand-pasting a
@@ -314,15 +318,6 @@ and `refresh_token` keys deliberately blank.
       long-expired `token:` back into `clusters.yaml`) and connect: the tree
       shows the yellow key with `CREDENTIAL EXPIRED:` and the offered recovery is
       Sign In
-- [ ] The **"+"** in the Clusters view title branches on evidence: with no
-      install receipt and no `local: true` cluster it offers **Install a local
-      cluster...** alongside **Connect to an existing cluster...**; with a
-      local cluster present and answering it goes straight to the connect form
-      with no picker; with one present but not answering it offers **Repair
-      local cluster...** as well
-- [ ] Choosing Install or Repair shows the installer's CLI command with a **Copy
-      Command** button and says an in-editor wizard is not wired up yet -- it
-      does not silently do nothing
 - [ ] **memQL: Sign In With a Device Code** (palette only) shows an
       `XXXX-XXXX` code and a verification URL, and approving at
       `https://identity.<domain>/device` completes the sign-in on the editor side
@@ -339,6 +334,64 @@ because they are not wired up and the row would fail:
   `renameClusterCredentials` and `reconcileClusterCredentials` both exist and
   neither is called from the extension, so a rename leaves the secret orphaned
   under the old key and nothing sweeps it. Sign in again after a rename.
+
+### The Add a cluster page and the cluster lifecycle (memql#3463)
+
+The **"+"** opens a webview page, not a quick pick. The palette entry the
+`+` used to show, and the installer stub behind it that named a CLI command
+for you to copy, were both deleted (memql#3478): no path in this surface
+hands you a command to run in a terminal.
+
+The three evidence branches want three machine states, so run them in the
+order below and you get all three from one cluster.
+
+- [ ] With no install receipt and no `local: true` cluster, the page's landing
+      cards lead with **Install a local cluster** and offer **Connect to an
+      existing cluster...** beside it, and no uninstall card
+- [ ] Pressing **"+"** a second time reveals the page that is already open
+      rather than opening a second one -- one machine, one wizard
+- [ ] **Connect to an existing cluster...** collects the cluster's fields in
+      the page's own form and the new cluster appears in the tree
+- [ ] With a local cluster installed and answering, the cards include
+      **Uninstall the local cluster...** and no longer lead with Install
+- [ ] With one installed but NOT answering (stop it: `k3d cluster stop memql`),
+      the cards lead with **Repair the local cluster**
+- [ ] Repair re-runs the install graph: steps already satisfied report as
+      skipped rather than being done twice
+- [ ] The cluster panel's primary control offers **Repair** for a local
+      cluster that is not answering, and opens the same page
+- [ ] A failed step shows its exit status and the script's own stderr verbatim
+      in a disclosure, and offers a retry in place rather than a restart
+- [ ] Cancelling a part-finished install still leaves a receipt, and the
+      uninstall preview can read it
+
+Remove and Uninstall are the pair to check most carefully, because the risk in
+this surface is reading one as the other:
+
+- [ ] The trash can beside a cluster row is **Remove**, and its confirmation
+      spends a line saying that nothing is uninstalled and no data on the
+      cluster is touched
+- [ ] Remove drops the entry from `clusters.yaml`, deletes the stored
+      credential, and disconnects if that cluster was the live connection
+- [ ] Removing the selected cluster clears `selected_cluster` rather than
+      leaving it pointing at a name that no longer exists
+- [ ] **Uninstall** appears in a `local: true` row's context menu, is NOT an
+      inline icon, and does NOT appear on a remote cluster's row at all
+- [ ] Uninstall opens an itemised dry run first: every artifact the receipt
+      names, what happens to it, and which steps will ask for elevation
+- [ ] Anything the install FOUND rather than created -- an mkcert CA that was
+      already on the machine -- is listed as **preserved** and is still there
+      afterwards
+- [ ] After the uninstall the cluster is gone from the tree as well as from
+      the machine
+
+WARNING: two items this section does not ask for, because they are not
+finished and the row would fail. The AI provider key is collected but is
+**not** verified with a live call before the run starts (memql#3473), so a
+wrong key surfaces later, as a failing step. And when two steps running
+concurrently both fail, which of them is presented as *the* failure is
+arbitrary (memql#3474) -- both are in the log, but do not read the headline
+as "the first thing that went wrong".
 
 ## 3. Running a construct (B2, memql#3309)
 
