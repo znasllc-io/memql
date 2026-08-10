@@ -139,6 +139,25 @@ const CONNECT_HINTS: Record<ConnectField, string> = {
 /** The token is the one field on this page that should not render as plain text. */
 const CONNECT_SECRET_FIELDS: readonly ConnectField[] = ["token"];
 
+/**
+ * How long any ONE step may take before it is killed (memql#3474).
+ *
+ * `runner.ts` documents its own default plainly: "0 or absent means NO
+ * TIMEOUT". So omitting this does not pick a sensible ceiling -- it removes
+ * the ceiling, and a step that never returns leaves the wizard reporting
+ * `running` forever with Cancel as the only exit. That is exactly the "nothing
+ * hangs indefinitely" requirement, and it is unmet by silence.
+ *
+ * Ten minutes PER STEP, not per run. It has to clear the genuinely slow ones --
+ * `clusterUp` waits for ArgoCD to reconcile, `stackCheckout` clones, the tool
+ * steps download -- on a slow connection, without being so generous that a
+ * wedged step is indistinguishable from a working one. It matches the
+ * `--timeout=600` the install-e2e lane drives the CLI with, so the editor and
+ * the terminal kill a hung step at the same point rather than disagreeing
+ * about what "stuck" means.
+ */
+const STEP_TIMEOUT_MS = 600_000;
+
 /** What each field is for, in one line. */
 const FIELD_HINTS: Record<InputField, string> = {
   domain: "The cluster answers at cockpit.<domain>. Defaults are fine if you have no preference.",
@@ -464,6 +483,7 @@ export class AddClusterPanel {
           // A PATH, never the key. argv is world-readable in `ps`.
           providerKeyFile: inputs.providerKeyFile,
           stepParams: {},
+          timeoutMs: STEP_TIMEOUT_MS,
         },
         {
           onEvent: (event) => {
@@ -666,6 +686,10 @@ export class AddClusterPanel {
       // the AI vendor an install seeds a key for.
       provider: "",
       stepParams: {},
+      // A removal can hang exactly as an install can -- `k3d cluster delete`
+      // against a wedged daemon is the obvious way -- and an uninstall stuck
+      // halfway is the worse of the two states to be left in.
+      timeoutMs: STEP_TIMEOUT_MS,
     };
   }
 
