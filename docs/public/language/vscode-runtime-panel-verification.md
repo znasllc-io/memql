@@ -357,19 +357,18 @@ and `refresh_token` keys deliberately blank.
 - [ ] **memQL: Sign In With a Device Code** (palette only) shows an
       `XXXX-XXXX` code and a verification URL, and approving at
       `https://identity.<domain>/device` completes the sign-in on the editor side
-
-WARNING: two things this section deliberately does not ask you to verify,
-because they are not wired up and the row would fail:
-
-- The automatic loopback-to-device-code fallback exists in the codebase
-  (`signInWithDeviceCodeFallback`) but is **not** reached from **memQL: Sign
-  In**, which runs the loopback flow alone. The device grant is reachable only
-  through the explicit **Sign In With a Device Code** command. Verify it that
-  way; do not wait for a failed loopback to hand you one.
-- **Renaming a signed-in cluster does not move its refresh token.**
-  `renameClusterCredentials` and `reconcileClusterCredentials` both exist and
-  neither is called from the extension, so a rename leaves the secret orphaned
-  under the old key and nothing sweeps it. Sign in again after a rename.
+- [ ] **memQL: Sign In on a host that cannot do loopback** falls back to a
+      device code by itself (memql#3515). The cheapest way to produce the
+      condition is a host whose browser is elsewhere -- Remote-SSH into a box
+      with no display, or a container -- where the loopback callback cannot
+      arrive. Expect the progress notification to say it is switching, an
+      information message naming the reason, and then the same `XXXX-XXXX` code
+      the explicit command shows. It must NOT switch on a sign-in you
+      cancelled yourself
+- [ ] **Renaming a signed-in cluster keeps it signed in** (memql#3515).
+      **memQL: Edit Cluster**, change only the name, and confirm the cluster
+      reconnects without a fresh browser round trip -- the refresh token moves
+      with the entry rather than being orphaned under the old name
 
 ### The Add a cluster page and the cluster lifecycle (memql#3463)
 

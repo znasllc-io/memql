@@ -4,7 +4,6 @@ import {
   commands,
   Diagnostic,
   DiagnosticSeverity,
-  env,
   ExtensionContext,
   languages,
   Position,
@@ -28,8 +27,12 @@ import { browseConceptPage } from '@znasllc-io/memql-sdk-core/client';
 import type { Concept } from '@znasllc-io/memql-sdk-core/client';
 import type { ConceptLike } from '@znasllc-io/memql-view-kit';
 
-import { signInWithDeviceCode } from './auth/deviceCodeUi.js';
-import { runAuthorizationFlow } from './auth/flow.js';
+import {
+  runDeviceCodeSignIn,
+  runSignInWithFallback,
+  type SignInFlowUi,
+} from './auth/deviceCodeUi.js';
+import type { AuthFlowTokens } from './auth/flow.js';
 import {
   canSignIn,
   describeSignInFailure,
@@ -41,7 +44,11 @@ import { persistSignIn, signOut as signOutCredentials } from './auth/store.js';
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
-import { removeClusterCompletely } from './clusters/registry.js';
+import {
+  removeClusterCompletely,
+  renameClusterCompletely,
+  sweepOrphanedCredentials,
+} from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { composeEndpointFromDomain } from './connection/endpoint.js';
@@ -318,6 +325,23 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     signOut: (clusterName) => signOutCredentials(storeDeps, clusterName),
   };
 
+  // The other half of that index: sweep the secrets of clusters that are GONE
+  // (memql#3515). clusters.yaml is shared -- the memQL Cockpit writes it, and
+  // operators edit it by hand -- so a cluster can disappear without any command
+  // here running, stranding a thirty-day refresh token under a key
+  // SecretStorage cannot enumerate to find again.
+  //
+  // NOT AWAITED, and its failures are its own: activation must not wait on a
+  // keyring that may be locked, and a sweep that could not read the registry
+  // deliberately sweeps nothing (see sweepOrphanedCredentials). Once at
+  // activation rather than on every read of the file: the orphan it exists for
+  // was created outside this editor, so re-checking on each refresh would cost
+  // a keyring round trip per repaint to find the same nothing.
+  void sweepOrphanedCredentials(clustersPath, { secrets: context.secrets }).catch(() => {
+    // A sweep that could not run leaves the orphan for the next activation.
+    // There is nothing here for an operator to act on.
+  });
+
   // What the "+" branches on. Held for the life of the surface rather than
   // built per click, because the memo (and the single-flight it wraps) is the
   // whole reason opening the menu twice does not dial twice.
@@ -396,6 +420,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
             clustersPath,
             store: signInStore,
             clustersTree,
+            runFlow: runSignInWithFallback,
+            title: 'signing in to',
           });
         }
       }
@@ -411,6 +437,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         clustersPath,
         store: signInStore,
         clustersTree,
+        runFlow: runSignInWithFallback,
+        title: 'signing in to',
       });
     }),
     // The counterpart: forget this cluster's session. The store owns what that
@@ -537,14 +565,19 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         return;
       }
       // The name field is editable, so the edited config may not identify the
-      // node it came from. Pass the ORIGINAL name so upsertCluster renames that
-      // node instead of appending a second one under the new name.
+      // node it came from. Pass the ORIGINAL name so the write renames that
+      // node instead of appending a second one under the new name -- and so the
+      // stored credential, which is keyed by name, moves with it (memql#3515).
+      // The registry module owns both halves; upsertCluster alone would sign
+      // the operator out of a cluster they only renamed.
       const originalName = target.cluster.name;
       const edited = await promptForCluster(target.cluster);
       if (edited === undefined) {
         return;
       }
-      await writeCluster(clustersTree, () => upsertCluster(clustersPath, edited, originalName));
+      await writeCluster(clustersTree, () =>
+        renameClusterCompletely(clustersPath, originalName, edited, { secrets: context.secrets })
+      );
     }),
     // The Cluster tab (memql#3312): topology, deployment history, and the
     // deploy actions. Reached from the Clusters tree's inline action, which
@@ -569,15 +602,24 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // costs a two-minute callback deadline first -- so a user who already knows
   // their environment (a container, a hardened network, an SSH session with no
   // browser) can ask for the device code straight away.
+  //
+  // Same shell as `memQL: Sign In`, one argument different (memql#3515). It
+  // used to be a shell of its own, which is how it came to persist through a
+  // different call than the other command and to refresh the tree without
+  // reconnecting.
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.signInWithCode', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
-      if (target === undefined) {
+      if (target === undefined || target.cluster.name === '') {
         return;
       }
-      if (await signInWithDeviceCode(target.cluster, { clustersPath, secrets: context.secrets })) {
-        clustersTree.refresh();
-      }
+      await signInToCluster(target.cluster, {
+        clustersPath,
+        store: signInStore,
+        clustersTree,
+        runFlow: runDeviceCodeSignIn,
+        title: 'signing in with a device code to',
+      });
     })
   );
 
@@ -1319,10 +1361,29 @@ interface SignInDeps {
   clustersPath: string;
   store: SignInTokenStore;
   clustersTree: ClustersTreeProvider;
+  /**
+   * WHICH FLOW RUNS. The only thing that differs between the two sign-in
+   * commands (memql#3515): `memQL: Sign In` takes the browser round trip and
+   * falls back to a device code when this host cannot do one, and
+   * `memQL: Sign In With a Device Code` goes straight to the device grant.
+   * Everything after the tokens arrive is identical, so it lives below rather
+   * than in two shells that drift.
+   */
+  runFlow: (cluster: ClusterConfig, ui: SignInFlowUi) => Promise<AuthFlowTokens>;
+  /** The progress notification's title, naming the flow the operator asked for. */
+  title: string;
 }
 
 // signInToCluster is the editor half of memql#3403's sign-in: progress,
-// cancellation, and the two vscode.env capabilities the flow needs injected.
+// cancellation, and everything that happens to the tokens once they arrive.
+//
+// IT IS THE ONLY ONE. Both sign-in commands run through here, differing only in
+// the `runFlow` they bring (memql#3515). There were two functions of this name
+// for a while -- this one, and an exported one in auth/deviceCodeUi.ts that
+// carried the device-code fallback and was imported by nothing -- which meant
+// the fallback shipped, was tested, and could not be reached from any command.
+// A host that genuinely cannot open a browser sat out the callback deadline and
+// was told sign-in failed.
 //
 // WHY THE PROGRESS IS CANCELLABLE AND WHAT CANCELLING ACTUALLY DOES.
 // A browser sign-in parks on a loopback listener for minutes at a time waiting
@@ -1341,34 +1402,23 @@ async function signInToCluster(cluster: ClusterConfig, deps: SignInDeps): Promis
   return window.withProgress(
     {
       location: ProgressLocation.Notification,
-      title: `memQL: signing in to ${displayLabel(cluster)}`,
+      title: `memQL: ${deps.title} ${displayLabel(cluster)}`,
       cancellable: true,
     },
     async (progress, token) => {
       const aborter = new AbortController();
       const cancelSubscription = token.onCancellationRequested(() => aborter.abort());
       try {
-        progress.report({ message: 'opening your browser...' });
         await performSignIn(cluster, {
           signal: aborter.signal,
           store: deps.store,
           persistClientId: async (clusterName, clientId) => {
             await upsertCluster(deps.clustersPath, { name: clusterName, clientId });
           },
-          runFlow: (target, signal) =>
-            runAuthorizationFlow(target, {
-              signal,
-              // asExternalUri is not decoration: under Remote-SSH, Codespaces
-              // or a dev container the browser runs on a different machine
-              // from this extension host, and the loopback URL has to be
-              // rewritten into one that machine can reach. toString(true)
-              // skips re-encoding -- the authorization URL's query is already
-              // percent-encoded and encoding it twice corrupts the PKCE
-              // challenge and the state.
-              resolveExternalUri: async (url) =>
-                (await env.asExternalUri(Uri.parse(url))).toString(true),
-              openExternal: (url) => env.openExternal(Uri.parse(url)),
-            }),
+          // The progress notification is handed to the flow, not just watched:
+          // a device code is something the human has to READ off this screen
+          // and type into another one, so the runner reports it here.
+          runFlow: (target, signal) => deps.runFlow(target, { signal, progress }),
         });
       } catch (err) {
         const report = describeSignInFailure(cluster.name, err);

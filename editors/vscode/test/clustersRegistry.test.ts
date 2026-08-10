@@ -22,7 +22,11 @@ import {
   type SecretStore,
 } from "../src/auth/store.js";
 import { readClustersFile } from "../src/clusters/file.js";
-import { removeClusterCompletely } from "../src/clusters/registry.js";
+import {
+  removeClusterCompletely,
+  renameClusterCompletely,
+  sweepOrphanedCredentials,
+} from "../src/clusters/registry.js";
 
 class FakeSecrets implements SecretStore {
   readonly values = new Map<string, string>();
@@ -203,4 +207,148 @@ test("returns the removed cluster so the caller can report what went", async () 
 
   assert.equal(removed.name, "local");
   assert.equal(removed.local, true);
+});
+
+// -----------------------------------------------------------------------------
+// RENAMING a cluster (memql#3515)
+//
+// The mirror of the removal above, and the same lesson: the entry is not the
+// cluster. A rename that moved only the YAML row left the thirty-day refresh
+// token under the OLD name -- a key SecretStorage cannot enumerate to find
+// again -- so the operator was silently signed out of a cluster they had only
+// renamed, and a live credential was orphaned on the machine.
+// -----------------------------------------------------------------------------
+
+test("a rename moves the entry AND the stored credential", async () => {
+  const file = await tempFile();
+  const secrets = signedIn("local");
+
+  await renameClusterCompletely(
+    file,
+    "local",
+    { name: "homelab", endpoint: "cockpit.local.znas.io:443" },
+    { secrets },
+  );
+
+  const parsed = await readClustersFile(file);
+  assert.deepEqual(
+    parsed.clusters.map((c) => c.name),
+    ["homelab", "staging"],
+  );
+  assert.equal(
+    secrets.values.get(refreshTokenSecretKey("homelab")),
+    "refresh-token-value",
+    "the refresh token must follow the cluster: a rename is not a sign-out",
+  );
+  assert.equal(secrets.values.get(accessTokenExpirySecretKey("homelab")), "1800000000");
+  assert.equal(
+    secrets.values.get(refreshTokenSecretKey("local")),
+    undefined,
+    "and nothing may be left behind under the old name",
+  );
+  assert.deepEqual(
+    JSON.parse(secrets.values.get(credentialIndexKey) as string),
+    ["homelab"],
+    "the index is the only way these secrets can ever be found again",
+  );
+});
+
+test("an edit that changes everything BUT the name leaves the credential alone", async () => {
+  const file = await tempFile();
+  const secrets = signedIn("local");
+
+  await renameClusterCompletely(
+    file,
+    "local",
+    { name: "local", endpoint: "cockpit.elsewhere.example.com:443" },
+    { secrets },
+  );
+
+  const parsed = await readClustersFile(file);
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.elsewhere.example.com:443");
+  assert.equal(
+    secrets.values.get(refreshTokenSecretKey("local")),
+    "refresh-token-value",
+    "an edit that is not a rename must not touch the credential at all",
+  );
+});
+
+test("a rename onto a name already taken is refused with the credential still in place", async () => {
+  const file = await tempFile();
+  const secrets = signedIn("local");
+
+  // ORDER IS LOAD-BEARING: the file write is the step that can refuse, so it
+  // runs first. Moving the secrets before it would sign the operator out of a
+  // cluster whose rename never happened.
+  await assert.rejects(
+    renameClusterCompletely(
+      file,
+      "local",
+      { name: "staging", endpoint: "cockpit.local.znas.io:443" },
+      { secrets },
+    ),
+    /already taken/,
+  );
+
+  assert.equal(
+    secrets.values.get(refreshTokenSecretKey("local")),
+    "refresh-token-value",
+    "the credential must stay under the name the cluster still has",
+  );
+  assert.equal(secrets.values.get(refreshTokenSecretKey("staging")), undefined);
+});
+
+test("a host with no SecretStorage still renames the entry", async () => {
+  const file = await tempFile();
+  await renameClusterCompletely(file, "local", { name: "homelab" }, {});
+
+  const parsed = await readClustersFile(file);
+  assert.deepEqual(
+    parsed.clusters.map((c) => c.name),
+    ["homelab", "staging"],
+  );
+});
+
+// -----------------------------------------------------------------------------
+// SWEEPING credentials whose cluster is gone (memql#3515)
+//
+// The catch-all for a deletion this extension never saw: the Cockpit writes
+// clusters.yaml too, and an operator can edit it by hand.
+// -----------------------------------------------------------------------------
+
+test("sweeps the credentials of clusters the registry no longer carries", async () => {
+  const file = await tempFile();
+  const secrets = signedIn("local");
+  secrets.values.set(refreshTokenSecretKey("deleted-elsewhere"), "orphan");
+  secrets.values.set(accessTokenExpirySecretKey("deleted-elsewhere"), "1800000000");
+  secrets.values.set(credentialIndexKey, JSON.stringify(["local", "deleted-elsewhere"]));
+
+  const swept = await sweepOrphanedCredentials(file, { secrets });
+
+  assert.deepEqual(swept, ["deleted-elsewhere"]);
+  assert.equal(secrets.values.get(refreshTokenSecretKey("deleted-elsewhere")), undefined);
+  assert.equal(secrets.values.get(accessTokenExpirySecretKey("deleted-elsewhere")), undefined);
+  assert.equal(
+    secrets.values.get(refreshTokenSecretKey("local")),
+    "refresh-token-value",
+    "a cluster that is still in the file keeps its credential",
+  );
+});
+
+test("an unreadable registry sweeps NOTHING", async () => {
+  // The failure mode this guards is total: a file that cannot be parsed carries
+  // no cluster names, and a sweep that took that at face value would delete
+  // every credential on the machine over a YAML typo the Cockpit is mid-write.
+  const file = await tempFile("clusters:\n  - name: local\n   bad indent: [\n");
+  const secrets = signedIn("local");
+
+  const swept = await sweepOrphanedCredentials(file, { secrets });
+
+  assert.deepEqual(swept, []);
+  assert.equal(secrets.values.get(refreshTokenSecretKey("local")), "refresh-token-value");
+});
+
+test("a host with no SecretStorage sweeps nothing and does not fail", async () => {
+  const file = await tempFile();
+  assert.deepEqual(await sweepOrphanedCredentials(file, {}), []);
 });

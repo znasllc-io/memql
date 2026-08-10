@@ -25,7 +25,13 @@
 // Refs: #3465 #3464 #3463
 
 import { ClusterCredentialStore, type SecretStore } from "../auth/store.js";
-import { readClustersFile, removeCluster } from "./file.js";
+import {
+  readClustersFile,
+  readClustersFileSafe,
+  removeCluster,
+  upsertCluster,
+  type ClusterUpdate,
+} from "./file.js";
 import type { ClusterConfig } from "./model.js";
 
 export interface RemoveClusterDeps {
@@ -102,6 +108,67 @@ export async function removeClusterCompletely(
   await new ClusterCredentialStore(deps.secrets).clear(name);
 
   return removeCluster(clustersPath, name);
+}
+
+/**
+ * Renames a cluster's entry AND the credential that is keyed by its name.
+ *
+ * The same lesson as removeClusterCompletely, from the other direction: the
+ * ENTRY is not the cluster. `upsertCluster` moves the YAML row and the
+ * `selected_cluster` reference; the refresh token and its expiry live in
+ * SecretStorage under a key composed from the name, and nothing in the file
+ * write can know that. Left at the file write alone -- which is what shipped
+ * until memql#3515 -- renaming a signed-in cluster silently signed the operator
+ * out of it and stranded a thirty-day credential under a key SecretStorage
+ * cannot enumerate to find again.
+ *
+ * ORDER IS LOAD-BEARING, and it is the OPPOSITE of the removal's. There, the
+ * irrecoverable step (the live connection) ran first. Here the file write is
+ * the only step that can REFUSE -- renaming onto a name already in the registry
+ * throws -- and moving the secrets before it would sign an operator out of a
+ * cluster whose rename never happened. So the fallible step runs first, and the
+ * secrets follow a rename that actually took.
+ *
+ * A rename is not a sign-out and not a re-authorization: `rename` is a no-op
+ * when the name did not change, so this is also the ordinary edit path.
+ */
+export async function renameClusterCompletely(
+  clustersPath: string,
+  previousName: string,
+  edited: ClusterUpdate,
+  deps: Pick<RemoveClusterDeps, "secrets">,
+): Promise<void> {
+  await upsertCluster(clustersPath, edited, previousName);
+  await new ClusterCredentialStore(deps.secrets).rename(previousName, edited.name);
+}
+
+/**
+ * Deletes the stored credentials of clusters the registry no longer carries,
+ * and returns the names swept.
+ *
+ * The catch-all for a deletion this extension never saw. clusters.yaml is
+ * SHARED -- the memQL Cockpit writes it, and an operator can edit it by hand --
+ * so a cluster can disappear without any command here running, leaving a
+ * thirty-day refresh token behind under a key nothing would ever look at again.
+ * The credential index exists precisely so those can still be found
+ * (auth/store.ts), and this is what consults it.
+ *
+ * A FILE THAT CANNOT BE READ SWEEPS NOTHING. That is the whole reason this
+ * reads through `readClustersFileSafe` rather than the throwing variant and
+ * returns instead of propagating: an unparseable registry carries no cluster
+ * names, so taking it at face value would delete every credential on the
+ * machine over a YAML typo the Cockpit is halfway through writing. "I could not
+ * tell" and "there are none" must not produce the same action.
+ */
+export async function sweepOrphanedCredentials(
+  clustersPath: string,
+  deps: Pick<RemoveClusterDeps, "secrets">,
+): Promise<string[]> {
+  const result = await readClustersFileSafe(clustersPath);
+  if (!result.ok) return [];
+  return new ClusterCredentialStore(deps.secrets).reconcile(
+    result.file.clusters.map((cluster) => cluster.name),
+  );
 }
 
 /**
