@@ -113,7 +113,10 @@ test("a run cannot begin while a required field is empty", () => {
   s.chooseAction("install");
   assert.equal(s.beginRun(), false, "an incomplete form must not start an install");
   assert.equal(s.screen, "collect");
-  assert.ok(s.errors.some((e) => e.field === "domain"));
+  // `ownerEmail` rather than `domain`: the domain carries a default now
+  // (#3473), so it is no longer an example of an empty required field. The
+  // four fields only a person can supply are.
+  assert.ok(s.errors.some((e) => e.field === "ownerEmail"));
 });
 
 test("a complete form begins the run", () => {
@@ -145,8 +148,10 @@ test("editing a field clears its error without clearing the others", () => {
   s.chooseAction("install");
   s.beginRun();
   const before = s.errors.length;
-  s.setInput("domain", "local.znas.io");
-  assert.ok(!s.errors.some((e) => e.field === "domain"));
+  // Corrects `ownerEmail` rather than `domain` -- the domain is pre-filled
+  // (#3473) and so has no error to clear.
+  s.setInput("ownerEmail", "ada@example.com");
+  assert.ok(!s.errors.some((e) => e.field === "ownerEmail"));
   assert.equal(s.errors.length, before - 1, "only the corrected field's error may go");
 });
 
