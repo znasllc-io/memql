@@ -62,7 +62,6 @@ import {
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { resolveInstallRoot } from './install/root.js';
-import { defaultReceiptPath } from './install/receipt.js';
 import {
   AutomationRunner,
   type AutomationRunEngine,
@@ -328,6 +327,40 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // whole reason opening the menu twice does not dial twice.
   const presence = new ClusterPresence({ clustersPath });
 
+  // "Forget this cluster", as one call: the entry, the stored credential and
+  // the live connection. Lifted out of the memql.clusters.remove handler
+  // because the add-a-cluster page needs the same operation after an uninstall
+  // -- a cluster that is off the machine must not stay in the list -- and two
+  // spellings of it would be two answers to "what does removing a cluster
+  // touch?" (memql#3476).
+  const removeRegistryEntry = (name: string): Promise<ClusterConfig> => {
+    // Only a LIVE connection to this cluster counts; a disconnected state can
+    // still name the cluster it was last dialled to.
+    const state = connections?.state;
+    const connectedClusterName =
+      state !== undefined && state.status !== 'disconnected' ? state.clusterName : undefined;
+    return removeClusterCompletely(clustersPath, name, {
+      secrets: context.secrets,
+      connectedClusterName,
+      disconnect: () => connections?.disconnect(),
+    });
+  };
+
+  // What the add-a-cluster page needs from activation. Built per open rather
+  // than held, so `installRootFor` is answered against the context that is
+  // actually running the extension.
+  const addClusterDeps = (): {
+    clustersPath: string;
+    refreshTree: () => void;
+    installRoot: string;
+    removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
+  } => ({
+    clustersPath,
+    refreshTree: () => clustersTree.refresh(),
+    installRoot: installRootFor(context),
+    removeRegistryEntry,
+  });
+
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
     commands.registerCommand('memql.clusters.disconnect', async () => {
@@ -420,12 +453,28 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // the page carries has landed. The remote branch is already off it: the
       // page's own form registers the cluster (memql#3475), so nothing on this
       // path reaches promptForCluster's input-box sequence any more.
-      AddClusterPanel.show(context, presence, {
-        clustersPath,
-        refreshTree: () => clustersTree.refresh(),
-        installRoot: installRootFor(context),
-        receiptFile: defaultReceiptPath(),
-      });
+      AddClusterPanel.show(context, presence, addClusterDeps());
+    }),
+    // The irreversible half of the pair D1 keeps apart (memql#3476). It is
+    // contributed on `memqlLocalCluster` rows only and never as an inline icon,
+    // so it cannot be hit by aiming at the trash can next to it.
+    //
+    // THE TREE ROW IS NOT AN ARGUMENT. There is exactly one local cluster --
+    // the receipt describes one install and presence finds one `local: true`
+    // entry -- so the page uninstalls THE local cluster rather than the row
+    // that was clicked. From the palette, where no row exists, the behaviour is
+    // therefore identical; a machine with nothing installed gets the preview's
+    // own refusal, which names the missing receipt.
+    commands.registerCommand('memql.clusters.uninstall', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'uninstall');
+    }),
+    // Repair is the install graph re-run: every step verifies first and skips
+    // when already satisfied, so there is no second graph and no second run
+    // path -- only different wording. Registered as its own command because the
+    // cluster panel's primary control has to have something to invoke
+    // (memql#3476, design D5).
+    commands.registerCommand('memql.clusters.repair', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'repair');
     }),
     commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));

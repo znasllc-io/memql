@@ -854,14 +854,17 @@ ${state.error === "" ? "" : `<div class="error">ERROR: ${escapeHtml(state.error)
 
 // The label each primary control carries, and the set this panel can render.
 //
-// `repair` is deliberately ABSENT. It opens the add-a-cluster page, which does
-// not exist yet (#3476) -- and a button that goes nowhere is worse than none,
-// because the reason line above it already tells the operator their local
-// cluster needs repairing. The entry lands with the page it opens.
+// `repair` has landed with the page it opens (memql#3476). It is the one
+// control here that does not act on the connection: the others reconnect,
+// re-authenticate or fix a registry entry, while this one opens the
+// add-a-cluster page on its repair branch and re-runs the install graph over a
+// cluster that stopped answering. Every step of that graph verifies first and
+// skips when already satisfied, which is why re-running it IS the repair.
 const PRIMARY_CONTROL_LABELS: Partial<Record<PrimaryControlId, string>> = {
   connect: "Connect",
   signIn: "Sign In",
   edit: "Edit Cluster",
+  repair: "Repair Local Cluster",
 };
 
 // The commands each control invokes. Kept beside the labels so a control can
@@ -870,6 +873,7 @@ const PRIMARY_CONTROL_COMMANDS: Partial<Record<PrimaryControlId, string>> = {
   connect: "memql.clusters.select",
   signIn: "memql.clusters.signIn",
   edit: "memql.clusters.edit",
+  repair: "memql.clusters.repair",
 };
 
 // The ids runAction will accept off the untrusted postMessage channel. A

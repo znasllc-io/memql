@@ -27,6 +27,7 @@ import * as vscode from "vscode";
 import {
   escapeHtml,
   renderInstallSteps,
+  renderRemovalPreview,
   renderToHtml,
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
@@ -39,6 +40,16 @@ import {
   type ClusterPresence,
   type PresenceVerdict,
 } from "../clusters/presence.js";
+import { completeLocalUninstall } from "../clusters/registry.js";
+import { defaultReceiptPath } from "../install/receipt.js";
+import { removalPreviewItems } from "../install/removalPreview.js";
+import {
+  previewUninstall,
+  runInstall,
+  runUninstall,
+  type SessionOptions,
+  type UninstallPreview,
+} from "../install/session.js";
 import {
   AddClusterState,
   requiredFields,
@@ -46,8 +57,8 @@ import {
   type InputField,
 } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
-import { runInstall } from "../install/session.js";
 import type { ExecutionReport } from "../install/executor.js";
+import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
 const CHOICE_ACTIONS: readonly AddClusterAction[] = [
@@ -90,6 +101,21 @@ const FIELD_LABELS: Record<InputField, string> = {
 const CONNECT_FIELDS: readonly ConnectField[] = ["name", "domain", "endpoint", "token"];
 
 const CONNECT_ACTIONS = ["save", "discard"] as const;
+
+/**
+ * The uninstall screen's actions (memql#3476) -- a THIRD literal list, for the
+ * reason CONNECT_FIELDS gives for being a second one.
+ *
+ * It matters more here than anywhere else on this page. Every other action on
+ * this channel opens a screen or writes a registry entry; `uninstallStart`
+ * deletes a k3d cluster, a block of /etc/hosts and a certificate authority the
+ * operator's browsers trust. A value that reached that branch by being indexed
+ * into a table, or cast, would be an irreversible operation started by whatever
+ * the webview happened to post.
+ */
+const UNINSTALL_ACTIONS = ["uninstallStart", "uninstallCancel", "uninstallBack"] as const;
+
+type UninstallAction = (typeof UNINSTALL_ACTIONS)[number];
 
 const CONNECT_LABELS: Record<ConnectField, string> = {
   name: "Cluster name",
@@ -135,23 +161,27 @@ export interface AddClusterDeps {
   /** Repaints the Clusters view once an entry lands. */
   refreshTree: () => void;
   /**
-   * What `SessionOptions.root` must be on THIS installation (memql#3487).
+   * Where the graph documents and capability scripts are, from
+   * `installRootFor` (memql#3487).
    *
-   * `installRootFor(context)` in extension.ts: the staged copy of `scripts/`
-   * inside a packaged extension, or the repository root when running out of a
-   * checkout. Resolved at activation for the same reason `clustersPath` is --
-   * a panel that worked it out itself would be a second opinion about where
-   * the capability scripts live.
+   * Resolved by activation rather than here because the answer depends on
+   * whether this extension was PACKAGED -- a .vsix carries a staged copy of
+   * `scripts/`, a checkout has the real one two levels up -- and
+   * `context.extensionPath` is the only input to that question.
+   *
+   * The install run (#3474) and the uninstall run (#3476) pass the same value
+   * as `SessionOptions.root`; one root, resolved once.
    */
   installRoot: string;
   /**
-   * The install receipt, `~/.memql/install-receipt.json` by default.
+   * Drops a cluster's registry entry, its stored credential and its live
+   * connection, exactly as the "Remove from list" command does.
    *
-   * The executor writes it after EVERY step through an atomic rename, which is
-   * what makes a cancelled run still fully uninstallable -- so this path is
-   * load-bearing for cancellation, not just for a later uninstall.
+   * Injected rather than called directly: the whole operation needs
+   * SecretStorage and the ConnectionManager, and a panel that reached for
+   * either would be a second opinion about state activation owns.
    */
-  receiptFile: string;
+  removeRegistryEntry: (name: string) => Promise<unknown>;
 }
 
 export class AddClusterPanel {
@@ -168,26 +198,74 @@ export class AddClusterPanel {
   /** Why the run could not be attempted at all. Not a step failure. */
   private runError = "";
 
+  /** The removal's own state (memql#3476). See state/uninstallRun.ts. */
+  private readonly uninstall = new UninstallRunState();
+  /** What an uninstall would do, from previewUninstall. Undefined until read. */
+  private uninstallPreview: UninstallPreview | undefined;
+  /** Why the preview could not be produced -- most often: no receipt. */
+  private uninstallProblem = "";
+  private uninstallAbort: AbortController | undefined;
+  private uninstalling = false;
+  /**
+   * The registry name of the local cluster, read BEFORE the removal runs.
+   *
+   * The entry is found by its `local: true` flag, and the uninstall is about to
+   * make every other thing that flag refers to untrue. Reading the name while
+   * the operator is still looking at what will go keeps the follow-up aimed at
+   * the cluster they consented to remove.
+   */
+  private localClusterName: string | undefined;
+
   /**
    * Opens the page, or reveals the one already open.
    *
    * ONE PANEL. A second "Add a cluster" tab would be a second wizard over the
    * same machine, and two runs against one k3d cluster is not a state anything
    * downstream is prepared for.
+   *
+   * `initialAction` opens the page ON a branch instead of on the cards, for the
+   * two affordances that name the branch themselves: the tree's "Uninstall
+   * local cluster..." entry and the cluster panel's "Repair local cluster"
+   * control (memql#3476). Making them route through the cards would ask the
+   * operator to choose again something they have already chosen.
    */
   static show(
     context: vscode.ExtensionContext,
     presence: ClusterPresence,
     deps: AddClusterDeps,
+    initialAction?: AddClusterAction,
   ): AddClusterPanel {
     const existing = AddClusterPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
+      existing.openOn(initialAction);
       return existing;
     }
     const panel = new AddClusterPanel(context, presence, deps);
     AddClusterPanel.open_ = panel;
+    panel.openOn(initialAction);
     return panel;
+  }
+
+  /**
+   * Puts the page on a named branch, as if the operator had clicked its card.
+   *
+   * Goes through `chooseAction` rather than setting a screen, so a branch
+   * opened from a command is the same state as one opened from the cards --
+   * there is no second route into a screen for the state machine to disagree
+   * about.
+   */
+  private openOn(action: AddClusterAction | undefined): void {
+    if (action === undefined) return;
+    // A PAGE MID-RUN IS REVEALED, NEVER RE-ROUTED. The command may arrive while
+    // this panel is executing a graph, and switching the screen out from under
+    // a run would leave the operator with no view of work that is still
+    // happening -- while the events it emits kept folding into a machine
+    // nothing is drawing.
+    if (this.uninstalling || this.state.screen === "running") return;
+    this.state.chooseAction(action);
+    if (action === "uninstall") void this.loadUninstallPreview();
+    this.render();
   }
 
   private constructor(
@@ -255,6 +333,10 @@ export class AddClusterPanel {
       // registry that never arrives costs the inline refusal but not the
       // write-time one.
       if (action === "connect") void this.loadRegistry();
+      // The itemized list is the confirmation, so it is read the moment the
+      // branch opens rather than behind a further click: there is nothing on
+      // this screen for the operator to do until it is on screen.
+      if (action === "uninstall") void this.loadUninstallPreview();
       this.render();
       return;
     }
@@ -325,6 +407,14 @@ export class AddClusterPanel {
       this.state.cancel();
       this.render();
     }
+    // The uninstall screen's own channel (memql#3476), recognised against
+    // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
+    // particular is reached only by comparison against a name written out in
+    // this file.
+    if (typeof type === "string") {
+      const uninstallAction = UNINSTALL_ACTIONS.find((known) => known === type);
+      if (uninstallAction !== undefined) this.onUninstallAction(uninstallAction);
+    }
   }
 
   /**
@@ -353,7 +443,10 @@ export class AddClusterPanel {
       report = await runInstall(
         {
           root: this.deps.installRoot,
-          receiptFile: this.deps.receiptFile,
+          // The same default the uninstall side reads (#3476), so the run that
+          // writes the receipt and the run that reverses it cannot disagree
+          // about where it lives.
+          receiptFile: defaultReceiptPath(),
           skip: new Set<string>(),
           // The graph pins `anthropic` on the providerKey step; this is the
           // same value, passed for the seedBootstrap step that also needs it.
@@ -491,6 +584,160 @@ export class AddClusterPanel {
   }
 
   // ---------------------------------------------------------------------------
+  // taking the cluster off the machine (memql#3476)
+  // ---------------------------------------------------------------------------
+
+  /** Routes one approved action off the uninstall screen. */
+  private onUninstallAction(action: UninstallAction): void {
+    switch (action) {
+      case "uninstallStart":
+        void this.startUninstall();
+        return;
+      case "uninstallCancel":
+        // Stops at the next WAVE boundary, never mid-step: a capability script
+        // is the thing removing a cluster or a hosts block, and killing one
+        // partway leaves the artifact half-gone. See ExecuteOptions.signal.
+        this.uninstallAbort?.abort();
+        return;
+      case "uninstallBack":
+        // Escape and Cancel both land here, and both must leave the machine
+        // untouched -- which they do by construction, since nothing on this
+        // screen runs anything until `uninstallStart`.
+        if (this.uninstalling) return;
+        this.uninstall.reset();
+        this.uninstallPreview = undefined;
+        this.uninstallProblem = "";
+        this.state.back();
+        this.render();
+        // The verdict may have changed under the page -- this is also the way
+        // back from a COMPLETED removal, where the cards must no longer offer
+        // to uninstall a cluster that is gone.
+        void this.refreshVerdict();
+        return;
+    }
+  }
+
+  /**
+   * The run-time inputs a removal needs.
+   *
+   * Everything else an uninstall step is given comes off the RECEIPT: where the
+   * artifact landed, and whether the installer created it or merely found it.
+   * That is why this carries no domain, no owner and no tag -- a removal is not
+   * configured, it is remembered.
+   */
+  private uninstallOptions(): SessionOptions {
+    return {
+      root: this.deps.installRoot,
+      receiptFile: defaultReceiptPath(),
+      // Nothing is skipped. A skip list is how an operator narrows an INSTALL;
+      // narrowing an uninstall would produce a machine in a state no receipt
+      // describes, and this screen offers no such control.
+      skip: new Set<string>(),
+      // Required by the shape and meaningless to a removal: `provider` names
+      // the AI vendor an install seeds a key for.
+      provider: "",
+      stepParams: {},
+    };
+  }
+
+  /**
+   * Works out what an uninstall would do, and shows it.
+   *
+   * NOTHING RUNS HERE. `previewUninstall` is pure over the receipt -- it plans
+   * every step and executes none -- which is what makes an itemized
+   * confirmation possible without a dry-run mode inside the scripts.
+   *
+   * A FAILURE IS A SENTENCE, NOT AN EMPTY LIST. The case that matters is a
+   * missing receipt, where `previewUninstall` refuses rather than falling back
+   * to the graph's own idea of what an install creates. Rendering that as "this
+   * would remove nothing" would be the same claim an empty receipt makes, and
+   * the two are opposite news.
+   */
+  private async loadUninstallPreview(): Promise<void> {
+    this.uninstall.reset();
+    this.uninstallPreview = undefined;
+    this.uninstallProblem = "";
+    this.render();
+
+    try {
+      this.localClusterName = (await this.presence.get()).clusterName;
+    } catch {
+      // A detection that will not answer costs the registry cleanup, not the
+      // uninstall. The artifacts still go; the entry is left for the operator's
+      // own "Remove from list".
+      this.localClusterName = undefined;
+    }
+    try {
+      this.uninstallPreview = await previewUninstall(this.uninstallOptions());
+    } catch (err) {
+      this.uninstallProblem = err instanceof Error ? err.message : String(err);
+    }
+    this.render();
+  }
+
+  /**
+   * Runs the removal the operator has just approved.
+   *
+   * THE PREVIEW IS THE PRECONDITION, not merely the confirmation: with no
+   * preview on screen there is no itemized list for consent to have been given
+   * to, so this refuses rather than running an unseen one.
+   *
+   * IT DOES NOT ASK THE CLUSTER ANYTHING. An uninstall reverses a receipt, and
+   * a cluster that stopped answering is one of the two states this page is most
+   * likely opened in -- gating the removal on reachability would strand exactly
+   * the machine that most needs cleaning.
+   */
+  private async startUninstall(): Promise<void> {
+    // A second click is not a second uninstall: two graph runs over one machine
+    // would have each step racing the other's removal of the same artifact.
+    if (this.uninstalling || this.uninstallPreview === undefined) return;
+
+    this.uninstalling = true;
+    const controller = new AbortController();
+    this.uninstallAbort = controller;
+    this.uninstall.begin();
+    this.render();
+
+    try {
+      const report = await runUninstall(this.uninstallOptions(), {
+        onEvent: (event) => {
+          this.uninstall.apply(event);
+          this.render();
+        },
+        signal: controller.signal,
+      });
+      this.uninstall.finish(report);
+      if (report.ok && report.cancelled !== true) {
+        await this.completeUninstall();
+      } else {
+        // A partial removal still changed the machine, so the memo describing
+        // it has to go. The registry entry does NOT: it still names a cluster
+        // some of whose artifacts are there, and dropping it would leave those
+        // with nothing in the editor that can see them.
+        this.presence.invalidate();
+        this.deps.refreshTree();
+      }
+    } catch (err) {
+      this.uninstall.fail(err instanceof Error ? err.message : String(err));
+    } finally {
+      this.uninstalling = false;
+      this.uninstallAbort = undefined;
+      this.render();
+    }
+  }
+
+  /** The three things that follow a clean removal. See completeLocalUninstall. */
+  private async completeUninstall(): Promise<void> {
+    const problem = await completeLocalUninstall({
+      clusterName: this.localClusterName,
+      removeEntry: (name) => this.deps.removeRegistryEntry(name),
+      invalidatePresence: () => this.presence.invalidate(),
+      refreshTree: () => this.deps.refreshTree(),
+    });
+    if (problem !== "") this.uninstall.noteFollowUpProblem(problem);
+  }
+
+  // ---------------------------------------------------------------------------
   // rendering
   // ---------------------------------------------------------------------------
 
@@ -609,6 +856,7 @@ ${this.bodyHtml()}
       case "connect":
         return this.connectHtml();
       case "uninstallPreview":
+        return this.uninstallHtml();
       case "done":
         return this.placeholderHtml();
     }
@@ -793,6 +1041,199 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
   <button class="primary" type="button" data-connect-act="save">Save cluster</button>
   <button class="secondary" type="button" data-connect-act="discard">Cancel</button>
 </div>
+</div>`;
+  }
+
+  /**
+   * Taking the local cluster off this machine (memql#3476).
+   *
+   * ONE SCREEN, FIVE PHASES, and they stay on this branch rather than borrowing
+   * the install's `running` / `failedStep` screens. Those screens offer Retry
+   * and Switch-to-Guided per step, which an uninstall has no version of, and
+   * their wording is about building a cluster. What they DO share is the row
+   * projection: `toStepViews` draws a removal's steps exactly as it draws an
+   * install's, because a step is a step.
+   */
+  private uninstallHtml(): string {
+    switch (this.uninstall.phase) {
+      case "preview":
+        return this.uninstallListHtml();
+      case "running":
+        return this.uninstallRunningHtml();
+      case "removed":
+        return this.uninstallRemovedHtml();
+      case "stopped":
+        return this.uninstallStoppedHtml();
+      case "failed":
+        return this.uninstallFailedHtml();
+    }
+  }
+
+  /**
+   * The itemized dry run -- and the confirmation.
+   *
+   * THERE IS NO SEPARATE YES/NO BOX (design D6). The list and the control that
+   * acts on it are on one screen with nothing between them, because a modal
+   * asking "are you sure?" after an itemized list adds a click and no
+   * information: what the operator is consenting to is the list.
+   *
+   * BOTH KINDS RENDER IN ONE LIST. Hiding the preserved half behind a
+   * disclosure would make "the uninstall leaves something behind" the one fact
+   * an operator has to go looking for, and it is exactly the fact most likely
+   * to change their mind.
+   */
+  private uninstallListHtml(): string {
+    if (this.uninstallProblem !== "") {
+      return `<h1>Uninstall the local cluster</h1>
+<p class="lede">memQL cannot say what an uninstall would remove, so it will not run one.</p>
+<p class="error">${escapeHtml(this.uninstallProblem)}</p>
+<div class="actions">
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
+</div>`;
+    }
+
+    const preview = this.uninstallPreview;
+    if (preview === undefined) {
+      return `<h1>Uninstall the local cluster</h1>
+<p class="lede">Reading the install receipt to work out exactly what is on this machine.</p>`;
+    }
+
+    // The projection is removalPreview.ts's, and it re-derives nothing: which
+    // artifacts are preserved, in what order they read, and what each one is
+    // called were all settled by previewUninstall against the receipt.
+    const items = removalPreviewItems(preview);
+    const privileged = items.filter(
+      (item) => item.elevation !== undefined && item.elevation !== "none",
+    );
+    const elevationNote =
+      privileged.length === 0
+        ? ""
+        : `<p class="hint">${escapeHtml(
+            "The marked steps interrupt the run to ask for something outside memQL's own " +
+              "footprint: [sudo] needs your password to edit a system file, [user-trust] needs " +
+              "your approval to withdraw a certificate authority your browsers trust.",
+          )}</p>`;
+
+    // data-escape-act, so Escape means "leave this alone" HERE and does not
+    // reach a screen that never asked for it. Leaving costs nothing: not one
+    // step has run.
+    return `<h1>Uninstall the local cluster</h1>
+<p class="lede">${escapeHtml(
+      "This list is the confirmation -- there is no second prompt. It is built from the " +
+        "install receipt, so nothing this machine had before the install is touched.",
+    )}</p>
+<div data-escape-act="uninstallBack">
+${renderToHtml(renderRemovalPreview(items))}
+${elevationNote}
+<div class="actions">
+  <button class="primary" type="button" data-act="uninstallStart">Uninstall -- remove the items above</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Cancel</button>
+</div>
+</div>`;
+  }
+
+  /** The removal in flight. */
+  private uninstallRunningHtml(): string {
+    const steps = this.uninstall.steps;
+    const body =
+      steps.length === 0
+        ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
+        : renderToHtml(renderInstallSteps(toStepViews(steps)));
+    // Cancel stops at the next wave boundary, so it is offered only while there
+    // is a wave left to stop.
+    const actions = runIsSettled(steps)
+      ? ""
+      : `<div class="actions">
+  <button class="secondary" type="button" data-act="uninstallCancel">Cancel</button>
+</div>`;
+
+    return `<h1>Removing the local cluster</h1>
+<p class="lede">${escapeHtml(
+      "Each step reverses one entry in the receipt, in the order the graph gives -- each tool " +
+        "outlives the artifact it is needed to remove.",
+    )}</p>
+${body}
+${actions}`;
+  }
+
+  /** It is off the machine. */
+  private uninstallRemovedHtml(): string {
+    const steps = this.uninstall.steps;
+    const removed = steps.filter((step) => step.state === "done").length;
+    const kept = steps.filter((step) => step.state === "preserved").length;
+    const summary =
+      kept === 0
+        ? `${removed} artifact${removed === 1 ? "" : "s"} removed.`
+        : `${removed} artifact${removed === 1 ? "" : "s"} removed; ${kept} left in place because ` +
+          `${kept === 1 ? "it was" : "they were"} already on this machine before the install.`;
+    // The follow-up is reported as its own news. The cluster IS gone -- saying
+    // the uninstall failed because a YAML write did would send the operator to
+    // repeat a removal with nothing left to remove.
+    const followUp =
+      this.uninstall.followUpProblem === ""
+        ? ""
+        : `<p class="error">${escapeHtml(this.uninstall.followUpProblem)}</p>`;
+
+    return `<h1>The local cluster is off this machine</h1>
+<p class="lede">${escapeHtml(summary)}</p>
+${renderToHtml(renderInstallSteps(toStepViews(steps)))}
+${followUp}
+<div class="actions">
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
+</div>`;
+  }
+
+  /** The operator stopped it. */
+  private uninstallStoppedHtml(): string {
+    return `<h1>Removal stopped</h1>
+<p class="lede">${escapeHtml(
+      "What had already been removed is gone; everything else is still here. An uninstall " +
+        "does not rewrite the receipt, so running it again takes up the rest -- the steps that " +
+        "already ran find their artifact missing and do nothing.",
+    )}</p>
+${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
+<div class="actions">
+  <button class="primary" type="button" data-act="uninstallStart">Run the rest</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
+</div>`;
+  }
+
+  /**
+   * A step refused, and WHICH one.
+   *
+   * The failing step is named in the heading rather than left for the operator
+   * to find in the list: a failed reversal means one specific artifact is still
+   * on the machine, and "the uninstall failed" does not say which.
+   */
+  private uninstallFailedHtml(): string {
+    const failed = this.uninstall.failure;
+    if (failed === undefined) {
+      // No step ever reported -- the run could not start. The sentence is the
+      // whole of what there is to say.
+      return `<h1>The uninstall did not run</h1>
+<p class="lede">${escapeHtml(
+        this.uninstall.problem === ""
+          ? "The removal ended without reporting a step."
+          : this.uninstall.problem,
+      )}</p>
+<div class="actions">
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
+</div>`;
+    }
+
+    const guidance = failureGuidance(failed.exitCode);
+    return `<h1>${escapeHtml(failed.description === "" ? failed.id : failed.description)} failed</h1>
+<p class="lede">${escapeHtml(guidance.headline)}</p>
+<p>${escapeHtml(guidance.advice)}</p>
+<p>${escapeHtml(
+      `The artifact this step names is still on this machine, and the receipt still records it ` +
+        `-- an uninstall never rewrites the receipt, so once the cause is dealt with, running it ` +
+        `again repeats exactly this list.`,
+    )}</p>
+${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
+<div class="actions">
+  <button class="primary" type="button" data-act="uninstallStart">Try the removal again</button>
+  <button class="secondary" type="button" data-act="uninstallBack">Back</button>
 </div>`;
   }
 
