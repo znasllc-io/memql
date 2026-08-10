@@ -74,7 +74,9 @@ suite("deployErrorAuditEventId", () => {
   });
 
   test("a failure the engine did not audit carries none", () => {
-    // INVALID_ARGUMENT is rejected before the role gate, so no event exists.
+    // INVALID_ARGUMENT is a caller error the gate does not record. Since
+    // memql#3505 it also means the caller CLEARED the role floor -- the gate
+    // runs first on every RPC -- so no event exists either way.
     expect(deployErrorAuditEventId(new DeployControlError("cut_version", 3, "bad bump"))).toBe("");
   });
 

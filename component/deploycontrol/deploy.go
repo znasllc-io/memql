@@ -63,15 +63,16 @@ type deploymentRecord struct {
 // developer gated; emits exactly one audit event.
 func (s *Service) Deploy(ctx context.Context, req *memqlv1.DeployRequest) (*memqlv1.ActionResult, error) {
 	deploymentID := strings.TrimSpace(req.GetDeploymentId())
-	if deploymentID == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: deployment_id is required")
-	}
 	detail := map[string]any{"deploymentId": deploymentID}
 	// Forward deploy is developer-or-above (#1876): developer/admin/owner
-	// may ship a cut version.
+	// may ship a cut version. The gate runs BEFORE argument validation
+	// (memql#3505; see the block comment in service.go).
 	act, err := s.authorizeDeploy(ctx, "deploy", detail)
 	if err != nil {
 		return nil, err
+	}
+	if deploymentID == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: deployment_id is required")
 	}
 
 	rec, err := s.loadDeployment(ctx, deploymentID)
@@ -120,14 +121,19 @@ func (s *Service) Deploy(ctx context.Context, req *memqlv1.DeployRequest) (*memq
 // (#2168). Rollback is owner-only (#1876); emits one audit event.
 func (s *Service) RollbackDeployment(ctx context.Context, req *memqlv1.RollbackDeploymentRequest) (*memqlv1.ActionResult, error) {
 	toID := strings.TrimSpace(req.GetToDeploymentId())
-	if toID == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: to_deployment_id is required")
-	}
 	detail := map[string]any{"toDeploymentId": toID}
-	// rollback is owner-only (#1876): not even admin may roll back.
+	// rollback is owner-only (#1876): not even admin may roll back. The gate
+	// runs BEFORE argument validation (memql#3505; see the block comment in
+	// service.go). This RPC is the sharpest case for that order on the whole
+	// surface: admin is below THIS floor and no other, so an unaudited
+	// argument rejection here was the one probe available to the caller
+	// holding every other deploy power.
 	act, err := s.authorizeOwner(ctx, "rollback_deployment", detail)
 	if err != nil {
 		return nil, err
+	}
+	if toID == "" {
+		return nil, status.Error(codes.InvalidArgument, "deploy console: to_deployment_id is required")
 	}
 
 	target, err := s.loadDeployment(ctx, toID)

@@ -184,9 +184,11 @@ func TestRefusalAuditIdIsIdenticalOnBothPaths(t *testing.T) {
 // bearing: an empty audit_event_id has to MEAN "no event was written", or a
 // consumer cannot tell a silent drop from an honest absence.
 //
-// Two shapes qualify. An argument rejection runs BEFORE the gate on several
-// RPCs, so it is refused without an actor ever being resolved and without an
-// audit event. A node with no service never reached the gate at all.
+// Two shapes qualify. An argument rejection is a CALLER error the gate does not
+// record: the caller below cleared the floor (memql#3505 put the gate first
+// everywhere, so reaching an argument error means the role check passed) and
+// the admitted path audits actions, not admissions. A node with no service
+// never reached the gate at all.
 func TestNonRefusalFailuresCarryNoAuditId(t *testing.T) {
 	t.Run("invalid argument is not audited", func(t *testing.T) {
 		svc, audit, _ := newParityService(t)
