@@ -174,7 +174,21 @@ function check_prerequisites() {
         cap_fail 4 "missing required tools: ${missing[*]}"
     fi
 
-    if ! docker info &>/dev/null; then
+    # The two ways `docker info` fails have completely different remedies, and
+    # reporting the second as the first turns a five-second fix into an
+    # afternoon (memql#3337). "permission denied ... docker.sock" means the
+    # daemon is running fine and THIS USER is not in the docker group --
+    # starting Docker again, forever, will not fix it.
+    local docker_probe
+    if ! docker_probe="$(docker info 2>&1)"; then
+        if grep -qi "permission denied" <<<"$docker_probe"; then
+            error "The Docker daemon is running, but $(id -un) cannot reach its socket."
+            error "You are not in the 'docker' group (groups: $(id -nG))."
+            error "Fix it, then start a NEW login session -- the group is read at login:"
+            error "    sudo usermod -aG docker \"\$USER\""
+            error "    newgrp docker      # this shell only; log out and back in for the rest"
+            cap_fail 4 "docker socket is not accessible to $(id -un)"
+        fi
         error "Docker daemon is not running. Start Docker Desktop first."
         cap_fail 4 "docker daemon is not running"
     fi

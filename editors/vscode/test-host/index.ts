@@ -54,6 +54,12 @@ import { ResultPanel, RunPanel } from "../src/webview/runPanel.js";
 import type { RunPanelHost } from "../src/webview/runPanel.js";
 
 import { info, runCases, skip, smoke, waitFor, warn } from "./harness.js";
+// A FUNCTION rather than an import-for-side-effect: cases run in registration
+// order, and an `import "./live.js"` would register them FIRST -- ES imports
+// are evaluated before the importing module's body, so the live cases would
+// run ahead of the activation case that everything else depends on. Calling it
+// at the bottom of this file is what actually puts them last.
+import { registerLiveCases } from "./live.js";
 
 const EXTENSION_ID = "znasllc.memql";
 
@@ -746,9 +752,13 @@ smoke("presence detection reads this host's real HOME and finds nothing installe
 // Not a placeholder for work left undone -- a standing, deliberate skip that
 // keeps the lane honest about the line it draws. A smoke lane that quietly
 // omitted the cluster-dependent half would read as covering more than it does.
-smoke("connection-dependent behaviour", () => {
+//
+// The line moved once (memql#3337): the read-only half of "what happens after
+// you connect" is now exercised by ./live.ts when a credentialed cluster is
+// configured. What stays here is what a process cannot assert about itself.
+smoke("connection-dependent behaviour beyond a read-only probe", () => {
   skip(
-    "by design: this lane never dials a cluster. Connecting, browsing concepts, paging rows, running a construct or an automation, and the Cluster tab's live data are covered by the manual checklist in docs/public/language/vscode-runtime-panel-verification.md."
+    "by design: no writes and no pixels. Running a mutation, the write confirmation, session-defining an edited buffer, the deploy actions and their type-to-confirm phrases, and every 'does it look right' item are covered by the manual checklist in docs/public/language/vscode-runtime-panel-verification.md. The read-only live cases are in ./live.ts."
   );
 });
 
@@ -760,5 +770,6 @@ smoke("connection-dependent behaviour", () => {
  */
 export async function run(): Promise<void> {
   info(`HOME=${os.homedir()}`);
+  registerLiveCases();
   await runCases();
 }
