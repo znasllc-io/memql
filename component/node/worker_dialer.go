@@ -54,6 +54,27 @@ func isWorkerType(t NodeType) bool {
 	}
 }
 
+// isDialableType reports whether the dialer may open an outbound stream to a
+// node of this type. It is isWorkerType plus the identity node (memql#3380).
+//
+// Identity is NOT a mesh worker and deliberately stays out of ValidNodeTypes:
+// it is the node-token ISSUER, it never dials a parent, and it must never
+// self-bootstrap a token (see NodeType's doc comment and EnsureBearerToken).
+// None of that says anything about the INBOUND direction, and one capability
+// forces the question: DeployControlService shells out against an on-disk
+// overlay checkout, so it exists only on identity, while the portal is served
+// by the bff. Without a dialable route from bff to identity, every deploy
+// control -- live state, cut, deploy, promote, rollback, rollout -- answers
+// UNIMPLEMENTED on the surface an operator actually uses.
+//
+// Reachability is all this grants. The identity node is still not a mesh EVENT
+// participant: EventBridge.forwardToPeers excludes it from every broadcast
+// (isMeshEventParticipant), so joining the bff's peer table does not start
+// fanning graph events at the auth service.
+func isDialableType(t NodeType) bool {
+	return isWorkerType(t) || t == NodeTypeIdentity
+}
+
 // ParseWorkerPeers parses the MEMQL_WORKER_PEERS env-var format:
 //
 //	"voice=voice:50059,agent=agent:50055,cognition=cognition:50054"
@@ -83,7 +104,7 @@ func ParseWorkerPeers(raw string) []WorkerTarget {
 			continue
 		}
 		nodeType := NodeType(typeStr)
-		if !ValidNodeTypes[nodeType] || !isWorkerType(nodeType) {
+		if !isDialableType(nodeType) {
 			continue
 		}
 		key := string(nodeType) + "@" + addr
@@ -154,6 +175,10 @@ type WorkerDialer struct {
 	sinkMu               sync.RWMutex
 	aiForwardSink        AiForwardResponseSink
 	workbenchForwardSink WorkbenchForwardResponseSink
+	// deployControlSink receives DeployControlForwardResponse messages on a
+	// managed connection (memql#3380). Set on the bff, whose dial set includes
+	// the identity node; nil elsewhere.
+	deployControlSink DeployControlForwardResponseSink
 }
 
 // dialEntry tracks a single active outbound dial. The conn is owned by
@@ -274,6 +299,19 @@ func (wd *WorkerDialer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRes
 	}
 	wd.sinkMu.Lock()
 	wd.workbenchForwardSink = sink
+	wd.sinkMu.Unlock()
+}
+
+// SetDeployControlForwardResponseSink installs the sink that receives
+// DeployControlForwardResponse messages arriving on our managed connections
+// (memql#3380). Called during bff bootstrap -- the bff dials the identity node
+// for the deploy surface. Thread-safe; may be called at any time.
+func (wd *WorkerDialer) SetDeployControlForwardResponseSink(sink DeployControlForwardResponseSink) {
+	if wd == nil {
+		return
+	}
+	wd.sinkMu.Lock()
+	wd.deployControlSink = sink
 	wd.sinkMu.Unlock()
 }
 
@@ -477,7 +515,7 @@ func (wd *WorkerDialer) discoverFromDB(ctx context.Context) []WorkerTarget {
 		fields := payload.GetFields()
 
 		nodeType := NodeType(strings.ToLower(strings.TrimSpace(fields["nodeType"].GetStringValue())))
-		if !isWorkerType(nodeType) {
+		if !isDialableType(nodeType) {
 			continue
 		}
 
@@ -713,6 +751,14 @@ func (wd *WorkerDialer) handleServerMessage(entry *dialEntry, msg *nodev1.NodeSe
 		wd.sinkMu.RUnlock()
 		if sink != nil {
 			sink.Dispatch(payload.WorkbenchForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_DeployControlForwardResponse:
+		wd.sinkMu.RLock()
+		sink := wd.deployControlSink
+		wd.sinkMu.RUnlock()
+		if sink != nil {
+			sink.Dispatch(payload.DeployControlForwardResponse)
 		}
 	}
 }

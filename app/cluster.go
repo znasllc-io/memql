@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/automations"
 	"github.com/znasllc-io/memql/component/events"
 	memqlgrpc "github.com/znasllc-io/memql/component/grpc"
+	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/component/server"
@@ -318,6 +319,28 @@ func (a *App) cluster() {
 				parentConnector.SetAiForwardResponseSink(forwarder)
 			}
 
+			// Deploy-control forwarding, bff -> identity (memql#3380). The
+			// portal is served ONLY by the bff and a SPA dials the origin that
+			// served it, while DeployControlService shells out against an
+			// on-disk overlay checkout and therefore exists only on the
+			// identity node. Without this route the portal's Deployments page
+			// renders populated -- history is ordinary concept rows -- and
+			// answers UNIMPLEMENTED to live state and to every control.
+			//
+			// The sinks go on every inbound channel a reply can arrive over:
+			// the WorkerDialer's own stream (the normal case, since the bff
+			// dials identity) and the parent connection (peer discovery can
+			// make identity this node's parent). The caller's authority rides
+			// the forward explicitly and is re-verified on the receiving side;
+			// see component/grpc/deploy_control_forward.go.
+			deployForwarder := memqlgrpc.NewDeployControlForwardRouter(peerMgr, a.Logger)
+			if a.grpcServer != nil {
+				a.grpcServer.SetDeployControlForwarder(deployForwarder)
+			}
+			if parentConnector != nil {
+				parentConnector.SetDeployControlForwardResponseSink(deployForwarder)
+			}
+
 			// Install the WorkerDialer so the BFF opens outbound
 			// NodeService streams to each worker. Without this the
 			// forwarder has no *peerConnection to Send on -- accepting
@@ -337,6 +360,7 @@ func (a *App) cluster() {
 				a.Logger,
 			); dialer != nil {
 				dialer.SetAiForwardResponseSink(forwarder)
+				dialer.SetDeployControlForwardResponseSink(deployForwarder)
 				a.Dependencies = append(a.Dependencies, dialer)
 			}
 		} else {
@@ -445,6 +469,26 @@ func (a *App) cluster() {
 			// the integration falls back to local dispatch when the
 			// router returns ErrNoWorkbenchPeer.
 			a.wireWorkbenchForwarding(nodeIdentity, peerMgr, nodeServer, parentConnector)
+		}
+	}
+
+	// Deploy-control receiving side (memql#3380). Installed on whichever node
+	// actually HAS a DeployControlService -- in practice the identity node,
+	// because the service shells out against an on-disk overlay checkout.
+	//
+	// Wired here rather than in setupDeployControlService because the NodeServer
+	// does not exist yet at that point in the identity build (it is created by
+	// this phase). The type assertion is how app/ reaches the service without a
+	// build tag: a.deployControlService is `any`, populated only by the
+	// identity-tagged bootstrap, so this is a no-op on every other binary.
+	if nodeServer != nil && a.deployControlService != nil {
+		if svc, ok := a.deployControlService.(memqlv1.DeployControlServiceServer); ok {
+			if h := memqlgrpc.NewDeployControlForwardHandler(svc, a.Logger); h != nil {
+				nodeServer.SetDeployControlForwardHandler(h)
+				a.Logger.Info("deploy-control forward handler installed on NodeService.Stream "+
+					"(the portal is served by the bff; deploy control lives here)",
+					"node_id", nodeIdentity.ID, "node_type", string(nodeIdentity.Type))
+			}
 		}
 	}
 

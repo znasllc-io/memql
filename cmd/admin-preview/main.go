@@ -6,7 +6,7 @@
 // portal -- `make portal-install && npm run dev` in clients/portal -- rather
 // than by rendering a template into a file. What is left here is the identity
 // service's own web surface: the public sign-in flow and the admin sign-in
-// page that establishes a session for /admin/deployments. Used during UI iteration so the operator can
+// page that establishes an admin session. Used during UI iteration so the operator can
 // look at the pages without setting up the magic-link / OAuth flow.
 //
 // The compiled app.css is copied to /tmp/admin-preview/static/app.css
@@ -56,14 +56,12 @@ func main() {
 
 	asset := func(p string) string { return p }
 
-	// Mirrors adminNav in component/identity/admin/server.go, which is down to
-	// one entry: the dashboard, users, tokens, audit, JWKS and settings pages
-	// all moved into the memQL portal in memql#3324. Their previews went with
-	// them -- a React page is previewed by running the portal, not by rendering
-	// templ into a file.
-	nav := []webtempl.NavLink{
-		{Href: "/admin/deployments", Label: "Deployments"},
-	}
+	// Mirrors adminNav in component/identity/admin/server.go, which is now
+	// EMPTY: the dashboard, users, tokens, audit, JWKS and settings pages moved
+	// into the memQL portal in memql#3324 and Deployments followed in
+	// memql#3380. Their previews went with them -- a React page is previewed by
+	// running the portal, not by rendering templ into a file.
+	var nav []webtempl.NavLink
 
 	layout := func(title, path string, scripts ...string) webtempl.LayoutData {
 		return webtempl.LayoutData{

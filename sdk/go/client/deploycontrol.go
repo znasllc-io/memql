@@ -15,6 +15,8 @@ import (
 	"context"
 	"fmt"
 
+	"google.golang.org/grpc/status"
+
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
@@ -199,6 +201,40 @@ func wrapActionErr(verb string, err error) error {
 		return nil
 	}
 	return fmt.Errorf("deploy console: %s: %w", verb, err)
+}
+
+// AuditEventIdFromError returns the audit correlation id a REFUSED
+// deploy-control call carries, or "" for any error that is not a refusal
+// (memql#3334).
+//
+// A denial on this surface is an audited event: the engine's role gate writes
+// a blocked v1:identity:auditEvent before it refuses, and attaches that
+// event's correlation id to the status as a RefusalInfo detail. Show the id to
+// whoever was refused -- an operator told "rollback requires owner" needs a
+// reference to quote, and it is the one event that used to come back without
+// one. An admin resolves it against the audit log; holding it grants nothing
+// on its own.
+//
+// "" is a normal answer. An INVALID_ARGUMENT rejection runs before the gate
+// and writes no event, so there is nothing to report; a transport failure
+// never reached the service at all. Empty means "no event", not "id lost".
+//
+// The wrapping this file does is %w, so the status survives the unwrap chain
+// and this works on the errors the client's own methods return.
+func AuditEventIdFromError(err error) string {
+	if err == nil {
+		return ""
+	}
+	st, ok := status.FromError(err)
+	if !ok || st == nil {
+		return ""
+	}
+	for _, detail := range st.Details() {
+		if info, isRefusal := detail.(*memqlv1.RefusalInfo); isRefusal {
+			return info.GetAuditEventId()
+		}
+	}
+	return ""
 }
 
 func deploymentStatusFromProto(p *memqlv1.DeploymentStatus) DeploymentStatus {

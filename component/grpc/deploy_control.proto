@@ -275,3 +275,37 @@ message ActionResult {
   // details carries action-specific key/values (env, version, rollout, ...).
   map<string, string> details = 5;
 }
+
+// -----------------------------------------------------------------------------
+// Refusal detail (memql#3334)
+// -----------------------------------------------------------------------------
+
+// RefusalInfo is the gRPC error detail attached to a status returned by the
+// role gate -- PERMISSION_DENIED for a caller below the floor, UNAUTHENTICATED
+// for a connection with no resolvable actor.
+//
+// WHY A DETAIL RATHER THAN A RESULT. A refused unary call has no ActionResult
+// to carry an id on: the gate returns (nil, status error) before the action
+// exists. But the refusal IS an audited event -- authorizeWith writes a blocked
+// v1:identity:auditEvent before it returns -- and an operator who was told "no"
+// has the same correlation need as one who was told "yes". A gRPC error detail
+// is the standard place to put structured data on a status, it survives the
+// existing (nil, err) signature untouched, and the streamed bridge lifts it
+// onto DeployControlResult.audit_event_id so both surfaces answer alike.
+//
+// WHY IT IS SAFE TO HAND THE REFUSED CALLER. The value is an opaque random
+// correlation id minted at refusal time. It names no row the caller may read
+// (the audit log is admin-gated), grants nothing, and reveals strictly less
+// than the refusal message beside it already does -- that message names the
+// required role and the caller's own. It is a receipt for an event that
+// happened TO the caller. Same call memql#3324 made for IdentityAdminResult,
+// which carries audit_event_id on its refusals for the same reason.
+//
+// Present ONLY on a gate refusal. An argument rejection (INVALID_ARGUMENT) is
+// not audited and carries no detail; neither does a transport failure.
+message RefusalInfo {
+  // audit_event_id is the correlation id of the blocked v1:identity:auditEvent
+  // this refusal wrote. Quote it in a support thread; an admin resolves it
+  // against the audit log.
+  string audit_event_id = 1;
+}

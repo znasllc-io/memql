@@ -48,7 +48,11 @@ type NodeServer struct {
 	aiForwardResponse        AiForwardResponseSink
 	workbenchForwardHandler  WorkbenchForwardHandler
 	workbenchForwardResponse WorkbenchForwardResponseSink
-	eventInbound             EventInbound
+	// deployControlForwardHandler serves inbound deploy-control forwards
+	// (memql#3380). Installed on the identity node -- the only node that
+	// carries a DeployControlService -- and nil everywhere else.
+	deployControlForwardHandler DeployControlForwardHandler
+	eventInbound                EventInbound
 	// authInterceptor is the class="node" JWT enforcement interceptor
 	// (#105). Wired by app/cluster.go from the per-binary verifier;
 	// nil when the verifier isn't configured (single-node dev),
@@ -122,6 +126,18 @@ func (s *NodeServer) SetWorkbenchForwardResponseSink(sink WorkbenchForwardRespon
 		return
 	}
 	s.workbenchForwardResponse = sink
+}
+
+// SetDeployControlForwardHandler installs the identity-node-side handler
+// invoked for inbound DeployControlForwardRequest messages (memql#3380).
+// Called during bootstrap on the identity binary; every other node type
+// leaves it nil and answers the forward with a transport error naming the
+// identity node.
+func (s *NodeServer) SetDeployControlForwardHandler(h DeployControlForwardHandler) {
+	if s == nil {
+		return
+	}
+	s.deployControlForwardHandler = h
 }
 
 // NewNodeServer constructs a NodeService gRPC server.
@@ -240,6 +256,8 @@ func (s *NodeServer) prepareForRun(ctx context.Context) (context.Context, contex
 		workbenchForwardHandler:  s.workbenchForwardHandler,
 		workbenchForwardResponse: s.workbenchForwardResponse,
 		eventInbound:             s.eventInbound,
+
+		deployControlForwardHandler: s.deployControlForwardHandler,
 	}
 	nodev1.RegisterNodeServiceServer(s.grpcServer, svc)
 

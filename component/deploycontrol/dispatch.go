@@ -134,10 +134,20 @@ func Dispatch(ctx context.Context, srv memqlv1.DeployControlServiceServer, msg *
 // failResult stamps the canonical gRPC code + message of err onto the
 // envelope. A non-status error is reported as Internal, matching how a
 // unary gRPC server surfaces a bare error to its caller.
+//
+// It also lifts the audit correlation id off a gate refusal (memql#3334). A
+// unary caller reads that id from the status's RefusalInfo detail; a streamed
+// caller has no status to read details from, so the id is copied onto the
+// envelope's own audit_event_id field. That is what makes the two surfaces
+// answer a refusal identically -- the property the #3311 parity suite exists
+// to hold. It stays "" for everything that is not a refusal (an
+// INVALID_ARGUMENT rejection runs before the gate and writes no event), which
+// is the honest answer rather than a missing one.
 func failResult(out *memqlv1.DeployControlResult, err error) *memqlv1.DeployControlResult {
 	st, _ := status.FromError(err)
 	out.Ok = false
 	out.ErrorCode = int32(st.Code())
 	out.ErrorMessage = st.Message()
+	out.AuditEventId = AuditEventIdFromError(err)
 	return out
 }

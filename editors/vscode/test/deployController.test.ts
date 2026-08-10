@@ -173,10 +173,32 @@ test("a promote refusal names owner or admin, not owner alone", async () => {
   assert.match(outcome.line, /requires the owner or admin cluster role/);
 });
 
-test("a refusal carries no audit id -- there genuinely is none to show", async () => {
-  // A denial writes a BLOCKED audit event server-side, but DeployControlResult
-  // populates `action` only when the call was permitted, so the id is not on
-  // the wire. Inventing a placeholder would be worse than the gap.
+test("a refusal carries the audit id of the blocked attempt", async () => {
+  // memql#3334. This test previously asserted the OPPOSITE -- that a refusal
+  // carried no id -- and was correct to: the engine wrote a blocked audit
+  // event and then dropped its id, so the panel had nothing to show and said
+  // nothing rather than inventing a placeholder. #3334 fixed that at the
+  // source, so the panel now prints the reference an operator quotes when they
+  // ask why they were denied.
+  const outcome = await runDeployAction(
+    port({
+      deploy: async () => {
+        throw new DeployControlError("deploy", CODE_PERMISSION_DENIED, "no", "audit-refused-1");
+      },
+    }),
+    { id: "deploy", deploymentId: "d-1" },
+  );
+  assert.equal(outcome.auditEventId, "audit-refused-1");
+  // Same `(audit <id>)` shape a SUCCESS carries, so an operator learns one
+  // convention rather than two.
+  assert.match(outcome.line, /\(audit audit-refused-1\)$/);
+  assert.equal(outcome.permissionDenied, true);
+});
+
+test("a refusal from an engine that sends no id still renders cleanly", async () => {
+  // The empty case has to stay graceful: an INVALID_ARGUMENT is rejected
+  // before the gate and writes no event, so there is nothing to reference and
+  // the line must not trail an empty "(audit )".
   const outcome = await runDeployAction(
     port({
       deploy: async () => {
@@ -186,6 +208,7 @@ test("a refusal carries no audit id -- there genuinely is none to show", async (
     { id: "deploy", deploymentId: "d-1" },
   );
   assert.equal(outcome.auditEventId, "");
+  assert.doesNotMatch(outcome.line, /audit/);
 });
 
 test("an unimplemented service is explained, not reported as a refusal", async () => {

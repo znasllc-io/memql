@@ -38,7 +38,13 @@ type ParentConnector struct {
 	parentNodeId         string                       // learned from NodeWelcome
 	aiForwardSink        AiForwardResponseSink        // optional, set on BFF binaries
 	workbenchForwardSink WorkbenchForwardResponseSink // optional, set on agent binaries in cluster mode
-	eventInbound         EventInbound                 // republishes parent-pushed events onto local bus
+	// deployControlSink routes replies to deploy-control forwards this node
+	// started (memql#3380). Set on the bff, which is the node that serves the
+	// portal; nil elsewhere. Registered here as well as on the WorkerDialer
+	// because peer discovery can make the identity node this node's PARENT,
+	// in which case the reply arrives on this stream and nowhere else.
+	deployControlSink DeployControlForwardResponseSink
+	eventInbound      EventInbound // republishes parent-pushed events onto local bus
 }
 
 // SetAiForwardResponseSink registers a sink for AiForwardResponse
@@ -64,6 +70,18 @@ func (pc *ParentConnector) SetWorkbenchForwardResponseSink(sink WorkbenchForward
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
 	pc.workbenchForwardSink = sink
+}
+
+// SetDeployControlForwardResponseSink registers a sink for inbound
+// DeployControlForwardResponse messages received over the parent connection
+// (memql#3380). Called during bff bootstrap; other node types leave it nil.
+func (pc *ParentConnector) SetDeployControlForwardResponseSink(sink DeployControlForwardResponseSink) {
+	if pc == nil {
+		return
+	}
+	pc.mu.Lock()
+	defer pc.mu.Unlock()
+	pc.deployControlSink = sink
 }
 
 // SetEventInbound registers the local-bus bridge for EventForward
@@ -293,6 +311,16 @@ func (pc *ParentConnector) handleServerMessage(msg *nodev1.NodeServerMessage) {
 		pc.mu.Unlock()
 		if sink != nil {
 			sink.Dispatch(payload.WorkbenchForwardResponse)
+		}
+
+	case *nodev1.NodeServerMessage_DeployControlForwardResponse:
+		// Reply to a deploy-control forward this node originated. Set on the
+		// bff; no-op otherwise.
+		pc.mu.Lock()
+		sink := pc.deployControlSink
+		pc.mu.Unlock()
+		if sink != nil {
+			sink.Dispatch(payload.DeployControlForwardResponse)
 		}
 
 	case *nodev1.NodeServerMessage_EventForward:

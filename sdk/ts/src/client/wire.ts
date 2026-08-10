@@ -768,6 +768,13 @@ export interface DeployControlResultPayload {
   ok?: boolean;
   errorCode?: number;
   errorMessage?: string;
+  // Present on a GATE refusal (PERMISSION_DENIED / UNAUTHENTICATED) --
+  // memql#3334. The refusal is itself an audited event and an operator
+  // arguing about a denial needs its id, exactly as on IdentityAdminResult
+  // below. Absent everywhere else, including on an INVALID_ARGUMENT (which
+  // runs before the gate and writes no event) and on a transport failure.
+  // The permitted path keeps its id on action.auditEventId.
+  auditEventId?: string;
   deploymentStatus?: DeploymentStatusWire;
   nextVersion?: SuggestNextVersionResultWire;
   action?: DeployActionResultWire;
