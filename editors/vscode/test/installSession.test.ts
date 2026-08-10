@@ -295,6 +295,81 @@ test("a cancelled run leaves a receipt that still describes what happened", asyn
   );
 });
 
+test("the receipt a cancelled install produces is one an uninstall can actually reverse", async () => {
+  // TWO HALVES THAT USED TO NEVER MEET. One case proved the cancelled run leaves
+  // a valid receipt by reading it back; the uninstall cases proved a removal
+  // works by feeding in a HAND-BUILT fixture. A mismatch between what `record()`
+  // writes and what `removalParams()` reads would have passed both -- and the
+  // criterion is "a test proves the cancelled install is still uninstallable",
+  // which is this chain and not either half.
+  //
+  // Nothing here is hand-authored: the receipt under test is the one the
+  // executor produced, byte for byte.
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-session-chain-"));
+  const receiptFile = path.join(dir, "install-receipt.json");
+
+  const controller = new AbortController();
+  const install: RunScript = async () => {
+    // Cancelled the moment the first step returns, so the SECOND wave never
+    // runs -- the state an operator who pressed Cancel is left in.
+    controller.abort();
+    return {
+      argv: [],
+      exitCode: 0,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      envelope: {
+        ok: true,
+        capability: "install.binary",
+        changed: true,
+        result: { installed: true, path: "/tmp/k3d" },
+        error: null,
+      },
+    };
+  };
+
+  const installReport = await runInstall(options({ receiptFile }), {
+    graph: INSTALL_GRAPH,
+    run: install,
+    signal: controller.signal,
+  });
+  assert.equal(installReport.cancelled, true);
+
+  // The preview, over the receipt the run just wrote. This is the screen the
+  // operator confirms against, so what it lists is what consent is given to.
+  const preview = await previewUninstall(options({ receiptFile }), { graph: UNINSTALL_GRAPH });
+  assert.deepEqual(
+    preview.removals.map((r) => r.id),
+    ["removeBinary"],
+    "exactly what ran is offered for removal -- no more, and not nothing",
+  );
+  assert.equal(
+    preview.removals[0]!.params.path,
+    "/tmp/k3d",
+    "the removal is aimed by the path the install RECORDED, not by a fixture that agrees with it",
+  );
+
+  // And the removal itself runs, which is the half a preview cannot prove: a
+  // step planned with no params would reach remove-artifact.sh and exit 2.
+  const removal = okRunner();
+  const uninstallReport = await runUninstall(options({ receiptFile }), {
+    graph: UNINSTALL_GRAPH,
+    run: removal.run,
+  });
+  assert.equal(uninstallReport.ok, true, "the cancelled install must be fully uninstallable");
+  assert.deepEqual(
+    uninstallReport.outcomes.filter((o) => o.status === "ok").map((o) => o.id),
+    ["removeBinary"],
+  );
+  // removeCluster is SKIPPED-satisfied rather than failed: the install stopped
+  // before the cluster, so there is nothing to remove and the removals waiting
+  // on it may still proceed.
+  const cluster = uninstallReport.outcomes.find((o) => o.id === "removeCluster");
+  assert.equal(cluster?.status, "skipped");
+  assert.equal(cluster?.satisfied, true);
+});
+
 // -----------------------------------------------------------------------------
 // the uninstall preview
 // -----------------------------------------------------------------------------

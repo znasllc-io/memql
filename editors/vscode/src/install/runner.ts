@@ -75,6 +75,26 @@ export interface ScriptOutcome {
 export type RunScript = (run: ScriptRun) => Promise<ScriptOutcome>;
 
 /**
+ * The exit codes memQL assigns ITSELF, as opposed to the ones a capability
+ * script reports (docs/internal/design/capability-script-contract.md).
+ *
+ * NAMED, AND EXPORTED, because they have to be explainable. A step killed by
+ * the ten-minute ceiling reaching the operator as "memQL cannot say what code
+ * 124 means" is memQL disclaiming a number it chose -- and that was live until
+ * memql#3493. `installProgress.test.ts` derives its reachable set from this
+ * object plus the contract's own table, so a code added here without guidance
+ * is a red test rather than a shrug in front of an operator.
+ */
+export const SYNTHESISED_EXIT_CODES = {
+  /** The step outran `timeoutMs` and was SIGKILLed. */
+  timeout: 124,
+  /** The script could not be spawned at all -- missing, or not executable. */
+  spawnFailure: 127,
+  /** The child died on a signal nobody here sent, and reported no code. */
+  signalled: 128,
+} as const;
+
+/**
  * The params of a run as argv elements.
  *
  * One element per param, in the script's own kebab-case spelling. A conformant
@@ -181,7 +201,11 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
         shell: false,
       });
     } catch (err) {
-      finish(127, null, `could not start ${run.scriptPath}: ${(err as Error).message}`);
+      finish(
+        SYNTHESISED_EXIT_CODES.spawnFailure,
+        null,
+        `could not start ${run.scriptPath}: ${(err as Error).message}`,
+      );
       return;
     }
 
@@ -189,7 +213,11 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
       run.timeoutMs && run.timeoutMs > 0
         ? setTimeout(() => {
             child.kill("SIGKILL");
-            finish(124, "SIGKILL", `${run.scriptPath} exceeded ${run.timeoutMs}ms`);
+            finish(
+              SYNTHESISED_EXIT_CODES.timeout,
+              "SIGKILL",
+              `${run.scriptPath} exceeded ${run.timeoutMs}ms`,
+            );
           }, run.timeoutMs)
         : (undefined as unknown as NodeJS.Timeout);
 
@@ -208,11 +236,15 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
     });
 
     child.on("error", (err) => {
-      finish(127, null, `could not run ${run.scriptPath}: ${err.message}`);
+      finish(
+        SYNTHESISED_EXIT_CODES.spawnFailure,
+        null,
+        `could not run ${run.scriptPath}: ${err.message}`,
+      );
     });
     child.on("close", (code, signal) => {
       if (run.onLog && logCarry.trim() !== "") run.onLog(logCarry);
-      finish(code ?? (signal ? 128 : 1), signal);
+      finish(code ?? (signal ? SYNTHESISED_EXIT_CODES.signalled : 1), signal);
     });
   });
 };
