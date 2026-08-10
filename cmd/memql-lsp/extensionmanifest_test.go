@@ -750,6 +750,12 @@ var trustGatedCommands = []string{
 	"memql.clusters.select",
 	"memql.clusters.add",
 	"memql.clusters.edit",
+	// memql#3466. Palette-invokable for the same reason edit is: with no tree
+	// node it falls back to a quick pick over the registered clusters, so it is
+	// genuinely usable from the palette and needs the trust clause rather than
+	// "when": "false". It reads clusters.yaml and drops a live connection, which
+	// puts it squarely on the runtime side of the boundary.
+	"memql.clusters.remove",
 	"memql.clusters.disconnect",
 	// memql#3312's Cluster tab. Palette-invokable unlike the other
 	// argument-taking commands: with no tree node it falls back to the

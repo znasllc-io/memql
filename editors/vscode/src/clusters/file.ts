@@ -327,3 +327,59 @@ export async function addCluster(file: string, cluster: ClusterUpdate): Promise<
   }
   await upsertCluster(file, cluster);
 }
+
+// removeCluster deletes one entry and returns what it deleted.
+//
+// It lives here, next to upsert and add, because removal is a DOCUMENT
+// operation for the same reason they are: the file is shared with the memQL
+// Cockpit, so the node is dropped out of the live YAMLSeq rather than the file
+// being reserialized from a parse. A round trip would satisfy "the entry is
+// gone" while stripping the operator's comments and any key a newer cockpit
+// wrote on the entries that remain.
+//
+// IT RETURNS THE REMOVED CONFIG rather than void. The caller has to disconnect
+// if this was the live connection, purge the credential the entry named, and
+// decide whether to offer an uninstall -- all of which need the entry's fields
+// (`local`, `endpoint`) AFTER it is gone. Returning it here is what lets the
+// caller avoid a read-before-delete, which would be a second read this module
+// could not make authoritative anyway: every write is read-modify-write against
+// the bytes on disk at write time, because the cockpit writes this file too.
+//
+// A MISSING NAME IS AN ERROR, not a silent success. Removal is the one
+// operation here whose caller takes destructive action on the strength of the
+// return -- revoking a stored credential, tearing down a connection -- and
+// "there was nothing to remove" and "I removed it" must not be the same answer.
+//
+// selected_cluster is a reference BY NAME, so removing its target clears it.
+// Leaving it behind points the selection at a cluster that no longer exists,
+// which is the same orphaning upsertCluster's rename branch guards against.
+export async function removeCluster(file: string, name: string): Promise<ClusterConfig> {
+  const doc = await loadDocument(file);
+  const seq = doc.get("clusters", true) as YAMLSeq | undefined;
+  const items = Array.isArray(seq?.items) ? seq.items : [];
+
+  // findIndex, matching findByName's FIRST-match rule. A hand-edited or
+  // concurrently-written file can carry two entries sharing a name; every other
+  // lookup in this module resolves the first, so removing any other one would
+  // report success while leaving the entry those lookups can see in place.
+  const index = items.findIndex((item) => {
+    const map = item as YAMLMap;
+    return typeof map?.get === "function" && map.get("name", false) === name;
+  });
+  if (index === -1) {
+    throw new Error(`no cluster named "${name}" in ${file}`);
+  }
+
+  // Read the node BEFORE dropping it -- afterwards there is nothing to read.
+  // clusterFromNode cannot return null here: it only does so for a node with no
+  // `name`, and this index matched on exactly that field.
+  const removed = clusterFromNode(items[index]) as ClusterConfig;
+
+  seq?.delete(index);
+  if (doc.get("selected_cluster", false) === name) {
+    doc.delete("selected_cluster");
+  }
+
+  await saveDocument(file, doc);
+  return removed;
+}

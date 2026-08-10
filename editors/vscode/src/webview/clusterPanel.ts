@@ -42,7 +42,15 @@ import {
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
 
+import { defaultClustersPath, readClustersFileSafe } from "../clusters/file.js";
+import type { ClusterConfig } from "../clusters/model.js";
+import { clusterRowStatus } from "../clusters/status.js";
 import type { ConnectionManager } from "../connection/manager.js";
+import {
+  actionEnablement,
+  type ActionEnablement,
+  type PrimaryControlId,
+} from "../deploy/enablement.js";
 import {
   actionById,
   confirmationMatches,
@@ -88,6 +96,10 @@ export class ClusterPanel {
   private readonly state = new ClusterPanelState();
   private readonly disposeConnectionListener: () => void;
   private readonly clusterName: string;
+  // The registry entry for this panel's cluster, as of the last refresh. Held
+  // because `local` decides how an unreachable cluster is presented, and
+  // because a primary control hands it straight to a cluster command.
+  private clusterConfig: ClusterConfig | undefined;
   private unsubscribeChanges: (() => void) | undefined;
 
   // Same two-bag disposal arrangement as ConceptPanel: this panel's own
@@ -186,6 +198,8 @@ export class ClusterPanel {
       }
     } else if (type === "action" && typeof value === "string") {
       void this.runAction(value);
+    } else if (type === "control" && typeof value === "string") {
+      void this.runPrimaryControl(value);
     }
   }
 
@@ -257,6 +271,11 @@ export class ClusterPanel {
 
   /** Reload everything: the concept rows, the role, and the deploy-control reads. */
   private async refresh(): Promise<void> {
+    // BEFORE the not-connected early return, because that is exactly the case
+    // this exists for: a panel with no query is a panel whose deploy buttons
+    // must not look pressable.
+    await this.refreshEnablement();
+
     const query = this.connections.query;
     if (query === undefined) {
       this.state.setConnectionError(NOT_CONNECTED_MESSAGE);
@@ -283,6 +302,51 @@ export class ClusterPanel {
     // topology off the screen.
     if (await this.state.loadAccess(() => this.readRole())) this.render();
     await this.refreshDeployControl();
+  }
+
+  /**
+   * Re-reads this panel's cluster and recomputes whether its actions are usable.
+   *
+   * The registry is re-read rather than cached because the memQL Cockpit writes
+   * clusters.yaml too, and because `local` is what decides whether an
+   * unreachable cluster is offered a repair or a retry.
+   *
+   * A cluster that cannot be found -- the operator removed it while its panel
+   * was open, or the file will not parse -- leaves the enablement at its
+   * default rather than inventing a verdict from nothing. See the getter on
+   * ClusterPanelState for why that default is "enabled".
+   */
+  private async refreshEnablement(): Promise<void> {
+    const result = await readClustersFileSafe(defaultClustersPath());
+    const cluster = result.ok
+      ? result.file.clusters.find((c) => c.name === this.clusterName)
+      : undefined;
+    if (cluster === undefined) return;
+    this.clusterConfig = cluster;
+    this.state.setEnablement(
+      actionEnablement(clusterRowStatus(cluster, this.connections.state).icon, cluster),
+    );
+  }
+
+  /**
+   * Runs the one control offered beside disabled actions.
+   *
+   * Narrowed against the command table rather than cast, for the same reason
+   * runAction narrows against DEPLOY_ACTION_IDS: the postMessage channel is
+   * untrusted, and an unrecognised id must be dropped here rather than reaching
+   * executeCommand with whatever the webview sent.
+   */
+  private async runPrimaryControl(rawId: string): Promise<void> {
+    const command = (PRIMARY_CONTROL_COMMANDS as Record<string, string | undefined>)[rawId];
+    if (command === undefined) return;
+    // The cluster commands accept a tree node and fall back to a quick pick
+    // without one. This panel knows exactly which cluster it is showing, so it
+    // supplies it rather than making the operator pick it again.
+    const node =
+      this.clusterConfig === undefined
+        ? undefined
+        : { cluster: this.clusterConfig, selected: false };
+    await vscode.commands.executeCommand(command, node);
   }
 
   /** The two per-env deploy-control reads (status + next-version preview). */
@@ -694,7 +758,15 @@ ${state.error === "" ? "" : `<div class="error">ERROR: ${escapeHtml(state.error)
   const actions = document.getElementById('actions');
   if (actions) actions.addEventListener('click', (e) => {
     const button = e.target.closest('[data-action]');
-    if (button) vscode.postMessage({ type: 'action', value: button.dataset.action });
+    // A native disabled button does not fire click, so this is belt to that
+    // braces -- and it is the assertion that survives someone later styling
+    // "disabled" with a class instead of the attribute.
+    if (button && !button.disabled) vscode.postMessage({ type: 'action', value: button.dataset.action });
+  });
+  const primary = document.getElementById('primary-control');
+  if (primary) primary.addEventListener('click', (e) => {
+    const button = e.target.closest('[data-control]');
+    if (button) vscode.postMessage({ type: 'control', value: button.dataset.control });
   });
 </script>
 </body>
@@ -728,21 +800,77 @@ ${state.error === "" ? "" : `<div class="error">ERROR: ${escapeHtml(state.error)
         }; topology and deployment history above are unaffected.`,
       )}</div>`;
     }
+    // The SECOND question (memql#3467). Role decided which buttons exist; this
+    // decides whether they can be pressed. They stay separate because "you may
+    // never do this" and "you cannot do this yet" are different messages, and
+    // an operator who sees a control vanish and one who sees it greyed out with
+    // a reason are being told different things.
+    const enablement = this.state.enablement;
+    const disabledAttr = enablement.enabled ? "" : " disabled";
     const buttons = actions
-      .map(
-        (action) =>
-          `<button type="button" data-action="${escapeHtml(action.id)}" title="${escapeHtml(
-            `${action.description} Requires ${tierDescription(action.tier)}.`,
-          )}">${escapeHtml(action.label)}</button>`,
-      )
+      .map((action) => {
+        // When the actions are unusable, EVERY tooltip says why, rather than
+        // describing an action that cannot run. The role requirement is
+        // irrelevant information at that point.
+        const title = enablement.enabled
+          ? `${action.description} Requires ${tierDescription(action.tier)}.`
+          : enablement.disabledReason;
+        return `<button type="button"${disabledAttr} data-action="${escapeHtml(
+          action.id,
+        )}" title="${escapeHtml(title)}">${escapeHtml(action.label)}</button>`;
+      })
       .join("");
     const notice =
       visibility.kind === "indeterminate"
         ? `<div class="notice">${escapeHtml(visibility.reason)}</div>`
         : "";
-    return `<div class="actions" id="actions">${buttons}</div>${notice}`;
+    return `<div class="actions" id="actions">${buttons}</div>${this.blockedHtml(
+      enablement,
+    )}${notice}`;
+  }
+
+  /**
+   * The reason the actions are unusable, and the one control that fixes it.
+   *
+   * ONE control, never a menu: the panel has just told the operator what is
+   * wrong, and the value of that is lost if it immediately asks them to choose
+   * how to respond.
+   */
+  private blockedHtml(enablement: ActionEnablement): string {
+    if (enablement.enabled) return "";
+    const label =
+      enablement.primaryControl === undefined
+        ? undefined
+        : PRIMARY_CONTROL_LABELS[enablement.primaryControl];
+    const control =
+      label === undefined
+        ? ""
+        : `<div class="actions" id="primary-control"><button type="button" data-control="${escapeHtml(
+            enablement.primaryControl as string,
+          )}">${escapeHtml(label)}</button></div>`;
+    return `<div class="notice">${escapeHtml(enablement.disabledReason)}</div>${control}`;
   }
 }
+
+// The label each primary control carries, and the set this panel can render.
+//
+// `repair` is deliberately ABSENT. It opens the add-a-cluster page, which does
+// not exist yet (#3476) -- and a button that goes nowhere is worse than none,
+// because the reason line above it already tells the operator their local
+// cluster needs repairing. The entry lands with the page it opens.
+const PRIMARY_CONTROL_LABELS: Partial<Record<PrimaryControlId, string>> = {
+  connect: "Connect",
+  signIn: "Sign In",
+  edit: "Edit Cluster",
+};
+
+// The commands each control invokes. Kept beside the labels so a control can
+// never be offered without somewhere to send it.
+const PRIMARY_CONTROL_COMMANDS: Partial<Record<PrimaryControlId, string>> = {
+  connect: "memql.clusters.select",
+  signIn: "memql.clusters.signIn",
+  edit: "memql.clusters.edit",
+};
 
 // The ids runAction will accept off the untrusted postMessage channel. A
 // literal list rather than a map over DEPLOY_ACTIONS so the narrowing is a

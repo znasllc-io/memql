@@ -70,6 +70,16 @@ export interface ExecutionReport {
   ok: boolean;
   waves: string[][];
   outcomes: StepOutcome[];
+  /**
+   * The run stopped because the caller asked it to, rather than because the
+   * graph finished.
+   *
+   * Separate from `ok`, which keeps its meaning: nothing FAILED. A cancelled
+   * run is usually ok by that definition -- every step that ran, worked -- and
+   * folding the two would make "did anything break?" unanswerable. A caller
+   * that needs "did the whole graph run?" asks both.
+   */
+  cancelled?: boolean;
 }
 
 /** What the caller wants done with a step. */
@@ -120,6 +130,18 @@ export interface ExecuteOptions {
   /** When set, every executed step is recorded here as it finishes. */
   receiptFile?: string;
   onEvent?: (event: ExecEvent) => void | Promise<void>;
+  /**
+   * Stops the run at the next WAVE BOUNDARY.
+   *
+   * Deliberately not mid-step. A capability script is the thing that creates a
+   * k3d cluster or writes a hosts block, and killing one partway through would
+   * leave that artifact half-made AND unrecorded -- the receipt entry is
+   * written when the step finishes, so an interrupted step is exactly the case
+   * the uninstall could not clean up afterwards. Letting the in-flight wave
+   * complete costs the operator one step's wait and keeps the receipt a true
+   * account of the machine, which is what makes Cancel safe to offer at all.
+   */
+  signal?: AbortSignal;
   /** Per-step timeout in milliseconds. */
   timeoutMs?: number;
   cwd?: string;
@@ -143,7 +165,13 @@ export async function executeGraph(options: ExecuteOptions): Promise<ExecutionRe
   const waves = topoOrder(graph);
   const outcomes = new Map<string, StepOutcome>();
 
+  let cancelled = false;
   for (const [index, wave] of waves.entries()) {
+    // Checked between waves, never inside one. See ExecuteOptions.signal.
+    if (options.signal?.aborted === true) {
+      cancelled = true;
+      break;
+    }
     await emit(options, { type: "waveStarted", index, ids: wave });
     await Promise.all(
       wave.map(async (id) => {
@@ -161,6 +189,7 @@ export async function executeGraph(options: ExecuteOptions): Promise<ExecutionRe
     ok: ordered.every((o) => o.status !== "failed"),
     waves,
     outcomes: ordered,
+    ...(cancelled ? { cancelled: true } : {}),
   };
 }
 

@@ -46,6 +46,8 @@ import {
   type AddClusterAction,
   type PresenceVerdict,
 } from './clusters/presence.js';
+import { removeClusterCompletely } from './clusters/registry.js';
+import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
@@ -406,26 +408,66 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // (src/clusters/presence.ts) and the remote path below is unchanged: it is
     // what the "Connect to an existing cluster..." choice runs.
     commands.registerCommand('memql.clusters.add', async () => {
-      const action = await pickAddClusterAction(presence);
-      if (action === undefined) {
+      // The "+" opens a PAGE now (memql#3472), not a quick pick. A palette
+      // entry is the wrong shape for a decision that depends on the state of
+      // the machine and is followed by ten minutes of work -- there is no room
+      // in a list of three sentences to say what this machine actually is.
+      //
+      // The quick-pick path below it is retired in #3478, once every branch
+      // the page carries has landed.
+      AddClusterPanel.show(context, presence);
+    }),
+    commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
         return;
       }
-      if (action === 'install' || action === 'repair') {
-        await launchLocalClusterInstaller(action);
-        // The two events that change the verdict deterministically. Waiting
-        // out the memo window would show someone who just installed a cluster
-        // the menu for someone who has none.
-        presence.invalidate();
+      const name = target.cluster.name;
+
+      // Modal, and the detail says what is NOT happening. The whole risk in
+      // this surface is an operator reading "remove" as "uninstall", so the
+      // confirmation spends its second line ruling that out rather than asking
+      // a generic "are you sure?".
+      const confirmed = await window.showWarningMessage(
+        `Remove "${name}" from the cluster list?`,
+        {
+          modal: true,
+          detail:
+            'This editor forgets the cluster and deletes the credential it stored for it. ' +
+            'Nothing is uninstalled, and no data on the cluster is touched. ' +
+            'You can add it back at any time.',
+        },
+        'Remove'
+      );
+      if (confirmed !== 'Remove') {
         return;
       }
-      const created = await promptForCluster();
-      if (created === undefined) {
+
+      // Only a LIVE connection to this cluster counts. A disconnected state can
+      // still name the cluster it was last dialled to, and disconnecting again
+      // on the strength of that would be a no-op at best.
+      const state = connections?.state;
+      const connectedClusterName =
+        state !== undefined && state.status !== 'disconnected' ? state.clusterName : undefined;
+
+      try {
+        await removeClusterCompletely(clustersPath, name, {
+          secrets: context.secrets,
+          connectedClusterName,
+          disconnect: () => connections?.disconnect(),
+        });
+      } catch (err) {
+        window.showErrorMessage(
+          `memQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        );
         return;
       }
-      // addCluster, not upsertCluster: an add whose name collides with an
-      // existing cluster must be refused, not silently turned into an edit
-      // that deletes every field this form left blank. See addCluster.
-      await writeCluster(clustersTree, () => addCluster(clustersPath, created));
+
+      // A removal changes what the "+" should offer -- deterministically, so it
+      // must not wait out the memo window (see presence.ts invalidate).
+      presence.invalidate();
+      clustersTree.refresh();
+      window.showInformationMessage(`memQL: removed "${name}" from the cluster list.`);
     }),
     commands.registerCommand('memql.clusters.edit', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
@@ -1254,12 +1296,21 @@ export async function showAddClusterMenu(
  * verifies its own postcondition, so re-running it over a cluster that stopped
  * answering is the repair. Only the wording differs.
  */
-async function launchLocalClusterInstaller(mode: 'install' | 'repair'): Promise<void> {
-  const command = 'npm run install-cli -- install';
-  const what =
-    mode === 'install'
-      ? 'Installing a local memQL cluster'
-      : 'Repairing the local memQL cluster';
+async function launchLocalClusterInstaller(
+  mode: 'install' | 'installGuided' | 'repair' | 'uninstall'
+): Promise<void> {
+  // The stub reports the command it would run, so it has to report the RIGHT
+  // one. Telling an operator who asked to uninstall to run `install` would be
+  // worse than the stub already is -- it would rebuild the cluster they asked
+  // to remove.
+  const command =
+    mode === 'uninstall' ? 'npm run install-cli -- uninstall' : 'npm run install-cli -- install';
+  const what = {
+    install: 'Installing a local memQL cluster',
+    installGuided: 'Installing a local memQL cluster (guided)',
+    repair: 'Repairing the local memQL cluster',
+    uninstall: 'Uninstalling the local memQL cluster',
+  }[mode];
   const choice = await window.showInformationMessage(
     `memQL: ${what} runs the installer from editors/vscode:\n\n    ${command}\n\nAn in-editor wizard is not wired up yet.`,
     'Copy Command'
