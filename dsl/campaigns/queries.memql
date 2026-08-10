@@ -112,9 +112,9 @@ query recipient sendableRecipientsForAudience {
   shape     recipientFull
 }
 
-/// Per-recipient outcomes for one campaign, newest first. Empty until the sending engine exists
-/// (memql#3323 scoped it out); the query ships with the schema so that work is additive. Owned;
-/// @pii projection.
+/// Per-recipient outcomes for one campaign, newest first. Written by the drain worker as it works
+/// through the audience (memql#3348), so an operator watching a live send sees the ledger fill in.
+/// Owned; @pii projection.
 @actor
 query delivery deliveriesForCampaign {
   args {
@@ -124,4 +124,96 @@ query delivery deliveriesForCampaign {
   sort      "row.createdAt", "desc"
   paginate  100
   shape     deliveryFull
+}
+
+// ---------------------------------------------------------------------------
+// The sending engine's own reads (memql#3348).
+//
+// Two different callers, two different actors, and the split is deliberate.
+//
+// The three ENGINE reads below (drainableSendJobs / sendJobById /
+// suppressionByDigest) bind clusterOwner-tier concepts and are issued by the
+// drain worker under the engine's own operator identity. They name
+// `actor.isClusterOwner==true` explicitly even though the tier already injects
+// it, because a reader auditing this file should not have to know that
+// enforcement exists to see that the read is gated (the telephony admin reads
+// set the same precedent).
+//
+// The two OWNED reads (audienceRosterForSend / deliveryLedgerForCampaign) are
+// issued by that same worker under the CAMPAIGN OWNER'S actor -- so they gate
+// on ownerUserId==actor.userId like every other read in this domain, and the
+// worker gets exactly the owner's authority and no more. That is why the
+// engine needs no bypass anywhere: it borrows an identity rather than
+// out-ranking one.
+
+/// ENGINE: send jobs the drain worker still has work to do on, oldest first so a long-queued
+/// campaign is not starved by a newer one. Cluster-owner gated -- this is the one read in the domain
+/// that deliberately spans owners, which is exactly why it may only be issued by the engine's own
+/// operator identity and why the row it returns carries no recipient data.
+@actor
+query sendJob drainableSendJobs {
+  filter    isDrainableSendJob && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  50
+  shape     sendJobFull
+}
+
+/// ENGINE: one send job by id (the id is the campaign's bare short id). Cluster-owner gated. Read
+/// after a claim so the worker acts on the row as it stands now rather than as the scan saw it.
+@actor
+query sendJob sendJobById {
+  args {
+    sendJobId  string!
+  }
+  filter  row.id==args.sendJobId && actor.isClusterOwner==true
+  shape   sendJobFull
+}
+
+/// ENGINE: is this address on the cluster-wide do-not-mail list? The argument is the SHA-256 hex
+/// digest of the normalized address, which is also the row id -- so this is a single-row read and a
+/// caller can only ask about an address it already holds. Cluster-owner gated: the suppression list
+/// is engine state, and it is checked under the engine's identity rather than the campaign owner's,
+/// precisely so that no operator's authority can decide whether it applies to them.
+@actor
+query suppression suppressionByDigest {
+  args {
+    emailDigest  string!
+  }
+  filter  row.id==args.emailDigest && actor.isClusterOwner==true
+  shape   suppressionFull
+}
+
+/// ENGINE (owner-scoped): every recipient in the audience a send is working through, oldest first --
+/// including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed
+/// rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
+///
+/// The 5000 bound is the send's AUDIENCE CEILING, not a page: the worker reads the roster whole on
+/// every batch and diffs it against the delivery ledger, so a larger audience would be silently
+/// truncated. campaignStartSend refuses a send whose audience exceeds MEMQL_CAMPAIGNS_MAX_AUDIENCE
+/// (default 5000, matched to this bound and to MEMORY_ENGINE_MAX_WINDOW) rather than mailing a
+/// prefix of it. Lifting the ceiling means keyset-cursoring the roster, which is a follow-up.
+@actor
+query recipient audienceRosterForSend {
+  args {
+    audienceId  string!
+  }
+  filter    ownerUserId==actor.userId && audienceId==args.audienceId
+  sort      "row.createdAt", "asc"
+  paginate  5000
+  shape     recipientFull
+}
+
+/// ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection
+/// -- recipient, outcome, attempts, retry due-time and nothing else. This is the read that makes a
+/// resumed send safe: the worker diffs it against the roster and mails only what is missing or due.
+/// Owned, read under the campaign owner's actor. Same 5000 ceiling and the same reason.
+@actor
+query delivery deliveryLedgerForCampaign {
+  args {
+    campaignId  string!
+  }
+  filter    ownerUserId==actor.userId && campaignId==args.campaignId
+  sort      "row.createdAt", "asc"
+  paginate  5000
+  shape     deliveryLedgerEntry
 }

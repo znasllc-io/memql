@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { newShortId, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { runMutation, runQuery } from "./calls";
+import { runBuiltin, runMutation, runQuery } from "./calls";
 
 // Campaign authoring against the cluster (memql#3323).
 //
@@ -41,6 +41,14 @@ export interface CampaignsState {
   saveCampaign: (input: CampaignInput) => void;
   scheduleCampaign: (input: { campaignId: string; scheduledAt: string }) => void;
   cancelCampaign: (campaignId: string) => void;
+  // The three send actions (memql#3348). Builtins rather than mutations:
+  // starting a send is a preflight across several rows plus two writes, and
+  // the refusals it produces -- "template is not ready", "no email sender is
+  // registered on this node", "one-click unsubscribe is not configured" --
+  // arrive here as the rejected promise's message and land in actionError.
+  startSend: (campaignId: string) => void;
+  pauseSend: (campaignId: string) => void;
+  resumeSend: (campaignId: string) => void;
 }
 
 export interface CampaignInput {
@@ -186,9 +194,11 @@ export function useCampaigns(): CampaignsState {
     (input: { campaignId: string; scheduledAt: string }) =>
       run(
         query ? runMutation(query, "scheduleCampaign", input) : null,
-        // Said in full, every time. The scheduler is a separate piece of work
-        // and an operator who reads "Scheduled." will reasonably expect mail.
-        "Scheduled. Nothing sends yet -- this records the intended time; the sending engine is a separate piece of work.",
+        // Still said in full. Sending exists now, but nothing STARTS a
+        // campaign from a clock -- the drain worker drains jobs and no job is
+        // created by a schedule -- so an operator who reads "Scheduled." would
+        // still reasonably expect mail that never comes.
+        "Scheduled. This records the intended time; nothing starts a send from it yet -- press Start sending when you are ready.",
       ),
     [query, run],
   );
@@ -196,6 +206,33 @@ export function useCampaigns(): CampaignsState {
   const cancelCampaign = useCallback(
     (campaignId: string) =>
       run(query ? runMutation(query, "cancelCampaign", { campaignId }) : null, "Campaign cancelled."),
+    [query, run],
+  );
+
+  const startSend = useCallback(
+    (campaignId: string) =>
+      run(
+        query ? runBuiltin(query, "campaignStartSend", { campaignId }) : null,
+        // Deliberately not "Sent." The engine has ACCEPTED the send; the
+        // messages leave over the following minutes, paced by the send rate
+        // and by whatever the provider allows.
+        "Sending started. Messages go out in batches -- watch the per-recipient outcomes below.",
+      ),
+    [query, run],
+  );
+
+  const pauseSend = useCallback(
+    (campaignId: string) =>
+      run(
+        query ? runBuiltin(query, "campaignPauseSend", { campaignId }) : null,
+        "Paused. The delivery ledger is untouched, so resuming continues where it stopped.",
+      ),
+    [query, run],
+  );
+
+  const resumeSend = useCallback(
+    (campaignId: string) =>
+      run(query ? runBuiltin(query, "campaignResumeSend", { campaignId }) : null, "Resumed."),
     [query, run],
   );
 
@@ -214,6 +251,9 @@ export function useCampaigns(): CampaignsState {
     saveCampaign,
     scheduleCampaign,
     cancelCampaign,
+    startSend,
+    pauseSend,
+    resumeSend,
   };
 }
 
@@ -227,9 +267,12 @@ export function useCampaigns(): CampaignsState {
 // complained), and an operator about to commit a campaign to a time should be
 // looking at the number that will be mailed, not the number on the list.
 //
-// Deliveries are empty until a sending engine exists. The editor says that in
-// words rather than showing an empty table -- an empty table reads as "the
-// send went out and reached nobody".
+// Deliveries are empty until a send RUNS, which is a different statement from
+// the one this comment used to make (memql#3348 supplied the engine). The
+// editor still distinguishes the two in words rather than showing an empty
+// table, because an empty table reads as "the send went out and reached
+// nobody" -- and after a send has started, an empty ledger for a few seconds
+// is the normal state rather than a failure.
 export interface CampaignDetailState {
   deliveries: Row[];
   sendableCount: number;

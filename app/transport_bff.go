@@ -29,6 +29,7 @@ func (a *App) transportBFF() {
 	// on the frontend-facing node. Deny-by-default -- with no
 	// MEMQL_INBOUND_SOURCE_ALLOWLIST it answers 404 to everything.
 	a.mountInboundEndpoints()
+	a.mountUnsubscribeEndpoint()
 	// The memQL Portal SPA (GET /portal/*, memql#3314). Static bundle only --
 	// the data it reads rides the same /memql/ws bridge transportBase wired
 	// above, so the portal is a client of this node rather than a new surface.
