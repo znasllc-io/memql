@@ -47,6 +47,7 @@ import {
   type PresenceVerdict,
 } from './clusters/presence.js';
 import { removeClusterCompletely } from './clusters/registry.js';
+import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
 import { ConnectionManager } from './connection/manager.js';
 import {
@@ -407,47 +408,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // (src/clusters/presence.ts) and the remote path below is unchanged: it is
     // what the "Connect to an existing cluster..." choice runs.
     commands.registerCommand('memql.clusters.add', async () => {
-      const action = await pickAddClusterAction(presence);
-      if (action === undefined) {
-        return;
-      }
-      // Everything except `connect` is a local-cluster lifecycle action and
-      // goes to the installer seam. Listing them positively rather than
-      // testing for `connect` means a new action added to AddClusterAction
-      // fails the type check here instead of silently falling through to the
-      // remote-registration form, which is what would have happened when
-      // memql#3471 added installGuided and uninstall.
-      if (
-        action === 'install' ||
-        action === 'installGuided' ||
-        action === 'repair' ||
-        action === 'uninstall'
-      ) {
-        await launchLocalClusterInstaller(action);
-        // The two events that change the verdict deterministically. Waiting
-        // out the memo window would show someone who just installed a cluster
-        // the menu for someone who has none.
-        presence.invalidate();
-        return;
-      }
-      const created = await promptForCluster();
-      if (created === undefined) {
-        return;
-      }
-      // addCluster, not upsertCluster: an add whose name collides with an
-      // existing cluster must be refused, not silently turned into an edit
-      // that deletes every field this form left blank. See addCluster.
-      await writeCluster(clustersTree, () => addCluster(clustersPath, created));
+      // The "+" opens a PAGE now (memql#3472), not a quick pick. A palette
+      // entry is the wrong shape for a decision that depends on the state of
+      // the machine and is followed by ten minutes of work -- there is no room
+      // in a list of three sentences to say what this machine actually is.
+      //
+      // The quick-pick path below it is retired in #3478, once every branch
+      // the page carries has landed.
+      AddClusterPanel.show(context, presence);
     }),
-    // Removing a cluster from the LIST -- the reversible half of the pair the
-    // tree offers. It forgets the entry, its stored credential and its live
-    // connection, and touches no machine.
-    //
-    // It is a SEPARATE command from uninstalling a local cluster (#3476), which
-    // tears down k3d, /etc/hosts and the mkcert CA. Different label, different
-    // icon, different menu, different confirmation -- a single action that asked
-    // which one you meant would put the irreversible operation one click away
-    // from a routine one (design D1).
     commands.registerCommand('memql.clusters.remove', async (node?: ClusterNode) => {
       const target = node ?? (await pickCluster(clustersPath));
       if (target === undefined || target.cluster.name === '') {
