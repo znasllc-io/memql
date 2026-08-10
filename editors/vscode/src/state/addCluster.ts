@@ -12,10 +12,12 @@
 // receipt's, and they arrive as events. This module never decides what to run
 // -- only what to show.
 //
-// Refs: #3470 #3469 #3463
+// Refs: #3475 #3470 #3469 #3463
 
 import type { ExecEvent } from "../install/executor.js";
 import type { AddClusterAction } from "../clusters/presence.js";
+import type { ClustersFile } from "../clusters/model.js";
+import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -105,6 +107,111 @@ export const DEFAULT_INPUTS: Inputs = {
   providerKeyFile: "",
 };
 
+// -----------------------------------------------------------------------------
+// registering a cluster that already exists (the `connect` screen, memql#3475)
+// -----------------------------------------------------------------------------
+
+/**
+ * What registering an existing cluster asks for.
+ *
+ * ONE SET OF FIELDS, held together, because this replaces a sequence of input
+ * boxes that could not be navigated backwards and lost every answer on Escape.
+ * A form is not a nicer rendering of that sequence -- it is the thing that
+ * makes revising the second answer after seeing the fourth possible at all,
+ * and holding the values here rather than in the DOM is what survives the
+ * webview repaint each validation pass causes.
+ *
+ * `domain` and `token` are OPTIONAL and are still collected, for reasons that
+ * are not symmetry:
+ *   - the domain names where sign-in POSTs (identityBaseUrlFor); without it
+ *     that derivation depends on the endpoint happening to be spelled
+ *     `cockpit.<domain>`, which a hand-registered cluster need not be;
+ *   - the token is the paste-a-credential path, which "memQL: Sign In" has
+ *     made the exception rather than the rule -- so the field stays, and the
+ *     ordinary answer is to leave it empty.
+ */
+export interface ConnectInputs {
+  name: string;
+  domain: string;
+  endpoint: string;
+  token: string;
+}
+
+export type ConnectField = keyof ConnectInputs;
+
+export interface ConnectFieldError {
+  field: ConnectField;
+  message: string;
+}
+
+/**
+ * The registry entry a valid form produces.
+ *
+ * IT CARRIES NO `local` KEY, and the absence is the point rather than an
+ * omission. `local: true` means "this cluster's data is disposable", which
+ * gates the mutation confirmation and, since memql#3466, decides whether the
+ * tree row offers an uninstall -- read as a strict `=== true`, never as
+ * truthiness. A cluster reached through THIS screen is one the operator
+ * already has somewhere else; nothing here can know it is disposable, and the
+ * direction that cannot destroy anything is to say nothing.
+ *
+ * Not-supplied and false are also not the same write. `local: false` would be
+ * a key clusters.yaml's other author drops on its next save (the cockpit
+ * declares the field `omitempty`), so writing it would make the two tools
+ * churn the file against each other. Omitting the field entirely is the only
+ * spelling that round-trips.
+ */
+export interface ClusterRegistration {
+  name: string;
+  endpoint: string;
+  domain?: string;
+  token?: string;
+}
+
+const EMPTY_CONNECT: ConnectInputs = { name: "", domain: "", endpoint: "", token: "" };
+
+/**
+ * The refusal a duplicate name earns, worded EXACTLY as clusters/file.ts
+ * `addCluster` words its own.
+ *
+ * Two walls stand between a duplicate and the file -- this synchronous check
+ * over a registry already read, and addCluster's re-read at write time -- and
+ * they are both necessary: clusters.yaml is shared with the Cockpit, so no
+ * read this side stays authoritative, and a form that only found out at write
+ * time would be back to reporting the problem after the operator had committed
+ * to it. Saying the same sentence at both walls is what stops the second one
+ * from reading as a different, more alarming failure than the first.
+ */
+export function duplicateNameMessage(name: string): string {
+  return `a cluster named "${name}" already exists; edit it instead of adding it again`;
+}
+
+/**
+ * The endpoint's problem, as the DIALER sees it.
+ *
+ * webSocketUrlFor is the function the connection layer actually calls, and it
+ * throws for exactly the endpoints that cannot be dialed -- so it is the
+ * validator here rather than the inspiration for one. A second parser would be
+ * free to accept something the dialer later rejects, and the operator would
+ * find out at connect time with the form long since closed.
+ *
+ * Its message names the cluster ("cluster \"x\": endpoint scheme must be...")
+ * because its usual caller has no field to attach the sentence to. This one
+ * does, and the label above the box already says which value is wrong, so the
+ * prefix is stripped -- by exact match against the name we passed in, not by a
+ * pattern, since anything else would be a parser of the validator's prose.
+ */
+function endpointProblem(name: string, endpoint: string): string | undefined {
+  try {
+    webSocketUrlFor({ name, endpoint });
+    return undefined;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const prefix = `cluster "${name}": `;
+    return message.startsWith(prefix) ? message.slice(prefix.length) : message;
+  }
+}
+
 /**
  * What each action cannot start without.
  *
@@ -161,6 +268,10 @@ export class AddClusterState {
   private failedId: string | undefined;
   private wasCancelled = false;
   private didSucceed = false;
+  private connectValues: ConnectInputs = { ...EMPTY_CONNECT };
+  private connectErrorList: ConnectFieldError[] = [];
+  private connectFailureMessage = "";
+  private registry: ClustersFile | undefined;
 
   get screen(): Screen {
     return this.currentScreen;
@@ -185,6 +296,16 @@ export class AddClusterState {
     const found = this.progress.find((p) => p.id === this.failedId);
     return found === undefined ? undefined : { ...found };
   }
+  get connectInputs(): ConnectInputs {
+    return { ...this.connectValues };
+  }
+  get connectErrors(): ConnectFieldError[] {
+    return [...this.connectErrorList];
+  }
+  /** What the WRITE refused, when the form itself had nothing wrong with it. */
+  get connectFailure(): string {
+    return this.connectFailureMessage;
+  }
   get cancelled(): boolean {
     return this.wasCancelled;
   }
@@ -204,6 +325,7 @@ export class AddClusterState {
     this.guidedRun = action === "installGuided";
     this.currentScreen = screenFor(action);
     this.fieldErrors = [];
+    this.clearConnectProblems();
   }
 
   back(): void {
@@ -211,6 +333,10 @@ export class AddClusterState {
     this.guidedRun = false;
     this.currentScreen = "landing";
     this.fieldErrors = [];
+    // The problems go, what was TYPED stays. Back is one click away from every
+    // form on this page, and an operator who lands on the cards by accident
+    // must not have to retype four fields to get where they were.
+    this.clearConnectProblems();
   }
 
   // ---------------------------------------------------------------------------
@@ -273,6 +399,165 @@ export class AddClusterState {
     this.wasCancelled = false;
     this.didSucceed = false;
     return true;
+  }
+
+  // ---------------------------------------------------------------------------
+  // registering an existing cluster (memql#3475)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Hands over the registry the duplicate-name check reads.
+   *
+   * A SNAPSHOT, and knowingly one. clusters.yaml is shared with the memQL
+   * Cockpit, so this list is only true of the moment it was read -- which is
+   * why it is the FIRST of two walls and not the only one: `addCluster` re-reads
+   * the file at write time and refuses there too. What this one buys is the
+   * refusal arriving while the operator still has the name in front of them.
+   *
+   * Never supplied (a clusters.yaml that would not parse, a panel that has not
+   * finished reading it) simply means the check cannot fire; the write-time
+   * wall still does.
+   */
+  setRegistry(file: ClustersFile): void {
+    this.registry = file;
+  }
+
+  /**
+   * Records one field of the registration form.
+   *
+   * It VALIDATES NOTHING and only drops the error the field was carrying.
+   * Every value arrives here on the way to an action -- the webview re-sends
+   * the whole form with each message, because a render replaces its HTML
+   * wholesale and the DOM is therefore not where form state lives -- so
+   * checking here would re-derive on every click what connectDraft is about to
+   * derive anyway. Dropping the stale error is the part that matters: an
+   * operator who has just changed a field should not still be reading the
+   * complaint about what it used to say.
+   */
+  setConnectInput(field: ConnectField, value: string): void {
+    this.connectValues[field] = value;
+    this.connectErrorList = this.connectErrorList.filter((e) => e.field !== field);
+  }
+
+  /**
+   * Every problem with the registration form, in field order.
+   *
+   * EVERY FIELD IS CHECKED before returning, the way coerceArgs checks every
+   * argument: the operator sees all the problems at once rather than one per
+   * attempt, which is the difference between one correction pass and four.
+   */
+  validateConnect(): ConnectFieldError[] {
+    const values = this.connectValues;
+    const errors: ConnectFieldError[] = [];
+    const name = values.name.trim();
+    const domain = normalizeDomain(values.domain);
+
+    if (name === "") {
+      errors.push({ field: "name", message: "A cluster name is required." });
+    } else if (this.registry?.clusters.some((c) => c.name === name) === true) {
+      errors.push({ field: "name", message: duplicateNameMessage(name) });
+    }
+
+    if (domain !== "" && /\s/.test(domain)) {
+      errors.push({ field: "domain", message: "A domain cannot contain spaces." });
+    } else if (domain.includes("://")) {
+      errors.push({
+        field: "domain",
+        message: "A domain is a hostname, not a URL -- drop the scheme.",
+      });
+    }
+
+    // The endpoint is DERIVABLE from the domain, so an empty box is only a
+    // problem when nothing else names the front door. This is the same
+    // `cockpit.<domain>:443` convention identityBaseUrlFor reads back off a
+    // registered endpoint, called rather than copied.
+    const endpoint = values.endpoint.trim() || composeEndpointFromDomain(domain);
+    if (endpoint === "") {
+      errors.push({
+        field: "endpoint",
+        message:
+          "An endpoint is required: the cluster's gRPC host:port, or a domain above to compose it from.",
+      });
+    } else {
+      const problem = endpointProblem(name === "" ? "this cluster" : name, endpoint);
+      if (problem !== undefined) errors.push({ field: "endpoint", message: problem });
+    }
+
+    const token = values.token.trim();
+    if (token.startsWith("mql_pat_")) {
+      errors.push({
+        field: "token",
+        message:
+          "That is a Personal Access Token, and the mesh cannot verify one: it checks bearers against the identity service's JWKS feed, so a PAT fails before any lookup. Paste the `access_token` from POST <identity>/oauth/token, or leave this empty and run \"memQL: Sign In\".",
+      });
+    } else if (/\s/.test(token)) {
+      errors.push({
+        field: "token",
+        message:
+          "An access token contains no whitespace -- this one looks like it picked up a line break on the way in.",
+      });
+    }
+
+    return errors;
+  }
+
+  /**
+   * The entry to write, or undefined with the reasons recorded.
+   *
+   * Returning the entry rather than writing it keeps this module free of the
+   * filesystem, which is what lets the whole form -- validation, refusal,
+   * revision, the shape of the row that lands -- be driven under bare
+   * `node --test`.
+   *
+   * EMPTY OPTIONAL FIELDS ARE OMITTED, not written as "". Against a new entry
+   * the two produce the same file, but they mean opposite things to
+   * upsertCluster ("" is an explicit CLEAR), and a draft that says "clear the
+   * token" is one refactor away from being handed to the update path.
+   */
+  connectDraft(): ClusterRegistration | undefined {
+    const errors = this.validateConnect();
+    this.connectErrorList = errors;
+    this.connectFailureMessage = "";
+    if (errors.length > 0) return undefined;
+
+    const name = this.connectValues.name.trim();
+    const domain = normalizeDomain(this.connectValues.domain);
+    const token = this.connectValues.token.trim();
+    const draft: ClusterRegistration = {
+      name,
+      endpoint: this.connectValues.endpoint.trim() || composeEndpointFromDomain(domain),
+    };
+    if (domain !== "") draft.domain = domain;
+    if (token !== "") draft.token = token;
+    return draft;
+  }
+
+  /** Records why the WRITE refused an otherwise-valid form. */
+  failConnect(message: string): void {
+    this.connectFailureMessage = message;
+  }
+
+  /**
+   * Throws the draft away and returns to the cards.
+   *
+   * Escape and the close button both end here, and both must leave NOTHING
+   * behind: a half-filled form is not a partial cluster, and the old sequence's
+   * habit of writing whatever it had collected before the operator gave up is
+   * the failure this screen exists to end. Nothing is written because nothing
+   * writes except an explicit save -- this clears the values so a later visit
+   * starts clean rather than resuming a draft the operator abandoned.
+   */
+  discardConnect(): void {
+    this.connectValues = { ...EMPTY_CONNECT };
+    this.clearConnectProblems();
+    this.chosen = undefined;
+    this.guidedRun = false;
+    this.currentScreen = "landing";
+  }
+
+  private clearConnectProblems(): void {
+    this.connectErrorList = [];
+    this.connectFailureMessage = "";
   }
 
   // ---------------------------------------------------------------------------
