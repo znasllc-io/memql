@@ -578,25 +578,89 @@ smoke("the sign-out command clears the stored credential", async () => {
 // WHAT ONLY A HOST CAN SAY ABOUT THIS MENU. Which items a verdict produces is
 // decided in a pure module and asserted in the fast lane
 // (test/clusterPresence.test.ts). What that lane structurally cannot reach is
-// whether the workbench actually renders the quick pick, whether the promise
-// it returns settles when an item is accepted, and -- the whole point of the
-// single-item rule -- whether the healthy case really shows no dialog at all.
-// A picker that opened and waited there would be indistinguishable from a
-// correct return value in a unit test, and would hang the button in practice.
+// whether the workbench actually renders the quick pick, and whether the
+// promise it returns settles when an item is accepted. A picker that opened
+// and waited there would be indistinguishable from a correct return value in a
+// unit test, and would hang the button in practice.
 
-smoke("the + menu shows no picker when a healthy local cluster is already here", async () => {
+/**
+ * Opens the "+" menu for a verdict, moves the selection down `downPresses`
+ * times, accepts, and returns what the menu resolved to.
+ *
+ * The widget takes a moment to appear and the accept command is a no-op until
+ * it has, so the accept is RETRIED rather than sleeping a guessed interval.
+ * The modal is closed in a `finally` whatever happens: a picker left open would
+ * swallow the input of every case after this one, turning one failure into a
+ * whole-lane failure with no useful output.
+ */
+async function acceptMenuItem(
+  verdict: Parameters<typeof showAddClusterMenu>[0],
+  downPresses: number
+): Promise<Awaited<ReturnType<typeof showAddClusterMenu>> | "pending"> {
+  let settled: Awaited<ReturnType<typeof showAddClusterMenu>> | "pending" = "pending";
+  const choice = showAddClusterMenu(verdict).then((value) => {
+    settled = value;
+    return value;
+  });
+  const observed = choice.catch(() => "pending" as const);
+
+  try {
+    await waitFor(
+      `the + quick pick for ${verdict} to accept item ${downPresses + 1}`,
+      async () => {
+        if (settled !== "pending") return true;
+        for (let i = 0; i < downPresses; i += 1) {
+          await withinDeadline(
+            "workbench.action.quickOpenSelectNext",
+            Promise.resolve(vscode.commands.executeCommand("workbench.action.quickOpenSelectNext")),
+            2_000
+          );
+        }
+        await withinDeadline(
+          "workbench.action.acceptSelectedQuickOpenItem",
+          Promise.resolve(
+            vscode.commands.executeCommand("workbench.action.acceptSelectedQuickOpenItem")
+          ),
+          2_000
+        );
+        return settled !== "pending";
+      },
+      10_000,
+      250
+    );
+    return await withinDeadline("the menu promise to settle", observed, 2_000);
+  } finally {
+    await withinDeadline(
+      "workbench.action.closeQuickOpen",
+      Promise.resolve(vscode.commands.executeCommand("workbench.action.closeQuickOpen")),
+      2_000
+    ).catch(() => undefined);
+  }
+}
+
+smoke("the + menu offers connect first on a healthy local cluster, with uninstall behind it", async () => {
   await extension().activate();
 
-  // Nothing accepts, cancels or dismisses anything here. If a quick pick were
-  // shown, this promise would still be waiting when the deadline fires.
-  const settled = await Promise.race([
-    showAddClusterMenu("installed-healthy"),
-    new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 2_000)),
-  ]);
+  // THIS CASE ASSERTED THE OPPOSITE UNTIL memql#3471. `installed-healthy` used
+  // to produce a single item, so the caller short-circuited and no dialog was
+  // shown at all -- and this case existed to prove exactly that. #3471 gave the
+  // verdict a second entry, because a cluster that is here and answering is
+  // precisely the one an operator may want to take off the machine. A picker is
+  // now the correct behaviour, so the old assertion was asserting a rule that no
+  // longer exists rather than catching a regression.
   assert.equal(
-    settled,
+    await acceptMenuItem("installed-healthy", 0),
     "connect",
-    "installed-healthy must resolve straight to the connect path; a one-item quick pick asks the operator to confirm the absence of a decision (and this one never closed)"
+    "the first item on a healthy cluster must be connect -- there is a cluster, it answers, and registering a connection is what the operator almost always came for"
+  );
+
+  // The half that earns this case its place now. #3471's whole point is that a
+  // healthy local cluster can be uninstalled, and nothing else in this lane
+  // proves the operator can actually reach that item in a real workbench.
+  assert.equal(
+    await acceptMenuItem("installed-healthy", 1),
+    "uninstall",
+    "uninstall must be reachable as the second item; #3471 added it precisely so a local cluster is removable, and a menu that renders it out of reach is the same as not having it"
   );
 });
 
