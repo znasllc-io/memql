@@ -332,6 +332,32 @@ test("finishing a run reports whether it succeeded", () => {
   assert.equal(s.cancelled, false);
 });
 
+test("a CANCELLED run does not count as a success, even though ok is true", () => {
+  // THE GATE THE HAND-OFF HANGS OFF (#3477). `ok` means nothing FAILED, and a
+  // cancelled run normally satisfies that -- `executor.ts` sets `cancelled`
+  // separately for exactly this reason. Reading `ok` alone would have the
+  // wizard register the cluster and offer "Sign in as owner" for an install
+  // the operator deliberately stopped: worse than doing nothing, because it
+  // looks like success.
+  const s = new AddClusterState();
+  s.chooseAction("repair");
+  s.beginRun();
+  s.finish({ ok: true, cancelled: true });
+
+  assert.equal(s.screen, "done");
+  assert.equal(s.cancelled, true);
+  assert.equal(s.succeeded, false, "a cancelled run must never report success");
+});
+
+test("a failed run is neither successful nor cancelled", () => {
+  const s = new AddClusterState();
+  s.chooseAction("repair");
+  s.beginRun();
+  s.finish({ ok: false });
+  assert.equal(s.succeeded, false);
+  assert.equal(s.cancelled, false);
+});
+
 // -----------------------------------------------------------------------------
 // registering an existing cluster (memql#3475)
 //

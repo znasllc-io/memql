@@ -45,6 +45,7 @@ import { defaultReceiptPath } from "../install/receipt.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import {
   previewUninstall,
+  runInstall,
   runUninstall,
   type SessionOptions,
   type UninstallPreview,
@@ -56,6 +57,7 @@ import {
   type InputField,
 } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
+import type { ExecutionReport } from "../install/executor.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -166,6 +168,9 @@ export interface AddClusterDeps {
    * whether this extension was PACKAGED -- a .vsix carries a staged copy of
    * `scripts/`, a checkout has the real one two levels up -- and
    * `context.extensionPath` is the only input to that question.
+   *
+   * The install run (#3474) and the uninstall run (#3476) pass the same value
+   * as `SessionOptions.root`; one root, resolved once.
    */
   installRoot: string;
   /**
@@ -188,6 +193,10 @@ export class AddClusterPanel {
   private verdict: PresenceVerdict = "installed-unreachable";
   private disposed = false;
   private saving = false;
+  /** Non-undefined exactly while a run is in flight; also the cancel handle. */
+  private runAbort: AbortController | undefined;
+  /** Why the run could not be attempted at all. Not a step failure. */
+  private runError = "";
 
   /** The removal's own state (memql#3476). See state/uninstallRun.ts. */
   private readonly uninstall = new UninstallRunState();
@@ -372,7 +381,7 @@ export class AddClusterPanel {
       // No toast. The run screen itself says what state the run is in, and a
       // popup that announced a run which has not started would be the same lie
       // in a second place -- one the operator cannot dismiss by looking again.
-      this.state.beginRun();
+      if (this.state.beginRun()) void this.startRun();
       this.render();
       return;
     }
@@ -390,6 +399,11 @@ export class AddClusterPanel {
       return;
     }
     if (type === "cancel") {
+      // Abort FIRST, then transition. The executor stops at the next wave
+      // boundary and the receipt has been written after every step that ran,
+      // so the cancelled install remains fully uninstallable -- which is the
+      // property that makes cancelling safe to offer at any point.
+      this.runAbort?.abort();
       this.state.cancel();
       this.render();
     }
@@ -401,6 +415,83 @@ export class AddClusterPanel {
       const uninstallAction = UNINSTALL_ACTIONS.find((known) => known === type);
       if (uninstallAction !== undefined) this.onUninstallAction(uninstallAction);
     }
+  }
+
+  /**
+   * Drives `session.ts` and folds every event into the state machine.
+   *
+   * ONE RUN AT A TIME, guarded by `runAbort` rather than by the screen: the
+   * operator can reach `begin` again through retry, and two concurrent graphs
+   * against one k3d cluster is not a state anything downstream is prepared for.
+   *
+   * Repair uses the SAME call. Every step verifies first and skips when
+   * satisfied, which is what makes re-running the graph a repair -- there is no
+   * second code path here, only different wording on the screen.
+   */
+  private async startRun(): Promise<void> {
+    if (this.runAbort !== undefined) return;
+    const action = this.state.action;
+    if (action !== "install" && action !== "installGuided" && action !== "repair") return;
+
+    const controller = new AbortController();
+    this.runAbort = controller;
+    const inputs = this.state.inputs;
+
+    let report: ExecutionReport | undefined;
+    let failure: string | undefined;
+    try {
+      report = await runInstall(
+        {
+          root: this.deps.installRoot,
+          // The same default the uninstall side reads (#3476), so the run that
+          // writes the receipt and the run that reverses it cannot disagree
+          // about where it lives.
+          receiptFile: defaultReceiptPath(),
+          skip: new Set<string>(),
+          // The graph pins `anthropic` on the providerKey step; this is the
+          // same value, passed for the seedBootstrap step that also needs it.
+          provider: "anthropic",
+          domain: inputs.domain,
+          ownerEmail: inputs.ownerEmail,
+          ownerFirstName: inputs.ownerFirstName,
+          ownerLastName: inputs.ownerLastName,
+          // A PATH, never the key. argv is world-readable in `ps`.
+          providerKeyFile: inputs.providerKeyFile,
+          stepParams: {},
+        },
+        {
+          onEvent: (event) => {
+            this.state.apply(event);
+            this.render();
+          },
+          signal: controller.signal,
+        },
+      );
+    } catch (err) {
+      // A THROW IS NOT A FAILED STEP. Everything a step can do wrong arrives as
+      // an event and is already on screen; reaching here means the run could
+      // not be attempted at all -- a missing graph document, an unreadable
+      // script -- and the step list would otherwise sit empty with no account
+      // of why.
+      failure = err instanceof Error ? err.message : String(err);
+    } finally {
+      this.runAbort = undefined;
+    }
+
+    if (this.disposed) return;
+
+    if (failure !== undefined) {
+      this.runError = failure;
+      this.state.finish({ ok: false });
+      this.render();
+      return;
+    }
+
+    // `ok` means nothing FAILED, which a cancelled run usually satisfies -- so
+    // "did the whole graph run?" needs both fields. Handing off on `ok` alone
+    // would have the wizard claim an install the operator deliberately stopped.
+    this.state.finish({ ok: report?.ok === true, cancelled: report?.cancelled === true });
+    this.render();
   }
 
   // ---------------------------------------------------------------------------
@@ -788,19 +879,26 @@ ${this.bodyHtml()}
     const settled = runIsSettled(steps);
     const repair = this.state.action === "repair";
 
-    // NO STEPS MEANS NOTHING IS RUNNING, and this must not pretend otherwise.
-    //
-    // `AddClusterState.apply()` is what populates the list, and nothing calls
-    // it yet -- driving `session.ts` needs an install root a packaged extension
-    // does not have (memql#3487). An earlier version of this screen said
-    // "Starting. The first step will appear here as it begins", which was a
-    // claim about a run that had not begun and could not begin. A wizard that
-    // reports work it is not doing is worse than one that reports nothing: the
-    // operator waits on it.
+    // An empty list now means the run is starting for real -- `startRun()` is
+    // in flight and the first `stepStarted` has not arrived. That claim was
+    // false while the invocation was unwired (memql#3487), which is why this
+    // text is tied to `runAbort` rather than asserted unconditionally: if no
+    // run is in flight and no step has reported, nothing is happening and the
+    // screen says so.
     const body =
-      steps.length === 0
-        ? `<p class="lede">Nothing has been run. Starting an install from the editor is not wired up in this build -- see memql#3487.</p>`
-        : renderToHtml(renderInstallSteps(toStepViews(steps)));
+      steps.length > 0
+        ? renderToHtml(renderInstallSteps(toStepViews(steps)))
+        : this.runAbort !== undefined
+          ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
+          : `<p class="lede">Nothing has been run.</p>`;
+
+    // A run that could not be ATTEMPTED gets its own line. It is not a step
+    // failure -- there is no step to retry and no stderr to disclose -- so it
+    // must not be dressed as one.
+    const errorHtml =
+      this.runError === ""
+        ? ""
+        : `<p class="error">The install could not be started: ${escapeHtml(this.runError)}</p>`;
 
     // Cancel is offered for exactly as long as there is something to stop.
     // A cancelled run leaves a valid receipt -- what ran, ran, and an uninstall
@@ -815,6 +913,7 @@ ${this.bodyHtml()}
         ? "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs."
         : "Each step proves itself before the next one starts.",
     )}</p>
+${errorHtml}
 ${body}
 <div class="actions">${actions}</div>`;
   }
