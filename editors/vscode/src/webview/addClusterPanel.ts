@@ -1247,22 +1247,6 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   }
 
   /**
-   * The slot the remaining screens fill.
-   *
-   * Left as a plain region on purpose: #3474 (progress) and #3476 (the
-   * uninstall preview) each render their own HTML into it. Guessing at their
-   * markup here would be a second thing for them to unpick. The remote form
-   * has since claimed its own screen off this slot (connectHtml, #3475).
-   */
-  private placeholderHtml(): string {
-    return `<h1>${escapeHtml(this.state.action ?? "")}</h1>
-<p class="lede">This screen lands with its own issue. Nothing has been run.</p>
-<div class="actions">
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
-  }
-
-  /**
    * Registers the cluster the run just built, and moves to the hand-off screen.
    *
    * THE SEAM #3474 CALLS when a run finishes successfully. The ordering and the
