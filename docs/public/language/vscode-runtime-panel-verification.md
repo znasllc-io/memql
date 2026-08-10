@@ -357,19 +357,31 @@ and `refresh_token` keys deliberately blank.
 - [ ] **memQL: Sign In With a Device Code** (palette only) shows an
       `XXXX-XXXX` code and a verification URL, and approving at
       `https://identity.<domain>/device` completes the sign-in on the editor side
+- [ ] **memQL: Sign In** falls back to a device code on a host that cannot do
+      loopback (memql#3515). The cheapest arrangement is a Remote-SSH window
+      onto a box with no browser; a firewall that refuses the loopback bind
+      works too. The switch is **announced** -- a progress line reading
+      `switching to a device code...` and an information message naming the
+      loopback failure -- and then the same `XXXX-XXXX` code appears. A host
+      that *can* do loopback must still open a browser: the fallback firing
+      unconditionally would be its own defect
+- [ ] Renaming a signed-in cluster (**memQL: Edit Cluster**, change the name)
+      leaves it signed in (memql#3515). Rename it, then reconnect: no
+      credential prompt. The stranded half is invisible by construction --
+      SecretStorage cannot be enumerated and the access token rides on the
+      entry -- so the check that bites is reconnecting **after the access token
+      expires** (15 minutes), where a lost refresh token surfaces as a
+      re-authorization the rename should not have caused
 
-WARNING: two things this section deliberately does not ask you to verify,
-because they are not wired up and the row would fail:
+WARNING: one thing this section deliberately does not ask you to verify:
 
-- The automatic loopback-to-device-code fallback exists in the codebase
-  (`signInWithDeviceCodeFallback`) but is **not** reached from **memQL: Sign
-  In**, which runs the loopback flow alone. The device grant is reachable only
-  through the explicit **Sign In With a Device Code** command. Verify it that
-  way; do not wait for a failed loopback to hand you one.
-- **Renaming a signed-in cluster does not move its refresh token.**
-  `renameClusterCredentials` and `reconcileClusterCredentials` both exist and
-  neither is called from the extension, so a rename leaves the secret orphaned
-  under the old key and nothing sweeps it. Sign in again after a rename.
+- The credential **sweep** (`reconcileClusterCredentials`) runs at activation
+  and deletes SecretStorage entries whose cluster is no longer in
+  `clusters.yaml`. It is correct that you cannot observe it -- SecretStorage
+  cannot be enumerated, so there is no surface that shows an orphan before or
+  after. Its behaviour is covered by unit tests
+  (`editors/vscode/test/authStore.test.ts`); what you can check here is only
+  that a rename does **not** trip it, which is the row above.
 
 ### The Add a cluster page and the cluster lifecycle (memql#3463)
 

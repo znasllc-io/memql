@@ -15,7 +15,9 @@ import {
   canSignIn,
   describeSignInFailure,
   performSignIn,
+  selectSignInRunner,
   signInCanRecover,
+  type AuthFlowRunner,
   type PerformSignInDeps,
   type SignInCredentials,
 } from "../src/auth/signin.js";
@@ -288,4 +290,77 @@ test("describeSignInFailure survives a rejection that is not an AuthFlowError", 
   assert.equal(report.level, "error");
   assert.match(report.message, /fetch is not a function/);
   assert.equal(report.retryable, false);
+});
+
+// -----------------------------------------------------------------------------
+// Which grant runs (memql#3515)
+// -----------------------------------------------------------------------------
+//
+// The defect these pin is not a wrong result -- it is a capability that shipped
+// unreachable. `memQL: Sign In` called a PRIVATE function in extension.ts that
+// ran loopback alone, while an exported function of the SAME NAME in
+// auth/deviceCodeUi.ts ran the loopback-to-device-code fallback and had zero
+// importers. Nothing failed for a host that could do loopback. A host that could
+// not -- Remote-SSH onto a box whose browser is elsewhere, a hardened network --
+// waited out the callback deadline, was told it had failed, and the code to hand
+// it a device code was sitting two files away.
+//
+// selectSignInRunner exists so that choice is somewhere a test can reach.
+// Everything around it in extension.ts needs a live editor, which is exactly why
+// the one decision worth asserting was the one nothing asserted.
+
+function stubRunner(label: string, seen: string[]): AuthFlowRunner {
+  return async () => {
+    seen.push(label);
+    return {
+      accessToken: "A",
+      refreshToken: "R",
+      clientId: "c",
+      clientIdWasRegistered: false,
+      expiresInSeconds: 900,
+      expiresAtEpochSeconds: 900,
+    } as AuthFlowTokens;
+  };
+}
+
+test("the default sign-in runs the fallback, not loopback alone", async () => {
+  const seen: string[] = [];
+  const runner = selectSignInRunner("auto", {
+    loopbackWithDeviceFallback: stubRunner("fallback", seen),
+    deviceCode: stubRunner("device", seen),
+  });
+
+  await runner(cluster(), undefined);
+
+  // If this ever reads ["device"] the default silently stopped trying a browser;
+  // if the runner map is ever wired to a bare loopback flow, THAT is memql#3515
+  // regressing and this assertion is the only thing standing in front of it.
+  assert.deepEqual(seen, ["fallback"]);
+});
+
+test("the deliberate device-code command skips loopback entirely", async () => {
+  const seen: string[] = [];
+  const runner = selectSignInRunner("deviceCode", {
+    loopbackWithDeviceFallback: stubRunner("fallback", seen),
+    deviceCode: stubRunner("device", seen),
+  });
+
+  await runner(cluster(), undefined);
+
+  // The whole point of memql#3411's command: a user who already knows their
+  // environment must not pay the callback deadline to be told so. Running the
+  // fallback here would reintroduce exactly that wait.
+  assert.deepEqual(seen, ["device"]);
+});
+
+test("the two flows select DIFFERENT runners", async () => {
+  // The degenerate failure a pair of positive assertions cannot see on its own:
+  // a selector that returned the same runner for both would satisfy each test
+  // above if the map happened to hold the same function twice.
+  const seen: string[] = [];
+  const runners = {
+    loopbackWithDeviceFallback: stubRunner("fallback", seen),
+    deviceCode: stubRunner("device", seen),
+  };
+  assert.notEqual(selectSignInRunner("auto", runners), selectSignInRunner("deviceCode", runners));
 });

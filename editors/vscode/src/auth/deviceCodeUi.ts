@@ -32,175 +32,64 @@
 //   because re-summoning a notification a person just closed is nagging.
 //
 // -----------------------------------------------------------------------------
-// ONE PERSISTENCE PATH
+// WHAT THIS FILE IS AND IS NOT (memql#3515)
 // -----------------------------------------------------------------------------
 //
-// Both sign-in shapes return the same `AuthFlowTokens`, and both land in
-// persistSignIn (memql#3404) through `completeSignIn` below -- one call site,
-// so a device sign-in cannot drift into storing its tokens somewhere the
-// loopback sign-in does not, or skipping the client_id write that stops the
-// next sign-in re-registering.
+// PRESENTATION ONLY. It used to carry two full sign-in shells of its own --
+// `signInWithDeviceCode` and an exported `signInToCluster` -- and the second was
+// the bug memql#3515 was filed about: `memQL: Sign In` called a PRIVATE function
+// of the same name in extension.ts that ran loopback with no fallback, so the
+// capability here shipped with zero importers. A host that genuinely could not
+// do loopback sat through the callback deadline and was told it had failed,
+// while the code to hand it a device code sat right here.
+//
+// The resolution is one sign-in shell, in extension.ts, because that is where
+// the rest of a sign-in lives: the tree refresh, the reconnect of the selected
+// cluster, and the kind-based failure levels from src/auth/signin.ts. This file
+// keeps the part that is genuinely about the DEVICE CODE and nothing else --
+// putting it on screen and keeping it there.
 
-import { env, ProgressLocation, Uri, window, type CancellationToken, type Progress } from 'vscode';
+import { env, Uri, window, type Progress } from 'vscode';
 
-import { upsertCluster } from '../clusters/file.js';
-import type { ClusterConfig } from '../clusters/model.js';
-import {
-  runDeviceCodeFlow,
-  signInWithDeviceCodeFallback,
-  type DeviceAuthorization,
-} from './deviceCode.js';
-import { errorText, isAuthFlowError } from './errors.js';
-import type { AuthFlowTokens } from './flow.js';
-import { persistSignIn, type SecretStore } from './store.js';
-
-export interface SignInUiDeps {
-  /** Where clusters.yaml lives; the access token and client_id are written there. */
-  clustersPath: string;
-  /** VS Code's SecretStorage. Absent only in a host that has none. */
-  secrets?: SecretStore;
-}
+import type { AuthFlowError } from './errors.js';
+import type { DeviceAuthorization } from './deviceCode.js';
 
 /**
- * signInWithDeviceCode runs the device grant DELIBERATELY, skipping loopback.
+ * deviceCodeProgressLine is what the progress notification shows while polling.
  *
- * This is the command path (memql#3411): a user who already knows their
- * environment cannot do loopback should not have to sit through the
- * two-minute callback deadline to be told so.
+ * The notification carries the code AND the URL as text, so a user who closes
+ * every other surface can still read both.
  */
-export async function signInWithDeviceCode(
-  cluster: ClusterConfig,
-  deps: SignInUiDeps,
-): Promise<boolean> {
-  return runSignIn(cluster, deps, `Signing in to "${cluster.name}" with a device code`, (flowDeps) =>
-    runDeviceCodeFlow(cluster, flowDeps),
-  );
-}
-
-/**
- * signInToCluster runs the loopback flow, falling back to the device grant when
- * this host cannot do loopback.
- *
- * The default sign-in path: the browser round trip when it works, and the
- * device code when the environment makes it impossible. Which one ran is
- * announced (`onFallback`) rather than silently substituted.
- */
-export async function signInToCluster(
-  cluster: ClusterConfig,
-  deps: SignInUiDeps,
-): Promise<boolean> {
-  return runSignIn(cluster, deps, `Signing in to "${cluster.name}"`, (flowDeps, progress) =>
-    signInWithDeviceCodeFallback(cluster, {
-      ...flowDeps,
-      resolveExternalUri: async (url) => (await env.asExternalUri(Uri.parse(url))).toString(true),
-      openExternal: (url) => env.openExternal(Uri.parse(url)),
-      onFallback: (reason) => {
-        progress.report({
-          message: 'This host cannot complete a browser sign-in; switching to a device code...',
-        });
-        window.showInformationMessage(
-          `memQL: the browser sign-in could not complete (${reason.message}) Falling back to a device code.`,
-        );
-      },
-    }),
-  );
-}
-
-interface FlowDeps {
-  /** Aborted by the progress notification's Cancel button. */
-  signal: AbortSignal;
-  onUserCode: (authorization: DeviceAuthorization) => void;
-}
-
-type SignInRunner = (
-  deps: FlowDeps,
-  progress: Progress<{ message?: string }>,
-) => Promise<AuthFlowTokens>;
-
-/**
- * runSignIn is the shared shell: a cancellable progress notification, the code
- * on screen, one persistence call, one report.
- *
- * The AbortController is what makes cancellation immediate rather than
- * eventual -- the poll loop's sleep rejects the moment it fires, instead of
- * finishing the interval it is in the middle of.
- */
-async function runSignIn(
-  cluster: ClusterConfig,
-  deps: SignInUiDeps,
-  title: string,
-  run: SignInRunner,
-): Promise<boolean> {
-  return window.withProgress(
-    { location: ProgressLocation.Notification, title, cancellable: true },
-    async (progress, token: CancellationToken) => {
-      const controller = new AbortController();
-      const cancellation = token.onCancellationRequested(() => controller.abort());
-      let settled = false;
-
-      try {
-        const tokens = await run(
-          {
-            signal: controller.signal,
-            onUserCode: (authorization) => {
-              progress.report({ message: codeLine(authorization) });
-              showCodeActions(authorization, () => settled);
-            },
-          },
-          progress,
-        );
-        settled = true;
-        await completeSignIn(cluster.name, tokens, deps);
-        window.showInformationMessage(`memQL: signed in to "${cluster.name}".`);
-        return true;
-      } catch (err) {
-        settled = true;
-        if (isAuthFlowError(err) && err.kind === 'cancelled') {
-          // Deliberate. Nothing louder than an acknowledgement.
-          window.showInformationMessage(`memQL: sign-in to "${cluster.name}" cancelled.`);
-          return false;
-        }
-        window.showErrorMessage(`memQL: ${errorText(err)}`);
-        return false;
-      } finally {
-        settled = true;
-        cancellation.dispose();
-      }
-    },
-  );
-}
-
-/**
- * completeSignIn is the ONLY place either sign-in shape stores anything.
- *
- * memql#3404 owns the split (refresh token to SecretStorage, access token and
- * client_id to the shared clusters.yaml); this call is what keeps the device
- * path from acquiring a second, divergent copy of that decision.
- */
-async function completeSignIn(
-  clusterName: string,
-  tokens: AuthFlowTokens,
-  deps: SignInUiDeps,
-): Promise<void> {
-  await persistSignIn(
-    {
-      secrets: deps.secrets,
-      writeCluster: (update) => upsertCluster(deps.clustersPath, update),
-    },
-    clusterName,
-    tokens,
-  );
-}
-
-function codeLine(authorization: DeviceAuthorization): string {
+export function deviceCodeProgressLine(authorization: DeviceAuthorization): string {
   return `Enter code ${authorization.userCode} at ${authorization.verificationUri}`;
 }
 
-// showCodeActions puts the two buttons on screen and keeps them there for as
-// long as the user is using them. `isSettled` is read at each step so a flow
-// that finished (or was cancelled) while a notification sat open does not
-// re-summon it afterwards.
-function showCodeActions(authorization: DeviceAuthorization, isSettled: () => boolean): void {
+/**
+ * announceDeviceCodeFallback explains the switch when loopback proved
+ * impossible. A flow that silently changes shape reads as a bug.
+ */
+export function announceDeviceCodeFallback(
+  progress: Progress<{ message?: string }>,
+  reason: AuthFlowError,
+): void {
+  progress.report({
+    message: 'This host cannot complete a browser sign-in; switching to a device code...',
+  });
+  void window.showInformationMessage(
+    `memQL: the browser sign-in could not complete (${reason.message}) Falling back to a device code.`,
+  );
+}
+
+/**
+ * showDeviceCodeActions puts the two buttons on screen and keeps them there for
+ * as long as the user is using them. `isSettled` is read at each step so a flow
+ * that finished (or was cancelled) while a notification sat open does not
+ * re-summon it afterwards.
+ */
+export function showDeviceCodeActions(
+  authorization: DeviceAuthorization,
+  isSettled: () => boolean,
+): void {
   const COPY = 'Copy Code';
   const OPEN = 'Open Verification Page';
   const message = `memQL: enter code ${authorization.userCode} at ${authorization.verificationUri} to finish signing in.`;
