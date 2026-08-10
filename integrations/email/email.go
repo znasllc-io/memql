@@ -157,6 +157,21 @@ func (s *SMTPSender) Send(ctx context.Context, msg Message) error {
 		return err
 	}
 
+	// `go/email-injection` fires here and is adjudicated a false positive at
+	// THIS sink (memql#3483). The query flags untrusted input reaching email
+	// content, which is what a mail sender is for -- a campaign exists to put
+	// operator-authored text into a message, so no code change can satisfy it.
+	// Everything it could concretely mean is closed above: RenderRFC5322 runs
+	// msg.Validate(), headerUnsafe(fromHeader) and ValidateExtraHeaders before
+	// a byte is serialized, so header injection is barred however the message
+	// was assembled; the MIME boundary is 128 bits of crypto/rand, so a body
+	// cannot forge a part; and recipient data is escaped in the HTML body.
+	//
+	// Sited here rather than dismissed only on the security surface so the
+	// reasoning travels with the code and the next reader can see it. The
+	// query stays live everywhere else -- it caught a real unescaped-HTML
+	// defect in memql#3455 that a green test suite missed.
+	// codeql[go/email-injection]
 	if err := smtp.SendMail(addr, auth, from, []string{msg.To}, body); err != nil {
 		// Wrapped as an unclassified SendError rather than left bare
 		// (memql#3348): net/smtp gives no status code, so nothing here can
