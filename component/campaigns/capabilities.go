@@ -57,6 +57,15 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 			},
 		},
 		{
+			Name:        "scheduleSend",
+			Description: "Commit a campaign to a time and enqueue the send job that fires at it. Runs the same preflight as startSend, so a schedule that could never send is refused now rather than at 3am.",
+			Handler:     w.handleScheduleSend,
+			ArgsSchema: map[string]string{
+				"campaignId":  "string (required) - the campaign to schedule",
+				"scheduledAt": "string (required) - RFC 3339 instant the send should begin at",
+			},
+		},
+		{
 			Name:        "pauseSend",
 			Description: "Pause a running campaign send. The delivery ledger is untouched, so resuming continues where it stopped.",
 			Handler:     w.handlePauseSend,
@@ -80,6 +89,14 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 				"email":  "string (required) - the address to suppress",
 				"reason": "string (optional) - unsubscribed | hard_bounce | complaint | manual (default manual)",
 				"note":   "string (optional) - provenance, never the address",
+			},
+		},
+		{
+			Name:        "ingestFeedback",
+			Description: "Read a provider's bounce / complaint webhook off a staged v1:platform:inboundRequest row and apply it. Gated by configuration rather than by role: the source must be listed in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES and the delivery must have been signature-verified.",
+			Handler:     w.handleIngestFeedback,
+			ArgsSchema: map[string]string{
+				"inboundRequestId": "string (required) - the staged v1:platform:inboundRequest row to read",
 			},
 		},
 		{
@@ -115,51 +132,12 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 	if !found {
 		return nil, fmt.Errorf("campaigns.startSend: campaign %q not found", campaignID)
 	}
-	switch campaign.Status {
-	case "sending":
-		return nil, fmt.Errorf("campaigns.startSend: campaign is already sending; use resumeSend after a pause")
-	case "sent":
-		return nil, fmt.Errorf("campaigns.startSend: campaign has already been sent. Re-sending means authoring a new campaign -- " +
-			"the delivery ledger is per (campaign, recipient), so a second run of the same campaign would find every recipient already terminal and mail nobody")
-	case "cancelled":
-		return nil, fmt.Errorf("campaigns.startSend: campaign is cancelled")
+	if err := sendableStatus("startSend", campaign.Status); err != nil {
+		return nil, err
 	}
-
-	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
-		return nil, fmt.Errorf("campaigns.startSend: %s", reason)
-	}
-	if w.resolveSender() == nil {
-		return nil, fmt.Errorf("campaigns.startSend: no email sender is registered on this node, so nothing could deliver the campaign")
-	}
-
-	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
+	recipients, err := w.preflight(ctx, "startSend", campaign)
 	if err != nil {
-		return nil, fmt.Errorf("campaigns.startSend: %w", err)
-	}
-	if !found {
-		return nil, fmt.Errorf("campaigns.startSend: template %q is not readable", campaign.TemplateID)
-	}
-	// `ready` is an operator asserting the copy is finished. Refusing a
-	// draft is the cheapest guard there is against the single most
-	// expensive mistake in this domain -- half-written copy delivered to
-	// an entire audience, which is unrecallable.
-	if tmpl.Status != "ready" {
-		return nil, fmt.Errorf("campaigns.startSend: template %q is %q, not \"ready\". Mark it ready once the copy is final", tmpl.ID, tmpl.Status)
-	}
-
-	roster, err := w.store.Roster(ctx, campaign.AudienceID)
-	if err != nil {
-		return nil, fmt.Errorf("campaigns.startSend: %w", err)
-	}
-	if len(roster) == 0 {
-		return nil, fmt.Errorf("campaigns.startSend: audience %q has no recipients", campaign.AudienceID)
-	}
-	if len(roster) >= w.cfg.MaxAudience {
-		return nil, fmt.Errorf(
-			"campaigns.startSend: audience %q has %d recipients, at or over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE). "+
-				"The send reads the roster whole on every batch, so it would silently mail a prefix. Split the audience, or raise the "+
-				"ceiling together with the paginate bound on audienceRosterForSend",
-			campaign.AudienceID, len(roster), w.cfg.MaxAudience)
+		return nil, err
 	}
 
 	// Job first, campaign second. If the process dies between the two,
@@ -182,9 +160,191 @@ func (w *Worker) handleStartSend(ctx context.Context, args map[string]any, _ int
 	return resultNode("campaignSendStarted", map[string]any{
 		"campaignId": campaign.ID,
 		"audienceId": campaign.AudienceID,
-		"recipients": len(roster),
+		"recipients": recipients,
 		"status":     "sending",
 	})
+}
+
+// handleScheduleSend commits a campaign to a time (memql#3459).
+//
+// # Why this is a builtin rather than the scheduleCampaign mutation alone
+//
+// The mutation writes the operator's intended time onto their own row, and
+// before this it wrote nothing else -- which is exactly why a scheduled
+// campaign never fired. Something has to record the intent where the ENGINE
+// can find it, and "find it" is the hard word: `campaign` is owned-tier, so
+// no actor can scan across operators for due rows. The engine's own
+// clusterOwner-tier send job is the only row a worker can find without
+// already knowing whose it is, so the schedule is written there, by Go
+// holding a campaign it read under the caller's actor.
+//
+// # The preflight runs NOW, not at the scheduled time
+//
+// Both, in fact -- the worker re-checks at fire time, because hours pass. But
+// running it here is the point of the feature: a schedule whose template is
+// still a draft, whose audience is empty or whose node has no configured
+// sender is a send that was never going to happen, and the operator finds
+// that out while they are looking at the screen rather than the next morning.
+func (w *Worker) handleScheduleSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
+	campaignID := memql.BareShortId(strings.TrimSpace(argString(args, "campaignId")))
+	if campaignID == "" {
+		return nil, fmt.Errorf("campaigns.scheduleSend: campaignId is required")
+	}
+	raw := strings.TrimSpace(argString(args, "scheduledAt"))
+	if raw == "" {
+		return nil, fmt.Errorf("campaigns.scheduleSend: scheduledAt is required; to send now, use campaignStartSend")
+	}
+	when, err := parseScheduledAt(raw)
+	if err != nil {
+		return nil, fmt.Errorf("campaigns.scheduleSend: %w", err)
+	}
+	if strings.TrimSpace(callerUserID(ctx)) == "" {
+		return nil, fmt.Errorf("campaigns.scheduleSend: no caller identity; a send is always scheduled by somebody")
+	}
+
+	// THE AUTHORIZATION, identical to startSend's: an owned-tier read under
+	// the caller's own context. A campaign the caller does not own is simply
+	// not found, and every value that reaches the job is copied off that row.
+	campaign, found, err := w.store.CampaignByID(ctx, campaignID)
+	if err != nil {
+		return nil, fmt.Errorf("campaigns.scheduleSend: %w", err)
+	}
+	if !found {
+		return nil, fmt.Errorf("campaigns.scheduleSend: campaign %q not found", campaignID)
+	}
+	if err := sendableStatus("scheduleSend", campaign.Status); err != nil {
+		return nil, err
+	}
+
+	// A time already past would fire on the very next tick, which is a
+	// confusing way to spell "send now" and is far more often a typo in the
+	// year or the timezone. The slack absorbs the round trip and a little
+	// clock skew between the operator's browser and the node.
+	if now := w.nowUTC(); when.Before(now.Add(-scheduleBackdateSlack)) {
+		return nil, fmt.Errorf(
+			"campaigns.scheduleSend: %s is in the past (it is now %s). To send immediately, use campaignStartSend",
+			when.Format(time.RFC3339), now.Format(time.RFC3339))
+	}
+
+	recipients, err := w.preflight(ctx, "scheduleSend", campaign)
+	if err != nil {
+		return nil, err
+	}
+
+	// Job first, campaign second, for the reason startSend gives: a crash
+	// between the two leaves a `scheduled` job under a campaign that is still
+	// a draft, and the promotion refuses to fire from `draft`. Inert. The
+	// other order would leave a campaign promising a send with no job behind
+	// it, which is the shape this issue is about.
+	if err := w.store.EnqueueSend(w.systemActorContext(ctx), SendJob{
+		CampaignID:          campaign.ID,
+		CampaignOwnerUserID: campaign.OwnerUserID,
+		AudienceID:          campaign.AudienceID,
+		TemplateID:          campaign.TemplateID,
+		Status:              "scheduled",
+		ScheduledAt:         when,
+	}); err != nil {
+		return nil, fmt.Errorf("campaigns.scheduleSend: %w", err)
+	}
+	if err := w.store.ScheduleCampaign(ctx, campaign.ID, when); err != nil {
+		return nil, fmt.Errorf("campaigns.scheduleSend: %w", err)
+	}
+
+	return resultNode("campaignSendScheduled", map[string]any{
+		"campaignId":  campaign.ID,
+		"audienceId":  campaign.AudienceID,
+		"recipients":  recipients,
+		"scheduledAt": when.Format(time.RFC3339),
+		"status":      "scheduled",
+	})
+}
+
+// scheduleBackdateSlack is how far into the past a scheduled time may sit
+// before it is read as a mistake rather than as "now".
+const scheduleBackdateSlack = 5 * time.Minute
+
+// parseScheduledAt accepts the two spellings a UI produces: a full RFC 3339
+// instant, and the offset-less form an <input type="datetime-local"> emits.
+// The second is read as UTC and said so in the builtin's documentation --
+// guessing a local zone from a server's TZ would make the same string mean
+// different moments on different nodes.
+func parseScheduledAt(raw string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05", "2006-01-02T15:04"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("scheduledAt %q is not an RFC 3339 instant (e.g. 2026-08-14T09:00:00Z)", raw)
+}
+
+// sendableStatus refuses the campaign states from which neither starting nor
+// scheduling a send is meaningful. Shared so the two entry points cannot
+// drift into disagreeing about which those are.
+func sendableStatus(op, status string) error {
+	switch status {
+	case "sending":
+		return fmt.Errorf("campaigns.%s: campaign is already sending; use resumeSend after a pause", op)
+	case "sent":
+		return fmt.Errorf("campaigns.%s: campaign has already been sent. Re-sending means authoring a new campaign -- "+
+			"the delivery ledger is per (campaign, recipient), so a second run of the same campaign would find every recipient already terminal and mail nobody", op)
+	case "cancelled":
+		return fmt.Errorf("campaigns.%s: campaign is cancelled", op)
+	}
+	return nil
+}
+
+// preflight is the refusal set shared by starting a send and scheduling one,
+// and the sharing is the point: a schedule that passes a WEAKER preflight
+// than a manual start is a schedule that fails in the middle of the night
+// with nobody watching.
+//
+// Every check is a read, which is why this lives in Go rather than in a
+// mutation body. It runs under the CALLER'S context throughout, so the
+// template and roster it consults are the ones the caller can actually see.
+//
+// Returns the recipient count the send will work through.
+func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (int, error) {
+	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
+	}
+	if w.resolveSender() == nil {
+		return 0, fmt.Errorf("campaigns.%s: no email sender is registered on this node, so nothing could deliver the campaign", op)
+	}
+
+	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)
+	if err != nil {
+		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
+	}
+	if !found {
+		return 0, fmt.Errorf("campaigns.%s: template %q is not readable", op, campaign.TemplateID)
+	}
+	// `ready` is an operator asserting the copy is finished. Refusing a
+	// draft is the cheapest guard there is against the single most
+	// expensive mistake in this domain -- half-written copy delivered to
+	// an entire audience, which is unrecallable.
+	if tmpl.Status != "ready" {
+		return 0, fmt.Errorf("campaigns.%s: template %q is %q, not \"ready\". Mark it ready once the copy is final", op, tmpl.ID, tmpl.Status)
+	}
+
+	// A server-side COUNT, not the length of a read (memql#3460). The
+	// difference is the whole issue: measuring a bounded page and calling it
+	// a total is what made 5000 a ceiling, and a count query has no window
+	// to be bounded by.
+	size, err := w.store.RosterSize(ctx, campaign.AudienceID)
+	if err != nil {
+		return 0, fmt.Errorf("campaigns.%s: %w", op, err)
+	}
+	if size == 0 {
+		return 0, fmt.Errorf("campaigns.%s: audience %q has no recipients", op, campaign.AudienceID)
+	}
+	if size > w.cfg.MaxAudience {
+		return 0, fmt.Errorf(
+			"campaigns.%s: audience %q has %d recipients, over the %d ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE). "+
+				"The ceiling is a deliberate refusal, not a technical bound -- the send pages through the roster, so no size is unsafe. "+
+				"A send this large is more often a mis-scoped audience than an intent, and it cannot be recalled. Raise the ceiling if you mean it",
+			op, campaign.AudienceID, size, w.cfg.MaxAudience)
+	}
+	return size, nil
 }
 
 func (w *Worker) handlePauseSend(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {

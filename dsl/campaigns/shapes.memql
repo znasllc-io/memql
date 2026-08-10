@@ -115,6 +115,7 @@ shape sendJob sendJobFull {
   audienceId
   templateId
   status
+  scheduledAt
   recipientCount
   sentCount
   skippedCount
@@ -123,6 +124,8 @@ shape sendJob sendJobFull {
   startedAt
   completedAt
   throttledUntil
+  rosterCursor
+  rosterOutstanding
   row.createdAt
 }
 
@@ -136,5 +139,36 @@ shape suppression suppressionFull {
   suppressedAt
   sourceCampaignId
   note
+  row.createdAt
+}
+
+/// Full reputation-window projection. Four counters plus the three keys that identify the bucket.
+/// No address anywhere -- a domain and some integers.
+@row
+shape reputationWindow reputationWindowFull {
+  row.id
+  sendingIdentity
+  domain
+  windowStart
+  nodeId
+  accepted
+  hardBounce
+  softBounce
+  complaint
+  row.createdAt
+}
+
+/// Full warmup-state projection. `decision` and `reason` are the point of reading it at all.
+@row
+shape warmupState warmupStateFull {
+  row.id
+  sendingIdentity
+  step
+  ratePerMinute
+  decision
+  reason
+  evaluatedAt
+  stepEnteredAt
+  acceptedInStep
   row.createdAt
 }

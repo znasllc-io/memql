@@ -73,6 +73,25 @@ import (
 // visibly different at a glance -- a new one has to name its own issue.
 const undeclaredGrandfatherReason = "memql#3173 seed -- grandfathered as a population, not individually triaged"
 
+// undeclared3461ByIdReason covers the by-id read memql#3461 added so the
+// campaign feedback parser can fetch the staged webhook body an automation
+// hands it.
+//
+// Deliberately NOT carrying the grandfather marker: it was added after the
+// seed and names its own issue, which is the distinction that marker exists
+// to make visible.
+//
+// Why it is listed rather than paid off. Declaring a tier on
+// v1:platform:inboundRequest is a decision about the INBOUND DELIVERY
+// feature (memql#2957) -- it changes the result set of the two reads above
+// and of every product automation draining them -- and making it as a side
+// effect of a campaigns task would be exactly the kind of quiet scope change
+// this gate is here to surface. The read itself is strictly narrower than
+// the listed `inboundRequestsByStatus`, which returns pages of the same rows
+// under the same absent tier: this one returns at most one, by an id the
+// caller already holds.
+const undeclared3461ByIdReason = "memql#3461 -- by-id read of a staged webhook; the tier decision belongs to inbound delivery (memql#2957), and this is strictly narrower than the listed inboundRequestsByStatus"
+
 // undeclared3178SelfScopedReason covers the two constructs memql#3178
 // introduced while splitting the per-user credential lists off a
 // caller-supplied id.
@@ -529,6 +548,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:platform:inboundRequest
 	"inboundRequestByDedupeKey": {"v1:platform:inboundRequest", undeclaredGrandfatherReason},
+	"inboundRequestById":        {"v1:platform:inboundRequest", undeclared3461ByIdReason},
 	"inboundRequestsByStatus":   {"v1:platform:inboundRequest", undeclaredGrandfatherReason},
 
 	// v1:platform:missingCapability

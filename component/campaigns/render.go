@@ -57,6 +57,21 @@ const (
 	headerListUnsubscribe     = "List-Unsubscribe"
 	headerListUnsubscribePost = "List-Unsubscribe-Post"
 	oneClickValue             = "List-Unsubscribe=One-Click"
+
+	// headerCampaignID stamps which send a message belongs to, so a bounce
+	// that comes back hours later can be attributed to it (memql#3461).
+	//
+	// It has to be an `X-` name and it is: Microsoft Graph's structured
+	// sendMail payload only carries custom headers with that prefix, and a
+	// header the preferred sender cannot set is a header that does not
+	// exist. A DSN quotes the original headers back and SES echoes them in
+	// `mail.headers`, so both parsers find it in the shape the provider
+	// happens to return it.
+	//
+	// It carries a campaign id and nothing else: no recipient, no owner, no
+	// token. The id is already visible to anyone holding the message, and
+	// the unsubscribe token -- which is not -- stays in its own header.
+	headerCampaignID = "X-Campaign-Id"
 )
 
 // UnsubscribePath is the route the one-click endpoint is mounted at. One
@@ -105,6 +120,7 @@ func renderMessage(c Campaign, t Template, r Recipient, unsubscribeURL string) (
 			// as having no unsubscribe at all.
 			headerListUnsubscribe:     "<" + unsubscribeURL + ">",
 			headerListUnsubscribePost: oneClickValue,
+			headerCampaignID:          c.ID,
 		},
 	}
 	if strings.TrimSpace(t.HTMLBody) != "" {

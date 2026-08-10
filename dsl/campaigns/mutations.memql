@@ -28,10 +28,14 @@
 //     have no owner, and reaching them at all requires the engine's own
 //     operator identity.
 //
-// `scheduleCampaign` still records an INTENT ONLY. A scheduled campaign is not
-// started by anything -- the drain worker drains jobs, and nothing creates a
-// job from a clock. That is the one piece of the sending surface memql#3348
-// left for a follow-up, and it is said here rather than implied.
+// `scheduleCampaign` NO LONGER records an intent nothing acts on (memql#3459).
+// It is still an ordinary owned-tier write of the time and the status -- but it
+// is now reached through the `campaignScheduleSend` builtin, which does the same
+// preflight `campaignStartSend` does and enqueues a `scheduled` send job the
+// worker will promote when the time comes. Calling this mutation directly still
+// works and still moves the campaign to `scheduled`; what it will not do on its
+// own is create the job, so a campaign scheduled that way waits for a hand on
+// Start. The builtin is the path the portal takes and the one to document.
 
 /// Create an audience owned by the caller. Owned: ownerUserId is stamped from actor.userId, so a
 /// caller can only ever create their own audiences.
@@ -203,8 +207,12 @@ mutate campaign updateCampaign {
   }
 }
 
-/// Commit a campaign to a time. Records the operator's intent; NOTHING ACTS ON IT YET -- the
-/// scheduler is part of the sending engine, which is a separate piece of work. Owned.
+/// Commit a campaign to a time. Owned.
+///
+/// scheduledAt written here is THE AUTHORITY on when the send fires (memql#3459) -- the drain worker
+/// re-reads this row rather than trusting the copy it stamped on the send job, so moving the date
+/// moves the send. What this mutation does not do by itself is create the job the worker scans;
+/// `campaignScheduleSend` does both, and is the path the portal takes.
 @actor
 mutate campaign scheduleCampaign {
   args {
@@ -362,6 +370,11 @@ mutate delivery recordCampaignDelivery {
 /// enqueue a job naming a user they could already act as -- the owned-tier read IS the authorization.
 /// Nothing in this mutation's arguments is trusted to say who owns anything.
 ///
+/// `status` exists so ONE mutation covers both ways a job is created (memql#3459): 'queued' for a
+/// send starting now, 'scheduled' for one committed to a time. It defaults to 'queued' via ?? rather
+/// than being required, so every existing caller is unchanged and the shortest spelling is still the
+/// one that sends now. A 'scheduled' job is inert until the worker promotes it.
+///
 /// clusterOwner tier, so no actor and no owner stamp: these rows have no owner, and reaching them at
 /// all requires the engine's own operator identity.
 mutate sendJob enqueueCampaignSend {
@@ -370,12 +383,14 @@ mutate sendJob enqueueCampaignSend {
     campaignOwnerUserId  string!
     audienceId           string!
     templateId           string!
+    status               string
+    scheduledAt          datetime
   }
   insert {
-    accept { campaignId, campaignOwnerUserId, audienceId, templateId }
+    accept { campaignId, campaignOwnerUserId, audienceId, templateId, scheduledAt }
     stamp {
       id: args.campaignId
-      status: "queued"
+      status: args.status ?? "queued"
       recipientCount: 0
       sentCount: 0
       skippedCount: 0
@@ -397,12 +412,14 @@ mutate sendJob updateSendJob {
     skippedCount    int
     failedCount     int
     lastError       string
-    startedAt       datetime
-    completedAt     datetime
-    throttledUntil  datetime
+    startedAt         datetime
+    completedAt       datetime
+    throttledUntil    datetime
+    rosterCursor      string
+    rosterOutstanding bool
   }
   update {
-    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil }
+    accept { status, recipientCount, sentCount, skippedCount, failedCount, lastError, startedAt, completedAt, throttledUntil, rosterCursor, rosterOutstanding }
     stamp {
       id: args.sendJobId
     }
@@ -433,6 +450,73 @@ mutate suppression recordSuppression {
     stamp {
       id: args.emailDigest
       suppressedAt: now
+    }
+  }
+}
+
+/// ENGINE: write one replica's counters for one (sending identity, domain, day) bucket (memql#3462).
+///
+/// ABSOLUTE VALUES, NOT INCREMENTS, and that is the whole concurrency design. Each worker accumulates
+/// in memory and writes the running total for its OWN row, so there is no read-modify-write on the
+/// send path and no interleaving to lose counts to. Two replicas never touch one row; a reader sums
+/// across nodeIds, which it was going to do across domains and days regardless.
+///
+/// The id is derived from (sendingIdentity, domain, windowStart, nodeId), each part hashed before
+/// concatenation (authoring rule 20) so no separator in a domain can alias two buckets onto one
+/// timeline. A re-write appends a version to the same row, which is what makes "write the running
+/// total" correct rather than duplicating.
+///
+/// clusterOwner tier: these are the deployment's numbers, not an operator's.
+mutate reputationWindow recordReputationWindow {
+  args {
+    sendingIdentity  string!
+    domain           string!
+    windowStart      string!
+    nodeId           string!
+    accepted         int
+    hardBounce       int
+    softBounce       int
+    complaint        int
+  }
+  insert {
+    accept { sendingIdentity, domain, windowStart, nodeId }
+    stamp {
+      id: hash(concat(hash(args.sendingIdentity), hash(args.domain), hash(args.windowStart), hash(args.nodeId)))
+      accepted: args.accepted ?? 0
+      hardBounce: args.hardBounce ?? 0
+      softBounce: args.softBounce ?? 0
+      complaint: args.complaint ?? 0
+    }
+  }
+}
+
+/// ENGINE: record what the warming ramp just decided and why (memql#3462). One row per sending
+/// identity, id = the identity, so a restart or a second replica lands on the same timeline rather
+/// than starting a competing ramp.
+///
+/// `reason` is written on every evaluation including the ones that change nothing, because "held" is
+/// the ramp's common state and an operator seeing a step that has not moved for two days needs to
+/// read why rather than guess.
+///
+/// clusterOwner tier.
+mutate warmupState recordWarmupState {
+  args {
+    sendingIdentity  string!
+    step             int
+    ratePerMinute    int
+    decision         string
+    reason           string
+    evaluatedAt      datetime
+    stepEnteredAt    datetime
+    acceptedInStep   int
+  }
+  insert {
+    accept { sendingIdentity, decision, reason, evaluatedAt, stepEnteredAt }
+    stamp {
+      id: args.sendingIdentity
+      step: args.step ?? 0
+      ratePerMinute: args.ratePerMinute ?? 0
+      acceptedInStep: args.acceptedInStep ?? 0
     }
   }
 }

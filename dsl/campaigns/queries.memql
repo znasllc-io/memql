@@ -171,6 +171,24 @@ query sendJob recentSendJobs {
   shape     sendJobFull
 }
 
+/// ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner
+/// gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due"
+/// is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned
+/// tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why
+/// the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+///
+/// It deliberately does NOT filter on the due time. The authority on when a send fires is the
+/// CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row
+/// hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is
+/// small by nature (one row per pending scheduled campaign), which is what makes that affordable.
+@actor
+query sendJob scheduledSendJobs {
+  filter    isScheduledSendJob && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  200
+  shape     sendJobFull
+}
+
 /// ENGINE: one send job by id (the id is the campaign's bare short id). Cluster-owner gated. Read
 /// after a claim so the worker acts on the row as it stands now rather than as the scan saw it.
 @actor
@@ -196,15 +214,23 @@ query suppression suppressionByDigest {
   shape   suppressionFull
 }
 
-/// ENGINE (owner-scoped): every recipient in the audience a send is working through, oldest first --
+/// ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first --
 /// including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed
 /// rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
 ///
-/// The 5000 bound is the send's AUDIENCE CEILING, not a page: the worker reads the roster whole on
-/// every batch and diffs it against the delivery ledger, so a larger audience would be silently
-/// truncated. campaignStartSend refuses a send whose audience exceeds MEMQL_CAMPAIGNS_MAX_AUDIENCE
-/// (default 5000, matched to this bound and to MEMORY_ENGINE_MAX_WINDOW) rather than mailing a
-/// prefix of it. Lifting the ceiling means keyset-cursoring the roster, which is a follow-up.
+/// THE 500 IS A PAGE, NOT A CEILING (memql#3460). It used to be 5000 and it used to be the largest
+/// audience this engine could send to: the worker read the roster WHOLE on every batch and diffed it
+/// against the ledger, so anything past the bound would have been silently truncated and
+/// campaignStartSend refused the send rather than mail a prefix. The worker now walks this query with
+/// the engine's keyset cursor, so the roster is unbounded and the number here only decides how much
+/// of it is in memory at once.
+///
+/// The ascending `row.createdAt` ordering is load-bearing under concurrent roster edits, which is the
+/// question a cursor over versioned rows has to answer. Reads collapse to the latest version per id
+/// (DISTINCT ON), so editing a recipient mid-send moves it FORWARD in this enumeration -- never
+/// backward past the cursor. A row can therefore be seen twice in one pass and can never be MISSED,
+/// and the worker de-duplicates within a batch. That asymmetry is the whole safety argument: a
+/// duplicate costs a wasted comparison, a skip costs somebody their mail.
 @actor
 query recipient audienceRosterForSend {
   args {
@@ -212,14 +238,56 @@ query recipient audienceRosterForSend {
   }
   filter    ownerUserId==actor.userId && audienceId==args.audienceId
   sort      "row.createdAt", "asc"
-  paginate  5000
+  paginate  500
   shape     recipientFull
 }
 
-/// ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection
-/// -- recipient, outcome, attempts, retry due-time and nothing else. This is the read that makes a
-/// resumed send safe: the worker diffs it against the roster and mails only what is missing or due.
-/// Owned, read under the campaign owner's actor. Same 5000 ceiling and the same reason.
+/// ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate
+/// (memql#3460). Computed server-side, so it is the one question about a large audience that needs
+/// no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it
+/// rather than measuring the length of a bounded read. Measuring a page and calling it a total is
+/// how the 5000 ceiling came to be load-bearing in the first place. Owned.
+@actor
+query recipient audienceRosterSize {
+  args {
+    audienceId  string!
+  }
+  filter  ownerUserId==actor.userId && audienceId==args.audienceId
+  count
+}
+
+/// ENGINE (owner-scoped): the delivery ledger for ONE PAGE OF RECIPIENTS, in the slim projection --
+/// recipient, outcome, attempts, retry due-time and nothing else. THE read that makes a resumed send
+/// safe: the worker diffs it against the roster page it just read and mails only what is missing or
+/// due (memql#3460).
+///
+/// Bounded by the CALLER'S id list rather than by a page of its own, and that is what lets the send
+/// scale. Reading the whole ledger for a campaign is exactly as unbounded as reading the whole
+/// roster, so cursoring one and not the other would have moved the ceiling rather than removed it.
+/// The slice of the ledger a batch needs is precisely the slice of the roster it is looking at.
+///
+/// recipientIds are CANONICAL ids. The relationship-canonicalizing pre-walk rewrites a bare id only
+/// on a scalar comparison, not on a list, so a bare id here would compare against a stored
+/// `v1:campaigns:recipient:...` and match nothing -- which would read as "nobody has been mailed"
+/// and re-mail the page. The worker passes the ids exactly as the roster row returned them.
+///
+/// Owned, read under the campaign owner's actor. @pii-free projection.
+@actor
+query delivery deliveriesForRecipients {
+  args {
+    campaignId    string!
+    recipientIds  array!
+  }
+  filter    ownerUserId==actor.userId && campaignId==args.campaignId && recipientId in args.recipientIds
+  sort      "row.createdAt", "asc"
+  paginate  1000
+  shape     deliveryLedgerEntry
+}
+
+/// ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection.
+/// Retained for the operator-facing read of a whole run; the SEND path pages through
+/// deliveriesForRecipients instead, because a whole-ledger read is as unbounded as a whole-roster one.
+/// Owned, read under the campaign owner's actor.
 @actor
 query delivery deliveryLedgerForCampaign {
   args {
@@ -229,4 +297,36 @@ query delivery deliveryLedgerForCampaign {
   sort      "row.createdAt", "asc"
   paginate  5000
   shape     deliveryLedgerEntry
+}
+
+/// ENGINE: reputation counters from a given UTC day onward, oldest first (memql#3462). The read the
+/// warming ramp evaluates and the one an operator runs to answer "what is our complaint rate at
+/// gmail.com this week". Cluster-owner gated, and it spans owners for the same reason the suppression
+/// list does: one deployment, one sending mailbox, one reputation. The rows carry a domain and four
+/// integers and no address.
+///
+/// windowStart is compared as a STRING because the bucket key is one -- YYYY-MM-DD orders lexically
+/// exactly as it orders chronologically, which is the property that makes a string key legitimate
+/// here rather than a shortcut.
+@actor
+query reputationWindow reputationWindowsSince {
+  args {
+    since  string!
+  }
+  filter    windowStart>=args.since && actor.isClusterOwner==true
+  sort      "row.createdAt", "asc"
+  paginate  5000
+  shape     reputationWindowFull
+}
+
+/// ENGINE: the warming ramp's state for one sending identity (the id IS the identity). Cluster-owner
+/// gated. Backs both the ramp's own evaluation and an operator asking which step it is on and why it
+/// last held.
+@actor
+query warmupState warmupStateForIdentity {
+  args {
+    sendingIdentity  string!
+  }
+  filter  row.id==args.sendingIdentity && actor.isClusterOwner==true
+  shape   warmupStateFull
 }

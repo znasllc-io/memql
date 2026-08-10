@@ -3,7 +3,7 @@
 // WHY THESE ARE BUILTINS AND NOT MUTATIONS. Everything else an operator
 // does to a campaign is a plain mutation, and that is the right default:
 // the concept treatment (browsable, view-composable, authorization-gated)
-// comes free, and a mutation is auditable in a way a Go call is not. Five
+// comes free, and a mutation is auditable in a way a Go call is not. Seven
 // operations cannot be expressed that way, and each fails for a specific
 // reason rather than for convenience:
 //
@@ -23,6 +23,16 @@
 //                user Y" is an instruction the engine carries out under
 //                Y's authority.
 //
+//   scheduleSend Same preflight, same two writes -- and one more reason
+//                (memql#3459). "Which campaigns are due?" cannot be asked of
+//                v1:campaigns:campaign at all: the owned tier injects
+//                ownerUserId==actor.userId into every read and has no
+//                cluster-owner bypass, so no clock-driven scan over an
+//                operator's rows is expressible. The schedule therefore has
+//                to be recorded on the engine's own clusterOwner-tier job
+//                row, which only Go holding a campaign it already read under
+//                the caller's actor may write.
+//
 //   pauseSend    Same two-writes problem, campaign plus job.
 //   resumeSend
 //
@@ -33,6 +43,21 @@
 //                Both also carry an admin gate that is a role check
 //                rather than a row predicate, because the rows they write
 //                have no owner to gate on.
+//
+//   ingestFeedback  PARSING, of a shape a filter expression has no business
+//                attempting: a DSN is folded RFC 822 field groups inside a
+//                MIME report, and an SES payload is JSON nested inside JSON
+//                inside a string (memql#3461). Its gate is the one exception
+//                to the paragraph above -- it is CONFIGURATION rather than a
+//                role, because the call asserts nothing. Every address and
+//                every verdict comes out of a body a third party signed with
+//                a secret the operator configured, arriving at a source the
+//                operator allowlisted, in a format the operator named. The
+//                most an arbitrary caller achieves is re-processing a
+//                webhook that was already trusted, which is idempotent;
+//                requiring admin would have meant every deployment minting a
+//                service-account credential for an automation to present,
+//                for no property this does not already have.
 //
 // AUTHORIZATION IS THE FIRST READ, in every one of the campaign-scoped
 // three. `campaignById` is owned-tier, so it returns a row only to its
@@ -46,6 +71,13 @@
 @executor("integration.campaigns.startSend")
 builtin campaignStartSend {
   campaignId  string!  @description("The campaign to send. The caller must own it.")
+}
+
+@description("Commit a campaign to a time and enqueue the send job that will fire at it (memql#3459). Runs the SAME preflight as campaignStartSend -- sender registered, one-click unsubscribe configured, template marked ready, audience non-empty and inside the ceiling -- because the whole value of scheduling is finding out now rather than at 3am. The job it writes is inert: it sits in the 'scheduled' status until the drain worker sees that the campaign's scheduledAt has passed, and the campaign row is the authority on that time, so moving the date with updateCampaign moves the send. A time in the past is refused; use campaignStartSend to send now. Authorization is the owned-tier read of the campaign, exactly as for starting one by hand.")
+@executor("integration.campaigns.scheduleSend")
+builtin campaignScheduleSend {
+  campaignId   string!  @description("The campaign to schedule. The caller must own it.")
+  scheduledAt  string!  @description("When the send should begin, RFC 3339 (e.g. 2026-08-14T09:00:00Z). Interpreted as an instant, not a local wall clock -- a value with no offset is read as UTC.")
 }
 
 @description("Pause a running campaign send. The delivery ledger is untouched, so resuming continues exactly where it stopped -- 'where it stopped' is the set of recipients with no delivery row, not a cursor that could go stale.")
@@ -68,11 +100,17 @@ builtin campaignSuppress {
   note    string  @description("Free-text provenance. Never put the address here -- it is stored verbatim.")
 }
 
-@description("Record a bounce or complaint the mail provider reported. Admin or cluster owner only. A hard_bounce or complaint suppresses the address cluster-wide and the next send converges the operator's own recipient row onto that verdict; audience membership is NOT deleted, because deleting it destroys the audit trail and lets the next import resurrect a dead address. A soft_bounce is transient and does NOT suppress -- the per-recipient retry budget is what bounds those. Intended caller: an automation over a provider webhook landing on v1:platform:inboundRequest, presenting an admin service-account credential.")
+@description("Record a bounce or complaint the mail provider reported. Admin or cluster owner only. A hard_bounce or complaint suppresses the address cluster-wide and the next send converges the operator's own recipient row onto that verdict; audience membership is NOT deleted, because deleting it destroys the audit trail and lets the next import resurrect a dead address. A soft_bounce is transient and does NOT suppress -- the per-recipient retry budget is what bounds those. This is the MANUAL door -- an operator entering a report by hand, or a bespoke automation presenting an admin service-account credential. The automated path is campaignIngestFeedback, which parses a real provider payload instead of being handed a verdict.")
 @executor("integration.campaigns.recordFeedback")
 builtin campaignRecordFeedback {
   email       string!  @description("The address the provider reported.")
   kind        string!  @description("hard_bounce | soft_bounce | complaint.")
   campaignId  string  @description("The campaign the report came from, when the provider named one. Recorded on the suppression row so a deliverability review can attribute complaints to a send.")
   note        string  @description("The provider's own classification string. Never the address.")
+}
+
+@description("Read a mail provider's bounce or complaint webhook off a staged v1:platform:inboundRequest row and apply it to the cluster-wide suppression list (memql#3461). Understands RFC 3464 delivery status notifications -- the standard format every SMTP-era relay including Microsoft Graph produces -- and Amazon SES feedback over SNS, which additionally carries the complaint feedback loop a DSN structurally cannot. Hard vs soft comes from the provider's own classification (the DSN's Status class or Action, SES's bounceType), never from the diagnostic text. GATED BY CONFIGURATION rather than by role: the row's source must be listed in MEMQL_CAMPAIGNS_FEEDBACK_SOURCES and the delivery must carry signatureVerified=true, so the most an arbitrary caller can do is re-process a webhook the operator already trusted. A payload that cannot be read stamps the inbound row 'failed' with the reason AND errors, so it is queryable rather than dropped; a payload that reads fine and carries no bounce (a delivery receipt, an SNS subscription confirmation) stamps 'processed' and says which it was.")
+@executor("integration.campaigns.ingestFeedback")
+builtin campaignIngestFeedback {
+  inboundRequestId  string!  @description("The staged v1:platform:inboundRequest row to read. In the shipped automation this is event.node.id.")
 }

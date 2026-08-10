@@ -31,14 +31,18 @@ campaigns deliberately do not use — see below)
   operator                engine                          recipient
   ────────                ──────                          ─────────
   campaignStartSend  ──▶  preflight (sender? unsubscribe?
-                          template ready? audience sane?)
+  campaignScheduleSend    template ready? audience sane?)
                             │ refuses here, or
                             ▼
-                          v1:campaigns:sendJob   (queued)
+                          v1:campaigns:sendJob
+                          (queued — or `scheduled`, which
+                           the worker promotes to queued
+                           once the campaign's scheduledAt
+                           has passed)
                             │
        drain worker  ──────▶│  every 15s, one batch per job
                             │
-                            ├── roster  ⨯ delivery ledger  = who is left
+                            ├── roster page ⨯ its ledger   = who is left
                             ├── cluster suppression list   = who may not
                             ├── token bucket               = how fast
                             └── send ─────────────────────────────────▶ inbox
@@ -67,6 +71,12 @@ Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
 `_MAX_AUDIENCE`, `_POLL_SECONDS`, `_STARTUP_DELAY_SECONDS`,
 `_CLAIM_TTL_SECONDS`, `_THROTTLE_SECONDS`, `_SEND_TIMEOUT_SECONDS`,
 `_ENABLED`.
+
+Feedback and warming (both opt-in, both off with no value):
+`MEMQL_CAMPAIGNS_FEEDBACK_SOURCES` ([feeding bounces back
+in](#feeding-bounces-back-in)), `_WARMUP_ENABLED` and the `_WARMUP_*` ladder
+and thresholds ([warming](#warming-a-new-sending-domain)),
+`_SENDING_IDENTITY`.
 
 Rotating the unsubscribe signing key is a two-variable operation, and doing it
 with one variable breaks every link already sent. The procedure is
@@ -132,6 +142,39 @@ A **soft** bounce does neither. It is transient — a full mailbox, a greylistin
 relay — and suppressing on one loses a real subscriber to a bad afternoon. The
 per-recipient retry budget (`MEMQL_CAMPAIGNS_MAX_ATTEMPTS`) is what bounds
 those.
+
+### The audience is walked, not held
+
+The send reads the roster **one page at a time**, through the engine's keyset
+cursor, and reads the delivery ledger **for that page** rather than for the
+campaign. Both halves matter: the ledger for a large campaign is exactly as
+large as its roster, so cursoring one and not the other would move the ceiling
+rather than remove it.
+
+Before this, both reads were whole and bounded at 5000 rows — and a bounded
+read of an unbounded set is a truncation, so a larger audience would have been
+mailed as a silent prefix. The send refused instead, and "5000 is the largest
+mailing list this can send to" was the price.
+
+**Why ascending order is safe while the roster is being edited.** Reads
+collapse to the latest version per id, so editing a recipient mid-send — which
+this worker does, converging a suppressed address — moves it to a *newer*
+timestamp, i.e. forward in an ascending walk, never backward past the cursor.
+A row can therefore be seen twice and can never be missed. A duplicate costs a
+comparison; a skip costs somebody their mail. Duplicates inside one batch are
+de-duplicated, because those would be mailed before either send was recorded.
+
+**The cursor is an optimization, not the idempotency mechanism.** It lives on
+the send job so a tick resumes instead of re-scanning from the start. Losing
+it, or having the engine refuse a stale one, costs one re-scan. What decides
+who gets mailed is the ledger, below.
+
+**`MEMQL_CAMPAIGNS_MAX_AUDIENCE` still exists, and now means something
+different.** It was a correctness guard at 5000. It is now a deliberate
+refusal at 250,000: no size is unsafe, but a send that large is more often a
+mis-scoped audience or a bad import than an intent, and it cannot be recalled.
+Raising it is a decision about how large a send you mean to make — not
+something you have to do in three places to avoid silent truncation.
 
 ### Idempotency is the ledger, not a retry flag
 
@@ -342,6 +385,60 @@ builtin campaignResumeSend(campaignId: "<id>")
 Pausing leaves the ledger alone, so resuming continues exactly where it
 stopped.
 
+### Scheduling one
+
+```
+builtin campaignScheduleSend(campaignId: "<id>", scheduledAt: "2026-09-01T09:00:00Z")
+```
+
+or the **Schedule send** button in the editor. The send then starts on its own;
+nothing else has to be pressed.
+
+`scheduledAt` is an RFC 3339 instant. A value with no offset is read as **UTC** —
+guessing a local zone from a node's `TZ` would make one string mean different
+moments on different replicas.
+
+Four things are worth knowing about it:
+
+**The preflight runs when you schedule, and again when it fires.** Both, and
+that is the point of scheduling being a builtin rather than a stored date: a
+campaign whose template is still a draft is refused while you are looking at
+the screen, not at 3am.
+
+**A time already past is refused.** Use `campaignStartSend` to send now. A
+backdated schedule is far more often a typo in the year or the offset than a
+request to send immediately.
+
+**The campaign row decides when it fires.** The send job carries a copy of the
+time for you to look at; the worker compares the clock against
+`v1:campaigns:campaign.scheduledAt`. So moving the date — with the editor, or
+with `updateCampaign` — moves the send, and a schedule you postponed does not
+go out on its original time.
+
+**A campaign whose time passed while the cluster was down still sends**, when
+the cluster comes back. There is no window past which a late send is dropped,
+deliberately: a silently-skipped campaign is the failure this replaced. If you
+no longer want it, cancel it — a campaign sitting in `scheduled` is a campaign
+that is going to send.
+
+If the fire-time preflight refuses, the reason lands on the **campaign row's
+`lastError`**, where the operator who scheduled it is looking, and the two
+kinds of refusal are treated differently by who can fix them:
+
+| Refusal | Kind | What happens |
+|---|---|---|
+| Template un-readied, audience emptied or over the ceiling | authoring | campaign goes `failed` with the reason; fix and schedule again |
+| No sender registered on the node, one-click unsubscribe unconfigured | environment | the send **waits** and retries each tick, reason stamped on the row |
+
+The split is by who can fix it, not by severity. Failing a campaign because a
+node booted without its mail credentials would make an operator re-author a
+schedule to recover from a bad deploy.
+
+Cross-replica, a due campaign fires once — and the claim is the least of the
+three reasons. The send job's id **is** the campaign's id, so two replicas
+promoting it write one row; the drain claim admits one replica per (job,
+progress); and the delivery ledger is per (campaign, recipient) underneath both.
+
 **Re-sending a campaign is not a thing.** The ledger is per (campaign,
 recipient), so a second run finds every recipient terminal and mails nobody.
 Author a new campaign.
@@ -352,46 +449,192 @@ Author a new campaign.
 
 Bounces and complaints arrive out of band — Microsoft Graph's `sendMail`
 returns `202 Accepted` and the bounce comes back to the sending mailbox
-later. Wire the provider's feedback webhook to `POST /inbound/{source}`
-([inbound delivery](inbound-delivery.md)) and have a DSL automation over
-`v1:platform:inboundRequest` call:
+later. **Two formats parse out of the box** (memql#3461):
+
+| Format | What it covers | Who produces it |
+|---|---|---|
+| `rfc3464` | Bounces, hard and soft | The standard delivery status notification. Microsoft Graph / Exchange, Postfix, essentially every SMTP-era relay. Cannot express a complaint — nothing bounced, so there is no DSN. |
+| `ses` | Bounces **and complaints** | Amazon SES feedback over SNS. Carries the complaint feedback loop a DSN structurally cannot. |
+
+Anything else needs a parser, and the honest consequence of not writing one
+is that its bounces never reach the suppression list.
+
+### Wiring a feed
+
+1. Point the provider's feedback webhook at `POST /inbound/{source}`
+   ([inbound delivery](inbound-delivery.md)) and configure that source's
+   allowlist entry and signing secret there.
+2. Name it as a feedback feed:
+
+   ```bash
+   MEMQL_CAMPAIGNS_FEEDBACK_SOURCES=postmaster=rfc3464,ses-feedback=ses
+   ```
+
+That is the whole wiring. A shipped automation
+(`ingestCampaignFeedback`) fires on every staged inbound row and offers it
+to `campaignIngestFeedback`, which parses and applies it.
+
+**Listing the source here is the authorization**, and there is deliberately
+no role check on top of it. The call asserts nothing: every address and every
+verdict comes out of a body the provider signed with a secret you configured,
+arriving at a source you allowlisted, in a format you named — three
+deployment-level decisions, all made by whoever holds the env. A payload from
+a source configured `scheme=none` is refused, because unauthenticated input
+must not write a cluster-wide list. The most anyone can do by calling the
+builtin directly is re-process a webhook you already trusted, which is
+idempotent.
+
+### Hard vs soft is the provider's word, not ours
+
+| Provider says | Result |
+|---|---|
+| DSN `Status: 5.x.x`, or `Action: failed` | hard bounce → **suppressed** |
+| DSN `Status: 4.x.x`, or `Action: delayed` | soft bounce → recorded, not suppressed |
+| SES `bounceType: Permanent` | hard bounce → **suppressed** |
+| SES `bounceType: Transient` or `Undetermined` | soft bounce → not suppressed |
+| SES complaint | **suppressed** |
+
+`Undetermined` counts as transient on purpose: SES is saying it could not
+tell, and a permanent suppression on "could not tell" costs a real
+subscriber, while the other error costs at most a few more attempts at a dead
+address. Nothing anywhere classifies by reading the diagnostic **text** — a
+parser that looked for "user unknown" would be inventing a verdict.
+
+A bounce is attributed to its send through the `X-Campaign-Id` header the
+sender stamps, which a DSN quotes back and SES echoes in `mail.headers`.
+Best-effort: attribution improves a review and is never a precondition for
+suppressing.
+
+### What happens to a payload we cannot read
+
+It is **not dropped**. The inbound row is stamped `failed` with the reason and
+the call errors, so:
+
+```
+query inboundRequestsByStatus(status: "failed")
+```
+
+is the list of feedback this deployment could not understand. A payload that
+reads fine and carries no bounce — a delivery receipt, an SNS subscription
+confirmation — is stamped `processed` with what it was, because recording
+that as a failure would teach you to ignore failures. An SNS
+`SubscriptionConfirmation` says to visit its `SubscribeURL`, which is the one
+message that means the wiring is working.
+
+### By hand
+
+An operator can still enter a report or suppress directly:
 
 ```
 builtin campaignRecordFeedback(email: "...", kind: "hard_bounce", campaignId: "...")
-```
-
-The automation has to present an **admin service-account credential**
-([service-account JWT](auth/service-account-jwt.md)) — the suppression list is
-cluster-wide, so writing it is a deployment-level action and the gate is a
-role rather than a row predicate.
-
-An operator can also suppress by hand:
-
-```
 builtin campaignSuppress(email: "...", reason: "manual", note: "...")
 ```
+
+Both are admin-or-cluster-owner, because there the caller **is** asserting a
+verdict.
+
+## Reputation telemetry
+
+Every send and every piece of provider feedback is counted per **(sending
+identity, recipient domain, day)** on `v1:campaigns:reputationWindow`
+(memql#3462). That is the breakdown that matters: mailbox providers judge a
+sender independently, so "our bounce rate is 1%" is not a number any of them
+acts on, while "our complaint rate at gmail.com is 0.4% this week" is.
+
+```
+query reputationWindowsSince(since: "2026-08-01")
+```
+
+Cluster-owner gated, and it carries a domain and four integers — no address
+anywhere, the same property that makes the suppression list safe to keep
+cluster-wide.
+
+Two things it deliberately does **not** claim:
+
+- **`accepted` is not `delivered`.** It counts what the transport took;
+  Graph answers `202` and the bounce arrives hours later through the feedback
+  path. Delivery is inferred as accepted minus bounces, and there is no
+  `delivered` column because nothing on this side could honestly produce one.
+- **Unsubscribes are not counted.** The one-click endpoint is a separate
+  handler with its own store, so a column for them would be a column nothing
+  writes. The ramp thresholds on bounces and complaints, which is what the
+  providers themselves act on.
+
+There is one counter row **per replica** (`nodeId`), written as an absolute
+running total rather than an increment. Two replicas incrementing one shared
+row would need a read-modify-write on the send path and would lose counts to
+the interleaving; one row each, summed at read time, has neither problem.
 
 ---
 
 ## Warming a new sending domain
 
-There is **no automated warming ramp**, and that is a deliberate omission
-rather than an oversight: a correct ramp is driven by reputation telemetry —
-per-domain deliverability, complaint rate, throttle frequency over time —
-which this deployment does not collect. A ramp built on a fixed schedule
-instead is a guess with a schedule attached.
+Warming is raising volume gradually on a new sending identity, so a provider
+sees a growing trickle rather than a cold blast.
 
-The manual procedure works today and uses the same knob:
+**There is now an automated ramp, and it is off by default.**
 
-1. Start `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE` low (a few per minute) on a
-   new domain.
-2. Send to your most engaged recipients first — split the audience rather than
-   sampling it, so the send order is deliberate.
-3. Raise the rate over days, watching the skipped/failed counts on the
-   campaign rows and the `domain` breakdown on the suppression list.
+```bash
+MEMQL_CAMPAIGNS_WARMUP_ENABLED=true
+MEMQL_CAMPAIGNS_WARMUP_STEPS=5,10,25,50,100,200
+```
+
+An established sending domain does not want its rate re-derived by a control
+loop that has never seen it, which is why you have to ask for it.
+
+**It can only ever slow you down.** The effective rate is min(the current
+step, `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE`). The ramp holds your configured
+rate down while the evidence is thin; it never raises it past what you
+allowed.
+
+### It advances on evidence, not on a clock
+
+A fixed-schedule ramp is a guess with a schedule attached, and it produces
+the worst kind of false confidence — an operator believing they are warming
+safely while the system has no idea whether it is working. This one advances
+a step only when **all** of these hold:
+
+| Condition | Knob | Why |
+|---|---|---|
+| The step has run long enough | `_WARMUP_MIN_HOURS_PER_STEP` (24) | Providers judge over time. A step they have not seen through a daily cycle has not been judged, however clean it looks. |
+| It has sent enough to judge | `_WARMUP_MIN_VOLUME_PER_STEP` (200) | Four messages with no bounces is a hard bounce rate of 0.0 and no evidence at all. This is the condition that stops an empty numerator reading as a clean bill of health. |
+| Every measurable domain is inside its thresholds | `_WARMUP_MAX_HARD_BOUNCE_RATE` (2%), `_WARMUP_MAX_COMPLAINT_RATE` (0.1%) | **Per domain, never in aggregate.** One bad domain inside a large healthy total is exactly what an aggregate hides, and it is the shape that gets a sending domain blocked. |
+
+A domain over threshold **reduces** the ramp a step rather than merely
+holding it. Holding at a rate that is already producing complaints is not a
+neutral act.
+
+A domain with less than `_WARMUP_MIN_DOMAIN_VOLUME` (50) of its own is
+ignored, or one bounce at a domain we sent three messages to would read as
+33% and pin the ramp forever. The cost — a genuinely bad small domain is
+invisible to the ramp until it grows — is a real gap rather than a hidden
+one.
+
+### Reading what it decided
+
+```
+query warmupStateForIdentity(sendingIdentity: "sender@example.com")
+```
+
+carries the current `step`, its `ratePerMinute`, the last `decision`
+(`started` / `held` / `advanced` / `reduced`) and a `reason` in words. `held`
+is the common and healthy state, so the reason is written on every
+evaluation: an operator looking at a step that has not moved for two days
+should read why rather than guess.
+
+A malformed `_WARMUP_STEPS` leaves the ramp **disabled** with a boot warning,
+rather than being sorted into a ladder you did not write.
+
+### Doing it by hand instead
+
+Still perfectly reasonable, and unchanged:
+
+1. Start `MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE` low (a few per minute).
+2. Send to your most engaged recipients first — split the audience rather
+   than sampling it, so the send order is deliberate.
+3. Raise the rate over days, watching `reputationWindowsSince` and the
+   `domain` breakdown on the suppression list.
 4. Back off on any rise in complaints.
-
----
 
 ## Troubleshooting
 
@@ -400,8 +643,13 @@ The manual procedure works today and uses the same knob:
 | `startSend` refuses: "no one-click unsubscribe" | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` / `_BASE_URL` unset. |
 | `startSend` refuses: "no email sender registered" | Neither the Graph nor the SMTP credentials resolved on this node; the `LogSender` is not a sender for this purpose. |
 | `startSend` refuses: template not ready | Mark the template `ready`. |
-| Job `failed`, "audience has reached the ceiling" | Split the audience, or raise `MEMQL_CAMPAIGNS_MAX_AUDIENCE` **and** the `paginate` bound on `audienceRosterForSend` **and** `MEMORY_ENGINE_MAX_WINDOW`. |
+| `startSend` refuses: "over the ceiling" | The audience is larger than `MEMQL_CAMPAIGNS_MAX_AUDIENCE` (default 250,000). Nothing is technically wrong with a send that size — raise it if you mean it, or check the audience is scoped the way you think. |
+| Scheduled campaign did not send | Read the campaign row's `lastError` — the fire-time preflight records its reason there. An environment refusal (no sender, no unsubscribe config) retries; an authoring one leaves the campaign `failed`. |
+| Scheduled campaign sent later than its time | Expected after downtime: a late send is sent rather than dropped. The log line carries `lateBy`. |
 | Campaign stuck at `sending`, counters not moving | Check the job's `throttledUntil` — the provider parked it. Otherwise check that a node with a configured sender is running the worker. |
+| The warming ramp never advances | Read `warmupStateForIdentity`'s `reason` — it names which condition is unmet. Most often the step has not sent `_WARMUP_MIN_VOLUME_PER_STEP` messages yet, which is the ramp refusing to treat a clean rate over four messages as evidence. |
+| The warming ramp is enabled and nothing paces | Check the boot log for a malformed `MEMQL_CAMPAIGNS_WARMUP_STEPS`; the ramp disables itself rather than inventing a ladder. |
+| Bounces never appear on the suppression list | The source is not in `MEMQL_CAMPAIGNS_FEEDBACK_SOURCES`, or its format is misspelled (a misspelling is dropped, not defaulted). Check `inboundRequestsByStatus(status: "failed")` for payloads that arrived and could not be read. |
 | Everything `skipped` | The cluster suppression list matched. Browse `v1:campaigns:suppression` as the cluster owner. |
 | Recipient says the unsubscribe link does not work | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` is not externally reachable, or the key that signed it has been retired by two rotations. Check the node log for `refused an unsubscribe link signed by a key this node no longer holds`; if the retired value can still be recovered, putting it back in `_PREVIOUS` revives those links. See [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | Boot warns "holds only ONE unsubscribe signing key" | This deployment has sent campaign mail and has no `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS`. Nothing is broken yet; the next rotation of the secret alone would break every link already sent. |

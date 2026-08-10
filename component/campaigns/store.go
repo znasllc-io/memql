@@ -64,6 +64,22 @@ type SendJob struct {
 	RecipientCount      int
 	ThrottledUntil      time.Time
 	StartedAt           time.Time
+
+	// ScheduledAt is the time this job was enqueued for, copied off the
+	// campaign at schedule time (memql#3459). A HINT, never the authority:
+	// the worker re-reads the campaign's own scheduledAt at fire time, so an
+	// operator who moves the date is obeyed rather than raced by this copy.
+	ScheduledAt time.Time
+
+	// RosterCursor is where the roster walk resumes (memql#3460) -- an
+	// opaque engine keyset cursor. An OPTIMIZATION only: losing it costs one
+	// re-scan, because the ledger is what decides who gets mailed.
+	RosterCursor string
+
+	// RosterOutstanding records whether the pass in progress has seen
+	// anything still to deal with. It is what makes completion decidable
+	// without holding the whole roster in memory.
+	RosterOutstanding bool
 }
 
 // Progress is the count of terminal outcomes so far. It doubles as the
@@ -83,6 +99,11 @@ type Campaign struct {
 	FromName    string
 	ReplyTo     string
 	Status      string
+
+	// ScheduledAt is THE authority on when a scheduled send fires
+	// (memql#3459). The job row carries a copy for the operator to look at;
+	// this is the one the worker compares against the clock.
+	ScheduledAt time.Time
 }
 
 // Template is the authored content.
@@ -96,7 +117,14 @@ type Template struct {
 
 // Recipient is one address in the audience roster.
 type Recipient struct {
-	ID                 string
+	ID string
+	// CanonicalID is the stored `v1:campaigns:recipient:<short>` form. Kept
+	// alongside the bare id because the ledger page read compares a LIST of
+	// recipient ids, and the engine's relationship-canonicalizing pre-walk
+	// rewrites a bare id only on a scalar comparison -- so a bare id in that
+	// list would match nothing, which reads as "nobody has been mailed"
+	// (memql#3460).
+	CanonicalID        string
 	Email              string
 	DisplayName        string
 	SubscriptionStatus string
@@ -192,7 +220,29 @@ func (s *Store) CampaignByID(ctx context.Context, campaignID string) (Campaign, 
 		FromName:    str(r, "fromName"),
 		ReplyTo:     str(r, "replyTo"),
 		Status:      str(r, "status"),
+		ScheduledAt: parseTime(str(r, "scheduledAt")),
 	}, true, nil
+}
+
+// ScheduledJobs returns every send job still waiting for its time, oldest
+// first. clusterOwner-tier: issue under the engine's operator identity.
+//
+// Unfiltered by due-ness on purpose (memql#3459). The row carries a COPY of
+// the campaign's scheduledAt, and an operator moving the date with
+// updateCampaign never touches it -- so filtering here would either fire a
+// send the operator had postponed or sit on one they had brought forward.
+// The worker reads them all and asks the campaign, which is affordable
+// because the set is one row per pending scheduled campaign.
+func (s *Store) ScheduledJobs(ctx context.Context) ([]SendJob, error) {
+	rows, err := s.rows(ctx, "query scheduledSendJobs()")
+	if err != nil {
+		return nil, err
+	}
+	jobs := make([]SendJob, 0, len(rows))
+	for _, r := range rows {
+		jobs = append(jobs, sendJobFromRow(r))
+	}
+	return jobs, nil
 }
 
 // TemplateByID reads a template. OWNED tier.
@@ -211,25 +261,116 @@ func (s *Store) TemplateByID(ctx context.Context, templateID string) (Template, 
 	}, true, nil
 }
 
-// Roster reads the whole audience, suppressed members included -- a
-// `skipped` delivery row is an outcome the operator is owed rather than a
+// RosterPage reads ONE PAGE of the audience, suppressed members included --
+// a `skipped` delivery row is an outcome the operator is owed rather than a
 // silence. OWNED tier.
-func (s *Store) Roster(ctx context.Context, audienceID string) ([]Recipient, error) {
-	rows, err := s.rows(ctx, call("query", "audienceRosterForSend", arg{"audienceId", audienceID}))
+//
+// cursor is the engine's opaque keyset token from the previous page, or ""
+// to start. The returned cursor is empty when the audience is exhausted,
+// which is the signal the walk terminates on (memql#3460).
+func (s *Store) RosterPage(ctx context.Context, audienceID, cursor string) ([]Recipient, string, error) {
+	rows, next, err := s.rowsPage(ctx, cursor, call("query", "audienceRosterForSend", arg{"audienceId", audienceID}))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out := make([]Recipient, 0, len(rows))
 	for _, r := range rows {
+		canonical := str(r, "id")
 		out = append(out, Recipient{
-			ID:                 bare(str(r, "id")),
+			ID:                 bare(canonical),
+			CanonicalID:        canonical,
 			Email:              str(r, "email"),
 			DisplayName:        str(r, "displayName"),
 			SubscriptionStatus: str(r, "subscriptionStatus"),
 		})
 	}
-	return out, nil
+	return out, next, nil
 }
+
+// Roster reads the whole audience by walking every page. OWNED tier.
+//
+// Retained for the callers that genuinely want the set rather than a batch:
+// the unsubscribe endpoint resolving one recipient, and tests. THE SEND PATH
+// DOES NOT USE IT -- it walks RosterPage, because materializing a
+// hundred-thousand-address audience once per batch is the shape memql#3460
+// removed. maxRows bounds it so "the whole audience" cannot become an
+// unbounded allocation in a caller that only needed one row.
+func (s *Store) Roster(ctx context.Context, audienceID string) ([]Recipient, error) {
+	var out []Recipient
+	cursor := ""
+	for {
+		page, next, err := s.RosterPage(ctx, audienceID, cursor)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, page...)
+		if next == "" || len(out) >= rosterWalkCap {
+			return out, nil
+		}
+		cursor = next
+	}
+}
+
+// rosterWalkCap bounds the whole-audience read above. Deliberately far
+// larger than the old 5000 ceiling and deliberately not a product limit:
+// it exists so a bug in the cursor loop is a bounded allocation rather
+// than an OOM.
+const rosterWalkCap = 100000
+
+// RosterSize returns how many recipients an audience holds, as a
+// server-side count. OWNED tier.
+//
+// A count query rather than the length of a read, and that distinction is
+// the memql#3460 lesson in one line: measuring a bounded page and calling it
+// a total is how the 5000 ceiling came to be load-bearing.
+func (s *Store) RosterSize(ctx context.Context, audienceID string) (int, error) {
+	res, err := s.engine.Execute(ctx, call("query", "audienceRosterSize", arg{"audienceId", audienceID}))
+	if err != nil {
+		return 0, fmt.Errorf("campaigns: query audienceRosterSize: %w", err)
+	}
+	for _, row := range memql.MaterializeRows(res) {
+		if _, ok := row["count"]; ok {
+			return integer(row, "count"), nil
+		}
+	}
+	return 0, nil
+}
+
+// LedgerFor reads the delivery ledger for exactly the recipients named,
+// keyed by bare recipient id. THE read that makes a resumed send safe, and
+// the one that keeps a batch's cost proportional to the batch rather than to
+// the campaign (memql#3460). OWNED tier.
+//
+// canonicalIDs must be the stored canonical form -- see Recipient.CanonicalID
+// for why a bare id here would silently match nothing.
+func (s *Store) LedgerFor(ctx context.Context, campaignID string, canonicalIDs []string) (map[string]LedgerEntry, error) {
+	if len(canonicalIDs) == 0 {
+		return map[string]LedgerEntry{}, nil
+	}
+	rows, err := s.rows(ctx, call("query", "deliveriesForRecipients",
+		arg{"campaignId", campaignID},
+		arg{"recipientIds", canonicalIDs},
+	))
+	if err != nil {
+		return nil, err
+	}
+	// The query's own paginate is the only thing that could truncate this
+	// read, and a truncated ledger reads as "these recipients have never been
+	// mailed" -- which would re-mail them. Reads collapse to one row per id,
+	// so a result at or over the bound means the page size and the bound have
+	// drifted apart, and refusing is the only safe answer.
+	if len(rows) >= ledgerPageBound {
+		return nil, fmt.Errorf(
+			"campaigns: the delivery-ledger page returned %d rows, at the query's %d bound; refusing to diff a possibly-truncated ledger",
+			len(rows), ledgerPageBound)
+	}
+	return ledgerFromRows(rows), nil
+}
+
+// ledgerPageBound mirrors the `paginate` on deliveriesForRecipients. It is
+// headroom over the roster page size, not a page in its own right: the read
+// returns at most one row per named recipient.
+const ledgerPageBound = 1000
 
 // Ledger reads the delivery ledger for one campaign, keyed by bare
 // recipient id. THE read that makes a resumed send safe. OWNED tier.
@@ -238,25 +379,30 @@ func (s *Store) Ledger(ctx context.Context, campaignID string) (map[string]Ledge
 	if err != nil {
 		return nil, err
 	}
+	return ledgerFromRows(rows), nil
+}
+
+// ledgerFromRows keys a ledger projection by bare recipient id.
+//
+// LAST WRITE WINS on a duplicate. The query sorts oldest-first and a
+// re-attempt appends a new version under the SAME row id, so the later row is
+// the current state. Reading the first would resume against a stale outcome
+// and re-mail somebody.
+func ledgerFromRows(rows []map[string]any) map[string]LedgerEntry {
 	out := make(map[string]LedgerEntry, len(rows))
 	for _, r := range rows {
 		recipientID := bare(str(r, "recipientId"))
 		if recipientID == "" {
 			continue
 		}
-		entry := LedgerEntry{
+		out[recipientID] = LedgerEntry{
 			RecipientID:   recipientID,
 			Status:        str(r, "status"),
 			Attempts:      integer(r, "attempts"),
 			NextAttemptAt: parseTime(str(r, "nextAttemptAt")),
 		}
-		// LAST WRITE WINS on a duplicate. The query sorts oldest-first and
-		// a re-attempt appends a new version under the SAME row id, so the
-		// later row is the current state. Reading the first would resume
-		// against a stale outcome and re-mail somebody.
-		out[recipientID] = entry
 	}
-	return out, nil
+	return out
 }
 
 // SuppressionByDigest asks the cluster-wide list about one address.
@@ -283,13 +429,25 @@ func (s *Store) SuppressionByDigest(ctx context.Context, digest string) (Suppres
 
 // EnqueueSend creates (or re-creates) the send job for a campaign.
 // clusterOwner-tier.
+//
+// job.Status selects between the two ways a job comes into existence
+// (memql#3459): empty or "queued" for a send starting now, "scheduled" for
+// one committed to a time. A scheduled job is inert -- isDrainableSendJob
+// does not match it -- so writing one can never by itself mail anybody.
 func (s *Store) EnqueueSend(ctx context.Context, job SendJob) error {
-	return s.exec(ctx, call("mutation", "enqueueCampaignSend",
-		arg{"campaignId", job.CampaignID},
-		arg{"campaignOwnerUserId", job.CampaignOwnerUserID},
-		arg{"audienceId", job.AudienceID},
-		arg{"templateId", job.TemplateID},
-	))
+	args := []arg{
+		{"campaignId", job.CampaignID},
+		{"campaignOwnerUserId", job.CampaignOwnerUserID},
+		{"audienceId", job.AudienceID},
+		{"templateId", job.TemplateID},
+	}
+	if job.Status != "" {
+		args = append(args, arg{"status", job.Status})
+	}
+	if !job.ScheduledAt.IsZero() {
+		args = append(args, arg{"scheduledAt", job.ScheduledAt.UTC().Format(time.RFC3339)})
+	}
+	return s.exec(ctx, call("mutation", "enqueueCampaignSend", args...))
 }
 
 // SendJobPatch is the set of send-job fields a caller means to change.
@@ -306,6 +464,11 @@ type SendJobPatch struct {
 	StartedAt      *time.Time
 	CompletedAt    *time.Time
 	ThrottledUntil *time.Time
+
+	// RosterCursor and RosterOutstanding carry the walk's position and
+	// whether the current pass has seen outstanding work (memql#3460).
+	RosterCursor      *string
+	RosterOutstanding *bool
 }
 
 // UpdateJob stamps a patch onto a send job. clusterOwner-tier.
@@ -320,6 +483,8 @@ func (s *Store) UpdateJob(ctx context.Context, sendJobID string, patch SendJobPa
 	args = appendTime(args, "startedAt", patch.StartedAt)
 	args = appendTime(args, "completedAt", patch.CompletedAt)
 	args = appendTime(args, "throttledUntil", patch.ThrottledUntil)
+	args = appendStr(args, "rosterCursor", patch.RosterCursor)
+	args = appendBool(args, "rosterOutstanding", patch.RosterOutstanding)
 	return s.exec(ctx, call("mutation", "updateSendJob", args...))
 }
 
@@ -384,6 +549,19 @@ func (s *Store) UpdateCampaignProgress(ctx context.Context, campaignID string, p
 	args = appendStr(args, "lastError", p.LastError)
 	args = appendTime(args, "completedAt", p.CompletedAt)
 	return s.exec(ctx, call("mutation", "updateCampaignProgress", args...))
+}
+
+// ScheduleCampaign commits a campaign to a time. OWNED tier: the caller's
+// own identity, because this is the operator's row.
+//
+// Separate from SetCampaignStatus because it carries a value rather than
+// only a transition -- and the value it carries is the one the drain
+// worker treats as authoritative when it decides whether a send is due.
+func (s *Store) ScheduleCampaign(ctx context.Context, campaignID string, at time.Time) error {
+	return s.exec(ctx, call("mutation", "scheduleCampaign",
+		arg{"campaignId", campaignID},
+		arg{"scheduledAt", at.UTC().Format(time.RFC3339)},
+	))
 }
 
 // SetCampaignStatus drives the operator-visible lifecycle transitions.
@@ -459,6 +637,14 @@ func call(kind, name string, args ...arg) string {
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(v))
 		case int:
 			rendered = append(rendered, fmt.Sprintf("%s: %d", a.name, v))
+		case bool:
+			rendered = append(rendered, fmt.Sprintf("%s: %t", a.name, v))
+		case []string:
+			quoted := make([]string, 0, len(v))
+			for _, item := range v {
+				quoted = append(quoted, langparser.QuoteString(item))
+			}
+			rendered = append(rendered, a.name+": ["+strings.Join(quoted, ", ")+"]")
 		default:
 			rendered = append(rendered, a.name+": "+langparser.QuoteString(fmt.Sprintf("%v", v)))
 		}
@@ -467,6 +653,13 @@ func call(kind, name string, args ...arg) string {
 }
 
 func appendStr(args []arg, name string, v *string) []arg {
+	if v == nil {
+		return args
+	}
+	return append(args, arg{name, *v})
+}
+
+func appendBool(args []arg, name string, v *bool) []arg {
 	if v == nil {
 		return args
 	}
@@ -496,6 +689,52 @@ func (s *Store) rows(ctx context.Context, q string) ([]map[string]any, error) {
 		return nil, fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
 	}
 	return memql.MaterializeRows(res), nil
+}
+
+// rowsPage issues a paginated read at the given continuation point and
+// returns the rows plus the engine's next cursor (memql#3460).
+//
+// The cursor rides the CONTEXT rather than the query text, because that is
+// the engine's own contract: `paginate` in the DSL declares a page size, and
+// the continuation is a runtime value the executor lifts off the context and
+// compiles into a `(createdAt, id)` keyset predicate. There is no grammar for
+// it and there should not be -- a cursor spelled into a query string would be
+// a caller-supplied scan position on an owned-tier read.
+func (s *Store) rowsPage(ctx context.Context, cursor, q string) ([]map[string]any, string, error) {
+	if cursor != "" {
+		ctx = memql.ContextWithCursor(ctx, cursor)
+	}
+	res, err := s.engine.Execute(ctx, q)
+	if err != nil {
+		return nil, "", fmt.Errorf("campaigns: %s: %w", firstWords(q), err)
+	}
+	return memql.MaterializeRows(res), cursorFromResult(res), nil
+}
+
+// cursorFromResult lifts the continuation token off whatever the engine seam
+// handed back. Two shapes, and both are real: the in-process engine returns
+// an *ExecuteResult carrying ResultMeta, and the package's tests fake flat row
+// envelopes (the seam is `Execute(ctx, string) (any, error)` precisely so they
+// can). A result with neither is an exhausted page, which is the safe reading
+// -- it ends the walk rather than continuing from a position nobody supplied.
+func cursorFromResult(res any) string {
+	type metaCarrier interface{ GetMeta() *memql.ResultMeta }
+	if carrier, ok := res.(metaCarrier); ok {
+		if meta := carrier.GetMeta(); meta != nil {
+			return strings.TrimSpace(meta.Cursor)
+		}
+	}
+	if envelope, ok := res.(map[string]any); ok {
+		if raw, ok := envelope["cursor"].(string); ok {
+			return strings.TrimSpace(raw)
+		}
+		if meta, ok := envelope["meta"].(map[string]any); ok {
+			if raw, ok := meta["cursor"].(string); ok {
+				return strings.TrimSpace(raw)
+			}
+		}
+	}
+	return ""
 }
 
 func (s *Store) exec(ctx context.Context, q string) error {
@@ -528,6 +767,20 @@ func sendJobFromRow(r map[string]any) SendJob {
 		RecipientCount:      integer(r, "recipientCount"),
 		ThrottledUntil:      parseTime(str(r, "throttledUntil")),
 		StartedAt:           parseTime(str(r, "startedAt")),
+		ScheduledAt:         parseTime(str(r, "scheduledAt")),
+		RosterCursor:        str(r, "rosterCursor"),
+		RosterOutstanding:   boolean(r, "rosterOutstanding"),
+	}
+}
+
+func boolean(m map[string]any, key string) bool {
+	switch v := m[key].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	default:
+		return false
 	}
 }
 
@@ -605,4 +858,128 @@ func sortedRecipientIDs(m map[string]LedgerEntry) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// --- reputation + warming (memql#3462) ----------------------------------
+
+// ReputationWindow is one (identity, domain, day, node) counter row.
+type ReputationWindow struct {
+	SendingIdentity string
+	Domain          string
+	WindowStart     string
+	NodeID          string
+	Accepted        int
+	HardBounce      int
+	SoftBounce      int
+	Complaint       int
+}
+
+// WarmupState is the ramp's persisted position.
+type WarmupState struct {
+	Step          int
+	RatePerMinute int
+	Decision      string
+	Reason        string
+	EvaluatedAt   time.Time
+	StepEnteredAt time.Time
+	// AcceptedAtStepStart is the deployment-wide accepted total as it stood
+	// when the current step began. Stored as a WATERMARK rather than as a
+	// running per-step counter because the counters themselves live in
+	// per-replica rows: subtracting a watermark from the current total gives
+	// the step's volume without any replica having to know what the others
+	// sent.
+	AcceptedAtStepStart int
+}
+
+// ReputationSince reads every counter row from a UTC day onward.
+// clusterOwner-tier.
+func (s *Store) ReputationSince(ctx context.Context, since string) ([]ReputationWindow, error) {
+	rows, err := s.rows(ctx, call("query", "reputationWindowsSince", arg{"since", since}))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ReputationWindow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, ReputationWindow{
+			SendingIdentity: str(r, "sendingIdentity"),
+			Domain:          str(r, "domain"),
+			WindowStart:     str(r, "windowStart"),
+			NodeID:          str(r, "nodeId"),
+			Accepted:        integer(r, "accepted"),
+			HardBounce:      integer(r, "hardBounce"),
+			SoftBounce:      integer(r, "softBounce"),
+			Complaint:       integer(r, "complaint"),
+		})
+	}
+	return out, nil
+}
+
+// ReputationForBucket reads what THIS node already wrote for one bucket, so
+// a restart mid-day seeds from it instead of clobbering it with a total that
+// began again at zero.
+func (s *Store) ReputationForBucket(ctx context.Context, key reputationKey, nodeID string) (reputationCounts, error) {
+	rows, err := s.ReputationSince(ctx, key.day)
+	if err != nil {
+		return reputationCounts{}, err
+	}
+	for _, r := range rows {
+		if r.WindowStart == key.day && r.Domain == key.domain && r.NodeID == nodeID && r.SendingIdentity == key.identity {
+			return reputationCounts{
+				accepted:   r.Accepted,
+				hardBounce: r.HardBounce,
+				softBounce: r.SoftBounce,
+				complaint:  r.Complaint,
+			}, nil
+		}
+	}
+	return reputationCounts{}, nil
+}
+
+// RecordReputationWindow writes this node's running total for one bucket.
+// clusterOwner-tier. Absolute values -- see the mutation's doc for why that
+// is the concurrency design rather than a shortcut.
+func (s *Store) RecordReputationWindow(ctx context.Context, key reputationKey, nodeID string, counts reputationCounts) error {
+	return s.exec(ctx, call("mutation", "recordReputationWindow",
+		arg{"sendingIdentity", key.identity},
+		arg{"domain", key.domain},
+		arg{"windowStart", key.day},
+		arg{"nodeId", nodeID},
+		arg{"accepted", counts.accepted},
+		arg{"hardBounce", counts.hardBounce},
+		arg{"softBounce", counts.softBounce},
+		arg{"complaint", counts.complaint},
+	))
+}
+
+// WarmupState reads the ramp's position for one sending identity.
+// clusterOwner-tier.
+func (s *Store) WarmupState(ctx context.Context, identity string) (WarmupState, bool, error) {
+	rows, err := s.rows(ctx, call("query", "warmupStateForIdentity", arg{"sendingIdentity", identity}))
+	if err != nil || len(rows) == 0 {
+		return WarmupState{}, false, err
+	}
+	r := rows[len(rows)-1]
+	return WarmupState{
+		Step:                integer(r, "step"),
+		RatePerMinute:       integer(r, "ratePerMinute"),
+		Decision:            str(r, "decision"),
+		Reason:              str(r, "reason"),
+		EvaluatedAt:         parseTime(str(r, "evaluatedAt")),
+		StepEnteredAt:       parseTime(str(r, "stepEnteredAt")),
+		AcceptedAtStepStart: integer(r, "acceptedInStep"),
+	}, true, nil
+}
+
+// RecordWarmupState persists a ramp decision. clusterOwner-tier.
+func (s *Store) RecordWarmupState(ctx context.Context, identity string, d warmupDecision) error {
+	return s.exec(ctx, call("mutation", "recordWarmupState",
+		arg{"sendingIdentity", identity},
+		arg{"step", d.Step},
+		arg{"ratePerMinute", d.RatePerMinute},
+		arg{"decision", d.Decision},
+		arg{"reason", d.Reason},
+		arg{"evaluatedAt", time.Now().UTC().Format(time.RFC3339)},
+		arg{"stepEnteredAt", d.StepEnteredAt.UTC().Format(time.RFC3339)},
+		arg{"acceptedInStep", d.AcceptedInStep},
+	))
 }

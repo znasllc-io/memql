@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/integrations/email"
 )
 
@@ -54,12 +55,21 @@ type recordedCall struct {
 type fakeEngine struct {
 	mu sync.Mutex
 
-	jobs        []map[string]any
-	campaign    map[string]any
-	template    map[string]any
-	roster      []map[string]any
-	ledger      []map[string]any
-	suppression map[string]map[string]any // digest -> row
+	jobs []map[string]any
+	// scheduledJobs backs `scheduledSendJobs` (memql#3459). A separate slice
+	// rather than a status filter over `jobs`, because the two queries answer
+	// different questions and a test that conflated them could not tell a
+	// scheduled job that was correctly left alone from one the drain path
+	// wrongly picked up.
+	scheduledJobs []map[string]any
+	campaign      map[string]any
+	template      map[string]any
+	roster        []map[string]any
+	ledger        []map[string]any
+	suppression   map[string]map[string]any // digest -> row
+	// pageSize bounds one roster page. Zero means "everything in one page",
+	// which is the pre-paging shape most tests still want.
+	pageSize int
 
 	calls []recordedCall
 }
@@ -78,6 +88,8 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	switch {
 	case strings.HasPrefix(q, "query drainableSendJobs"):
 		return rowsEnvelope(e.jobs), nil
+	case strings.HasPrefix(q, "query scheduledSendJobs"):
+		return rowsEnvelope(e.scheduledJobs), nil
 	case strings.HasPrefix(q, "query recentSendJobs"):
 		return rowsEnvelope(e.jobs), nil
 	case strings.HasPrefix(q, "query sendJobById"):
@@ -87,7 +99,15 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	case strings.HasPrefix(q, "query templateById"):
 		return rowsEnvelope([]map[string]any{e.template}), nil
 	case strings.HasPrefix(q, "query audienceRosterForSend"):
-		return rowsEnvelope(e.roster), nil
+		// PAGED, because the send walks it (memql#3460). A fake that
+		// returned the whole roster at once would make every paging test
+		// vacuous -- the walk would exhaust the audience on its first read
+		// and no cursor would ever be exercised.
+		return e.rosterPage(memql.CursorFromContext(ctx)), nil
+	case strings.HasPrefix(q, "query audienceRosterSize"):
+		return rowsEnvelope([]map[string]any{{"count": len(e.roster)}}), nil
+	case strings.HasPrefix(q, "query deliveriesForRecipients"):
+		return rowsEnvelope(e.ledgerFor(idListOf(q, "recipientIds"))), nil
 	case strings.HasPrefix(q, "query deliveryLedgerForCampaign"):
 		return rowsEnvelope(e.ledger), nil
 	case strings.HasPrefix(q, "query suppressionByDigest"):
@@ -99,6 +119,78 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 	default:
 		return nil, nil
 	}
+}
+
+// rosterPage serves one page of the roster from a numeric cursor. The real
+// cursor is an opaque keyset token; the fake's is the offset, because what
+// the walk is being tested on is that it CARRIES the token it was given and
+// stops when there is none -- not the codec.
+func (e *fakeEngine) rosterPage(cursor string) any {
+	size := e.pageSize
+	if size <= 0 {
+		size = len(e.roster) + 1
+	}
+	from := 0
+	if cursor != "" {
+		_, _ = fmt.Sscanf(cursor, "%d", &from)
+	}
+	if from > len(e.roster) {
+		from = len(e.roster)
+	}
+	to := from + size
+	if to > len(e.roster) {
+		to = len(e.roster)
+	}
+	envelope := map[string]any{"output": toAnySlice(e.roster[from:to])}
+	if to < len(e.roster) {
+		envelope["cursor"] = fmt.Sprintf("%d", to)
+	}
+	return envelope
+}
+
+// ledgerFor narrows the ledger to the canonical recipient ids named, the way
+// deliveriesForRecipients does.
+func (e *fakeEngine) ledgerFor(canonicalIDs []string) []map[string]any {
+	want := make(map[string]bool, len(canonicalIDs))
+	for _, id := range canonicalIDs {
+		want[id] = true
+	}
+	out := make([]map[string]any, 0, len(canonicalIDs))
+	for _, row := range e.ledger {
+		if id, ok := row["recipientId"].(string); ok && want[id] {
+			out = append(out, row)
+		}
+	}
+	return out
+}
+
+func toAnySlice(rows []map[string]any) []any {
+	out := make([]any, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r)
+	}
+	return out
+}
+
+// idListOf pulls a rendered `name: ["a", "b"]` argument back out of a call.
+func idListOf(q, name string) []string {
+	marker := name + ": ["
+	i := strings.Index(q, marker)
+	if i < 0 {
+		return nil
+	}
+	rest := q[i+len(marker):]
+	j := strings.Index(rest, "]")
+	if j < 0 {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(rest[:j], ",") {
+		if trimmed := strings.Trim(strings.TrimSpace(part), `"`); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (e *fakeEngine) mutations(name string) []recordedCall {
@@ -237,9 +329,10 @@ func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 			UnsubscribeSecret:  "test-signing-secret-not-a-credential",
 			UnsubscribeBaseURL: "https://example.test",
 		},
-		now:     time.Now,
-		readyCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		now:        time.Now,
+		readyCh:    make(chan struct{}),
+		doneCh:     make(chan struct{}),
+		reputation: newReputationCollector("sender@example.test", "n1"),
 	}
 	w.limiter = newRateLimiter(w.cfg.SendRatePerMinute, w.now)
 	return w
@@ -801,28 +894,66 @@ func TestCompletionStampsBothRows(t *testing.T) {
 	}
 }
 
-// TestSelectBatchIsPureAndOrdered pins the resume rule directly, without
-// an engine. Roster order is preserved so a resumed send continues rather
-// than re-shuffling, and the limit is respected.
-func TestSelectBatchIsPureAndOrdered(t *testing.T) {
+// TestWalkAppliesTheResumeRule pins the resume rule through the walk that
+// now owns it: never-attempted and due-retry recipients are batched, terminal
+// ones are not, and roster order is preserved so a resumed send continues
+// rather than re-shuffling.
+func TestWalkAppliesTheResumeRule(t *testing.T) {
 	now := time.Now()
-	roster := []Recipient{
-		{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"},
+	engine := &fakeEngine{
+		roster: []map[string]any{
+			recipientRow("a", "a@example.test", "subscribed"),
+			recipientRow("b", "b@example.test", "subscribed"),
+			recipientRow("c", "c@example.test", "subscribed"),
+			recipientRow("d", "d@example.test", "subscribed"),
+		},
+		ledger: []map[string]any{
+			ledgerRow("b", "sent", 1, time.Time{}),
+			ledgerRow("c", "pending", 1, now.Add(-time.Minute)),
+		},
 	}
-	ledger := map[string]LedgerEntry{
-		"b": {Status: "sent"},
-		"c": {Status: "pending", NextAttemptAt: now.Add(-time.Minute)},
+	w := newTestWorker(t, engine, &recordingSender{})
+
+	walk, err := w.walkRoster(context.Background(), SendJob{AudienceID: testAudience, CampaignID: testCampaign}, now)
+	if err != nil {
+		t.Fatalf("walkRoster: %v", err)
 	}
-	got := selectBatch(roster, ledger, now, 10)
-	var ids []string
-	for _, it := range got {
-		ids = append(ids, it.recipient.ID)
+	if got := batchIDs(walk); strings.Join(got, ",") != "a,c,d" {
+		t.Errorf("walk batched %v, want [a c d] in roster order", got)
 	}
-	want := []string{"a", "c", "d"}
-	if strings.Join(ids, ",") != strings.Join(want, ",") {
-		t.Errorf("selectBatch = %v, want %v", ids, want)
+	if !walk.exhausted {
+		t.Error("a single-page roster should have been exhausted in one walk")
 	}
-	if len(selectBatch(roster, ledger, now, 2)) != 2 {
-		t.Error("selectBatch ignored its limit")
+
+	w.cfg.BatchSize = 2
+	limited, err := w.walkRoster(context.Background(), SendJob{AudienceID: testAudience, CampaignID: testCampaign}, now)
+	if err != nil {
+		t.Fatalf("walkRoster: %v", err)
+	}
+	if len(limited.batch) != 2 {
+		t.Errorf("the walk ignored its batch limit: %d items", len(limited.batch))
 	}
 }
+
+func batchIDs(walk rosterWalk) []string {
+	out := make([]string, 0, len(walk.batch))
+	for _, it := range walk.batch {
+		out = append(out, it.recipient.ID)
+	}
+	return out
+}
+
+func ledgerRow(recipientID, status string, attempts int, next time.Time) map[string]any {
+	row := map[string]any{
+		"recipientId": "v1:campaigns:recipient:" + recipientID,
+		"status":      status,
+		"attempts":    attempts,
+	}
+	if !next.IsZero() {
+		row["nextAttemptAt"] = next.UTC().Format(time.RFC3339)
+	}
+	return row
+}
+
+// cursorOf exposes the inbound pagination cursor to a fake engine.
+func cursorOf(ctx context.Context) string { return memql.CursorFromContext(ctx) }

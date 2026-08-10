@@ -110,6 +110,13 @@ type Worker struct {
 	now      func() time.Time
 	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
 
+	// reputation accumulates the per-domain counters this replica observes
+	// (memql#3462), flushed once per drain pass.
+	reputation *reputationCollector
+	// warmupEvaluatedAt bounds how often the ramp re-reads the evidence.
+	// Guarded by mu.
+	warmupEvaluatedAt time.Time
+
 	cancel      context.CancelFunc
 	running     atomic.Bool
 	startOnce   sync.Once
@@ -132,15 +139,16 @@ func NewWorker(engine Engine, claimer ExecutionClaimer, resolveSender func() ema
 	}
 	cfg := LoadConfig()
 	return &Worker{
-		store:   NewStore(engine),
-		claimer: claimer,
-		resolve: resolveSender,
-		logger:  logger.With("component", string(WorkerComponent)),
-		cfg:     cfg,
-		limiter: newRateLimiter(cfg.SendRatePerMinute, time.Now),
-		now:     time.Now,
-		readyCh: make(chan struct{}),
-		doneCh:  make(chan struct{}),
+		store:      NewStore(engine),
+		claimer:    claimer,
+		resolve:    resolveSender,
+		logger:     logger.With("component", string(WorkerComponent)),
+		cfg:        cfg,
+		limiter:    newRateLimiter(cfg.SendRatePerMinute, time.Now),
+		reputation: newReputationCollector(cfg.SendingIdentity, cfg.NodeID),
+		now:        time.Now,
+		readyCh:    make(chan struct{}),
+		doneCh:     make(chan struct{}),
 	}
 }
 
@@ -167,6 +175,16 @@ func (w *Worker) Start(_ context.Context) {
 		// buried in a boot log.
 		if reason := w.cfg.RequireUnsubscribe(); reason != "" {
 			w.logger.Warn("campaigns worker: one-click unsubscribe is NOT configured, so no campaign can be started", "reason", reason)
+		}
+		// Said once, loudly: a malformed ladder leaves the ramp OFF, and an
+		// operator who configured warming and got none should learn it here
+		// rather than by watching a rate that never moves.
+		if w.cfg.WarmupStepsError != "" {
+			w.logger.Warn("campaigns worker: MEMQL_CAMPAIGNS_WARMUP_STEPS is malformed, so the warming ramp is DISABLED",
+				"error", w.cfg.WarmupStepsError)
+		} else if w.cfg.WarmupEnabled {
+			w.logger.Info("campaigns worker: warming ramp enabled",
+				"identity", w.cfg.SendingIdentity, "steps", w.cfg.WarmupSteps)
 		}
 		runCtx, cancel := context.WithCancel(context.Background())
 		w.mu.Lock()
@@ -278,6 +296,14 @@ func (w *Worker) WarnOnUnrotatableUnsubscribeSecret(ctx context.Context) {
 // than racing a ticker.
 func (w *Worker) DrainOnce(ctx context.Context) {
 	systemCtx := w.systemActorContext(ctx)
+	// Schedules first, so a campaign that comes due is promoted and drained
+	// in the SAME pass rather than waiting a further poll interval to start
+	// (memql#3459).
+	w.promoteDueSchedules(ctx, systemCtx)
+	// The ramp reads the evidence and sets the pace BEFORE any batch, so a
+	// step change takes effect on this pass rather than the next
+	// (memql#3462). It self-limits to warmupEvalInterval internally.
+	w.applyWarmup(systemCtx, w.nowUTC())
 	jobs, err := w.store.DrainableJobs(systemCtx)
 	if err != nil {
 		w.logger.Debug("campaigns worker: scan failed (engine likely not ready)", "error", err)
@@ -291,6 +317,9 @@ func (w *Worker) DrainOnce(ctx context.Context) {
 		}
 		w.processJob(ctx, systemCtx, job)
 	}
+	// After the pass, so one write covers everything the pass observed
+	// rather than one per message.
+	w.flushReputation(systemCtx)
 }
 
 func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job SendJob) {
@@ -309,14 +338,21 @@ func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job 
 		return
 	}
 
-	// Cross-replica claim BEFORE any side effect, keyed per (job,
-	// progress). Progress advances whenever a batch produced a terminal
-	// outcome, so the next batch claims a fresh key; a batch that
+	// Cross-replica claim BEFORE any side effect, keyed per (job, progress,
+	// roster position). Progress advances whenever a batch produced a
+	// terminal outcome, so the next batch claims a fresh key; a batch that
 	// produced none re-claims the same key and is correctly blocked until
-	// the lease expires, which is what stops a permanently-failing job
-	// from spinning on every tick of every replica.
+	// the lease expires, which is what stops a permanently-failing job from
+	// spinning on every tick of every replica.
+	//
+	// The roster position joined the key in memql#3460. Without it, a tick
+	// that only SCANNED -- walking past recipients already dealt with,
+	// advancing the cursor, producing no terminal outcome -- would re-claim
+	// the same key next tick and be blocked for the whole lease. On a large
+	// audience that is the difference between advancing every 15 seconds and
+	// advancing every 5 minutes.
 	if w.claimer != nil {
-		key := fmt.Sprintf("%s:%d", job.ID, job.Progress())
+		key := fmt.Sprintf("%s:%d:%s", job.ID, job.Progress(), cursorFingerprint(job.RosterCursor))
 		if !w.claimer.ClaimWithTTL(ctx, sendClaimName, key, w.cfg.ClaimTTL) {
 			return
 		}
@@ -362,44 +398,49 @@ func (w *Worker) processJob(ctx context.Context, systemCtx context.Context, job 
 		return
 	}
 
-	roster, err := w.store.Roster(ownerCtx, job.AudienceID)
+	// The roster is WALKED, one page at a time, with the delivery ledger
+	// read for each page rather than for the campaign (memql#3460). Neither
+	// read is bounded by the audience's size any more, which is what removed
+	// the 5000-recipient wall.
+	walk, err := w.walkRoster(ownerCtx, job, now)
 	if err != nil {
-		w.logger.Warn("campaigns worker: could not read audience roster", "job", job.ID, "error", err)
-		return
-	}
-	// The ceiling is re-checked here and not only at start: an audience
-	// can grow mid-send, and the roster read is bounded by the query's
-	// paginate, so past the bound the worker would be diffing a TRUNCATED
-	// roster and would silently declare the campaign complete having
-	// never seen the tail.
-	if len(roster) >= w.cfg.MaxAudience {
-		w.failJob(systemCtx, job, fmt.Sprintf(
-			"audience has reached the %d-recipient ceiling (MEMQL_CAMPAIGNS_MAX_AUDIENCE); "+
-				"the roster read is bounded, so continuing would silently skip the remainder", w.cfg.MaxAudience))
+		w.logger.Warn("campaigns worker: could not walk the audience roster", "job", job.ID, "error", err)
 		return
 	}
 
-	ledger, err := w.store.Ledger(ownerCtx, job.CampaignID)
-	if err != nil {
-		w.logger.Warn("campaigns worker: could not read delivery ledger", "job", job.ID, "error", err)
-		return
-	}
-
-	batch := selectBatch(roster, ledger, now, w.cfg.BatchSize)
-	if len(batch) == 0 {
-		if pendingRemains(roster, ledger) {
-			// Nothing due right now -- every outstanding recipient is
-			// waiting out a backoff. Leave the job running.
+	if len(walk.batch) == 0 {
+		if walk.exhausted && !walk.outstanding {
+			// A full pass over the audience found nothing outstanding. That
+			// is the completion proof, and it is the only one available
+			// without holding the whole roster in memory.
+			w.completeJob(systemCtx, ownerCtx, job, campaign)
 			return
 		}
-		w.completeJob(systemCtx, ownerCtx, job, campaign, len(roster))
+		// Either the pass has more ground to cover, or everything left is
+		// waiting out a backoff. Persist the position and leave the job
+		// running.
+		w.stampWalk(systemCtx, job, walk)
 		return
 	}
 
-	if err := w.sendBatch(ctx, systemCtx, ownerCtx, &job, campaign, tmpl, batch); err != nil {
+	if err := w.sendBatch(ctx, systemCtx, ownerCtx, &job, campaign, tmpl, walk.batch); err != nil {
 		w.logger.Warn("campaigns worker: batch ended early", "job", job.ID, "error", err)
 	}
-	w.stampProgress(systemCtx, ownerCtx, job, len(roster))
+	w.stampWalk(systemCtx, job, walk)
+	w.stampProgress(systemCtx, ownerCtx, job)
+}
+
+// stampWalk persists where the roster walk got to, so the next tick resumes
+// rather than re-scanning from the start of the audience. Best-effort by
+// design: a failed stamp costs a re-scan, never a wrong send.
+func (w *Worker) stampWalk(systemCtx context.Context, job SendJob, walk rosterWalk) {
+	cursor, outstanding := walk.cursor, walk.outstanding
+	if err := w.store.UpdateJob(systemCtx, job.ID, SendJobPatch{
+		RosterCursor: &cursor, RosterOutstanding: &outstanding,
+	}); err != nil {
+		w.logger.Warn("campaigns worker: could not record the roster walk position; the next pass re-scans",
+			"job", job.ID, "error", err)
+	}
 }
 
 // sendBatch mails one batch, updating the job's in-memory counters as it
@@ -423,9 +464,21 @@ func (w *Worker) sendBatch(
 		return errors.New(reason)
 	}
 	if job.StartedAt.IsZero() {
-		started := w.now().UTC()
+		started := w.nowUTC()
 		running := "running"
-		_ = w.store.UpdateJob(systemCtx, job.ID, SendJobPatch{Status: &running, StartedAt: &started})
+		patch := SendJobPatch{Status: &running, StartedAt: &started}
+		// recipientCount is FROZEN at send time, which is what the concept
+		// has always said it was -- it was being recomputed from the length
+		// of a bounded read on every batch, which is the same measurement
+		// mistake that made 5000 a ceiling. A server-side count answers it
+		// once, exactly, for an audience of any size (memql#3460).
+		if size, err := w.store.RosterSize(ownerCtx, job.AudienceID); err == nil && size > 0 {
+			patch.RecipientCount = &size
+			job.RecipientCount = size
+		} else if err != nil {
+			w.logger.Warn("campaigns worker: could not count the audience", "job", job.ID, "error", err)
+		}
+		_ = w.store.UpdateJob(systemCtx, job.ID, patch)
 		job.StartedAt = started
 	}
 
@@ -529,6 +582,9 @@ func (w *Worker) processRecipient(
 	if err == nil {
 		job.SentCount++
 		w.sentTotal.Add(1)
+		// `accepted`, not `delivered`: the transport took it, and whether it
+		// lands is what the feedback path reports later (memql#3462).
+		w.reputation.observe(now, r.Email, "accepted")
 		if derr := w.store.RecordDelivery(ownerCtx, Delivery{
 			CampaignID: campaign.ID, RecipientID: r.ID, Email: r.Email,
 			Status: "sent", SentAt: now, Attempts: attempts,
@@ -593,6 +649,16 @@ func (w *Worker) deliver(ctx context.Context, msg email.Message) error {
 	return sender.Send(ctx, msg)
 }
 
+// nowUTC is the worker's clock, tolerating a zero-valued Worker. Tests
+// construct one by struct literal to drive a single handler, and a nil `now`
+// there would be a panic in a code path that has nothing to do with time.
+func (w *Worker) nowUTC() time.Time {
+	if w.now == nil {
+		return time.Now().UTC()
+	}
+	return w.now().UTC()
+}
+
 func (w *Worker) resolveSender() email.Sender {
 	if w.resolve == nil {
 		return nil
@@ -622,39 +688,54 @@ func (w *Worker) recordFailed(ownerCtx context.Context, job *SendJob, campaignID
 	}
 }
 
-func (w *Worker) stampProgress(systemCtx, ownerCtx context.Context, job SendJob, rosterSize int) {
-	sent, skipped, failed, count := job.SentCount, job.SkippedCount, job.FailedCount, rosterSize
-	if err := w.store.UpdateJob(systemCtx, job.ID, SendJobPatch{
-		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed, RecipientCount: &count,
-	}); err != nil {
+func (w *Worker) stampProgress(systemCtx, ownerCtx context.Context, job SendJob) {
+	sent, skipped, failed := job.SentCount, job.SkippedCount, job.FailedCount
+	jobPatch := SendJobPatch{SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed}
+	campaignPatch := CampaignProgress{SentCount: &sent, FailedCount: &failed}
+	// Only carried when it is known. The count is taken once, at send time,
+	// and a zero here would blank a figure the operator is watching rather
+	// than leave it alone.
+	if job.RecipientCount > 0 {
+		count := job.RecipientCount
+		jobPatch.RecipientCount = &count
+		campaignPatch.RecipientCount = &count
+	}
+	if err := w.store.UpdateJob(systemCtx, job.ID, jobPatch); err != nil {
 		w.logger.Warn("campaigns worker: could not stamp job progress", "error", err)
 	}
-	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, CampaignProgress{
-		RecipientCount: &count, SentCount: &sent, FailedCount: &failed,
-	}); err != nil {
+	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, campaignPatch); err != nil {
 		w.logger.Warn("campaigns worker: could not stamp campaign progress", "error", err)
 	}
 }
 
-func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, campaign Campaign, rosterSize int) {
-	now := w.now().UTC()
+func (w *Worker) completeJob(systemCtx, ownerCtx context.Context, job SendJob, campaign Campaign) {
+	now := w.nowUTC()
 	done := "completed"
-	sent, skipped, failed, count := job.SentCount, job.SkippedCount, job.FailedCount, rosterSize
-	if err := w.store.UpdateJob(systemCtx, job.ID, SendJobPatch{
+	cleared := ""
+	sent, skipped, failed := job.SentCount, job.SkippedCount, job.FailedCount
+	jobPatch := SendJobPatch{
 		Status: &done, CompletedAt: &now,
-		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed, RecipientCount: &count,
-	}); err != nil {
+		SentCount: &sent, SkippedCount: &skipped, FailedCount: &failed,
+		RosterCursor: &cleared,
+	}
+	sentStatus := "sent"
+	campaignPatch := CampaignProgress{
+		Status: &sentStatus, CompletedAt: &now,
+		SentCount: &sent, FailedCount: &failed,
+	}
+	if job.RecipientCount > 0 {
+		count := job.RecipientCount
+		jobPatch.RecipientCount = &count
+		campaignPatch.RecipientCount = &count
+	}
+	if err := w.store.UpdateJob(systemCtx, job.ID, jobPatch); err != nil {
 		w.logger.Warn("campaigns worker: could not complete send job", "error", err)
 	}
-	status := "sent"
-	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, CampaignProgress{
-		Status: &status, CompletedAt: &now,
-		RecipientCount: &count, SentCount: &sent, FailedCount: &failed,
-	}); err != nil {
+	if err := w.store.UpdateCampaignProgress(ownerCtx, job.CampaignID, campaignPatch); err != nil {
 		w.logger.Warn("campaigns worker: could not complete campaign", "error", err)
 	}
 	w.logger.Info("campaigns worker: campaign complete",
-		"campaign", campaign.ID, "recipients", rosterSize,
+		"campaign", campaign.ID, "recipients", job.RecipientCount,
 		"sent", job.SentCount, "skipped", job.SkippedCount, "failed", job.FailedCount)
 }
 
@@ -712,47 +793,6 @@ func (w *Worker) ownerActorContext(ctx context.Context, ownerUserID string) cont
 type batchItem struct {
 	recipient Recipient
 	attempts  int
-}
-
-// selectBatch is the resume rule, isolated so it is testable without an
-// engine: roster members with no ledger entry, plus entries still
-// `pending` whose retry is due. Roster order (oldest recipient first) is
-// preserved, so a resumed send continues where it left off rather than
-// re-shuffling.
-func selectBatch(roster []Recipient, ledger map[string]LedgerEntry, now time.Time, limit int) []batchItem {
-	batch := make([]batchItem, 0, limit)
-	for _, r := range roster {
-		entry, seen := ledger[r.ID]
-		switch {
-		case !seen:
-			// never attempted
-		case entry.Status != "pending":
-			// terminal: sent, skipped or failed. NEVER re-mailed.
-			continue
-		case !entry.NextAttemptAt.IsZero() && now.Before(entry.NextAttemptAt):
-			continue
-		}
-		batch = append(batch, batchItem{recipient: r, attempts: entry.Attempts})
-		if len(batch) >= limit {
-			break
-		}
-	}
-	return batch
-}
-
-// pendingRemains reports whether any roster member is still outstanding
-// (unattempted, or pending a future retry). Distinguishes "the batch is
-// empty because everything is done" from "the batch is empty because
-// everything is waiting", which are opposite conclusions about whether
-// the campaign is finished.
-func pendingRemains(roster []Recipient, ledger map[string]LedgerEntry) bool {
-	for _, r := range roster {
-		entry, seen := ledger[r.ID]
-		if !seen || entry.Status == "pending" {
-			return true
-		}
-	}
-	return false
 }
 
 func isDrainable(status string) bool { return status == "queued" || status == "running" }

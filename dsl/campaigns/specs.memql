@@ -35,3 +35,11 @@ spec template isReadyTemplate {
 spec sendJob isDrainableSendJob {
   return status=="queued" || status=="running"
 }
+
+/// Matches send jobs waiting for their scheduled time (memql#3459). Deliberately NOT part of
+/// isDrainableSendJob: a scheduled job is inert, and the worker has to promote it to 'queued' before
+/// a single message can leave. Keeping the two predicates apart is what makes "the row exists" and
+/// "the row may mail somebody" different statements.
+spec sendJob isScheduledSendJob {
+  return status=="scheduled"
+}

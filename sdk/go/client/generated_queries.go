@@ -955,8 +955,9 @@ func AudienceByIdBuild(args AudienceByIdArgs) string {
 	return b.String()
 }
 
-// AudienceRosterForSend -- ENGINE (owner-scoped): every recipient in the audience a send is working through, oldest first -- including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
-// The 5000 bound is the send's AUDIENCE CEILING, not a page: the worker reads the roster whole on every batch and diffs it against the delivery ledger, so a larger audience would be silently truncated. campaignStartSend refuses a send whose audience exceeds MEMQL_CAMPAIGNS_MAX_AUDIENCE (default 5000, matched to this bound and to MEMORY_ENGINE_MAX_WINDOW) rather than mailing a prefix of it. Lifting the ceiling means keyset-cursoring the roster, which is a follow-up.
+// AudienceRosterForSend -- ENGINE (owner-scoped): ONE PAGE of the audience a send is working through, oldest first -- including suppressed ones, because a `skipped` delivery row is an outcome the operator is owed rather than a silence. Owned, and read under the campaign owner's actor. @pii projection.
+// THE 500 IS A PAGE, NOT A CEILING (memql#3460). It used to be 5000 and it used to be the largest audience this engine could send to: the worker read the roster WHOLE on every batch and diffed it against the ledger, so anything past the bound would have been silently truncated and campaignStartSend refused the send rather than mail a prefix. The worker now walks this query with the engine's keyset cursor, so the roster is unbounded and the number here only decides how much of it is in memory at once.
+// The ascending `row.createdAt` ordering is load-bearing under concurrent roster edits, which is the question a cursor over versioned rows has to answer. Reads collapse to the latest version per id (DISTINCT ON), so editing a recipient mid-send moves it FORWARD in this enumeration -- never backward past the cursor. A row can therefore be seen twice in one pass and can never be MISSED, and the worker de-duplicates within a batch. That asymmetry is the whole safety argument: a duplicate costs a wasted comparison, a skip costs somebody their mail.
 //
 // Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterForSend"] in generated_concepts.go).
 type AudienceRosterForSendArgs struct {
@@ -972,6 +973,28 @@ func (qc *QueryClient) AudienceRosterForSend(ctx context.Context, args AudienceR
 func AudienceRosterForSendBuild(args AudienceRosterForSendArgs) string {
 	var b strings.Builder
 	b.WriteString("query audienceRosterForSend(")
+	b.WriteString("audienceId: ")
+	b.WriteString(quoteMemQL(args.AudienceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// AudienceRosterSize -- ENGINE (owner-scoped): how many recipients an audience holds, as a {count: N} aggregate (memql#3460). Computed server-side, so it is the one question about a large audience that needs no window at all -- which is exactly why the preflight and the frozen `recipientCount` use it rather than measuring the length of a bounded read. Measuring a page and calling it a total is how the 5000 ceiling came to be load-bearing in the first place. Owned.
+//
+// Bound concept: v1:campaigns:recipient (machine-readable: BoundConcepts["audienceRosterSize"] in generated_concepts.go).
+type AudienceRosterSizeArgs struct {
+	AudienceId string
+}
+
+// AudienceRosterSize calls the engine query audienceRosterSize.
+func (qc *QueryClient) AudienceRosterSize(ctx context.Context, args AudienceRosterSizeArgs) (*Result, error) {
+	call := AudienceRosterSizeBuild(args)
+	return qc.executeNamed(ctx, "audienceRosterSize", call)
+}
+
+func AudienceRosterSizeBuild(args AudienceRosterSizeArgs) string {
+	var b strings.Builder
+	b.WriteString("query audienceRosterSize(")
 	b.WriteString("audienceId: ")
 	b.WriteString(quoteMemQL(args.AudienceId))
 	b.WriteString(")")
@@ -1799,7 +1822,38 @@ func DeliveriesForCampaignBuild(args DeliveriesForCampaignArgs) string {
 	return b.String()
 }
 
-// DeliveryLedgerForCampaign -- ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection -- recipient, outcome, attempts, retry due-time and nothing else. This is the read that makes a resumed send safe: the worker diffs it against the roster and mails only what is missing or due. Owned, read under the campaign owner's actor. Same 5000 ceiling and the same reason.
+// DeliveriesForRecipients -- ENGINE (owner-scoped): the delivery ledger for ONE PAGE OF RECIPIENTS, in the slim projection -- recipient, outcome, attempts, retry due-time and nothing else. THE read that makes a resumed send safe: the worker diffs it against the roster page it just read and mails only what is missing or due (memql#3460).
+// Bounded by the CALLER'S id list rather than by a page of its own, and that is what lets the send scale. Reading the whole ledger for a campaign is exactly as unbounded as reading the whole roster, so cursoring one and not the other would have moved the ceiling rather than removed it. The slice of the ledger a batch needs is precisely the slice of the roster it is looking at.
+// recipientIds are CANONICAL ids. The relationship-canonicalizing pre-walk rewrites a bare id only on a scalar comparison, not on a list, so a bare id here would compare against a stored `v1:campaigns:recipient:...` and match nothing -- which would read as "nobody has been mailed" and re-mail the page. The worker passes the ids exactly as the roster row returned them.
+// Owned, read under the campaign owner's actor. @pii-free projection.
+//
+// Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["deliveriesForRecipients"] in generated_concepts.go).
+type DeliveriesForRecipientsArgs struct {
+	CampaignId   string
+	RecipientIds []any
+}
+
+// DeliveriesForRecipients calls the engine query deliveriesForRecipients.
+func (qc *QueryClient) DeliveriesForRecipients(ctx context.Context, args DeliveriesForRecipientsArgs) (*Result, error) {
+	call := DeliveriesForRecipientsBuild(args)
+	return qc.executeNamed(ctx, "deliveriesForRecipients", call)
+}
+
+func DeliveriesForRecipientsBuild(args DeliveriesForRecipientsArgs) string {
+	var b strings.Builder
+	b.WriteString("query deliveriesForRecipients(")
+	b.WriteString("campaignId: ")
+	b.WriteString(quoteMemQL(args.CampaignId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("recipientIds: ")
+	b.WriteString(renderMemQLValue(args.RecipientIds))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeliveryLedgerForCampaign -- ENGINE (owner-scoped): the delivery ledger for one campaign, oldest first, in the slim projection. Retained for the operator-facing read of a whole run; the SEND path pages through deliveriesForRecipients instead, because a whole-ledger read is as unbounded as a whole-roster one. Owned, read under the campaign owner's actor.
 //
 // Bound concept: v1:campaigns:delivery (machine-readable: BoundConcepts["deliveryLedgerForCampaign"] in generated_concepts.go).
 type DeliveryLedgerForCampaignArgs struct {
@@ -2599,6 +2653,28 @@ func InboundRequestByDedupeKeyBuild(args InboundRequestByDedupeKeyArgs) string {
 	}
 	b.WriteString("dedupeKey: ")
 	b.WriteString(quoteMemQL(args.DedupeKey))
+	b.WriteString(")")
+	return b.String()
+}
+
+// InboundRequestById -- One staged inbound request by its row id. The read a product's handler does when an automation hands it `event.node.id` and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
+//
+// Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestById"] in generated_concepts.go).
+type InboundRequestByIdArgs struct {
+	RequestId string
+}
+
+// InboundRequestById calls the engine query inboundRequestById.
+func (qc *QueryClient) InboundRequestById(ctx context.Context, args InboundRequestByIdArgs) (*Result, error) {
+	call := InboundRequestByIdBuild(args)
+	return qc.executeNamed(ctx, "inboundRequestById", call)
+}
+
+func InboundRequestByIdBuild(args InboundRequestByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query inboundRequestById(")
+	b.WriteString("requestId: ")
+	b.WriteString(quoteMemQL(args.RequestId))
 	b.WriteString(")")
 	return b.String()
 }
@@ -3734,6 +3810,29 @@ func RecordsByStateBuild(args RecordsByStateArgs) string {
 	return b.String()
 }
 
+// ReputationWindowsSince -- ENGINE: reputation counters from a given UTC day onward, oldest first (memql#3462). The read the warming ramp evaluates and the one an operator runs to answer "what is our complaint rate at gmail.com this week". Cluster-owner gated, and it spans owners for the same reason the suppression list does: one deployment, one sending mailbox, one reputation. The rows carry a domain and four integers and no address.
+// windowStart is compared as a STRING because the bucket key is one -- YYYY-MM-DD orders lexically exactly as it orders chronologically, which is the property that makes a string key legitimate here rather than a shortcut.
+//
+// Bound concept: v1:campaigns:reputationWindow (machine-readable: BoundConcepts["reputationWindowsSince"] in generated_concepts.go).
+type ReputationWindowsSinceArgs struct {
+	Since string
+}
+
+// ReputationWindowsSince calls the engine query reputationWindowsSince.
+func (qc *QueryClient) ReputationWindowsSince(ctx context.Context, args ReputationWindowsSinceArgs) (*Result, error) {
+	call := ReputationWindowsSinceBuild(args)
+	return qc.executeNamed(ctx, "reputationWindowsSince", call)
+}
+
+func ReputationWindowsSinceBuild(args ReputationWindowsSinceArgs) string {
+	var b strings.Builder
+	b.WriteString("query reputationWindowsSince(")
+	b.WriteString("since: ")
+	b.WriteString(quoteMemQL(args.Since))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RequestById -- Resolve a single v1:forge:request by id (detail view).
 //
 // Bound concept: v1:forge:request (machine-readable: BoundConcepts["requestById"] in generated_concepts.go).
@@ -3883,6 +3982,24 @@ func RouterBudgetsBuild(args RouterBudgetsArgs) string {
 	}
 	b.WriteString(")")
 	return b.String()
+}
+
+// ScheduledSendJobs -- ENGINE: send jobs committed to a time and not yet fired, oldest first (memql#3459). Cluster-owner gated, and it spans owners for the same reason drainableSendJobs does -- "which campaigns are due" is a question about the cluster, and it is not one an OWNED row can answer at all, since the owned tier injects ownerUserId==actor.userId into every read with no cluster-owner bypass. That is why the schedule lives on the engine's job row rather than being scanned off v1:campaigns:campaign.
+// It deliberately does NOT filter on the due time. The authority on when a send fires is the CAMPAIGN's scheduledAt, which an operator can move with updateCampaign without the job row hearing about it -- so the worker reads every scheduled job and asks the campaign. The set is small by nature (one row per pending scheduled campaign), which is what makes that affordable.
+//
+// Bound concept: v1:campaigns:sendJob (machine-readable: BoundConcepts["scheduledSendJobs"] in generated_concepts.go).
+type ScheduledSendJobsArgs struct {
+}
+
+// ScheduledSendJobs calls the engine query scheduledSendJobs.
+func (qc *QueryClient) ScheduledSendJobs(ctx context.Context, args ScheduledSendJobsArgs) (*Result, error) {
+	call := ScheduledSendJobsBuild(args)
+	return qc.executeNamed(ctx, "scheduledSendJobs", call)
+}
+
+func ScheduledSendJobsBuild(args ScheduledSendJobsArgs) string {
+	_ = args
+	return "query scheduledSendJobs()"
 }
 
 // SearchUsers -- Search users, optionally gated by active status. Omit `active` to list active and deactivated users alike; pass true to return only active users or false for only deactivated ones. Owner-or-admin only. Backs the searchUsers tool.
@@ -4722,6 +4839,28 @@ func (qc *QueryClient) WaitingPlansForUser(ctx context.Context, args WaitingPlan
 func WaitingPlansForUserBuild(args WaitingPlansForUserArgs) string {
 	_ = args
 	return "query waitingPlansForUser()"
+}
+
+// WarmupStateForIdentity -- ENGINE: the warming ramp's state for one sending identity (the id IS the identity). Cluster-owner gated. Backs both the ramp's own evaluation and an operator asking which step it is on and why it last held.
+//
+// Bound concept: v1:campaigns:warmupState (machine-readable: BoundConcepts["warmupStateForIdentity"] in generated_concepts.go).
+type WarmupStateForIdentityArgs struct {
+	SendingIdentity string
+}
+
+// WarmupStateForIdentity calls the engine query warmupStateForIdentity.
+func (qc *QueryClient) WarmupStateForIdentity(ctx context.Context, args WarmupStateForIdentityArgs) (*Result, error) {
+	call := WarmupStateForIdentityBuild(args)
+	return qc.executeNamed(ctx, "warmupStateForIdentity", call)
+}
+
+func WarmupStateForIdentityBuild(args WarmupStateForIdentityArgs) string {
+	var b strings.Builder
+	b.WriteString("query warmupStateForIdentity(")
+	b.WriteString("sendingIdentity: ")
+	b.WriteString(quoteMemQL(args.SendingIdentity))
+	b.WriteString(")")
+	return b.String()
 }
 
 // WorkerByIdentityId -- Look up the worker registration owned by an identity row.

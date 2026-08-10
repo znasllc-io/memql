@@ -1,0 +1,31 @@
+// automations.memql -- campaigns namespace
+//
+// ONE automation: the trigger half of provider feedback ingestion
+// (memql#3461). memql#3348 built everything a bounce does -- suppress the
+// address cluster-wide, leave the audience membership alone, keep a soft
+// bounce out of it -- and nothing that turned an actual provider's report
+// into that call. This is the wire.
+//
+// The transport is the existing inbound webhook receiver
+// (POST /inbound/{source}), which already has the deny-by-default source
+// allowlist and the per-source HMAC a suppression feed needs. It stages a
+// verified v1:platform:inboundRequest row; this fires on that row.
+//
+// It fires on EVERY inbound row rather than filtering by source, because the
+// set of sources that are feedback feeds is deployment configuration
+// (MEMQL_CAMPAIGNS_FEEDBACK_SOURCES) and is not knowable here. The builtin
+// answers "not a feedback source" for everything else without erroring --
+// which is why that is a benign result rather than a failure, since
+// otherwise every Shopify webhook this cluster received would log one.
+
+/// On a staged inbound webhook delivery, offer it to the campaign feedback parser. Does nothing
+/// unless the row's source is configured as a feedback feed and the delivery was signature-verified;
+/// the builtin decides both, because both are deployment configuration rather than graph state.
+@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+automation ingestCampaignFeedback {
+  step ingest {
+    builtin campaignIngestFeedback (
+      inboundRequestId: event.node.id
+    )
+  }
+}
