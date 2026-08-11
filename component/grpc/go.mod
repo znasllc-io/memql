@@ -28,6 +28,7 @@ require (
 	github.com/znasllc-io/memql/component/node/gen v0.0.0
 	github.com/znasllc-io/memql/component/polyphon v0.0.0
 	github.com/znasllc-io/memql/component/provenance v0.0.0
+	github.com/znasllc-io/memql/component/secret v0.0.0
 	github.com/znasllc-io/memql/component/server v0.0.0
 	github.com/znasllc-io/memql/component/worker v0.0.0
 	github.com/znasllc-io/memql/core v0.0.0
@@ -126,7 +127,6 @@ require (
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect
 	github.com/znasllc-io/memql/docs v0.0.0 // indirect
 	github.com/znasllc-io/memql/integrations/openai v0.0.0 // indirect
 	go.opentelemetry.io/otel v1.44.0 // indirect

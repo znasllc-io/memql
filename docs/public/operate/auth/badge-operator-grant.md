@@ -126,5 +126,7 @@ A kiosk client typically:
 ## Naming note
 
 The scheme is deliberately named **badge**, not "operator":
-`Authorization: Operator <key>` is the pre-existing master-key scheme
-(synthetic cluster owner) and is unrelated.
+`Authorization: Operator <key>` is the pre-existing operator-credential
+scheme (synthetic cluster owner) and is unrelated. Since memql#3519 that
+scheme reads `MEMQL_OPERATOR_KEY`, not the master key -- see
+[operator-credential.md](operator-credential.md).
