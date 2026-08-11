@@ -456,3 +456,71 @@ test("a hanging probe does not hang the memo either", async () => {
   });
   assert.equal((await presence.get()).verdict, "installed-unreachable");
 });
+
+// -----------------------------------------------------------------------------
+// A receipt that names no artifact is not an install (memql#3544)
+// -----------------------------------------------------------------------------
+
+test("a receipt whose steps left NO artifact is not evidence of an install", async () => {
+  // THE TRAP THIS OPENS, and it is a dead end rather than a cosmetic slip.
+  //
+  // An install that dies at its first mutating step still records the read-only
+  // steps that ran ahead of it -- `detect`, which only inspects the machine, and
+  // `providerKey`, which verifies a credential and creates nothing. Both carry
+  // `receipt: ""`, because that field names the ARTIFACT class a step left
+  // behind and neither leaves one.
+  //
+  // Counting entries rather than artifacts read that as "a cluster is installed
+  // here". The consequences compound: the Install card is withdrawn (it is
+  // offered for `absent` and nothing else), so the operator cannot retry the
+  // install that just failed; Repair is offered instead and re-runs the same
+  // graph into the same failure; and Uninstall correctly reports there is
+  // nothing to remove, because there is not. Three screens, no way forward.
+  const result = await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () =>
+      Promise.resolve(
+        installedReceipt([
+          entry({ stepId: "detect", script: "install.detect", receipt: "", changed: false }),
+          entry({
+            stepId: "providerKey",
+            script: "install.verifyProviderKey",
+            receipt: "",
+            changed: false,
+          }),
+        ]),
+      ),
+    readClusters: NO_CLUSTERS,
+    probe: fixedProbe(false),
+    probeTimeoutMs: 25,
+  });
+
+  assert.equal(result.verdict, "absent", "nothing was left on this machine to protect");
+  assert.deepEqual(result.evidence, { receipt: false, registry: false });
+});
+
+test("an artifact a step FOUND already present is still evidence", async () => {
+  // The counterpart, and the reason the test is on the artifact rather than on
+  // `changed`. A step that finds docker already installed records
+  // `preExisting: true, changed: false` -- it changed nothing, and the artifact
+  // is on the machine all the same. Reading that as "absent" would offer to
+  // install over a cluster that is already there, which is the one direction
+  // this module exists to make impossible.
+  const result = await detectPresence({
+    clustersPath: CLUSTERS_PATH,
+    receiptPath: RECEIPT_PATH,
+    readReceiptFile: () =>
+      Promise.resolve(
+        installedReceipt([
+          entry({ stepId: "clusterUp", receipt: "stack", preExisting: true, changed: false }),
+        ]),
+      ),
+    readClusters: NO_CLUSTERS,
+    probe: fixedProbe(false),
+    probeTimeoutMs: 25,
+  });
+
+  assert.equal(result.verdict, "installed-unreachable");
+  assert.deepEqual(result.evidence, { receipt: true, registry: false });
+});

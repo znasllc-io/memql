@@ -90,11 +90,19 @@ test("back returns to the landing screen and forgets the action", () => {
 // collecting
 // -----------------------------------------------------------------------------
 
-test("an install needs everything up front; a repair needs only the domain", () => {
+test("an install needs everything up front; a repair needs what it can get wrong", () => {
   // Everything is collected before any work starts because a wizard that stops
   // to ask a question nine minutes in is a wizard people abandon. A repair is
   // the same graph re-run over a machine that already has these answers
-  // recorded, so demanding them again would be asking for what it can see.
+  // recorded -- so it asks for the domain and for the two the RECEIPT can be
+  // wrong about (memql#3544).
+  //
+  // It used to ask for the domain alone, reading the key path off the receipt
+  // (memql#3512) so wave 2 could pass. That is right when the recorded path is
+  // good and a dead end when it is not: the repair re-runs with the same bad
+  // value, fails at the same step, and offers no box to fix it. The panel
+  // pre-fills both from the receipt, so the common case is still no typing --
+  // what changed is that the value is now reachable.
   assert.deepEqual(requiredFields("install"), [
     "domain",
     "ownerFirstName",
@@ -104,7 +112,7 @@ test("an install needs everything up front; a repair needs only the domain", () 
     "providerKeyFile",
   ]);
   assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
-  assert.deepEqual(requiredFields("repair"), ["domain"]);
+  assert.deepEqual(requiredFields("repair"), ["domain", "provider", "providerKeyFile"]);
   assert.deepEqual(requiredFields("uninstall"), []);
   assert.deepEqual(requiredFields("connect"), []);
 });

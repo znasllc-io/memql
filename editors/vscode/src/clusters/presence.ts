@@ -138,7 +138,24 @@ async function receiptEvidence(
   try {
     const receipt = await read(file);
     if (receipt === null) return { present: false, receipt: null };
-    return { present: receipt.entries.length > 0, receipt };
+    // AN ARTIFACT, not an entry (memql#3544). `receipt` on an entry names the
+    // artifact CLASS that step left behind, and the read-only steps -- `detect`,
+    // which only inspects the machine, and `providerKey`, which verifies a
+    // credential -- carry "" because they leave nothing.
+    //
+    // Counting entries therefore called a failed install an installed cluster:
+    // a run that died at its first mutating step still recorded the read-only
+    // ones ahead of it. That withdrew the Install card (offered for `absent` and
+    // nothing else), so the operator could not retry the install that had just
+    // failed; Repair re-ran the same graph into the same failure; and Uninstall
+    // truthfully reported nothing to remove. A dead end, reached by the most
+    // ordinary failure this wizard has.
+    //
+    // The test is the artifact rather than `changed`, because a step that FINDS
+    // its artifact already present records `preExisting: true, changed: false`
+    // -- it changed nothing and the thing is on the machine regardless, which is
+    // exactly the case that must never be read as `absent`.
+    return { present: receipt.entries.some((e) => e.receipt !== ""), receipt };
   } catch {
     return { present: true, receipt: null };
   }

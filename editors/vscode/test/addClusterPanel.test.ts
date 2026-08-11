@@ -65,6 +65,13 @@ const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 // ~/.memql.
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), "memql-addcluster-panel-"));
 
+// A REAL FILE, because the panel now checks that the key path resolves to one
+// before it starts a run (memql#3544). "/tmp/key" was fine while nothing
+// looked; a fixture that names a file which does not exist is no longer a
+// fixture for the happy path.
+const KEY_FILE = path.join(HOME, "provider-key");
+fs.writeFileSync(KEY_FILE, "sk-ant-not-a-real-key\n", { mode: 0o600 });
+
 // -----------------------------------------------------------------------------
 // the fake runner
 // -----------------------------------------------------------------------------
@@ -238,7 +245,7 @@ function beginInstall(h: Harness): void {
   h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
   h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
   h.post({ type: "input", value: { field: "provider", text: "anthropic" } });
-  h.post({ type: "input", value: { field: "providerKeyFile", text: "/tmp/key" } });
+  h.post({ type: "input", value: { field: "providerKeyFile", text: KEY_FILE } });
   h.post({ type: "begin" });
 }
 
@@ -265,11 +272,12 @@ test("a repair with no recorded provider key is refused before anything runs", a
   const runner = await fakeRunner();
   const h = open({ action: "repair", runner, verdict: "installed-unreachable" });
   try {
-    // A repair collects only the domain, which is already defaulted -- so this
-    // is the whole of what the operator does. "A repair can be started without
-    // typing anything at all" was green while every invocation exited 2.
+    // A repair now COLLECTS the key path (memql#3544) and the panel pre-fills
+    // it from the receipt. There is no receipt here, so the box stays empty and
+    // the refusal is the form's own -- which is the improvement: it names the
+    // field, and it happens before any step runs.
     h.post({ type: "begin" });
-    await until(() => /has no record of an AI provider key/.test(h.html()), "the refusal");
+    await until(() => /provider key file is required/i.test(h.html()), "the refusal");
 
     // THE ASSERTION THAT MATTERS. Not that a message was rendered -- that the
     // graph was never entered. Reaching wave 2 with no `--key-file` is the
@@ -300,7 +308,10 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
           script: "install.verifyProviderKey",
           receipt: "",
           preExisting: false,
-          params: { provider: "openai", "key-file": "/home/ada/.openai-key" },
+          // A path that EXISTS, because the panel now refuses to start a run
+          // on one that does not (memql#3544). The value under test is still
+          // "whatever the receipt recorded", which is what this case is about.
+          params: { provider: "openai", "key-file": KEY_FILE },
           result: { valid: true },
           changed: false,
           recordedAt: "2026-08-01T00:00:00Z",
@@ -309,6 +320,12 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
     },
   });
   try {
+    // The repair form is PRE-FILLED from the receipt (memql#3544) rather than
+    // reading it behind the operator's back, so the recorded answers are on
+    // screen and can be corrected. Waiting for that is waiting for the read.
+    await until(() => h.html().includes(KEY_FILE), "the recorded key path to reach the form");
+    assert.match(h.html(), /value="openai" selected/, "and the recorded vendor with it");
+
     h.post({ type: "begin" });
     await until(
       () => runner.calls.some((c) => c.capability === "install.verifyProviderKey"),
@@ -318,7 +335,7 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
     const key = runner.calls.find((c) => c.capability === "install.verifyProviderKey")!;
     assert.equal(
       key.params["key-file"],
-      "/home/ada/.openai-key",
+      KEY_FILE,
       "the recorded key path must reach the step -- an absent flag is exit 2",
     );
     assert.equal(
@@ -466,7 +483,7 @@ test("the provider the operator chose is the provider the step verifies", async 
     h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
     h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
     h.post({ type: "input", value: { field: "provider", text: "openai" } });
-    h.post({ type: "input", value: { field: "providerKeyFile", text: "/tmp/key" } });
+    h.post({ type: "input", value: { field: "providerKeyFile", text: KEY_FILE } });
     h.post({ type: "begin" });
 
     await until(
@@ -524,7 +541,7 @@ test("typing a character does not replace the document the operator is typing in
   }
 });
 
-test("what was typed without a repaint is still there when one comes", () => {
+test("what was typed without a repaint is still there when one comes", async () => {
   // The other half, and the reason the keystroke message is KEPT rather than
   // removed with the render it triggered. The extension is where form state
   // lives -- the DOM is discarded on every repaint -- so a screen that stopped
@@ -537,7 +554,10 @@ test("what was typed without a repaint is still there when one comes", () => {
     h.post({ type: "input", value: { field: "provider", text: "openai" } });
 
     // An action repaints -- here the incomplete form's refusal to start.
+    // `begin` is async now (it stats the key path before starting anything),
+    // so the repaint it causes is one tick away.
     h.post({ type: "begin" });
+    await until(() => /is required/.test(h.html()), "the refusal to repaint");
 
     const html = h.html();
     assert.match(html, /value="Ada"/, "the name typed before the repaint survived it");
