@@ -23,6 +23,8 @@ package campaigns
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -480,5 +482,88 @@ func (c Config) RequireUnsubscribe() string {
 		return "MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL is not set, so no one-click unsubscribe URL can be built. " +
 			"A bulk send without a working RFC 8058 unsubscribe is refused rather than sent."
 	}
+	if reason := validateUnsubscribeBaseURL(c.UnsubscribeBaseURL); reason != "" {
+		return reason
+	}
 	return ""
+}
+
+// validateUnsubscribeBaseURL reports why the configured origin cannot carry a
+// conforming one-click unsubscribe link, or "" if it can.
+//
+// RFC 8058 §3.1 is a MUST, not a SHOULD: "The List-Unsubscribe header field
+// MUST contain one HTTPS URI." A value that is merely non-empty satisfies the
+// presence check above and still produces a header the mailbox provider
+// silently declines to act on -- the campaign sends, every check is green, and
+// the first evidence is a complaint rate nobody can attribute (memql#3481).
+//
+// A VALID HTTPS ORIGIN IS NECESSARY, NOT SUFFICIENT. §3.1 also requires the
+// header PAIR (List-Unsubscribe alongside List-Unsubscribe-Post:
+// List-Unsubscribe=One-Click); renderMessage already emits both, so this
+// function owns only the URI half.
+//
+// The rules, and why each one:
+//
+//   - HTTPS required, EXCEPT on a loopback host. `make up` runs the bff behind
+//     a local origin with no public certificate, and refusing that would make
+//     the local cluster the one environment where campaigns cannot be
+//     exercised. A loopback URL cannot reach a real mailbox provider, so
+//     permitting it costs nothing.
+//   - A non-empty host. This is what catches the bare `cockpit.example.com`
+//     case: url.Parse accepts it, puts the whole value in Path, and leaves
+//     Scheme and Host empty -- so without this check it concatenates into
+//     `cockpit.example.com/unsubscribe`, a relative URI in a header that
+//     requires an absolute one.
+//   - No query or fragment. unsubscribeURL appends `?token=`, so a base that
+//     already carries one produces a URL with two.
+//
+// A trailing PATH is allowed and preserved. UnsubscribePaths() composes
+// through pathsWithBase(), so a deployment served under SERVER_PUBLIC_PATH
+// legitimately has one; `https://host/app` yields
+// `https://host/app/unsubscribe`.
+func validateUnsubscribeBaseURL(raw string) string {
+	const varName = "MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL"
+
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Sprintf("%s is not a valid URL (%v). "+
+			"A bulk send without a working RFC 8058 unsubscribe is refused rather than sent.", varName, err)
+	}
+
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Sprintf("%s must be an absolute origin such as https://cockpit.example.com, but is %q. "+
+			"A value with no scheme is not a URL the recipient's mail client can POST to -- it would be "+
+			"concatenated into a relative path. A bulk send without a working RFC 8058 unsubscribe is "+
+			"refused rather than sent.", varName, trimmed)
+	}
+
+	if parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLoopbackHost(parsed.Hostname())) {
+		return fmt.Sprintf("%s must use https, but is %q. RFC 8058 section 3.1 requires the "+
+			"List-Unsubscribe header to carry an HTTPS URI, and mailbox providers silently ignore "+
+			"one-click on anything else -- so the campaign would send with an opt-out that never "+
+			"works. (http is permitted only for a loopback host, so the local cluster still runs.) "+
+			"A bulk send without a working RFC 8058 unsubscribe is refused rather than sent.", varName, trimmed)
+	}
+
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Sprintf("%s must not carry a query string or fragment, but is %q. "+
+			"The unsubscribe token is appended as ?token=..., so a base that already has one "+
+			"produces a URL with two. A trailing path is fine and is preserved.", varName, trimmed)
+	}
+
+	return ""
+}
+
+// isLoopbackHost reports whether the host names this machine -- the one case
+// where plain http is permitted, because the local cluster has no public
+// certificate and a loopback URL cannot reach a mailbox provider anyway.
+func isLoopbackHost(hostname string) bool {
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+	if ip := net.ParseIP(hostname); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
 }
