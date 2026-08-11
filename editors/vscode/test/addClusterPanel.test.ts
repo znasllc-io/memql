@@ -491,6 +491,63 @@ test("the provider the operator chose is the provider the step verifies", async 
 });
 
 // -----------------------------------------------------------------------------
+// Typing must not repaint the page under the cursor (memql#3538)
+// -----------------------------------------------------------------------------
+
+test("typing a character does not replace the document the operator is typing into", () => {
+  // THE DEFECT, stated as the operator meets it: type one character into any
+  // box on this screen and the caret is gone, because the keystroke posted an
+  // `input` message and the handler answered it with a full `render()`.
+  // Assigning `webview.html` reloads the whole document -- there is no
+  // surviving focused element on the other side of it -- so the form could only
+  // be filled one click-and-character at a time.
+  //
+  // The count is asserted rather than the focus because focus is a property of
+  // a DOM this lane does not have. It is the same fact: a document that was
+  // never replaced still has whatever the operator was doing in it.
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    const painted = h.panel.renders;
+
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "A" } });
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ad" } });
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
+
+    assert.equal(
+      h.panel.renders,
+      painted,
+      "three keystrokes repainted the page, so the operator lost focus three times",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("what was typed without a repaint is still there when one comes", () => {
+  // The other half, and the reason the keystroke message is KEPT rather than
+  // removed with the render it triggered. The extension is where form state
+  // lives -- the DOM is discarded on every repaint -- so a screen that stopped
+  // recording keystrokes would hand the next render an empty form. Recording
+  // without repainting is the whole fix.
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
+    h.post({ type: "input", value: { field: "provider", text: "openai" } });
+
+    // An action repaints -- here the incomplete form's refusal to start.
+    h.post({ type: "begin" });
+
+    const html = h.html();
+    assert.match(html, /value="Ada"/, "the name typed before the repaint survived it");
+    assert.match(html, /value="openai" selected/, "and so did the vendor chosen");
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
 // The steps AHEAD, and every failure rather than one of them (memql#3474)
 // -----------------------------------------------------------------------------
 

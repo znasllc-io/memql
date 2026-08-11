@@ -432,12 +432,31 @@ export class AddClusterPanel {
       this.render();
       return;
     }
+    // RECORDED, NEVER REPAINTED (memql#3538).
+    //
+    // This message arrives once per KEYSTROKE, and `render()` assigns
+    // `webview.html` -- which replaces the entire document. There is no focused
+    // element, no caret and no selection on the other side of that, so
+    // answering a keystroke with a render meant every character typed anywhere
+    // on this page threw the operator out of the box they were in. The form
+    // could be filled only one click-and-character at a time.
+    //
+    // The message itself STAYS. The DOM is discarded on every repaint, so the
+    // extension is where form state lives; recording the value is what lets a
+    // later render -- an action, a verdict arriving late -- redraw the form with
+    // everything typed since the last one still in it.
+    //
+    // What is lost is per-keystroke validation feedback: `setInput` recomputes
+    // this field's error, and nothing draws it until the next render. That is
+    // the same trade the registration form states plainly in `connectHtml`, and
+    // for the same reason -- on a surface whose only repaint is a full document
+    // reload, validating as someone types means reloading the page under their
+    // cursor. Every problem is still reported, together, when Start is pressed.
     if (type === "input" && typeof value === "object" && value !== null) {
       const { field, text } = value as { field?: unknown; text?: unknown };
       const known = INPUT_FIELDS.find((f) => f === field);
       if (known === undefined || typeof text !== "string") return;
       this.state.setInput(known, text);
-      this.render();
       return;
     }
     if (type === "begin") {
@@ -1015,9 +1034,11 @@ ${this.bodyHtml()}
   // BOTH events, because the collect screen now carries a select as well as
   // text boxes. A select fires an input event in every browser this runs in,
   // but change is the one it is specified around, and this handler is
-  // idempotent -- the extension records the value and repaints, so arriving
-  // twice costs a duplicate message and nothing else. (No backticks in here:
-  // this script is itself inside a template literal.)
+  // idempotent -- the extension only records the value, so arriving twice
+  // costs a duplicate message and nothing else. Recording is ALL it does: the
+  // host does not repaint on a keystroke, because a repaint here replaces the
+  // whole document and would take the caret with it (memql#3538). (No
+  // backticks in here: this script is itself inside a template literal.)
   function sendField(e) {
     const field = e.target.closest('[data-field]');
     if (field) vscode.postMessage({
