@@ -35,6 +35,26 @@ permissions:
 #     authoritative pass that also catches secrets added-then-removed
 #     across commits.
 #
+# EDITING A FILE DOES NOT CLEAR A HISTORICAL FINDING (memql#3484). Read this
+# before "fixing" a red push lane, because the obvious fix does not work and
+# three separate people have already tried it.
+#
+# `gitleaks dir .` reads the WORKING TREE. `gitleaks git .` reads COMMITS.
+# Renaming a fixture, or splitting a literal across a newline so the regex
+# stops matching, makes the PR lane green and leaves the push lane red
+# forever: the offending blob is still in the commit that introduced it, and
+# history is immutable. That asymmetry means the PR lane actively TEACHES the
+# wrong fix -- it goes green on a tree the push lane is red on, and the author
+# reasonably concludes they are done. On memql#3484 that produced three
+# rounds of it (integrations/email/status_test.go,
+# docs/public/language/vscode-runtime-panel.md, and
+# editors/vscode/test/addClusterState.test.ts) and eight live findings.
+#
+# The fix for a historical finding is an entry in `.gitleaks.toml` saying WHY
+# the value is not a credential -- see that file's header for when to key the
+# entry on the value (no `paths`) versus scope it to a path. Fix the fixture
+# too if it deserves fixing, but do not expect that to turn the lane green.
+#
 # The full-history lane is pinned to the HEAD ancestry (memql#2996). A
 # fetch-depth:0 checkout fetches EVERY branch, and `gitleaks git .` defaults to
 # walking every ref it can reach -- not just the commit under test. So two
@@ -98,10 +118,16 @@ jobs:
         # is still the original zricethezav/gitleaks namespace.
         run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
       - name: scan working tree (PR, fast incremental)
+        # WORKING TREE ONLY. Green here does NOT mean the push lane below is
+        # green -- see "EDITING A FILE DOES NOT CLEAR A HISTORICAL FINDING" in
+        # the header comment.
         if: github.event_name == 'pull_request'
         run: gitleaks dir . --no-banner
       - name: scan full history (main / merge queue / schedule)
         if: github.event_name != 'pull_request'
         # Scoped to the candidate's ancestry plus tags -- see the header
         # comment. Without this, an unmerged branch fails every merge candidate.
+        #
+        # COMMITS, not files. A finding here is cleared by a `.gitleaks.toml`
+        # entry, never by editing the file that introduced it (memql#3484).
         run: gitleaks git . --no-banner --log-opts="HEAD --tags"
