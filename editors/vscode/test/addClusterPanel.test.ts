@@ -53,7 +53,13 @@ import { ClusterPresence, type AddClusterAction } from "../src/clusters/presence
 import { graphDocumentPath, loadGraphFile, type Verify } from "../src/install/graph.js";
 import type { ScriptOutcome, ScriptRun } from "../src/install/runner.js";
 import { AddClusterPanel, type AddClusterDeps } from "../src/webview/addClusterPanel.js";
-import { recorded, resetRecorded, type StubWebviewPanel } from "./support/vscodeStub.js";
+import {
+  Uri,
+  recorded,
+  resetRecorded,
+  setNextOpenDialogResult,
+  type StubWebviewPanel,
+} from "./support/vscodeStub.js";
 
 // dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
 // The same walk installGraph.test.ts makes, and for the same reason: the graph
@@ -698,6 +704,88 @@ test("a cancelled run hands nothing off, and leaves a receipt that describes wha
       "a cancelled run is `ok` -- everything that ran, worked -- and must not be handed off",
     );
     assert.ok(!fs.existsSync(h.clustersPath), "nothing may be registered for a cancelled install");
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// The key file can be PICKED, not only typed (memql#3547)
+// -----------------------------------------------------------------------------
+
+test("the key-file field offers a Browse button; the other fields do not", () => {
+  // Only the field that names a FILE gets a picker. A Browse button beside the
+  // owner's email would be noise, and beside the domain it would be wrong.
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    const html = h.html();
+    assert.match(html, /data-act="browseKeyFile"/, "the key path is chosen from disk");
+    assert.equal(
+      (html.match(/data-act="browseKeyFile"/g) ?? []).length,
+      1,
+      "exactly one field names a file",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("choosing a file in the dialog fills the field with its path", async () => {
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    setNextOpenDialogResult([Uri.file(KEY_FILE)]);
+    h.post({ type: "browseKeyFile" });
+
+    await until(() => h.html().includes(KEY_FILE), "the chosen path to reach the form");
+
+    // THE DIALOG'S SHAPE IS PART OF THE CONTRACT. One file, not many; a file,
+    // not a directory -- a `--key-file` flag can be handed exactly one path,
+    // and a directory is not a key.
+    const options = recorded.openDialogs[0]!;
+    assert.equal(options.canSelectMany, false);
+    assert.equal(options.canSelectFiles, true);
+    assert.equal(options.canSelectFolders, false);
+  } finally {
+    h.close();
+  }
+});
+
+test("cancelling the dialog leaves the form exactly as it was", async () => {
+  // The case that is easy to get wrong and invisible when it is: an empty
+  // result must not be read as "the operator chose nothing, so clear it".
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    h.post({ type: "input", value: { field: "providerKeyFile", text: KEY_FILE } });
+    h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
+
+    setNextOpenDialogResult(undefined);
+    h.post({ type: "browseKeyFile" });
+    await until(() => recorded.openDialogs.length === 1, "the dialog to be asked for");
+
+    // Force a repaint through an ordinary action, then read what the form holds.
+    h.post({ type: "begin" });
+    await until(() => /is required/.test(h.html()), "the incomplete form's refusal");
+    assert.match(h.html(), new RegExp(`value="${KEY_FILE}"`), "the typed path survived");
+    assert.match(h.html(), /value="Ada"/, "and so did everything else");
+  } finally {
+    h.close();
+  }
+});
+
+test("a picked file is validated too, so a directory chosen by other means is caught", async () => {
+  // The picker is asked for files only, so this is defence rather than the
+  // common case -- but the validation lives on the VALUE, not on how it
+  // arrived, which is what keeps the typed and picked routes honest against
+  // each other.
+  const h = open({});
+  try {
+    h.post({ type: "choose", value: "install" });
+    setNextOpenDialogResult([Uri.file(HOME)]);
+    h.post({ type: "browseKeyFile" });
+    await until(() => /directory/i.test(h.html()), "the refusal");
   } finally {
     h.close();
   }

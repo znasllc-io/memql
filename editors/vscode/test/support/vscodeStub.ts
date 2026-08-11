@@ -66,7 +66,23 @@ export const recorded = {
   executed: [] as string[],
   /** Every panel window.createWebviewPanel has produced, in order. */
   webviews: [] as StubWebviewPanel[],
+  /** Every window.showOpenDialog invocation, with the options it was given. */
+  openDialogs: [] as Record<string, unknown>[],
 };
+
+/**
+ * What the next `window.showOpenDialog` answers with (memql#3547).
+ *
+ * `undefined` is CANCELLED, which is the case worth being able to drive: a
+ * cancelled picker must leave the form exactly as it was, and that is not
+ * observable unless a test can cancel one.
+ */
+export let nextOpenDialogResult: Uri[] | undefined;
+
+/** Arms the next open dialog. Pass undefined for "the operator cancelled". */
+export function setNextOpenDialogResult(result: Uri[] | undefined): void {
+  nextOpenDialogResult = result;
+}
 
 /** Drops everything `recorded` holds. Call between cases. */
 export function resetRecorded(): void {
@@ -78,6 +94,8 @@ export function resetRecorded(): void {
   recorded.watched.length = 0;
   recorded.executed.length = 0;
   recorded.webviews.length = 0;
+  recorded.openDialogs.length = 0;
+  nextOpenDialogResult = undefined;
 }
 
 /**
@@ -372,6 +390,13 @@ export const window = {
   showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
     recorded.infos.push(message);
     return Promise.resolve(undefined);
+  },
+
+  // The file picker the key-file field offers (memql#3547). A webview cannot
+  // open one itself, so this is the host-side half the page posts to reach.
+  showOpenDialog(options: Record<string, unknown>): Promise<Uri[] | undefined> {
+    recorded.openDialogs.push(options);
+    return Promise.resolve(nextOpenDialogResult);
   },
 
   withProgress<T>(
