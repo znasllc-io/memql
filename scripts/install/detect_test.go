@@ -52,7 +52,7 @@ type detectResult struct {
 	Arch         string               `json:"arch"`
 	Supported    bool                 `json:"supported"`
 	Tools        map[string]toolProbe `json:"tools"`
-	DockerDaemon *bool                `json:"dockerDaemon"`
+	DockerAccess *string              `json:"dockerAccess"`
 	Ports        map[string]bool      `json:"ports"`
 	Disk         struct {
 		Path   string `json:"path"`
@@ -280,49 +280,73 @@ func TestDetectFindsInstalledTools(t *testing.T) {
 // calls out: the docker BINARY existing and the docker DAEMON answering are two
 // different facts. Collapsing them is how an installer decides everything is
 // fine and then fails on the first `docker run`.
-func TestDockerDaemonIsSeparateFromDockerPresent(t *testing.T) {
+func TestDockerAccessIsSeparateFromDockerPresent(t *testing.T) {
 	home := t.TempDir()
 
-	t.Run("binary present, daemon down", func(t *testing.T) {
-		dir := stubPATH(t, "Linux", "x86_64")
-		writeStub(t, dir, "docker", `case "${1:-}" in
+	// THREE STATES, NOT A BOOLEAN (memql#3549). This was `dockerDaemon:
+	// true|false`, and the three ways Docker can be unusable need three
+	// different remedies. Reporting them as one flag meant the wizard told an
+	// operator whose daemon was running and healthy -- but whose user was not in
+	// the docker group -- to go and start a daemon that was already active.
+	cases := []struct {
+		name  string
+		stub  string // docker stub body; empty means no docker on PATH at all
+		want  string
+	}{
+		{
+			name: "daemon not answering",
+			stub: `case "${1:-}" in
   --version) echo "Docker version 28.1.0, build abc" ;;
   *) echo "Cannot connect to the Docker daemon" >&2; exit 1 ;;
-esac`)
-		r := decodeDetect(t, mustDetect(t, dir, home))
-		if p := r.Tools["docker"].Present; p == nil || !*p {
-			t.Fatalf("docker present=%v, want true (the stub binary is on PATH)", p)
-		}
-		if r.DockerDaemon == nil {
-			t.Fatal("dockerDaemon is missing -- it must be a field of its own, not folded into docker.present")
-		}
-		if *r.DockerDaemon {
-			t.Error("dockerDaemon=true although the docker stub refuses to connect")
-		}
-	})
-
-	t.Run("binary present, daemon up", func(t *testing.T) {
-		dir := stubPATH(t, "Linux", "x86_64")
-		writeStub(t, dir, "docker", `case "${1:-}" in
+esac`,
+			want: "stopped",
+		},
+		{
+			// THE ONE THAT WAS INDISTINGUISHABLE. The daemon is up and refuses
+			// this user on the socket; the fix is group membership and nothing
+			// else. Docker exits 1 here exactly as it does above, so the error
+			// TEXT is the only signal there is.
+			name: "socket refuses this user",
+			stub: `case "${1:-}" in
+  --version) echo "Docker version 28.1.0, build abc" ;;
+  *) echo "permission denied while trying to connect to the Docker API at unix:///var/run/docker.sock" >&2; exit 1 ;;
+esac`,
+			want: "denied",
+		},
+		{
+			name: "daemon answering",
+			stub: `case "${1:-}" in
   --version) echo "Docker version 28.1.0, build abc" ;;
   *) echo "28.1.0" ;;
-esac`)
-		r := decodeDetect(t, mustDetect(t, dir, home))
-		if r.DockerDaemon == nil || !*r.DockerDaemon {
-			t.Errorf("dockerDaemon=%v, want true (the stub answers)", r.DockerDaemon)
-		}
-	})
+esac`,
+			want: "ok",
+		},
+		{name: "no docker at all", stub: "", want: "missing"},
+	}
 
-	t.Run("binary absent, daemon false", func(t *testing.T) {
-		dir := stubPATH(t, "Linux", "x86_64")
-		r := decodeDetect(t, mustDetect(t, dir, home))
-		if p := r.Tools["docker"].Present; p == nil || *p {
-			t.Fatalf("docker present=%v, want false", p)
-		}
-		if r.DockerDaemon == nil || *r.DockerDaemon {
-			t.Errorf("dockerDaemon=%v, want false when docker is not installed", r.DockerDaemon)
-		}
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stubPATH(t, "Linux", "x86_64")
+			if tc.stub != "" {
+				writeStub(t, dir, "docker", tc.stub)
+			}
+			r := decodeDetect(t, mustDetect(t, dir, home))
+
+			if r.DockerAccess == nil {
+				t.Fatal("dockerAccess is missing -- it must be a field of its own, not folded into docker.present")
+			}
+			if *r.DockerAccess != tc.want {
+				t.Errorf("dockerAccess=%q, want %q", *r.DockerAccess, tc.want)
+			}
+
+			// `present` stays a fact about the BINARY, independent of whether the
+			// daemon behind it will talk to us.
+			wantPresent := tc.stub != ""
+			if p := r.Tools["docker"].Present; p == nil || *p != wantPresent {
+				t.Errorf("docker present=%v, want %v", p, wantPresent)
+			}
+		})
+	}
 }
 
 // TestPortsAreTrueWhenFree pins the polarity. "80: true" has to mean the port is

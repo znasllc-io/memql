@@ -523,6 +523,10 @@ export class AddClusterPanel {
       this.render();
       return;
     }
+    if (type === "remedy" && typeof value === "string") {
+      this.openRemedyTerminal(value);
+      return;
+    }
     if (type === "browseKeyFile") {
       void this.browseForKeyFile();
       return;
@@ -1180,6 +1184,13 @@ ${viewKitStyles}
   .control-row input { flex: 1 1 auto; min-width: 0; }
   button.browse { flex: 0 0 auto; white-space: nowrap; }
   .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
+  /* What the step itself said, as opposed to the generic advice for its code. */
+  .said { margin: 0 0 8px; }
+  .remedy { font-family: var(--vscode-editor-font-family, monospace);
+            background: var(--vscode-textCodeBlock-background, transparent);
+            border: 1px solid var(--vscode-panel-border);
+            border-radius: 4px; padding: 8px 10px; margin: 6px 0 0;
+            overflow-x: auto; white-space: pre; }
   .error { color: var(--vscode-inputValidation-errorForeground,
                    var(--vscode-editorError-foreground)); margin-top: 3px; }
   /* A refusal that belongs to the whole form rather than to one box, so it
@@ -1218,6 +1229,13 @@ ${this.bodyHtml()}
     const connect = e.target.closest('[data-connect-act]');
     if (connect) {
       vscode.postMessage({ type: connect.dataset.connectAct, fields: connectFields() });
+      return;
+    }
+    const remedy = e.target.closest('[data-remedy]');
+    if (remedy) {
+      // The STEP ID travels, never the command: the extension looks the command
+      // up in its own state. See openRemedyTerminal.
+      vscode.postMessage({ type: 'remedy', value: remedy.dataset.remedy });
       return;
     }
     const act = e.target.closest('[data-act]');
@@ -1348,9 +1366,16 @@ ${body}
       .map((failure) => {
         const guidance = failureGuidance(failure.exitCode);
         const name = failure.description === "" ? failure.id : failure.description;
+        // WHAT THE STEP ITSELF SAID, above the generic advice for its exit code.
+        // The guidance is keyed on a number and so can only ever be about a
+        // CLASS of failure; the capability's own sentence is about this one.
+        const said =
+          failure.reason === "" ? "" : `<p class="said">${escapeHtml(failure.reason)}</p>`;
         return `${many ? `<h2>${escapeHtml(name)}</h2>` : ""}
+${said}
 <p class="lede">${escapeHtml(guidance.headline)}</p>
-<p>${escapeHtml(guidance.advice)}</p>`;
+<p>${escapeHtml(guidance.advice)}</p>
+${this.remedyHtml(failure)}`;
       })
       .join("");
 
@@ -1369,6 +1394,56 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.state.steps)))}
   }</button>
   <button class="secondary" type="button" data-act="cancel">Cancel</button>
 </div>`;
+  }
+
+  /**
+   * The one command that fixes this failure, and a button that runs it
+   * (memql#3551).
+   *
+   * WHY THIS EXISTS AT ALL. The runner spawns every capability UNPRIVILEGED,
+   * with no sudo, pkexec or askpass anywhere in the extension -- and two steps
+   * in the install graph need root: `hostsBlock` edits /etc/hosts, and the
+   * docker gate's remedy adds the operator to a group. Without a handoff, the
+   * wizard's only honest move on those is to print a command and stop, which is
+   * where it had quietly arrived: the uninstall preview even promises "[sudo]
+   * needs your password", a promise nothing in the code fulfilled.
+   *
+   * THE COMMAND IS NOT TYPED FOR THE OPERATOR TO WATCH IT RUN. `sendText(cmd,
+   * false)` puts it in the terminal WITHOUT a newline, so nothing executes
+   * until a person reads it and presses Enter. A privileged command that ran
+   * itself the instant a button was clicked would be a worse thing than the
+   * problem it solves, and the operator's own shell is where their sudo prompt
+   * and their password belong -- memQL never sees either.
+   */
+  private remedyHtml(failure: { id: string; remedy: string }): string {
+    if (failure.remedy === "") return "";
+    return `<p>Run this to fix it:</p>
+<pre class="remedy">${escapeHtml(failure.remedy)}</pre>
+<div class="actions">
+  <button class="secondary" type="button" data-remedy="${escapeHtml(failure.id)}">
+    Open a terminal with this command
+  </button>
+</div>`;
+  }
+
+  /**
+   * Opens a terminal holding the failed step's remedy.
+   *
+   * THE COMMAND COMES FROM THE PANEL'S OWN STATE, NEVER FROM THE MESSAGE. The
+   * webview posts a step ID and nothing else, and the command is looked up
+   * here against the failures this panel recorded. Accepting a command string
+   * over postMessage would mean anything running in that iframe could choose
+   * what the operator is invited to run as root -- which is the whole reason
+   * the runner spawns with `shell:false` in the first place.
+   */
+  private openRemedyTerminal(stepId: string): void {
+    const failure = this.state.failures.find((f) => f.id === stepId);
+    if (failure === undefined || failure.remedy === "") return;
+
+    const terminal = vscode.window.createTerminal({ name: "memQL install -- fix" });
+    terminal.show();
+    // false: typed, NOT executed. See remedyHtml.
+    terminal.sendText(failure.remedy, false);
   }
 
   /** The cards, straight from addClusterMenu. */

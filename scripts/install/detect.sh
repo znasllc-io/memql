@@ -40,6 +40,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/docker.sh
+source "${SCRIPT_DIR}/../lib/docker.sh"
 
 cap_init "install.detect" "Inventory the local machine's installer dependencies (read-only)."
 cap_spec_param "ports" "comma-separated TCP ports to probe (default: 80,443)"
@@ -107,18 +109,10 @@ function _run_bounded() {
     fi
 }
 
-# docker_daemon_up -- 0 when the daemon ANSWERS. Deliberately a separate fact
-# from "the docker binary exists": a present client with a dead daemon is the
-# single most common local-cluster failure, and folding the two together hides
-# it until the first `docker run`.
-function docker_daemon_up() {
-    command -v docker &>/dev/null || return 1
-    if command -v timeout &>/dev/null; then
-        timeout 15 docker info --format '{{.ServerVersion}}' &>/dev/null
-    else
-        docker info --format '{{.ServerVersion}}' &>/dev/null
-    fi
-}
+# The docker probe lives in ../lib/docker.sh -- see docker_access_state. It is
+# shared with install.dockerAccess, which GATES the install on the same answer;
+# a second copy here would be a second opinion about whether the machine is
+# ready to install.
 
 #=============================================================================
 # PORTS -- reported TRUE when FREE
@@ -199,10 +193,15 @@ function main() {
         tools_json+="\"${tool}\":{\"present\":${present},\"path\":\"$(cap_json_escape "$p")\",\"version\":\"$(cap_json_escape "$v")\"}"
     done
 
-    # --- docker daemon (a fact of its own) ------------------------------
-    local daemon=false
-    if docker_daemon_up; then daemon=true; fi
-    cap_info "docker daemon: ${daemon}"
+    # --- docker access (a fact of its own, and not a boolean) -----------
+    #
+    # THREE STATES, THREE REMEDIES (memql#3549). This was `dockerDaemon:
+    # true|false`, which read as "the daemon is up or down" and so told an
+    # operator whose daemon was running and healthy -- but whose user was not in
+    # the docker group -- to go and start a daemon that was already active.
+    local docker_state
+    docker_state="$(docker_access_state)"
+    cap_info "docker access: ${docker_state}"
 
     # --- ports ----------------------------------------------------------
     local ports_json="" port free
@@ -228,7 +227,7 @@ function main() {
     cap_result_set     arch         "$arch"
     cap_result_set_raw supported    true
     cap_result_set_raw tools        "{${tools_json}}"
-    cap_result_set_raw dockerDaemon "$daemon"
+    cap_result_set     dockerAccess "$docker_state"
     cap_result_set_raw ports        "{${ports_json}}"
     cap_result_set_raw disk         "{\"path\":\"$(cap_json_escape "$path")\",\"freeMb\":${mb}}"
     # No cap_changed: detection is read-only, so changed stays false. Always.

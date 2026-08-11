@@ -204,6 +204,9 @@ export class UninstallRunState {
       // because the row type is shared with the install run, not because this
       // path can set it.
       guided: false,
+      // A removal step has no remedy to offer: what it needs is not something
+      // an operator supplies, it is an artifact the receipt already names.
+      remedy: "",
     };
     this.rows.push(fresh);
     return fresh;

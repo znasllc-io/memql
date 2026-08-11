@@ -61,6 +61,19 @@ export interface StepProgress {
   log: string;
   /** This step alone was switched to guided. */
   guided: boolean;
+  /**
+   * The exact command that fixes this failure, when the capability named one
+   * (memql#3551).
+   *
+   * Capabilities that fail on something an operator can repair return
+   * `result.remedy` -- a literal command line, not a description of one. The
+   * wizard offers to type it into a terminal, which is how a step that needs
+   * root gets run at all: the runner spawns everything unprivileged, so
+   * `hostsBlock` and the docker group have no other route.
+   *
+   * Empty when the failure has no single command that fixes it.
+   */
+  remedy: string;
 }
 
 /**
@@ -255,6 +268,21 @@ function endpointProblem(name: string, endpoint: string): string | undefined {
  * domain stays because it is how the cluster is addressed, and a repair
  * pointed at the wrong one is not a repair.
  */
+/**
+ * The remedy a capability declared, or "" (memql#3551).
+ *
+ * DEFENSIVE ABOUT ITS OWN INPUT. The envelope is JSON a script produced, so
+ * `result` can be anything at all; anything that is not a non-empty string is
+ * no remedy. It is about to be offered to an operator as a command to run with
+ * root, so "probably a string" is not the standard.
+ */
+function remedyFrom(envelope: { result?: unknown } | null | undefined): string {
+  const result = envelope?.result;
+  if (result === null || typeof result !== "object") return "";
+  const value = (result as Record<string, unknown>).remedy;
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export function requiredFields(action: AddClusterAction): InputField[] {
   switch (action) {
     case "install":
@@ -722,6 +750,11 @@ export class AddClusterState {
         entry.state = STATUS_TO_STATE[event.outcome.status] ?? "done";
         entry.reason = event.outcome.reason ?? "";
         entry.exitCode = event.outcome.exitCode;
+        // Off the ENVELOPE, not parsed out of the human sentence: the capability
+        // contract puts structured facts in `result`, and a remedy recovered by
+        // pattern-matching prose would break the first time a message was
+        // reworded (memql#3551).
+        entry.remedy = remedyFrom(event.outcome.envelope);
         if (entry.state === "failed") {
           // THE FIRST FAILURE IS KEPT, not the last to resolve. A wave runs
           // under Promise.all and independent branches are deliberately allowed
@@ -756,6 +789,7 @@ export class AddClusterState {
       exitCode: null,
       log: "",
       guided: false,
+      remedy: "",
     };
     this.progress.push(fresh);
     return fresh;
