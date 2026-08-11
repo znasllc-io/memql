@@ -117,8 +117,11 @@ go run ./scripts/cluster/rolling-drain \
     --reason "manual roll 0.9.40"
 ```
 
-- **Auth:** `MEMQL_MASTER_KEY` (the cluster operator credential) is required;
+- **Auth:** `MEMQL_OPERATOR_KEY` (the cluster operator credential) is required;
   the handler is owner/admin-gated, so a non-operator cannot drain a node.
+  This is NOT the master key -- they were split in memql#3519, and this tool
+  authenticates without decrypting anything. See
+  [auth/operator-credential.md](auth/operator-credential.md).
 - `--reason` is recorded in the node's logs/audit.
 - The node, once drained, is replaced/restarted by the orchestrator (k8s rolling
   the Deployment, or an operator restarting the process) — the trigger only

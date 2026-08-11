@@ -45,7 +45,41 @@ import (
 // EnvMasterKey names the environment variable that carries the 32-byte
 // hex-encoded master encryption key. Exported so the config loader and
 // docs can reference it by symbol rather than a bare string literal.
+//
+// This key DECRYPTS. It is not an authentication credential and must not
+// be used as one again -- see EnvOperatorKey.
 const EnvMasterKey = "MEMQL_MASTER_KEY"
+
+// EnvOperatorKey names the environment variable carrying the cluster
+// OPERATOR credential: the bearer token `Authorization: Operator <key>`
+// that admits a stream as a synthetic cluster owner
+// (component/grpc/operator_stream_interceptor.go).
+//
+// It lives beside EnvMasterKey for discoverability and is deliberately a
+// DIFFERENT VALUE (memql#3519). Do not re-merge them. The operator path
+// used to read EnvMasterKey on the argument that the master key was
+// "already the operator credential of the cluster (anyone who can read
+// /var/lib/memql secrets from the host can produce it)". That premise is
+// about HOST FILESYSTEM ACCESS, and it stopped describing where the value
+// actually lives:
+//
+//   - `genesis-seal --sync-shell` wrote it into ~/.bashrc / ~/.zshrc on
+//     operator machines, preserving the file's existing (typically 0644)
+//     mode -- world-readable to every local account, and carried into any
+//     dotfile backup or screen share.
+//   - ESO delivers it from Key Vault into the `memql-secrets` k8s Secret on
+//     staging and production (deploy/external-secrets/externalsecret-memql.yaml),
+//     so the operator path is live there, not just locally.
+//
+// Under one key those two facts compose into: a value sitting in a
+// world-readable dotfile is a cluster-owner bearer token against production
+// over the network. Splitting them costs one more secret to rotate, which is
+// exactly the cost the old comment declined to pay -- but that trade was
+// priced against nodes, not laptops.
+//
+// Unset means the operator path is unavailable and every `Operator` stream is
+// rejected. That is the safe default and the documented way to disable it.
+const EnvOperatorKey = "MEMQL_OPERATOR_KEY"
 
 const nonceLen = 24
 

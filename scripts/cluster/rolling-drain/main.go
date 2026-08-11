@@ -9,7 +9,7 @@
 // wait bounded by MEMQL_SHUTDOWN_GRACE_PERIOD -> Stopped -> Stop sweep. This
 // tool does NOT re-implement any of that; it just initiates it on demand.
 //
-// Auth: the cluster operator credential (MEMQL_MASTER_KEY), the same
+// Auth: the cluster operator credential (MEMQL_OPERATOR_KEY), the same
 // owner-equivalent credential the secrets tooling uses. The node's
 // owner/admin gate admits it as a synthetic cluster owner. No open endpoint.
 //
@@ -19,7 +19,7 @@
 //
 // Env:
 //
-//	MEMQL_MASTER_KEY   required -- the operator credential.
+//	MEMQL_OPERATOR_KEY required -- the operator credential (memql#3519).
 //	MEMQL_GRPC_ENDPOINT alternative to --endpoint (same parsing as the
 //	                    secrets tool: https:// or :443 => TLS, else plaintext).
 //
@@ -54,8 +54,11 @@ func main() {
 	)
 	flag.Parse()
 
-	if strings.TrimSpace(os.Getenv(secret.EnvMasterKey)) == "" {
-		fmt.Fprintf(os.Stderr, "ERROR: %s must be set (the cluster operator credential)\n", secret.EnvMasterKey)
+	// The operator credential, not the master key (memql#3519). This tool
+	// only authenticates -- it decrypts nothing -- so the master key is not
+	// merely unnecessary here, it would be the wrong secret to ask for.
+	if strings.TrimSpace(os.Getenv(secret.EnvOperatorKey)) == "" {
+		fmt.Fprintf(os.Stderr, "ERROR: %s must be set (the cluster operator credential)\n", secret.EnvOperatorKey)
 		os.Exit(1)
 	}
 
@@ -166,8 +169,9 @@ func dial(endpoint string) (*grpc.ClientConn, error) {
 }
 
 // withOperatorAuth stamps the operator credential onto outgoing metadata.
+// MEMQL_OPERATOR_KEY, not the master key -- see memql#3519.
 func withOperatorAuth(ctx context.Context) context.Context {
-	key := strings.TrimSpace(os.Getenv(secret.EnvMasterKey))
+	key := strings.TrimSpace(os.Getenv(secret.EnvOperatorKey))
 	if key == "" {
 		return ctx
 	}

@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/znasllc-io/memql/component/auth"
+	"github.com/znasllc-io/memql/component/secret"
 )
 
 // OperatorAuthClaimKey is the claims-map key the operator-aware
@@ -25,28 +26,41 @@ const OperatorAuthClaimKey = "identity.operator"
 // cleanly.
 const OperatorSubject = "cluster:operator"
 
-// envMasterKey names the env var that carries the cluster master
-// key. The operator-aware interceptor admits streams that present
-// the same value as `Authorization: Operator <master_key>`. We
-// reuse the secrets-encryption master key intentionally: it is
-// already the "operator credential" of the cluster (anyone who
-// can read /var/lib/memql secrets from the host can produce it),
-// so layering authentication on top of it adds no new secret to
-// rotate. Production-style deployments that want the operator
-// path disabled simply leave MEMQL_MASTER_KEY unset on the
-// node -- the interceptor short-circuits to the next layer.
-const envMasterKey = "MEMQL_MASTER_KEY"
+// minOperatorKeyLen is the shortest value this interceptor will accept as a
+// configured operator credential. It is a floor on operator error, not a
+// cryptographic parameter: `MEMQL_OPERATOR_KEY=test` in a hurry would
+// otherwise be a cluster-owner credential on a production ingress. 32 chars is
+// half of the 64-hex shape the docs prescribe, so it admits every honest key
+// and refuses the ones nobody meant as a secret. A short value is treated
+// exactly like an unset one -- refused, and logged with the reason.
+const minOperatorKeyLen = 32
 
-// NewOperatorAwareStreamInterceptor wraps `base` and admits
-// streams that present `Authorization: Operator <master_key>`
-// when the supplied key matches `MEMQL_MASTER_KEY` exactly. On
-// match the stream is admitted as a synthetic cluster-owner
-// identity so out-of-band tooling (`make secrets-seed`,
-// `scripts/secrets health`, future operator CLIs) can talk to
-// the cluster before any user has been provisioned.
+// NewOperatorAwareStreamInterceptor wraps `base` and admits streams that
+// present `Authorization: Operator <key>` matching secret.EnvOperatorKey
+// (`MEMQL_OPERATOR_KEY`) exactly. On match the stream is admitted as a
+// synthetic cluster-owner identity so out-of-band tooling (`make
+// secrets-seed`, `scripts/secrets health`, `scripts/cluster/rolling-drain`)
+// can talk to the cluster before any user has been provisioned.
+//
+// THIS IS A SEPARATE SECRET FROM THE MASTER KEY (memql#3519). It used to read
+// MEMQL_MASTER_KEY, on the argument that the master key was already the
+// operator credential because anyone with host filesystem access could
+// produce it. Two things made that premise stop describing reality: the
+// installer wrote the master key into ~/.bashrc at the file's existing
+// (typically world-readable) mode, and ESO delivers it to staging and
+// production pods -- so the value in a dotfile was a cluster-owner bearer
+// token against production over the network. The split costs one more secret
+// to rotate and buys back the property the old comment assumed it had: the
+// thing that DECRYPTS is not the thing that AUTHENTICATES.
+//
+// There is deliberately NO fallback to MEMQL_MASTER_KEY. A fallback would
+// keep the master key working as an auth credential, which is the entire
+// defect. Deployments must seed MEMQL_OPERATOR_KEY before operator tooling
+// works again; until they do, the interceptor refuses -- see the rotation
+// runbook in docs/public/operate/auth/operator-credential.md.
 //
 // Bearer / non-Operator traffic falls through to `base`
-// unchanged. If MEMQL_MASTER_KEY is not set on the node, the
+// unchanged. If MEMQL_OPERATOR_KEY is not set on the node, the
 // interceptor still parses the header but always rejects
 // Operator-scheme streams with Unauthenticated -- failing closed
 // is the right move for a cluster where no operator credential
@@ -64,10 +78,22 @@ func NewOperatorAwareStreamInterceptor(
 			return base(srv, ss, info, handler)
 		}
 
-		expected := strings.TrimSpace(os.Getenv(envMasterKey))
+		expected := strings.TrimSpace(os.Getenv(secret.EnvOperatorKey))
 		if expected == "" {
 			if logger != nil {
-				logger.Warn("operator auth: rejected -- MEMQL_MASTER_KEY not configured on this node")
+				logger.Warn("operator auth: rejected -- " + secret.EnvOperatorKey + " not configured on this node")
+			}
+			return status.Error(codes.Unauthenticated, "operator auth: not configured")
+		}
+		if len(expected) < minOperatorKeyLen {
+			// Refused rather than honoured: a value this short is a
+			// placeholder somebody meant to replace, and admitting it would
+			// make it a cluster-owner credential.
+			if logger != nil {
+				logger.Warn("operator auth: rejected -- configured "+secret.EnvOperatorKey+" is too short to be a credential",
+					"configuredLen", len(expected),
+					"minimum", minOperatorKeyLen,
+				)
 			}
 			return status.Error(codes.Unauthenticated, "operator auth: not configured")
 		}

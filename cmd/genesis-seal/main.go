@@ -42,7 +42,17 @@ func main() {
 	envFile := flag.String("env-file", "", "path to the plaintext .env to seal (required)")
 	out := flag.String("out", defaultOutPath(), "output path for the sealed genesis envelope")
 	manifestPath := flag.String("manifest", "", "manifest.yaml path (default: resolved by LoadManifest -- MEMQL_MANIFEST_PATH / MEMQL_REPO / embedded)")
-	syncShell := flag.Bool("sync-shell", true, "sync MEMQL_MASTER_KEY into ~/.bashrc and ~/.zshrc (matches the cockpit wizard)")
+	// OPT-IN, not opt-out (memql#3519). This wrote the master key into
+	// ~/.bashrc / ~/.zshrc by default, preserving each file's existing
+	// permission bits -- so on a typical 0644 dotfile the highest-value
+	// credential in the system became readable by every local account and
+	// travelled into dotfile backups, sync tools and screen shares. The
+	// repo's own agent-safety classifier scores a write to these exact paths
+	// as TierHigh, "near-certain persistence / privilege-escalation signal"
+	// (component/safety/rules_path.go); the installer was doing it by
+	// default and nothing objected. Defaulting to false is what stops the
+	// first-party tool tripping its own rule.
+	syncShell := flag.Bool("sync-shell", false, "sync MEMQL_MASTER_KEY into ~/.bashrc and ~/.zshrc (opt-in; the key lands in a world-readable dotfile -- prefer a password manager)")
 	syncSource := flag.Bool("sync-source", false, "rewrite the source .env's MEMQL_MASTER_KEY line to match the envelope")
 	flag.Parse()
 
@@ -93,9 +103,21 @@ func main() {
 		fmt.Println("  A NEW MEMQL_MASTER_KEY was generated -- SAVE THIS NOW (e.g. password manager):")
 		fmt.Printf("    export MEMQL_MASTER_KEY=%s\n", res.MasterKey)
 		if *syncShell {
-			fmt.Println("  (it was also synced into your shell rc files).")
+			fmt.Println("  (--sync-shell was passed, so it was ALSO written into your shell rc")
+			fmt.Println("   files at their existing permission bits -- typically world-readable.)")
 		}
 	}
+
+	// The operator credential is a SEPARATE secret (memql#3519) and this tool
+	// does not mint it: genesis-seal owns the envelope, and coupling the two
+	// again -- even just by generating both here -- is how they ended up as
+	// one value in the first place.
+	fmt.Println()
+	fmt.Println("  Operator tooling (scripts/secrets, rolling-drain) authenticates with")
+	fmt.Println("  MEMQL_OPERATOR_KEY, which is NOT this key. Generate one with:")
+	fmt.Println("    openssl rand -hex 32")
+	fmt.Println("  and seed it wherever the cluster reads its secrets. See")
+	fmt.Println("  docs/public/operate/auth/operator-credential.md.")
 }
 
 func fail(format string, args ...any) {

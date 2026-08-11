@@ -26,7 +26,7 @@ Primary client surface. Multiplexed bidirectional stream carrying every product-
 1. `verifier.StreamInterceptor()` — JWT signature validation via the per-node JWKS verifier.
 2. `NewSessionRevocationStreamInterceptor()` — rejects tokens whose hash matches a revoked `v1:identity:authSession` row.
 3. `NewGuestAwareStreamInterceptor()` — admits `Authorization: Guest <token>` against the invitation registry.
-4. `NewOperatorAwareStreamInterceptor()` — admits `Authorization: Operator <MEMQL_MASTER_KEY>` for bootstrap.
+4. `NewOperatorAwareStreamInterceptor()` — admits `Authorization: Operator <MEMQL_OPERATOR_KEY>` for bootstrap (its own secret since memql#3519; it read `MEMQL_MASTER_KEY` before).
 5. `NewVoiceAgentStreamInterceptor()` — surface-pinned shared-secret auth (`mql_va_<secret>`) for the voice-agent process.
 6. `NewWorkerAwareStreamInterceptor()` — surface-pinned worker-token auth for `WorkerService.Stream`.
 
@@ -198,11 +198,15 @@ Shipped via #106 (PR #148).
 
 **Upgrade path:** mint a fresh token + hash on each `ResendGuestInviteEmail`; the old `/join/<token>` URL becomes invalid. Has a UX cost (a recipient who clicks an older link after a resend gets a 404). Product decision before behaviour change.
 
-### 5.5 Operator master key (F6 — operator path, not CSRF)
+### 5.5 Operator credential (F6 — operator path, not CSRF)
 
-`MEMQL_MASTER_KEY` admits `Authorization: Operator <key>` for bootstrap before any users exist. The key is read from env at startup, so it lands in `/proc/self/environ` and any `env`-dumping diagnostic.
+`MEMQL_OPERATOR_KEY` admits `Authorization: Operator <key>` for bootstrap before any users exist. The key is read from env per request, so it lands in `/proc/self/environ` and any `env`-dumping diagnostic.
 
-**Trust assumption:** the operator path is used only during initial cluster bootstrap and for break-glass admin tasks. Rotate the key after the first admin user is created; keep it injected via the secrets manager, never via plain env.
+**This was `MEMQL_MASTER_KEY` until memql#3519.** Sharing one value meant the envelope-decryption key was also a cluster-owner bearer token over the network — while `genesis-seal --sync-shell` wrote it into `~/.bashrc` **by default** at the file's existing (typically world-readable) mode, and ESO delivered it to staging/production pods. The old justification ("anyone who can read `/var/lib/memql` secrets from the host can produce it") reasoned about host filesystem access and did not transfer to either of those locations. The two are now separate secrets: the master key decrypts, the operator key authenticates.
+
+**Residual exposure, unchanged by the split:** the operator key is still a long-lived bearer token in pod env with no expiry, no per-actor attribution beyond the synthetic `cluster:operator` subject, and no revocation short of rotation. The split narrows the blast radius (compromise no longer implies envelope decryption, and vice versa); it does not make this a good credential. A short-lived, attributable machine identity — the `class="service_account"` JWT (#691) — is the better long-term answer for the two first-party consumers, gated on widening that surface's pin to cover their writes.
+
+**Trust assumption:** the operator path is used only during initial cluster bootstrap and for break-glass admin tasks. Rotate the key after the first admin user is created; keep it injected via the secrets manager, never via plain env. Rotation sequencing: [operator-credential.md](../../public/operate/auth/operator-credential.md).
 
 ### 5.6 Delegation model (F2)
 

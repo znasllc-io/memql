@@ -439,13 +439,17 @@ func connectGRPC() (*grpc.ClientConn, error) {
 	return grpc.NewClient(endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 }
 
-// withOperatorAuth stamps the operator credential (MEMQL_MASTER_KEY)
+// withOperatorAuth stamps the operator credential (MEMQL_OPERATOR_KEY)
 // onto outgoing gRPC metadata so the cluster's operator-aware stream
 // interceptor admits the stream as a synthetic cluster owner. When
-// MEMQL_MASTER_KEY is empty this is a no-op and the downstream RPC
+// MEMQL_OPERATOR_KEY is empty this is a no-op and the downstream RPC
 // fails with codes.Unauthenticated, which is the right outcome.
+//
+// This is NOT the master key (memql#3519). MEMQL_MASTER_KEY decrypts the
+// envelope and is still required for the local decrypt/seal work below;
+// MEMQL_OPERATOR_KEY authenticates to the cluster. Two secrets, two jobs.
 func withOperatorAuth(ctx context.Context) context.Context {
-	key := strings.TrimSpace(os.Getenv(secret.EnvMasterKey))
+	key := strings.TrimSpace(os.Getenv(secret.EnvOperatorKey))
 	if key == "" {
 		return ctx
 	}
