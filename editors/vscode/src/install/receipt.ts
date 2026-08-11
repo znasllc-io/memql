@@ -28,6 +28,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { redactSecrets } from "./secrets.js";
+
 /** Bumped when the on-disk shape changes incompatibly. */
 export const RECEIPT_VERSION = 1;
 
@@ -209,13 +211,50 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
     receipt.graph = graph;
     receipt.updatedAt = new Date().toISOString();
 
-    const at = receipt.entries.findIndex((e) => e.stepId === entry.stepId);
-    if (at >= 0) receipt.entries[at] = entry;
-    else receipt.entries.push(entry);
+    // A SECRET NEVER REACHES THIS FILE (memql#3545). The receipt is long-lived,
+    // read back by repair and uninstall for the life of the install, and never
+    // rewritten -- so a credential that lands here does not expire and nothing
+    // cleans it up. It happened: an operator pasted an Anthropic key into the
+    // key-FILE box and it was recorded verbatim.
+    //
+    // Redacting on the WRITE rather than trusting the caller is the point.
+    // `state/addCluster.ts` refuses the value where it is typed, which is where
+    // a person can be told what to do instead; this covers every other route a
+    // param has into the receipt, including ones nobody has written yet.
+    const recorded: ReceiptEntry = { ...entry, params: redactSecrets(entry.params) };
+
+    const at = receipt.entries.findIndex((e) => e.stepId === recorded.stepId);
+    if (at >= 0) receipt.entries[at] = recorded;
+    else receipt.entries.push(recorded);
 
     await writeAtomic(file, serializeReceipt(receipt));
     return receipt;
   });
+}
+
+/**
+ * Removes the receipt, because the install it describes is gone (memql#3544).
+ *
+ * NOTHING USED TO DO THIS. Not the uninstall that had just removed every
+ * artifact the receipt names, not anything else -- so a machine that had been
+ * fully and successfully uninstalled still carried the record of an install.
+ * `detectPresence` reads that record, so the verdict stayed `installed-*`
+ * forever: the Install card was never offered again, Repair re-ran a graph over
+ * a cluster that was not there, and Uninstall correctly reported nothing left
+ * to remove. There was no control anywhere in the extension that could clear
+ * it.
+ *
+ * IDEMPOTENT, deliberately. The caller is a completion path that may run twice
+ * -- an uninstall re-run after a successful one, a retry after a follow-up step
+ * failed -- and "the file this asks me to delete is already gone" is the
+ * outcome it wanted, not an error to report to an operator.
+ *
+ * Only ever called after a removal that reported `ok`. A partial uninstall
+ * keeps its receipt: it still names artifacts that are still on the machine,
+ * and deleting it would strand them with nothing that knows they are there.
+ */
+export async function deleteReceipt(file: string): Promise<void> {
+  await fs.rm(file, { force: true });
 }
 
 async function writeAtomic(file: string, contents: string): Promise<void> {

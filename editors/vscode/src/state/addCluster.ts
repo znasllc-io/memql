@@ -19,6 +19,7 @@ import type { AddClusterAction } from "../clusters/presence.js";
 import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
+import { looksLikeProviderKey } from "../install/secrets.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -267,7 +268,21 @@ export function requiredFields(action: AddClusterAction): InputField[] {
         "providerKeyFile",
       ];
     case "repair":
-      return ["domain"];
+      // THE KEY FIELDS ARE COLLECTED, and the receipt supplies their DEFAULTS
+      // (memql#3544). This used to be `["domain"]` alone, on the reasoning that
+      // a repair re-runs a graph over a machine that has already answered these
+      // questions -- and memql#3512 made it read the answers back off the
+      // receipt so wave 2 could pass.
+      //
+      // That reasoning inverts the moment the RECORDED answer is the thing that
+      // is wrong. A repair then re-runs with the same bad value, fails at the
+      // same step, and offers no field in which to correct it -- which is the
+      // state an operator who fumbled the key file is left in permanently, with
+      // Uninstall reporting nothing to remove because nothing was installed.
+      //
+      // Nobody retypes a good path: the panel pre-fills both from the receipt.
+      // What changes is that the value is now in a box that can be edited.
+      return ["domain", "provider", "providerKeyFile"];
     case "uninstall":
     case "connect":
       return [];
@@ -324,6 +339,21 @@ export class AddClusterState {
   get inputs(): Inputs {
     return { ...this.values };
   }
+  /**
+   * Records a problem with one field that only the extension host could find.
+   *
+   * `problemWith` is a pure string check because this module is deliberately
+   * free of `node:fs` -- but "is there actually a readable file at that path?"
+   * is the question that catches a typo, a `~` the shell never expanded, and a
+   * file deleted since the last install (memql#3544). The panel asks it and
+   * reports the answer here, so the operator sees it under the box they typed
+   * in rather than nine minutes into a run.
+   */
+  noteFieldProblem(field: InputField, message: string): void {
+    this.fieldErrors = this.fieldErrors.filter((e) => e.field !== field);
+    this.fieldErrors.push({ field, message });
+  }
+
   get errors(): FieldError[] {
     return [...this.fieldErrors];
   }
@@ -450,6 +480,25 @@ export class AddClusterState {
     // answer, and therefore the wrong sentence for a value they chose.
     if (field === "provider" && !SUPPORTED_PROVIDERS.some((p) => p === trimmed)) {
       return `memQL can verify a key for ${SUPPORTED_PROVIDERS.join(" or ")}.`;
+    }
+    // THE KEY ITSELF, PASTED WHERE THE PATH GOES (memql#3545).
+    //
+    // The field's hint has always said "A PATH to a file holding the key, never
+    // the key itself", and for a long time the hint was the whole enforcement.
+    // What an operator who pasted the key actually got: the value handed to the
+    // capability script as `--key-file=sk-ant-...`, where `ps` shows it to every
+    // process on the machine, and then written verbatim into the install
+    // receipt, where it stayed.
+    //
+    // The message must not quote the value back. It is a secret, it is rendered
+    // into HTML, and a validation message is exactly the sort of thing that ends
+    // up in a screenshot attached to a bug report.
+    if (field === "providerKeyFile" && looksLikeProviderKey(trimmed)) {
+      return (
+        "That is the key itself. This field takes the PATH to a file holding it -- " +
+        "a command line is readable by every process on this machine, so the key " +
+        "must never be one. Save it to a file (e.g. ~/.memql/key) and give that path."
+      );
     }
     return undefined;
   }

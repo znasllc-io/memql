@@ -23,6 +23,7 @@ import {
   RECEIPT_VERSION,
   appendReceiptEntry,
   defaultReceiptPath,
+  deleteReceipt,
   emptyReceipt,
   entryFor,
   parseReceipt,
@@ -197,4 +198,95 @@ test("removalParams omits a target it has no recorded value for", () => {
 
 test("removalParams on an entry with no receipt has nothing to remove", () => {
   assert.equal(removalParams(entry({ receipt: "" })), null);
+});
+
+// -----------------------------------------------------------------------------
+// A receipt is not a place for a secret (memql#3545)
+// -----------------------------------------------------------------------------
+
+test("a param that looks like a provider key is redacted before it is written", async () => {
+  // DEFENCE IN DEPTH, and the depth is the point: the field validation
+  // (addClusterCollect.test.ts) is what stops a key being typed here in the
+  // first place, and it runs in ONE screen. This runs on the write itself, so
+  // it also covers the CLI, a future surface, and a graph that pins a param
+  // nobody re-read.
+  //
+  // The receipt is long-lived, mode 0600, and read back by repair and uninstall
+  // for the life of the install. A secret that reaches it does not expire and
+  // nothing ever rewrites it -- so the value is dropped at the boundary rather
+  // than filtered on the way out.
+  const dir = await tempDir();
+  const file = path.join(dir, "install-receipt.json");
+
+  await appendReceiptEntry(file, "install", {
+    stepId: "providerKey",
+    script: "install.verifyProviderKey",
+    receipt: "",
+    preExisting: false,
+    params: {
+      "key-file": "sk-ant-api03-EXAMPLE-not-a-real-key-aaaaaaaaaaaaaaaaaaaaaa",
+      provider: "anthropic",
+    },
+    result: {},
+    changed: false,
+    recordedAt: "2026-08-11T00:00:00.000Z",
+  });
+
+  const raw = await fs.readFile(file, "utf8");
+  assert.doesNotMatch(raw, /sk-ant/, "no part of a provider key may reach the receipt file");
+
+  const receipt = await readReceipt(file);
+  const entry = entryFor(receipt!, "providerKey")!;
+  assert.notEqual(entry.params["key-file"], undefined, "the key is redacted, not dropped silently");
+  assert.doesNotMatch(entry.params["key-file"]!, /sk-ant/);
+  assert.equal(entry.params["provider"], "anthropic", "ordinary params are untouched");
+});
+
+test("an ordinary path param survives the write unchanged", async () => {
+  const dir = await tempDir();
+  const file = path.join(dir, "install-receipt.json");
+  await appendReceiptEntry(file, "install", {
+    stepId: "providerKey",
+    script: "install.verifyProviderKey",
+    receipt: "",
+    preExisting: false,
+    params: { "key-file": "/home/someone/.memql/key", provider: "anthropic" },
+    result: {},
+    changed: false,
+    recordedAt: "2026-08-11T00:00:00.000Z",
+  });
+  const receipt = await readReceipt(file);
+  assert.equal(entryFor(receipt!, "providerKey")!.params["key-file"], "/home/someone/.memql/key");
+});
+
+// -----------------------------------------------------------------------------
+// The record of an install must be removable (memql#3544)
+// -----------------------------------------------------------------------------
+
+test("deleteReceipt removes the file, and is silent when there is none", async () => {
+  // NOTHING DELETED THE RECEIPT. Not the uninstall that removed every artifact
+  // it describes, not anything else -- so a machine that had been fully
+  // uninstalled still carried the record of an install, presence still answered
+  // "installed", and the wizard went on offering Repair and Uninstall for a
+  // cluster that was gone. Permanently, and with no control anywhere that could
+  // clear it.
+  const dir = await tempDir();
+  const file = path.join(dir, "install-receipt.json");
+  await appendReceiptEntry(file, "install", {
+    stepId: "clusterUp",
+    script: "k3d.up",
+    receipt: "stack",
+    preExisting: false,
+    params: {},
+    result: {},
+    changed: true,
+    recordedAt: "2026-08-11T00:00:00.000Z",
+  });
+
+  await deleteReceipt(file);
+  assert.equal(await readReceipt(file), null);
+
+  // Idempotent: an uninstall re-run after a successful one must not fail on a
+  // file its predecessor already removed.
+  await deleteReceipt(file);
 });

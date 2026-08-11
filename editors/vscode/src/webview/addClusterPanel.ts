@@ -22,6 +22,8 @@
 // Refs: #3475 #3472 #3470 #3471 #3469 #3463
 
 import { randomBytes } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
+import * as fs from "node:fs/promises";
 import * as vscode from "vscode";
 
 import {
@@ -43,7 +45,13 @@ import {
 import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
-import { readReceipt, recordedProvider, recordedProviderKeyFile } from "../install/receipt.js";
+import {
+  deleteReceipt,
+  readReceipt,
+  recordedProvider,
+  recordedProviderKeyFile,
+} from "../install/receipt.js";
+import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import {
@@ -331,6 +339,7 @@ export class AddClusterPanel {
     if (this.uninstalling || this.state.screen === "running") return;
     this.state.chooseAction(action);
     if (action === "uninstall") void this.loadUninstallPreview();
+    if (action === "repair") void this.prefillFromReceipt();
     this.render();
   }
 
@@ -399,6 +408,10 @@ export class AddClusterPanel {
       // registry that never arrives costs the inline refusal but not the
       // write-time one.
       if (action === "connect") void this.loadRegistry();
+      // A repair now COLLECTS the key fields (memql#3544), so it opens with the
+      // recorded answers already in the boxes -- nobody retypes a good path,
+      // and a bad one is finally reachable.
+      if (action === "repair") void this.prefillFromReceipt();
       // The itemized list is the confirmation, so it is read the moment the
       // branch opens rather than behind a further click: there is nothing on
       // this screen for the operator to do until it is on screen.
@@ -466,8 +479,7 @@ export class AddClusterPanel {
       // No toast. The run screen itself says what state the run is in, and a
       // popup that announced a run which has not started would be the same lie
       // in a second place -- one the operator cannot dismiss by looking again.
-      if (this.state.beginRun()) void this.startRun();
-      this.render();
+      void this.begin();
       return;
     }
     // The two recoveries from a failed step (#3474). Both are transitions on
@@ -523,6 +535,79 @@ export class AddClusterPanel {
   }
 
   /**
+   * The form's last gate before a run: does the key file actually exist?
+   *
+   * WHY IT IS NOT IN `problemWith`. `state/addCluster.ts` is deliberately free
+   * of `node:fs` -- it is the module the fast unit lane drives -- so its checks
+   * are string shape only. Whether there is a readable file at the path is the
+   * question that catches everything shape cannot: a typo, a `~` no shell ever
+   * expanded, a file moved since the last install.
+   *
+   * WHY IT MATTERS MORE THAN A TIDY ERROR. Without it, the first thing to
+   * notice is `verify-provider-key.sh`, which exits 2 -- and the wizard renders
+   * exit 2 as "a fault in memQL rather than in your machine or your answers".
+   * That sentence is false here and points the operator away from the one thing
+   * they can fix. Nine minutes of install can precede it.
+   *
+   * Returns the message, or "" when the path is fine.
+   */
+  private async keyFileProblem(pathValue: string): Promise<string> {
+    const value = pathValue.trim();
+    if (value === "") return "";
+    if (looksLikeProviderKey(value)) {
+      // Belt to the state layer's braces: the same refusal, in case a value
+      // reached the inputs by a route that did not run `problemWith`.
+      return (
+        "That is the key itself. This field takes the PATH to a file holding it -- " +
+        "save the key to a file (e.g. ~/.memql/key) and give that path."
+      );
+    }
+    if (value.startsWith("~")) {
+      // `~` is expanded by a SHELL, and the runner spawns scripts with
+      // shell:false so that a `;` in a param stays inert. Nothing will expand
+      // this, and the script would report a missing file naming a literal "~".
+      return "A leading ~ is not expanded here. Give the full path, e.g. /home/you/.memql/key.";
+    }
+    try {
+      const stat = await fs.stat(value);
+      if (!stat.isFile()) return "That path is a directory. Give the file that holds the key.";
+    } catch {
+      return "No file exists at that path. Save the key to a file and give the path to it.";
+    }
+    try {
+      await fs.access(value, fsConstants.R_OK);
+    } catch {
+      return "That file exists but cannot be read. Check its permissions.";
+    }
+    return "";
+  }
+
+  /**
+   * Validates, then starts -- with the filesystem check the state machine
+   * cannot make itself (memql#3544).
+   *
+   * Async, which is why it is a method rather than three lines in `onMessage`:
+   * the shape checks are synchronous and the file check is not, and the
+   * operator must see the result of both under the fields rather than as a
+   * failed run.
+   */
+  private async begin(): Promise<void> {
+    // BEFORE `beginRun()`, not after. That call transitions to the run screen,
+    // and `back()` -- the only way off it -- returns to the CARDS, dropping the
+    // chosen action and every field error with it. Checking first keeps a
+    // refusal on the form the operator is already looking at, with the box they
+    // need to edit still on screen and still holding what they typed.
+    const problem = await this.keyFileProblem(this.state.inputs.providerKeyFile);
+    if (problem !== "") {
+      this.state.noteFieldProblem("providerKeyFile", problem);
+      this.render();
+      return;
+    }
+    if (this.state.beginRun()) void this.startRun();
+    this.render();
+  }
+
+  /**
    * The hooks every session call gets: the caller's, plus the injected runner.
    *
    * One place, so a run started from Retry cannot end up on a different runner
@@ -568,7 +653,13 @@ export class AddClusterPanel {
     let provider = inputs.provider;
     if (providerKeyFile === "") {
       const receipt = await readReceipt(this.deps.receiptFile);
-      providerKeyFile = recordedProviderKeyFile(receipt);
+      // `usablePath`, because the receipt can hold a value that is not one: a
+      // redaction marker where a key was given instead of a path (memql#3545),
+      // or -- on a receipt written before that guard existed -- the key itself.
+      // Passing either as `--key-file` produces a confusing failure deep in the
+      // run; treating it as "nothing recorded" produces the honest refusal
+      // below, which names the one thing the operator can do about it.
+      providerKeyFile = usablePath(recordedProviderKeyFile(receipt));
       // The recorded vendor travels with the recorded path, and for the same
       // reason: a repair that read the key file back but re-asserted the
       // wizard's DEFAULT vendor would verify an OpenAI key against Anthropic
@@ -712,6 +803,38 @@ export class AddClusterPanel {
       const text = supplied[field];
       if (typeof text === "string") this.state.setConnectInput(field, text);
     }
+  }
+
+  /**
+   * Puts the recorded answers into the repair form's boxes (memql#3544).
+   *
+   * A DEFAULT, NOT A LOCK -- that distinction is the whole fix. memql#3512
+   * taught the repair to read the key path off the receipt so wave 2 could
+   * pass, which was right for a good path and a trap for a bad one: the run
+   * re-used the recorded value, failed at the same step, and offered no field
+   * in which to correct it. The value now lands in an editable box.
+   *
+   * A REDACTED entry is left blank on purpose. It records that a key was given
+   * where a path belonged (see install/secrets.ts) -- it is not a path, and
+   * pre-filling it would hand the operator the very value that has to change.
+   *
+   * A value already typed WINS. This is async and the operator is looking at
+   * the form while it runs; overwriting what they have just entered with what
+   * an old receipt says would be the worst possible moment to be helpful.
+   */
+  private async prefillFromReceipt(): Promise<void> {
+    const receipt = await readReceipt(this.deps.receiptFile);
+    if (this.disposed || this.state.action !== "repair") return;
+
+    const recordedPath = usablePath(recordedProviderKeyFile(receipt));
+    if (this.state.inputs.providerKeyFile === "" && recordedPath !== "") {
+      this.state.setInput("providerKeyFile", recordedPath);
+    }
+    const recordedVendor = recordedProvider(receipt);
+    if (recordedVendor !== "" && SUPPORTED_PROVIDERS.some((p) => p === recordedVendor)) {
+      this.state.setInput("provider", recordedVendor);
+    }
+    this.render();
   }
 
   /**
@@ -938,6 +1061,10 @@ export class AddClusterPanel {
       removeEntry: (name) => this.deps.removeRegistryEntry(name),
       invalidatePresence: () => this.presence.invalidate(),
       refreshTree: () => this.deps.refreshTree(),
+      // The receipt goes with the artifacts it describes (memql#3544) --
+      // otherwise the next thing the operator sees is a wizard still offering
+      // to repair and uninstall a cluster that is no longer here.
+      deleteReceipt: () => deleteReceipt(this.deps.receiptFile),
     });
     if (problem !== "") this.uninstall.noteFollowUpProblem(problem);
   }
@@ -1617,6 +1744,20 @@ const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
   installGuided: "Install a local cluster -- guided",
   repair: "Repair the local cluster",
 };
+
+/**
+ * A recorded key-file value, or "" when what was recorded is not a path.
+ *
+ * TWO WAYS THE RECEIPT CAN HOLD A NON-PATH, and both end here. Since
+ * memql#3545 a key given where a path belonged is stored as `REDACTED`; on a
+ * receipt written before that, the key itself is sitting there in plaintext.
+ * Neither can be handed to `--key-file`, and "" is precisely what the callers
+ * treat as "nothing to go on, ask" -- which is the true state of affairs.
+ */
+function usablePath(recorded: string): string {
+  if (recorded === REDACTED) return "";
+  return looksLikeProviderKey(recorded) ? "" : recorded;
+}
 
 // A CSP nonce is a security control, so it comes from a CSPRNG.
 function nonceValue(): string {

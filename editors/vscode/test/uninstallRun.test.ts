@@ -484,12 +484,16 @@ test("the completion trio all fire: the entry goes, the memo drops, the tree rep
     removeEntry: async (name) => void order.push(`remove:${name}`),
     invalidatePresence: () => order.push("invalidate"),
     refreshTree: () => order.push("refresh"),
+    deleteReceipt: async () => void order.push("deleteReceipt"),
   });
 
   assert.equal(problem, "");
   // The entry FIRST: it is the only one that can fail, so it runs before
-  // anything says the surface is up to date.
-  assert.deepEqual(order, ["remove:local", "invalidate", "refresh"]);
+  // anything says the surface is up to date. The RECEIPT goes with it
+  // (memql#3544) -- it is the record of the install that has just been
+  // reversed, and detectPresence reads it, so leaving it behind leaves the
+  // wizard offering to repair and uninstall a cluster that is gone.
+  assert.deepEqual(order, ["remove:local", "deleteReceipt", "invalidate", "refresh"]);
 });
 
 test("a registry write that fails still drops the memo and repaints the tree", async () => {
@@ -504,9 +508,13 @@ test("a registry write that fails still drops the memo and repaints the tree", a
     },
     invalidatePresence: () => order.push("invalidate"),
     refreshTree: () => order.push("refresh"),
+    deleteReceipt: async () => void order.push("deleteReceipt"),
   });
 
-  assert.deepEqual(order, ["invalidate", "refresh"]);
+  // The receipt is removed even though the registry write failed: they are
+  // independent records of the same departed cluster, and the receipt is the
+  // one that decides what the wizard offers next.
+  assert.deepEqual(order, ["deleteReceipt", "invalidate", "refresh"]);
   assert.match(problem, /clusters\.yaml is read-only/);
   assert.match(problem, /off this machine/, "the uninstall SUCCEEDED -- only the bookkeeping did not");
 });
@@ -521,8 +529,32 @@ test("no registered cluster is an ordinary case, not a problem", async () => {
       removeEntry: async (name) => void order.push(`remove:${name}`),
       invalidatePresence: () => order.push("invalidate"),
       refreshTree: () => order.push("refresh"),
+      deleteReceipt: async () => void order.push("deleteReceipt"),
     });
     assert.equal(problem, "");
-    assert.deepEqual(order, ["invalidate", "refresh"]);
+    assert.deepEqual(order, ["deleteReceipt", "invalidate", "refresh"]);
   }
+});
+
+test("a receipt that cannot be removed is reported, because the wizard will keep lying", async () => {
+  // The failure worth a sentence of its own. Every artifact is gone, but the
+  // record of them is not -- and detectPresence reads that record, so the
+  // wizard goes on withholding the Install card and offering Repair for a
+  // cluster that is not there. An operator told only "uninstalled" would have
+  // no way to connect the two.
+  const order: string[] = [];
+  const problem = await completeLocalUninstall({
+    clusterName: "local",
+    removeEntry: async (name) => void order.push(`remove:${name}`),
+    invalidatePresence: () => order.push("invalidate"),
+    refreshTree: () => order.push("refresh"),
+    deleteReceipt: async () => {
+      throw new Error("install-receipt.json is read-only");
+    },
+  });
+
+  assert.deepEqual(order, ["remove:local", "invalidate", "refresh"]);
+  assert.match(problem, /install-receipt\.json is read-only/);
+  assert.match(problem, /go on reporting a cluster/, "it must say what the operator will SEE");
+  assert.match(problem, /off this machine/, "the removal itself succeeded");
 });

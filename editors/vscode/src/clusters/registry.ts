@@ -189,22 +189,50 @@ export interface UninstallFollowUp {
   invalidatePresence: () => void;
   /** Repaints the Clusters view. */
   refreshTree: () => void;
+  /**
+   * Removes the install receipt -- the record of the install that has just been
+   * reversed (memql#3544).
+   *
+   * THE THIRD THING A REMOVAL LEAVES BEHIND, and the one nothing used to take.
+   * `detectPresence` reads the receipt, so a machine whose every artifact had
+   * just been removed still answered `installed-*`: the Install card stayed
+   * withdrawn, Repair re-ran a graph over a cluster that was gone, and
+   * Uninstall reported nothing left to remove. Permanently -- no control in the
+   * extension could clear it.
+   */
+  deleteReceipt: () => Promise<void>;
 }
 
 export async function completeLocalUninstall(follow: UninstallFollowUp): Promise<string> {
-  let problem = "";
+  const problems: string[] = [];
   const name = follow.clusterName;
   if (name !== undefined && name !== "") {
     try {
       await follow.removeEntry(name);
     } catch (err) {
-      problem =
-        `the cluster is off this machine, but "${name}" could not be removed from the ` +
-        `cluster list: ${err instanceof Error ? err.message : String(err)}`;
+      problems.push(
+        `"${name}" could not be removed from the cluster list: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+  }
+
+  // ATTEMPTED EVEN IF THE REGISTRY WRITE FAILED. They are independent records of
+  // the same departed cluster, and the receipt is the one that decides what the
+  // wizard offers next -- so a failure to tidy clusters.yaml must not also cost
+  // the operator the Install card.
+  try {
+    await follow.deleteReceipt();
+  } catch (err) {
+    problems.push(
+      `the record of the install could not be removed, so memQL will go on ` +
+        `reporting a cluster on this machine: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   follow.invalidatePresence();
   follow.refreshTree();
-  return problem;
+  // The cluster IS gone either way; these are follow-ups, and the caller
+  // renders them as their own news rather than as a failed removal.
+  return problems.length === 0 ? "" : `the cluster is off this machine, but ${problems.join("; ")}`;
 }

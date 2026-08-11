@@ -40,12 +40,23 @@ test("the form opens pre-filled with the installer's own domain default", () => 
   assert.equal(DEFAULT_INPUTS.domain, "local.znas.io");
 });
 
-test("a repair can be started without typing anything at all", () => {
-  // A repair needs only the domain, and the domain now has a default -- so the
-  // whole form is acceptable as-is. This is the concrete form of "the operator
-  // can accept them all without typing".
+test("a repair can be started without typing anything, once the receipt is in", () => {
+  // A repair asks for the domain (defaulted), the vendor (defaulted) and the
+  // key path -- and the panel pre-fills the last two from the receipt before
+  // the operator sees the form, so in practice nothing is typed (memql#3544).
+  //
+  // The key path is the one that cannot be defaulted HERE: this module has no
+  // receipt and no filesystem. What it can pin is that the path is the only
+  // thing standing between a fresh state and a startable repair.
   const state = new AddClusterState();
   state.chooseAction("repair");
+  assert.deepEqual(
+    state.validate().map((e) => e.field),
+    ["providerKeyFile"],
+    "the domain and the vendor are already defaulted; only the path is missing",
+  );
+
+  state.setInput("providerKeyFile", "/home/someone/.memql/key");
   assert.deepEqual(state.validate(), []);
   assert.equal(state.beginRun(), true);
   assert.equal(state.screen, "running");
@@ -152,4 +163,69 @@ test("the provider key field carries a PATH, and the schema says so", () => {
   // in `ps`.
   assert.ok(requiredFields("install").includes("providerKeyFile"));
   assert.ok(!Object.keys(DEFAULT_INPUTS).some((k) => /secret|token|apiKey|password/i.test(k)));
+});
+
+// -----------------------------------------------------------------------------
+// The key FILE field must hold a path, and a repair must be able to fix it
+// (memql#3544 / memql#3545)
+// -----------------------------------------------------------------------------
+
+test("pasting the provider key itself into the key-FILE box is refused", () => {
+  // WHAT ACTUALLY HAPPENED. The field's hint says "A PATH to a file holding the
+  // key, never the key itself", and nothing enforced it -- so an operator who
+  // pasted their Anthropic key had it accepted, passed to the script as
+  // `--key-file=sk-ant-...` (argv, which `ps` shows to every process on the
+  // machine) and then RECORDED IN THE INSTALL RECEIPT, where it sat in
+  // plaintext afterwards.
+  //
+  // A hint is not a control. The value that cannot be allowed to reach argv is
+  // refused where it is typed.
+  const state = new AddClusterState();
+  state.chooseAction("install");
+  state.setInput("providerKeyFile", "sk-ant-api03-EXAMPLE-not-a-real-key-aaaaaaaaaaaaaaaaaaaa");
+
+  const problem = state.errors.find((e) => e.field === "providerKeyFile");
+  assert.ok(problem !== undefined, "a pasted key must be refused, not accepted");
+  assert.match(problem.message, /path/i, "and the refusal must say what is wanted instead");
+  // The message must not quote the value back: this whole test is about a
+  // secret, and a validation message is rendered into HTML and is the kind of
+  // thing that ends up in a screenshot.
+  assert.doesNotMatch(problem.message, /sk-ant/, "the refusal must not echo the secret");
+});
+
+test("an OpenAI key pasted into the same box is refused too", () => {
+  // The vendor is collected separately, so the refusal cannot key off it. Both
+  // supported vendors' key formats are recognised.
+  const state = new AddClusterState();
+  state.chooseAction("install");
+  state.setInput("providerKeyFile", "sk-proj-EXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLEEXAMPLE");
+  assert.ok(state.errors.some((e) => e.field === "providerKeyFile"));
+});
+
+test("an ordinary path is accepted", () => {
+  const state = new AddClusterState();
+  state.chooseAction("install");
+  state.setInput("providerKeyFile", "/home/someone/.memql/key");
+  assert.deepEqual(state.errors, []);
+});
+
+test("a repair collects the provider key again, so a bad one can be corrected", () => {
+  // THE DEAD END. `requiredFields("repair")` was `["domain"]`, on the reasoning
+  // that a repair re-runs a graph over a machine that already answered these
+  // questions -- and the answer it reads back is the one on the receipt. When
+  // the recorded answer is the thing that is WRONG, that reasoning inverts: the
+  // repair re-runs with the same bad value, fails at the same step, and offers
+  // the operator no field in which to fix it. Every repair, forever.
+  //
+  // The receipt still supplies the DEFAULT (memql#3512's point stands -- nobody
+  // should retype a good path), but it is now a starting value in a box rather
+  // than a locked-in one.
+  assert.ok(
+    requiredFields("repair").includes("providerKeyFile"),
+    "a repair must be able to correct the key path it is about to reuse",
+  );
+  assert.ok(
+    requiredFields("repair").includes("provider"),
+    "and the vendor that path is verified against",
+  );
 });
