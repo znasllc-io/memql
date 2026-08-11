@@ -38,11 +38,7 @@ func (a *App) wirePolyphonEndpoints() {
 		polyphonScoreEng = a.polyphonScoreEngine.(*polyphon.ScoreEngine)
 	}
 
-	handler := polyphonws.NewHandler(polyphonScoreEng, roomProvider, "", &CognitionEngineAdapter{Engine: a.engine})
-
-	// Wire the per-space cache prewarm hook when this binary carries
-	// the cognition integration (cognition / default builds).
-	a.wirePolyphonPrewarm(handler)
+	handler := polyphonws.NewHandler(polyphonScoreEng, roomProvider, "")
 
 	// Wire Polyphon dependencies to gRPC server.
 	if a.grpcServer != nil {
@@ -56,12 +52,10 @@ func (a *App) wirePolyphonEndpoints() {
 	for _, path := range server.PolyphonStatusPaths() {
 		a.handleRoute("GET "+path, http.HandlerFunc(handler.ServeStatus))
 	}
-	for _, path := range server.PolyphonUtterancePaths() {
-		a.handleRoute("POST "+path, http.HandlerFunc(handler.ServeUtterance))
-	}
-	for _, path := range server.PolyphonPreloadPaths() {
-		a.handleRoute("POST "+path, http.HandlerFunc(handler.ServePreload))
-	}
+	// /polyphon/utterance and /polyphon/preload used to register here too.
+	// Both were unauthenticated (server.PublicPaths()) and existed only for
+	// the retired Bridge Agent; removed in memql#3531. The authenticated
+	// equivalent is PolyphonUtteranceMsg on MemqlService.Stream.
 
 	if cfg.LiveKitConfigured() {
 		a.Logger.Info("polyphon endpoints registered (LiveKit configured)",
