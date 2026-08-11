@@ -54,7 +54,7 @@ cap_spec_param "provider"          "provider to verify: anthropic | openai"
 cap_spec_param "key-file"          "path to a file containing the API key (never a flag -- argv is public)"
 cap_spec_param "base-url"          "API base URL override (default: the provider's public endpoint)"
 cap_spec_param "timeout"           "per-request timeout in seconds (default 15)"
-cap_spec_param "anthropic-version" "anthropic-version header value (default 2026-01-01)"
+cap_spec_param "anthropic-version" "anthropic-version header value (default 2023-06-01)"
 
 # Private working directory holding the 0600 curl config. Set by setup_workdir.
 _VPK_WORKDIR=""
@@ -158,7 +158,7 @@ function check_prerequisites() {
 # classify_and_finish <provider> <endpoint> <curl-rc> <http-code> <curl-stderr>
 # Turns the transport + HTTP outcome into the envelope and the exit code.
 function classify_and_finish() {
-    local provider="$1" endpoint="$2" rc="$3" code="$4" transport="$5"
+    local provider="$1" endpoint="$2" rc="$3" code="$4" transport="$5" body_note="${6:-}"
     [[ "$code" =~ ^[0-9]+$ ]] || code=0
 
     cap_result_set     provider   "$provider"
@@ -184,10 +184,26 @@ function classify_and_finish() {
             cap_error "${provider} rejected the key (HTTP ${code})."
             cap_fail 3 "provider rejected the key (HTTP ${code})"
             ;;
+        400)
+            # A 400 IS OUR FAULT, NOT THE KEY'S (memql#3549). The provider
+            # understood the request well enough to say it was malformed, which
+            # is a statement about what memQL sent -- the headers it composed,
+            # the version it asserted -- and says nothing whatever about the
+            # credential. Reporting it as "the key could not be verified" points
+            # the operator at the one thing that is not wrong, and exit 5 invites
+            # a retry that cannot behave differently.
+            #
+            # Exit 2 is the honest code: the wizard renders it as "a fault in
+            # memQL rather than in your machine or your answers", which is
+            # exactly what a 400 here is.
+            cap_result_set_raw valid false
+            cap_result_set     detail "${provider} refused the request as malformed (HTTP 400): ${body_note}"
+            cap_fail 2 "${provider} refused the request as malformed (HTTP 400), which is a fault in memQL and not in your key: ${body_note}"
+            ;;
         *)
             cap_result_set_raw valid false
-            cap_result_set     detail "unexpected response (HTTP ${code})"
-            cap_fail 5 "provider returned HTTP ${code}; the key could not be verified"
+            cap_result_set     detail "unexpected response (HTTP ${code}): ${body_note}"
+            cap_fail 5 "provider returned HTTP ${code}; the key could not be verified: ${body_note}"
             ;;
     esac
 }
@@ -216,7 +232,21 @@ function probe() {
     local transport=""
     [[ -f "$errf" ]] && transport="$(tr '\n' ' ' < "$errf" | cut -c1-300)"
 
-    classify_and_finish "$provider" "$endpoint" "$rc" "$code" "$transport"
+    # WHAT THE PROVIDER ACTUALLY SAID (memql#3549). Without it, a refusal
+    # reaches the operator as a bare status code and the one sentence that
+    # explains it -- `anthropic-version: "2026-01-01" is not a valid version` --
+    # is discarded by the only process that ever saw it.
+    #
+    # SCRUBBED OF THE KEY FIRST. No provider has any reason to echo a
+    # credential back in an error, and this is not the place to find out that
+    # one does: the body is about to travel into a receipt, a log line and a
+    # panel that renders it.
+    local body_note=""
+    if [[ -s "$body" ]]; then
+        body_note="$(tr '\n' ' ' < "$body" | sed "s/${key//\//\\/}/[key]/g" | cut -c1-300)"
+    fi
+
+    classify_and_finish "$provider" "$endpoint" "$rc" "$code" "$transport" "$body_note"
 }
 
 #=============================================================================
@@ -231,7 +261,15 @@ function main() {
     provider="$(cap_param provider)"
     key_file="$(cap_param key-file)"
     timeout="$(cap_param timeout 15)"
-    anthropic_version="$(cap_param anthropic-version 2026-01-01)"
+    # 2023-06-01, NOT a date near today (memql#3549). `anthropic-version` names
+    # a FIXED API contract version, not "when you are calling" -- Anthropic
+    # publishes a small set of them and refuses anything else with
+    #     HTTP 400  anthropic-version: "2026-01-01" is not a valid version
+    # The default used to be 2026-01-01, so EVERY anthropic key verification
+    # failed with a 400 that the classifier then reported as "the key could not
+    # be verified" -- accusing a key that was perfectly good, on a step whose
+    # entire job is to tell the operator whether their key works.
+    anthropic_version="$(cap_param anthropic-version 2023-06-01)"
 
     cap_require provider "$provider"
     case "$provider" in
