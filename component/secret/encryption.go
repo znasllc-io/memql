@@ -45,7 +45,19 @@ import (
 // EnvMasterKey names the environment variable that carries the 32-byte
 // hex-encoded master encryption key. Exported so the config loader and
 // docs can reference it by symbol rather than a bare string literal.
+//
+// This key DECRYPTS. It is not an authentication credential and must not
+// be used as one again -- see EnvOperatorKey.
 const EnvMasterKey = "MEMQL_MASTER_KEY"
+
+// The OPERATOR credential -- the bearer token that authenticates
+// `Authorization: Operator <key>` as a synthetic cluster owner -- is a
+// DIFFERENT secret, and its name lives in component/auth as
+// auth.EnvOperatorKey (memql#3519). Deliberately not here: this package is
+// about encryption, an auth credential is not, and keeping the two names in
+// one file is a short step from keeping the two VALUES in one variable, which
+// is the defect that issue exists to undo. See
+// docs/public/operate/auth/operator-credential.md.
 
 const nonceLen = 24
 

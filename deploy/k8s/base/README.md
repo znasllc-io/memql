@@ -127,7 +127,7 @@ releases: (1) add the new shape + write both, (2) backfill + switch reads,
 
 ## Secrets (genesis A2)
 
-Four keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`,
+Five keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY` (memql#3519 -- a DIFFERENT value; it authenticates, the master key decrypts), `MEMQL_GENESIS_B64`,
 `MEMQL_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`. With
 `MEMQL_GENESIS_AUTOLOAD=true`, each pod decrypts the sealed envelope in-process
 at boot and applies ~150 vars set-if-absent; the per-pod overrides (node type,
@@ -198,6 +198,7 @@ kubectl apply -f deploy/k8s/namespace.yaml
 #    DSN = transaction pooler (tsdb_transaction:39578); DIRECT_DSN = direct (tsdb).
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
+  --from-literal=MEMQL_OPERATOR_KEY="$MEMQL_OPERATOR_KEY" \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
   --from-literal=MEMQL_IDENTITY_SIGNING_KEY_B64="$MEMQL_IDENTITY_SIGNING_KEY_B64" \
   --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \

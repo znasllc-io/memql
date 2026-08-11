@@ -17,7 +17,7 @@ secret material. **External Secrets Operator** reconciles `memql-secrets` from
 
 ## The genesis-envelope boundary (unchanged)
 
-ESO owns the **k8s Secret** that carries `MEMQL_MASTER_KEY`, `MEMQL_GENESIS_B64`
+ESO owns the **k8s Secret** that carries `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY`, `MEMQL_GENESIS_B64`
 (the sealed A2 envelope), and `MEMQL_DATABASE_DSN`. It does **not** change
 the genesis envelope itself: the A2 envelope stays the **app-internal**
 shared-secret bootstrap (`component/secret/`, `component/genesis/`), autoloaded
@@ -69,6 +69,7 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 ```bash
 # 0. Ensure the 3 Key Vault entries exist (memql-genesis-b64 already does, §4):
 az keyvault secret set --vault-name kv-memql-staging --name memql-master-key --value "$MEMQL_MASTER_KEY"
+az keyvault secret set --vault-name kv-memql-staging --name memql-operator-key --value "$(openssl rand -hex 32)"  # memql#3519: NOT the master key
 az keyvault secret set --vault-name kv-memql-staging --name memory-nodes-database-dsn --value "$DSN"
 
 # 1. Install ESO (additive — doesn't touch memql-secrets yet). cert-manager

@@ -1145,6 +1145,16 @@ See [docs/public/operate/auth/](docs/public/operate/auth/):
   registration modes and magic-link flow.
 - [identity-service.md](docs/public/operate/auth/identity-service.md) --
   operator-side env vars + key management.
+- [operator-credential.md](docs/public/operate/auth/operator-credential.md) --
+  `MEMQL_OPERATOR_KEY`, the `Authorization: Operator <key>` bearer token that
+  admits a stream as a synthetic cluster owner so tooling can reach a cluster
+  before any user exists. **A different secret from `MEMQL_MASTER_KEY` since
+  memql#3519**: the master key DECRYPTS, the operator key AUTHENTICATES. They
+  were one value, which made a key the installer wrote into a world-readable
+  `~/.bashrc` (and ESO delivers to production pods) a cluster-owner bearer
+  token over the network. No fallback -- a cluster that has not been seeded
+  `MEMQL_OPERATOR_KEY` refuses operator streams rather than accepting the old
+  one. Rotation sequencing for both keys lives here.
 - [service-account-jwt.md](docs/public/operate/auth/service-account-jwt.md) --
   the `class="service_account"` machine identity (#691): the deploy
   gate / automation credential that verifies on the BFF/mesh via
