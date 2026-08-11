@@ -13,11 +13,31 @@ useDefault = true
 # -----------------------------------------------------------------------------
 # Allowlists
 # -----------------------------------------------------------------------------
-# Each allowlist uses condition = "AND" so that BOTH the regex AND the path
-# constraint must match before a finding is suppressed. This keeps the
-# suppression narrow: the literal dev credential is OK in compose / docs /
-# dev-scripts, but the same string appearing in Go source or anywhere else
-# still trips the scanner.
+# Two shapes of entry live here, and picking the wrong one is the mistake this
+# comment exists to prevent (memql#3484).
+#
+#   PATH-SCOPED  -- condition = "AND" plus a `paths` list, so BOTH the regex and
+#   the path must match. Correct when the regex matches a SHAPE rather than a
+#   value: the AAGUID entry below is a bare UUID pattern, and unscoping it would
+#   blind the scanner to every UUID-shaped secret in the repo. The dev-credential
+#   entries are the same idea from the other direction -- `memql_dev` is fine in
+#   compose and dev scripts and is not fine in Go source.
+#
+#   VALUE-KEYED  -- regex only, no `paths`. Correct when the literal identifies
+#   ITSELF: a published RFC test vector, a fixture whose own name says PLANTED, a
+#   JWT that decodes to an empty payload. Nothing is gained by also constraining
+#   where it appears, and constraining it does active harm, because
+#   `gitleaks git .` scans COMMITS: a path-scoped suppression stops matching the
+#   moment the file moves, and the historical finding comes back.
+#
+# The value-keyed entries carry no `condition` because with `paths` gone there
+# is one criterion, and naming AND or OR would imply a constraint that is not
+# there.
+#
+# HISTORICAL FINDINGS CANNOT BE FIXED BY EDITING THE FILE. See the note in
+# .github/workflows/gitleaks.yml. If a fixture of yours turns the push lane red,
+# the fix is an entry here, not a change to the fixture -- three separate people
+# have now tried the second thing (memql#3484).
 
 [[allowlists]]
 description    = "Local Postgres dev credentials (memql_dev). Dev-only; not a production fallback -- see issue #85. Allowed in Docker Compose files, dev scripts, the local k3d overlay and seed-secrets script, and documentation."
@@ -68,3 +88,31 @@ regexes        = ['''[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 paths = [
   '''^component/identity/webauthn/aaguid\.go$''',
 ]
+
+# -----------------------------------------------------------------------------
+# Value-keyed entries (memql#3484) -- no `paths`, deliberately. Each of these
+# is a literal that identifies itself as a non-credential; see the header.
+# -----------------------------------------------------------------------------
+
+[[allowlists]]
+description = "RFC 7636 Appendix B PKCE test vectors, used by the WebAuthn-login and SSO-PKCE tests. NOT a credential: both literals are PUBLISHED IN THE RFC as the worked example every OAuth implementation tests against, so an attacker holding them holds what the standards document hands out. Value-keyed with no `paths` (memql#3484): these are exact published strings, safe to suppress wherever they appear, and a path constraint would resurface the finding the moment the test file moves."
+regexTarget = "match"
+regexes = [
+  '''dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk''',
+  '''E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM''',
+]
+
+[[allowlists]]
+description = "Redaction-test fixture in the email status tests (memql#3484). NOT a credential: the value's own name records that it is PLANTED, and it exists so the test can assert the status path redacts it -- a real secret would defeat the test's purpose. An earlier attempt to fix this by renaming the constants in the tree did not clear it, because `gitleaks git .` scans commits."
+regexTarget = "match"
+regexes = ['''PLANTED-ROW-SECRET-c41d55''']
+
+[[allowlists]]
+description = "Elided RS256 JWT header in the runtime-panel docs (memql#3484). NOT a credential: `eyJhbGciOiJSUzI1NiIsImtpZCI6` is the base64 of {\"alg\":\"RS256\",\"kid\": -- byte-identical in EVERY RS256 JWT, carrying no claims and no signature. The regex is ANCHORED ON THE TRAILING LITERAL `...`, so it matches only the elided form: a real token continues past that prefix with its own payload, produces a different match, and still trips the scanner."
+regexTarget = "match"
+regexes = ['''eyJhbGciOiJSUzI1NiIsImtpZCI6\.\.\.''']
+
+[[allowlists]]
+description = "Synthetic JWT fixture in the VS Code cluster-registration tests (memql#3484). NOT a credential: it decodes to {\"alg\":\"RS256\"} . {} . the literal string `sig` -- an empty payload and a three-character signature. It names no subject, carries no claim, and authorizes nothing. The tree spelling was later split across a newline to dodge the regex; that did not clear the historical finding, which is what this entry is for."
+regexTarget = "match"
+regexes = ['''eyJhbGciOiJSUzI1NiJ9\.e30\.sig''']
