@@ -119,10 +119,21 @@ var coverageAllowList = map[string]exemption{
 	// --- tool configs whose own workflow verifies them ---
 	".gitleaks.toml": {
 		reason: "verified by its own workflow rather than by a ci.yml bucket: gitleaks runs " +
-			"on every PR with no path filter, and a malformed config fails that run. " +
-			"gitleaks.yml does not NAME the file (the CLI discovers it), which is why the " +
-			"claim is expressed as the workflow rather than as a mention",
+			"on every PR with no path filter, and a malformed config fails that run. The CLI " +
+			"DISCOVERS the file rather than being pointed at it, so the coverage claim is " +
+			"expressed as the workflow rather than as a mention -- gitleaks.yml naming the " +
+			"path in prose (below) does not change which lane reads it",
 		coveredByWorkflow: "gitleaks.yml",
+		mentionedBy: map[string]string{
+			".github/workflows/gitleaks.yml": "prose, not a reference CI executes. The " +
+				"workflow's header comment names this file to tell the next person that a " +
+				"HISTORICAL finding is cleared by an entry here and never by editing the " +
+				"fixture that introduced it -- the mistake three separate commits made " +
+				"(memql#3484). The run step still passes no --config flag; the CLI discovers " +
+				"the file exactly as before. Recorded rather than reworded away, per the " +
+				"precedent set by the deploy/k8s/base/tls/*.sh entry: phrasing a comment to " +
+				"dodge the check would be the first step to the check meaning nothing",
+		},
 	},
 	".markdownlint.json": {
 		reason: "editor/linter config; no CI lane runs markdownlint",
