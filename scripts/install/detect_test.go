@@ -184,6 +184,71 @@ func freePort(t *testing.T) int {
 
 // TestDetectNeverChanges is THE assertion of #3359: detection must not mutate.
 // changed=false on every path, and the HOME the test hands it stays untouched.
+// The state that traps an operator who has already done what they were told
+// (memql#3554): `usermod -aG docker` has run, the group file lists them, and
+// this process still cannot use the socket -- because supplementary groups are
+// fixed when a process starts and inherited from its parent, so nothing inside
+// the current login session ever gains one.
+//
+// Reported as plain `denied`, the wizard tells them to run the command they
+// have just run. It changes nothing and the gate refuses again, with no reading
+// of the message that gets them out.
+func TestDockerAccessSeparatesAppliedFromNotYetInEffect(t *testing.T) {
+	home := t.TempDir()
+	denied := `case "${1:-}" in
+  --version) echo "Docker version 28.1.0, build abc" ;;
+  *) echo "permission denied while trying to connect to the Docker API at unix:///var/run/docker.sock" >&2; exit 1 ;;
+esac`
+
+	// `id -nG <user>` re-reads the group database; a bare `id -nG` reports what
+	// this process is actually running with. The two disagreeing IS the state.
+	const idApplied = `case "${1:-}" in
+  -un) echo "ada" ;;
+  -nG) if [[ -n "${2:-}" ]]; then echo "ada docker"; else echo "ada"; fi ;;
+esac`
+	const idNotApplied = `case "${1:-}" in
+  -un) echo "ada" ;;
+  -nG) echo "ada" ;;
+esac`
+
+	for _, tc := range []struct {
+		name string
+		id   string
+		want string
+	}{
+		{"group file lists them, session predates it", idApplied, "stale"},
+		{"group file does not list them", idNotApplied, "denied"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := stubPATH(t, "Linux", "x86_64")
+			writeStub(t, dir, "docker", denied)
+			writeStub(t, dir, "id", tc.id)
+
+			r := decodeDetect(t, mustDetect(t, dir, home))
+			if r.DockerAccess == nil || *r.DockerAccess != tc.want {
+				t.Errorf("dockerAccess=%v, want %q", r.DockerAccess, tc.want)
+			}
+		})
+	}
+}
+
+// Without `id` on PATH the more specific state cannot be evidenced, and the
+// library must answer with the less specific one rather than guess. The other
+// docker cases rely on this: their stub PATH carries no `id`.
+func TestDockerAccessFallsBackWhenItCannotTell(t *testing.T) {
+	home := t.TempDir()
+	dir := stubPATH(t, "Linux", "x86_64")
+	writeStub(t, dir, "docker", `case "${1:-}" in
+  --version) echo "Docker version 28.1.0, build abc" ;;
+  *) echo "permission denied while trying to connect" >&2; exit 1 ;;
+esac`)
+
+	r := decodeDetect(t, mustDetect(t, dir, home))
+	if r.DockerAccess == nil || *r.DockerAccess != "denied" {
+		t.Errorf("dockerAccess=%v, want \"denied\" when there is no id to check the group file with", r.DockerAccess)
+	}
+}
+
 func TestDetectNeverChanges(t *testing.T) {
 	home := t.TempDir()
 	dir := stubPATH(t, "Linux", "x86_64")

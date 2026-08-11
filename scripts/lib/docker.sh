@@ -13,7 +13,10 @@
 #   missing  -- no docker binary. Install Docker.
 #   stopped  -- the binary is there, the daemon is not answering. Start it.
 #   denied   -- the daemon IS running and refuses THIS USER on the socket,
-#               which is group membership and nothing else.
+#               and the group file does not list them either. Add them.
+#   stale    -- the group file DOES list them, and this process does not carry
+#               the group. The fix has already been applied and cannot reach a
+#               process that was already running (memql#3554).
 #
 # `detect.sh` reported all three as `dockerDaemon: false`, and the operator-
 # facing reading of that is "the daemon is down" -- which sends someone whose
@@ -54,10 +57,45 @@ function docker_access_state() {
     # someone to restart a daemon that is already running.
     local lower="${out,,}"
     if [[ "$lower" == *"permission denied"* || "$lower" == *"dial unix"*"permission"* ]]; then
+        # DENIED SPLITS IN TWO, and the second half is the one that traps people
+        # (memql#3554). `usermod -aG docker <user>` writes the group file and
+        # cannot touch a process that is already running: supplementary groups
+        # are fixed when a process starts and inherited from its parent, so
+        # every process in the current login session -- the editor, the terminal
+        # it spawns, this script -- keeps the credentials it was born with.
+        #
+        # Reported as `denied`, that state tells an operator who has ALREADY run
+        # the command to run it again. It changes nothing, the gate refuses
+        # again, and there is no reading of the message that gets them out.
+        if docker_group_pending; then
+            printf 'stale\n'
+            return 0
+        fi
         printf 'denied\n'
         return 0
     fi
     printf 'stopped\n'
+}
+
+# docker_group_pending -- 0 when the group file lists this user in `docker` but
+# the CURRENT process does not carry it.
+#
+# `id -nG <user>` re-reads the group database; a bare `id -nG` reports the
+# credentials this process is actually running with. The two disagreeing is the
+# whole signature of "applied, not yet in effect".
+#
+# GUARDED ON `id` BEING PRESENT, and answers "no" when it is not. This library
+# runs with whatever PATH the caller had; claiming the more specific state
+# without the evidence for it would be a confident wrong diagnosis, and the
+# less specific one is still true.
+function docker_group_pending() {
+    command -v id &>/dev/null || return 1
+    local user recorded current
+    user="$(id -un 2>/dev/null)" || return 1
+    [[ -n "$user" ]] || return 1
+    recorded=" $(id -nG "$user" 2>/dev/null) "
+    current=" $(id -nG 2>/dev/null) "
+    [[ "$recorded" == *" docker "* && "$current" != *" docker "* ]]
 }
 
 # docker_access_remedy <state> -- the exact command that fixes it, or "".
@@ -73,6 +111,10 @@ function docker_access_state() {
 function docker_access_remedy() {
     case "$1" in
         denied)  printf 'sudo usermod -aG docker %s\n' "$(id -un)" ;;
+        # NO COMMAND. Nothing run inside this session can give it a group it did
+        # not start with, and offering `usermod` again -- the one command that
+        # looks relevant -- is exactly the loop this state exists to break.
+        stale)   printf '' ;;
         stopped) printf 'sudo systemctl start docker\n' ;;
         *)       printf '' ;;
     esac
@@ -85,6 +127,7 @@ function docker_access_explanation() {
         missing) printf 'Docker is not installed on this machine. Install Docker Engine for your distribution, then run this again.\n' ;;
         stopped) printf 'Docker is installed but its daemon is not answering.\n' ;;
         denied)  printf 'The Docker daemon is running but refuses this user on its socket -- you are not in the "docker" group.\n' ;;
+        stale)   printf 'You ARE in the "docker" group now, but this session started before that was true and cannot pick it up -- a process keeps the groups it was born with. Log out and log back in (or reboot), then run this again. Restarting the editor alone is NOT enough: it is started by the desktop session, which has the same old credentials.\n' ;;
         *)       printf 'The state of Docker on this machine could not be determined.\n' ;;
     esac
 }
