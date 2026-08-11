@@ -251,6 +251,17 @@ message ConfigSnapshot {
   reserved 12;
   reserved "engine_step_cache_enabled";
 
+  // The Bridge Agent URL was removed in memql#3453. The Go Bridge Agent it
+  // pointed at was retired, and the only construction site of the handler that
+  // would have dialled it passed a hardcoded "" for the entire life of the
+  // file -- so the variable was a documented operator knob wired to nothing.
+  // Reserved rather than deleted for the same reason as 12: ConfigSnapshot is
+  // carried between binaries of possibly-different vintages during a rolling
+  // restart, and a renumber that silently reused 60 for a different meaning is
+  // exactly what reserving prevents.
+  reserved 60;
+  reserved "polyphon_bridge_agent_url";
+
   // Database
   string db_dsn = 1;
   int32 db_max_open_conns = 2;
@@ -278,7 +289,6 @@ message ConfigSnapshot {
   bool delegation_enabled = 56;
 
   // Polyphon
-  string polyphon_bridge_agent_url = 60;
   string polyphon_voice_provider = 61;
   string polyphon_openai_asr_model = 62;
   string polyphon_openai_tts_model = 63;

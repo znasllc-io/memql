@@ -2094,7 +2094,6 @@ type ConfigSnapshot struct {
 	AuthEnabled       bool `protobuf:"varint,50,opt,name=auth_enabled,json=authEnabled,proto3" json:"auth_enabled,omitempty"`
 	DelegationEnabled bool `protobuf:"varint,56,opt,name=delegation_enabled,json=delegationEnabled,proto3" json:"delegation_enabled,omitempty"`
 	// Polyphon
-	PolyphonBridgeAgentUrl string `protobuf:"bytes,60,opt,name=polyphon_bridge_agent_url,json=polyphonBridgeAgentUrl,proto3" json:"polyphon_bridge_agent_url,omitempty"`
 	PolyphonVoiceProvider  string `protobuf:"bytes,61,opt,name=polyphon_voice_provider,json=polyphonVoiceProvider,proto3" json:"polyphon_voice_provider,omitempty"`
 	PolyphonOpenaiAsrModel string `protobuf:"bytes,62,opt,name=polyphon_openai_asr_model,json=polyphonOpenaiAsrModel,proto3" json:"polyphon_openai_asr_model,omitempty"`
 	PolyphonOpenaiTtsModel string `protobuf:"bytes,63,opt,name=polyphon_openai_tts_model,json=polyphonOpenaiTtsModel,proto3" json:"polyphon_openai_tts_model,omitempty"`
@@ -2251,13 +2250,6 @@ func (x *ConfigSnapshot) GetDelegationEnabled() bool {
 		return x.DelegationEnabled
 	}
 	return false
-}
-
-func (x *ConfigSnapshot) GetPolyphonBridgeAgentUrl() string {
-	if x != nil {
-		return x.PolyphonBridgeAgentUrl
-	}
-	return ""
 }
 
 func (x *ConfigSnapshot) GetPolyphonVoiceProvider() string {
@@ -2921,7 +2913,7 @@ const file_bus_proto_rawDesc = "" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\"u\n" +
 	"\vEventNotify\x12'\n" +
 	"\x0fsubscription_id\x18\x01 \x01(\tR\x0esubscriptionId\x12=\n" +
-	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xd5\v\n" +
+	"\x05event\x18\x02 \x01(\v2'.znasllc.memql.internal.v1.EventPublishR\x05event\"\xbb\v\n" +
 	"\x0eConfigSnapshot\x12\x15\n" +
 	"\x06db_dsn\x18\x01 \x01(\tR\x05dbDsn\x12)\n" +
 	"\x11db_max_open_conns\x18\x02 \x01(\x05R\x0edbMaxOpenConns\x12)\n" +
@@ -2937,8 +2929,7 @@ const file_bus_proto_rawDesc = "" +
 	"\x10http_public_path\x18  \x01(\tR\x0ehttpPublicPath\x12!\n" +
 	"\fstt_provider\x18( \x01(\tR\vsttProvider\x12!\n" +
 	"\fauth_enabled\x182 \x01(\bR\vauthEnabled\x12-\n" +
-	"\x12delegation_enabled\x188 \x01(\bR\x11delegationEnabled\x129\n" +
-	"\x19polyphon_bridge_agent_url\x18< \x01(\tR\x16polyphonBridgeAgentUrl\x126\n" +
+	"\x12delegation_enabled\x188 \x01(\bR\x11delegationEnabled\x126\n" +
 	"\x17polyphon_voice_provider\x18= \x01(\tR\x15polyphonVoiceProvider\x129\n" +
 	"\x19polyphon_openai_asr_model\x18> \x01(\tR\x16polyphonOpenaiAsrModel\x129\n" +
 	"\x19polyphon_openai_tts_model\x18? \x01(\tR\x16polyphonOpenaiTtsModel\x129\n" +
@@ -2960,7 +2951,7 @@ const file_bus_proto_rawDesc = "" +
 	"\x17cognition_fit_threshold\x18n \x01(\x01R\x15cognitionFitThreshold\x1a?\n" +
 	"\x11FeatureFlagsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\f\x10\rR\x19engine_step_cache_enabled\"R\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\f\x10\rJ\x04\b<\x10=R\x19engine_step_cache_enabledR\x19polyphon_bridge_agent_url\"R\n" +
 	"\fConfigUpdate\x12\x14\n" +
 	"\x05field\x18\x01 \x01(\tR\x05field\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.google.protobuf.ValueR\x05value\"\x82\x02\n" +
