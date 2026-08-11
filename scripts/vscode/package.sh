@@ -116,6 +116,26 @@ function build_binary() {
     binname="memql-lsp"
     [[ "$GOOS_TARGET" == "windows" ]] && binname="memql-lsp.exe"
     echo "INFO: building memql-lsp (GOOS=${GOOS_TARGET} GOARCH=${GOARCH_TARGET}) -> bin/${nodeos}-${nodearch}/${binname}"
+    # ONE PLATFORM PER PACKAGE, so the tree is rebuilt from scratch -- the same
+    # treatment stage_install_tree gives the staged scripts, for the same reason:
+    # bin/ is a BUILD ARTIFACT (it is gitignored), and nothing here ever removes
+    # what a previous run left behind.
+    #
+    # It is not tidiness. This function writes exactly ONE platform directory,
+    # but vsce packages everything under the extension root -- so a binary built
+    # for some other platform on some earlier day stays in the tree and ships in
+    # every VSIX built afterwards. Locally that doubled the archive (20MB -> 40MB)
+    # with a second 45MB binary nothing on the target machine can execute; the
+    # worse half is that it is STALE, built from whatever the checkout was at the
+    # time, and a cross-built package would quietly hand its users that instead of
+    # the binary this run just produced.
+    #
+    # Safe because every caller invokes this script ONCE per package: the CI lane
+    # (ci.yml), `make vscode-package`, and install.sh, which passes at most one
+    # --goos/--goarch pair. There is no flow that accumulates platforms across
+    # runs for a multi-platform VSIX, and if one is ever wanted it needs an
+    # explicit opt-in rather than a directory nobody cleaned.
+    rm -rf "$EXT_DIR/bin"
     mkdir -p "$bindir"
     ( cd "$REPO_ROOT" && GOOS="$GOOS_TARGET" GOARCH="$GOARCH_TARGET" CGO_ENABLED=0 \
         go build -o "$bindir/$binname" ./cmd/memql-lsp )
