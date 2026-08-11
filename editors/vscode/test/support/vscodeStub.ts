@@ -68,6 +68,8 @@ export const recorded = {
   webviews: [] as StubWebviewPanel[],
   /** Every window.showOpenDialog invocation, with the options it was given. */
   openDialogs: [] as Record<string, unknown>[],
+  /** Every terminal created, with what was typed into it (memql#3551). */
+  terminals: [] as { name: string; shown: boolean; sent: { text: string; executed: boolean }[] }[],
 };
 
 /**
@@ -95,6 +97,7 @@ export function resetRecorded(): void {
   recorded.executed.length = 0;
   recorded.webviews.length = 0;
   recorded.openDialogs.length = 0;
+  recorded.terminals.length = 0;
   nextOpenDialogResult = undefined;
 }
 
@@ -390,6 +393,33 @@ export const window = {
   showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
     recorded.infos.push(message);
     return Promise.resolve(undefined);
+  },
+
+  // The privileged-command handoff (memql#3551). The extension spawns every
+  // capability unprivileged, so a step needing root is run by the OPERATOR in
+  // their own terminal -- which makes "was it typed or was it executed" a
+  // property worth being able to assert.
+  createTerminal(options: { name?: string } | string): {
+    show(): void;
+    sendText(text: string, addNewLine?: boolean): void;
+    dispose(): void;
+  } {
+    const entry = {
+      name: typeof options === "string" ? options : (options.name ?? ""),
+      shown: false,
+      sent: [] as { text: string; executed: boolean }[],
+    };
+    recorded.terminals.push(entry);
+    return {
+      show(): void {
+        entry.shown = true;
+      },
+      sendText(text: string, addNewLine?: boolean): void {
+        // VS Code's default is TRUE -- omitting the flag RUNS the command.
+        entry.sent.push({ text, executed: addNewLine !== false });
+      },
+      dispose(): void {},
+    };
   },
 
   // The file picker the key-file field offers (memql#3547). A webview cannot

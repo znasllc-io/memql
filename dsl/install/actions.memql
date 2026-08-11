@@ -60,6 +60,16 @@ action detectMachine {
   capability script(script: "install.detect", ports: args.ports, path: args.path)
 }
 
+// Backend: scripts/install/docker-access.sh. Read-only: it never installs
+// Docker, starts the daemon or edits a group -- the remedy for two of its three
+// failure states needs root, and it names the command instead of acquiring any
+// (memql#3549, memql#3551).
+/// Confirm this user can actually reach the Docker daemon, distinguishing a missing binary from a
+/// stopped daemon from a socket that refuses this user, before any step changes the machine.
+action dockerAccess {
+  capability script(script: "install.dockerAccess")
+}
+
 // Backend: scripts/install/verify-provider-key.sh. The key is passed as a FILE
 // PATH, never as a value: argv is world-readable on a shared machine.
 /// Verify an AI-provider API key is accepted, with an authenticated token-free request, before the

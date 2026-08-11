@@ -56,6 +56,7 @@ function step(over: Partial<StepProgress> = {}): StepProgress {
     state: "pending",
     reason: "",
     exitCode: null,
+    remedy: "",
     log: "",
     guided: false,
     ...over,

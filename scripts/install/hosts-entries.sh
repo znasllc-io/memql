@@ -57,6 +57,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The caller's own --action and the confirm phrase this run required, held for
+# the remedy line the wizard offers when the write needs root (memql#3551).
+_HOSTS_ACTION=""
+_HOSTS_CONFIRM=""
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
@@ -304,6 +308,12 @@ function apply() {
         return 1
     fi
     if [[ ! -w "$path" ]]; then
+        # THE COMMAND, so the wizard can offer to run it (memql#3551). The
+        # extension spawns every capability unprivileged, so this step cannot
+        # elevate itself -- what it can do is name exactly what would work,
+        # with this run's own arguments in it, and let the operator run it in
+        # their own terminal where their sudo prompt belongs.
+        cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --action=$(printf '%q' "$_HOSTS_ACTION") --hosts-file=$(printf '%q' "$path") --confirm=$(printf '%q' "$_HOSTS_CONFIRM")"
         cap_fail 4 "hosts file is not writable: ${path} (re-run with sudo)"
     fi
     # Write THROUGH the existing file so its inode, owner and mode survive --
@@ -324,6 +334,7 @@ function main() {
 
     local action hosts_file hostnames_raw confirm mode expected
     action="$(cap_param action "")"
+    _HOSTS_ACTION="$action"
     hosts_file="$(cap_param hosts-file "$DEFAULT_HOSTS_FILE")"
     hostnames_raw="$(cap_param hostnames "$DEFAULT_HOSTNAMES")"
     IP="$(cap_param ip "$DEFAULT_IP")"
@@ -341,6 +352,7 @@ function main() {
 
     # Refuse BEFORE reading or touching the file: an operator who did not
     # confirm gets a clean exit 3 and an untouched hosts file, always.
+    _HOSTS_CONFIRM="$expected"
     cap_confirm_or_die "$confirm" "$expected"
 
     check_hosts_file "$hosts_file"
