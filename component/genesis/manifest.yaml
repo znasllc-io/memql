@@ -1084,12 +1084,6 @@ variables:
 
   # --- polyphon ---
 
-  - name: MEMQL_POLYPHON_BRIDGE_AGENT_URL
-    component: polyphon
-    scope: node
-    optional: true
-    description: "URL of the external Polyphon bridge agent service."
-
   - name: MEMQL_POLYPHON_OPENAI_ASR_MODEL
     component: polyphon
     scope: node
@@ -2255,12 +2249,6 @@ variables:
     scope: node
     optional: true
     description: "DEPRECATED legacy alias for MEMQL_OPERATOR_APP_PROFILES_DIR; resolved via the boot-time alias shim. Remove after operators migrate."
-
-  - name: POLYPHON_BRIDGE_AGENT_URL
-    component: polyphon
-    scope: node
-    optional: true
-    description: "DEPRECATED legacy alias for MEMQL_POLYPHON_BRIDGE_AGENT_URL; resolved via the boot-time alias shim. Remove after operators migrate."
 
   - name: POLYPHON_LIVEKIT_PUBLIC_URL
     component: voice

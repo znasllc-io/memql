@@ -38,7 +38,7 @@ func (a *App) wirePolyphonEndpoints() {
 		polyphonScoreEng = a.polyphonScoreEngine.(*polyphon.ScoreEngine)
 	}
 
-	handler := polyphonws.NewHandler(polyphonScoreEng, roomProvider, "")
+	handler := polyphonws.NewHandler(polyphonScoreEng, roomProvider)
 
 	// Wire Polyphon dependencies to gRPC server.
 	if a.grpcServer != nil {

@@ -91,11 +91,19 @@ func TestOwnedVarsArePrefixed(t *testing.T) {
 	}
 }
 
-// TestLegacyAliasesCount guards the 90-rule rename map against accidental
-// edits: every legacy alias must map to a distinct MEMQL_ new name.
+// TestLegacyAliasesCount guards the rename map against accidental edits: every
+// legacy alias must map to a distinct MEMQL_ new name.
+//
+// The count went 90 -> 89 in memql#3453, which REMOVED
+// MEMQL_POLYPHON_BRIDGE_AGENT_URL along with the Bridge Agent code that read
+// it. An alias whose target no longer exists is worse than no alias: it keeps
+// a retired name resolvable and tells an operator the variable still means
+// something. Shrinking this number is legitimate only when the target variable
+// is going away too -- a bare decrement with the target still live would be
+// dropping a migration path operators depend on.
 func TestLegacyAliasesCount(t *testing.T) {
-	if len(LegacyAliases) != 90 {
-		t.Fatalf("LegacyAliases has %d entries, want 90 (the Epic 7.3 rename map)", len(LegacyAliases))
+	if len(LegacyAliases) != 89 {
+		t.Fatalf("LegacyAliases has %d entries, want 89 (the Epic 7.3 rename map, minus the memql#3453 removal)", len(LegacyAliases))
 	}
 	seenLegacy := map[string]bool{}
 	for newName, legacy := range LegacyAliases {

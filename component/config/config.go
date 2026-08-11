@@ -95,7 +95,6 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		DelegationEnabled: envBool("MEMQL_DELEGATION_ENABLED"),
 
 		// Polyphon
-		PolyphonBridgeAgentUrl: envStr("MEMQL_POLYPHON_BRIDGE_AGENT_URL"),
 		PolyphonVoiceProvider:  envStr("MEMQL_POLYPHON_VOICE_PROVIDER"),
 		PolyphonOpenaiAsrModel: envStr("MEMQL_POLYPHON_OPENAI_ASR_MODEL"),
 		PolyphonOpenaiTtsModel: envStr("MEMQL_POLYPHON_OPENAI_TTS_MODEL"),

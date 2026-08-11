@@ -4,13 +4,11 @@
 package polyphonws
 
 import (
-	"bytes"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/common"
@@ -21,6 +19,13 @@ import (
 const ComponentName = common.ComponentName("polyphonSession")
 
 // Handler serves Polyphon room token and status endpoints.
+//
+// It once also carried an OUTBOUND call: on every room-token request it fired
+// a best-effort goroutine POSTing to $MEMQL_POLYPHON_BRIDGE_AGENT_URL/join-room
+// so the Bridge Agent would join the LiveKit room. Removed in memql#3453, with
+// no behaviour change -- the sole construction site
+// (app/transport_voice.go) passed a hardcoded "" for that URL from the file's
+// first commit, so the guard never opened and the call never ran.
 //
 // It once also served POST /polyphon/utterance and POST /polyphon/preload,
 // both of which were removed in memql#3531. Those two were registered in
@@ -34,22 +39,19 @@ const ComponentName = common.ComponentName("polyphonSession")
 // (component/grpc/polyphon_handlers.go), which is where a service-to-service
 // call belongs under the gRPC-first policy.
 type Handler struct {
-	scoreEngine    *polyphon.ScoreEngine
-	room           polyphon.RoomProvider
-	bridgeAgentURL string // HTTP base URL of the Bridge Agent (e.g., "http://bridge-agent:50052")
-	logger         *slog.Logger
+	scoreEngine *polyphon.ScoreEngine
+	room        polyphon.RoomProvider
+	logger      *slog.Logger
 }
 
 // NewHandler creates a new Polyphon handler.
 // The score engine and room provider may be nil if Polyphon is not configured,
 // in which case all requests return 503 Service Unavailable.
-// bridgeAgentURL is optional; if set, the handler notifies the Bridge Agent when tokens are generated.
-func NewHandler(scoreEngine *polyphon.ScoreEngine, room polyphon.RoomProvider, bridgeAgentURL string) *Handler {
+func NewHandler(scoreEngine *polyphon.ScoreEngine, room polyphon.RoomProvider) *Handler {
 	return &Handler{
-		scoreEngine:    scoreEngine,
-		room:           room,
-		bridgeAgentURL: strings.TrimRight(bridgeAgentURL, "/"),
-		logger:         logger.New(ComponentName, os.Stdout, slog.LevelInfo),
+		scoreEngine: scoreEngine,
+		room:        room,
+		logger:      logger.New(ComponentName, os.Stdout, slog.LevelInfo),
 	}
 }
 
@@ -129,49 +131,10 @@ func (h *Handler) ServeRoomToken(w http.ResponseWriter, r *http.Request) {
 		"roomName", token.RoomName,
 	)
 
-	// Best-effort: notify Bridge Agent to join the room.
-	if h.bridgeAgentURL != "" {
-		go h.notifyBridgeAgent(req.PartitionId, token.RoomName)
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		h.logger.Error("failed to encode response", "error", err)
 	}
-}
-
-// notifyBridgeAgent sends a best-effort POST to the Bridge Agent so it joins
-// the LiveKit room. If the Bridge Agent is unreachable, the error is logged
-// and the token is still returned to the browser.
-func (h *Handler) notifyBridgeAgent(partitionId, roomName string) {
-	body, _ := json.Marshal(map[string]string{
-		"partitionId": partitionId,
-		"roomName":    roomName,
-	})
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(h.bridgeAgentURL+"/join-room", "application/json", bytes.NewReader(body))
-	if err != nil {
-		h.logger.Debug("polyphon: bridge agent unreachable (non-fatal)",
-			"bridgeAgentURL", h.bridgeAgentURL,
-			"error", err,
-		)
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		h.logger.Warn("polyphon: bridge agent returned error",
-			"status", resp.StatusCode,
-			"partitionId", partitionId,
-		)
-		return
-	}
-
-	h.logger.Info("polyphon: bridge agent notified to join room",
-		"partitionId", partitionId,
-		"roomName", roomName,
-	)
 }
 
 // ServeStatus handles GET /polyphon/status requests.
