@@ -15,6 +15,12 @@ dist-install/
 # Tracking it would create a second one that silently drifts.
 staged/
 
+# The repository LICENSE, copied here by the same script for the same reason:
+# a VSIX carries only files from under the extension directory, and the manifest
+# says "SEE LICENSE IN LICENSE". A tracked second copy would be a second licence
+# text to keep in step with the root one.
+LICENSE
+
 # The repo-root .gitignore ignores package.json / package-lock.json (this is a
 # Go repo); re-include the VS Code extension's manifest + lockfile, which must
 # be tracked.

@@ -197,6 +197,28 @@ function stage_install_tree() {
     echo "INFO: staged $count capability scripts plus their libraries and graph documents"
 }
 
+# stage_license copies the repository's LICENSE beside the manifest.
+#
+# WHY IT IS STAGED RATHER THAN COMMITTED. Same reason as the binary and the
+# scripts tree: a VSIX contains only files from under the extension directory,
+# and the licence this extension ships under lives at the repository root. A
+# committed second copy would be a second licence text to keep in step with the
+# first, and the failure mode of that is a package whose stated terms differ
+# from the project's.
+#
+# IT IS NOT COSMETIC. `editors/vscode/package.json` declares
+# `"license": "SEE LICENSE IN LICENSE"`, so vsce looks for that file, does not
+# find it, and asks "Do you want to continue? [y/N]" -- a BLOCKING PROMPT in
+# the middle of `make vscode-install`. A build step that stops for a keystroke
+# is not one CI or an unattended run can complete, so the missing file was a
+# hang waiting to happen, not just a warning.
+function stage_license() {
+    local src="$REPO_ROOT/LICENSE" dest="$EXT_DIR/LICENSE"
+    [[ -f "$src" ]] || { echo "ERROR: no LICENSE at the repository root; the VSIX would ship without one"; exit 1; }
+    echo "INFO: staging LICENSE -> editors/vscode/LICENSE"
+    cp "$src" "$dest"
+}
+
 # verify_staged_sources proves every shared library a staged script reaches for
 # was actually staged.
 #
@@ -351,6 +373,7 @@ function main() {
     check_prerequisites
     build_binary
     stage_install_tree
+    stage_license
     verify_staged_sources
     build_workspace_deps
     build_extension

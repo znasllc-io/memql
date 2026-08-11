@@ -34,10 +34,6 @@
       "types": "./dist/identityadmin/index.d.ts",
       "import": "./dist/identityadmin/index.js"
     },
-    "./deploy": {
-      "types": "./dist/deploy/index.d.ts",
-      "import": "./dist/deploy/index.js"
-    },
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
       "import": "./dist/realtime/index.js"
