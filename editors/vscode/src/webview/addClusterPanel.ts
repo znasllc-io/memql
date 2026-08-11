@@ -24,6 +24,8 @@
 import { randomBytes } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import * as vscode from "vscode";
 
 import {
@@ -521,6 +523,10 @@ export class AddClusterPanel {
       this.render();
       return;
     }
+    if (type === "browseKeyFile") {
+      void this.browseForKeyFile();
+      return;
+    }
     if (type === "signInAsOwner") {
       void this.signInAsOwner();
     }
@@ -532,6 +538,60 @@ export class AddClusterPanel {
       const uninstallAction = UNINSTALL_ACTIONS.find((known) => known === type);
       if (uninstallAction !== undefined) this.onUninstallAction(uninstallAction);
     }
+  }
+
+  /**
+   * Opens the editor's own file dialog and puts the chosen path in the box
+   * (memql#3547).
+   *
+   * THE DIALOG BELONGS TO THE HOST. A webview runs in an iframe with no
+   * filesystem access at all: it cannot open a native picker, and an
+   * `<input type="file">` would give it a File object with no path -- which is
+   * not something `--key-file` can be handed. So the page posts, the extension
+   * asks, and the answer comes back as a path.
+   *
+   * IT FILLS THE FIELD, IT DOES NOT START ANYTHING. Choosing a file is not
+   * consent to install; the operator still reads the form and presses Start.
+   *
+   * `defaultUri` opens where the answer probably is: the directory of whatever
+   * is already typed, else `~/.memql`, which is where the wizard's own hint
+   * tells people to put the key. `canSelectMany: false` because the flag takes
+   * one path, and `canSelectFolders: false` because a directory is not a key.
+   *
+   * No filter. Key files carry every extension and none -- `.txt`, `.key`,
+   * bare `key` -- and a filter that guessed would hide the file the operator
+   * came here to choose.
+   */
+  private async browseForKeyFile(): Promise<void> {
+    const chosen = await vscode.window.showOpenDialog({
+      canSelectMany: false,
+      canSelectFiles: true,
+      canSelectFolders: false,
+      openLabel: "Use this key file",
+      title: "Select the file holding your AI provider key",
+      defaultUri: vscode.Uri.file(this.keyDialogStartDir()),
+    });
+    // Cancelled. The form is untouched, which is the whole of what "cancel"
+    // should mean here.
+    if (chosen === undefined || chosen.length === 0) return;
+    if (this.disposed) return;
+
+    const picked = chosen[0]!.fsPath;
+    this.state.setInput("providerKeyFile", picked);
+    // A path that came out of the picker exists by construction, so any
+    // complaint left over from something typed earlier is now stale.
+    const problem = await this.keyFileProblem(picked);
+    if (problem !== "") this.state.noteFieldProblem("providerKeyFile", problem);
+    if (!this.disposed) this.render();
+  }
+
+  /** Where the file dialog opens. See browseForKeyFile. */
+  private keyDialogStartDir(): string {
+    const typed = this.state.inputs.providerKeyFile.trim();
+    if (typed !== "" && !looksLikeProviderKey(typed) && path.isAbsolute(typed)) {
+      return path.dirname(typed);
+    }
+    return path.join(os.homedir(), ".memql");
   }
 
   /**
@@ -1114,6 +1174,11 @@ ${viewKitStyles}
                  color: var(--vscode-input-foreground);
                  background: var(--vscode-input-background);
                  border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+  /* The box and its Browse button read as one control (memql#3547): the button
+     is an alternative way to fill the field beside it, not a separate action. */
+  .control-row { display: flex; gap: 6px; align-items: stretch; }
+  .control-row input { flex: 1 1 auto; min-width: 0; }
+  button.browse { flex: 0 0 auto; white-space: nowrap; }
   .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
   .error { color: var(--vscode-inputValidation-errorForeground,
                    var(--vscode-editorError-foreground)); margin-top: 3px; }
@@ -1341,9 +1406,29 @@ ${cards}`;
         const error = errors.find((e) => e.field === field);
         const hint = FIELD_HINTS[field];
         const choices = CHOICE_FIELDS[field];
+        // THE ONE FIELD THAT NAMES A FILE GETS A FILE PICKER (memql#3547).
+        //
+        // Typing a path is the error-prone way to name a file, and this is the
+        // path an operator is least able to check: it holds a secret, so
+        // nothing on this page can echo its contents back as confirmation. The
+        // picker removes the whole class -- what it returns exists, is a file,
+        // and is spelled the way the filesystem spells it.
+        //
+        // Typing still works, and both routes end in the same validation. The
+        // dialog is the extension host's (`vscode.window.showOpenDialog`);
+        // a webview cannot open one itself, which is why this is a button that
+        // posts a message rather than an `<input type="file">` -- and an
+        // `<input type="file">` would hand back a File object with no path,
+        // which is not what a `--key-file` flag can be given.
+        const browse =
+          field === "providerKeyFile"
+            ? `<button class="secondary browse" type="button" data-act="browseKeyFile">Browse...</button>`
+            : "";
         const control =
           choices === undefined
-            ? `<input id="f-${field}" data-field="${field}" value="${escapeHtml(values[field])}">`
+            ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
+                values[field],
+              )}">${browse}</div>`
             : `<select id="f-${field}" data-field="${field}">${choices
                 .map(
                   (choice) =>
