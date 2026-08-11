@@ -162,6 +162,16 @@ export interface StubWebviewPanel {
   title: string;
   /** The last HTML the extension assigned. Empty before the first render. */
   html: string;
+  /**
+   * How many times the extension has ASSIGNED that html.
+   *
+   * Not a render statistic. Assigning `webview.html` replaces the whole
+   * document, which destroys the DOM -- and with it the focused element, the
+   * caret and any selection. So this count is the only host-side evidence of a
+   * property the operator experiences directly: whether the page they are
+   * typing into is still the page they started typing into (memql#3538).
+   */
+  renders: number;
   /** Posts a message from the PAGE to the extension, as a click would. */
   send(message: unknown): void;
   /** How many times the extension asked to bring this panel forward. */
@@ -194,6 +204,7 @@ function createStubWebviewPanel(viewType: string, title: string): {
     viewType,
     title,
     html: '',
+    renders: 0,
     revealCount: 0,
     disposed: false,
     send(message: unknown): void {
@@ -213,6 +224,7 @@ function createStubWebviewPanel(viewType: string, title: string): {
       },
       set html(value: string) {
         handle.html = value;
+        handle.renders += 1;
       },
       onDidReceiveMessage(handler: (message: unknown) => void): StubDisposable {
         inbound.push(handler);
