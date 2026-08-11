@@ -797,9 +797,8 @@ func PublicPaths() []string {
 	// identity's public discovery documents (cockpit authorize + RFC 8414)
 	paths = append(paths, IdentityDiscoveryPaths()...)
 	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
-	// Polyphon Bridge Agent internal endpoints (service-to-service, no user auth)
-	paths = append(paths, PolyphonUtterancePaths()...)
-	paths = append(paths, PolyphonPreloadPaths()...)
+	// The two Polyphon Bridge Agent endpoints that used to be appended here
+	// were removed in memql#3531 -- see the removal note below PolyphonStatusPaths.
 	// AI HTTP endpoints (service-to-service, e.g., frontend -> memQL)
 	paths = append(paths, AIHTTPPaths()...)
 	// Concept metadata endpoint (public, no auth required)
@@ -861,21 +860,21 @@ func PolyphonStatusPaths() []string {
 	return pathsWithBase("/polyphon/status")
 }
 
-// PolyphonUtterancePaths returns paths for the Bridge Agent utterance endpoint.
-// This is an internal endpoint that bypasses auth for service-to-service communication.
-func PolyphonUtterancePaths() []string {
-	return pathsWithBase("/polyphon/utterance")
-}
-
-// PolyphonPreloadPaths returns paths for the Bridge Agent prewarm
-// endpoint. Bridge fires this when the user starts speaking so the
-// cognition node warms its per-space caches in parallel with the
-// ASR session, knocking ~50-150ms off handlerOffsetMs on the
-// downstream utterance handler. Public path (no auth) for the same
-// service-to-service reasons as /polyphon/utterance.
-func PolyphonPreloadPaths() []string {
-	return pathsWithBase("/polyphon/preload")
-}
+// PolyphonUtterancePaths and PolyphonPreloadPaths used to live here, returning
+// /polyphon/utterance and /polyphon/preload. Both were removed in memql#3531.
+//
+// They were declared in PublicPaths(), the strongest of the three surface lists,
+// so they bypassed the identity verifier -- and the utterance handler executed a
+// graph insert under a system actor from caller-supplied partitionId /
+// participantId / text. The bypass was justified in the handler by the Bridge
+// Agent being "a trusted service running in the same Docker network": the Bridge
+// Agent was retired, and the Compose network with it (memql#2068 / #2088), which
+// left an unauthenticated write on the externally-routed bff serving nobody.
+//
+// Do not reintroduce them. Polyphon utterance insertion is PolyphonUtteranceMsg
+// on MemqlService.Stream, which is authenticated and is where the gRPC-first
+// policy puts a service-to-service call. /polyphon/room-token and
+// /polyphon/status are unaffected and stay authenticated.
 
 // AIHTTPPaths used to return the legacy /si/* HTTP endpoints. All of
 // them have been retired in favour of MemqlService.Stream with

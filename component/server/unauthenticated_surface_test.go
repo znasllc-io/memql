@@ -236,8 +236,10 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 	// make the whole check pass vacuously.
 	//
 	// Not exhaustive over the declarations, and deliberately not claiming to
-	// be: PublicPaths() also carries the /auth/*, /polyphon/*, /api/concepts,
-	// /si/* and /.well-known/* entries. These are the ones whose failure mode
+	// be: PublicPaths() also carries the /auth/*, /api/concepts,
+	// /si/* and /.well-known/* entries. (It carried /polyphon/utterance and
+	// /polyphon/preload too until memql#3531 removed both; no /polyphon path
+	// is public now.) These are the ones whose failure mode
 	// differs; the unit tests below pin the two guards directly, which is what
 	// makes exhaustiveness here unnecessary rather than merely unclaimed.
 	bases := []string{
