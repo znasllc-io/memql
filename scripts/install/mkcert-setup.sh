@@ -100,6 +100,11 @@ cap_spec_param "allow-missing-certutil" "proceed without browser (NSS) trust on 
 readonly DEFAULT_HOSTNAMES="$MEMQL_LOCAL_TLS_HOSTNAMES"
 readonly CONFIRM_INSTALL_CA="install-memql-ca"
 
+# The provenance marker, beside the key material it describes. Shared with
+# remove-artifact.sh, which reads it to decide whether the CA is memQL's to
+# take (memql#3576).
+readonly MEMQL_CA_MARKER=".memql-created"
+
 # Flags this run was given that a remedy line has to repeat verbatim, so the
 # command handed to the operator refuses or succeeds for the same reasons the
 # run did. Filled in by main.
@@ -361,10 +366,41 @@ function main() {
     # a CA on this machine? The answer decides whether this run CREATES shared
     # machine state (gated on the phrase) or merely completes trust for one that
     # is already there.
-    local ca_pre_existing=false ca_installed=false
+    # WHO CREATED THIS CA -- asked of the CA itself, not of a receipt
+    # (memql#3576).
+    #
+    # The verdict used to be "is rootCA.pem here", recorded once into the
+    # install receipt. That receipt is DELETED by an uninstall, so anything the
+    # uninstall refused to remove -- which is exactly the CA it could not prove
+    # was ours -- came back on the next install as "already here", truthfully,
+    # forever. A ratchet: one run that could not tell, and the answer is locked
+    # in because the uninstall that would have cleared it is the thing being
+    # blocked.
+    #
+    # A marker beside the key material has none of that. It is written by the
+    # run that creates the CA, it survives every receipt, and it disappears with
+    # the CA it describes. The question "did memQL create this" is a fact about
+    # the artifact, so it is stored with the artifact.
+    # TWO DIFFERENT QUESTIONS, and conflating them made a re-run claim it had
+    # installed a CA that was already there:
+    #
+    #   ca_on_disk      -- was there a CA before THIS run? decides `changed`
+    #                      and caInstalled.
+    #   ca_pre_existing -- was it here before MEMQL ever touched this machine?
+    #                      decides whether an uninstall may take it.
+    #
+    # A CA memQL created on an earlier run is on disk (so this run installs
+    # nothing) and NOT pre-existing (so it is still ours to remove).
+    local ca_on_disk=false ca_pre_existing=false ca_installed=false
     if [[ -f "${caroot}/rootCA.pem" ]]; then
-        ca_pre_existing=true
-        cap_info "root CA already present at ${caroot}/rootCA.pem -- it will not be regenerated."
+        ca_on_disk=true
+        if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
+            cap_info "root CA at ${caroot} was created by memQL -- reusing it."
+        else
+            ca_pre_existing=true
+            cap_info "root CA already present at ${caroot}/rootCA.pem -- it will not be regenerated."
+            cap_info "  (no ${MEMQL_CA_MARKER}: memQL did not create it, so an uninstall will leave it)"
+        fi
     else
         cap_confirm_or_die "$confirm" "$CONFIRM_INSTALL_CA"
     fi
@@ -377,9 +413,14 @@ function main() {
     fi
 
     ensure_ca_trusted "$bin" "$caroot" "$cert" "$key" "$CONFIRM_INSTALL_CA"
-    if [[ "$ca_pre_existing" != "true" ]]; then
+    if [[ "$ca_on_disk" != "true" ]]; then
         ca_installed=true
         cap_changed
+        # Stamped AFTER the CA exists, so a run that died creating one leaves no
+        # claim on a CA it did not finish making.
+        if [[ -f "${caroot}/rootCA.pem" && ! -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
+            printf 'memQL created this certificate authority. Removing this file makes an\nuninstall leave the CA in place.\n' > "${caroot}/${MEMQL_CA_MARKER}" || true
+        fi
     fi
 
     local cert_issued=false

@@ -769,3 +769,78 @@ func TestMkcertTestsAlwaysUseTheStubbedEnvironment(t *testing.T) {
 			"go through the stubbed PATH and the temp CAROOT, never the real trust store", n)
 	}
 }
+
+//=============================================================================
+// PROVENANCE: who created this CA (memql#3576)
+//=============================================================================
+
+// caMarker is the file mkcert-setup.sh writes beside key material it created.
+const caMarker = ".memql-created"
+
+// The verdict used to be "is rootCA.pem here", recorded once into a receipt an
+// uninstall then DELETES -- so a CA the uninstall refused to remove came back
+// on the next install as "already here", truthfully, forever. A marker beside
+// the key material has none of that: written by the run that creates it,
+// survives every receipt, and disappears with the CA it describes.
+func TestMkcertStampsProvenanceOnACAItCreates(t *testing.T) {
+	e := newMkcertEnv(t)
+
+	env, code, out := e.run(t)
+	if code != 0 || !env.OK {
+		t.Fatalf("run failed (exit %d): %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(e.caroot, caMarker)); err != nil {
+		t.Fatalf("no provenance marker after creating a CA: %v", err)
+	}
+	if mkcertBool(t, env, "caPreExisting") {
+		t.Errorf("caPreExisting = true for a CA this run created: %s", out)
+	}
+}
+
+// A CA memQL created stays memQL's across runs -- which is the whole point.
+// Without the marker this second run would see a file on disk and report it as
+// the operator's, and nothing could ever remove it again.
+func TestMkcertRecognisesItsOwnCAOnASecondRun(t *testing.T) {
+	e := newMkcertEnv(t)
+	if _, code, out := e.run(t); code != 0 {
+		t.Fatalf("first run: exit %d: %s", code, out)
+	}
+
+	env, code, out := e.run(t, "--force")
+	if code != 0 || !env.OK {
+		t.Fatalf("second run failed (exit %d): %s", code, out)
+	}
+	if mkcertBool(t, env, "caPreExisting") {
+		t.Errorf("a CA memQL created was reported as pre-existing on the next run -- "+
+			"that is the ratchet: it can never be removed again: %s", out)
+	}
+}
+
+// The conservative half, unchanged: a CA that was already here carries no
+// marker and is still reported as the operator's.
+func TestMkcertLeavesAnUnmarkedCAAsTheOperatorsOwn(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.seedCA(t) // planted by hand: no marker
+	e.confirm = ""
+
+	env, code, out := e.run(t)
+	if code != 0 || !env.OK {
+		t.Fatalf("run failed (exit %d): %s", code, out)
+	}
+	if !mkcertBool(t, env, "caPreExisting") {
+		t.Errorf("an unmarked CA must stay the operator's: %s", out)
+	}
+}
+
+// A run that dies creating a CA must leave no claim on one it did not finish.
+func TestMkcertDoesNotStampWhenCreationFails(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.extra = append(e.extra, "STUB_FAIL_INSTALL=1")
+
+	if _, code, _ := e.run(t); code != 4 {
+		t.Fatalf("exit %d, want 4", code)
+	}
+	if _, err := os.Stat(filepath.Join(e.caroot, caMarker)); err == nil {
+		t.Errorf("a failed run claimed a CA it never finished creating")
+	}
+}

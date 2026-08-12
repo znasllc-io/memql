@@ -45,6 +45,7 @@ import {
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, type RunScript } from "./runner.js";
 import {
+  DEFAULT_CAROOT_DIR,
   DEFAULT_IMAGE_REGISTRY,
   DEFAULT_REGISTRATION_MODE,
   DEFAULT_STACK_TAG,
@@ -233,6 +234,14 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // tags do not. See imageTagFor.
           "image-tag": imageTagFor(opts.tag || DEFAULT_STACK_TAG),
         });
+        break;
+      case "localCA":
+        // PINNED, not inherited (memql#3576). mkcert reads CAROOT out of
+        // XDG_DATA_HOME, which snapd points at a revision-scoped directory
+        // for a snap-packaged editor -- so the CA landed somewhere the
+        // operator's own mkcert would never look, under a path that moves on
+        // the next refresh.
+        params = present({ caroot: path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR) });
         break;
       case "providerKey":
         params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });
