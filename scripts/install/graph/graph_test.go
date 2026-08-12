@@ -32,6 +32,7 @@
 package graph
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -92,11 +93,11 @@ func TestEveryMutatingInstallStepIsAccountedFor(t *testing.T) {
 	in, _ := bothGraphs(t)
 	for i := range in.Steps {
 		s := &in.Steps[i]
-		if s.ReadOnly || s.Receipt != "" || s.ContainedBy != "" {
+		if s.ReadOnly || s.Receipt != "" || s.ContainedBy != "" || s.Retained {
 			continue
 		}
-		t.Errorf("install step %q changes the machine but declares neither a receipt nor a containedBy -- "+
-			"say where this change gets taken back", s.ID)
+		t.Errorf("install step %q changes the machine but declares none of receipt, containedBy or "+
+			"retained -- say where this change gets taken back, or say that it is deliberately kept", s.ID)
 	}
 }
 
@@ -431,4 +432,102 @@ func sortedKeys(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// retained is the third answer to "say where this change gets taken back", and
+// the one that must not become a way around the question. It is only honest
+// with a reason attached, and only for a step that really does change something
+// -- so the loader refuses it bare, refuses it beside a receipt, and refuses it
+// on a readOnly step (memql#3566).
+func TestRetainedMustBeArgued(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		step map[string]any
+		want string
+	}{
+		{
+			name: "no reason",
+			step: map[string]any{"retained": true},
+			want: "retainedReason",
+		},
+		{
+			name: "a reason without the flag",
+			step: map[string]any{"retainedReason": "because"},
+			want: "not retained",
+		},
+		{
+			name: "retained and reversible at once",
+			step: map[string]any{
+				"retained": true, "retainedReason": "because",
+				"receipt": "binary", "preExistingPath": "none",
+			},
+			want: "kept or it is taken back",
+		},
+		{
+			name: "retained but changes nothing",
+			step: map[string]any{"retained": true, "retainedReason": "because", "readOnly": true},
+			want: "nothing to keep",
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			step := map[string]any{
+				"id": "a", "script": "install.detect", "description": "d",
+				"elevation": "none", "verify": map[string]any{"kind": "resultTrue", "field": "result.ok"},
+			}
+			for k, v := range tc.step {
+				step[k] = v
+			}
+			_, err := Load([]byte(mustJSON(map[string]any{
+				"name": "install", "kind": "install", "description": "d",
+				"steps": []any{step},
+			})), "test.json")
+			if err == nil {
+				t.Fatalf("loaded a document that should have been refused")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q does not mention %q", err.Error(), tc.want)
+			}
+		})
+	}
+}
+
+// The operator is being ASKED whether to keep a shared tool. They cannot answer
+// without being told what else it is for.
+func TestSharedMustSayWhatElseItIsFor(t *testing.T) {
+	_, err := Load([]byte(mustJSON(map[string]any{
+		"name": "uninstall", "kind": "uninstall", "description": "d",
+		"steps": []any{map[string]any{
+			"id": "a", "script": "install.removeArtifact", "description": "d",
+			"reverses": "toolK3d", "elevation": "none", "shared": true,
+			"verify": map[string]any{"kind": "resultTrue", "field": "result.removed"},
+		}},
+	})), "test.json")
+	if err == nil || !strings.Contains(err.Error(), "sharedReason") {
+		t.Errorf("a shared step with no reason should be refused; got %v", err)
+	}
+}
+
+// Each flag belongs to one kind of graph. Crossing them is a document that
+// means nothing, not a document with a harmless extra field.
+func TestRetainedAndSharedBelongToTheirOwnGraphs(t *testing.T) {
+	_, err := Load([]byte(mustJSON(map[string]any{
+		"name": "install", "kind": "install", "description": "d",
+		"steps": []any{map[string]any{
+			"id": "a", "script": "install.detect", "description": "d",
+			"readOnly": true, "elevation": "none", "shared": true, "sharedReason": "r",
+			"verify": map[string]any{"kind": "scriptOk"},
+		}},
+	})), "test.json")
+	if err == nil || !strings.Contains(err.Error(), "shared") {
+		t.Errorf("an install step should not be able to declare shared; got %v", err)
+	}
+}
+
+func mustJSON(v any) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
