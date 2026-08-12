@@ -36,7 +36,7 @@ import {
   runUninstall,
   type SessionOptions,
 } from "../src/install/session.js";
-import { DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
+import { DEFAULT_IMAGE_REGISTRY, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import type { ExecEvent } from "../src/install/executor.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -690,5 +690,54 @@ test("the root a packaged run passes is NOT the script's own parent", async () =
   if (cluster.action === "run") {
     assert.ok(!cluster.params["repo-root"].includes("staged"));
     assert.ok(cluster.params["repo-root"].endsWith(".memql/src"));
+  }
+});
+
+// -----------------------------------------------------------------------------
+// where the node images come from (memql#3572)
+// -----------------------------------------------------------------------------
+
+test("clusterUp is told to pull published images, not locally built ones", async () => {
+  // The local overlay renames every node image to `memql-<node>:local`, which
+  // exists only after a developer has built and imported it. An install has
+  // built nothing, so without this every pod lands in ImagePullBackOff -- with
+  // the cluster otherwise healthy, which is what made it hard to see.
+  const plan = installPlan(options());
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  if (decision.action === "run") {
+    assert.equal(decision.params["image-registry"], DEFAULT_IMAGE_REGISTRY);
+    // THE SAME RELEASE as the manifests. Pinning one and floating the other
+    // would run this version's images against another version's deploy tree.
+    assert.equal(decision.params["image-tag"], DEFAULT_STACK_TAG);
+  }
+});
+
+test("an explicit tag moves the images with it", async () => {
+  const plan = installPlan(options({ tag: "v9.9.9" }));
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  });
+  if (decision.action === "run") {
+    assert.equal(decision.params["image-tag"], "v9.9.9");
   }
 });

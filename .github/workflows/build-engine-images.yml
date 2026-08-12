@@ -42,10 +42,20 @@ on:
 permissions:
   id-token: write # mint the OIDC token for azure/login
   contents: read
+  packages: write # push the same images to GHCR (memql#3572)
 
 env:
   ACR_NAME: acrmemql
   ACR_LOGIN_SERVER: acrmemql.azurecr.io
+  # GHCR carries the SAME images under a public name, because a local install
+  # has to be able to pull them (memql#3572). ACR is private and reachable only
+  # by the deployment that owns it; an operator installing a local cluster has
+  # no Azure credentials and no reason to acquire any. The alternative was
+  # building all eight node types on their machine at install time.
+  #
+  # One build, two tags: the image is identical, so there is no second thing to
+  # keep in step and no way for the two registries to disagree.
+  GHCR_LOGIN_SERVER: ghcr.io/znasllc-io
 
 jobs:
   build:
@@ -120,6 +130,13 @@ jobs:
       - name: ACR login
         run: az acr login --name "$ACR_NAME"
 
+      - name: GHCR login
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Immutability guard
         if: ${{ !inputs.allow_overwrite }}
         run: |
@@ -146,7 +163,12 @@ jobs:
             BUILD_TAGS=${{ matrix.node }}
             CGO_ENABLED=${{ matrix.cgo }}
             PORTAL_DIST_STAGE=${{ matrix.portal }}
-          tags: ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
+            ${{ env.GHCR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/znasllc-io/memql
+            org.opencontainers.image.version=${{ inputs.version }}
           cache-from: type=gha,scope=memql-${{ matrix.node }}
           cache-to: type=gha,mode=max,scope=memql-${{ matrix.node }}
 
@@ -156,5 +178,6 @@ jobs:
             echo "### memql-${{ matrix.node }}:${{ inputs.version }}"
             echo '```'
             echo "${ACR_LOGIN_SERVER}/memql-${{ matrix.node }}@${{ steps.build.outputs.digest }}"
+            echo "${GHCR_LOGIN_SERVER}/memql-${{ matrix.node }}:${{ inputs.version }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
