@@ -382,3 +382,56 @@ func TestSeedSecretsForwardsTheIssuersOwnReason(t *testing.T) {
 		t.Errorf("the issuer's own message did not reach the operator:\n%s", e.lastStderr)
 	}
 }
+
+// The internal CA is what identity serves TLS with and what every other node
+// mounts to trust it. Without those two secrets each of them stalls in
+// ContainerCreating on a FailedMount -- forever, since nothing retries a
+// missing Secret into existence.
+//
+// This used to WARN and carry on, so `make secrets` succeeded, k3d.up reported
+// the cluster up, the front door answered (traefik terminates TLS at the
+// ingress with or without a backend), and the install ran two more steps before
+// anything noticed. A skip whose documented consequence is a cluster that can
+// never start is not a skip (memql#3570).
+func TestSeedSecretsRefusesWithoutTheInternalCAGenerator(t *testing.T) {
+	e := newFrontDoorEnv(t)
+	e.seedCA(t)
+	writeFrontDoorPair(t, e.home)
+
+	// A repo root with no deploy/ tree -- which is exactly what a packaged
+	// extension's staged copy is: scripts/ and nothing else.
+	res, _, code := e.run(t, "--repo-root="+t.TempDir())
+	if code != 4 {
+		t.Errorf("exit %d, want 4 -- a cluster that can never start must not be reported as seeded", code)
+	}
+	// The message is in the ENVELOPE, which is where cap_fail writes it.
+	if res.Error == nil || !strings.Contains(res.Error.Message, "ContainerCreating") {
+		t.Errorf("the message should say what happens without the CA: %+v", res.Error)
+	}
+}
+
+// The generator lives under deploy/, which only the CHECKOUT has -- so the root
+// has to be the one the caller passes, not the one this script infers from its
+// own location. Inferring it is what put the staged tree in that slot.
+func TestSeedSecretsFindsTheGeneratorUnderTheGivenRoot(t *testing.T) {
+	e := newFrontDoorEnv(t)
+	e.seedCA(t)
+	writeFrontDoorPair(t, e.home)
+
+	root := t.TempDir()
+	gen := filepath.Join(root, "deploy", "k8s", "base", "tls", "gen-internal-ca.sh")
+	if err := os.MkdirAll(filepath.Dir(gen), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(gen, []byte("#!/usr/bin/env bash\nprintf 'generated\\n' >&2\n"), 0o755); err != nil {
+		t.Fatalf("write generator: %v", err)
+	}
+
+	_, _, code := e.run(t, "--repo-root="+root)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, e.lastStderr)
+	}
+	if !strings.Contains(e.lastStderr, "generated") {
+		t.Errorf("the generator under --repo-root was not run:\n%s", e.lastStderr)
+	}
+}

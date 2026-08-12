@@ -607,9 +607,15 @@ function seed_internal_ca() {
     # k3d-secrets is safe.
     local gen="${REPO_ROOT}/deploy/k8s/base/tls/gen-internal-ca.sh"
     if [ ! -f "$gen" ]; then
-        warn "internal CA generator not found at $gen; skipping."
-        warn "  identity TLS + memql-ca will be missing; nodes will FailedMount."
-        return
+        # A HARD FAILURE, not a warning (memql#3570). The comment above already
+        # says what happens without these two secrets -- every node that mounts
+        # memql-ca stalls in ContainerCreating -- and the code then warned and
+        # carried on. So `make secrets` succeeded, k3d.up reported the cluster
+        # up, the front door answered (traefik terminates TLS at the ingress,
+        # with or without a backend), and the install ran three more steps
+        # before anything noticed. A skip whose documented consequence is a
+        # cluster that can never start is not a skip.
+        cap_fail 4 "the internal CA generator is not at ${gen}, so identity-tls and memql-ca cannot be created -- and every node that mounts memql-ca would stall in ContainerCreating forever. Point --repo-root at a memQL checkout (the installer's is ~/.memql/src)."
     fi
     # Already present? Leave them be (preserves a manually-rotated CA).
     if kubectl get secret memql-ca identity-tls -n "$NAMESPACE" &>/dev/null; then

@@ -197,7 +197,7 @@
       "preExistingPath": "!result.clusterCreated",
       "verify": {
         "kind": "resultTrue",
-        "field": "result.argocdReady"
+        "field": "result.workloadsReady"
       }
     },
     {

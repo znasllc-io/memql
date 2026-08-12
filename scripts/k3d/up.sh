@@ -113,6 +113,7 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # Outcome tracking (result envelope + idempotency reporting).
 CLUSTER_CREATED=false
 ARGOCD_READY=false
+WORKLOADS_READY=false
 SECRETS_SEEDED=false
 
 #=============================================================================
@@ -293,6 +294,52 @@ function install_argocd() {
     wait_for_argocd
 }
 
+# wait_for_workloads -- the memQL Deployments, not just the thing that applies
+# them (memql#3570).
+#
+# WHY THIS EXISTS. ArgoCD being ready means the RECONCILER is up. It says
+# nothing about whether the workloads it reconciled ever started, and the
+# install trusted it: with the internal CA secrets missing, every node sat in
+# ContainerCreating on a FailedMount while k3d.up reported the cluster up,
+# `verify-frontdoor` passed (traefik terminates TLS at the ingress with or
+# without a backend), and the first step that actually needed a running pod --
+# `magicLink`, two steps later -- was left holding a failure it did not cause.
+#
+# A bring-up that reports success while nothing can start is worse than one
+# that fails: it sends the operator looking in the wrong place. So the result
+# now carries workloadsReady, and the install graph verifies it.
+#
+# NOT FATAL HERE. It records the verdict and lets the graph's verify decide, so
+# `make up` on a developer machine still prints its summary and leaves them
+# with a cluster to inspect rather than an abort in the middle of one.
+function wait_for_workloads() {
+    local deadline="${MEMQL_K3D_WORKLOAD_TIMEOUT:-300s}" names
+    info "Waiting up to ${deadline} for the memQL workloads to become Available..."
+
+    names="$(kubectl get deployments -n "$NAMESPACE" -o name 2>/dev/null || true)"
+    if [[ -z "$names" ]]; then
+        warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
+        WORKLOADS_READY=false
+        return 0
+    fi
+
+    # shellcheck disable=SC2086
+    if kubectl wait --for=condition=Available --timeout="$deadline" \
+        -n "$NAMESPACE" $names >&2; then
+        info "every memQL workload is Available."
+        WORKLOADS_READY=true
+        return 0
+    fi
+
+    WORKLOADS_READY=false
+    warn "not every workload became Available within ${deadline}."
+    # The REASON, on stderr, where the operator is already looking. A pod stuck
+    # on a missing Secret and a pod that cannot pull its image are different
+    # problems with the same symptom, and the difference is in here.
+    kubectl get pods -n "$NAMESPACE" >&2 || true
+    kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
+}
+
 # Wait for ArgoCD to become ready. argocd-server is the gate, but it depends on
 # argocd-repo-server + argocd-redis, and on a fresh cluster every component
 # pulls its image concurrently -- so `rollout status` can legitimately need
@@ -445,7 +492,15 @@ function seed_secrets() {
     fi
 
     info "Running scripts/k3d/seed-secrets.sh..."
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" >&2
+    # --repo-root TRAVELS (memql#3570). seed-secrets.sh reads
+    # deploy/k8s/base/tls/gen-internal-ca.sh out of the repository, and defaults
+    # its own root to two levels above ITSELF. Run from a packaged extension
+    # that is the STAGED tree, which carries scripts/ and nothing else -- so the
+    # generator was not found, the internal CA was never seeded, and every node
+    # that mounts memql-ca stalled in ContainerCreating forever while the
+    # install reported success. memql#3491 threaded this value into k3d.up and
+    # stopped there; it has to reach the script that actually reads deploy/.
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" --repo-root="${REPO_ROOT}" >&2
     SECRETS_SEEDED=true
 }
 
@@ -500,7 +555,7 @@ function gate_voice_lane_post_sync() {
             return 0
         fi
     done
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --gate-voice-lane-only >&2 || true
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --repo-root="${REPO_ROOT}" --gate-voice-lane-only >&2 || true
 }
 
 # require_checkout <dir> -- refuse a root that is not a real memQL checkout.
@@ -598,6 +653,7 @@ function main() {
 
     seed_repo_credential
     apply_argocd_app
+    wait_for_workloads
     gate_voice_lane_post_sync
     print_summary
 
@@ -608,6 +664,7 @@ function main() {
     cap_result_set_raw agents         "$K3D_AGENTS"
     cap_result_set_raw clusterCreated "$CLUSTER_CREATED"
     cap_result_set_raw argocdReady    "$ARGOCD_READY"
+    cap_result_set_raw workloadsReady "$WORKLOADS_READY"
     cap_result_set_raw secretsSeeded  "$SECRETS_SEEDED"
     cap_ok
 }

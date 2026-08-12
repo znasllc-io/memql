@@ -95,8 +95,33 @@ function check_prerequisites() {
 # Fills _ML_LOGS. Assigns a global rather than echoing so a cap_fail here is
 # never swallowed by a "$(...)" subshell.
 _ML_LOGS=""
+
+# wait_for_target <context> <namespace> <target>
+#
+# `kubectl logs deploy/identity` on a Deployment whose pod has not started
+# answers `BadRequest: container "identity" ... is waiting to start:
+# ContainerCreating` -- a failure that says nothing about magic links and sends
+# the operator to the wrong place (memql#3570). The step ran the moment its
+# dependency verified, which on a fresh cluster is well before identity is up.
+#
+# Only Deployments can be waited on this way, so a bare pod name skips the wait
+# and takes its chances exactly as before.
+function wait_for_target() {
+    local ctx="$1" ns="$2" target="$3" deadline="${MEMQL_MAGIC_LINK_WAIT:-180s}"
+    case "$target" in
+        deploy/*|deployment/*|deployments/*) ;;
+        *) return 0 ;;
+    esac
+    cap_step "waiting up to ${deadline} for ${target} to be Available"
+    if ! kubectl --context="$ctx" --namespace="$ns" wait \
+        --for=condition=Available --timeout="$deadline" "$target" >&2; then
+        cap_fail 5 "${target} did not become Available within ${deadline}, so it has written no logs to read a magic link out of. Check: kubectl -n ${ns} get pods"
+    fi
+}
+
 function fetch_logs() {
     local ctx="$1" ns="$2" target="$3" since="$4" tail="$5" rc=0
+    wait_for_target "$ctx" "$ns" "$target"
     cap_step "kubectl --context=${ctx} -n ${ns} logs ${target} --since=${since}"
     _ML_LOGS="$(kubectl --context="$ctx" --namespace="$ns" logs "$target" \
                     --since="$since" --tail="$tail" 2>&1)" || rc=$?
