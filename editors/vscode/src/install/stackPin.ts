@@ -30,6 +30,11 @@
 // one that reached the network to try would fail offline for a reason that has
 // nothing to do with the change under test.
 //
+// BUMPED TO v0.16.1 (memql#3580). v0.16.0's local overlay leaves genesis
+// autoload on, and the envelope it then demands is authored by hand -- so every
+// node in a cluster installed from it exits at boot. The engine images are
+// unchanged between the two; only the deploy tree moves.
+//
 // WHY IT IS NOT v0.15.0, WHICH WAS THE NEWEST TAG WHEN THIS LANDED. The install
 // path is younger than the last release. v0.15.0's local overlay carries no
 // `bootstrap-secret-envfrom` patch (#3375), so `seedBootstrap` would write the
@@ -46,7 +51,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.16.0";
+export const DEFAULT_STACK_TAG = "v0.16.1";
 
 /**
  * How a cluster the wizard builds treats people who are not its owner.
