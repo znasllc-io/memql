@@ -277,7 +277,7 @@ jobs:
 
       - name: Upload the receipt and the snapshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: install-e2e-evidence
           path: |
@@ -463,7 +463,7 @@ jobs:
 
       - name: Upload the evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: install-e2e-refused-key-evidence
           path: |
