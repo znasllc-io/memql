@@ -57,6 +57,7 @@ import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import {
+  installSessionOptions,
   previewUninstall,
   runInstall,
   runUninstall,
@@ -751,13 +752,17 @@ export class AddClusterPanel {
     let failure: string | undefined;
     try {
       report = await runInstall(
-        {
+        // BUILT ON THE OTHER SIDE OF THE `vscode` LINE (memql#3560). This was
+        // an object literal here, where no unit test can reach it -- and it was
+        // missing `tag`, so every install started from this page failed at
+        // stackCheckout while the CLI's worked. `installSessionOptions` is
+        // audited against what the capability scripts require.
+        installSessionOptions({
           root: this.deps.installRoot,
           // The same value the uninstall side reads (#3476), so the run that
           // writes the receipt and the run that reverses it cannot disagree
           // about where it lives.
           receiptFile: this.deps.receiptFile,
-          skip: new Set<string>(),
           // COLLECTED (memql#3473), and the graph no longer pins it -- which
           // vendor a key belongs to is a fact about the operator's key, run
           // input like the path beside it, not policy the graph decides. On a
@@ -770,9 +775,8 @@ export class AddClusterPanel {
           // A PATH, never the key. argv is world-readable in `ps`. On a
           // repair this is the path the receipt recorded (memql#3512).
           providerKeyFile,
-          stepParams: {},
           timeoutMs: STEP_TIMEOUT_MS,
-        },
+        }),
         this.hooks({
           onEvent: (event) => {
             this.state.apply(event);
@@ -1364,7 +1368,7 @@ ${body}
     // the name is already the heading, so repeating it would be noise.
     const blocks = failures
       .map((failure) => {
-        const guidance = failureGuidance(failure.exitCode);
+        const guidance = failureGuidance(failure.exitCode, failure.remedy);
         const name = failure.description === "" ? failure.id : failure.description;
         // WHAT THE STEP ITSELF SAID, above the generic advice for its exit code.
         // The guidance is keyed on a number and so can only ever be about a

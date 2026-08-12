@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -18,13 +19,21 @@ import (
 // with (the *.local.znas.io cert seed-secrets.sh loads as local-znas-tls).
 //
 // The assertion that matters is the RESTRAINT one: when a rootCA.pem already
-// exists, the script reports caPreExisting=true / caInstalled=false and does
-// NOT run `mkcert -install`. mkcert's CA is per-machine, not per-project --
+// exists, the script reports caPreExisting=true / caInstalled=false and the
+// file's bytes are unchanged. mkcert's CA is per-machine, not per-project --
 // the operator may already have one signing certificates for half a dozen
-// other local stacks, and an installer that re-runs `-install` on it (or
-// worse, regenerates it) is reaching into shared machine state it does not
-// own. Installing memQL must never be the reason someone's other local
-// projects start failing TLS.
+// other local stacks, and an installer that REGENERATES it is reaching into
+// shared machine state it does not own. Installing memQL must never be the
+// reason someone's other local projects start failing TLS.
+//
+// That restraint used to be asserted as "never runs `mkcert -install`", which
+// is a different and wrong claim (memql#3560): `-install` does not regenerate
+// anything, it adds an existing CA to trust stores missing it. Not running it
+// is what let a created-but-untrusted CA -- the state an interrupted first run
+// leaves behind, because trust needs a password no child process can ask for --
+// be mistaken on the next run for a healthy one, and reported as a successful
+// install with an untrusted front door. So the tests below assert trust is
+// ENSURED, and separately that the CA file is never rewritten.
 //
 // Every test here drives a STUB mkcert on a PATH prefix, with CAROOT pointed
 // at t.TempDir(). Nothing in this file may reach the runner's real trust
@@ -93,6 +102,12 @@ func mkcertLastJSONLine(out string) string {
 //
 // STUB_FAIL_ISSUE makes certificate issuance fail, so the script's handling of
 // a real mkcert error is exercised rather than assumed.
+//
+// STUB_FAIL_INSTALL reproduces the ACTUAL failure a headless `mkcert -install`
+// produces on Linux, verbatim off a real run: mkcert creates the CA, then dies
+// trying to copy it into the system store because sudo has no terminal to ask
+// for a password on. The CA file is left behind, which is the whole point --
+// the next run has to cope with a real CA that nothing trusts.
 const mkcertStubBody = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$STUB_LOG"
 
@@ -102,9 +117,19 @@ case "$1" in
     exit 0
     ;;
   -install)
+    # Creates a CA only when there is none, exactly as mkcert does: -install
+    # against an existing CA adds it to trust stores and never rewrites it.
     mkdir -p "$STUB_CAROOT"
-    printf 'stub-root-ca\n' > "$STUB_CAROOT/rootCA.pem"
-    printf 'stub-root-key\n' > "$STUB_CAROOT/rootCA-key.pem"
+    if [ ! -f "$STUB_CAROOT/rootCA.pem" ]; then
+      printf 'stub-root-ca\n' > "$STUB_CAROOT/rootCA.pem"
+      printf 'stub-root-key\n' > "$STUB_CAROOT/rootCA-key.pem"
+    fi
+    if [ -n "$STUB_FAIL_INSTALL" ]; then
+      printf 'ERROR: failed to execute "tee": exit status 1\n\n' >&2
+      printf 'sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper\n' >&2
+      printf 'sudo: a password is required\n' >&2
+      exit 1
+    fi
     exit 0
     ;;
 esac
@@ -161,6 +186,15 @@ func newMkcertEnv(t *testing.T) *mkcertEnv {
 	stub := filepath.Join(e.binDir, "mkcert")
 	if err := os.WriteFile(stub, []byte(mkcertStubBody), 0o755); err != nil {
 		t.Fatalf("write stub: %v", err)
+	}
+	// certutil is a real prerequisite on Linux (browsers read NSS, not the
+	// system store) and it is present on some CI images and absent on others.
+	// Stubbing it makes every OTHER test in this file independent of which
+	// image it landed on; the one test that is about its absence names a path
+	// that does not exist.
+	certutil := filepath.Join(e.binDir, "certutil")
+	if err := os.WriteFile(certutil, []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write certutil stub: %v", err)
 	}
 	return e
 }
@@ -247,14 +281,15 @@ func mkcertBool(t *testing.T, env mkcertEnvelope, key string) bool {
 }
 
 //=============================================================================
-// THE ASSERTION THAT MATTERS: a pre-existing CA is left alone
+// THE ASSERTION THAT MATTERS: a pre-existing CA is never regenerated
 //=============================================================================
 
-func TestMkcertPreExistingCAIsNotReinstalled(t *testing.T) {
+func TestMkcertPreExistingCAIsNotRegenerated(t *testing.T) {
 	e := newMkcertEnv(t)
 	e.seedCA(t)
-	// No --confirm: with a CA already on disk there is no trust-store change
-	// to authorise, so the run must succeed without one.
+	// No --confirm: with a CA already on disk there is nothing to CREATE, and
+	// completing trust for a CA the operator already has is not a decision that
+	// needs authorising.
 	e.confirm = ""
 	before, err := os.ReadFile(e.caPEM())
 	if err != nil {
@@ -269,22 +304,43 @@ func TestMkcertPreExistingCAIsNotReinstalled(t *testing.T) {
 		t.Errorf("caPreExisting = false, want true -- a rootCA.pem was already on disk: %s", out)
 	}
 	if mkcertBool(t, env, "caInstalled") {
-		t.Errorf("caInstalled = true, want false -- the script must not adopt an existing CA: %s", out)
-	}
-	if log := e.stubLog(t); strings.Contains(log, "-install") {
-		t.Errorf("`mkcert -install` was invoked against a pre-existing CA -- that CA may be "+
-			"signing other projects' certs and is shared machine state we do not own.\nstub log:\n%s", log)
+		t.Errorf("caInstalled = true, want false -- the script must not claim to have created "+
+			"a CA that was already there: %s", out)
 	}
 	after, err := os.ReadFile(e.caPEM())
 	if err != nil {
 		t.Fatalf("read CA after run: %v", err)
 	}
 	if !bytes.Equal(before, after) {
-		t.Errorf("the operator's root CA was rewritten\n got: %q\nwant: %q", after, before)
+		t.Errorf("the operator's root CA was rewritten -- THIS is the restraint that matters\n got: %q\nwant: %q", after, before)
 	}
 	// It must still have done its actual job.
 	if !mkcertBool(t, env, "certIssued") {
 		t.Errorf("certIssued = false, want true -- the wildcard pair is the point: %s", out)
+	}
+}
+
+// The counterpart to the test above, and the memql#3560 regression: a CA on
+// disk is NOT evidence that anything trusts it. `mkcert -install` creates the
+// CA first and trusts it second, so an interrupted first run leaves exactly
+// this state -- and the run that follows must complete the trust rather than
+// take the file's presence as proof the work is done.
+func TestMkcertEnsuresTrustOnAPreExistingCA(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.seedCA(t)
+	e.confirm = ""
+
+	env, code, out := e.run(t)
+	if code != 0 || !env.OK {
+		t.Fatalf("run failed (exit %d): %s", code, out)
+	}
+	if log := e.stubLog(t); !strings.Contains(log, "-install") {
+		t.Errorf("`mkcert -install` was never invoked, so nothing established that the CA on "+
+			"disk is actually trusted -- an untrusted CA reported as a successful install is "+
+			"how memql#3560 shipped an unreachable front door.\nstub log:\n%s", log)
+	}
+	if !mkcertBool(t, env, "caTrusted") {
+		t.Errorf("caTrusted = false after a clean -install: %s", out)
 	}
 }
 
@@ -484,6 +540,167 @@ func TestMkcertMissingBinaryIsExitFour(t *testing.T) {
 	}
 	if log := e.stubLog(t); log != "" {
 		t.Errorf("nothing should have been invoked when the prerequisite is missing:\n%s", log)
+	}
+}
+
+//=============================================================================
+// TRUST NEEDS A PASSWORD, AND A WIZARD HAS NO TERMINAL (memql#3560)
+//=============================================================================
+
+// mkcertString reads a string field off a result envelope.
+func mkcertString(t *testing.T, env mkcertEnvelope, key string) string {
+	t.Helper()
+	v, ok := env.Result[key]
+	if !ok {
+		t.Fatalf("result has no %q field: %+v", key, env.Result)
+	}
+	s, ok := v.(string)
+	if !ok {
+		t.Fatalf("result.%s = %v (%T), want a string", key, v, v)
+	}
+	return s
+}
+
+// The failure the operator actually hit. `mkcert -install` needs root to write
+// the system trust store; the wizard runs it as a child process with no
+// terminal, so sudo cannot prompt and mkcert dies.
+//
+// Two things have to be true about how that is reported, and neither was:
+//
+//   - exit 4, not 5. Five means "may be transient, retry" -- advice that can
+//     never come true here, because nothing about an unattended retry gives
+//     sudo a terminal.
+//   - a remedy. Exit 4 with no command is a dead end; the wizard turns this
+//     field into the "open a terminal with this command" button.
+func TestMkcertTrustFailureWithoutATerminalIsExitFourWithARemedy(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.extra = append(e.extra, "STUB_FAIL_INSTALL=1")
+
+	env, code, out := e.run(t)
+	if code != 4 {
+		t.Errorf("exit %d, want 4 (prerequisite missing) -- exit 5 tells the operator to retry "+
+			"something that cannot succeed unattended: %s", code, out)
+	}
+	if env.OK || env.Error == nil || env.Error.Code != 4 {
+		t.Fatalf("envelope should carry ok=false error.code=4: %s", out)
+	}
+	remedy := mkcertString(t, env, "remedy")
+	if remedy == "" {
+		t.Fatalf("no remedy: the wizard has nothing to offer and the operator has nowhere to go: %s", out)
+	}
+	// NOT `sudo <script>`: as root, mkcert resolves CAROOT under root's home
+	// and builds a second CA there -- trusted for a user who is not the one
+	// running a browser.
+	if strings.HasPrefix(remedy, "sudo ") {
+		t.Errorf("remedy runs the whole script as root: %q -- mkcert would then create its CA "+
+			"in root's CAROOT, not the operator's", remedy)
+	}
+	if !strings.Contains(remedy, "mkcert-setup.sh") {
+		t.Errorf("remedy does not run this capability: %q", remedy)
+	}
+	// The paths this run was given have to travel, or the terminal run writes
+	// its pair somewhere the retry will not look.
+	for _, want := range []string{e.caroot, e.certFile(), e.keyFile(), mkcertConfirmPhrase} {
+		if !strings.Contains(remedy, want) {
+			t.Errorf("remedy does not carry %q: %q", want, remedy)
+		}
+	}
+}
+
+// The half-finished state must not be laundered into a success. After a failed
+// trust step there IS a rootCA.pem on disk -- and the run that follows has to
+// keep failing until trust is real, rather than seeing the file and declaring
+// the step done.
+func TestMkcertUntrustedCAIsNeverReportedAsInstalled(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.extra = append(e.extra, "STUB_FAIL_INSTALL=1")
+
+	if _, code, out := e.run(t); code != 4 {
+		t.Fatalf("first run: exit %d, want 4: %s", code, out)
+	}
+	if _, err := os.Stat(e.caPEM()); err != nil {
+		t.Fatalf("the stub should have left a CA behind (that is the state under test): %v", err)
+	}
+
+	// Second run: a real CA on disk, still trusted by nothing.
+	env, code, out := e.run(t)
+	if code == 0 || env.OK {
+		t.Fatalf("the second run reported SUCCESS over an untrusted CA -- the install then "+
+			"completes and every browser refuses the front door: %s", out)
+	}
+	if code != 4 {
+		t.Errorf("exit %d, want 4: %s", code, out)
+	}
+	if v, ok := env.Result["caTrusted"]; ok && v == true {
+		t.Errorf("caTrusted = true while `mkcert -install` is failing: %s", out)
+	}
+}
+
+//=============================================================================
+// BROWSER TRUST IS PART OF THE JOB
+//=============================================================================
+
+// On Linux, Firefox and Chrome read their own NSS store rather than the system
+// one, and mkcert can only write it through certutil. Without certutil mkcert
+// exits 0 with a warning -- a "success" that leaves the front door untrusted in
+// the one application the install's final step tells the operator to open.
+func TestMkcertMissingCertutilOnLinuxIsExitFour(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("NSS is the browser trust store on Linux; macOS trusts through the keychain")
+	}
+	e := newMkcertEnv(t)
+
+	env, code, out := e.run(t, "--certutil="+filepath.Join(t.TempDir(), "definitely-not-certutil"))
+	if code != 4 {
+		t.Errorf("exit %d, want 4 (prerequisite missing): %s", code, out)
+	}
+	if env.Error == nil || !strings.Contains(env.Error.Message, "certutil") {
+		t.Errorf("the message should name certutil and what it is for: %+v", env.Error)
+	}
+	// Refused BEFORE anything was created: a machine that cannot finish must
+	// not be left holding a half-made CA, which is the exact shape of the bug
+	// the trust tests above are about.
+	if _, err := os.Stat(e.caPEM()); err == nil {
+		t.Errorf("a CA was created on the way to refusing")
+	}
+	if log := e.stubLog(t); strings.Contains(log, "-install") {
+		t.Errorf("the trust store was touched before the prerequisite check.\nstub log:\n%s", log)
+	}
+}
+
+// A machine with no browser is a real case -- a headless install has nothing to
+// trust the CA in. The refusal is a default, not a law.
+func TestMkcertMissingCertutilCanBeWaived(t *testing.T) {
+	e := newMkcertEnv(t)
+
+	env, code, out := e.run(t,
+		"--certutil="+filepath.Join(t.TempDir(), "definitely-not-certutil"),
+		"--allow-missing-certutil",
+	)
+	if code != 0 || !env.OK {
+		t.Fatalf("run failed (exit %d): %s", code, out)
+	}
+	if !mkcertBool(t, env, "caTrusted") {
+		t.Errorf("caTrusted = false: %s", out)
+	}
+}
+
+// A remedy has to reproduce the run it is finishing. A waived run that then
+// hits the password wall would otherwise be handed a command that refuses on
+// certutil instead -- a second, different dead end.
+func TestMkcertRemedyCarriesTheWaiver(t *testing.T) {
+	e := newMkcertEnv(t)
+	e.extra = append(e.extra, "STUB_FAIL_INSTALL=1")
+
+	env, code, out := e.run(t,
+		"--certutil="+filepath.Join(t.TempDir(), "definitely-not-certutil"),
+		"--allow-missing-certutil",
+	)
+	if code != 4 {
+		t.Fatalf("exit %d, want 4: %s", code, out)
+	}
+	if remedy := mkcertString(t, env, "remedy"); !strings.Contains(remedy, "--allow-missing-certutil") {
+		t.Errorf("remedy drops the waiver, so running it refuses for a different reason: %q", remedy)
 	}
 }
 

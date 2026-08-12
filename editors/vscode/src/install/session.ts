@@ -44,6 +44,7 @@ import {
 } from "./graph.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, type RunScript } from "./runner.js";
+import { DEFAULT_STACK_TAG } from "./stackPin.js";
 
 /**
  * The run-time inputs an install needs and a document cannot pin.
@@ -93,6 +94,57 @@ export interface SessionOptions {
   timeoutMs?: number;
 }
 
+/**
+ * What the wizard collects from an operator, before it becomes SessionOptions.
+ *
+ * Every field is a question the Add-a-cluster page asks (or a path the
+ * extension already knows). Deliberately NOT the same shape as SessionOptions,
+ * which also carries run inputs no page has a field for.
+ */
+export interface WizardAnswers {
+  root: string;
+  receiptFile: string;
+  provider: string;
+  /** A PATH, never the key. See SessionOptions.providerKeyFile. */
+  providerKeyFile: string;
+  domain: string;
+  ownerEmail: string;
+  ownerFirstName: string;
+  ownerLastName: string;
+  timeoutMs?: number;
+}
+
+/**
+ * The wizard's answers as a run.
+ *
+ * WHY THIS IS A FUNCTION AND NOT AN OBJECT LITERAL IN THE PANEL. It was a
+ * literal, and `webview/addClusterPanel.ts` imports `vscode`, which the unit
+ * lane excludes by design -- so nothing could assert what the wizard actually
+ * passes. `tag` was simply absent from that literal for the whole life of the
+ * wizard's install path, and every install started from the "+" button died at
+ * stackCheckout on `exit 2: missing required parameter: tag` while the same
+ * install from `cli.js --tag=...` worked (memql#3560).
+ *
+ * Moving the construction to this side of the vscode line is what lets
+ * `installSession.test.ts` audit it against what the capability scripts require
+ * -- the check that has to hold for the NEXT required param as well.
+ */
+export function installSessionOptions(answers: WizardAnswers): SessionOptions {
+  return {
+    root: answers.root,
+    receiptFile: answers.receiptFile,
+    skip: new Set<string>(),
+    provider: answers.provider,
+    providerKeyFile: answers.providerKeyFile,
+    domain: answers.domain,
+    ownerEmail: answers.ownerEmail,
+    ownerFirstName: answers.ownerFirstName,
+    ownerLastName: answers.ownerLastName,
+    stepParams: {},
+    timeoutMs: answers.timeoutMs,
+  };
+}
+
 /** Everything a caller can vary about HOW a session runs, as opposed to what. */
 export interface SessionHooks {
   onEvent?: (event: ExecEvent) => void | Promise<void>;
@@ -134,7 +186,14 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
     let params: Record<string, string> = {};
     switch (step.id) {
       case "stackCheckout":
-        params = present({ tag: opts.tag, repo: opts.repo, dest: stackDir });
+        // THE DEFAULT IS APPLIED HERE, not in either front end. `--tag` is a
+        // run input the CLI collects and the wizard has no field for, and
+        // `present()` drops empty values -- so a webview that simply did not
+        // set it produced a run with no `--tag` at all, which clone-stack.sh
+        // refuses (exit 2). Defaulting at the one place both front ends go
+        // through is what makes "the wizard forgot an input the CLI collects"
+        // unable to happen again (memql#3560).
+        params = present({ tag: opts.tag || DEFAULT_STACK_TAG, repo: opts.repo, dest: stackDir });
         break;
       case "clusterUp":
         // The checkout stackCheckout just created. Without it k3d.up derives a

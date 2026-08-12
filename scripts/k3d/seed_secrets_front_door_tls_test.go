@@ -93,6 +93,9 @@ type frontDoorEnv struct {
 	stubLog    string
 	stubMkcert string
 	caroot     string
+	// The human-facing log of the last run. seed-secrets forwards a failing
+	// child's envelope here, which is the only place its message appears.
+	lastStderr string
 }
 
 func newFrontDoorEnv(t *testing.T) *frontDoorEnv {
@@ -119,6 +122,13 @@ func newFrontDoorEnv(t *testing.T) *frontDoorEnv {
 	}
 	if err := os.WriteFile(filepath.Join(home, "kubectl"), []byte(fakeKubectlTemplate), 0o755); err != nil {
 		t.Fatalf("write fake kubectl: %v", err)
+	}
+	// mkcert-setup.sh requires certutil on Linux -- browsers read the NSS store,
+	// not the system one, and a front door no browser trusts is not a front
+	// door. Stubbed so these cases test seed-secrets rather than which packages
+	// the runner image happens to carry.
+	if err := os.WriteFile(filepath.Join(home, "certutil"), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write certutil stub: %v", err)
 	}
 	return e
 }
@@ -166,6 +176,7 @@ func (e *frontDoorEnv) run(t *testing.T, args ...string) (seedResult, []string, 
 		t.Fatalf("running seed-secrets.sh: %v\nstderr:\n%s", err, stderr.String())
 	}
 	t.Logf("exit=%d\nstdout: %s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	e.lastStderr = stderr.String()
 
 	var res seedResult
 	if line := strings.TrimSpace(stdout.String()); line != "" {
@@ -344,5 +355,30 @@ func TestSeedSecretsFailsWithGuidanceWhenNoRootCAExists(t *testing.T) {
 	if strings.Contains(e.mkcertLog(t), "-install") {
 		t.Errorf("mkcert -install was run without the operator's confirmation;\nstub log:\n%s",
 			e.mkcertLog(t))
+	}
+}
+
+// When the issuer refuses, seed-secrets has to say WHY -- and only the child
+// knows. cap_fail writes its message to the envelope on stdout and nowhere
+// else, and this caller used to discard stdout, then guess from the exit code:
+// "mkcert is not installed", printed whatever the actual reason was. install.
+// mkcert's exit 4 now covers three prerequisites, so the guess is wrong more
+// often than it is right (memql#3560).
+func TestSeedSecretsForwardsTheIssuersOwnReason(t *testing.T) {
+	e := newFrontDoorEnv(t)
+	e.seedCA(t)
+
+	// A missing mkcert is simply the exit-4 case that is deterministic to
+	// arrange; the assertion is about the message travelling, not about which
+	// prerequisite is absent.
+	_, _, code := e.run(t, "--mkcert="+filepath.Join(t.TempDir(), "definitely-not-mkcert"))
+	if code != 4 {
+		t.Fatalf("exit %d, want 4", code)
+	}
+	if !strings.Contains(e.lastStderr, "install.mkcert said:") {
+		t.Errorf("the child's envelope was not forwarded, so its reason is nowhere:\n%s", e.lastStderr)
+	}
+	if !strings.Contains(e.lastStderr, "mkcert not found") {
+		t.Errorf("the issuer's own message did not reach the operator:\n%s", e.lastStderr)
 	}
 }

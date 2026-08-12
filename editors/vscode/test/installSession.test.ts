@@ -20,16 +20,25 @@ import { mkdtempSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { loadGraph, type Graph } from "../src/install/graph.js";
-import type { RunScript } from "../src/install/runner.js";
+import {
+  graphDocumentPath,
+  loadGraph,
+  loadGraphFile,
+  type Graph,
+} from "../src/install/graph.js";
+import { capabilityScriptPath, type RunScript } from "../src/install/runner.js";
 import {
   installPlan,
+  installSessionOptions,
   previewUninstall,
   runInstall,
   runUninstall,
   type SessionOptions,
 } from "../src/install/session.js";
+import { DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import type { ExecEvent } from "../src/install/executor.js";
+
+const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
 /** loadGraph parses a document, so fixtures are written as one. */
 function graph(doc: unknown): Graph {
@@ -502,6 +511,125 @@ test("both steps are given the SAME directory", async () => {
     assert.equal(checkout.params.dest, cluster.params["repo-root"]);
   }
 });
+
+// -----------------------------------------------------------------------------
+// the release tag (memql#3560)
+// -----------------------------------------------------------------------------
+
+test("stackCheckout is given a tag even when the caller names none", async () => {
+  // The wizard has no tag field, so it passed none, and `present()` drops empty
+  // values -- every install started from the "+" button reached clone-stack.sh
+  // with no --tag and died there on exit 2. The CLI's `--tag` worked throughout,
+  // which is exactly the "worked from the terminal, not from the editor" split
+  // this module exists to make impossible.
+  const plan = installPlan(options());
+  const decision = plan({
+    id: "stackCheckout",
+    script: "install.cloneStack",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  if (decision.action === "run") {
+    assert.equal(decision.params.tag, DEFAULT_STACK_TAG);
+    assert.notEqual(decision.params.tag, "");
+  }
+});
+
+test("an explicit tag still wins over the pin", async () => {
+  const plan = installPlan(options({ tag: "v9.9.9" }));
+  const decision = plan({
+    id: "stackCheckout",
+    script: "install.cloneStack",
+    description: "",
+    elevation: "none",
+    verify: { kind: "scriptOk" },
+  });
+  if (decision.action === "run") {
+    assert.equal(decision.params.tag, "v9.9.9");
+  }
+});
+
+test("the pinned tag is a release tag, not a branch", async () => {
+  // clone-stack.sh rejects a branch outright: a branch MOVES, so two installs
+  // of "the same version" a week apart are not the same install. A default that
+  // was a branch name would be refused at run time by that gate -- assert the
+  // shape here, where the failure is one line rather than a failed install.
+  //
+  // The RECENCY of the pin is deliberately not asserted. No test can tell a
+  // deliberate pin from a stale one, and one that asked the network would fail
+  // offline for reasons unrelated to the change under test.
+  assert.match(DEFAULT_STACK_TAG, /^v\d+\.\d+\.\d+$/);
+});
+
+// Every param a capability script REQUIRES and has no default for has to come
+// from somewhere -- the graph pins some, the plan supplies the rest. Nothing
+// checked that, which is how `tag` went missing for the whole life of the
+// wizard's install path.
+//
+// The requirement is read off the scripts themselves rather than from a list
+// kept beside them: a list is a second thing to forget.
+test("every required-with-no-default param is supplied by the graph or the plan", async () => {
+  const graphDoc = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  // THE WIZARD'S OWN OPTIONS, not a hand-populated SessionOptions. The point is
+  // to catch a required input the PAGE does not supply -- which is what `tag`
+  // was -- so anything this test fills in by hand is a hole it cannot see.
+  const plan = installPlan(
+    installSessionOptions({
+      root: REPO_ROOT,
+      receiptFile: path.join(mkdtempSync(path.join(os.tmpdir(), "memql-audit-")), "receipt.json"),
+      provider: "anthropic",
+      providerKeyFile: "/tmp/key",
+      domain: "local.znas.io",
+      ownerEmail: "op@example.test",
+      ownerFirstName: "Op",
+      ownerLastName: "Erator",
+    }),
+  );
+
+  const missing: string[] = [];
+  for (const step of graphDoc.steps) {
+    const scriptPath = capabilityScriptPath(step.script, REPO_ROOT);
+    const source = await fs.readFile(scriptPath, "utf8");
+    const decision = plan(step);
+    assert.equal(decision.action, "run", `${step.id} was not planned as a run`);
+    if (decision.action !== "run") continue;
+    const supplied = new Set([...Object.keys(step.params ?? {}), ...Object.keys(decision.params)]);
+
+    for (const name of requiredWithNoDefault(source)) {
+      if (!supplied.has(name)) missing.push(`${step.id} (${step.script}): --${name}`);
+    }
+  }
+
+  assert.deepEqual(
+    missing,
+    [],
+    `these steps would fail with "missing required parameter":\n  ${missing.join("\n  ")}`,
+  );
+});
+
+/**
+ * The params a capability script both `cap_require`s and gives no default for.
+ *
+ * `cap_param <name> ""` is the script saying "there is no sensible default for
+ * this"; paired with a `cap_require <name>` it means the caller must supply it
+ * or the run exits 2. Anything with a non-empty default is the script's own
+ * business.
+ */
+function requiredWithNoDefault(source: string): string[] {
+  const required = new Set<string>();
+  for (const m of source.matchAll(/^\s*cap_require\s+([A-Za-z0-9_-]+)\s/gm)) {
+    required.add(m[1]!);
+  }
+  const out: string[] = [];
+  for (const m of source.matchAll(/cap_param\s+([A-Za-z0-9_-]+)\s+"([^"]*)"/g)) {
+    const [, name, dflt] = m;
+    if (required.has(name!) && dflt === "") out.push(name!);
+  }
+  return out;
+}
 
 test("the root a packaged run passes is NOT the script's own parent", async () => {
   // The acceptance criterion, stated as the property rather than a path: a
