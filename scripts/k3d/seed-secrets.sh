@@ -274,9 +274,20 @@ function resolve_genesis_b64() {
         GENESIS_SOURCE="cluster"
         return
     fi
-    warn "no genesis file at $genesis_file and MEMQL_GENESIS_B64 is unset"
-    warn "memql-secrets will be seeded WITHOUT the genesis envelope."
-    warn "identity will fail to start without MEMQL_GENESIS_B64."
+    # SAID ACCURATELY NOW (memql#3580). This used to end with "identity will
+    # fail to start without MEMQL_GENESIS_B64", which was TRUE and then carried
+    # on anyway -- a warning that names a fatal outcome and proceeds is the same
+    # defect as the internal-CA skip (memql#3570), and it produced the same
+    # result: a cluster in which nothing could start.
+    #
+    # The envelope is not what makes those values reachable locally. This script
+    # seeds them into memql-secrets directly and every node reads that Secret
+    # through envFrom, so the local overlay turns autoload OFF
+    # (patches/genesis-autoload-off.yaml) and the absence of an envelope is
+    # genuinely harmless here rather than merely survivable.
+    info "no genesis file at $genesis_file and MEMQL_GENESIS_B64 is unset."
+    info "  Not needed locally: the values it would carry are seeded into"
+    info "  memql-secrets directly, and the local overlay turns autoload off."
     RESOLVED_GENESIS_B64=""
     GENESIS_SOURCE="none"
 }

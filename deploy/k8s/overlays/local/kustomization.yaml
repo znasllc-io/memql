@@ -387,6 +387,7 @@ patches:
   # scripts/install/seed-bootstrap.sh, `optional: true` so a cluster brought up
   # without the installer behaves exactly as it does today. Targeted by name
   # regex at the engine nodes that carry an envFrom list.
+  - path: patches/genesis-autoload-off.yaml
   - path: patches/bootstrap-secret-envfrom.yaml
     target:
       kind: Deployment
