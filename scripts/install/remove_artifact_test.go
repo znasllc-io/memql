@@ -307,8 +307,28 @@ func TestRemoveArtifactPreExistingRefusesEveryKind(t *testing.T) {
 			if !strings.Contains(strings.ToLower(env.Error.Message), "pre-existing") {
 				t.Errorf("the refusal must say why; got %q", env.Error.Message)
 			}
-			// Nothing may have been touched.
+			// NOTHING MAY HAVE BEEN MUTATED. A read is a different matter, and
+			// since memql#3583 a necessary one: absence is checked BEFORE the
+			// guard, so that an artifact which is already gone reports the
+			// honest no-op instead of "refusing to remove ... it was already on
+			// this machine" about a thing that does not exist. Telling absent
+			// from present-but-not-ours means asking the machine, and
+			// `k3d cluster list` is how that question is asked.
+			//
+			// So the assertion is on the VERBS that destroy, not on whether a
+			// tool ran at all.
 			for _, tool := range []string{"k3d", "docker", "mkcert"} {
+				if !w.ran(t, tool) {
+					continue
+				}
+				argv := w.argv(t, tool)
+				for _, verb := range []string{"cluster delete", "-uninstall", "rmi", "image rm"} {
+					if strings.Contains(argv, verb) {
+						t.Errorf("%s ran a destructive %q despite the refusal: %s", tool, verb, argv)
+					}
+				}
+			}
+			for _, tool := range []string{"docker", "mkcert"} {
 				if w.ran(t, tool) {
 					t.Errorf("%s was invoked despite the refusal: %s", tool, w.argv(t, tool))
 				}
@@ -950,4 +970,67 @@ func TestRemoveArtifactPrunesEmptyParents(t *testing.T) {
 				filepath.Join(root, "a"), err)
 		}
 	})
+}
+
+// THE ONE THAT WAS REPORTED (memql#3583). An operator removed the CA by hand,
+// ran the uninstall, and was told:
+//
+//	refusing to remove mkcertCA (...): --pre-existing=true says the installer
+//	did not create it, and uninstalling memQL must never take something that
+//	was already here
+//
+// about a CA that had not existed for an hour -- with a summary line claiming
+// "1 left in place because it was already on this machine before the install"
+// when nothing was left in place at all. Somebody who had just cleaned up by
+// hand was told their uninstall had not worked.
+//
+// The guard ran before the existence check, so it refused things that were not
+// there. What is not there cannot be taken from anyone.
+func TestRemoveArtifactAbsentIsNotARefusal(t *testing.T) {
+	for _, tc := range []struct {
+		kind string
+		args func(dir string) []string
+	}{
+		{
+			kind: "mkcertCA",
+			args: func(dir string) []string {
+				// A caroot that exists as a directory but holds no CA.
+				return []string{"--kind=mkcertCA", "--caroot=" + filepath.Join(dir, "empty-caroot")}
+			},
+		},
+		{
+			kind: "binary",
+			args: func(dir string) []string {
+				return []string{"--kind=binary", "--path=" + filepath.Join(dir, "no-such-binary")}
+			},
+		},
+		{
+			kind: "checkout",
+			args: func(dir string) []string {
+				return []string{"--kind=checkout", "--path=" + filepath.Join(dir, "no-such-checkout")}
+			},
+		},
+	} {
+		tc := tc
+		t.Run(tc.kind, func(t *testing.T) {
+			w := raNewWorld(t, raClusterList, raImageList)
+
+			// --pre-existing=true is the WORST case: the receipt says the
+			// artifact was the operator's. It still must not produce a refusal
+			// when there is no artifact.
+			args := append(tc.args(t.TempDir()), "--pre-existing=true")
+			stdout, _, code := raRun(t, w.env, args...)
+			if code != 0 {
+				t.Fatalf("kind=%s exited %d, want 0 -- nothing there is not something to refuse\nstdout: %s",
+					tc.kind, code, stdout)
+			}
+			env, _ := raParse(t, stdout)
+			if !env.OK {
+				t.Errorf("want ok=true for an absent artifact: %s", stdout)
+			}
+			if env.Changed {
+				t.Errorf("changed=true when there was nothing to remove: %s", stdout)
+			}
+		})
+	}
 }
