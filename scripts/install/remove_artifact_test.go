@@ -73,7 +73,11 @@ func raRun(t *testing.T, extraEnv []string, args ...string) (stdout, stderr stri
 		t.Skip("bash not available")
 	}
 	cmd := exec.Command("bash", append([]string{raScript(t)}, args...)...)
-	cmd.Env = append(os.Environ(), extraEnv...)
+	// NO DISPLAY, EVER -- see the same note in mkcert_setup_test.go. The
+	// hostsEntries removal path can elevate itself now, and a test must never be
+	// able to raise a password prompt on the machine running it.
+	cmd.Env = append(os.Environ(), "DISPLAY=", "WAYLAND_DISPLAY=")
+	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdin = nil
 	var out, errb strings.Builder
 	cmd.Stdout = &out

@@ -89,10 +89,56 @@ func hostsLastJSONLine(out string) string {
 // hostsRun invokes the script with stdin closed and returns the parsed
 // envelope (from stdout only -- stdout must be pure JSON), the exit code and
 // the combined output for diagnostics.
+// hostsSandbox is the environment every run in this file gets: a bin directory
+// first on PATH and no display.
+//
+// THE POINT IS WHAT IT PREVENTS. The script can now elevate itself for the
+// /etc/hosts write, through a graphical password prompt (scripts/lib/elevate.sh).
+// A test that inherited the developer's environment would therefore pop a real
+// dialog in front of whoever ran `go test`, and on a CI runner with NOPASSWD
+// sudo it would perform the privileged write for real. `sudoBody` is the case's
+// own stub, so what "sudo" means here is always something this file wrote.
+func hostsSandbox(t *testing.T, sudoBody string) []string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	script := "#!/usr/bin/env bash\nprintf 'sudo %s\\n' \"$*\" >> \"${STUB_LOG:-/dev/null}\"\n" + sudoBody
+	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write sudo stub: %v", err)
+	}
+	// The password dialog is stubbed too, and for the same reason the sudo is:
+	// otherwise the case depends on which programs the host happens to carry.
+	// A developer desktop has zenity and a CI runner does not, so the elevation
+	// case passed locally and failed in CI on the machine rather than on the
+	// change. Nothing about elevation is left to the environment.
+	dialog := "#!/usr/bin/env bash\nprintf 'zenity %s\\n' \"$*\" >> \"${STUB_LOG:-/dev/null}\"\nprintf 'a-password\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "zenity"), []byte(dialog), 0o755); err != nil {
+		t.Fatalf("write zenity stub: %v", err)
+	}
+	return []string{
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + t.TempDir(),
+		"TMPDIR=" + os.Getenv("TMPDIR"),
+		"DISPLAY=",
+		"WAYLAND_DISPLAY=",
+	}
+}
+
+// hostsNoSudo is a machine that cannot elevate at all: sudo refuses everything.
+const hostsNoSudo = "exit 1\n"
+
 func hostsRun(t *testing.T, args ...string) (hostsEnvelope, int, string) {
+	t.Helper()
+	return hostsRunEnv(t, hostsSandbox(t, hostsNoSudo), args...)
+}
+
+func hostsRunEnv(t *testing.T, childEnv []string, args ...string) (hostsEnvelope, int, string) {
 	t.Helper()
 	cmd := exec.Command("bash", append([]string{hostsScript(t)}, args...)...)
 	cmd.Stdin = nil
+	cmd.Env = childEnv
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -497,4 +543,91 @@ func TestHostsEntriesTestsNeverNameRealHostsFile(t *testing.T) {
 			"(only the default-declaration assertion) -- a test must never target the "+
 			"runner's real hosts file", n)
 	}
+}
+
+//=============================================================================
+// ELEVATION (memql#3562)
+//=============================================================================
+
+// The wizard spawns this with no terminal, so sudo cannot ask for a password
+// the ordinary way. It can ask through a desktop dialog instead -- and when it
+// can, the write must simply HAPPEN rather than stopping the install to hand
+// the operator a command.
+func TestHostsEntriesElevatesTheWriteWhenItCan(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: nothing to elevate")
+	}
+	original := "127.0.0.1 localhost\n"
+	path := hostsFixture(t, original)
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	log := filepath.Join(t.TempDir(), "sudo.log")
+
+	// A machine whose sudo asks for a password and gets one. The stub STANDS IN
+	// FOR ROOT by clearing the read-only bit before running the command, which
+	// is the one thing real root would bring and a test process cannot: without
+	// it `tee` fails on the file mode and the case would only ever prove that
+	// the harness has no privileges, which nobody doubted.
+	sandbox := append(
+		hostsSandbox(t, `if [ "$1" = "-n" ]; then exit 1; fi
+if [ "$1" = "-A" ]; then shift; fi
+if [ "$1" = "tee" ] && [ -n "${2:-}" ]; then chmod u+w "$2"; fi
+exec "$@"
+`),
+		"DISPLAY=:0", "STUB_LOG="+log,
+	)
+
+	env, code, out := hostsRunEnv(t, sandbox, "--action=add", "--hosts-file="+path, "--confirm="+hostsConfirmAdd)
+	if code != 0 || !env.OK {
+		t.Fatalf("the write was not elevated (exit %d): %s\nsudo calls:\n%s", code, out, hostsSudoLog(t, log))
+	}
+	calls := hostsSudoLog(t, log)
+	if !strings.Contains(calls, "tee "+path) {
+		t.Errorf("expected the write to go through `sudo -A tee %s`:\n%s", path, calls)
+	}
+	if got := hostsRead(t, path); !strings.Contains(got, "cockpit.local.znas.io") {
+		t.Errorf("the elevated write did not land:\n%q", got)
+	}
+}
+
+// A dialog the operator cancels, or a password sudo rejects: nothing was
+// written, and the way forward is the same command in a terminal.
+func TestHostsEntriesRefusedElevationStillOffersTheCommand(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: nothing to elevate")
+	}
+	original := "127.0.0.1 localhost\n"
+	path := hostsFixture(t, original)
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	sandbox := append(
+		hostsSandbox(t, "if [ \"$1\" = \"-n\" ]; then exit 1; fi\nexit 1\n"),
+		"DISPLAY=:0",
+	)
+
+	env, code, out := hostsRunEnv(t, sandbox, "--action=add", "--hosts-file="+path, "--confirm="+hostsConfirmAdd)
+	if code != 4 {
+		t.Errorf("exit %d, want 4: %s", code, out)
+	}
+	remedy, _ := env.Result["remedy"].(string)
+	if !strings.Contains(remedy, "hosts-entries.sh") || !strings.Contains(remedy, path) {
+		t.Errorf("no usable remedy after a refused elevation: %q", remedy)
+	}
+	if got := hostsRead(t, path); got != original {
+		t.Errorf("the file changed despite the refusal\n got: %q", got)
+	}
+}
+
+func hostsSudoLog(t *testing.T, path string) string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "(sudo was never invoked)"
+		}
+		t.Fatalf("read sudo log: %v", err)
+	}
+	return string(b)
 }
