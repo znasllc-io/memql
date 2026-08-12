@@ -64,6 +64,9 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/elevate.sh
 source "${SCRIPT_DIR}/../lib/elevate.sh"
 
+# The provenance marker mkcert-setup.sh writes beside a CA it created.
+readonly MEMQL_CA_MARKER=".memql-created"
+
 _CAP_PRUNED=()
 cap_init "install.removeArtifact" \
     "Remove one installer-created artifact: binary | checkout | hostsEntries | mkcertCA | stack | images."
@@ -315,16 +318,34 @@ function remove_hosts_entries() {
 function remove_mkcert_ca() {
     local caroot="$1"
 
-    # Guarded before the CAROOT lookup as well as before the mutation: a
-    # refusal should never even ask the machine questions.
-    refuse_if_pre_existing mkcertCA "${caroot:-<mkcert -CAROOT>}"
-
     if [[ -z "$caroot" ]]; then
+        # No receipt value to go on. Resolving CAROOT is a read, and the guard
+        # below still runs before anything is touched.
         command -v mkcert &>/dev/null || cap_fail 4 "mkcert is not installed and no --caroot was given"
         caroot="$(mkcert -CAROOT 2>/dev/null | head -n 1 || true)"
         [[ -n "$caroot" ]] || cap_fail 5 "could not determine the mkcert CA root"
     fi
-    refuse_if_pre_existing mkcertCA "$caroot"
+
+    # THE MARKER OUTRANKS THE RECEIPT, and only in the direction of doing less
+    # harm (memql#3576).
+    #
+    # mkcert-setup.sh writes .memql-created beside the key material when it
+    # creates a CA. That is a fact about the artifact, written by the run that
+    # made it, and it survives the receipt -- which an uninstall deletes, taking
+    # with it the only record of who created anything the uninstall refused to
+    # remove. One run that could not tell then locked the answer in forever,
+    # because the uninstall that would have cleared it is the thing being
+    # blocked.
+    #
+    # So: a marker present means memQL created this CA and may take it. NO
+    # marker falls back to the receipt's verdict, which is the conservative
+    # half -- an unmarked CA on a machine whose receipt says "already here" is
+    # still refused, exactly as before.
+    if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
+        cap_info "${caroot}/${MEMQL_CA_MARKER} says memQL created this CA."
+    else
+        refuse_if_pre_existing mkcertCA "$caroot"
+    fi
 
     if [[ ! -f "${caroot}/rootCA.pem" ]]; then
         cap_info "No CA at ${caroot} -- nothing to remove."
@@ -334,7 +355,9 @@ function remove_mkcert_ca() {
     command -v mkcert &>/dev/null || cap_fail 4 "mkcert is not installed; cannot uninstall the local CA"
     cap_info "Uninstalling the mkcert CA from the system trust stores..."
     mkcert -uninstall >&2 || cap_fail 5 "mkcert -uninstall failed"
-    rm -f "${caroot}/rootCA.pem" "${caroot}/rootCA-key.pem" || cap_fail 5 "could not remove the CA files in ${caroot}"
+    # The marker goes with what it describes.
+    rm -f "${caroot}/rootCA.pem" "${caroot}/rootCA-key.pem" "${caroot}/${MEMQL_CA_MARKER}" \
+        || cap_fail 5 "could not remove the CA files in ${caroot}"
 
     cap_changed
     cap_info "Removed the mkcert CA at ${caroot}."

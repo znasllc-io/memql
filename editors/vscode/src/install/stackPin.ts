@@ -99,3 +99,23 @@ export const DEFAULT_IMAGE_REGISTRY = "ghcr.io/znasllc-io";
 export function imageTagFor(releaseTag: string): string {
   return releaseTag.replace(/^v/, "");
 }
+
+/**
+ * Where the local certificate authority lives.
+ *
+ * WHY IT IS PINNED AT ALL. mkcert derives CAROOT from `XDG_DATA_HOME`, and
+ * snapd sets that to a REVISION-SCOPED directory for a snap-packaged editor:
+ *
+ *     XDG_DATA_HOME=/home/you/snap/code/255/.local/share
+ *
+ * So an install run from VS Code put the CA in `.../code/255/...` while
+ * `mkcert -CAROOT` in the operator's own terminal answered
+ * `~/.local/share/mkcert`. Two consequences, both observed (memql#3576): the
+ * installer and the operator disagreed about which CA was "the" CA and a second
+ * one got created; and `255` is baked into the path the receipt records, so the
+ * next snap refresh strands it and every refresh accumulates another.
+ *
+ * `~/.memql/mkcert` is memQL's own directory, identical whether the installer
+ * or a human runs mkcert, and independent of how the editor was packaged.
+ */
+export const DEFAULT_CAROOT_DIR = ".memql/mkcert";
