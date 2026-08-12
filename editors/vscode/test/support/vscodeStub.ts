@@ -114,7 +114,17 @@ export function resetRecorded(): void {
   recorded.webviews.length = 0;
   recorded.openDialogs.length = 0;
   recorded.terminals.length = 0;
+  // The password prompt, which this reset MISSED until memql#3586 -- the
+  // recording landed with the one-password agent (memql#3568) and nothing read it
+  // until a case asserted that a NOPASSWD machine is never asked, then counted
+  // two prompts belonging to the two cases before it. A per-case recorder that
+  // silently accumulates across cases is worse than none: it reports a fact
+  // about the whole file while reading like a fact about one case.
+  recorded.inputBoxes.length = 0;
   nextOpenDialogResult = undefined;
+  // Back to DISMISSED, the documented default. An armed answer surviving into the
+  // next case would hand a password to a run that never asked for one.
+  nextInputBoxResult = undefined;
 }
 
 /**

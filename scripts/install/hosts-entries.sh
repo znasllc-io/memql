@@ -344,7 +344,7 @@ function write_elevated() {
 
     if ! elevate_begin "update ${path}"; then
         offer_terminal_handoff "$path" \
-            "hosts file is not writable: ${path}, and this machine has no way to ask for a password without a terminal"
+            "hosts file is not writable: ${path}, and $(elevate_no_ask_reason)"
     fi
 
     cap_info "writing ${path} as root -- $(elevate_explain)"

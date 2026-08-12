@@ -70,10 +70,32 @@ Everything else, without asking beyond one password prompt:
 ### The password prompt
 
 Three of those steps need root: the hosts-file block, trusting the certificate
-authority, and installing the NSS tools. The wizard asks through your desktop's
-own password dialog. If there is no desktop to draw on -- over SSH, on a
-headless box, in CI -- it stops and hands you the exact command to run in a
-terminal instead.
+authority, and installing the NSS tools.
+
+**One prompt, in the editor.** The wizard asks once, in a VS Code input box,
+before anything runs, and serves the answer to each of those three steps. It has
+to ask on their behalf because `sudo` caches an authentication per terminal --
+or, with no terminal, per parent process -- and each step is its own process, so
+nothing they do can share one prompt between them.
+
+Dismissing the box does not stop the run. The steps that need root refuse and
+hand you the exact command to run in a terminal; the rest proceed.
+
+**Running a step yourself instead** -- from a terminal, by hand -- gets your
+desktop's own password dialog, or a terminal prompt. Only the wizard's own runs
+suppress that, because the wizard has already asked.
+
+If there is no way to ask at all -- over SSH, on a headless box, in CI -- the
+step stops and hands you the command to run in a terminal.
+
+**Is the editor's box safe?** It is a trade, not a free win. Neither prompt is
+drawn by the operating system: a VS Code input box and a desktop password dialog
+are both drawn by ordinary programs running as you, and any program running as
+you could draw either. The difference is that the editor's box means your
+password passes through the editor's memory for the length of the install, where
+a desktop dialog hands it straight to `sudo`. Asking once is what buys that. The
+password is never written to disk and never placed in any child process's
+environment.
 
 ### Why the NSS tools are never removed
 

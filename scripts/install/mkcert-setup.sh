@@ -310,7 +310,7 @@ function ensure_ca_trusted() {
         # is meant to finish.
         cap_result_set remedy "$(printf '%q' "$(self_command)") --confirm=$(printf '%q' "$confirm") --caroot=$(printf '%q' "$caroot") --cert-file=$(printf '%q' "$cert") --key-file=$(printf '%q' "$key")${_MKCERT_REMEDY_FLAGS}"
         if [[ "$(elevate_method)" == "none" ]]; then
-            cap_fail 4 "trusting the local CA needs your password, and this machine has no way to ask for one without a terminal. Run the command below in a terminal -- it is the same step, where mkcert can prompt -- then retry."
+            cap_fail 4 "trusting the local CA needs your password, and $(elevate_no_ask_reason). Run the command below in a terminal -- it is the same step, where mkcert can prompt -- then retry."
         fi
         cap_fail 4 "trusting the local CA needs your password, and the prompt was cancelled or the password was not accepted. Retry, or run the command below in a terminal."
     fi

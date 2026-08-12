@@ -33,6 +33,33 @@
 // gated on a nonce, which raises the bar over a guessable path; it does not
 // change the trust boundary, and nothing at this layer could.
 //
+// IS THE VS CODE PASSWORD BOX SECURE? An operator asked, and the answer is a
+// trade rather than a reassurance (memql#3586).
+//
+//   NEITHER PROMPT IS SYSTEM-TRUSTED. The VS Code input box and the zenity box
+//   `scripts/lib/elevate.sh` builds are both drawn by ordinary user processes,
+//   and any program running as this user can draw either. Only polkit and the
+//   macOS authorization dialog are drawn by the OS -- and pkexec was rejected
+//   above for a different reason: it runs the whole command as root, which
+//   breaks mkcert's CAROOT resolution.
+//
+//   THE VS CODE BOX MEANS THE PASSWORD TRANSITS THIS PROCESS. It arrives in an
+//   ordinary unlocked JS string, lives in the extension host's heap for the
+//   length of the run, may appear in a heap snapshot or a core dump, and cannot
+//   be reliably zeroed. The zenity path never hands it to the extension at all:
+//   it goes from the dialog's stdout to sudo's stdin.
+//
+//   SO ASKING ONCE IS THE REASON THE EXTENSION HOLDS IT. That is the whole
+//   trade, and it is worth stating rather than implying that the convenient
+//   option is also the safest one. What holding it does NOT do is put the
+//   password on disk or into any child process's environment; both are argued
+//   above and the on-disk half has a test.
+//
+// A stronger posture is available and deliberately not built: a setting that
+// asks per step through the desktop dialog and never holds the password. It
+// costs three prompts per install, which is the thing memql#3568 set out to fix,
+// so it belongs to an operator who wants it rather than to everyone.
+//
 // Free of `vscode` imports so it is unit-testable under plain `node --test`;
 // the panel supplies the secret it collected.
 //
@@ -165,16 +192,63 @@ function shellQuote(value: string): string {
 }
 
 /**
- * Whether sudo will run without asking: this user is NOPASSWD, or a recent
- * authentication is still cached.
+ * The environment that tells a capability script the wizard owns the asking.
+ *
+ * WHY THIS IS NOT JUST `SUDO_ASKPASS` (memql#3586). Every capability script can
+ * build its own desktop password dialog, which is the right answer for a human
+ * running one by hand and the wrong one here: this wizard has an input box, and
+ * a script that prompts as well puts a second, differently-shaped question in
+ * front of someone who has already answered.
+ *
+ * With `SUDO_ASKPASS` alone, that consistency rested on the agent ALWAYS being
+ * created -- and the run where it was not is exactly the run that asked three
+ * times through the desktop. So the marker travels unconditionally and says the
+ * true thing on its own: whoever owns the run owns the asking. `elevate_method`
+ * then answers `none` when no helper was inherited, and the step refuses with
+ * the terminal remedy it already carries.
+ *
+ * SUDO_ASKPASS is ABSENT rather than empty when there is no agent: sudo reads an
+ * empty value as a helper it cannot execute, which is a different and worse
+ * failure than having none.
+ */
+export const ELEVATE_DIALOG_ENV = "MEMQL_ELEVATE_DIALOG";
+
+export function elevationEnv(askpassPath: string | undefined): Record<string, string> {
+  return {
+    [ELEVATE_DIALOG_ENV]: "never",
+    ...(askpassPath !== undefined && askpassPath !== "" ? { SUDO_ASKPASS: askpassPath } : {}),
+  };
+}
+
+/** How the probe below runs sudo. Injected by tests, which must never reach it. */
+export type SudoRunner = (args: string[]) => Promise<number>;
+
+/**
+ * Whether sudo will run without asking, because this user is NOPASSWD.
  *
  * `-n` so the probe itself can never block. Asking someone for a password sudo
  * was never going to want is the surest way to teach them to type it at
  * anything.
+ *
+ * `-k` BECAUSE A CACHED CREDENTIAL IS NOT AN ANSWER TO THIS QUESTION
+ * (memql#3586). The sudoers policy keys a cache record to the terminal or, with
+ * no terminal, to the PARENT PROCESS ID -- and there is no terminal anywhere in
+ * this wizard. So a credential cached for the extension host is one that no
+ * capability script can use: each is its own process with its own record. The
+ * probe used to find it, conclude no password was needed, skip the agent, and
+ * leave every privileged step to discover otherwise and prompt on its own.
+ *
+ * `-k` WITH A COMMAND IS NOT DESTRUCTIVE, which is the reason it is safe to
+ * probe with. From `man sudo`: used with a command it "will cause sudo to ignore
+ * the user's cached credentials [...] and will not update" them. Used WITHOUT a
+ * command it invalidates them, which is what `sudoAccepts` does deliberately and
+ * this must not.
  */
-export async function sudoRunsWithoutAsking(): Promise<boolean> {
-  return (await runSudo(["-n", "true"], {})) === 0;
+export async function sudoRunsWithoutAsking(run: SudoRunner = defaultSudoRunner): Promise<boolean> {
+  return (await run(["-n", "-k", "true"])) === 0;
 }
+
+const defaultSudoRunner: SudoRunner = (args) => runSudo(args, {});
 
 /**
  * Whether the password behind this helper is the right one.

@@ -155,7 +155,7 @@ function install_package() {
 
     if ! elevate_begin "install ${package}, so browsers can trust the local certificate authority"; then
         cap_result_set remedy "sudo ${argv[*]}"
-        cap_fail 4 "installing ${package} needs root, and this machine has no way to ask for a password without a terminal. Run the command below in a terminal, then retry."
+        cap_fail 4 "installing ${package} needs root, and $(elevate_no_ask_reason). Run the command below in a terminal, then retry."
     fi
     cap_info "${package} needs root to install -- $(elevate_explain)"
     if ! elevate_run "${argv[@]}" >&2; then
