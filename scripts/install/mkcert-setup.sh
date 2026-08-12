@@ -78,6 +78,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/elevate.sh
+source "${SCRIPT_DIR}/../lib/elevate.sh"
 # shellcheck source=../lib/localtls.sh
 source "${SCRIPT_DIR}/../lib/localtls.sh"
 
@@ -265,14 +267,31 @@ function ensure_ca_trusted() {
     local bin="$1" caroot="$2" cert="$3" key="$4" confirm="$5" out=""
 
     cap_step "ensuring the local CA is trusted (CAROOT=${caroot})"
-    cap_info "mkcert may ask for your password -- it is writing to the trust store."
+
+    # mkcert SHELLS OUT TO SUDO for the trust-store write, and sudo with no
+    # terminal reads the password from $SUDO_ASKPASS. Exporting that variable is
+    # the entire integration -- memQL does not wrap, re-implement or elevate
+    # mkcert, it gives mkcert's own sudo a way to ask (memql#3562).
+    #
+    # NOT `sudo mkcert -install`, which would be the obvious thing and is wrong:
+    # mkcert resolves CAROOT from the running user's home, so as root it would
+    # build a SECOND CA under /root, trusted for a user who is not the one
+    # running a browser. mkcert stays the operator; only the write becomes root.
+    if elevate_begin "trust the local certificate authority"; then
+        cap_info "mkcert needs your password to write the trust store -- $(elevate_explain)."
+    else
+        cap_info "mkcert may ask for your password -- it is writing to the trust store."
+    fi
+
     if out="$(CAROOT="$caroot" "$bin" -install 2>&1)"; then
+        elevate_end
         [[ -n "$out" ]] && printf '%s\n' "$out" >&2
         if [[ ! -f "${caroot}/rootCA.pem" ]]; then
             cap_fail 5 "mkcert -install reported success but ${caroot}/rootCA.pem is missing"
         fi
         return 0
     fi
+    elevate_end
     printf '%s\n' "$out" >&2
 
     if looks_like_an_elevation_failure "$out"; then
@@ -285,7 +304,10 @@ function ensure_ca_trusted() {
         # remedy that drops one refuses for a different reason than the run it
         # is meant to finish.
         cap_result_set remedy "$(printf '%q' "$(self_command)") --confirm=$(printf '%q' "$confirm") --caroot=$(printf '%q' "$caroot") --cert-file=$(printf '%q' "$cert") --key-file=$(printf '%q' "$key")${_MKCERT_REMEDY_FLAGS}"
-        cap_fail 4 "trusting the local CA needs your password, and this run has no terminal to ask on. Run the command below in a terminal -- it is the same step, where mkcert can prompt -- then retry."
+        if [[ "$(elevate_method)" == "none" ]]; then
+            cap_fail 4 "trusting the local CA needs your password, and this machine has no way to ask for one without a terminal. Run the command below in a terminal -- it is the same step, where mkcert can prompt -- then retry."
+        fi
+        cap_fail 4 "trusting the local CA needs your password, and the prompt was cancelled or the password was not accepted. Retry, or run the command below in a terminal."
     fi
     cap_fail 5 "mkcert -install failed"
 }

@@ -63,6 +63,8 @@ _HOSTS_ACTION=""
 _HOSTS_CONFIRM=""
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/elevate.sh
+source "${SCRIPT_DIR}/../lib/elevate.sh"
 
 cap_init "install.hostsEntries" "Add or remove the memQL front-door hostnames in the system hosts file."
 cap_spec_param "action"     "add | remove (required)"
@@ -301,27 +303,69 @@ function apply() {
     local mode="$1" path="$2"
 
     _TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/memql-hosts.XXXXXX")"
-    trap cleanup_tmp EXIT
+    # COMPOSED with capability.sh's EXIT trap rather than replacing it. A bare
+    # `trap cleanup_tmp EXIT` overwrote it, and with it the guarantee that an
+    # unexpected abort still emits a failure envelope -- so from this line on,
+    # a `set -e` death produced silence on stdout and the caller saw a bare
+    # exit code with no message (memql#3562).
+    trap 'cleanup_tmp; _cap_on_exit' EXIT
     render "$mode" > "$_TMP_FILE"
 
     if cmp -s "$_TMP_FILE" "$path"; then
         return 1
     fi
-    if [[ ! -w "$path" ]]; then
-        # THE COMMAND, so the wizard can offer to run it (memql#3551). The
-        # extension spawns every capability unprivileged, so this step cannot
-        # elevate itself -- what it can do is name exactly what would work,
-        # with this run's own arguments in it, and let the operator run it in
-        # their own terminal where their sudo prompt belongs.
-        cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --action=$(printf '%q' "$_HOSTS_ACTION") --hosts-file=$(printf '%q' "$path") --confirm=$(printf '%q' "$_HOSTS_CONFIRM")"
-        cap_fail 4 "hosts file is not writable: ${path} (re-run with sudo)"
-    fi
     # Write THROUGH the existing file so its inode, owner and mode survive --
-    # a mv would hand /etc/hosts a fresh inode owned by whoever ran us.
-    if ! cat "$_TMP_FILE" > "$path"; then
-        cap_fail 5 "failed to write ${path}"
+    # a mv would hand /etc/hosts a fresh inode owned by whoever ran us. `tee`
+    # is the elevated spelling of the same write, and takes the content on
+    # stdin, which sudo leaves alone because the password comes from the
+    # askpass helper rather than from there.
+    if [[ -w "$path" ]]; then
+        if ! cat "$_TMP_FILE" > "$path"; then
+            cap_fail 5 "failed to write ${path}"
+        fi
+        return 0
     fi
+    write_elevated "$path"
     return 0
+}
+
+# write_elevated <path> -- the same write, as root.
+#
+# The installer used to stop here and hand the operator a command (memql#3551),
+# because a capability spawned by the wizard has no terminal and sudo cannot ask
+# for a password without one. It can now ask through a desktop dialog
+# (scripts/lib/elevate.sh), so the ordinary case is that this just works and the
+# operator types their password once into a native prompt.
+#
+# The handoff remains for the case that is genuinely unautomatable -- over SSH,
+# on a headless machine, in CI -- where there is no screen to put a dialog on.
+function write_elevated() {
+    local path="$1"
+
+    if ! elevate_begin "update ${path}"; then
+        offer_terminal_handoff "$path" \
+            "hosts file is not writable: ${path}, and this machine has no way to ask for a password without a terminal"
+    fi
+
+    cap_info "writing ${path} as root -- $(elevate_explain)"
+    if ! elevate_run tee "$path" < "$_TMP_FILE" >/dev/null; then
+        elevate_end
+        # A cancelled dialog and a mistyped password land here together, and
+        # both mean the same thing to the operator: nothing was written, and
+        # the way forward is to try again or run it themselves.
+        offer_terminal_handoff "$path" \
+            "could not write ${path} as root -- the password prompt was cancelled, or the password was not accepted"
+    fi
+    elevate_end
+}
+
+# offer_terminal_handoff <path> <message> -- refuse, naming the exact command
+# that would work, with THIS run's arguments in it. The wizard turns the remedy
+# into a button that opens a terminal with the command already typed.
+function offer_terminal_handoff() {
+    local path="$1" message="$2"
+    cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --action=$(printf '%q' "$_HOSTS_ACTION") --hosts-file=$(printf '%q' "$path") --confirm=$(printf '%q' "$_HOSTS_CONFIRM")"
+    cap_fail 4 "$message"
 }
 
 #=============================================================================

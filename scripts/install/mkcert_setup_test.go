@@ -247,6 +247,12 @@ func (e *mkcertEnv) run(t *testing.T, args ...string) (mkcertEnvelope, int, stri
 		"STUB_CAROOT="+e.caroot,
 		"STUB_LOG="+e.log,
 	)
+	// NO DISPLAY, EVER. mkcert-setup.sh now offers mkcert's sudo a graphical
+	// askpass helper (scripts/lib/elevate.sh), and a suite that inherited a
+	// developer's DISPLAY could put a real password dialog in front of whoever
+	// ran `go test`. The stub mkcert never shells out to sudo, so this is belt
+	// and braces -- which is the right amount for a prompt nobody asked for.
+	cmd.Env = append(cmd.Env, "DISPLAY=", "WAYLAND_DISPLAY=")
 	cmd.Env = append(cmd.Env, e.extra...)
 
 	var stdout, stderr bytes.Buffer
