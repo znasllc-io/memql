@@ -405,3 +405,84 @@ test("src/install imports nothing from vscode", async () => {
     );
   }
 });
+
+// -----------------------------------------------------------------------------
+// retained + shared (memql#3566)
+// -----------------------------------------------------------------------------
+
+test("the shipped install graph installs the NSS tools and keeps them", async () => {
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const step = stepById(g, "browserTrust");
+  assert.ok(step, "no browserTrust step -- certutil is what lets browsers trust the local CA");
+  assert.equal(step!.retained, true);
+  assert.notEqual(step!.retainedReason.trim(), "", "retained with no reason");
+  assert.ok(!step!.receipt, "a retained step declares no receipt: nothing takes it back");
+
+  // The step that needs it must wait for it, or mkcert runs first and refuses.
+  const localCA = stepById(g, "localCA");
+  assert.ok(localCA!.dependsOn?.includes("browserTrust"));
+});
+
+test("the shipped uninstall graph separates shared tools from memQL's own", async () => {
+  const g = await loadGraphFile(graphDocumentPath("uninstall", REPO_ROOT));
+  const shared = g.steps.filter((s) => s.shared).map((s) => s.id).sort();
+  const own = g.steps.filter((s) => !s.shared).map((s) => s.id).sort();
+
+  // The toolchain is the operator's now; the cluster, the checkout and the
+  // hosts block exist only because memQL was installed.
+  assert.deepEqual(shared, ["removeLocalCA", "removeToolK3d", "removeToolKubectl", "removeToolMkcert"]);
+  assert.ok(own.includes("removeCluster"));
+  assert.ok(own.includes("removeCheckout"));
+  assert.ok(own.includes("removeHostsBlock"));
+
+  for (const s of g.steps) {
+    if (s.shared) {
+      assert.notEqual(s.sharedReason.trim(), "", `${s.id} is shared with no reason for the operator`);
+    }
+  }
+});
+
+test("retained is refused without an argument for it", () => {
+  refuses(
+    doc("install", [
+      { ...readOnlyStep(), readOnly: false, retained: true, verify: { kind: "resultTrue", field: "result.ok" } },
+    ]),
+    "retainedReason",
+  );
+});
+
+test("a change is kept or taken back, never both", () => {
+  refuses(
+    doc("install", [
+      {
+        ...readOnlyStep(),
+        readOnly: false,
+        retained: true,
+        retainedReason: "because",
+        receipt: "binary",
+        preExistingPath: "none",
+        verify: { kind: "resultTrue", field: "result.ok" },
+      },
+    ]),
+    "kept or it is taken back",
+  );
+});
+
+test("shared belongs to an uninstall graph and retained to an install one", () => {
+  refuses(doc("install", [{ ...readOnlyStep(), shared: true, sharedReason: "r" }]), "shared");
+  refuses(
+    doc("uninstall", [
+      {
+        id: "a",
+        script: "install.removeArtifact",
+        description: "d",
+        reverses: "toolK3d",
+        elevation: "none",
+        retained: true,
+        retainedReason: "r",
+        verify: { kind: "resultTrue", field: "result.removed" },
+      },
+    ]),
+    "retained",
+  );
+});

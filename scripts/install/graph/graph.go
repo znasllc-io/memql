@@ -211,6 +211,31 @@ type Step struct {
 	// Reverses names the install-graph step id this step undoes. Uninstall
 	// graphs only; it is what makes the drift assertion in #3370 possible.
 	Reverses string `json:"reverses,omitempty"`
+	// Retained declares that this step changes the machine and the change is
+	// DELIBERATELY KEPT -- the third answer to "say where this gets taken
+	// back", alongside a receipt and containedBy (memql#3566).
+	//
+	// It exists because the honest answer for a distribution package is
+	// "nowhere". certutil is a general system tool that other software uses,
+	// and an application uninstaller that removes distro packages is how
+	// installers earn their reputation. Forcing that step to claim a receipt it
+	// will never honour, or a containment that is not true, would put a lie in
+	// the document instead of a decision. Install graphs only.
+	Retained bool `json:"retained,omitempty"`
+	// RetainedReason says WHY, in the document, next to the claim. Required
+	// when Retained is set: "this is kept" is a decision an operator reading
+	// the graph is entitled to see argued.
+	RetainedReason string `json:"retainedReason,omitempty"`
+	// Shared marks an uninstall step whose artifact is NOT memQL-only -- k3d,
+	// kubectl, mkcert, the local CA. Those are general tools the operator may
+	// now depend on, so removing them is OFFERED rather than assumed, and the
+	// wizard shows them unticked (memql#3566). A step without this flag removes
+	// something only memQL put there and only memQL uses, and needs no
+	// permission beyond "uninstall memQL". Uninstall graphs only.
+	Shared bool `json:"shared,omitempty"`
+	// SharedReason is what the operator reads beside the checkbox: what else
+	// this thing is good for. Required when Shared is set.
+	SharedReason string `json:"sharedReason,omitempty"`
 	// Verify is mandatory: what this step must prove before the graph moves on.
 	Verify Verify `json:"verify"`
 }
@@ -350,6 +375,9 @@ func (g *Graph) validateStep(s *Step, source string) error {
 		if s.Reverses != "" {
 			return fmt.Errorf("%s sets reverses -- that belongs on an uninstall graph, an install step undoes nothing", where)
 		}
+		if s.Shared {
+			return fmt.Errorf("%s sets shared -- that marks an UNINSTALL step whose artifact the operator may want to keep", where)
+		}
 	case KindUninstall:
 		if s.Receipt != "" {
 			return fmt.Errorf("%s sets receipt -- an uninstall step removes artifacts, it does not leave them behind", where)
@@ -357,6 +385,31 @@ func (g *Graph) validateStep(s *Step, source string) error {
 		if s.ContainedBy != "" {
 			return fmt.Errorf("%s sets containedBy -- that records where an INSTALL step's change gets taken back", where)
 		}
+		if s.Retained {
+			return fmt.Errorf("%s sets retained -- that declares an INSTALL step's change is deliberately kept", where)
+		}
+	}
+	if s.Retained {
+		if s.Receipt != "" || s.ContainedBy != "" {
+			return fmt.Errorf("%s is retained AND declares a receipt or containedBy -- a change is kept or it is taken back, not both", where)
+		}
+		if s.ReadOnly {
+			return fmt.Errorf("%s is readOnly and retained -- a step that changes nothing has nothing to keep", where)
+		}
+		if strings.TrimSpace(s.RetainedReason) == "" {
+			return fmt.Errorf("%s is retained but gives no retainedReason -- "+
+				"leaving something on an operator's machine forever is a decision they are entitled to see argued", where)
+		}
+	}
+	if s.RetainedReason != "" && !s.Retained {
+		return fmt.Errorf("%s gives a retainedReason but is not retained -- nothing would ever read it", where)
+	}
+	if s.Shared && strings.TrimSpace(s.SharedReason) == "" {
+		return fmt.Errorf("%s is shared but gives no sharedReason -- "+
+			"the operator is being asked whether to keep this, and cannot answer without knowing what else it is for", where)
+	}
+	if s.SharedReason != "" && !s.Shared {
+		return fmt.Errorf("%s gives a sharedReason but is not shared -- nothing would ever read it", where)
 	}
 	if s.ContainedBy != "" {
 		if s.Receipt != "" {

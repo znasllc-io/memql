@@ -288,6 +288,7 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "install.refreshPins": "scripts/install/refresh-tool-pins.sh",
   "install.detect": "scripts/install/detect.sh",
   "install.dockerAccess": "scripts/install/docker-access.sh",
+  "install.nssTools": "scripts/install/nss-tools.sh",
   "install.binary": "scripts/install/install-binary.sh",
   "install.hostsEntries": "scripts/install/hosts-entries.sh",
   "install.mkcert": "scripts/install/mkcert-setup.sh",

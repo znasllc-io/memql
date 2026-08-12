@@ -34,6 +34,8 @@ function step(over: Partial<PreviewStep> = {}): PreviewStep {
     preserved: false,
     target: "cluster memql-local",
     elevation: "none",
+    shared: false,
+    sharedReason: "",
     ...over,
   };
 }
