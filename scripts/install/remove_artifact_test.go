@@ -308,7 +308,7 @@ func TestRemoveArtifactPreExistingRefusesEveryKind(t *testing.T) {
 				t.Errorf("the refusal must say why; got %q", env.Error.Message)
 			}
 			// NOTHING MAY HAVE BEEN MUTATED. A read is a different matter, and
-			// since memql#3584 a necessary one: absence is checked BEFORE the
+			// since memql#3583 a necessary one: absence is checked BEFORE the
 			// guard, so that an artifact which is already gone reports the
 			// honest no-op instead of "refusing to remove ... it was already on
 			// this machine" about a thing that does not exist. Telling absent
@@ -972,7 +972,7 @@ func TestRemoveArtifactPrunesEmptyParents(t *testing.T) {
 	})
 }
 
-// THE ONE THAT WAS REPORTED (memql#3584). An operator removed the CA by hand,
+// THE ONE THAT WAS REPORTED (memql#3583). An operator removed the CA by hand,
 // ran the uninstall, and was told:
 //
 //	refusing to remove mkcertCA (...): --pre-existing=true says the installer
