@@ -106,12 +106,22 @@ did not create it, and uninstalling memQL must never take something that was alr
 function remove_binary() {
     local path="$1"
     cap_require path "$path"
-    refuse_if_pre_existing binary "$path"
 
+    # NOTHING THERE IS NOT SOMETHING TO REFUSE (memql#3584). The guard used to
+    # run first, so an artifact that had ALREADY BEEN REMOVED still produced
+    # "refusing to remove ... it was already on this machine before the
+    # install" -- a refusal about a thing that does not exist, and a summary
+    # line claiming something was left in place when nothing was. An operator
+    # who had just cleaned up by hand was told their uninstall had not worked.
+    #
+    # Absence is checked first now. What is not there cannot be taken from
+    # anyone, so it reports the honest no-op; the guard still stands between the
+    # flag and the damage for everything that IS there.
     if [[ ! -e "$path" && ! -L "$path" ]]; then
         cap_info "No binary at ${path} -- nothing to remove."
         finish binary "$path" false "already absent"
     fi
+    refuse_if_pre_existing binary "$path"
     rm -f "$path" || cap_fail 5 "could not remove ${path}"
     cap_changed
     cap_info "Removed ${path}."
@@ -179,12 +189,13 @@ function prune_empty_parents() {
 function remove_checkout() {
     local path="$1"
     cap_require path "$path"
-    refuse_if_pre_existing checkout "$path"
 
+    # Absence before the guard -- see remove_binary (memql#3584).
     if [[ ! -e "$path" ]]; then
         cap_info "No checkout at ${path} -- nothing to remove."
         finish checkout "$path" false "already absent"
     fi
+    refuse_if_pre_existing checkout "$path"
     if [[ ! -d "$path" ]]; then
         cap_fail 5 "${path} is not a directory -- refusing to treat it as a source checkout"
     fi
@@ -219,9 +230,9 @@ function remove_checkout() {
 function remove_hosts_entries() {
     local path="$1" marker="$2"
     cap_require path "$path"
-    refuse_if_pre_existing hostsEntries "$path"
 
     local begin="# BEGIN ${marker}" end="# END ${marker}"
+    # Absence before the guard -- see remove_binary (memql#3584).
     if [[ ! -f "$path" ]]; then
         cap_info "No hosts file at ${path} -- nothing to remove."
         finish hostsEntries "$path" false "already absent"
@@ -230,6 +241,7 @@ function remove_hosts_entries() {
         cap_info "No '${begin}' block in ${path} -- nothing to remove."
         finish hostsEntries "$path" false "no managed block present"
     fi
+    refuse_if_pre_existing hostsEntries "$path"
 
     local tmp
     tmp="$(mktemp)" || cap_fail 5 "could not create a temporary file"
@@ -341,15 +353,19 @@ function remove_mkcert_ca() {
     # marker falls back to the receipt's verdict, which is the conservative
     # half -- an unmarked CA on a machine whose receipt says "already here" is
     # still refused, exactly as before.
+    # Absence before the guard -- see remove_binary (memql#3584).
+    # This is the one that was actually reported: an operator removed the CA by
+    # hand, ran the uninstall, and was told memQL was refusing to take a CA that
+    # had not been there for an hour.
+    if [[ ! -f "${caroot}/rootCA.pem" ]]; then
+        cap_info "No CA at ${caroot} -- nothing to remove."
+        finish mkcertCA "$caroot" false "already absent"
+    fi
+
     if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
         cap_info "${caroot}/${MEMQL_CA_MARKER} says memQL created this CA."
     else
         refuse_if_pre_existing mkcertCA "$caroot"
-    fi
-
-    if [[ ! -f "${caroot}/rootCA.pem" ]]; then
-        cap_info "No CA at ${caroot} -- nothing to remove."
-        finish mkcertCA "$caroot" false "already absent"
     fi
 
     command -v mkcert &>/dev/null || cap_fail 4 "mkcert is not installed; cannot uninstall the local CA"
@@ -371,14 +387,15 @@ function remove_mkcert_ca() {
 function remove_stack() {
     local cluster="$1"
     cap_require cluster "$cluster"
-    refuse_if_pre_existing stack "$cluster"
 
     command -v k3d &>/dev/null || cap_fail 4 "k3d is not installed; cannot remove the local cluster"
 
+    # Absence before the guard -- see remove_binary (memql#3584).
     if ! k3d cluster list 2>/dev/null | grep -q "^${cluster}[[:space:]]"; then
         cap_info "No k3d cluster named '${cluster}' -- nothing to remove."
         finish stack "$cluster" false "already absent"
     fi
+    refuse_if_pre_existing stack "$cluster"
     cap_info "Deleting k3d cluster '${cluster}'..."
     k3d cluster delete "$cluster" >&2 || cap_fail 5 "k3d cluster delete ${cluster} failed"
 
