@@ -16,6 +16,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -607,11 +608,23 @@ test("the pinned tag is a release tag, not a branch", async () => {
 //
 // The requirement is read off the scripts themselves rather than from a list
 // kept beside them: a list is a second thing to forget.
-test("every required-with-no-default param is supplied by the graph or the plan", async () => {
+// Every param a capability script cannot run without has to come from
+// somewhere -- the graph pins some, the plan supplies the rest. Nothing checked
+// that, which is how the wizard shipped twice with an input it never passed:
+// `--tag`, and then `--registration-mode`, which got all the way through
+// creating a Kubernetes cluster before failing (memql#3568).
+//
+// REQUIREDNESS IS READ OFF `--print-spec`, by running each script. It used to be
+// parsed out of the shell source by looking for `cap_require` beside an empty
+// default -- which found `--tag` and could not find `--registration-mode`,
+// because seed-bootstrap.sh checks its five as a set and reports them together.
+// A test that infers a contract from an implementation only sees the shapes it
+// was taught; --print-spec is the contract itself.
+test("every required param is supplied by the graph or the plan", async () => {
   const graphDoc = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
   // THE WIZARD'S OWN OPTIONS, not a hand-populated SessionOptions. The point is
-  // to catch a required input the PAGE does not supply -- which is what `tag`
-  // was -- so anything this test fills in by hand is a hole it cannot see.
+  // to catch a required input the PAGE does not supply -- which is what both
+  // misses were -- so anything filled in by hand here is a hole it cannot see.
   const plan = installPlan(
     installSessionOptions({
       root: REPO_ROOT,
@@ -627,14 +640,12 @@ test("every required-with-no-default param is supplied by the graph or the plan"
 
   const missing: string[] = [];
   for (const step of graphDoc.steps) {
-    const scriptPath = capabilityScriptPath(step.script, REPO_ROOT);
-    const source = await fs.readFile(scriptPath, "utf8");
     const decision = plan(step);
     assert.equal(decision.action, "run", `${step.id} was not planned as a run`);
     if (decision.action !== "run") continue;
     const supplied = new Set([...Object.keys(step.params ?? {}), ...Object.keys(decision.params)]);
 
-    for (const name of requiredWithNoDefault(source)) {
+    for (const name of await requiredParams(capabilityScriptPath(step.script, REPO_ROOT))) {
       if (!supplied.has(name)) missing.push(`${step.id} (${step.script}): --${name}`);
     }
   }
@@ -646,25 +657,17 @@ test("every required-with-no-default param is supplied by the graph or the plan"
   );
 });
 
-/**
- * The params a capability script both `cap_require`s and gives no default for.
- *
- * `cap_param <name> ""` is the script saying "there is no sensible default for
- * this"; paired with a `cap_require <name>` it means the caller must supply it
- * or the run exits 2. Anything with a non-empty default is the script's own
- * business.
- */
-function requiredWithNoDefault(source: string): string[] {
-  const required = new Set<string>();
-  for (const m of source.matchAll(/^\s*cap_require\s+([A-Za-z0-9_-]+)\s/gm)) {
-    required.add(m[1]!);
-  }
-  const out: string[] = [];
-  for (const m of source.matchAll(/cap_param\s+([A-Za-z0-9_-]+)\s+"([^"]*)"/g)) {
-    const [, name, dflt] = m;
-    if (required.has(name!) && dflt === "") out.push(name!);
-  }
-  return out;
+/** The params a capability script declares it cannot run without. */
+async function requiredParams(scriptPath: string): Promise<string[]> {
+  const out = await new Promise<string>((resolve, reject) => {
+    const child = spawn(scriptPath, ["--print-spec"], { stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    child.stdout.on("data", (c) => (stdout += String(c)));
+    child.on("error", reject);
+    child.on("close", () => resolve(stdout));
+  });
+  const spec = JSON.parse(out) as { params?: { name: string; required?: boolean }[] };
+  return (spec.params ?? []).filter((p) => p.required === true).map((p) => p.name);
 }
 
 test("the root a packaged run passes is NOT the script's own parent", async () => {

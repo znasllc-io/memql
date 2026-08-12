@@ -60,7 +60,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 cap_init "install.enrolmentLink" \
     "Mint a single-use passkey-enrolment link for the cluster owner from the local identity pod."
 cap_spec_param "local"      "REQUIRED affirmation that this targets the LOCAL cluster (flag)"
-cap_spec_param "user-email" "primary email of the account to enrol (required)"
+cap_spec_param_required "user-email" "primary email of the account to enrol (required)"
 cap_spec_param "base-url"   "public identity base URL the link points at (default: the pod's MEMQL_IDENTITY_BASE_URL)"
 cap_spec_param "ttl"        "link lifetime as a Go duration (default 15m, server ceiling 24h)"
 cap_spec_param "context"    "kubectl context to pin (default k3d-memql)"

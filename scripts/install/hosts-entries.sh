@@ -67,7 +67,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 source "${SCRIPT_DIR}/../lib/elevate.sh"
 
 cap_init "install.hostsEntries" "Add or remove the memQL front-door hostnames in the system hosts file."
-cap_spec_param "action"     "add | remove (required)"
+cap_spec_param_required "action"     "add | remove (required)"
 cap_spec_param "hosts-file" "hosts file to edit (default: /etc/hosts)"
 cap_spec_param "hostnames"  "comma/space separated hostnames (default: the memQL front door)"
 cap_spec_param "ip"         "address the hostnames resolve to (default: 127.0.0.1)"

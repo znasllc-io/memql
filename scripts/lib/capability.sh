@@ -89,7 +89,27 @@ function cap_init() {
 # script passes an env-resolved value as the DEFAULT if it wants one). The
 # spec/help formerly advertised per-param env vars that were never read.
 function cap_spec_param() {
-    _CAP_SPEC_PARAMS+=("${1}|${2:-}")
+    _CAP_SPEC_PARAMS+=("${1}|${2:-}|")
+}
+
+# cap_spec_param_required <name> <description>
+# Declares a parameter the script CANNOT RUN WITHOUT, and says so in
+# --print-spec (`"required": true`).
+#
+# WHY THE SPEC HAS TO CARRY IT (memql#3568). A caller has no other way to know.
+# Requiredness was previously expressed three different ways -- a `cap_require`
+# call, a REQUIRED_PARAMS array checked by hand, the word "REQUIRED" in a prose
+# description -- so the only reliable way to discover a missing param was to run
+# the script and read the exit 2. That is exactly how the wizard shipped twice
+# with an input it never passed: `--tag` (memql#3560), and then
+# `--registration-mode`, which got all the way through creating a Kubernetes
+# cluster before failing.
+#
+# --print-spec is the contract surface a caller can read WITHOUT running
+# anything, so requiredness belongs in it, and installSession.test.ts audits
+# every install step against it.
+function cap_spec_param_required() {
+    _CAP_SPEC_PARAMS+=("${1}|${2:-}|required")
 }
 
 #=============================================================================
@@ -376,10 +396,13 @@ function _cap_print_spec() {
     local params="" entry first=1
     for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
         [[ -z "$entry" ]] && continue
-        local name="${entry%%|*}" desc="${entry#*|}"
+        local name="${entry%%|*}" rest="${entry#*|}"
+        local desc="${rest%|*}" flag="${rest##*|}"
         [[ "$first" == "1" ]] || params+=","
         first=0
-        params+="{\"name\":\"$(cap_json_escape "$name")\",\"description\":\"$(cap_json_escape "$desc")\"}"
+        params+="{\"name\":\"$(cap_json_escape "$name")\",\"description\":\"$(cap_json_escape "$desc")\""
+        [[ "$flag" == "required" ]] && params+=",\"required\":true"
+        params+="}"
     done
     printf '{"capability":"%s","summary":"%s","params":[%s]}\n' \
         "$(cap_json_escape "$_CAP_NAME")" "$(cap_json_escape "$_CAP_SUMMARY")" "$params"
@@ -393,7 +416,9 @@ function _cap_print_help() {
     local entry
     for entry in "${_CAP_SPEC_PARAMS[@]:-}"; do
         [[ -z "$entry" ]] && continue
-        local name="${entry%%|*}" desc="${entry#*|}"
+        local name="${entry%%|*}" rest="${entry#*|}"
+        local desc="${rest%|*}" flag="${rest##*|}"
+        [[ "$flag" == "required" ]] && desc="REQUIRED -- ${desc}"
         printf '  --%-22s %s\n' "$name" "$desc"
     done
     printf '\nMeta:\n'

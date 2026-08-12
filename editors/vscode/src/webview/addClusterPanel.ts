@@ -54,6 +54,13 @@ import {
   recordedProviderKeyFile,
 } from "../install/receipt.js";
 import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
+import {
+  startSudoAgent,
+  sudoAccepts,
+  sudoRunsWithoutAsking,
+  type SudoAgent,
+} from "../install/sudoAgent.js";
+import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind } from "../install/graph.js";
 import { removalPreviewItems } from "../install/removalPreview.js";
 import type { RunScript } from "../install/runner.js";
 import {
@@ -284,6 +291,8 @@ export class AddClusterPanel {
    * answer: everything not in here is skipped (memql#3566).
    */
   private readonly removeShared = new Set<string>();
+  /** Answers sudo for every step of the run in flight. See sudoAgent.ts. */
+  private sudoAgent: SudoAgent | undefined;
   /** Why the preview could not be produced -- most often: no receipt. */
   private uninstallProblem = "";
   private uninstallAbort: AbortController | undefined;
@@ -767,6 +776,11 @@ export class AddClusterPanel {
       return;
     }
 
+    // ONE PASSWORD FOR THE WHOLE RUN (memql#3568). Collected before the first
+    // step, served to every one of them; see collectSudoPassword.
+    await this.collectSudoPassword("install");
+    if (this.disposed) return;
+
     const controller = new AbortController();
     this.runAbort = controller;
 
@@ -798,6 +812,7 @@ export class AddClusterPanel {
           // repair this is the path the receipt recorded (memql#3512).
           providerKeyFile,
           timeoutMs: STEP_TIMEOUT_MS,
+          env: this.sudoEnv(),
         }),
         this.hooks({
           onEvent: (event) => {
@@ -816,6 +831,8 @@ export class AddClusterPanel {
       failure = err instanceof Error ? err.message : String(err);
     } finally {
       this.runAbort = undefined;
+      // The run is over either way; the password has no further use.
+      await this.releaseSudoAgent();
     }
 
     if (this.disposed) return;
@@ -1059,7 +1076,15 @@ export class AddClusterPanel {
       // against a wedged daemon is the obvious way -- and an uninstall stuck
       // halfway is the worse of the two states to be left in.
       timeoutMs: STEP_TIMEOUT_MS,
+      // The hosts block and the CA both need root on the way OUT as well.
+      env: this.sudoEnv(),
     };
+  }
+
+  /** `SUDO_ASKPASS` for the run in flight, or nothing when none was collected. */
+  private sudoEnv(): Record<string, string> | undefined {
+    const agent = this.sudoAgent;
+    return agent === undefined ? undefined : { SUDO_ASKPASS: agent.askpassPath };
   }
 
   /**
@@ -1120,6 +1145,10 @@ export class AddClusterPanel {
     if (this.uninstalling || this.uninstallPreview === undefined) return;
 
     this.uninstalling = true;
+    // A removal takes root too -- the hosts block, and the CA if it is ticked.
+    // Asked once, here, for the same reason the install asks once.
+    await this.collectSudoPassword("uninstall");
+    if (this.disposed) return;
     const controller = new AbortController();
     this.uninstallAbort = controller;
     this.uninstall.begin();
@@ -1730,6 +1759,72 @@ ${this.sharedToolsHtml()}
     return skip;
   }
 
+  /**
+   * Collects the password ONCE, if this run will need one at all.
+   *
+   * WHY IT IS ASKED HERE rather than left to each step. sudo caches an
+   * authentication against a timestamp keyed by the terminal -- or, with no
+   * terminal, by the PARENT PROCESS ID. Every step is its own process, so no
+   * two share the cache: an install that touches the hosts file, installs the
+   * NSS tools and trusts a CA asked three times for one install (memql#3568).
+   *
+   * NOT ASKED WHEN IT WOULD BE POINTLESS: already root, or a sudo that runs
+   * without asking. A prompt in either case is a question with no consequence,
+   * and the surest way to teach someone to type their password at anything.
+   *
+   * A wrong password is caught HERE, with `sudo -A -v`, rather than nine
+   * minutes into a graph -- and re-asked, because a typo is the likeliest
+   * reason and re-running the whole install is a poor way to fix one.
+   */
+  private async collectSudoPassword(kind: GraphKind): Promise<void> {
+    await this.releaseSudoAgent();
+    if (!(await this.runNeedsAPassword(kind))) return;
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const secret = await vscode.window.showInputBox({
+        password: true,
+        ignoreFocusOut: true,
+        title: "memQL installer",
+        prompt:
+          attempt === 0
+            ? "Your password, once. Some steps have to edit system files -- the hosts file, the certificate store your browsers read."
+            : "That password was not accepted. Try again.",
+        placeHolder: "Password for sudo",
+      });
+      // Dismissed. The run still starts: a step that needs root will refuse
+      // with the exact command to run in a terminal, which is a better answer
+      // than refusing to begin over a thing they may have already arranged.
+      if (secret === undefined || secret === "") return;
+
+      const agent = await startSudoAgent(secret, process.execPath);
+      if (await sudoAccepts(agent.askpassPath)) {
+        this.sudoAgent = agent;
+        return;
+      }
+      await agent.dispose();
+    }
+  }
+
+  /** Whether any step of this graph needs a privilege this process lacks. */
+  private async runNeedsAPassword(kind: GraphKind): Promise<boolean> {
+    if (process.getuid?.() === 0) return false;
+    let graph: Graph;
+    try {
+      graph = await loadGraphFile(graphDocumentPath(kind, this.deps.installRoot));
+    } catch {
+      return false; // The run is about to fail on the same missing document.
+    }
+    if (!graph.steps.some((step) => step.elevation !== "none")) return false;
+    return !(await sudoRunsWithoutAsking());
+  }
+
+  /** Stops the agent and removes its socket. Idempotent. */
+  private async releaseSudoAgent(): Promise<void> {
+    const agent = this.sudoAgent;
+    this.sudoAgent = undefined;
+    if (agent !== undefined) await agent.dispose();
+  }
+
   /** Whether this removal step takes away something that is not memQL-only. */
   private isShared(stepId: string): boolean {
     return (this.uninstallPreview?.removals ?? []).some((s) => s.id === stepId && s.shared);
@@ -1985,6 +2080,12 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   private dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    // THE PASSWORD GOES WITH THE PANEL. Closing the wizard is the clearest
+    // possible statement that the operator is done, and a credential that
+    // outlived the thing it was given to is a credential nobody is watching.
+    // `dispose()` cannot await, so this is fire-and-forget -- the agent's own
+    // dispose is idempotent and the failure mode is a stopped server.
+    void this.releaseSudoAgent();
     if (AddClusterPanel.open_ === this) AddClusterPanel.open_ = undefined;
     for (const d of this.disposables.splice(0)) {
       try {

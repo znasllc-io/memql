@@ -82,6 +82,21 @@ function elevate_has_display() {
 # macOS always has osascript, and its dialog does not need DISPLAY. On Linux the
 # desktop's own prompt is preferred over anything memQL might draw, in the order
 # a desktop is likely to have installed one.
+# elevate_inherited_helper -- an askpass helper our CALLER already provided.
+#
+# The wizard asks for the password ONCE and serves it to every step over a unix
+# socket (editors/vscode/src/install/sudoAgent.ts), because sudo's own
+# authentication cache is keyed by parent process and every step is its own
+# process -- so without this the operator is asked once per privileged step.
+#
+# Honoured ahead of everything below: a caller that has already arranged how
+# sudo will ask knows more than this file does, and a script that built its own
+# dialog on top would put a second prompt in front of someone who has already
+# answered.
+function elevate_inherited_helper() {
+    [[ -n "${SUDO_ASKPASS:-}" && -x "${SUDO_ASKPASS}" ]]
+}
+
 function elevate_dialog_program() {
     if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]]; then
         command -v osascript 2>/dev/null
@@ -107,6 +122,9 @@ function elevate_method() {
     if elevate_is_root; then printf 'root\n'; return; fi
     if ! command -v sudo &>/dev/null; then printf 'none\n'; return; fi
     if elevate_sudo_is_free; then printf 'free\n'; return; fi
+    # An inherited helper beats a dialog of our own, and works where no dialog
+    # could -- a headless run whose caller has some other way to answer.
+    if elevate_inherited_helper; then printf 'inherited\n'; return; fi
     if [[ -n "$(elevate_dialog_program)" ]]; then printf 'dialog\n'; return; fi
     printf 'none\n'
 }
@@ -134,7 +152,9 @@ function elevate_begin() {
     local purpose="$1" program prompt
     case "$(elevate_method)" in
         none) return 1 ;;
-        root|free) return 0 ;;
+        # inherited: SUDO_ASKPASS is already set and already works. Nothing to
+        # build and nothing to clean up -- the caller owns both.
+        root|free|inherited) return 0 ;;
     esac
 
     program="$(elevate_dialog_program)"
@@ -170,9 +190,13 @@ EOF
 
 # elevate_end -- remove the helper. Safe to call when there is none.
 function elevate_end() {
-    if [[ -n "$_ELEVATE_HELPER" && -f "$_ELEVATE_HELPER" ]]; then
-        rm -f "$_ELEVATE_HELPER"
+    # ONLY ever removes a helper THIS file created. An inherited one belongs to
+    # the caller and is still needed by the steps after this one -- unsetting it
+    # would put the second password prompt back.
+    if [[ -z "$_ELEVATE_HELPER" ]]; then
+        return 0
     fi
+    [[ -f "$_ELEVATE_HELPER" ]] && rm -f "$_ELEVATE_HELPER"
     _ELEVATE_HELPER=""
     unset SUDO_ASKPASS
 }
@@ -208,6 +232,7 @@ function elevate_explain() {
     case "$(elevate_method)" in
         root)   printf 'already running as root\n' ;;
         free)   printf 'sudo runs without a password here\n' ;;
+        inherited) printf 'using the password you already gave the installer\n' ;;
         dialog) printf 'a password dialog will open on your desktop\n' ;;
         *)      printf 'this machine has no way to ask for a password without a terminal\n' ;;
     esac

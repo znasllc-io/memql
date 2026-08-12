@@ -50,7 +50,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "install.cloneStack" "Fetch the memQL stack at a release tag into a pinned local checkout."
 cap_spec_param "repo"  "git repository URL (default: the memQL engine)"
-cap_spec_param "tag"   "release TAG to check out (required; a branch is rejected)"
+cap_spec_param_required "tag"   "release TAG to check out (required; a branch is rejected)"
 cap_spec_param "dest"  "checkout directory (default: ~/.memql/src)"
 cap_spec_param "depth" "clone/fetch depth, 0 for a full history (default: 1)"
 cap_spec_param "git"   "path to the git binary (default: resolved from PATH)"

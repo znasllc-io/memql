@@ -68,6 +68,8 @@ export const recorded = {
   webviews: [] as StubWebviewPanel[],
   /** Every window.showOpenDialog invocation, with the options it was given. */
   openDialogs: [] as Record<string, unknown>[],
+  /** Every window.showInputBox invocation, with the options it was given. */
+  inputBoxes: [] as Record<string, unknown>[],
   /** Every terminal created, with what was typed into it (memql#3551). */
   terminals: [] as { name: string; shown: boolean; sent: { text: string; executed: boolean }[] }[],
 };
@@ -84,6 +86,20 @@ export let nextOpenDialogResult: Uri[] | undefined;
 /** Arms the next open dialog. Pass undefined for "the operator cancelled". */
 export function setNextOpenDialogResult(result: Uri[] | undefined): void {
   nextOpenDialogResult = result;
+}
+
+/**
+ * What the next `window.showInputBox` answers with (memql#3568).
+ *
+ * DEFAULT UNDEFINED, meaning dismissed -- so a case that says nothing about the
+ * password prompt gets a run that collects none, which is the behaviour a test
+ * about something else should see. A test that wants the one-password path
+ * arms it deliberately.
+ */
+export let nextInputBoxResult: string | undefined;
+
+export function setNextInputBoxResult(result: string | undefined): void {
+  nextInputBoxResult = result;
 }
 
 /** Drops everything `recorded` holds. Call between cases. */
@@ -427,6 +443,11 @@ export const window = {
   showOpenDialog(options: Record<string, unknown>): Promise<Uri[] | undefined> {
     recorded.openDialogs.push(options);
     return Promise.resolve(nextOpenDialogResult);
+  },
+
+  showInputBox(options: Record<string, unknown>): Promise<string | undefined> {
+    recorded.inputBoxes.push(options);
+    return Promise.resolve(nextInputBoxResult);
   },
 
   withProgress<T>(
