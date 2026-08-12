@@ -50,7 +50,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "install.binary" "Download, digest-verify and install one pinned tool."
-cap_spec_param "tool"    "which pinned tool to install (k3d | kubectl | mkcert)"
+cap_spec_param_required "tool"    "which pinned tool to install (k3d | kubectl | mkcert)"
 cap_spec_param "dest"    "directory to install into (default: \$HOME/.memql/bin)"
 cap_spec_param "pins"    "path to the pins manifest (default: the committed tool-pins.env)"
 cap_spec_param "dry-run" "report the plan and write nothing (flag)"

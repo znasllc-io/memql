@@ -51,7 +51,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 cap_init "install.verifyProviderKey" \
     "Verify an AI-provider API key with an authenticated, token-free GET /v1/models."
 cap_spec_param "provider"          "provider to verify: anthropic | openai"
-cap_spec_param "key-file"          "path to a file containing the API key (never a flag -- argv is public)"
+cap_spec_param_required "key-file"          "path to a file containing the API key (never a flag -- argv is public)"
 cap_spec_param "base-url"          "API base URL override (default: the provider's public endpoint)"
 cap_spec_param "timeout"           "per-request timeout in seconds (default 15)"
 cap_spec_param "anthropic-version" "anthropic-version header value (default 2023-06-01)"

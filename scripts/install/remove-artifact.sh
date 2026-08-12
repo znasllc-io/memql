@@ -67,7 +67,7 @@ source "${SCRIPT_DIR}/../lib/elevate.sh"
 _CAP_PRUNED=()
 cap_init "install.removeArtifact" \
     "Remove one installer-created artifact: binary | checkout | hostsEntries | mkcertCA | stack | images."
-cap_spec_param "kind"         "what to remove: binary | checkout | hostsEntries | mkcertCA | stack | images"
+cap_spec_param_required "kind"         "what to remove: binary | checkout | hostsEntries | mkcertCA | stack | images"
 cap_spec_param "pre-existing" "the installer did NOT create this -- refuses unconditionally when set"
 cap_spec_param "path"         "filesystem target (binary path, or the hosts file)"
 cap_spec_param "dest"         "alias for --path, for receipts that spell it that way"

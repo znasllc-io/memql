@@ -47,3 +47,17 @@
  * `installPlan`, so no front end can forget it.
  */
 export const DEFAULT_STACK_TAG = "v0.16.0";
+
+/**
+ * How a cluster the wizard builds treats people who are not its owner.
+ *
+ * `invite_only`, because that cluster has exactly one owner -- bootstrapped
+ * from the answers on the same screen -- and lives at a hostname on the
+ * operator's own machine. `open` would let anyone who can reach it register an
+ * account. Overridden per run by `--registration-mode` on the CLI.
+ *
+ * It lives beside the stack pin because it is the same kind of value: a default
+ * the installer supplies so that neither front end has to remember to, applied
+ * in `installPlan` where both go through (memql#3568, memql#3560).
+ */
+export const DEFAULT_REGISTRATION_MODE = "invite_only";

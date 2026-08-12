@@ -44,7 +44,7 @@ import {
 } from "./graph.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, type RunScript } from "./runner.js";
-import { DEFAULT_STACK_TAG } from "./stackPin.js";
+import { DEFAULT_REGISTRATION_MODE, DEFAULT_STACK_TAG } from "./stackPin.js";
 
 /**
  * The run-time inputs an install needs and a document cannot pin.
@@ -89,6 +89,16 @@ export interface SessionOptions {
    * impossible.
    */
   stackDir?: string;
+  /**
+   * Extra environment for every step's child process.
+   *
+   * The one real use is `SUDO_ASKPASS`, pointing at the agent that answers
+   * sudo with the password the operator gave ONCE (sudoAgent.ts). It has to
+   * reach every step, because sudo's own authentication cache is keyed by
+   * parent process and each step is its own process -- which is why an install
+   * asked three times before this existed (memql#3568).
+   */
+  env?: Record<string, string>;
   /** Escape hatch: per-step flag overrides. */
   stepParams: Record<string, Record<string, string>>;
   timeoutMs?: number;
@@ -112,6 +122,8 @@ export interface WizardAnswers {
   ownerFirstName: string;
   ownerLastName: string;
   timeoutMs?: number;
+  /** See SessionOptions.env -- in practice, the sudo agent's SUDO_ASKPASS. */
+  env?: Record<string, string>;
 }
 
 /**
@@ -142,6 +154,7 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     ownerLastName: answers.ownerLastName,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
+    env: answers.env,
   };
 }
 
@@ -212,7 +225,20 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           "owner-email": opts.ownerEmail,
           "owner-first-name": opts.ownerFirstName,
           "owner-last-name": opts.ownerLastName,
-          "registration-mode": opts.registrationMode,
+          // DEFAULTED HERE, like the release tag and for the same reason: it is a
+          // run input the CLI collects and the wizard has no field for, and
+          // `present()` drops empty values -- so a webview that simply did not
+          // set it reached seed-bootstrap.sh without it. That script refuses an
+          // INCOMPLETE bootstrap set on purpose, because a partial seed writes a
+          // Secret that looks healthy, brings the cluster up green, and leaves
+          // the operator at a login page for an account that was never created.
+          // The refusal was right; the wizard was wrong (memql#3568).
+          //
+          // invite_only is the answer for the cluster this wizard builds: one
+          // owner, bootstrapped from these very values, on a machine reachable
+          // at local.znas.io. `open` would let anyone who can reach it register.
+          // An operator who wants otherwise passes --registration-mode.
+          "registration-mode": opts.registrationMode || DEFAULT_REGISTRATION_MODE,
           provider: opts.providerKeyFile ? opts.provider : undefined,
           "provider-key-file": opts.providerKeyFile,
         });
@@ -359,7 +385,11 @@ function execute(
 function childEnv(opts: SessionOptions): NodeJS.ProcessEnv {
   const home = process.env.HOME ?? "";
   const toolDir = opts.toolDir ?? path.join(home, ".memql", "bin");
-  return { ...process.env, PATH: `${toolDir}${path.delimiter}${process.env.PATH ?? ""}` };
+  return {
+    ...process.env,
+    PATH: `${toolDir}${path.delimiter}${process.env.PATH ?? ""}`,
+    ...(opts.env ?? {}),
+  };
 }
 
 /**
