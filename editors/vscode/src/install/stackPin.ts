@@ -61,3 +61,22 @@ export const DEFAULT_STACK_TAG = "v0.16.0";
  * in `installPlan` where both go through (memql#3568, memql#3560).
  */
 export const DEFAULT_REGISTRATION_MODE = "invite_only";
+
+/**
+ * Where an install pulls the node images from.
+ *
+ * WHY AN INSTALL CANNOT USE THE OVERLAY'S OWN. The local overlay renames every
+ * node image to `memql-<node>:local` -- images that exist only after a
+ * developer runs `make dev` to build and import them. That is right for the
+ * inner loop and impossible for an install, so every pod sat in
+ * ImagePullBackOff (memql#3572).
+ *
+ * GHCR rather than the ACR the base manifests name, because ACR is private and
+ * reachable only by the deployment that owns it. Somebody installing a local
+ * cluster has no Azure credentials and no reason to acquire any. The images are
+ * identical -- one build, pushed to both.
+ *
+ * The tag is DEFAULT_STACK_TAG: the manifests and the images they run come from
+ * the same release, which is the whole point of pinning either.
+ */
+export const DEFAULT_IMAGE_REGISTRY = "ghcr.io/znasllc-io";

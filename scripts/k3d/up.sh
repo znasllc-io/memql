@@ -70,6 +70,8 @@ cap_spec_param "app-name"       "ArgoCD Application name"
 cap_spec_param "overlay-path"   "kustomize overlay path within the repo"
 cap_spec_param "extra-ports"    "additional host:container loadbalancer port mappings, comma-separated"
 cap_spec_param "app-project"    "ArgoCD AppProject the Application belongs to"
+cap_spec_param "image-registry" "registry to pull node images from (default: the overlay's own, i.e. locally built)"
+cap_spec_param "image-tag"      "tag for those images; required with --image-registry"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
@@ -114,6 +116,8 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 CLUSTER_CREATED=false
 ARGOCD_READY=false
 WORKLOADS_READY=false
+IMAGE_REGISTRY=""
+IMAGE_TAG=""
 SECRETS_SEEDED=false
 
 #=============================================================================
@@ -422,6 +426,46 @@ YAML
 #=============================================================================
 
 function apply_argocd_app() {
+# kustomize_image_overrides -- the `kustomize.images` block for the Application,
+# or nothing.
+#
+# WHY THE APPLICATION AND NOT A SECOND OVERLAY (memql#3572). The local overlay
+# renames every node image to `memql-<node>:local` -- images that exist only
+# after a developer runs `make dev` to build and import them. That is right for
+# the inner loop and impossible for an install: nobody installing a cluster has
+# built anything, which is why every pod sat in ImagePullBackOff.
+#
+# The two need different image VALUES, not a different topology, so this is
+# expressed where a value belongs -- `spec.source.kustomize.images` on the
+# Application -- rather than as a second overlay, a component, or an
+# `if installing` branch in the manifests. Same manifests, same overlay, same
+# sync path; only the registry differs. That is the line
+# docs/public/operate/environment-parity.md draws.
+#
+# THE KEYS ARE READ OUT OF THE OVERLAY, never listed here. kustomize matches an
+# override on the name as it appears in the BASE manifests, and the overlay
+# already names all eight. A hand-kept list in this script would be a second
+# copy that silently stops covering a node the day one is added.
+function kustomize_image_overrides() {
+    [[ -n "$IMAGE_REGISTRY" ]] || return 0
+
+    local kustomization="${REPO_ROOT}/${OVERLAY_PATH}/kustomization.yaml"
+    if [[ ! -f "$kustomization" ]]; then
+        cap_fail 4 "cannot read ${kustomization} to discover the node images; --image-registry needs the overlay to resolve them against"
+    fi
+
+    local names name out=""
+    names="$(sed -n 's/^[[:space:]]*-[[:space:]]*name:[[:space:]]*\(.*memql-[a-z]*\)[[:space:]]*$/\1/p' "$kustomization")"
+    if [[ -z "$names" ]]; then
+        cap_fail 5 "no node images found in ${kustomization}; --image-registry has nothing to override"
+    fi
+    for name in $names; do
+        out+="
+      - ${name}=${IMAGE_REGISTRY}/$(basename "$name"):${IMAGE_TAG}"
+    done
+    printf '\n    kustomize:\n      images:%s' "$out"
+}
+
     section "Registering Application '${APP_NAME}' in ArgoCD"
 
     info "Target revision: ${TARGET_REVISION}"
@@ -436,6 +480,8 @@ function apply_argocd_app() {
 
     # Generate and apply the local Application manifest.
     # We template the targetRevision so it follows the current branch.
+    local image_overrides
+    image_overrides="$(kustomize_image_overrides)"
     kubectl apply -f - >&2 <<YAML
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -452,7 +498,7 @@ spec:
   source:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
-    path: ${OVERLAY_PATH}
+    path: ${OVERLAY_PATH}${image_overrides}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${NAMESPACE}
@@ -611,6 +657,11 @@ function main() {
     # from carries scripts/ and nothing else -- so the install graph passes the
     # directory `install.cloneStack` put on disk (memql#3491).
     REPO_ROOT="$(cap_param repo-root "${REPO_ROOT}")"
+    IMAGE_REGISTRY="$(cap_param image-registry "")"
+    IMAGE_TAG="$(cap_param image-tag "")"
+    if [[ -n "$IMAGE_REGISTRY" && -z "$IMAGE_TAG" ]]; then
+        cap_fail 2 "--image-registry needs --image-tag: an untagged override would follow a moving tag, which is the opposite of what pinning an install means"
+    fi
     require_checkout "$REPO_ROOT"
     # Derived from REPO_ROOT, so it is resolved AFTER the param, not before.
     TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)}"

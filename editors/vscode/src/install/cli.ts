@@ -76,6 +76,7 @@ const VALUE_FLAGS: Record<string, keyof CliOptions> = {
   "tool-dir": "toolDir",
   tag: "tag",
   repo: "repo",
+  "image-registry": "imageRegistry",
   "provider-key-file": "providerKeyFile",
   provider: "provider",
   domain: "domain",

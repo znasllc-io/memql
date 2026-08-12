@@ -44,7 +44,11 @@ import {
 } from "./graph.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
 import { capabilityScriptPath, type RunScript } from "./runner.js";
-import { DEFAULT_REGISTRATION_MODE, DEFAULT_STACK_TAG } from "./stackPin.js";
+import {
+  DEFAULT_IMAGE_REGISTRY,
+  DEFAULT_REGISTRATION_MODE,
+  DEFAULT_STACK_TAG,
+} from "./stackPin.js";
 
 /**
  * The run-time inputs an install needs and a document cannot pin.
@@ -63,6 +67,8 @@ export interface SessionOptions {
   toolDir?: string;
   tag?: string;
   repo?: string;
+  /** Registry the node images come from; see DEFAULT_IMAGE_REGISTRY. */
+  imageRegistry?: string;
   /**
    * A PATH, never the key itself.
    *
@@ -214,7 +220,16 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // staged tree -- no deploy/, and not a git tree, so the ArgoCD target
         // revision silently became "main". The graph already declares the
         // dependency; this is the value finally flowing along it.
-        params = present({ "repo-root": stackDir });
+        // The checkout, AND where the node images come from. Without the
+        // second, ArgoCD applies an overlay whose images only exist on a
+        // machine that built them, and every pod lands in ImagePullBackOff
+        // (memql#3572). Both are values, not topology: same manifests, same
+        // overlay, same sync path.
+        params = present({
+          "repo-root": stackDir,
+          "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
+          "image-tag": opts.tag || DEFAULT_STACK_TAG,
+        });
         break;
       case "providerKey":
         params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });
