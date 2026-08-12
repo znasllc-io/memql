@@ -67,6 +67,26 @@ export interface Step {
   dependsOn?: string[];
   readOnly?: boolean;
   elevation: Elevation;
+  /**
+   * This step changes the machine and the change is DELIBERATELY KEPT -- the
+   * third answer to "say where this gets taken back", alongside a receipt and
+   * containedBy. The honest answer for a distribution package is "nowhere":
+   * certutil is a general system tool other software uses, and an application
+   * uninstaller that removes distro packages is how installers earn their
+   * reputation. Install graphs only (memql#3566).
+   */
+  retained: boolean;
+  /** Why it is kept. Required when `retained`; shown to whoever reads the graph. */
+  retainedReason: string;
+  /**
+   * This uninstall step removes something that is NOT memQL-only -- k3d,
+   * kubectl, mkcert, the local CA. The operator may now depend on it, so its
+   * removal is offered rather than assumed and the wizard shows it unticked.
+   * A step without this flag removes something only memQL put there.
+   */
+  shared: boolean;
+  /** What else the thing is good for -- what the operator reads beside the checkbox. */
+  sharedReason: string;
   /** The artifact class this step leaves behind. Install graphs only. */
   receipt?: string;
   /** `none` | `[!]result.<field>`. Required exactly when `receipt` is set. */
@@ -115,6 +135,10 @@ const STEP_KEYS = new Set([
   "preExistingPath",
   "containedBy",
   "reverses",
+  "retained",
+  "retainedReason",
+  "shared",
+  "sharedReason",
   "verify",
 ]);
 const VERIFY_KEYS = new Set(["kind", "field", "value"]);
@@ -228,6 +252,10 @@ function parseStep(value: unknown, i: number, source: string): Step {
     script: typeof obj.script === "string" ? obj.script : "",
     description: typeof obj.description === "string" ? obj.description : "",
     elevation: obj.elevation as Elevation,
+    retained: obj.retained === true,
+    retainedReason: typeof obj.retainedReason === "string" ? obj.retainedReason : "",
+    shared: obj.shared === true,
+    sharedReason: typeof obj.sharedReason === "string" ? obj.sharedReason : "",
     verify: parseVerify(obj.verify, `${source}: step ${JSON.stringify(id)}`),
   };
   if (obj.params !== undefined) step.params = parseParams(obj.params, `${source}: step ${JSON.stringify(id)}`);
@@ -328,6 +356,40 @@ function validateStep(graph: Graph, index: Map<string, Step>, s: Step, source: s
     if (s.containedBy) {
       throw new GraphError(`${where} sets containedBy -- that records where an INSTALL step's change gets taken back`);
     }
+    if (s.retained) {
+      throw new GraphError(`${where} sets retained -- that declares an INSTALL step's change is deliberately kept`);
+    }
+  }
+  if (graph.kind === "install" && s.shared) {
+    throw new GraphError(`${where} sets shared -- that marks an UNINSTALL step whose artifact the operator may want to keep`);
+  }
+  if (s.retained) {
+    if (s.receipt || s.containedBy) {
+      throw new GraphError(
+        `${where} is retained AND declares a receipt or containedBy -- a change is kept or it is taken back, not both`,
+      );
+    }
+    if (s.readOnly) {
+      throw new GraphError(`${where} is readOnly and retained -- a step that changes nothing has nothing to keep`);
+    }
+    if (s.retainedReason.trim() === "") {
+      throw new GraphError(
+        `${where} is retained but gives no retainedReason -- leaving something on an ` +
+          `operator's machine forever is a decision they are entitled to see argued`,
+      );
+    }
+  }
+  if (s.retainedReason !== "" && !s.retained) {
+    throw new GraphError(`${where} gives a retainedReason but is not retained -- nothing would ever read it`);
+  }
+  if (s.shared && s.sharedReason.trim() === "") {
+    throw new GraphError(
+      `${where} is shared but gives no sharedReason -- the operator is being asked whether ` +
+        `to keep this, and cannot answer without knowing what else it is for`,
+    );
+  }
+  if (s.sharedReason !== "" && !s.shared) {
+    throw new GraphError(`${where} gives a sharedReason but is not shared -- nothing would ever read it`);
   }
   if (s.containedBy) {
     if (s.receipt) {

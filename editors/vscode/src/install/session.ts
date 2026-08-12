@@ -417,6 +417,16 @@ export interface PlannedStep {
    * operator most needs to see coming.
    */
   elevation: Elevation;
+  /**
+   * This removal takes away something that is NOT memQL-only, so the operator
+   * chooses (memql#3566). k3d, kubectl, mkcert and the local CA are general
+   * tools they may now depend on; the cluster, the checkout and the hosts block
+   * are not. Carried from the graph so the wizard can offer the shared ones
+   * unticked and remove the rest without asking.
+   */
+  shared: boolean;
+  /** What else the shared thing is good for -- shown beside the checkbox. */
+  sharedReason: string;
   action: "run" | "skip";
   params: Record<string, string>;
   /**
@@ -475,6 +485,8 @@ export async function previewUninstall(
         script: step.script,
         reverses: step.reverses ?? "",
         elevation: step.elevation,
+        shared: step.shared,
+        sharedReason: step.sharedReason,
         action: "skip",
         params: {},
         reason: decision.reason,
@@ -490,6 +502,8 @@ export async function previewUninstall(
       script: step.script,
       reverses: step.reverses ?? "",
       elevation: step.elevation,
+      shared: step.shared,
+      sharedReason: step.sharedReason,
       action: "run",
       params,
       // A PRESERVED step carries its reason too, not just a skip. The preview

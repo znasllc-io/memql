@@ -55,6 +55,10 @@ const INSTALL_GRAPH: Graph = graph({
       description: "place a tool",
       script: "install.binary",
       elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
       receipt: "binary",
       preExistingPath: "none",
       verify: { kind: "resultTrue", field: "result.installed" },
@@ -65,6 +69,10 @@ const INSTALL_GRAPH: Graph = graph({
       script: "k3d.up",
       dependsOn: ["binary"],
       elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
       receipt: "stack",
       preExistingPath: "none",
       verify: { kind: "resultTrue", field: "result.installed" },
@@ -82,6 +90,10 @@ const UNINSTALL_GRAPH: Graph = graph({
       script: "install.removeArtifact",
       reverses: "cluster",
       elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
       verify: { kind: "resultTrue", field: "result.removed" },
     },
     {
@@ -91,6 +103,10 @@ const UNINSTALL_GRAPH: Graph = graph({
       reverses: "binary",
       dependsOn: ["removeCluster"],
       elevation: "none",
+      retained: false,
+      retainedReason: "",
+      shared: false,
+      sharedReason: "",
       verify: { kind: "resultTrue", field: "result.removed" },
     },
   ],
@@ -475,6 +491,10 @@ test("clusterUp is told where the checkout is, rather than deriving it", async (
     script: "k3d.up",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
 
@@ -495,6 +515,10 @@ test("both steps are given the SAME directory", async () => {
     script: "install.cloneStack",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
   const cluster = plan({
@@ -502,6 +526,10 @@ test("both steps are given the SAME directory", async () => {
     script: "k3d.up",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
 
@@ -528,6 +556,10 @@ test("stackCheckout is given a tag even when the caller names none", async () =>
     script: "install.cloneStack",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
 
@@ -545,6 +577,10 @@ test("an explicit tag still wins over the pin", async () => {
     script: "install.cloneStack",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
   if (decision.action === "run") {
@@ -642,6 +678,10 @@ test("the root a packaged run passes is NOT the script's own parent", async () =
     script: "k3d.up",
     description: "",
     elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
     verify: { kind: "scriptOk" },
   });
   if (cluster.action === "run") {

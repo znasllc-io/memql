@@ -70,6 +70,10 @@ action dockerAccess {
   capability script(script: "install.dockerAccess")
 }
 
+action nssTools {
+  capability script(script: "install.nssTools")
+}
+
 // Backend: scripts/install/verify-provider-key.sh. The key is passed as a FILE
 // PATH, never as a value: argv is world-readable on a shared machine.
 /// Verify an AI-provider API key is accepted, with an authenticated token-free request, before the

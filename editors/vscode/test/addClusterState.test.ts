@@ -18,7 +18,17 @@ import type { ExecEvent } from "../src/install/executor.js";
 import type { Step } from "../src/install/graph.js";
 
 function step(id: string, description = id): Step {
-  return { id, script: "install.binary", description, elevation: "none", verify: { kind: "scriptOk" } };
+  return {
+    id,
+    script: "install.binary",
+    description,
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  };
 }
 
 function finished(id: string, over: Record<string, unknown> = {}): ExecEvent {

@@ -72,7 +72,9 @@
         "kind": "resultEquals",
         "field": "result.kind",
         "value": "mkcertCA"
-      }
+      },
+      "shared": true,
+      "sharedReason": "The mkcert root CA is per machine, not per project -- it may be signing certificates for your other local stacks. Removing it makes those untrusted too."
     },
     {
       "id": "removeToolK3d",
@@ -91,7 +93,9 @@
         "kind": "resultEquals",
         "field": "result.kind",
         "value": "binary"
-      }
+      },
+      "shared": true,
+      "sharedReason": "k3d creates and manages local Kubernetes clusters generally, not only memQL's."
     },
     {
       "id": "removeToolKubectl",
@@ -110,7 +114,9 @@
         "kind": "resultEquals",
         "field": "result.kind",
         "value": "binary"
-      }
+      },
+      "shared": true,
+      "sharedReason": "kubectl talks to any Kubernetes cluster, not only memQL's."
     },
     {
       "id": "removeToolMkcert",
@@ -129,7 +135,9 @@
         "kind": "resultEquals",
         "field": "result.kind",
         "value": "binary"
-      }
+      },
+      "shared": true,
+      "sharedReason": "mkcert issues locally-trusted certificates for any project on this machine."
     }
   ]
 }
