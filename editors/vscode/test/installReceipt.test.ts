@@ -30,6 +30,7 @@ import {
   readReceipt,
   removalParams,
   serializeReceipt,
+  type Receipt,
   type ReceiptEntry,
 } from "../src/install/receipt.js";
 
@@ -189,11 +190,17 @@ test("removalParams carries the pre-existence verdict faithfully", () => {
   assert.equal(params?.["pre-existing"], "true");
 });
 
-test("removalParams omits a target it has no recorded value for", () => {
-  // Better a missing --path (the script exits 2 on a required param) than a
-  // guessed one.
-  const params = removalParams(entry({ receipt: "binary", result: {} }));
-  assert.deepEqual(params, { kind: "binary", "pre-existing": "false" });
+test("removalParams has nothing to remove when no run recorded a target", () => {
+  // THIS TEST USED TO ASSERT THE OPPOSITE, and its reason was "better a missing
+  // --path (the script exits 2 on a required param) than a guessed one". The
+  // first half is right; the conclusion is not the only alternative to guessing
+  // (memql#3564). A step that never recorded WHERE it wrote never wrote
+  // anywhere -- and the operator who hit this got their whole uninstall stopped,
+  // reported as "a fault in memQL", over a hosts block that does not exist.
+  //
+  // Nothing is guessed here either: null means "nothing to remove", the step
+  // skips as satisfied, and the removals waiting on it still run.
+  assert.equal(removalParams(entry({ receipt: "binary", result: {} })), null);
 });
 
 test("removalParams on an entry with no receipt has nothing to remove", () => {
@@ -289,4 +296,126 @@ test("deleteReceipt removes the file, and is silent when there is none", async (
   // Idempotent: an uninstall re-run after a successful one must not fail on a
   // file its predecessor already removed.
   await deleteReceipt(file);
+});
+
+// -----------------------------------------------------------------------------
+// a retried step, and a step that never wrote anything (memql#3564)
+// -----------------------------------------------------------------------------
+
+// The receipt is APPEND-ONLY and steps get retried, so a step usually has more
+// than one entry. `entries.find(...)` returned the FIRST, which on a retried
+// step is the OLDEST, which is the failure -- so an uninstall read the attempt
+// that left nothing behind and never saw the one that did.
+test("a retried step resolves to what the successful run recorded", () => {
+  const receipt: Receipt = {
+    ...emptyReceipt("install"),
+    entries: [
+      // The failed attempt: no --tag, so clone-stack.sh exited 2 before cloning.
+      entry({
+        stepId: "stackCheckout",
+        script: "install.cloneStack",
+        receipt: "checkout",
+        params: { dest: "/home/dev/.memql/src" },
+        result: {},
+        changed: false,
+      }),
+      // The run that worked.
+      entry({
+        stepId: "stackCheckout",
+        script: "install.cloneStack",
+        receipt: "checkout",
+        params: { tag: "v0.16.0", dest: "/home/dev/.memql/src" },
+        result: { dest: "/home/dev/.memql/src", commit: "abc123", cloned: true },
+        changed: true,
+      }),
+    ],
+  };
+
+  const resolved = entryFor(receipt, "stackCheckout")!;
+  assert.equal(resolved.result.commit, "abc123", "the successful run's result is invisible");
+  assert.deepEqual(removalParams(resolved), {
+    kind: "checkout",
+    path: "/home/dev/.memql/src",
+    "pre-existing": "false",
+  });
+});
+
+// The two questions an uninstall asks have opposite answers in time. "Is it
+// ours to remove" can only be answered by the FIRST run: if run 1 created the
+// CA and run 2 then found it there, reading the newest would conclude the
+// operator already had it and refuse to remove something memQL created.
+test("pre-existence is the FIRST run's answer, not the latest", () => {
+  const receipt: Receipt = {
+    ...emptyReceipt("install"),
+    entries: [
+      entry({ stepId: "localCA", receipt: "mkcertCA", preExisting: false, result: { caroot: "/ca" } }),
+      entry({ stepId: "localCA", receipt: "mkcertCA", preExisting: true, result: { caroot: "/ca" } }),
+    ],
+  };
+
+  const resolved = entryFor(receipt, "localCA")!;
+  assert.equal(
+    resolved.preExisting,
+    false,
+    "memQL created this CA on the first run; a later run finding it there does not make it the operator's",
+  );
+});
+
+// The failure the operator actually hit. hostsBlock died on a read-only
+// /etc/hosts and recorded `{remedy}` -- no hostsFile, because nothing was
+// written. The uninstall then passed no --path, remove-artifact.sh exited 2,
+// and the wizard reported "a fault in memQL" about a block that does not exist.
+test("a step that never recorded where it wrote has nothing to remove", () => {
+  const hostsBlock = entry({
+    stepId: "hostsBlock",
+    script: "install.hostsEntries",
+    receipt: "hostsEntries",
+    params: { action: "add", confirm: "add-memql-hosts" },
+    result: { remedy: "sudo .../hosts-entries.sh --action=add" },
+    changed: false,
+  });
+
+  assert.equal(
+    removalParams(hostsBlock),
+    null,
+    "a hosts block that was never written is not there to remove -- and exiting 2 " +
+      "over it stops the whole uninstall",
+  );
+});
+
+// The other half: when the result is empty but the installer's own invocation
+// named the target, that IS the location. Not a guess -- the exact value the
+// run used, so if anything landed it landed there.
+test("a target the run was invoked with is used when the result carries none", () => {
+  const checkout = entry({
+    stepId: "stackCheckout",
+    script: "install.cloneStack",
+    receipt: "checkout",
+    params: { tag: "v0.16.0", dest: "/opt/memql/src" },
+    result: {},
+  });
+
+  assert.deepEqual(removalParams(checkout), {
+    kind: "checkout",
+    path: "/opt/memql/src",
+    "pre-existing": "false",
+  });
+});
+
+// install.binary takes --dest=<directory> and reports result.path as the FILE
+// inside it. Falling back to the param would hand remove-artifact.sh a
+// directory where it expects a file.
+test("a binary never falls back to its --dest directory", () => {
+  const binary = entry({
+    stepId: "toolK3d",
+    receipt: "binary",
+    params: { tool: "k3d", dest: "/home/dev/.memql/bin" },
+    result: {},
+  });
+
+  assert.equal(
+    removalParams(binary),
+    null,
+    "the param is the directory the binary goes IN; removing that is not removing the binary",
+  );
 });
