@@ -174,6 +174,127 @@ func TestElevateMethodIsNoneWithoutSudo(t *testing.T) {
 }
 
 //=============================================================================
+// WHOEVER OWNS THE RUN OWNS THE ASKING (memql#3586)
+//=============================================================================
+//
+// The wizard has a password box of its own and asks once. A script that ALSO
+// draws a desktop dialog puts a second, differently-shaped question in front of
+// someone who has already answered -- which is what an install did, three times,
+// while the uninstall asked once. So the wizard marks the child environment, and
+// these cases pin what the mark means.
+
+func TestElevateDrawsNoDialogWhenTheCallerOwnsTheAsking(t *testing.T) {
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", sudoNeedsAPassword)
+	w.stub(t, "zenity", "exit 0")
+	// A machine that COULD draw a dialog -- a desktop with zenity installed --
+	// which is the only configuration where the marker changes anything.
+	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never")
+
+	out, _ := w.eval(t, `elevate_method`)
+	if strings.TrimSpace(out) != "none" {
+		t.Errorf("method = %q, want none -- the caller said it owns the asking, so this file must not\n"+
+			"offer a prompt of its own. The step refuses with the terminal remedy it already carries,\n"+
+			"which is one answer rather than a second prompt.", strings.TrimSpace(out))
+	}
+
+	if _, code := w.eval(t, `elevate_begin "update the hosts file" && echo "begin succeeded"`); code == 0 {
+		t.Errorf("elevate_begin built a helper anyway, so a dialog would open")
+	}
+	if strings.Contains(w.calls(t), "zenity") {
+		t.Errorf("a dialog program was invoked despite the caller owning the asking:\n%s", w.calls(t))
+	}
+}
+
+// THE ORDINARY CASE MUST NOT CHANGE. A human running this script by hand still
+// gets the desktop dialog; the marker is the wizard saying it has already asked,
+// not a decision that dialogs are wrong.
+func TestElevateStillDrawsADialogForAHumanRunningItByHand(t *testing.T) {
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", sudoNeedsAPassword)
+	w.stub(t, "zenity", "exit 0")
+	w.env = append(w.env, "DISPLAY=:0")
+
+	out, _ := w.eval(t, `elevate_method`)
+	if strings.TrimSpace(out) != "dialog" {
+		t.Errorf("method = %q, want dialog with no marker set: %s", strings.TrimSpace(out), out)
+	}
+}
+
+// An INHERITED helper still wins. The marker and SUDO_ASKPASS arrive together on
+// the run where a password WAS collected, and answering through the agent is the
+// whole point -- reading the marker as "never elevate" would break the case it
+// was added to make consistent.
+func TestElevateHonoursAnInheritedHelperEvenWhenDialogsAreOff(t *testing.T) {
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", sudoNeedsAPassword)
+	helper := filepath.Join(w.bin, "inherited-askpass")
+	if err := os.WriteFile(helper, []byte("#!/usr/bin/env bash\nprintf 'from-the-wizard\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never", "SUDO_ASKPASS="+helper)
+
+	out, _ := w.eval(t, `elevate_method`)
+	if strings.TrimSpace(out) != "inherited" {
+		t.Errorf("method = %q, want inherited -- the wizard collected a password and served it; the\n"+
+			"marker turns off dialogs THIS file would draw, not the caller's own answer", strings.TrimSpace(out))
+	}
+}
+
+// Being root, or having a sudo that never asks, is unaffected: there is nothing
+// to ask for, so there is no asking to own.
+func TestElevateMarkerDoesNotDisturbAFreeSudo(t *testing.T) {
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", "if [ \"$1\" = \"-n\" ]; then exit 0; fi\nif [ \"$1\" = \"-A\" ]; then shift; fi\nexec \"$@\"")
+	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never")
+
+	out, _ := w.eval(t, `elevate_method`)
+	if strings.TrimSpace(out) != "free" {
+		t.Errorf("method = %q, want free: %s", strings.TrimSpace(out), out)
+	}
+}
+
+// The refusal has to say the true thing. "This machine has no way to ask for a
+// password without a terminal" is wrong about a desktop with zenity on it: the
+// reason is that the installer is driving and holds no password. An operator
+// sent to diagnose their display when the actual remedy is to re-run and type
+// their password has been misdirected by the error message.
+func TestElevateExplainsWhyItCannotAskWhenTheCallerOwnsTheAsking(t *testing.T) {
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", sudoNeedsAPassword)
+	w.stub(t, "zenity", "exit 0")
+	w.env = append(w.env, "DISPLAY=:0", "MEMQL_ELEVATE_DIALOG=never")
+
+	out, code := w.eval(t, `elevate_no_ask_reason`)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if strings.Contains(out, "no way to ask") {
+		t.Errorf("the reason blames the machine on a desktop that has a dialog program installed: %q", out)
+	}
+	if !strings.Contains(out, "installer") {
+		t.Errorf("the reason does not name what is actually withholding the prompt: %q", out)
+	}
+}
+
+func TestElevateBlamesTheMachineWhenTheMachineIsTheReason(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("osascript needs no DISPLAY, so macOS always has a dialog")
+	}
+	w := newElevateWorld(t)
+	w.stub(t, "sudo", sudoNeedsAPassword)
+
+	out, code := w.eval(t, `elevate_no_ask_reason`)
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !strings.Contains(out, "no way to ask") {
+		t.Errorf("a headless machine with no dialog program is exactly the terminal-handoff case, and\n"+
+			"the reason should still say so: %q", out)
+	}
+}
+
+//=============================================================================
 // THE HELPER
 //=============================================================================
 

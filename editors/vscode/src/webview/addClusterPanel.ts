@@ -55,6 +55,7 @@ import {
 } from "../install/receipt.js";
 import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
 import {
+  elevationEnv,
   startSudoAgent,
   sudoAccepts,
   sudoRunsWithoutAsking,
@@ -257,6 +258,24 @@ export interface AddClusterDeps {
    * and a fake that replaced any of them would be the test talking to itself.
    */
   runScript?: RunScript;
+  /**
+   * Injected by tests; `sudoRunsWithoutAsking` when absent.
+   *
+   * A SAFETY RAIL AS MUCH AS A SEAM. Without it a case that opens this panel
+   * spawns the real sudo: on a desktop that risks a password dialog in front of
+   * whoever ran the suite, and on a NOPASSWD CI runner it answers "free" and
+   * quietly asserts nothing about the path that matters. It is also the only way
+   * to drive both machines -- one that needs a password and one that does not --
+   * from a single run (memql#3586).
+   */
+  sudoIsFree?: () => Promise<boolean>;
+  /**
+   * Injected by tests; `sudoAccepts` when absent. The other half of the rail
+   * above -- validating a collected password means running `sudo -A -v`, and
+   * `sudo -k` before it, which a test suite must not do to the machine it runs
+   * on.
+   */
+  sudoAccepts?: (askpassPath: string) => Promise<boolean>;
   /**
    * Drops a cluster's registry entry, its stored credential and its live
    * connection, exactly as the "Remove from list" command does.
@@ -1081,10 +1100,16 @@ export class AddClusterPanel {
     };
   }
 
-  /** `SUDO_ASKPASS` for the run in flight, or nothing when none was collected. */
-  private sudoEnv(): Record<string, string> | undefined {
-    const agent = this.sudoAgent;
-    return agent === undefined ? undefined : { SUDO_ASKPASS: agent.askpassPath };
+  /**
+   * The elevation environment every step of this run is handed.
+   *
+   * ALWAYS SET, agent or no agent (memql#3586). This used to return nothing when
+   * no password had been collected, which left each capability script free to
+   * draw its own desktop dialog -- and that is what an install did, three times,
+   * while the uninstall asked once in a VS Code box. See `elevationEnv`.
+   */
+  private sudoEnv(): Record<string, string> {
+    return elevationEnv(this.sudoAgent?.askpassPath);
   }
 
   /**
@@ -1797,7 +1822,8 @@ ${this.sharedToolsHtml()}
       if (secret === undefined || secret === "") return;
 
       const agent = await startSudoAgent(secret, process.execPath);
-      if (await sudoAccepts(agent.askpassPath)) {
+      const accepts = this.deps.sudoAccepts ?? sudoAccepts;
+      if (await accepts(agent.askpassPath)) {
         this.sudoAgent = agent;
         return;
       }
@@ -1815,7 +1841,8 @@ ${this.sharedToolsHtml()}
       return false; // The run is about to fail on the same missing document.
     }
     if (!graph.steps.some((step) => step.elevation !== "none")) return false;
-    return !(await sudoRunsWithoutAsking());
+    const isFree = this.deps.sudoIsFree ?? (() => sudoRunsWithoutAsking());
+    return !(await isFree());
   }
 
   /** Stops the agent and removes its socket. Idempotent. */

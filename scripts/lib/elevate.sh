@@ -97,7 +97,30 @@ function elevate_inherited_helper() {
     [[ -n "${SUDO_ASKPASS:-}" && -x "${SUDO_ASKPASS}" ]]
 }
 
+# elevate_caller_owns_the_asking -- the caller has told us it is the one asking.
+#
+# WHOEVER OWNS THE RUN OWNS THE ASKING (memql#3586). The install wizard has a
+# password box of its own and asks ONCE; a script that also draws a desktop
+# dialog puts a second, differently-shaped question in front of someone who has
+# already answered. That is what an install did -- three zenity dialogs -- while
+# the uninstall asked once in the editor.
+#
+# THIS IS THE INVARIANT, NOT THE SYMPTOM. The symptom was a probe in the
+# extension that skipped the agent; fixing it alone would leave consistency
+# resting on the agent always being created, and any future path that skipped it
+# would quietly revert to an OS popup. With the marker set, this file offers
+# nothing of its own: `elevate_method` answers `none` unless the caller supplied
+# a helper, and the step refuses with the terminal remedy it already carries.
+#
+# A HUMAN RUNNING THE SCRIPT BY HAND SETS NOTHING and still gets the dialog.
+function elevate_caller_owns_the_asking() {
+    [[ "${MEMQL_ELEVATE_DIALOG:-}" == "never" ]]
+}
+
 function elevate_dialog_program() {
+    # Checked before anything else: on macOS osascript always exists, so a later
+    # check would never be reached there.
+    elevate_caller_owns_the_asking && return 0
     if [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]]; then
         command -v osascript 2>/dev/null
         return
@@ -132,6 +155,23 @@ function elevate_method() {
 # elevate_available -- true when something above will work.
 function elevate_available() {
     [[ "$(elevate_method)" != "none" ]]
+}
+
+# elevate_no_ask_reason -- why root cannot be reached, as the second half of a
+# caller's refusal message.
+#
+# TWO DIFFERENT PROBLEMS WEAR THE SAME `none` (memql#3586), and they ask the
+# operator for different things. A headless machine needs a terminal. A wizard
+# run holds no password because the operator dismissed the box -- on a desktop
+# that has a dialog program installed, where "this machine has no way to ask for
+# a password without a terminal" is simply untrue and sends them to diagnose
+# their display instead of re-running and typing their password.
+function elevate_no_ask_reason() {
+    if elevate_caller_owns_the_asking; then
+        printf 'the memQL installer is driving this run and holds no password for it -- re-run and enter your password when it asks, or run the command below in a terminal\n'
+        return 0
+    fi
+    printf 'this machine has no way to ask for a password without a terminal\n'
 }
 
 #=============================================================================
@@ -234,7 +274,7 @@ function elevate_explain() {
         free)   printf 'sudo runs without a password here\n' ;;
         inherited) printf 'using the password you already gave the installer\n' ;;
         dialog) printf 'a password dialog will open on your desktop\n' ;;
-        *)      printf 'this machine has no way to ask for a password without a terminal\n' ;;
+        *)      elevate_no_ask_reason ;;
     esac
 }
 

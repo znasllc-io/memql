@@ -305,7 +305,7 @@ function remove_hosts_entries() {
         if ! elevate_begin "remove the memQL entries from ${path}"; then
             rm -f "$tmp"
             cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --kind=hostsEntries --path=$(printf '%q' "$path") --marker=$(printf '%q' "$marker")"
-            cap_fail 4 "${path} is not writable and this machine has no way to ask for a password without a terminal"
+            cap_fail 4 "${path} is not writable and $(elevate_no_ask_reason)"
         fi
         cap_info "editing ${path} as root -- $(elevate_explain)"
         if ! elevate_run tee "$path" < "$tmp" >/dev/null; then

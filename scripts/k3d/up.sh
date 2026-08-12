@@ -298,6 +298,43 @@ function install_argocd() {
     wait_for_argocd
 }
 
+# all_deployments -- every Deployment in the namespace, as `deployment.apps/x`
+# names. Empty means ArgoCD has not applied anything yet, which is a different
+# problem from a workload that will not start.
+function all_deployments() {
+    kubectl get deployments -n "$NAMESPACE" -o name 2>/dev/null || true
+}
+
+# scaled_up_deployments -- the Deployments that are MEANT to be running, as
+# `deployment.apps/x` names.
+#
+# A Deployment at zero replicas has been deliberately switched off -- the voice
+# lane, on any machine with no LiveKit credentials (memql#2416) -- and waiting
+# for one is waiting for something nobody asked to start.
+#
+# READ WITH custom-columns AND FILTERED HERE rather than with a jsonpath
+# comparison. `?(@.spec.replicas>0)` would put the whole question in one line of
+# a filter language whose numeric comparisons are easy to get subtly wrong and
+# which fails silently when it does -- and failing silently in the excluding
+# direction drops a node from the wait, which is the failure this function must
+# not have.
+#
+# UNREADABLE MEANS INCLUDED, for the same reason. A replica count that is not a
+# plain number is a Deployment we know nothing about, and the safe answer is to
+# wait for it: waiting for something that is switched off costs a timeout an
+# operator can see, while skipping something that should be running is the false
+# green memql#3570 was about.
+function scaled_up_deployments() {
+    local name replicas
+    while read -r name replicas; do
+        [[ -n "$name" ]] || continue
+        [[ "$replicas" == "0" ]] && continue
+        printf 'deployment.apps/%s\n' "$name"
+    done < <(kubectl get deployments -n "$NAMESPACE" \
+        -o custom-columns=NAME:.metadata.name,REPLICAS:.spec.replicas \
+        --no-headers 2>/dev/null || true)
+}
+
 # wait_for_workloads -- the memQL Deployments, not just the thing that applies
 # them (memql#3570).
 #
@@ -316,13 +353,35 @@ function install_argocd() {
 # NOT FATAL HERE. It records the verdict and lets the graph's verify decide, so
 # `make up` on a developer machine still prints its summary and leaves them
 # with a cluster to inspect rather than an abort in the middle of one.
+#
+# WHAT IT WAITS FOR IS WHAT IS MEANT TO BE RUNNING (memql#3585). It waited for
+# every Deployment in the namespace, voice and voice-agent included -- and those
+# two are scaled to 0 on every machine with no LiveKit credentials, because the
+# voice binaries fail fast on the missing env by design (memql#2416). So the wait
+# could not succeed on most machines, and clusterUp failed on a cluster where all
+# nine other nodes were Available.
+#
+# The set therefore comes from scaled_up_deployments, which asks the cluster
+# rather than trusting that the gate ran first. Ordering alone would have fixed
+# the symptom and left it flaky: anything that scales the lane back up between
+# the gate and the wait puts the failure back.
 function wait_for_workloads() {
     local deadline="${MEMQL_K3D_WORKLOAD_TIMEOUT:-300s}" names
     info "Waiting up to ${deadline} for the memQL workloads to become Available..."
 
-    names="$(kubectl get deployments -n "$NAMESPACE" -o name 2>/dev/null || true)"
-    if [[ -z "$names" ]]; then
+    if [[ -z "$(all_deployments)" ]]; then
         warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
+        WORKLOADS_READY=false
+        return 0
+    fi
+
+    names="$(scaled_up_deployments)"
+    if [[ -z "$names" ]]; then
+        # Nothing at all is running. No install path produces this, and reading
+        # it as success would make an entirely stopped namespace indistinguishable
+        # from a healthy one -- which is the class of false green workloadsReady
+        # exists to end.
+        warn "every Deployment in ${NAMESPACE} is scaled to 0 -- nothing is running."
         WORKLOADS_READY=false
         return 0
     fi
@@ -336,7 +395,7 @@ function wait_for_workloads() {
     fi
 
     WORKLOADS_READY=false
-    warn "not every workload became Available within ${deadline}."
+    warn "not every workload that is scaled up became Available within ${deadline}."
     # The REASON, on stderr, where the operator is already looking. A pod stuck
     # on a missing Secret and a pod that cannot pull its image are different
     # problems with the same symptom, and the difference is in here.
@@ -704,8 +763,13 @@ function main() {
 
     seed_repo_credential
     apply_argocd_app
-    wait_for_workloads
+    # GATE, THEN WAIT (memql#3585). The gate has to come after the Application --
+    # the Deployments it scales do not exist until ArgoCD has created them -- and
+    # before the wait, so the voice lane is already at zero when the wait works
+    # out what is meant to be running. The other order waits for two Deployments
+    # the next line exists to switch off.
     gate_voice_lane_post_sync
+    wait_for_workloads
     print_summary
 
     cap_result_set     cluster        "$CLUSTER_NAME"
@@ -720,4 +784,12 @@ function main() {
     cap_ok
 }
 
-main "$@"
+# Run main only when EXECUTED, so the readiness logic can be sourced and
+# exercised on its own -- the steps around it (cluster create, ArgoCD install,
+# secret seeding) are far too heavy to drive from a test, which is how the wait
+# came to be waiting for a Deployment the next line switches off (memql#3585).
+# Executed directly this is identical to the bare `main "$@"` it replaces, and
+# the same guard bringup.sh carries for the same reason.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
