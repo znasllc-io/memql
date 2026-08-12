@@ -147,6 +147,28 @@ test("each reachable exit code gets its own explanation", () => {
   assert.match(failureGuidance(3).headline, /refus/i);
 });
 
+// A step that needs root classifies as exit 4 -- correctly, since nothing is
+// half-done -- but the generic exit-4 advice sends the operator hunting for a
+// package to install when the wizard is already holding the exact command and
+// what the step actually wants is a password (memql#3560).
+test("exit 4 carrying a remedy is explained as elevation, not as a missing package", () => {
+  const bare = failureGuidance(4);
+  const withRemedy = failureGuidance(4, "sudo /path/to/hosts-entries.sh --action=add");
+
+  assert.notEqual(withRemedy.headline, bare.headline);
+  assert.match(withRemedy.headline, /privilege|password|root|administrator/i);
+  // The operator has to be told to go and RUN the thing, not to go and find one.
+  assert.match(withRemedy.advice, /terminal/i);
+  assert.doesNotMatch(withRemedy.advice, /install the missing prerequisite/i);
+  assert.equal(withRemedy.retryable, true);
+});
+
+test("an empty remedy leaves exit 4 alone", () => {
+  // No remedy means there is nothing to open a terminal for, and the ordinary
+  // prerequisite advice is the right advice.
+  assert.deepEqual(failureGuidance(4, ""), failureGuidance(4));
+});
+
 test("exit 0 is explained, because it is how most real failures arrive", () => {
   // THE ONE THIS FUNCTION GOT WRONG. executor.ts records a FAILED outcome
   // carrying exit 0 whenever a script exits cleanly and its verify does not

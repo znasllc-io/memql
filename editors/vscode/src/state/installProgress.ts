@@ -72,7 +72,27 @@ export interface FailureGuidance {
  * best. That is the confident-wrong-advice failure this function exists to
  * prevent, inverted into confidently disclaiming knowledge the system has.
  */
-export function failureGuidance(exitCode: number | null): FailureGuidance {
+export function failureGuidance(exitCode: number | null, remedy = ""): FailureGuidance {
+  // A REMEDY OUTRANKS THE CODE, on the one code that can carry it.
+  //
+  // "prerequisite missing" is the honest classification for a step that needs
+  // root: nothing is half-done and the thing it needs is not available to it.
+  // But the generic exit-4 advice -- "install the missing prerequisite named
+  // below" -- sends the operator looking for a package when what the step
+  // actually wants is a password, and the wizard is already showing them the
+  // exact command. Naming that changes nothing about the classification and
+  // everything about what they do next (memql#3560).
+  if (exitCode === 4 && remedy !== "") {
+    return {
+      headline: "This step needs to run with more privilege than the installer has.",
+      advice:
+        "It cannot ask for your password: an editor runs it as a background " +
+        "process with no terminal attached. Use the button below to open a " +
+        "terminal with the exact command, run it there, then retry -- the step " +
+        "will find its work already done. Nothing has been left half-finished.",
+      retryable: true,
+    };
+  }
   switch (exitCode) {
     case 0:
       // THE NORMAL FAILURE SHAPE FOR THIS INSTALLER, and the one this function
