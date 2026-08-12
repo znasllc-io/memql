@@ -36,7 +36,11 @@ import {
   runUninstall,
   type SessionOptions,
 } from "../src/install/session.js";
-import { DEFAULT_IMAGE_REGISTRY, DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
+import {
+  DEFAULT_IMAGE_REGISTRY,
+  DEFAULT_STACK_TAG,
+  imageTagFor,
+} from "../src/install/stackPin.js";
 import type { ExecEvent } from "../src/install/executor.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
@@ -718,9 +722,13 @@ test("clusterUp is told to pull published images, not locally built ones", async
   assert.equal(decision.action, "run");
   if (decision.action === "run") {
     assert.equal(decision.params["image-registry"], DEFAULT_IMAGE_REGISTRY);
-    // THE SAME RELEASE as the manifests. Pinning one and floating the other
-    // would run this version's images against another version's deploy tree.
-    assert.equal(decision.params["image-tag"], DEFAULT_STACK_TAG);
+    // THE SAME RELEASE as the manifests -- pinning one and floating the other
+    // would run this version's images against another version's deploy tree --
+    // but in the IMAGE spelling. Git tags carry the `v`, image tags do not
+    // (memql#3574), and asking a registry for `memql-bff:v0.16.0` is an
+    // ImagePullBackOff whose cause is one character.
+    assert.equal(decision.params["image-tag"], imageTagFor(DEFAULT_STACK_TAG));
+    assert.doesNotMatch(decision.params["image-tag"]!, /^v/);
   }
 });
 
@@ -738,6 +746,6 @@ test("an explicit tag moves the images with it", async () => {
     verify: { kind: "scriptOk" },
   });
   if (decision.action === "run") {
-    assert.equal(decision.params["image-tag"], "v9.9.9");
+    assert.equal(decision.params["image-tag"], "9.9.9");
   }
 });

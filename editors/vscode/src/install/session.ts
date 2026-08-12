@@ -48,6 +48,7 @@ import {
   DEFAULT_IMAGE_REGISTRY,
   DEFAULT_REGISTRATION_MODE,
   DEFAULT_STACK_TAG,
+  imageTagFor,
 } from "./stackPin.js";
 
 /**
@@ -228,7 +229,9 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         params = present({
           "repo-root": stackDir,
           "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
-          "image-tag": opts.tag || DEFAULT_STACK_TAG,
+          // CONVERTED, not passed through: git tags carry the `v` and image
+          // tags do not. See imageTagFor.
+          "image-tag": imageTagFor(opts.tag || DEFAULT_STACK_TAG),
         });
         break;
       case "providerKey":
