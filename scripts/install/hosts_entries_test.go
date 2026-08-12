@@ -108,6 +108,15 @@ func hostsSandbox(t *testing.T, sudoBody string) []string {
 	if err := os.WriteFile(filepath.Join(bin, "sudo"), []byte(script), 0o755); err != nil {
 		t.Fatalf("write sudo stub: %v", err)
 	}
+	// The password dialog is stubbed too, and for the same reason the sudo is:
+	// otherwise the case depends on which programs the host happens to carry.
+	// A developer desktop has zenity and a CI runner does not, so the elevation
+	// case passed locally and failed in CI on the machine rather than on the
+	// change. Nothing about elevation is left to the environment.
+	dialog := "#!/usr/bin/env bash\nprintf 'zenity %s\\n' \"$*\" >> \"${STUB_LOG:-/dev/null}\"\nprintf 'a-password\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "zenity"), []byte(dialog), 0o755); err != nil {
+		t.Fatalf("write zenity stub: %v", err)
+	}
 	return []string{
 		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"HOME=" + t.TempDir(),
