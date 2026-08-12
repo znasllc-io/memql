@@ -56,13 +56,15 @@ test("the secret is in no file the agent writes", async () => {
   const agent = await startSudoAgent(SECRET, process.execPath);
   try {
     const dir = path.dirname(agent.askpassPath);
-    for (const name of await fs.readdir(dir)) {
-      const full = path.join(dir, name);
-      if ((await fs.stat(full)).isSocket()) continue;
-      const body = await fs.readFile(full, "utf8");
+    // withFileTypes, so the KIND comes from the same directory read as the name.
+    // A stat between readdir and readFile is a second look at a path that may
+    // have changed in between -- harmless here and still the wrong shape.
+    for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      const body = await fs.readFile(path.join(dir, entry.name), "utf8");
       assert.ok(
         !body.includes(SECRET),
-        `${name} contains the password. It is meant to live only in the extension's ` +
+        `${entry.name} contains the password. It is meant to live only in the extension's ` +
           `memory -- a file is something a crash leaves behind.`,
       );
     }

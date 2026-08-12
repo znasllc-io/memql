@@ -68,6 +68,7 @@ export async function startSudoAgent(secret: string, nodePath: string): Promise<
   await fs.chmod(dir, 0o700);
 
   const socketPath = path.join(dir, "sock");
+  const noncePath = path.join(dir, "nonce");
   const clientPath = path.join(dir, "client.js");
   const askpassPath = path.join(dir, "askpass");
   const nonce = crypto.randomBytes(32).toString("hex");
@@ -106,23 +107,23 @@ export async function startSudoAgent(secret: string, nodePath: string): Promise<
   });
   await fs.chmod(socketPath, 0o600);
 
-  await fs.writeFile(
-    clientPath,
-    `// Reads the password from the extension and prints it for sudo.
-const net = require("node:net");
-const c = net.createConnection(${JSON.stringify(socketPath)}, () => c.write(${JSON.stringify(nonce)} + "\\n"));
-let out = "";
-c.on("data", (b) => (out += String(b)));
-c.on("end", () => process.stdout.write(out));
-c.on("error", () => process.exit(1));
-`,
-    { mode: 0o600 },
-  );
+  await fs.writeFile(noncePath, nonce, { mode: 0o600 });
+
+  // A CONSTANT PROGRAM, PARAMETERISED BY ARGV. The first version built this
+  // source by interpolating the socket path and the nonce into it, which is
+  // constructing code from values -- correct here only because JSON.stringify
+  // happens to be the right escaping for a JS string literal, and not a property
+  // anyone should have to re-derive when editing it. CodeQL was right to say so.
+  //
+  // The nonce is READ FROM A FILE rather than passed as an argument, because
+  // argv is visible to every process this user owns (`ps`), and the nonce is the
+  // gate on the socket. The path is not a secret; what it points at is.
+  await fs.writeFile(clientPath, SUDO_ASKPASS_CLIENT, { mode: 0o600 });
 
   // sudo EXECUTES this, so it needs the bit; it carries no secret of its own.
   await fs.writeFile(
     askpassPath,
-    `#!/bin/sh\nexec ${shellQuote(nodePath)} ${shellQuote(clientPath)}\n`,
+    `#!/bin/sh\nexec ${shellQuote(nodePath)} ${shellQuote(clientPath)} ${shellQuote(dir)}\n`,
     { mode: 0o700 },
   );
 
@@ -137,6 +138,26 @@ c.on("error", () => process.exit(1));
     },
   };
 }
+
+/**
+ * The askpass client, verbatim -- no value is ever interpolated into it.
+ *
+ * It is handed the agent's directory and finds the socket and the nonce inside,
+ * so the only thing that varies between runs is an argument, never the program.
+ */
+const SUDO_ASKPASS_CLIENT = `// Reads the password from the memQL installer and prints it for sudo.
+const fs = require("node:fs");
+const net = require("node:net");
+const path = require("node:path");
+
+const dir = process.argv[2];
+const nonce = fs.readFileSync(path.join(dir, "nonce"), "utf8").trim();
+const conn = net.createConnection(path.join(dir, "sock"), () => conn.write(nonce + "\\n"));
+let out = "";
+conn.on("data", (b) => (out += String(b)));
+conn.on("end", () => process.stdout.write(out));
+conn.on("error", () => process.exit(1));
+`;
 
 /** A path as one inert word for /bin/sh. */
 function shellQuote(value: string): string {
