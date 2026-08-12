@@ -531,3 +531,35 @@ func mustJSON(v any) string {
 	}
 	return string(b)
 }
+
+// TestEnrolmentIsNotVerifiedOnALinkThatCannotExist -- znasllc-io/memql#3591.
+//
+// The install's last step verified `result.enrolUrl`, and on a fresh cluster no
+// such link can exist: an enrolment token names a user, `attemptAutoBootstrap`
+// creates none, and the owner is created by `CreateUserOnFirstLogin` when the
+// magic link is verified. So every install ended in a failed step while the
+// cluster it had just built was complete and working.
+//
+// The step now reports `enrolmentState` -- `minted` or `awaitingFirstSignIn` --
+// which is answerable in both states, and the graph verifies that instead. This
+// pins the choice, because the failure it prevents looks like a broken installer
+// and is a bad afternoon to re-diagnose.
+func TestEnrolmentIsNotVerifiedOnALinkThatCannotExist(t *testing.T) {
+	g := mustLoadEmbedded(t, Install)
+	for _, step := range g.Steps {
+		if step.ID != "enrolmentLink" {
+			continue
+		}
+		if step.Verify.Field == "result.enrolUrl" {
+			t.Errorf("enrolmentLink verifies %q, which is empty on every cluster nobody has signed\n"+
+				"into yet -- there is no account to enrol until the first sign-in creates one, so this\n"+
+				"makes a complete install report a failed step (memql#3591)", step.Verify.Field)
+		}
+		if step.Verify.Field != "result.enrolmentState" {
+			t.Errorf("enrolmentLink verifies %q; the field that is answerable in both states is\n"+
+				"result.enrolmentState", step.Verify.Field)
+		}
+		return
+	}
+	t.Skip("the install graph no longer has an enrolmentLink step")
+}

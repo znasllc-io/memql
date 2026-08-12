@@ -248,7 +248,7 @@
     {
       "id": "enrolmentLink",
       "script": "install.enrolmentLink",
-      "description": "Mint a single-use passkey-enrolment link for the cluster owner, so the install ends with a credential the operator holds rather than an email round trip nobody can receive.",
+      "description": "Mint a single-use passkey-enrolment link for the cluster owner when there is an account to enrol, so the install ends with a credential the operator holds. A cluster nobody has signed into yet has no account: the first sign-in creates it, so this reports that instead.",
       "params": {
         "local": "1"
       },
@@ -259,7 +259,7 @@
       "containedBy": "clusterUp",
       "verify": {
         "kind": "resultNonEmpty",
-        "field": "result.enrolUrl"
+        "field": "result.enrolmentState"
       }
     }
   ]
