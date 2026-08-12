@@ -203,7 +203,7 @@
     {
       "id": "seedBootstrap",
       "script": "install.seedBootstrap",
-      "description": "Write the identity bootstrap values and the AI provider key into the cluster, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
+      "description": "Write the identity bootstrap values and the AI provider key into the cluster and restart the nodes that read them, so it creates its own owner instead of waiting on a /setup visit nobody was told about.",
       "dependsOn": [
         "clusterUp"
       ],
