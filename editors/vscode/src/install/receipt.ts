@@ -158,8 +158,45 @@ function plainObject(v: unknown): Record<string, unknown> {
   return v as Record<string, unknown>;
 }
 
+/**
+ * What the receipt knows about one install step, across every run of it.
+ *
+ * THE RECEIPT IS APPEND-ONLY AND STEPS GET RETRIED, so a step usually has more
+ * than one entry: the attempt that failed, then the one that worked. This used
+ * to be `entries.find(...)` -- the FIRST, which on any retried step is the
+ * OLDEST, which is the failure. An uninstall therefore read the attempt that
+ * left nothing behind and never saw the one that did (memql#3564).
+ *
+ * That is not a case of picking the other end either, because the two questions
+ * the uninstall asks have opposite answers in time:
+ *
+ *   WHERE IS IT -- the newest recorded value. A failed attempt records no
+ *   target at all (`hostsBlock` failing before it writes leaves a result of
+ *   just `{remedy}`), so the answer has to come from whichever run got far
+ *   enough to report one.
+ *
+ *   IS IT OURS TO REMOVE -- the OLDEST answer, and only the oldest. If the
+ *   first run created the mkcert CA (`preExisting: false`) then a later run
+ *   found it there (`preExisting: true`), taking the newest would conclude the
+ *   operator already had it and refuse to remove something memQL created. The
+ *   question is "was this here before memQL ever touched this machine", and
+ *   only the first run can answer it.
+ *
+ * Results and params are merged oldest-to-newest so a later run overrides a key
+ * it re-reported and keys it did not report survive.
+ */
 export function entryFor(receipt: Receipt, stepId: string): ReceiptEntry | undefined {
-  return receipt.entries.find((e) => e.stepId === stepId);
+  const runs = receipt.entries.filter((e) => e.stepId === stepId);
+  if (runs.length === 0) return undefined;
+  const oldest = runs[0]!;
+  const newest = runs[runs.length - 1]!;
+  if (runs.length === 1) return newest;
+  return {
+    ...newest,
+    preExisting: oldest.preExisting,
+    result: Object.assign({}, ...runs.map((e) => e.result)) as Record<string, unknown>,
+    params: Object.assign({}, ...runs.map((e) => e.params)) as Record<string, string>,
+  };
 }
 
 /** Reads a receipt, or null when one was never written. */
@@ -284,17 +321,47 @@ async function writeAtomic(file: string, contents: string): Promise<void> {
  * inferring it means a rename in one script silently stops the other from
  * removing anything.
  */
-const REMOVAL_TARGETS: Record<string, { flag: string; resultField: string }> = {
+/**
+ * Where each artifact class's removal target comes from.
+ *
+ * `resultField` is what the install step REPORTED. `paramField` is the flag it
+ * was INVOKED with, used when the result carries nothing -- which is what a
+ * step that failed part-way records. That is not a guess: it is the exact value
+ * the installer used, so if anything landed, it landed there.
+ *
+ * `binary` deliberately has NO param fallback. install.binary takes
+ * `--dest=<directory>` and reports `result.path` as the FILE inside it, so
+ * falling back would hand remove-artifact.sh a directory where it expects a
+ * file -- and `rm -f` on the wrong noun is not a mistake worth risking to save
+ * an edge case that cannot happen anyway (a download that fails leaves a temp
+ * file, never the final path).
+ *
+ * `required` says the script exits 2 without the flag. Where it is false the
+ * script has its own default and omitting the flag is fine.
+ */
+const REMOVAL_TARGETS: Record<
+  string,
+  { flag: string; resultField: string; paramField?: string; required: boolean }
+> = {
   // install.binary reports the installed file as result.path.
-  binary: { flag: "path", resultField: "path" },
-  // install.cloneStack reports the checkout directory as result.dest.
-  checkout: { flag: "path", resultField: "dest" },
-  // install.hostsEntries reports the file it edited as result.hostsFile.
-  hostsEntries: { flag: "path", resultField: "hostsFile" },
+  binary: { flag: "path", resultField: "path", required: true },
+  // install.cloneStack reports the checkout directory as result.dest, and is
+  // invoked with --dest naming the same directory.
+  checkout: { flag: "path", resultField: "dest", paramField: "dest", required: true },
+  // install.hostsEntries reports the file it edited as result.hostsFile, and is
+  // invoked with --hosts-file. The graph pins neither, so a run that failed
+  // before writing leaves nothing to go on -- which is the correct answer,
+  // because a block that was never written is not there to remove.
+  hostsEntries: {
+    flag: "path",
+    resultField: "hostsFile",
+    paramField: "hosts-file",
+    required: true,
+  },
   // install.mkcert reports the CA directory as result.caroot.
-  mkcertCA: { flag: "caroot", resultField: "caroot" },
+  mkcertCA: { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
   // k3d.up reports the cluster it created as result.cluster.
-  stack: { flag: "cluster", resultField: "cluster" },
+  stack: { flag: "cluster", resultField: "cluster", paramField: "cluster", required: false },
 };
 
 /**
@@ -304,22 +371,48 @@ const REMOVAL_TARGETS: Record<string, { flag: string; resultField: string }> = {
  * `--pre-existing` is always present and always the recorded verdict. That
  * flag is an unconditional refusal inside the script; passing it faithfully is
  * what keeps a developer's own k3d cluster, mkcert CA or checkout when they
- * uninstall memQL. A target the receipt has no recorded value for is OMITTED
- * rather than guessed -- the script exits 2 on a missing required param, and a
- * loud missing --path beats a confident wrong one.
+ * uninstall memQL.
+ *
+ * A REQUIRED TARGET NOBODY RECORDED MEANS THERE IS NOTHING TO REMOVE, and this
+ * returns null so the step skips (memql#3564). It used to omit the flag and let
+ * remove-artifact.sh exit 2 on the missing param -- reasoning, in a comment,
+ * that "a loud missing --path beats a confident wrong one". The first half is
+ * right and the conclusion does not follow: there is a third option between
+ * guessing and failing, which is recognising that a step which never recorded
+ * where it wrote never wrote anywhere. `hostsBlock` failing on a read-only
+ * /etc/hosts records `{remedy}` and no `hostsFile`, and the uninstall that
+ * followed died on it -- reported to the operator as "a fault in memQL", which
+ * it was, about a hosts block that does not exist.
+ *
+ * The value is looked for in the result FIRST and in the recorded invocation
+ * params SECOND; see REMOVAL_TARGETS for why `binary` has no second chance.
  */
 export function removalParams(entry: ReceiptEntry): Record<string, string> | null {
   if (!entry.receipt) return null;
   const params: Record<string, string> = { kind: entry.receipt };
   const target = REMOVAL_TARGETS[entry.receipt];
   if (target) {
-    const value = entry.result[target.resultField];
-    if (typeof value === "string" && value.trim() !== "") {
+    const value = recordedTarget(entry, target);
+    if (value !== "") {
       params[target.flag] = value;
+    } else if (target.required) {
+      return null;
     }
   }
   params["pre-existing"] = entry.preExisting ? "true" : "false";
   return params;
+}
+
+/** The artifact's location as the receipt recorded it, or "" if it did not. */
+function recordedTarget(
+  entry: ReceiptEntry,
+  target: { resultField: string; paramField?: string },
+): string {
+  const reported = entry.result[target.resultField];
+  if (typeof reported === "string" && reported.trim() !== "") return reported;
+  if (target.paramField === undefined) return "";
+  const invoked = entry.params[target.paramField];
+  return typeof invoked === "string" && invoked.trim() !== "" ? invoked : "";
 }
 
 /**

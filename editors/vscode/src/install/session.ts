@@ -276,6 +276,11 @@ export function uninstallPlan(
     }
     const params = removalParams(entry);
     if (!params) {
+      // Either the step declares no receipt at all, or no run of it ever
+      // recorded where it wrote -- which for the steps that record a location
+      // on success means it never got as far as writing (memql#3564). Both are
+      // "nothing here", and both are SATISFIED: the state this removal would
+      // have established already holds, so the removals waiting on it run.
       return { action: "skip", reason: `${installStep} left no artifact behind`, satisfied: true };
     }
     return { action: "run", params, preservedOnRefusal: entry.preExisting };
