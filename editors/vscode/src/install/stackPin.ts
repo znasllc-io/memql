@@ -80,3 +80,22 @@ export const DEFAULT_REGISTRATION_MODE = "invite_only";
  * the same release, which is the whole point of pinning either.
  */
 export const DEFAULT_IMAGE_REGISTRY = "ghcr.io/znasllc-io";
+
+/**
+ * The IMAGE tag for a release tag.
+ *
+ * TWO CONVENTIONS, ONE RELEASE. Git tags carry the `v` (`v0.16.0`, and
+ * clone-stack.sh checks out exactly that); image tags do not -- the base
+ * manifests name `acrmemql.azurecr.io/memql-identity:0.9.9`, and
+ * build-engine-images.yml takes its `version` input as the tag verbatim,
+ * documented as "e.g. 0.9.61".
+ *
+ * Both are long-standing and neither is wrong, so the installer converts rather
+ * than asking anyone to remember which surface wants which. Passing the git tag
+ * straight through would ask a registry for `memql-bff:v0.16.0`, which is not a
+ * tag anything publishes -- an ImagePullBackOff whose cause is one character
+ * (memql#3574).
+ */
+export function imageTagFor(releaseTag: string): string {
+  return releaseTag.replace(/^v/, "");
+}
