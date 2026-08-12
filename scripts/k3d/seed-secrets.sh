@@ -547,17 +547,28 @@ function ensure_front_door_pair() {
     # stdin is closed and the stdin opt-in cleared so the child cannot block;
     # its human logs flow to our stderr, its JSON envelope is captured here so
     # exactly one envelope (ours) ever reaches stdout.
-    local rc=0
-    CAP_PARAMS_STDIN= bash "$gen" \
+    # The child's envelope is CAPTURED rather than discarded: cap_fail writes
+    # its message only there, so a `>/dev/null` threw away the one sentence
+    # saying what went wrong -- and left this caller guessing from an exit code.
+    # Exit 4 from install.mkcert now covers three different prerequisites
+    # (mkcert absent, certutil absent, a password with no terminal to ask on),
+    # so a hardcoded "mkcert is not installed" here would be wrong two times in
+    # three (memql#3560).
+    local rc=0 child=""
+    child="$(CAP_PARAMS_STDIN= bash "$gen" \
         --hostnames="$MEMQL_LOCAL_TLS_HOSTNAMES" \
         --cert-file="$TLS_CERT" \
         --key-file="$TLS_KEY" \
         --mkcert="$MKCERT_BIN" \
-        </dev/null >/dev/null || rc=$?
+        </dev/null)" || rc=$?
+
+    if [ "$rc" -ne 0 ] && [ -n "$child" ]; then
+        printf 'install.mkcert said: %s\n' "$child" >&2
+    fi
 
     case "$rc" in
         0) ;;
-        4) cap_fail 4 "mkcert is not installed, so the front-door certificate cannot be issued. Install it and re-run 'make secrets':  brew install mkcert  (macOS)  |  https://github.com/FiloSottile/mkcert" ;;
+        4) cap_fail 4 "the front-door certificate could not be issued: install.mkcert is missing something it needs (its own message is above -- mkcert itself, certutil for browser trust, or a password it had no terminal to ask for). Run it directly to see and fix it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
         3) cap_fail 4 "no mkcert root CA exists on this machine yet. Creating one writes to the system trust store, so it is a deliberate one-time step -- run it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
         *) cap_fail 5 "issuing the front-door certificate failed (install.mkcert exit ${rc}); see the log above." ;;
     esac
