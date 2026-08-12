@@ -38,6 +38,11 @@ on:
         required: false
         default: false
         type: boolean
+      recreate_ghcr_package:
+        description: "Delete the GHCR package first so it is recreated under the org's CURRENT default visibility. Deletes every version of it on GHCR; ACR is untouched."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write # mint the OIDC token for azure/login
@@ -144,6 +149,31 @@ jobs:
           if az acr repository show --name "$ACR_NAME" --image "$img" >/dev/null 2>&1; then
             echo "::error::${img} already exists in ${ACR_NAME} -- release tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
             exit 1
+          fi
+
+      # A package's visibility is fixed WHEN IT IS CREATED, and there is no API
+      # to change it afterwards -- GitHub's packages REST surface covers list,
+      # get, delete and restore, and nothing else (memql#3578). So when the
+      # organization's default changes, the only way to move an existing package
+      # onto it is to delete the package and let the next push recreate it.
+      #
+      # Gated on an input and off by default, because it destroys every version
+      # of that package on GHCR. It is safe for a registry nothing consumes yet
+      # and would not be later, which is exactly why it is a deliberate choice
+      # rather than something this workflow does on its own. ACR is a separate
+      # registry and is never touched by this step.
+      - name: Recreate the GHCR package under the current default visibility
+        if: ${{ inputs.recreate_ghcr_package }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          PKG: memql-${{ matrix.node }}
+        run: |
+          if gh api "/orgs/${OWNER}/packages/container/${PKG}" >/dev/null 2>&1; then
+            gh api --method DELETE "/orgs/${OWNER}/packages/container/${PKG}"
+            echo "deleted GHCR package ${PKG}; the push below recreates it"
+          else
+            echo "no GHCR package ${PKG} yet -- nothing to recreate"
           fi
 
       - name: Set up Buildx
