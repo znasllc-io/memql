@@ -58,6 +58,14 @@ cross-node mesh bugs reproduces locally instead of only on staging.
   browser-trusted `*.local.znas.io` wildcard; `make secrets` issues that pair
   for you (see [Front-door TLS](#front-door-tls) below), but it needs mkcert
   and a root CA on the machine.
+- **certutil (Linux only)** -- `sudo apt-get install -y libnss3-tools`
+  (`nss-tools` on Fedora/RHEL, `nss` on Arch). Firefox and Chrome on Linux read
+  their own NSS trust store rather than the system one, and mkcert can only
+  write it through certutil. Without it mkcert warns and exits 0, so the pair
+  is issued, the cluster comes up, and every browser refuses the front door --
+  which is why it is now a hard prerequisite (memql#3560). On macOS the system
+  keychain covers Safari and Chrome; only Firefox needs NSS, so it is not
+  required there.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
 
@@ -70,9 +78,20 @@ so it stays a deliberate step and never a prompt:
 bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca
 ```
 
-That is only needed if you have no mkcert CA yet; if one already exists it is
-left completely alone (it may be signing certificates for your other local
-stacks). After that, `make up` / `make secrets` issue the `*.local.znas.io`
+The confirmation phrase is only needed if you have no mkcert CA yet. An
+existing CA is never regenerated -- it may be signing certificates for your
+other local stacks -- but `mkcert -install` IS run against it, because a CA on
+disk is not evidence that anything trusts it. mkcert creates the CA first and
+trusts it second, so an interrupted first run leaves a real CA that no browser
+accepts; the run that follows completes the trust rather than reading the
+file's presence as proof the work is done (memql#3560).
+
+Trusting a CA writes to the system trust store, which needs a password. Run
+this in a terminal: from a process with no terminal attached -- a VS Code
+extension host, a CI step -- sudo has nowhere to prompt, and the capability
+refuses with exit 4 and the exact command to run instead.
+
+After that, `make up` / `make secrets` issue the `*.local.znas.io`
 pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
 present, and load it into the cluster as the `local-znas-tls` Secret that both
 front-door ingresses reference. Override the location with

@@ -123,8 +123,8 @@
       "receipt": "mkcertCA",
       "preExistingPath": "result.caPreExisting",
       "verify": {
-        "kind": "resultNonEmpty",
-        "field": "result.certFile"
+        "kind": "resultTrue",
+        "field": "result.caTrusted"
       }
     },
     {

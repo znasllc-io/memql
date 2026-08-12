@@ -61,6 +61,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/elevate.sh
+source "${SCRIPT_DIR}/../lib/elevate.sh"
 
 _CAP_PRUNED=()
 cap_init "install.removeArtifact" \
@@ -278,8 +280,27 @@ function remove_hosts_entries() {
     }
 
     # Redirect INTO the existing file rather than mv over it: preserves the
-    # inode, its ownership and its mode (this is usually /etc/hosts).
-    cat "$tmp" > "$path" || { rm -f "$tmp"; cap_fail 5 "could not write ${path}"; }
+    # inode, its ownership and its mode (this is usually /etc/hosts) -- and
+    # /etc/hosts needs root, which an uninstall run from the wizard has no
+    # terminal to ask for. `tee` is the elevated spelling of the same write;
+    # see scripts/lib/elevate.sh for how the asking happens (memql#3562).
+    if [[ -w "$path" ]]; then
+        cat "$tmp" > "$path" || { rm -f "$tmp"; cap_fail 5 "could not write ${path}"; }
+    else
+        if ! elevate_begin "remove the memQL entries from ${path}"; then
+            rm -f "$tmp"
+            cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --kind=hostsEntries --path=$(printf '%q' "$path") --marker=$(printf '%q' "$marker")"
+            cap_fail 4 "${path} is not writable and this machine has no way to ask for a password without a terminal"
+        fi
+        cap_info "editing ${path} as root -- $(elevate_explain)"
+        if ! elevate_run tee "$path" < "$tmp" >/dev/null; then
+            elevate_end
+            rm -f "$tmp"
+            cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --kind=hostsEntries --path=$(printf '%q' "$path") --marker=$(printf '%q' "$marker")"
+            cap_fail 4 "could not edit ${path} as root -- the password prompt was cancelled, or the password was not accepted"
+        fi
+        elevate_end
+    fi
     rm -f "$tmp"
 
     cap_changed
