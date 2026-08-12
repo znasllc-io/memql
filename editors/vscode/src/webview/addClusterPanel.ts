@@ -279,6 +279,11 @@ export class AddClusterPanel {
   private readonly uninstall = new UninstallRunState();
   /** What an uninstall would do, from previewUninstall. Undefined until read. */
   private uninstallPreview: UninstallPreview | undefined;
+  /**
+   * Shared removals the operator has TICKED. Empty is the default and the safe
+   * answer: everything not in here is skipped (memql#3566).
+   */
+  private readonly removeShared = new Set<string>();
   /** Why the preview could not be produced -- most often: no receipt. */
   private uninstallProblem = "";
   private uninstallAbort: AbortController | undefined;
@@ -473,6 +478,23 @@ export class AddClusterPanel {
       const known = INPUT_FIELDS.find((f) => f === field);
       if (known === undefined || typeof text !== "string") return;
       this.state.setInput(known, text);
+      return;
+    }
+    // A TICK ON THE UNINSTALL SCREEN (memql#3566). Recorded and not repainted,
+    // like every other field on this surface -- a repaint replaces the whole
+    // document and would drop the other ticks with it.
+    //
+    // The message names a STEP ID and the extension checks it against the steps
+    // the preview actually planned. The webview is an untrusted channel; a
+    // message naming a step that is not shared, or not in this preview at all,
+    // could otherwise opt into a removal the operator was never shown.
+    if (type === "shared" && typeof value === "object" && value !== null) {
+      const { step, remove } = value as { step?: unknown; remove?: unknown };
+      if (typeof step !== "string" || typeof remove !== "boolean") return;
+      const offered = (this.uninstallPreview?.removals ?? []).some((s) => s.id === step && s.shared);
+      if (!offered) return;
+      if (remove) this.removeShared.add(step);
+      else this.removeShared.delete(step);
       return;
     }
     if (type === "begin") {
@@ -1018,10 +1040,17 @@ export class AddClusterPanel {
     return {
       root: this.deps.installRoot,
       receiptFile: this.deps.receiptFile,
-      // Nothing is skipped. A skip list is how an operator narrows an INSTALL;
-      // narrowing an uninstall would produce a machine in a state no receipt
-      // describes, and this screen offers no such control.
-      skip: new Set<string>(),
+      // THE SHARED TOOLS THE OPERATOR DID NOT TICK (memql#3566).
+      //
+      // This used to read "nothing is skipped", reasoning that narrowing an
+      // uninstall would leave a machine in a state no receipt describes. That
+      // holds for memQL's OWN artifacts and not for the toolchain: k3d, kubectl,
+      // mkcert and the local CA are general tools the operator may now depend on
+      // for other work, and taking them away is a decision they get to make
+      // rather than a consequence of uninstalling an application. The receipt
+      // still describes the result exactly -- a skipped removal leaves its entry
+      // intact, so a later uninstall can still take it.
+      skip: this.skippedSharedRemovals(),
       // Required by the shape and meaningless to a removal: `provider` names
       // the AI vendor an install seeds a key for.
       provider: "",
@@ -1061,7 +1090,12 @@ export class AddClusterPanel {
       this.localClusterName = undefined;
     }
     try {
-      this.uninstallPreview = await previewUninstall(this.uninstallOptions(), this.hooks({}));
+      // The PREVIEW plans every step, including the shared ones the operator has
+      // not ticked -- they are what the list offers. Only the RUN skips them.
+      this.uninstallPreview = await previewUninstall(
+        { ...this.uninstallOptions(), skip: new Set<string>() },
+        this.hooks({}),
+      );
     } catch (err) {
       this.uninstallProblem = err instanceof Error ? err.message : String(err);
     }
@@ -1254,6 +1288,15 @@ ${this.bodyHtml()}
   // whole document and would take the caret with it (memql#3538). (No
   // backticks in here: this script is itself inside a template literal.)
   function sendField(e) {
+    const shared = e.target.closest('[data-shared]');
+    if (shared) {
+      // A tick is state, not an action: the host records it and does NOT
+      // repaint, for the same reason a keystroke does not (memql#3538) -- a
+      // repaint replaces the whole document and would drop every other tick.
+      vscode.postMessage({
+        type: 'shared', value: { step: shared.dataset.shared, remove: shared.checked } });
+      return;
+    }
     const field = e.target.closest('[data-field]');
     if (field) vscode.postMessage({
       type: 'input', value: { field: field.dataset.field, text: field.value } });
@@ -1663,13 +1706,71 @@ ${failure === "" ? "" : `<p class="error form-error">${escapeHtml(failure)}</p>`
         "install receipt, so nothing this machine had before the install is touched.",
     )}</p>
 <div data-escape-act="uninstallBack">
-${renderToHtml(renderRemovalPreview(items))}
+${renderToHtml(renderRemovalPreview(items.filter((item) => !this.isShared(item.id))))}
 ${elevationNote}
+${this.sharedToolsHtml()}
 <div class="actions">
   <button class="primary" type="button" data-act="uninstallStart">Uninstall -- remove the items above</button>
   <button class="secondary" type="button" data-act="uninstallBack">Cancel</button>
 </div>
 </div>`;
+  }
+
+  /**
+   * Every shared removal the operator left unticked.
+   *
+   * Computed from the PREVIEW rather than from a list here, so a tool marked
+   * shared in the graph is offered and skipped without this file being edited.
+   */
+  private skippedSharedRemovals(): Set<string> {
+    const skip = new Set<string>();
+    for (const step of this.uninstallPreview?.removals ?? []) {
+      if (step.shared && !this.removeShared.has(step.id)) skip.add(step.id);
+    }
+    return skip;
+  }
+
+  /** Whether this removal step takes away something that is not memQL-only. */
+  private isShared(stepId: string): boolean {
+    return (this.uninstallPreview?.removals ?? []).some((s) => s.id === stepId && s.shared);
+  }
+
+  /**
+   * The shared tools, as an opt-in list.
+   *
+   * WHY THEY ARE NOT IN THE LIST ABOVE. Docker, k3d, kubectl, mkcert and the
+   * local CA are general tools; the operator may be using them for other work
+   * by now, and the mkcert CA may be signing certificates for half a dozen
+   * other local stacks. "Uninstall memQL" is consent to remove what memQL put
+   * there for itself -- the cluster, the checkout, the hosts block -- and is not
+   * consent to take away the toolchain (memql#3566).
+   *
+   * So these are UNTICKED by default, and the run skips every one the operator
+   * leaves alone. Skipping is the session's own `skip` set, which the executor
+   * already honours, so nothing new decides anything here.
+   *
+   * Docker appears nowhere at all: memQL did not install it and will not remove
+   * it. See docs/public/operate/install-prerequisites.md.
+   */
+  private sharedToolsHtml(): string {
+    const shared = (this.uninstallPreview?.removals ?? []).filter((s) => s.shared);
+    if (shared.length === 0) return "";
+    const rows = shared
+      .map((step) => {
+        const checked = this.removeShared.has(step.id) ? " checked" : "";
+        return `<label class="shared-tool">
+  <input type="checkbox" data-shared="${escapeHtml(step.id)}"${checked}>
+  <span><strong>${escapeHtml(step.target !== "" ? step.target : step.description)}</strong>
+  <em>${escapeHtml(step.sharedReason)}</em></span>
+</label>`;
+      })
+      .join("");
+    return `<h2>Also remove these?</h2>
+<p class="hint">${escapeHtml(
+      "These are general tools, not memQL's own. They stay unless you tick them. Docker is " +
+        "never touched -- memQL did not install it.",
+    )}</p>
+${rows}`;
   }
 
   /** The removal in flight. */

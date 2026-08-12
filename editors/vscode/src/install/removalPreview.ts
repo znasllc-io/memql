@@ -66,6 +66,15 @@ export interface PreviewStep {
    * value off the graph since #3469; the type makes passing it on unavoidable.
    */
   elevation: RemovalElevation;
+  /**
+   * This artifact is NOT memQL-only, so its removal is the operator's choice
+   * (memql#3566). k3d, kubectl, mkcert and the local CA are general tools they
+   * may now depend on for other work; the cluster, the checkout and the hosts
+   * block exist only because memQL was installed.
+   */
+  shared: boolean;
+  /** What else the shared thing is good for. Empty unless `shared`. */
+  sharedReason: string;
 }
 
 /** The half of `UninstallPreview` (session.ts, #3469) this mapping reads. */

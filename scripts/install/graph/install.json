@@ -110,6 +110,26 @@
       }
     },
     {
+      "id": "browserTrust",
+      "script": "install.nssTools",
+      "description": "Install the NSS tools, so browsers can trust the local certificate authority.",
+      "params": {
+        "confirm": "install-nss-tools"
+      },
+      "dependsOn": [
+        "detect",
+        "providerKey",
+        "dockerAccess"
+      ],
+      "elevation": "sudo",
+      "retained": true,
+      "retainedReason": "certutil is a general system tool other software uses. memQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
+      "verify": {
+        "kind": "resultTrue",
+        "field": "result.installed"
+      }
+    },
+    {
       "id": "localCA",
       "script": "install.mkcert",
       "description": "Ensure a trusted local CA and issue the front-door wildcard certificate.",
@@ -117,7 +137,8 @@
         "confirm": "install-memql-ca"
       },
       "dependsOn": [
-        "toolMkcert"
+        "toolMkcert",
+        "browserTrust"
       ],
       "elevation": "user-trust",
       "receipt": "mkcertCA",
