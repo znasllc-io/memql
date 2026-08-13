@@ -13,7 +13,7 @@ logic releaseWorkspaceOnPlanTerminal {
     event object!
   }
   body {
-    return query workspaceForPlan( planId: args.event.node.id ?? "" )
+    return query workspaceForPlan( planId: args.event.payload.id ?? "" )
   }
 }
 

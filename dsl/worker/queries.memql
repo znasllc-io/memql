@@ -96,7 +96,7 @@ query invocation invocationsForUser {
 /// automation and not from a caller-submitted bundle.
 ///
 /// NOTE the kill switch does not currently run, for an unrelated and
-/// pre-existing reason: `args.event.node.id ?? ""` reaches argument
+/// pre-existing reason: `args.event.payload.id ?? ""` reaches argument
 /// validation as an unevaluated CoalesceExpr (memql#2870, reproduced at the
 /// merge base). The origin plumbing below is correct and was verified
 /// separately; do not read it as evidence the automation works end to end. (An earlier
