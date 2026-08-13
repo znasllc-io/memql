@@ -235,13 +235,37 @@ func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegis
 // a payload property and must not be payload-prefixed by the bare-access
 // rewrite (epic #2292).
 func reservedFilterHead(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "row", "payload", "actor", "args", "now", "config", "trace", "meta",
-		"schema", "partition", "provenance":
+	if _, ok := reservedFilterHeadNames[strings.ToLower(strings.TrimSpace(name))]; ok {
 		return true
 	}
 	_, ok := resolveIntrinsicField(name)
 	return ok
+}
+
+// reservedFilterHeadNames is the engine-namespace half of reservedFilterHead,
+// lifted out of the switch it used to be so the set is ENUMERABLE. The other
+// half is derived from intrinsicFieldRegistry.
+//
+// Enumerable because the set has a second obligation it cannot discharge
+// silently: every name here must ALSO be refused as a concept payload property
+// (memql#3613). A name that addresses an engine namespace in a filter but is
+// declarable on a concept produces a field no filter can ever read -- and, for
+// `provenance` and `actor`, one that reads something else entirely without
+// erroring. TestReservedPayloadFieldsSupersetOfFilterHeads iterates this map,
+// so adding a head without adding it to memoryNodes.reservedPayloadFields
+// fails rather than reopening the gap.
+var reservedFilterHeadNames = map[string]struct{}{
+	"row":        {},
+	"payload":    {},
+	"actor":      {},
+	"args":       {},
+	"now":        {},
+	"config":     {},
+	"trace":      {},
+	"meta":       {},
+	"schema":     {},
+	"partition":  {},
+	"provenance": {},
 }
 
 // rowIntrinsicNamespace is the head that addresses the row envelope in a
