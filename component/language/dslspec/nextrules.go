@@ -56,7 +56,7 @@ func nextRules() []NextRule {
 		{
 			Context: "inConceptBody",
 			Expect:  []string{"fieldName", "fieldType", "annotation"},
-			Doc:     "Inside a concept body: field declarations `<name> <type>[!] [@annotations]` and @relationship links. The `!` sigil means required (#2618: preferred over @required, which keeps parsing); `enum(\"a\", \"b\")` is a first-class type.",
+			Doc:     "Inside a concept body: field declarations `<name> <type>[!] [@annotations]` and @relationship links. The `!` sigil means required (#2618: preferred over @required, which keeps parsing); `enum(\"a\", \"b\")` is a first-class type. A @relationship carries two independent axes: `type` (closed structural set -- what the engine does with the edge) and an optional `as` (open domain label -- what the edge means, form-validated only, memql#3652).",
 		},
 		{
 			Context: "inArgsBlock",

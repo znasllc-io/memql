@@ -26,6 +26,7 @@ const (
 	ContextUseImportList                         // Inside "use <ns>.<kind>.{ ... }" -> importable ids
 	ContextInvocation                            // After an in-body invocation verb (query/mutation/logic <name>)
 	ContextRelationshipTarget                    // Inside @relationship(... target="<cursor>
+	ContextRelationshipType                      // Inside @relationship(... type="<cursor>
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -90,6 +91,9 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 	// tokenizing: its unterminated string value makes the lexer return zero
 	// tokens, which would otherwise short-circuit to ContextTopLevel below and
 	// skip every token-based check.
+	if ctx, ok := checkRelationshipTypeContext(textBefore); ok {
+		return ctx
+	}
 	if ctx, ok := checkRelationshipTargetContext(textBefore); ok {
 		return ctx
 	}
@@ -558,6 +562,23 @@ var (
 // checkRelationshipTargetContext detects the cursor at a @relationship target
 // value and carries the partial name as the prefix. ConstructKey records the
 // form: "canonical" (quoted -> canonical ids) or "short" (bare -> short names).
+// relationshipTypeValueRe detects the cursor at a @relationship `type` VALUE.
+//
+// There is no sibling regex for `as`, deliberately: `type` is a CLOSED
+// structural set so completing it is a service, while `as` is an OPEN domain
+// vocabulary and a completion list there would rebuild the closed set the
+// whole epic removed (memql#3652).
+var relationshipTypeValueRe = regexp.MustCompile(`@relationship\([^)(\n]*\btype\s*=\s*"([^"\n]*)$`)
+
+// checkRelationshipTypeContext detects the cursor at a @relationship type
+// value and carries the partial name as the prefix.
+func checkRelationshipTypeContext(textBefore string) (CursorContext, bool) {
+	if m := relationshipTypeValueRe.FindStringSubmatch(textBefore); m != nil {
+		return CursorContext{Kind: ContextRelationshipType, Prefix: m[1]}, true
+	}
+	return CursorContext{}, false
+}
+
 func checkRelationshipTargetContext(textBefore string) (CursorContext, bool) {
 	if m := relationshipTargetQuotedRe.FindStringSubmatch(textBefore); m != nil {
 		return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1], ConstructKey: "canonical"}, true
