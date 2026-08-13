@@ -364,11 +364,16 @@ func NewEngineAgentFactory(exec Executor, embed EmbedFunc) *EngineAgentFactory {
 func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent, ownerUserID, originatingPlanID string) (string, error) {
 	agentID := newAgentID(ownerUserID, spec.RoleSlug, spec.Name)
 	capabilities := map[string]any{
-		// The agent concept's capability surface migrated to skillIds in
-		// #158; the planner provisions a SPECIALIST with the role's scoped
-		// tool + knowledge composition recorded under keywords/domains the
-		// fitScore reads back. We stamp both the legacy flat lists (for the
-		// roster's capability text) so the agent is fitScore-comparable.
+		// keywords is the ONLY capability field this path writes. The agent
+		// concept's capability surface migrated to skillIds in #158, which
+		// retired the flat knowledgeDomains / tools lists; keywords survived
+		// that cut as a per-agent routing hint and is still declared.
+		//
+		// The composed spec's domains + tools are not lost by not being
+		// written here: storeCapabilityEmbedding below builds the capability
+		// vector from spec.CapabilityText, so fitScore comparability comes
+		// from the embedding rather than from a round-trip through the row
+		// (memql#3696).
 		"keywords": spec.Tools,
 	}
 	capabilitiesJSON := mustJSONAny(capabilities)
@@ -384,40 +389,51 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 	if _, err := f.exec.Execute(ctx, q); err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
 	}
-	// Stamp lineage + the resolved domain/tool capability fields via a
-	// partial update so the roster's capability text reflects the role.
-	upd := map[string]any{
-		"lineage":          lineage,
-		"knowledgeDomains": spec.KnowledgeDomains,
-		"tools":            spec.Tools,
-	}
+	// Stamp lineage via a partial update, so the roster can attribute the
+	// agent to the Plan that prompted it.
+	//
+	// This payload used to carry `knowledgeDomains` and `tools` as well --
+	// TOP-LEVEL fields v1:agents:agent does not declare, because #158 replaced
+	// them with capabilities.skillIds. The top level of a concept IS closed, so
+	// the write was refused every time, taking the lineage stamp down with it
+	// while `_ = err` swallowed the reason (memql#3696).
+	//
+	// Deleted rather than migrated to skillIds. Restoring the intent means
+	// resolving a domain/tool set onto skill bundles, which is a design with
+	// open questions (no matching bundle; the min(skillBudgetMax,
+	// role.maxSkills) cap; updateAgent carrying no @mergeFields so the write
+	// must be the full capabilities object) -- a feature, not this repair.
+	upd := map[string]any{"lineage": lineage}
 	if _, err := f.exec.Execute(ctx, fmt.Sprintf(
 		`mutation updateAgent(agentId:%s, payload:%s)`, langparser.QuoteString(agentID), mustJSONAny(upd),
 	)); err != nil {
-		// Non-fatal: the agent exists; lineage/capability stamping is best
-		// effort. The roster falls back to keywords for the capability text.
-		_ = err
+		// Surfaced rather than discarded. With the undeclared fields gone this
+		// write can actually succeed, so a failure is a real one and the
+		// caller gets an id whose lineage never landed.
+		return agentID, fmt.Errorf("stamp agent lineage: %w", err)
 	}
 	f.storeCapabilityEmbedding(ctx, agentID, spec.CapabilityText)
 	return agentID, nil
 }
 
-// UpgradeAgent attaches the merged knowledge/tools to an existing agent
-// via updateAgent (partial update). newDomains/newTools are the
-// already-merged full lists from MergeCapabilities.
+// UpgradeAgent re-warms an existing agent's capability embedding from the
+// merged knowledge/tools, so the roster's fitScore reflects them.
+// newDomains/newTools are the already-merged full lists from
+// MergeCapabilities.
+//
+// It writes NOTHING to the agent row, and that is the whole of memql#3696.
+// It used to `updateAgent` with TOP-LEVEL `knowledgeDomains` and `tools`,
+// which v1:agents:agent does not declare -- #158 replaced that flat surface
+// with capabilities.skillIds. The top level of a concept is closed, so the
+// mutation was refused, and since the mutation was the entire function body
+// every call returned an error.
+//
+// The write is deleted rather than migrated to skillIds: attaching skills
+// through this path would be new behaviour with its own design questions, not
+// a repair of this one. The embedding recompute is what the function was
+// FOR -- the roster reads the capability vector, not the row -- so that stays
+// and the caller now gets the outcome it always expected.
 func (f *EngineAgentFactory) UpgradeAgent(ctx context.Context, agentID string, newDomains, newTools []string, originatingPlanID string) error {
-	upd := map[string]any{
-		"knowledgeDomains": newDomains,
-		"tools":            newTools,
-	}
-	q := fmt.Sprintf(
-		`mutation updateAgent(agentId:%s, payload:%s)`, langparser.QuoteString(agentID), mustJSONAny(upd),
-	)
-	if _, err := f.exec.Execute(ctx, q); err != nil {
-		return fmt.Errorf("upgrade agent %q: %w", agentID, err)
-	}
-	// Recompute + store the capability embedding so the upgraded agent's
-	// fitScore reflects its new capabilities.
 	f.storeCapabilityEmbedding(ctx, agentID,
 		AgentCapabilityText("", "", newDomains, newTools))
 	return nil
