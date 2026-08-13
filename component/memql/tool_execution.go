@@ -22,17 +22,31 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// remainingPlaceholderRegex matches a `$args.<identifier>` placeholder
-// the substituter passes left untouched (because the LLM omitted that
-// arg key). Used by substituteArgsInMemqlQuery's clean-up pass to
-// stamp those holes with `null` so the rendered query stays
-// syntactically valid for the MemQL parser.
+// argPlaceholderPattern is the shape of a `$args.<key>` reference in a tool
+// handler's template. An arg key is an identifier, and the identifier class is
+// greedy, so at any given position this matches the WHOLE name --
+// `$args.idempotencyKey`, never the `$args.id` that prefixes it (memql#3609).
 //
-// This is defensive only -- typed dispatch (handler type=function)
-// is the right architecture for tools authored with nested args. The
-// type=query path stays for legacy / simple cases where string
+// String substitution is defensive only -- typed dispatch (handler
+// type=function) is the right architecture for tools authored with nested
+// args. The type=query path stays for legacy / simple cases where string
 // substitution is fine.
-var remainingPlaceholderRegex = regexp.MustCompile(`\$args\.[a-zA-Z_][a-zA-Z0-9_]*`)
+const argPlaceholderPattern = `\$args\.[a-zA-Z_][a-zA-Z0-9_]*`
+
+// memqlArgPlaceholderRegex matches a placeholder in a MemQL handler template
+// in either of its two surrounding contexts: the PRE-QUOTED token
+// `"$args.key"` (the whole string-literal slot) or the bare `$args.key`. The
+// two alternatives can never both match at one position -- one needs a `"`
+// there, the other a `$` -- and the quoted form starts one byte earlier than
+// the bare form nested inside it, so leftmost matching alone picks the quoted
+// token whenever the quotes are actually there.
+var memqlArgPlaceholderRegex = regexp.MustCompile(`"` + argPlaceholderPattern + `"|` + argPlaceholderPattern)
+
+// rawArgPlaceholderRegex matches the bare form only. The webhook URL /
+// body-template path substitutes the raw stringified value INTO the host
+// language's existing string slot, so any surrounding quotes are the host's
+// and must survive.
+var rawArgPlaceholderRegex = regexp.MustCompile(argPlaceholderPattern)
 
 // toolSchemaCache stores compiled JSON-Schema validators keyed by
 // tool name. The InputSchema on a Tool is small (a few KB of JSON);
@@ -947,11 +961,61 @@ func buildFunctionCallQuery(name string, args map[string]any) (string, error) {
 	return b.String(), nil
 }
 
+// argPlaceholder is one `$args.<key>` reference found in a template.
+type argPlaceholder struct {
+	// text is the matched source text exactly as it appeared:
+	// `"$args.title"` or `$args.title`.
+	text string
+	// key is the arg name the reference resolves against (`title`).
+	key string
+	// quoted reports whether the match consumed the surrounding double
+	// quotes -- i.e. whether it owns the whole string-literal slot.
+	quoted bool
+}
+
+// substituteArgPlaceholders resolves every `$args.<key>` reference in template
+// in ONE left-to-right pass and hands each one to resolve.
+//
+// The pass is the fix for memql#3609. What it replaces was a loop over the
+// args MAP doing sequential strings.ReplaceAll over an accumulating buffer,
+// which was wrong twice:
+//
+//   - **Order-dependent.** Go randomizes map iteration and `$args.id` is a
+//     prefix of `$args.idempotencyKey`, so the same call rendered differently
+//     from run to run. Matching the template positionally with a greedy
+//     identifier class makes the longest name at each position the only
+//     candidate, so order stops existing as a variable.
+//   - **Values were re-read as template.** Substituted text went into the
+//     buffer that later keys -- and the unfilled-placeholder cleanup -- kept
+//     scanning, so a caller's own `$args.` text was rewritten and one arg's
+//     value could be aliased into another arg's slot. ReplaceAllStringFunc
+//     finds every match in the SOURCE string and appends replacements to a
+//     separate buffer, so nothing this pass writes is ever read back.
+//
+// The cleanup for placeholders the caller left unfilled belongs to resolve,
+// inside this same walk: as a separate sweep afterwards it ran over
+// already-substituted text, which is the second defect above.
+func substituteArgPlaceholders(template string, re *regexp.Regexp, resolve func(argPlaceholder) string) string {
+	return re.ReplaceAllStringFunc(template, func(match string) string {
+		ref := argPlaceholder{text: match, key: match}
+		if strings.HasPrefix(ref.key, `"`) {
+			ref.quoted = true
+			ref.key = strings.TrimSuffix(strings.TrimPrefix(ref.key, `"`), `"`)
+		}
+		ref.key = strings.TrimPrefix(ref.key, "$args.")
+		return resolve(ref)
+	})
+}
+
 // substituteArgsInQuery replaces $args.<key> references with raw
 // string values inside a templated string. Used for the WEBHOOK URL
 // + body-template paths where the placeholder is already inside a
 // host-language string (URL path segment, JSON field value), so we
 // substitute the raw stringified value with NO extra quoting.
+//
+// A key the caller did not supply is left standing as the literal
+// `$args.<key>` -- this path has no null-collapse, because there is no
+// downstream parser here to choke on it.
 //
 // For MemQL query-handler text -- where the placeholder is inside
 // MemQL source that gets re-parsed -- use substituteArgsInMemqlQuery
@@ -962,36 +1026,40 @@ func substituteArgsInQuery(query string, args map[string]any) string {
 	if args == nil {
 		return query
 	}
-	result := query
-	for key, value := range args {
-		placeholder := "$args." + key
-		var replacement string
-		switch v := value.(type) {
-		case string:
-			replacement = v
-		case float64:
-			if v == float64(int64(v)) {
-				replacement = fmt.Sprintf("%d", int64(v))
-			} else {
-				replacement = fmt.Sprintf("%v", v)
-			}
-		case bool:
-			replacement = fmt.Sprintf("%t", v)
-		default:
-			if jsonBytes, err := json.Marshal(v); err == nil {
-				replacement = string(jsonBytes)
-			} else {
-				replacement = fmt.Sprintf("%v", v)
-			}
+	return substituteArgPlaceholders(query, rawArgPlaceholderRegex, func(ref argPlaceholder) string {
+		value, ok := args[ref.key]
+		if !ok {
+			return ref.text
 		}
-		result = strings.ReplaceAll(result, placeholder, replacement)
+		return encodeForRawSubstitution(value)
+	})
+}
+
+// encodeForRawSubstitution renders a tool-arg value as the bare stringified
+// form the webhook URL / body-template path wants: no MemQL quoting, because
+// the placeholder already sits inside the host language's own string slot.
+func encodeForRawSubstitution(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case float64:
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprintf("%v", v)
+	case bool:
+		return fmt.Sprintf("%t", v)
+	default:
+		if jsonBytes, err := json.Marshal(v); err == nil {
+			return string(jsonBytes)
+		}
+		return fmt.Sprintf("%v", v)
 	}
-	return result
 }
 
 // substituteArgsInMemqlQuery replaces $args.<key> placeholders inside
 // a MemQL query-handler template with values that the engine's MemQL
-// parser will re-parse. Two surrounding contexts have to be handled:
+// parser will re-parse. Three cases have to be handled:
 //
 //  1. **Pre-quoted form** -- `"$args.key"`. Tool handlers wrap string
 //     placeholders this way (e.g. `summary: "$args.summary"`). The
@@ -1013,52 +1081,38 @@ func substituteArgsInQuery(query string, args map[string]any) string {
 //     the JSON-encoded value directly; for objects / arrays the
 //     produced JSON is valid MemQL too.
 //
-// Both passes are stable: the pre-quoted pass runs first and replaces
-// the whole `"$args.key"` token, so the second pass finds no matching
-// `$args.key` in the surviving text.
+//  3. **Unfilled** -- a key the caller never supplied (an omitted
+//     optional arg: planId / taskId / correlationId on workerHost, and
+//     any tool with optional fields really). Left standing, the literal
+//     `$args.foo` fails the MemQL parser on the bare `$` token
+//     ("unexpected token \"$\" at position 48"), so it degrades to
+//     `null` rather than crashing the dispatch. Bare and embedded
+//     (`"prefix-$args.foo"`) forms take an unquoted `null`; the
+//     pre-quoted form is a whole string-literal slot, so it takes the
+//     four-char string `"null"` -- what the engine has always seen for a
+//     missing string arg.
+//
+// All three are decided in ONE left-to-right pass over the template
+// (substituteArgPlaceholders), including the unfilled case: as a separate
+// cleanup sweep it ran over already-substituted text and rewrote the caller's
+// own `$args.` text to null (memql#3609). One pass also removes the map-order
+// dependence that made `$args.id` collide with `$args.idempotencyKey`.
 //
 // Webhook URL / body templating uses substituteArgsInQuery instead --
 // those callers want the raw stringified value (no extra JSON
 // quoting) because the placeholder is already inside the host
 // language's string slot.
 func substituteArgsInMemqlQuery(query string, args map[string]any) string {
-	result := query
-	if args != nil {
-		for key, value := range args {
-			encoded := encodeForMemqlSubstitution(value)
-			quotedPlaceholder := `"$args.` + key + `"`
-			barePlaceholder := "$args." + key
-			result = strings.ReplaceAll(result, quotedPlaceholder, encoded)
-			result = strings.ReplaceAll(result, barePlaceholder, encoded)
+	return substituteArgPlaceholders(query, memqlArgPlaceholderRegex, func(ref argPlaceholder) string {
+		value, ok := args[ref.key]
+		if !ok {
+			if ref.quoted {
+				return `"null"`
+			}
+			return "null"
 		}
-	}
-	// Clean up any remaining `$args.<name>` placeholders the LLM
-	// didn't fill in. Without this pass, an omitted optional arg
-	// (planId / taskId / correlationId on workerHost; any tool with
-	// optional fields really) leaves the literal `$args.foo` in the
-	// rendered query, and the MemQL parser fails on the bare `$`
-	// token ("unexpected token \"$\" at position 48"). Also covers
-	// the pre-quoted form: `"$args.foo"` collapses to `null` (an
-	// unquoted JSON null), which the parser accepts in any
-	// expression position the original quoted-string slot allowed.
-	// Same for embedded substring placeholders (`"prefix-$args.foo"`)
-	// -- the regex is anchored to the placeholder shape only, so it
-	// surgically removes just the `$args.x` part. Result: missing
-	// args degrade to null instead of crashing the dispatch.
-	result = remainingPlaceholderRegex.ReplaceAllStringFunc(result, func(_ string) string {
-		return "null"
+		return encodeForMemqlSubstitution(value)
 	})
-	// Sweep up any now-empty `""` introduced by replacing
-	// pre-quoted `"$args.foo"` (which became `"null"` after the
-	// inner replacement only happens if the pre-quoted form
-	// matches; the regex above would have NOT matched once the
-	// outer quotes were already there because `$args.foo` is
-	// surrounded by `"`). Net effect of the regex pass on a
-	// pre-quoted unfilled placeholder `"$args.foo"`: becomes
-	// `"null"`. That parses as the string literal `"null"`, which
-	// is acceptable behavior for missing string args -- the engine
-	// will see the literal four-char string.
-	return result
 }
 
 // encodeForMemqlSubstitution renders a tool-arg value as a MemQL-safe
