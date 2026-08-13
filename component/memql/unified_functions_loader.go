@@ -83,6 +83,26 @@ func LoadUnifiedFunctions(logger *slog.Logger, registry *FunctionRegistry, conce
 				continue
 			}
 
+			// memql#3617 advisory. A mutation that rebuilds a nested
+			// object out of optional args destroys every leaf the call
+			// did not pass, silently, on any write that read-merges.
+			// Warned rather than refused: the remedy needs an author's
+			// judgement per case (@mergeFields on an update, @required
+			// leaves on an insert, or "wholesale replace is what this
+			// field means"), and refusing boot would turn a latent
+			// hazard in a downstream product bundle into an outage. The
+			// engine's own tree is gated by
+			// TestNestedObjectFromOptionalArgs_InventoryIsPinned.
+			if logger != nil {
+				if warn := validateNestedObjectMergeSemantics(fn); warn != nil {
+					logger.Warn("unified function loader: mutation rebuilds a nested object from optional args",
+						"component", "memql.unifiedFunctionLoader",
+						"file", raw.Path,
+						"function", fn.Name,
+						"detail", warn.Error())
+				}
+			}
+
 			if upsertErr := registry.Upsert(fn); upsertErr != nil {
 				if logger != nil {
 					logger.Warn("unified function loader: upsert failed",
