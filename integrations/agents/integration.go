@@ -40,6 +40,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -440,8 +441,8 @@ func (i *Integration) handleRequestUserFeedback(ctx context.Context, args map[st
 	mutationCtx := withUserActor(ctx, ownerUserId)
 
 	q := fmt.Sprintf(
-		`mutation requestPlanFeedback(planId:%q, feedbackRequest:%s)`,
-		planId, string(fbReqJSON),
+		`mutation requestPlanFeedback(planId:%s, feedbackRequest:%s)`,
+		langparser.QuoteString(planId), string(fbReqJSON),
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
 		return nil, fmt.Errorf("requestUserFeedback: requestPlanFeedback failed: %w", err)
@@ -534,13 +535,13 @@ func (i *Integration) handleProduceArtifact(ctx context.Context, args map[string
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var qb strings.Builder
 	fmt.Fprintf(&qb,
-		`mutation createPlan(planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "user.implicit", authorizedBy: %q, input: %s`,
-		planId, partitionId, produceArtifactKind, goal, ownerUserId, ownerUserId, string(inputJSON),
+		`mutation createPlan(planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: "user.implicit", authorizedBy: %s, input: %s`,
+		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(produceArtifactKind), langparser.QuoteString(goal), langparser.QuoteString(ownerUserId), langparser.QuoteString(ownerUserId), string(inputJSON),
 	)
 	if agentId != "" {
 		// Dispatch the production turn straight to the requesting assistant
 		// (no planner-agent decompose loop -- memql#816).
-		fmt.Fprintf(&qb, `, ownerAgentId: %q`, agentId)
+		fmt.Fprintf(&qb, `, ownerAgentId: %s`, langparser.QuoteString(agentId))
 	}
 	qb.WriteString(`)`)
 	if _, err := i.engine.Execute(mutationCtx, qb.String()); err != nil {
@@ -616,8 +617,8 @@ func (i *Integration) createInvocationPlan(ctx context.Context, def *memql.Agent
 	}
 
 	query := fmt.Sprintf(
-		`mutation createPlan(planId: %q, partitionId: %q, kind: %q, goal: %q, requestedBy: %q, triggerSource: "agent.dsl", authorizedBy: %q, input: %s)`,
-		planId, partitionId, agentInvocationKind, prompt, systemActorId, systemActorId, string(inputJSON),
+		`mutation createPlan(planId: %s, partitionId: %s, kind: %s, goal: %s, requestedBy: %s, triggerSource: "agent.dsl", authorizedBy: %s, input: %s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(agentInvocationKind), langparser.QuoteString(prompt), langparser.QuoteString(systemActorId), langparser.QuoteString(systemActorId), string(inputJSON),
 	)
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return "", fmt.Errorf("execute createPlan: %w", err)

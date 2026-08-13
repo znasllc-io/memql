@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/env"
 )
 
@@ -203,7 +204,7 @@ func (c *FairnessCron) sweep(ctx context.Context) {
 // sweep.
 func (c *FairnessCron) passForFairness(ctx context.Context, accountId, planId string, waitingCount int) {
 	nowStr := c.now().UTC().Format(time.RFC3339)
-	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%q, status:"paused", pausedAt:%q)`, planId, nowStr)
+	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%s, status:"paused", pausedAt:%s)`, langparser.QuoteString(planId), langparser.QuoteString(nowStr))
 	if _, err := c.engine.Execute(contextWithSystemActor(ctx), q); err != nil {
 		c.logger.Warn("planner fairness cron: pass (mark paused) failed", "plan_id", planId, "account_id", accountId, "error", err)
 		return

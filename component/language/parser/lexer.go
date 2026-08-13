@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf16"
 )
 
 // TokenType enumerates lexical token categories.
@@ -317,7 +318,9 @@ func (l *Lexer) Tokenize() ([]Token, error) {
 
 // NextToken returns the next token from the input.
 func (l *Lexer) NextToken() (Token, error) {
-	l.skipWhitespace()
+	if err := l.skipWhitespace(); err != nil {
+		return Token{}, err
+	}
 
 	if l.eof() {
 		return Token{Type: TokenEOF, Pos: l.pos, Line: l.line, Column: l.column}, nil
@@ -410,11 +413,36 @@ func (l *Lexer) NextToken() (Token, error) {
 		l.advance()
 		return makeToken(TokenAt, "@"), nil
 	case '.':
-		// A `.` followed by an alnum starts a dotted-path identifier
-		// (e.g. the `.payload.value` tail after `)`). A `.` followed
-		// by anything else is the standalone separator used in the
-		// new `use path.{ names }` import syntax.
-		if l.hasNext() && (unicode.IsLetter(l.peekNext()) || unicode.IsDigit(l.peekNext()) || l.peekNext() == '_') {
+		// A `.` followed by a LETTER or `_` starts a dotted-path identifier
+		// (e.g. the `.payload.value` tail after `)`). A `.` followed by
+		// anything else is the standalone separator used in the
+		// `use path.{ names }` import syntax.
+		//
+		// A `.` followed by a DIGIT is REFUSED (memql#3624). It used to route
+		// here too, so `score > .5` compared against the STRING ".5" while
+		// `score > 0.5` compared against the float -- two spellings of one
+		// threshold that quietly meant different things, and `.5` / `.75` are
+		// ordinary spellings for a confidence or ratio.
+		//
+		// Refusing rather than lexing it as a number is deliberate. Accepting
+		// would have to pick between emitting the literal `.5` (which not
+		// every downstream number parser reads the same way) and normalising
+		// it to `0.5` (which makes the LEXER rewrite source text, breaking the
+		// migrator's token-stream reconstruction). An error picks neither, and
+		// it cannot silently reinterpret a spelling that already exists --
+		// which is the whole complaint. It also costs the corpus nothing:
+		// `0.5` is already its only spelling for a fraction, and one canonical
+		// spelling per construct is this language's standing rule.
+		//
+		// The refusal is narrow by construction. It fires only where `.` STARTS
+		// a token; a numeric segment INSIDE a path (`args.items.0`) is scanned
+		// by scanIdentifier's own dot arm and is untouched.
+		if l.hasNext() && isDigit(l.peekNext()) {
+			return Token{}, fmt.Errorf(
+				"a number cannot start with '.' at line %d, column %d: a decimal literal needs a leading digit (write \"0.5\", not \".5\")",
+				startLine, startColumn)
+		}
+		if l.hasNext() && (unicode.IsLetter(l.peekNext()) || l.peekNext() == '_') {
 			return l.scanIdentifier(start, startLine, startColumn)
 		}
 		l.advance()
@@ -433,6 +461,52 @@ func (l *Lexer) NextToken() (Token, error) {
 		// glued to an identifier with no leading whitespace is absorbed by
 		// scanIdentifier and never reaches this case; subtraction therefore
 		// needs the `-` surrounded by spaces (`a - b`).
+		//
+		// KNOWN SILENT HAZARD, deliberately left in place -- memql#3624
+		// hazard 4. That last sentence is the trap: `remaining == total-used`
+		// compares against the STRING "total-used" while
+		// `remaining == total - used` subtracts, and nothing reports the
+		// difference. The neighbourhood is asymmetric in a way nothing else
+		// documents:
+		//
+		//	a - b  /  a -b   ->  a, -, b       subtraction
+		//	a-b              ->  a-b           SILENT identifier
+		//	a- b             ->  a-, b         loud
+		//	a -5  /  5-3     ->  two operands  loud
+		//
+		// It was left alone because `-` in identifiers is LOAD-BEARING and no
+		// LEXICAL rule separates the two readings. All 189 hyphenated
+		// identifiers in the corpus sit in a declaration name
+		// (`seed agentRole|capability|skill <name>`, 160) or a
+		// capability-script argument name (`dsl/install/actions.memql`, 29),
+		// and `a-b` is character-for-character indistinguishable from
+		// `owner-email`; only POSITION separates them, which a lexer does not
+		// know.
+		//
+		// The obvious candidate rule -- glue `-` only when the run ends at
+		// `{` or `:`, the two slots those 189 occupy -- was implemented and
+		// measured. It leaves the corpus byte-identical and makes
+		// `total-used` agree with `total - used`, but it is still not
+		// shippable, for two reasons:
+		//
+		//  1. It REGRESSES bare canonical ids: `v1:cluster:node:bff-local`
+		//     splits into `v1:cluster:node:bff`, `-`, `local` -- the exact
+		//     case this comment cites as the reason `-` is an identifier
+		//     character at all.
+		//  2. It does not make the ambiguous case LOUD, it silently flips
+		//     which reading wins. `total-used` stops being a string and
+		//     becomes arithmetic with no diagnostic, so a hyphenated
+		//     identifier in any position nobody enumerated changes meaning
+		//     silently. That trades one silent misread for another.
+		//
+		// Nothing in the 182-package test set noticed either effect, so there
+		// is no existing coverage to fly on. A real fix is positional and
+		// belongs in the parser (accept a hyphenated identifier only in
+		// declaration-name and object-key position, reject it elsewhere),
+		// which needs the complete set of legal positions enumerated first.
+		// Until then the hazard is documented rather than half-fixed, and
+		// TestTightAndSpacedSpellingsAgree pins the current behaviour so this
+		// note cannot go stale silently.
 		if l.hasNext() && isDigit(l.peekNext()) {
 			return l.scanNumber(start, startLine, startColumn)
 		}
@@ -445,7 +519,9 @@ func (l *Lexer) NextToken() (Token, error) {
 			return l.NextToken() // recurse to get next real token
 		}
 		if l.hasNext() && l.peekNext() == '*' {
-			l.skipBlockComment()
+			if err := l.skipBlockComment(); err != nil {
+				return Token{}, err
+			}
 			return l.NextToken() // recurse to get next real token
 		}
 		// A standalone `/` (not `//` or `/*`) is the division operator (#2316).
@@ -564,7 +640,55 @@ func (l *Lexer) scanString(start, startLine, startColumn int) (Token, error) {
 	return Token{}, fmt.Errorf("unterminated string starting at position %d", start)
 }
 
+// scanUnicodeEscape decodes the `\uXXXX` form, joining a surrogate PAIR into
+// the single rune it encodes (memql#3624).
+//
+// It used to return each half separately, and strings.Builder.WriteRune
+// substitutes U+FFFD for a lone surrogate -- so an escaped astral character
+// (U+1F600, say) landed in the token as TWO replacement characters instead of
+// one rune. `\uXXXX` is a UTF-16 code unit by definition, and a non-BMP
+// character HAS no single-unit spelling, so a decoder that does not pair is not
+// decoding the format. The literal form was always fine (this lexer is
+// rune-oriented and copies the character straight through), which is exactly
+// why the escaped form's corruption went unnoticed.
+//
+// A LONE surrogate is now an error rather than a U+FFFD: it is not a character,
+// and silently replacing it is the same silent corruption in a quieter costume.
+//
+// The cursor contract is unchanged for the caller: on return the cursor sits on
+// the LAST hex digit consumed, and scanString's trailing advance() steps off it.
 func (l *Lexer) scanUnicodeEscape() (rune, error) {
+	value, err := l.scanHex4()
+	if err != nil {
+		return 0, err
+	}
+
+	switch {
+	case value >= 0xD800 && value <= 0xDBFF:
+		// High surrogate: a low surrogate escape MUST follow.
+		if l.peekAt(1) != '\\' || l.peekAt(2) != 'u' {
+			return 0, fmt.Errorf("lone high surrogate \\u%04X (a non-BMP character is written as a surrogate PAIR, e.g. \\uD83D\\uDE00)", value)
+		}
+		l.advance() // step onto the '\'
+		l.advance() // step onto the 'u' -- the state scanHex4 expects
+		low, err := l.scanHex4()
+		if err != nil {
+			return 0, err
+		}
+		if low < 0xDC00 || low > 0xDFFF {
+			return 0, fmt.Errorf("high surrogate \\u%04X followed by \\u%04X, which is not a low surrogate (\\uDC00-\\uDFFF)", value, low)
+		}
+		return utf16.DecodeRune(value, low), nil
+	case value >= 0xDC00 && value <= 0xDFFF:
+		return 0, fmt.Errorf("lone low surrogate \\u%04X (a low surrogate is only valid as the SECOND half of a pair)", value)
+	}
+
+	return value, nil
+}
+
+// scanHex4 reads the four hex digits of one `\uXXXX` escape. The cursor is on
+// the 'u' when it is called and on the last hex digit when it returns.
+func (l *Lexer) scanHex4() (rune, error) {
 	if l.pos+4 >= len(l.input) {
 		return 0, errors.New("incomplete unicode escape sequence")
 	}
@@ -795,7 +919,10 @@ func (l *Lexer) scanIdentifier(start, startLine, startColumn int) (Token, error)
 	return Token{Type: tokenType, Literal: literal, Pos: start, Line: startLine, Column: startColumn}, nil
 }
 
-func (l *Lexer) skipWhitespace() {
+// skipWhitespace consumes runs of whitespace and comments. It returns an error
+// only for an unterminated block comment (memql#3624) -- the one condition a
+// skipper can hit that is not recoverable by skipping.
+func (l *Lexer) skipWhitespace() error {
 	for !l.eof() {
 		ch := l.peek()
 		if ch == ' ' || ch == '\t' || ch == '\r' {
@@ -809,11 +936,14 @@ func (l *Lexer) skipWhitespace() {
 			l.skipLineComment()
 		} else if ch == '/' && l.hasNext() && l.peekNext() == '*' {
 			// Go-style block comment (/* */)
-			l.skipBlockComment()
+			if err := l.skipBlockComment(); err != nil {
+				return err
+			}
 		} else {
 			break
 		}
 	}
+	return nil
 }
 
 func (l *Lexer) skipLineComment() {
@@ -844,10 +974,21 @@ func (l *Lexer) skipLineComment() {
 	l.markCommentLines(startLine, startLine)
 }
 
-func (l *Lexer) skipBlockComment() {
+// skipBlockComment consumes a /* ... */ block comment. An unterminated one is
+// an ERROR, as it is in Go's own scanner (memql#3624).
+//
+// It used to run to EOF and return normally, which made a stray `/*` DELETE
+// the rest of the file: ParseFile returned only the definitions before it with
+// err == nil, so every construct after the comment vanished with no
+// diagnostic. Strict boot cannot fail on a construct that never appeared, so a
+// whole file's tail could go missing from a DSL bundle silently -- the worst
+// shape a lexer defect can take, because nothing downstream can tell that
+// anything was lost.
+func (l *Lexer) skipBlockComment() error {
 	// Skip /* ... */ block comment; its full line span is transparent for
 	// doc-comment attachment (memql#2633).
 	startLine := l.line
+	startColumn := l.column
 	if startLine != l.lastTokenLine {
 		defer func() { l.markCommentLines(startLine, l.line) }()
 	}
@@ -858,7 +999,7 @@ func (l *Lexer) skipBlockComment() {
 		if l.peek() == '*' && l.hasNext() && l.peekNext() == '/' {
 			l.advance() // consume '*'
 			l.advance() // consume '/'
-			return
+			return nil
 		}
 		if l.peek() == '\n' {
 			l.line++
@@ -866,6 +1007,12 @@ func (l *Lexer) skipBlockComment() {
 		}
 		l.advance()
 	}
+
+	// The "at line N, column M" phrasing is load-bearing, not decoration:
+	// sense's lexerDiagnostic scans for exactly that shape to place the
+	// squiggle. Without it the diagnostic defaults to 1:1 and points at the
+	// top of the file instead of at the `/*` that swallowed the rest of it.
+	return fmt.Errorf("unterminated block comment at line %d, column %d (missing '*/')", startLine, startColumn)
 }
 
 // Helper methods

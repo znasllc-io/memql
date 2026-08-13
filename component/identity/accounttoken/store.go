@@ -10,6 +10,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -101,8 +102,8 @@ func (s *Store) Create(ctx context.Context, identityId, accountId, label, keyHas
 		expires = expiresAt.UTC().Format(time.RFC3339Nano)
 	}
 	q := fmt.Sprintf(
-		`mutation createAccountTokenIdentity(identityId:%q,accountId:%q,label:%q,keyHash:%q,expiresAt:%q)`,
-		identityId, accountId, label, keyHash, expires,
+		`mutation createAccountTokenIdentity(identityId:%s,accountId:%s,label:%s,keyHash:%s,expiresAt:%s)`,
+		langparser.QuoteString(identityId), langparser.QuoteString(accountId), langparser.QuoteString(label), langparser.QuoteString(keyHash), langparser.QuoteString(expires),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("accounttoken.Store.Create: %w", err)
@@ -121,7 +122,7 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 	if strings.TrimSpace(identityId) == "" {
 		return errors.New("accounttoken.Store.Revoke: identityId required")
 	}
-	q := fmt.Sprintf(`mutation revokeAccountTokenIdentity(identityId:%q)`, BareSlug(identityId))
+	q := fmt.Sprintf(`mutation revokeAccountTokenIdentity(identityId:%s)`, langparser.QuoteString(BareSlug(identityId)))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("accounttoken.Store.Revoke: %w", err)
 	}
@@ -139,7 +140,7 @@ func (s *Store) ListForAccount(ctx context.Context, accountId string) ([]Row, er
 	if strings.TrimSpace(accountId) == "" {
 		return nil, errors.New("accounttoken.Store.ListForAccount: accountId required")
 	}
-	q := fmt.Sprintf(`query accountTokensForAccount(accountId:%q)`, accountId)
+	q := fmt.Sprintf(`query accountTokensForAccount(accountId:%s)`, langparser.QuoteString(accountId))
 
 	out := []Row{}
 	cursor := ""
@@ -179,7 +180,7 @@ func (s *Store) ByIdForCaller(ctx context.Context, identityId string) (*Row, err
 	if strings.TrimSpace(identityId) == "" {
 		return nil, errors.New("accounttoken.Store.ByIdForCaller: identityId required")
 	}
-	q := fmt.Sprintf(`query accountTokenById(identityId:%q)`, CanonicalId(identityId))
+	q := fmt.Sprintf(`query accountTokenById(identityId:%s)`, langparser.QuoteString(CanonicalId(identityId)))
 	nodes, _, err := s.executePage(ctx, q, "")
 	if err != nil {
 		return nil, fmt.Errorf("accounttoken.Store.ByIdForCaller: %w", err)

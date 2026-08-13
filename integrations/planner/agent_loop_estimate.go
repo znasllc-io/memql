@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"os"
 	"strconv"
 	"time"
@@ -238,8 +239,8 @@ func (l *PlannerAgentLoop) parkForBudgetApproval(ctx context.Context, planId, me
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s)`,
-		planId, string(fbReqJSON),
+		`mutation updatePlanStatus(planId:%s, status:"awaitingFeedback", feedbackReason:"budget_approval_required", feedbackRequest:%s)`,
+		langparser.QuoteString(planId), string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err

@@ -14,6 +14,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/core/id"
@@ -133,7 +134,7 @@ func (i *Integration) planPartitionId(ctx context.Context, planId string) string
 	if i.engine == nil || strings.TrimSpace(planId) == "" {
 		return ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%q)`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId)))
 	if err != nil || res == nil || res.Bundle == nil || len(res.Bundle.Nodes) == 0 {
 		return ""
 	}
@@ -180,8 +181,8 @@ func (i *Integration) uploadWorkerAttachment(ctx context.Context, planId, filePa
 
 	attachmentId := partitionId + ":" + det
 	call := fmt.Sprintf(
-		`mutation mutationCreateAttachment(attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q)`,
-		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
+		`mutation mutationCreateAttachment(attachmentId:%s, partitionId:%s, fileName:%s, mimeType:%s, fileSize:%d, blobUrl:%s, status:%s, uploadedBy:%s)`,
+		langparser.QuoteString(attachmentId), langparser.QuoteString(partitionId), langparser.QuoteString(fileName), langparser.QuoteString(mimeType), len(data), langparser.QuoteString(blobUrl), langparser.QuoteString("ready"), langparser.QuoteString(ownerUserId))
 	if _, err := i.engine.Execute(ctx, call); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("worker integration: attachment row create failed -- using pointer row",
@@ -414,25 +415,25 @@ func (i *Integration) promoteWorkerOutput(ctx context.Context, req Request) {
 	// withUserActor returns ctx UNCHANGED for a blank owner, which would
 	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, body:%q, source:%q, format:%q`,
-		outputId, title, body, "computer_use", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%s, title:%s, body:%s, source:%s, format:%s`,
+		langparser.QuoteString(outputId), langparser.QuoteString(title), langparser.QuoteString(body), langparser.QuoteString("computer_use"), langparser.QuoteString(format))
 	if req.AgentId != "" {
-		fmt.Fprintf(&b, `, producedByAgentId:%q`, req.AgentId)
+		fmt.Fprintf(&b, `, producedByAgentId:%s`, langparser.QuoteString(req.AgentId))
 	}
 	if req.PlanId != "" {
-		fmt.Fprintf(&b, `, producedByPlanId:%q`, req.PlanId)
+		fmt.Fprintf(&b, `, producedByPlanId:%s`, langparser.QuoteString(req.PlanId))
 	}
 	if workerId != "" {
-		fmt.Fprintf(&b, `, producedByWorkerId:%q`, workerId)
+		fmt.Fprintf(&b, `, producedByWorkerId:%s`, langparser.QuoteString(workerId))
 	}
 	if workerName != "" {
-		fmt.Fprintf(&b, `, producedByWorkerName:%q`, workerName)
+		fmt.Fprintf(&b, `, producedByWorkerName:%s`, langparser.QuoteString(workerName))
 	}
 	if partitionId != "" {
-		fmt.Fprintf(&b, `, partitionId:%q`, partitionId)
+		fmt.Fprintf(&b, `, partitionId:%s`, langparser.QuoteString(partitionId))
 	}
 	if attachmentId != "" {
-		fmt.Fprintf(&b, `, attachmentId:%q, mimeType:%q`, attachmentId, workerMimeType(title))
+		fmt.Fprintf(&b, `, attachmentId:%s, mimeType:%s`, langparser.QuoteString(attachmentId), langparser.QuoteString(workerMimeType(title)))
 	}
 	b.WriteString(")")
 
@@ -622,8 +623,8 @@ func (i *Integration) handleRequestScope(ctx context.Context, args map[string]an
 
 	planId := fmt.Sprintf("scope-elevation-%d", time.Now().UnixNano())
 	q := fmt.Sprintf(
-		`mutation createScopeElevationPlan(planId:%q, agentId:%q, ownerUserId:%q, partitionId:%q, intent:%q, summary:%q, requestedScope:%q)`,
-		planId, agentId, ownerUserId, partitionId, intent, summary, scope,
+		`mutation createScopeElevationPlan(planId:%s, agentId:%s, ownerUserId:%s, partitionId:%s, intent:%s, summary:%s, requestedScope:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(agentId), langparser.QuoteString(ownerUserId), langparser.QuoteString(partitionId), langparser.QuoteString(intent), langparser.QuoteString(summary), langparser.QuoteString(scope),
 	)
 	if _, err := i.engine.Execute(mutationCtx, q); err != nil {
 		return nil, fmt.Errorf("worker integration: createScopeElevationPlan failed: %w", err)
@@ -659,7 +660,7 @@ func workerHasConfigured(ctx context.Context, engine *memql.MemQLEngine, ownerUs
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
+	q := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err

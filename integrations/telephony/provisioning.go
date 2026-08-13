@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -172,8 +173,8 @@ func (i *Integration) recordNumber(ctx context.Context, num Number, partitionID,
 		return
 	}
 	q := fmt.Sprintf(
-		`mutation recordNumber(e164: %q, carrier: %q, partitionId: %q, purpose: %q, providerId: %q, numberType: %q, monthlyCost: %s)`,
-		num.E164, i.carrier.Name(), partitionID, purpose, num.ProviderID, string(orType(num.Type)), strconv.FormatFloat(num.MonthlyCost, 'f', -1, 64),
+		`mutation recordNumber(e164: %s, carrier: %s, partitionId: %s, purpose: %s, providerId: %s, numberType: %s, monthlyCost: %s)`,
+		langparser.QuoteString(num.E164), langparser.QuoteString(i.carrier.Name()), langparser.QuoteString(partitionID), langparser.QuoteString(purpose), langparser.QuoteString(num.ProviderID), langparser.QuoteString(string(orType(num.Type))), strconv.FormatFloat(num.MonthlyCost, 'f', -1, 64),
 	)
 	if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {
 		i.logger.Warn("telephony: record number row failed", "e164", num.E164, "err", err)

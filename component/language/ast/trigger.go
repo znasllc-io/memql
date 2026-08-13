@@ -2,6 +2,7 @@ package ast
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -35,6 +36,19 @@ var allowedEventKinds = map[string]bool{
 // one of the documented structured-trigger values.
 func EventKindAllowed(kind string) bool {
 	return allowedEventKinds[kind]
+}
+
+// AllowedEventKinds returns the closed set, sorted, for error messages
+// that have to tell an author what they may write instead. Exported so
+// callers name the same set the gate enforces rather than restating it
+// (memql#3614).
+func AllowedEventKinds() []string {
+	out := make([]string, 0, len(allowedEventKinds))
+	for k := range allowedEventKinds {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // BuildTriggerTopic assembles the subscription topic from the

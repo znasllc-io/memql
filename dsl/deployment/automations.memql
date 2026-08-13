@@ -40,6 +40,26 @@
 //   - schedule -- a future cron emitter (e.g. nightly staging refresh) raises
 //     the identical event; the automation is emitter-agnostic.
 //
+//     The emitter is OUT OF THIS REPO, so a whole-repo grep for the topic finds
+//     only this subscriber and reads as a dead topic. It is not: the in-repo
+//     proof is scripts/deploy/cockpit.sh (make deploy shells into the cockpit,
+//     which embeds this runtime), component/automations/args_binding.go's
+//     []string accommodation made FOR the cockpit's engineNodeTypes default
+//     (memql#2380, the first live deploy), and
+//     docs/public/operate/deploy-bundle-runbook.md. Recorded here because
+//     memql#3614's orphan-topic audit landed on this line (memql#3614 item 2).
+//
+// TOPIC SHAPE. `deploy.requested` is a RAW application topic, not graph CDC, so
+// it carries no concept segment. This trigger used to read
+// `@trigger(event="deploy.requested", concept="v1:cluster:deployment",
+// partition="*")`; those two kwargs are consumed only by the structured
+// node.created/updated/deleted rewrite, so on an unrecognised event kind they
+// were silently discarded and the compiled topic was the bare
+// `deploy.requested` all along (memql#3614 item 1). The kwargs are gone; the
+// compiled topic is byte-identical to what shipped. The concept the payload
+// concerns is stated by the writes themselves (createDeployment /
+// updateDeploymentStatus on v1:cluster:deployment).
+//
 // AUTHORIZATION. `authorize` records the pure forward-deploy role decision
 // (logic deploymentForwardAllowed, mirroring spec requiresDeveloperOrAbove,
 // #1876). The HARD gate is upstream + at the writes: createDeployment /
@@ -105,7 +125,7 @@
 /// cockpit/runner surface. Sequences clone -> build -> place (env switch) -> gate ->
 /// success/failure finish, recording the deployment lifecycle. Engine mesh ONLY -- no bff or
 /// product-carrier nodes.
-@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+@trigger(event="deploy.requested")
 automation deployEngineCluster {
   args {
     deploymentId         string!

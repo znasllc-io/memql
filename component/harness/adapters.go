@@ -24,6 +24,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Executor is the narrow engine surface the writer/claimer use to run
@@ -228,8 +229,8 @@ func NewEngineWriter(exec Executor) *EngineWriter {
 // reconcile already claimed it -> claimed=false, no error surfaced.
 func (w *EngineWriter) ClaimStep(ctx context.Context, _ string, stepID string, _ int) (bool, error) {
 	q := fmt.Sprintf(
-		`mutation startHarnessStep(stepId:%q, assignedAgent:%q)`,
-		stepID, systemActorId,
+		`mutation startHarnessStep(stepId:%s, assignedAgent:%s)`,
+		langparser.QuoteString(stepID), langparser.QuoteString(systemActorId),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		if isLostClaimError(err) {
@@ -254,7 +255,7 @@ func (w *EngineWriter) StartStep(_ context.Context, _ string) error { return nil
 // routes through validateHarnessStepTransition (the same guard the named
 // transition mutations hit), so no field re-assertion is needed.
 func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
-	q := fmt.Sprintf(`mutation readyHarnessStep(stepId:%q)`, step.ID)
+	q := fmt.Sprintf(`mutation readyHarnessStep(stepId:%s)`, langparser.QuoteString(step.ID))
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("mark step %q ready: %w", step.ID, err)
 	}
@@ -265,8 +266,8 @@ func (w *EngineWriter) MarkStepReady(ctx context.Context, step StepView) error {
 func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result map[string]any) error {
 	resultJSON := mustJSON(result)
 	q := fmt.Sprintf(
-		`mutation completeHarnessStep(stepId:%q, result:%s)`,
-		stepID, resultJSON,
+		`mutation completeHarnessStep(stepId:%s, result:%s)`,
+		langparser.QuoteString(stepID), resultJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("complete step %q: %w", stepID, err)
@@ -277,8 +278,8 @@ func (w *EngineWriter) CompleteStep(ctx context.Context, stepID string, result m
 // FailStep marks a running step failed (running -> failed).
 func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutation failHarnessStep(stepId:%q, errorMessage:%q)`,
-		stepID, errorMessage,
+		`mutation failHarnessStep(stepId:%s, errorMessage:%s)`,
+		langparser.QuoteString(stepID), langparser.QuoteString(errorMessage),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("fail step %q: %w", stepID, err)
@@ -291,8 +292,8 @@ func (w *EngineWriter) FailStep(ctx context.Context, stepID, errorMessage string
 func (w *EngineWriter) RecordObservation(ctx context.Context, obs Observation) error {
 	dataJSON := mustJSON(obs.Data)
 	q := fmt.Sprintf(
-		`mutation recordHarnessObservation(stepId:%q, planId:%q, kind:%q, content:%q, data:%s)`,
-		obs.StepID, obs.PlanID, obs.Kind, obs.Content, dataJSON,
+		`mutation recordHarnessObservation(stepId:%s, planId:%s, kind:%s, content:%s, data:%s)`,
+		langparser.QuoteString(obs.StepID), langparser.QuoteString(obs.PlanID), langparser.QuoteString(obs.Kind), langparser.QuoteString(obs.Content), dataJSON,
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("record observation for step %q: %w", obs.StepID, err)

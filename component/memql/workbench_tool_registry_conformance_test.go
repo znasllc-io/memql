@@ -33,8 +33,21 @@ import (
 func TestWorkbenchHostRegistersFromCarrierTree(t *testing.T) {
 	// A workbenchHost tool slice shaped like the carrier's pack tools
 	// file definition (discriminated by `action`).
+	// The handler reads `@handler(type="function", name="workbenchDispatchHost")`
+	// because that is the spelling that WORKS. This fixture carried
+	// `@handler(type="builtin", builtin="workbenchDispatchHost")` until
+	// memql#3625 made a tool declaration checkable, and neither half of that
+	// existed: `builtin` is not a @handler argument (so the value was dropped,
+	// leaving no target), and "builtin" is not a handler TYPE (executeToolHandler
+	// dispatches query / function / webhook and errors on anything else). The
+	// tool registered, resolved by name -- which is all this test asserted --
+	// and would have failed the moment an agent actually called it.
+	//
+	// A builtin IS reached through the function handler: builtins are Functions
+	// internally and share the FunctionRegistry, which is what makes
+	// `workbenchDispatchHost` (dsl/workbench/builtins.memql) resolvable here.
 	const workbenchHostTool = `@enabled
-@handler(type="builtin", builtin="workbenchDispatchHost")
+@handler(type="function", name="workbenchDispatchHost")
 @description("Run headless work in the per-Plan workbench sandbox: exec, fs_read, fs_write, fs_list, fs_stat, http_fetch.")
 tool workbenchHost {
   action   string  @required @enum("exec", "fs_read", "fs_write", "fs_list", "fs_stat", "http_fetch") @description("The workbench action to perform")

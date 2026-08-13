@@ -34,6 +34,7 @@ import (
 	"sort"
 	"strings"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -135,7 +136,7 @@ func (d *AuthoringCaptureDispatcher) runCaptureTranscript(ctx context.Context, p
 // loadToolCalls reads the plan's succeeded toolInvocation tasks (the literal
 // calls the agent made) in seq order.
 func (d *AuthoringCaptureDispatcher) loadToolCalls(ctx context.Context, planId string) ([]toolCall, error) {
-	q := fmt.Sprintf(`query tasksForPlan(planId:%q)`, planId)
+	q := fmt.Sprintf(`query tasksForPlan(planId:%s)`, langparser.QuoteString(planId))
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err

@@ -9,6 +9,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // EngineDelegationResolver is the concrete auth.DelegationResolver
@@ -196,7 +197,7 @@ type delegationRow struct {
 }
 
 func (r *EngineDelegationResolver) lookupActiveBySubject(ctx context.Context, subject string) ([]*delegationRow, error) {
-	query := fmt.Sprintf(`query activeDelegationsByIdentitySubject(identitySubject: %q)`, subject)
+	query := fmt.Sprintf(`query activeDelegationsByIdentitySubject(identitySubject: %s)`, langparser.QuoteString(subject))
 	result, err := r.Engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -230,7 +231,7 @@ func (r *EngineDelegationResolver) lookupUserByIdentityId(ctx context.Context, i
 	if identityId == "" {
 		return nil, nil
 	}
-	idQuery := fmt.Sprintf(`query queryIdentityById(identityId: %q)`, identityId)
+	idQuery := fmt.Sprintf(`query queryIdentityById(identityId: %s)`, langparser.QuoteString(identityId))
 	result, err := r.Engine.Execute(ctx, idQuery)
 	if err != nil {
 		return nil, fmt.Errorf("identity lookup: %w", err)
