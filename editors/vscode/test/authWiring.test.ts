@@ -106,6 +106,94 @@ test("every function the sign-in UI adapter exports is imported by something", (
   );
 });
 
+// -----------------------------------------------------------------------------
+// THE SAME RULE OVER src/auth/store.ts, WITH A NAMED EXEMPTION LIST
+// -----------------------------------------------------------------------------
+//
+// memql#3529 was this defect again, one module over: `runAuthenticated` --
+// refresh once, retry once, then clear the tokens -- was exported, unit-tested,
+// and imported by nothing. Everything that dialed with a bearer handled a 401
+// however it happened to, which for the connection manager meant reporting the
+// cluster as unreachable.
+//
+// That issue asked whether this guard could be widened to store.ts too. It can,
+// but NOT as the blanket rule deviceCodeUi.ts gets, and the comment above says
+// why: store.ts is a library as well as an adapter, and legitimately exports
+// helpers that only its own unit tests drive. A rule that flagged those would
+// be noise, and noise is how a guard stops being read.
+//
+// So the rule is "imported, or on this list" -- and the list is the point. Each
+// entry is a deliberate statement that a function is reachable-by-test-only, and
+// adding one is a decision somebody makes on purpose rather than a silence
+// nobody notices. A capability that arrives WITHOUT being wired now has to be
+// named here to go green, which is exactly the moment to ask whether it should
+// have been wired instead.
+const STORE_TEST_ONLY_EXPORTS = new Set<string>([
+  // The two SecretStorage key-derivation helpers. They exist so a test can
+  // assert the exact key a credential lands under -- which is the thing #3404's
+  // index has to agree with, and the one detail no behavioural test can show.
+  // Nothing outside this module should be composing these keys itself.
+  "refreshTokenSecretKey",
+  "accessTokenExpirySecretKey",
+
+  // The two halves of runAuthenticated's decision, exported so they can be
+  // driven directly rather than through a dial.
+  //
+  // `isUnauthorizedError` is a TEXT match over an error with no status field
+  // (a refused WebSocket upgrade surfaces through `ws` as a plain
+  // `Error: Unexpected server response: 401`). Being deliberately generous is
+  // the risk in it, so the table of what it does and does not match is asserted
+  // on the predicate itself, not inferred from six dial fixtures.
+  //
+  // `reauthenticationMessage` is the sentence an operator reads. It reaches
+  // them as `AuthenticatedRunResult.message`, so there is no second caller to
+  // wire -- what the test pins is the wording.
+  "isUnauthorizedError",
+  "reauthenticationMessage",
+]);
+
+test("every function src/auth/store.ts exports is imported, or is named test-only", () => {
+  const store = path.join(SRC, "auth", "store.ts");
+  const imported = new Set<string>();
+  for (const file of sourceFiles(SRC)) {
+    if (path.normalize(file) === path.normalize(store)) continue;
+    for (const entry of namedImports(file)) imported.add(entry);
+  }
+
+  const unreachable = exportedFunctions(store).filter(
+    (name) =>
+      !imported.has(`${path.normalize(store)}::${name}`) && !STORE_TEST_ONLY_EXPORTS.has(name),
+  );
+  assert.deepEqual(
+    unreachable,
+    [],
+    "exported from src/auth/store.ts and imported by nothing: either wire it at " +
+      "the call sites that need it, or -- if it genuinely exists only for its own " +
+      "unit tests -- add it to STORE_TEST_ONLY_EXPORTS above and say why.",
+  );
+});
+
+test("the test-only list does not name a function that is in fact wired", () => {
+  // A stale exemption is worse than none: it re-opens the hole the list exists
+  // to keep shut, silently, for whatever gets added under that name next.
+  const store = path.join(SRC, "auth", "store.ts");
+  const imported = new Set<string>();
+  for (const file of sourceFiles(SRC)) {
+    if (path.normalize(file) === path.normalize(store)) continue;
+    for (const entry of namedImports(file)) imported.add(entry);
+  }
+
+  const stale = [...STORE_TEST_ONLY_EXPORTS].filter((name) =>
+    imported.has(`${path.normalize(store)}::${name}`),
+  );
+  assert.deepEqual(
+    stale,
+    [],
+    "listed as test-only but actually imported by src/: drop it from " +
+      "STORE_TEST_ONLY_EXPORTS so the guard covers it again.",
+  );
+});
+
 test("no two modules declare a function named signInToCluster", () => {
   const declaring = sourceFiles(SRC).filter((file) =>
     /(?:^|\s)(?:export\s+)?(?:async\s+)?function\s+signInToCluster\b/m.test(
