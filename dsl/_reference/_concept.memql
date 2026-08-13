@@ -385,25 +385,32 @@ concept fieldTypes {
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
-// PLACEMENT (memql#3692). A property annotation goes at the END of the
-// property's own declaration line:
+//   @closed             On a NESTED BLOCK: reject undeclared keys inside it
+//                       (`additionalProperties: false` for that block).
+//                       Written on the typed spelling, because the bare
+//                       `name { ... }` form takes no annotation:
 //
-//   ownerUserId  string!  @pii  @description("…")
+//                         preferences object @closed {
+//                           theme  enum("light", "dark", "system")
+//                         }
 //
-// An annotation on a line of its OWN binds to the property that FOLLOWS, and is
-// REFUSED where the property above it could claim the same token -- which is
-// every position except directly after a nested block. The lexer strips
-// newlines, so
-//
-//   a  string
-//   @pii
-//   b  string
-//
-// is the same token stream as `a string @pii` + `b string`: it used to mark `a`,
-// the field ABOVE the one it reads as belonging to, leaving the field the author
-// marked exposed. @relationship is exempt -- it is body-level wherever it
-// appears, which is why every concept writes it on its own line.
-//
+//                       A nested block is OPEN by default -- the top level has
+//                       always been closed, the block never was -- so without
+//                       this a typo lands beside the field it was meant to be
+//                       (`computerUseEnbaled` next to `computerUseEnabled`) and
+//                       the value the author meant to set keeps its old one,
+//                       with nothing reporting anything (memql#3623).
+//                       Per-block rather than tree-wide because who writes a
+//                       block decides whether closing it is safe: a caller-
+//                       supplied splat, a wholesale read-modify-write of a
+//                       stored row, or a product bundle mounting its own blocks
+//                       each need their own migration first (memql#3641).
+//                       REFUSED where it cannot mean what it says: on a
+//                       non-object, on an `object` with no declared sub-fields
+//                       (it would reject every key, not only undeclared ones),
+//                       and beside @variant (an arm's fields are not in the
+//                       parent's `properties`, so the parent's
+//                       additionalProperties would refuse every row).
 //   @internal           TWO gates. The field is rejected from a mutation's
 //                       caller args, AND excluded from a shape's default
 //                       projection (Concept.ProjectableFields). Server-only in
@@ -504,6 +511,25 @@ concept fieldTypes {
 //                       it is NOT claimed to be applied. Nothing is applied at
 //                       ANY depth; stamping is the only mechanism, and it can
 //                       only be spelled for a top-level field.
+//
+// PLACEMENT (memql#3692). A property annotation goes at the END of the
+// property's own declaration line:
+//
+//   ownerUserId  string!  @pii  @description("…")
+//
+// An annotation on a line of its OWN binds to the property that FOLLOWS, and is
+// REFUSED where the property above it could claim the same token -- which is
+// every position except directly after a nested block. The lexer strips
+// newlines, so
+//
+//   a  string
+//   @pii
+//   b  string
+//
+// is the same token stream as `a string @pii` + `b string`: it used to mark `a`,
+// the field ABOVE the one it reads as belonging to, leaving the field the author
+// marked exposed. @relationship is exempt -- it is body-level wherever it
+// appears, which is why every concept writes it on its own line.
 //
 // Declared metadata is still worth writing where it records real intent: @pii
 // began exactly there and is now enforced in two places, with no schema change
