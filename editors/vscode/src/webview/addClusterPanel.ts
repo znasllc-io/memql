@@ -47,6 +47,7 @@ import {
 import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
+import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/enrolment.js";
 import {
   deleteReceipt,
   readReceipt,
@@ -586,6 +587,9 @@ export class AddClusterPanel {
     if (type === "signInAsOwner") {
       void this.signInAsOwner();
     }
+    if (type === "enrolPasskey") {
+      void this.enrolPasskey();
+    }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
     // particular is reached only by comparison against a name written out in
@@ -893,6 +897,20 @@ export class AddClusterPanel {
     }
 
     this.state.finish({ ok: report?.ok === true, cancelled: report?.cancelled === true });
+
+    // THE ENROLMENT LINK, off the report and onto the done screen (memql#3408).
+    //
+    // The `enrolmentLink` step mints a single-use passkey link inside the
+    // cluster and the executor records it on the step's result. Until now
+    // nothing read it back, so a successful install ended with the operator
+    // holding no way to reach the credential the install had just created for
+    // them -- the URL existed only in the receipt on disk.
+    //
+    // Read here rather than in `doneHtml` because `report` is local to this
+    // method and the screen re-renders many times. `enrolmentUrlFrom` returns
+    // "" when the step did not run or produced nothing, which is not a failure:
+    // an install that skipped enrolment simply gets no button.
+    if (report !== undefined) this.state.setEnrolmentUrl(enrolmentUrlFrom(report));
 
     // THE HAND-OFF, and the gate in front of it is the whole point (#3477).
     //
@@ -2040,6 +2058,34 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     this.render();
   }
 
+  /**
+   * Opens the passkey enrolment link the install minted (memql#3408).
+   *
+   * The link never enters the webview -- the button carries no href, and the
+   * URL is read from host-side state here. `openEnrolmentLink` re-validates
+   * it (https, `/enroll?code=`) before anything is opened, so a value that was
+   * rewritten between the mint and this click is refused rather than followed.
+   *
+   * A failure is REPORTED, not swallowed, and the message says what is still
+   * available: the magic-link route on this same screen still works, so an
+   * operator whose machine has no browser is inconvenienced rather than stuck.
+   */
+  private async enrolPasskey(): Promise<void> {
+    const url = this.state.enrolmentUrl;
+    if (url === "") return;
+    try {
+      await openEnrolmentLink(url, {
+        resolveExternalUri: async (target) => (await vscode.env.asExternalUri(vscode.Uri.parse(target))).toString(),
+        openExternal: async (target) => await vscode.env.openExternal(vscode.Uri.parse(target)),
+      });
+    } catch (err) {
+      const detail = err instanceof EnrolmentError ? err.message : String(err);
+      void vscode.window.showErrorMessage(
+        `${detail} You can still sign in with a magic link from this screen.`,
+      );
+    }
+  }
+
   /** Reaches the existing sign-in flow. No new credential path (#3401). */
   private async signInAsOwner(): Promise<void> {
     const handoff = this.state.handoff;
@@ -2087,14 +2133,35 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     }
 
     if (handoff !== undefined && handoff.ok) {
+      // THE PASSKEY IS THE PRIMARY ROUTE, and the magic link steps down to
+      // secondary when one exists (memql#3408). The install has just minted a
+      // single-use enrolment link for this operator; sending them to a magic
+      // link instead means waiting on a mailbox a local cluster does not have.
+      //
+      // The button carries NO href and no token -- the URL is a credential and
+      // stays on the host side, read by `enrolPasskey` when this is clicked.
+      const enrol = this.state.hasEnrolmentLink
+        ? `<button class="primary" type="button" data-act="enrolPasskey">Set up a passkey</button>`
+        : "";
+      const signInClass = enrol === "" ? "primary" : "secondary";
       const signIn = handoff.canSignIn
-        ? `<button class="primary" type="button" data-act="signInAsOwner">Sign in as owner</button>`
+        ? `<button class="${signInClass}" type="button" data-act="signInAsOwner">Sign in as owner</button>`
+        : "";
+      // Said only when there is a passkey to explain. The link expires and is
+      // single-use, and an operator who closes this screen without knowing that
+      // will come back to a dead link with no idea why.
+      const enrolNote = this.state.hasEnrolmentLink
+        ? `<p>${escapeHtml(
+            "Setting up a passkey opens your browser once. The link is single-use and expires shortly, so do it now -- otherwise sign in with a magic link.",
+          )}</p>`
         : "";
       return `<h1>Your cluster is ready</h1>
 <p class="lede">${escapeHtml(
         `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
       )}</p>
+${enrolNote}
 <div class="actions">
+  ${enrol}
   ${signIn}
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
