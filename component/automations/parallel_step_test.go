@@ -15,6 +15,7 @@ import (
 // ParallelExecutor already runs (branch ids surface as <parent>.<branch>).
 
 const parallelAuthoredSrc = `@description("Gather two reports concurrently, then merge.")
+@trigger(event="system.startup")
 automation gather {
   step layer0 {
     parallel {
@@ -90,6 +91,7 @@ func TestCompileSource_ParallelStep(t *testing.T) {
 
 func TestCompileSource_ParallelStep_Defaults(t *testing.T) {
 	src := `@description("Defaults probe.")
+@trigger(event="system.startup")
 automation gather {
   step layer0 {
     parallel {
@@ -117,6 +119,7 @@ automation gather {
 // condition on the parallel step itself -- the synthesizer's layer-k>0 shape.
 func TestCompileSource_ParallelStep_GatedLayer(t *testing.T) {
 	src := `@description("Gated fan-out probe.")
+@trigger(event="system.startup")
 automation gather {
   step prep {
     automation prep { }
@@ -152,6 +155,7 @@ automation gather {
 // evaluates branch Condition before dispatch.
 func TestCompileSource_ParallelStep_GatedBranch(t *testing.T) {
 	src := `@description("Branch gate probe.")
+@trigger(event="system.startup")
 automation gather {
   step layer0 {
     parallel {

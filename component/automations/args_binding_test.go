@@ -17,7 +17,7 @@ import (
 // contract. It compiles through the real loader pipeline (rewriter -> parser
 // -> compiler) so the schema round-trips onto Automation.Args.
 const argsAutomationSource = `@enabled
-@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+@trigger(event="deploy.requested")
 @description("deploy with a typed args contract")
 automation deployWithArgs {
   args {
@@ -78,7 +78,7 @@ func TestCompileMemQL_AttachesArgsSchema(t *testing.T) {
 // so the contract stays honest (defaults belong in the body via coalesce).
 func TestCompileMemQL_RejectsDefaultOnArgsField(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+	src := `@trigger(event="deploy.requested")
 automation badDefault {
   args {
     environment string @default("staging")

@@ -12,6 +12,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -79,8 +80,8 @@ func (s *Store) Create(ctx context.Context, identityId, userId, label, keyHash s
 		return errors.New("pat.Store.Create: identityId, userId, keyHash all required")
 	}
 	q := fmt.Sprintf(
-		`mutation createPATIdentity(identityId:%q,userId:%q,label:%q,keyHash:%q)`,
-		identityId, userId, label, keyHash,
+		`mutation createPATIdentity(identityId:%s,userId:%s,label:%s,keyHash:%s)`,
+		langparser.QuoteString(identityId), langparser.QuoteString(userId), langparser.QuoteString(label), langparser.QuoteString(keyHash),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("pat.Store.Create: %w", err)
@@ -103,8 +104,8 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 		return errors.New("pat.Store.Revoke: row not found")
 	}
 	q := fmt.Sprintf(
-		`mutation revokePATIdentity(identityId:%q,userId:%q,label:%q,keyHash:%q,usableByAgents:%t)`,
-		bareSlug(row.ID), row.UserId, row.Label, row.KeyHash, row.UsableByAgents,
+		`mutation revokePATIdentity(identityId:%s,userId:%s,label:%s,keyHash:%s,usableByAgents:%t)`,
+		langparser.QuoteString(bareSlug(row.ID)), langparser.QuoteString(row.UserId), langparser.QuoteString(row.Label), langparser.QuoteString(row.KeyHash), row.UsableByAgents,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("pat.Store.Revoke: %w", err)
@@ -122,7 +123,7 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*PATRow, e
 	if keyHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query patIdentityByKeyHash(keyHash:%q)`, keyHash)
+	q := fmt.Sprintf(`query patIdentityByKeyHash(keyHash:%s)`, langparser.QuoteString(keyHash))
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("pat.Store.LookupByKeyHash: %w", err)
@@ -139,7 +140,7 @@ func (s *Store) LookupById(ctx context.Context, identityId string) (*PATRow, err
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`query patIdentityById(identityId:%q)`, CanonicalId(identityId))
+	q := fmt.Sprintf(`query patIdentityById(identityId:%s)`, langparser.QuoteString(CanonicalId(identityId)))
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("pat.Store.LookupById: %w", err)
@@ -171,8 +172,8 @@ func (s *Store) BumpLastUsed(ctx context.Context, identityId string) error {
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	q := fmt.Sprintf(
-		`mutation bumpPATLastUsedAt(identityId:%q,userId:%q,label:%q,keyHash:%q,active:%t,usableByAgents:%t,lastUsedAt:%q)`,
-		bareSlug(row.ID), row.UserId, row.Label, row.KeyHash, row.Active, row.UsableByAgents, now,
+		`mutation bumpPATLastUsedAt(identityId:%s,userId:%s,label:%s,keyHash:%s,active:%t,usableByAgents:%t,lastUsedAt:%s)`,
+		langparser.QuoteString(bareSlug(row.ID)), langparser.QuoteString(row.UserId), langparser.QuoteString(row.Label), langparser.QuoteString(row.KeyHash), row.Active, row.UsableByAgents, langparser.QuoteString(now),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("pat.Store.BumpLastUsed: %w", err)
@@ -207,7 +208,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]PATRow, error
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("pat.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`query patIdentitiesForUser(userId:%q)`, userId)
+	q := fmt.Sprintf(`query patIdentitiesForUser(userId:%s)`, langparser.QuoteString(userId))
 	out := []PATRow{}
 	cursor := ""
 	for i := 0; i < maxPATPageWalk; i++ {

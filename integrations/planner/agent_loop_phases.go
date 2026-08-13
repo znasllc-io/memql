@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"os"
 	"strconv"
 	"time"
@@ -220,8 +221,8 @@ func (l *PlannerAgentLoop) parkForPhaseCheckpoint(ctx context.Context, plan map[
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s)`,
-		planId, string(fbReqJSON), string(metricsJSON),
+		`mutation updatePlanStatus(planId:%s, status:"awaitingFeedback", feedbackReason:"phase_checkpoint", feedbackRequest:%s, metrics:%s)`,
+		langparser.QuoteString(planId), string(fbReqJSON), string(metricsJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err

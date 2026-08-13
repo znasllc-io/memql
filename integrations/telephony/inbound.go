@@ -8,6 +8,7 @@ import (
 
 	"github.com/livekit/protocol/livekit"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -111,8 +112,8 @@ func (i *Integration) handleProvisionInbound(ctx context.Context, args map[strin
 	}
 	if eng, err := i.requireEngine(); err == nil {
 		q := fmt.Sprintf(
-			`mutation recordTrunk(carrier: %q, direction: "inbound", name: %q, livekitTrunkId: %q, sipEdgeUri: %q, secretRef: "telephony-secrets")`,
-			carrier.Name(), inboundTrunkName, trunkID, i.sipEdgeURI,
+			`mutation recordTrunk(carrier: %s, direction: "inbound", name: %s, livekitTrunkId: %s, sipEdgeUri: %s, secretRef: "telephony-secrets")`,
+			langparser.QuoteString(carrier.Name()), langparser.QuoteString(inboundTrunkName), langparser.QuoteString(trunkID), langparser.QuoteString(i.sipEdgeURI),
 		)
 		if _, err := eng.Execute(ctx, q); err != nil && i.logger != nil {
 			i.logger.Warn("telephony: record trunk row failed", "err", err)

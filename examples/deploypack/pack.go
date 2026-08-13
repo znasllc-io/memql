@@ -40,6 +40,7 @@ import (
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/deploycontrol"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	memqldsl "github.com/znasllc-io/memql/dsl"
 )
@@ -266,7 +267,7 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 	var effects []string
 
 	if status := argString(args, "status"); status != "" {
-		call := fmt.Sprintf("mutation updateDeploymentStatus(deploymentId: %q, status: %q)", deploymentID, status)
+		call := fmt.Sprintf("mutation updateDeploymentStatus(deploymentId: %s, status: %s)", langparser.QuoteString(deploymentID), langparser.QuoteString(status))
 		if _, err := p.engine.Execute(ctx, call); err != nil {
 			return nil, fmt.Errorf("deploypack.recordBack: updateDeploymentStatus: %w", err)
 		}
@@ -286,8 +287,8 @@ func (p *Provider) recordBack(ctx context.Context, args map[string]any, _ int) (
 			replicas = int(r)
 		}
 		call := fmt.Sprintf(
-			"mutation createDeploymentNodeSpec(deploymentId: %q, nodeType: %q, version: %q, replicas: %d, imageDigest: %q)",
-			deploymentID, nodeType, version, replicas, imageDigest,
+			"mutation createDeploymentNodeSpec(deploymentId: %s, nodeType: %s, version: %s, replicas: %d, imageDigest: %s)",
+			langparser.QuoteString(deploymentID), langparser.QuoteString(nodeType), langparser.QuoteString(version), replicas, langparser.QuoteString(imageDigest),
 		)
 		if _, err := p.engine.Execute(ctx, call); err != nil {
 			return nil, fmt.Errorf("deploypack.recordBack: createDeploymentNodeSpec: %w", err)

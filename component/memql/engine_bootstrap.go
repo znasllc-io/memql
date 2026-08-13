@@ -270,6 +270,21 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// This exposes functions to tool-calling agents without allowing free-form MemQL.
 	registerFunctionTools(e.Logger, functionRegistry, toolRegistry)
 
+	// Resolve every tool's @handler target against the function + builtin
+	// registry (memql#3625). Runs HERE because this is the first point where
+	// both registries are populated: ValidateTool at load can only check the
+	// handler's SHAPE, never that the thing it names exists. Unresolved
+	// targets land on the report as skips, so strict boot refuses them the
+	// same way it refuses a construct that failed to parse.
+	if unresolved := recordToolHandlerTargetProblems(report, toolRegistry, functionRegistry); len(unresolved) > 0 &&
+		e.Component != nil && e.Logger != nil {
+		for _, resolveErr := range unresolved {
+			e.Logger.Error("tool handler target does not resolve",
+				"component", "memql.engine",
+				"error", resolveErr)
+		}
+	}
+
 	e.tools = toolRegistry
 
 	// Boot self-check (memql#1156): a capability tool missing from the

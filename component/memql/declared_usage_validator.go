@@ -3,6 +3,7 @@ package memql
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -102,7 +103,101 @@ func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef
 		}
 	}
 
+	// ...and the symmetric direction: every `args.X` the body READS must be
+	// declared (memql#3626).
+	return validateArgsReferencesAreDeclared(body, funcDef)
+}
+
+// argsFieldReference matches the first segment of an `args.X` / `ctx.X` path.
+// `ctx.` is the legacy envelope alias the struct-form rewriter emits and
+// resolves to the same caller-arg AST node, which is why the reverse check
+// accepts either spelling too.
+var argsFieldReference = regexp.MustCompile(`\b(?:args|ctx)\.([A-Za-z_][A-Za-z0-9_]*)`)
+
+// validateArgsReferencesAreDeclared refuses a body that reads an `args.X`
+// absent from the construct's `args { }` block (memql#3626).
+//
+// # Why this direction was the one that mattered
+//
+// Only the other direction existed -- "declared but never referenced", above.
+// An UNDECLARED read was silent, and silence covered two different failures:
+//
+//   - An author typo (`args.userld` for `args.userId`) produced a field that
+//     is simply ABSENT from the written payload. Nothing logged, nothing
+//     failed; the row was just missing a value. That is the memql#3605
+//     outcome reached by another route.
+//   - A caller who supplied the undeclared name got it BOUND AND WRITTEN
+//     while bypassing every check the declared schema exists to run --
+//     @required, type, @enum, @pattern -- because validateFunctionArgs
+//     iterates DECLARED fields, and rejectUnknownArgs (the check that would
+//     have caught it) is gated behind strictUnknownArgs, i.e. the MCP
+//     boundary only. An internal caller walked straight past a documented
+//     validation surface.
+//
+// # Scope
+//
+// Uniform across every function kind, automations included: since the
+// event-payload-binding work (memql#2352), an automation's `args` IS its
+// declared block -- the trigger payload is bound INTO that contract and
+// validated against it -- while the triggering event rides its own `event`
+// envelope. So there is no ambient `args.topic` / `args.payload` an
+// automation reads without declaring, and no exemption to carve.
+//
+// One case is DEFERRED rather than exempt -- a Logic reading an undeclared
+// `event`, which validateLogicEventBinding (memql#1706) already refuses with a
+// message written for exactly that mistake. It stays refused; see the skip
+// below.
+//
+// Comments and string literals are blanked before the scan, so prose
+// mentioning an `args.X` (or a query string embedding one) cannot fail a
+// load.
+func validateArgsReferencesAreDeclared(body string, funcDef *languageParser.FunctionDef) error {
+	if body == "" || funcDef == nil {
+		return nil
+	}
+	declared := map[string]bool{}
+	if funcDef.ArgsSchema != nil {
+		for _, field := range funcDef.ArgsSchema.Fields {
+			if field != nil && field.Name != "" {
+				declared[field.Name] = true
+			}
+		}
+	}
+
+	// Blank comments + strings FIRST (so a multi-line literal cannot desync
+	// the scan), then drop annotation lines.
+	scanned := stripAttrLines(languageParser.BlankCommentsAndStrings(body))
+	for _, match := range argsFieldReference.FindAllStringSubmatch(scanned, -1) {
+		name := match[1]
+		if declared[name] {
+			continue
+		}
+		// A Logic reading an undeclared `event` is the SAME defect with a
+		// better diagnosis already written: validateLogicEventBinding
+		// (memql#1706) refuses it a few lines later in the loader and names
+		// the runner-threading reason plus the exact args line to add. Leave
+		// that case to its owner rather than pre-empting it with a generic
+		// message. It stays refused either way; only the wording differs.
+		if name == "event" && funcDef.Type == languageParser.FunctionTypeLogic {
+			continue
+		}
+		if len(declared) == 0 {
+			return fmt.Errorf("function %q: body reads args.%s but the construct declares no args block -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it; add `args { %s <type> }`", funcDef.Name, name, name)
+		}
+		return fmt.Errorf("function %q: body reads args.%s, which is not declared in the args block (declared: %s) -- an undeclared arg is silently absent when the caller omits it, and bypasses @required / type / @enum / @pattern when the caller supplies it", funcDef.Name, name, strings.Join(sortedDeclaredArgsNames(declared), ", "))
+	}
 	return nil
+}
+
+// sortedDeclaredArgsNames returns a declared-args set's names in a stable
+// order so a load error reads the same on every replica.
+func sortedDeclaredArgsNames(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // extractFunctionBody returns the contents between the first

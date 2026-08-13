@@ -196,6 +196,12 @@ logic voiceMigrationOnSecondHuman {
   // TestDocsDoNotReferencePrefixedConstructNames stays silent on it by design
   // rather than by exemption -- it only fires when THIS tree declares the
   // unprefixed form under the asserted kind, and it does not.
+  //
+  // Both calls below used to pass `actor: { kind: "system" }`, which never
+  // arrived (memql#3626). `actor` is a reserved engine name, so no args block
+  // anywhere -- including the bundle's -- can declare it, and an undeclared
+  // argument is dropped. Removing it changes nothing at runtime; it removes a
+  // line that read as if it did something.
   publishGroupCard := if active.count() == 2 {
     mutation mutationCreateCanvasState(
       stateId: concat("voice-migrated-public-", hash(args.event.payload.activePartitionId)),
@@ -206,7 +212,6 @@ logic voiceMigrationOnSecondHuman {
         message: "Voice is now active in this chat -- a second person joined."
       },
       visibility: "public",
-      actor: { kind: "system" },
       importance: "notify"
     )
   }
@@ -224,7 +229,6 @@ logic voiceMigrationOnSecondHuman {
       },
       visibility: "private",
       forUserId: args.event.payload.id,
-      actor: { kind: "system" },
       importance: "ambient"
     )
   }

@@ -400,6 +400,7 @@ func TestStepObserverFiresFromRealExecutor(t *testing.T) {
 	logger := relayTestLogger()
 	auto, err := NewLoader(LoaderOptions{Logger: logger}).CompileSource(
 		`@description("Two trivial steps.")
+@trigger(event="system.startup")
 automation traced {
   step first  { automation subOne { } }
   step second { automation subTwo { } }
@@ -431,6 +432,7 @@ func TestExecutorUnaffectedWithoutObserver(t *testing.T) {
 	logger := relayTestLogger()
 	auto, err := NewLoader(LoaderOptions{Logger: logger}).CompileSource(
 		`@description("One trivial step.")
+@trigger(event="system.startup")
 automation untraced {
   step only { automation sub { } }
 }`, "test:no-observer")

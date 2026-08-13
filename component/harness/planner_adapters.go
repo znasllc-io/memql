@@ -26,6 +26,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -266,8 +267,8 @@ func NewEnginePlanWriter(exec Executor) *EnginePlanWriter {
 // createHarnessPlan.
 func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, input map[string]any) error {
 	q := fmt.Sprintf(
-		`mutation createHarnessPlan(planId:%q, goal:%q, input:%s)`,
-		planID, goal, mustJSON(input),
+		`mutation createHarnessPlan(planId:%s, goal:%s, input:%s)`,
+		langparser.QuoteString(planID), langparser.QuoteString(goal), mustJSON(input),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("create plan %q: %w", planID, err)
@@ -279,8 +280,8 @@ func (w *EnginePlanWriter) CreatePlan(ctx context.Context, planID, goal string, 
 // addHarnessStep, carrying its dependsOn DAG in-edges.
 func (w *EnginePlanWriter) AddStep(ctx context.Context, step NewStep) error {
 	q := fmt.Sprintf(
-		`mutation addHarnessStep(stepId:%q, planId:%q, title:%q, idempotencyKey:%q, dependsOn:%s, input:%s)`,
-		step.ID, step.PlanID, step.Title, step.IdempotencyKey,
+		`mutation addHarnessStep(stepId:%s, planId:%s, title:%s, idempotencyKey:%s, dependsOn:%s, input:%s)`,
+		langparser.QuoteString(step.ID), langparser.QuoteString(step.PlanID), langparser.QuoteString(step.Title), langparser.QuoteString(step.IdempotencyKey),
 		mustJSONSlice(step.DependsOn), mustJSON(step.Input),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
@@ -326,8 +327,8 @@ func (w *EnginePlanWriter) AssignAgent(ctx context.Context, step NewStep, agentI
 // recordHarnessObservation.
 func (w *EnginePlanWriter) RecordDecision(ctx context.Context, obs Observation) error {
 	q := fmt.Sprintf(
-		`mutation recordHarnessObservation(stepId:%q, planId:%q, kind:%q, content:%q, data:%s)`,
-		obs.StepID, obs.PlanID, obs.Kind, obs.Content, mustJSON(obs.Data),
+		`mutation recordHarnessObservation(stepId:%s, planId:%s, kind:%s, content:%s, data:%s)`,
+		langparser.QuoteString(obs.StepID), langparser.QuoteString(obs.PlanID), langparser.QuoteString(obs.Kind), langparser.QuoteString(obs.Content), mustJSON(obs.Data),
 	)
 	if _, err := w.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("record decision for step %q: %w", obs.StepID, err)
@@ -376,9 +377,9 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"originatingPlanId": originatingPlanID,
 	}
 	q := fmt.Sprintf(
-		`mutation createAgent(agentId:%q, ownerUserId:%q, name:%q, description:%q, personality:%q, role:%q, roleSlug:%q, kind:%q, capabilities:%s)`,
-		agentID, ownerUserID, spec.Name, spec.Description, spec.SystemPrompt,
-		"specialist", spec.RoleSlug, "specialist", capabilitiesJSON,
+		`mutation createAgent(agentId:%s, ownerUserId:%s, name:%s, description:%s, personality:%s, role:%s, roleSlug:%s, kind:%s, capabilities:%s)`,
+		langparser.QuoteString(agentID), langparser.QuoteString(ownerUserID), langparser.QuoteString(spec.Name), langparser.QuoteString(spec.Description), langparser.QuoteString(spec.SystemPrompt),
+		langparser.QuoteString("specialist"), langparser.QuoteString(spec.RoleSlug), langparser.QuoteString("specialist"), capabilitiesJSON,
 	)
 	if _, err := f.exec.Execute(ctx, q); err != nil {
 		return "", fmt.Errorf("create agent: %w", err)
@@ -391,7 +392,7 @@ func (f *EngineAgentFactory) CreateAgent(ctx context.Context, spec ComposedAgent
 		"tools":            spec.Tools,
 	}
 	if _, err := f.exec.Execute(ctx, fmt.Sprintf(
-		`mutation updateAgent(agentId:%q, payload:%s)`, agentID, mustJSONAny(upd),
+		`mutation updateAgent(agentId:%s, payload:%s)`, langparser.QuoteString(agentID), mustJSONAny(upd),
 	)); err != nil {
 		// Non-fatal: the agent exists; lineage/capability stamping is best
 		// effort. The roster falls back to keywords for the capability text.
@@ -410,7 +411,7 @@ func (f *EngineAgentFactory) UpgradeAgent(ctx context.Context, agentID string, n
 		"tools":            newTools,
 	}
 	q := fmt.Sprintf(
-		`mutation updateAgent(agentId:%q, payload:%s)`, agentID, mustJSONAny(upd),
+		`mutation updateAgent(agentId:%s, payload:%s)`, langparser.QuoteString(agentID), mustJSONAny(upd),
 	)
 	if _, err := f.exec.Execute(ctx, q); err != nil {
 		return fmt.Errorf("upgrade agent %q: %w", agentID, err)

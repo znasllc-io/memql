@@ -14,6 +14,7 @@ import (
 // per-row sweep logics (#2235) into automation steps.
 
 const forEachAuthoredSrc = `@description("Prune stale nodes one row at a time.")
+@trigger(event="system.startup")
 automation pruneStaleNodes {
   step decide {
     automation findStaleNodes { }
