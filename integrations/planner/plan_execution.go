@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/node"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -792,7 +793,7 @@ func (p *PlannerIntegration) workerInvocationOutcomeForPlan(ctx context.Context,
 		)
 		return false, 0, 0
 	}
-	q := fmt.Sprintf(`query invocationsForPlan(planId:%q)`, planId)
+	q := fmt.Sprintf(`query invocationsForPlan(planId:%s)`, langparser.QuoteString(planId))
 	res, err := p.engine.Execute(ctx, q)
 	if err != nil {
 		p.logger.Warn("plan execution: invocation lookup failed; defaulting to failed",
@@ -838,7 +839,7 @@ func (p *PlannerIntegration) artifactProducedForPlan(ctx context.Context, planId
 		// No owner to impersonate -> the owned read can't run. Inconclusive.
 		return false, false
 	}
-	q := fmt.Sprintf(`query generatedOutputsForPlan(planId:%q)`, planId)
+	q := fmt.Sprintf(`query generatedOutputsForPlan(planId:%s)`, langparser.QuoteString(planId))
 	res, err := p.engine.Execute(ownerActorContext(ctx, owner), q)
 	if err != nil {
 		p.logger.Warn("plan execution: generatedOutput lookup failed; treating as inconclusive",
@@ -917,7 +918,7 @@ func (p *PlannerIntegration) fetchPlanForExecution(ctx context.Context, planId s
 	if p.engine == nil {
 		return planExecutionRow{}, fmt.Errorf("engine not configured")
 	}
-	q := fmt.Sprintf(`query planById(planId:%q)`, planId)
+	q := fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId))
 	res, err := p.engine.Execute(ctx, q)
 	if err != nil {
 		return planExecutionRow{}, err
@@ -1059,8 +1060,8 @@ func (p *PlannerIntegration) markPlanSucceeded(ctx context.Context, planId, repl
 	}
 	outputJSON, _ := json.Marshal(output)
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"succeeded", completedAt:%q, output:%s)`,
-		planId, now, string(outputJSON),
+		`mutation updatePlanStatus(planId:%s, status:"succeeded", completedAt:%s, output:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(now), string(outputJSON),
 	)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanSucceeded failed",
@@ -1078,8 +1079,8 @@ func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMe
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"failed", completedAt:%q, errorMessage:%q)`,
-		planId, now, errorMessage,
+		`mutation updatePlanStatus(planId:%s, status:"failed", completedAt:%s, errorMessage:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(now), langparser.QuoteString(errorMessage),
 	)
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanFailed failed",
@@ -1097,7 +1098,7 @@ func (p *PlannerIntegration) markPlanFailed(ctx context.Context, planId, errorMe
 // it): the system is throttling concurrency. Returns the engine error so the
 // admission demote callback can fail open on a write failure.
 func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId string) error {
-	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%q, status:"waitingForSlot")`, planId)
+	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%s, status:"waitingForSlot")`, langparser.QuoteString(planId))
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanWaitingForSlot failed",
 			"plan_id", planId,
@@ -1117,7 +1118,7 @@ func (p *PlannerIntegration) markPlanWaitingForSlot(ctx context.Context, planId 
 // Returns the engine error so the AdmitNext promote loop can stop on failure.
 func (p *PlannerIntegration) markPlanRunningFromQueue(ctx context.Context, planId string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%q, status:"running", startedAt:%q)`, planId, now)
+	q := fmt.Sprintf(`mutation updatePlanStatus(planId:%s, status:"running", startedAt:%s)`, langparser.QuoteString(planId), langparser.QuoteString(now))
 	if _, err := p.engine.Execute(ctx, q); err != nil {
 		p.logger.Warn("plan execution: markPlanRunningFromQueue failed",
 			"plan_id", planId,

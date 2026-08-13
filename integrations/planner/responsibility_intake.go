@@ -54,6 +54,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -309,7 +310,7 @@ func (d *ResponsibilityIntakeDispatcher) invokeIntake(ctx context.Context, state
 // --- loaders --------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context, id string) (map[string]any, error) {
-	q := fmt.Sprintf(`query responsibilityById(responsibilityId:%q)`, id)
+	q := fmt.Sprintf(`query responsibilityById(responsibilityId:%s)`, langparser.QuoteString(id))
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -324,7 +325,7 @@ func (d *ResponsibilityIntakeDispatcher) loadResponsibility(ctx context.Context,
 // --- mutations ------------------------------------------------------------
 
 func (d *ResponsibilityIntakeDispatcher) markPending(ctx context.Context, id string) error {
-	q := fmt.Sprintf(`mutation markResponsibilityIntakePending(responsibilityId:%q)`, id)
+	q := fmt.Sprintf(`mutation markResponsibilityIntakePending(responsibilityId:%s)`, langparser.QuoteString(id))
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
 }

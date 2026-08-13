@@ -23,6 +23,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // capNodePayloadJSON renders a query result node's structpb payload as JSON
@@ -60,7 +61,7 @@ func (s *engineCapabilityStore) LoadEnvelope(ctx context.Context, ownerUserId st
 	// switch is checked for the workspace OWNER, not the caller), so it uses
 	// the @serverOnly construct with an explicit internal stamp.
 	userRes, err := s.engine.Execute(auth.ContextWithInternalOrigin(ctx),
-		fmt.Sprintf(`query userByIdSystem(userId:%q)`, ownerUserId))
+		fmt.Sprintf(`query userByIdSystem(userId:%s)`, langparser.QuoteString(ownerUserId)))
 	if err != nil {
 		return env, fmt.Errorf("query user: %w", err)
 	}

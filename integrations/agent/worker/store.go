@@ -11,6 +11,7 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	workerservice "github.com/znasllc-io/memql/component/worker"
 )
@@ -35,7 +36,7 @@ func (s *EngineStore) UserPreferences(ctx context.Context, userId string) (Prefe
 	}
 	// #2800: reads the owning user's preferences server-side (worker
 	// kill-switch), not the caller's.
-	query := fmt.Sprintf(`query userByIdSystem(userId:%q)`, userId)
+	query := fmt.Sprintf(`query userByIdSystem(userId:%s)`, langparser.QuoteString(userId))
 	res, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), query)
 	if err != nil {
 		return Preferences{ComputerUseEnabled: true}, fmt.Errorf("user lookup: %w", err)
@@ -149,7 +150,7 @@ func (s *EngineStore) PlanScope(ctx context.Context, planId string) (string, err
 		return "", nil
 	}
 	// Re-uses the existing planFull query.
-	query := fmt.Sprintf(`query planById(planId:%q)`, planId)
+	query := fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId))
 	res, err := s.Engine.Execute(ctx, query)
 	if err != nil {
 		return "", fmt.Errorf("plan lookup: %w", err)

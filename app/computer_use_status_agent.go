@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/worker"
 	"github.com/znasllc-io/memql/integrations/agent"
@@ -200,7 +201,7 @@ func resolveAgentOwner(ctx context.Context, engine *memqlengine.MemQLEngine, age
 	if engine == nil || strings.TrimSpace(agentId) == "" {
 		return "", nil
 	}
-	q := fmt.Sprintf(`query agentOwner(agentId:%q)`, agentId)
+	q := fmt.Sprintf(`query agentOwner(agentId:%s)`, langparser.QuoteString(agentId))
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return "", err
@@ -250,7 +251,7 @@ func userHasConfiguredWorker(ctx context.Context, engine *memqlengine.MemQLEngin
 	if engine == nil || strings.TrimSpace(ownerUserId) == "" {
 		return false, nil
 	}
-	q := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
+	q := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
 	res, err := engine.Execute(ctx, q)
 	if err != nil {
 		return false, err
