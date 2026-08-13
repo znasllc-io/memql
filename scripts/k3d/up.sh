@@ -769,6 +769,40 @@ function gate_voice_lane_post_sync() {
 # files are present: the root has to BE a checkout. So the honest move is to
 # refuse, with exit 4 (prerequisite missing) naming what is wrong, rather than
 # guess a revision.
+# resolve_target_revision <repo-root> -- the revision ArgoCD should reconcile the
+# MANIFESTS from, which must be the same release the IMAGES come from.
+#
+# `git rev-parse --abbrev-ref HEAD` answers the literal string "HEAD" for a
+# DETACHED checkout, and an install is always detached: clone-stack.sh checks out
+# a release TAG. ArgoCD then resolves "HEAD" to the repository's DEFAULT BRANCH,
+# so an install that pinned its images to v0.16.1 reconciled its manifests from
+# main -- and the tag, the one thing the operator pinned, was silently dropped
+# (memql#3602).
+#
+# The skew is invisible until the two disagree, and then it is total: main's
+# overlay stopped setting the identity env because the engine derives it now,
+# and a v0.16.1 binary does not derive anything. The install completed green and
+# could not be signed into.
+#
+# So: a detached HEAD sitting exactly on a tag resolves to that TAG; anything
+# else keeps the branch name it already used.
+function resolve_target_revision() {
+    local root="$1" branch tag
+    branch="$(git -C "${root}" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [[ "$branch" != "HEAD" ]]; then
+        printf '%s' "$branch"
+        return 0
+    fi
+    tag="$(git -C "${root}" describe --tags --exact-match 2>/dev/null || true)"
+    if [[ -n "$tag" ]]; then
+        printf '%s' "$tag"
+        return 0
+    fi
+    # Detached but not on a tag: the commit itself is still an honest, immutable
+    # answer, and unlike "HEAD" it cannot silently mean a different tree later.
+    git -C "${root}" rev-parse HEAD 2>/dev/null || printf 'HEAD'
+}
+
 function require_checkout() {
     local root="$1"
     if [[ ! -d "$root" ]]; then
@@ -817,7 +851,7 @@ function main() {
     fi
     require_checkout "$REPO_ROOT"
     # Derived from REPO_ROOT, so it is resolved AFTER the param, not before.
-    TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(git -C "${REPO_ROOT}" rev-parse --abbrev-ref HEAD)}"
+    TARGET_REVISION="${MEMQL_K3D_TARGET_REVISION:-$(resolve_target_revision "${REPO_ROOT}")}"
     TARGET_REVISION="$(cap_param revision "${TARGET_REVISION}")"
     local skip_secrets
     skip_secrets="$(cap_flag no-secrets)"
