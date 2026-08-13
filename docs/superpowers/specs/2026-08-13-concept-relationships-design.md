@@ -367,7 +367,7 @@ traversal, `GraphEdge` on the wire. Every silent failure found here lived in a
 | Decision | Chosen | Rejected, and why |
 |---|---|---|
 | Vocabulary model | Closed structural `type` plus open `as` label | **Bigger closed enum** -- freezes a guess and keeps the treadmill. **Fully open `type`** -- the engine loses the ability to reason about edges structurally, which per-row authz inheritance and cascade will need. |
-| `interactsWith` name | Keep it | Renaming touches 46 sites, the concepts API, traversal names, and docs, for no semantic gain once `as` carries meaning. Counter-argument on record: pre-release is the cheapest moment to rename, and the project convention favors breaking now over later. |
+| `interactsWith` name | **Rename to `references`** (memql#3663) | Initially recorded as "keep it", on the grounds that renaming touched 46 sites for no semantic gain once `as` carried the meaning. Reversed on the counter-argument that was already on record: pre-release is the cheapest moment this will ever be, and every downstream bundle that adopts `interactsWith` before v1 raises the price. `references` rather than `reference` because `NodeTypeReference` already claims `"reference"` as a concept *node type* (`memory-nodes/constants.go:8`). |
 | Label syntax | Explicit `as=` kwarg | **Open `type` with reserved words** -- more ergonomic and removes the boot-refusal entirely, but re-merges the two axes and turns a typo into a silent custom label. **Both** -- two ways to say one thing ages badly. |
 | Zero-user types (`alias`, `equals`, `contains`) | Keep and gate | Cutting them applied YAGNI on a false premise: this is a product-agnostic engine and client repos are the users. Absence here is the expected state, not evidence. |
 | Traversal surface | Keep and properly gate | Cutting it guts a headline capability of a self-described graph database. Undocumenting it leaves known-buggy code reachable, which is how `memql#3432` happened. |
@@ -392,8 +392,11 @@ Tracked under epic **memql#3651**, sized for parallel claiming.
 | memql#3659 | Relationship load gate must fire for a mounted product bundle | `engine` `reliability` |
 | memql#3660 | `_reference/_concept.memql` teaches an invalid type | `dsl` `documentation` |
 | memql#3661 | `sense` and `dslspec` support for `as=` and label-scoped traversal | `dsl` |
+| memql#3663 | Rename the `interactsWith` relationship type to `references` | `dsl` `engine` |
 
 **Ordering.** memql#3653, memql#3654, and memql#3659 are the correctness spine;
 they are independent of the feature work and can ship first and stand alone.
 memql#3652 gates memql#3655, memql#3656, and memql#3661. memql#3657 and
-memql#3660 are independent cleanups claimable by anyone.
+memql#3660 are independent cleanups claimable by anyone. memql#3663 comes last
+of all -- it needs memql#3652, memql#3655, and memql#3657, and must land as one
+atomic PR, because a half-renamed vocabulary is worse than either name.
