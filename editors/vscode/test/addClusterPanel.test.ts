@@ -246,7 +246,7 @@ function open(options: {
 /** Fills the collect form the way typing into it does, then starts the run. */
 function beginInstall(h: Harness): void {
   h.post({ type: "choose", value: "install" });
-  h.post({ type: "input", value: { field: "domain", text: "local.znas.io" } });
+  h.post({ type: "input", value: { field: "domain", text: "memql.localhost" } });
   h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
   h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
   h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });
@@ -484,7 +484,7 @@ test("the provider the operator chose is the provider the step verifies", async 
   const h = open({ runner });
   try {
     h.post({ type: "choose", value: "install" });
-    h.post({ type: "input", value: { field: "domain", text: "local.znas.io" } });
+    h.post({ type: "input", value: { field: "domain", text: "memql.localhost" } });
     h.post({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
     h.post({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
     h.post({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });

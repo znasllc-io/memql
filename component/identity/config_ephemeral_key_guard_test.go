@@ -91,12 +91,35 @@ func TestValidate_EphemeralKeyGuard(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "RFC 6761 .localhost origin exempt (resolves to loopback) -> ALLOW",
+			// memql#3593. This case used to assert the opposite, on the
+			// reading that RFC 6761 makes `.localhost` resolve to loopback and
+			// therefore nothing behind it can be a second replica. The first
+			// half is true and the second does not follow: the local cluster's
+			// front door is now served at `*.memql.localhost`, where traefik
+			// terminates and proxies to a k8s Service with `make scale N=2`
+			// replicas behind it. That is the same mistake the `*.local.<domain>`
+			// wildcard caused in memql#3400 -- a hostname never told you how
+			// many processes are behind it.
+			//
+			// A genuinely single-process deployment on a `.localhost` name opts
+			// in explicitly (the case below this one).
+			name: "a .localhost SUBDOMAIN is a front door, not one process -> REFUSE",
 			mutate: func(c *Config) {
-				c.BaseURL = "https://identity.localhost"
+				c.BaseURL = "https://identity.memql.localhost"
 				c.SigningKeyB64 = ""
 				c.AllowEphemeralKey = false
 				c.KeyEncryptionKey = ""
+			},
+			wantErr:       true,
+			wantErrSubstr: "MEMQL_IDENTITY_SIGNING_KEY_B64 is not set",
+		},
+		{
+			name: "a .localhost subdomain with the ephemeral opt-in -> ALLOW",
+			mutate: func(c *Config) {
+				c.BaseURL = "https://identity.memql.localhost"
+				c.SigningKeyB64 = ""
+				c.AllowEphemeralKey = true
+				c.KeyEncryptionKey = devEncKey
 			},
 			wantErr: false,
 		},

@@ -1,11 +1,18 @@
-# Strategic merge patch: override staging-specific URLs on the identity Deployment
-# for local k3d development (#2065).
+# Strategic merge patch: the local-only identity settings that are NOT derived
+# from the domain (znasllc-io/memql#3593).
 #
-# Identity serves its web UI and JWKS on the owner's local wildcard domain
-# (identity.local.znas.io resolves to 127.0.0.1; the traefik front door
-# terminates TLS on 443 -- see front-door.yaml) so locally-surfaced URLs (magic links, JWKS, console
-# output) carry the domain form instead of raw localhost. Plain localhost
-# stays admitted for CORS/redirects so both address forms work.
+# WHAT LEFT THIS FILE. MEMQL_IDENTITY_BASE_URL, the expected issuer, the
+# bootstrap domain, MEMQL_DISCOVERY_GRPC_ENDPOINT, the CORS origins and the
+# OAuth registered clients were all pinned here. Every one of them is the same
+# fact -- the cluster's domain -- spelled a different way, and they are derived
+# now from the single MEMQL_DOMAIN key of the memql-domain ConfigMap by
+# component/genesis/domain.go at boot.
+#
+# That matters because missing one was not a visible failure. memql#3315 was a
+# single forgotten CORS origin and it presented as sign-in dying with an empty
+# identity log.
+#
+# WHAT IS LEFT IS GENUINELY LOCAL, AND CARRIES NO DOMAIN.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,33 +24,20 @@ spec:
       containers:
         - name: identity
           env:
-            # Local identity URL: https on the front door (443), no port --
-            # mirrors the deployed ingress topology.
-            - name: MEMQL_IDENTITY_BASE_URL
-              value: "https://identity.local.znas.io"
-            - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
-              value: "https://identity.local.znas.io"
-            - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
-              value: "local.znas.io"
-            # What clients are told to dial (memql#3399): the traefik front
-            # door on 443, whose `/` rule forwards h2c to svc/bff:50051. The
-            # local analog of the cloud ingress, and the same value the
-            # runbook's clusters.yaml entry uses -- so a client that trusts
-            # the discovery document lands where a client that read the docs
-            # lands.
-            - name: MEMQL_DISCOVERY_GRPC_ENDPOINT
-              value: "cockpit.local.znas.io:443"
-            # Admit the SPA on both address forms (domain + localhost), the dev
-            # API server, and the ops-edge front door the memQL Portal is
-            # served from (memql#3315 -- the portal exchanges its authorization
-            # code against identity cross-origin, so its origin must be here or
-            # sign-in fails in CORS with an empty identity log).
-            - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
-              value: "https://app.local.znas.io,https://cockpit.local.znas.io,http://localhost:8080,http://localhost:3000"
-            # OAuth redirect: SPA on both address forms, cockpit (unchanged),
-            # and the portal at its mount point under the front door.
-            - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
-              value: '[{"clientId":"app","redirectURIs":["https://app.local.znas.io/auth/callback","http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]},{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://cockpit.local.znas.io/portal/auth/callback"]}]'
+            # The vite dev servers for the portal and a product SPA.
+            #
+            # An "extra" rather than part of what the domain derives, because
+            # they are not domain-shaped: folding localhost origins into the
+            # derived default would mean a staging deployment that forgot to
+            # set CORS silently admits them. Appended to the derived-or-explicit
+            # set by LoadConfigFromEnv.
+            - name: MEMQL_IDENTITY_CORS_EXTRA_ORIGINS
+              value: "http://localhost:8080,http://localhost:3000"
+            # The same, for the redirect URIs those dev servers call back on.
+            # Merged BY clientId, so this adds URIs to the derived `app` client
+            # rather than creating a second one with the same id.
+            - name: MEMQL_IDENTITY_EXTRA_REGISTERED_CLIENTS
+              value: '[{"clientId":"app","redirectURIs":["http://localhost:8080/auth/callback","http://localhost:3000/auth/callback"]}]'
             # Run migrations on identity startup -- local Postgres starts empty
             # (Tiger Cloud staging has a pre-existing schema; local does not).
             - name: MEMORY_NODES_DATABASE_MIGRATE_ON_START

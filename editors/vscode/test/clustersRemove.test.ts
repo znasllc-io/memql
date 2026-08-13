@@ -30,8 +30,8 @@ const SAMPLE = `# my clusters
 clusters:
   # the parity cluster
   - name: local
-    display_name: local.znas.io
-    endpoint: cockpit.local.znas.io:443
+    display_name: memql.localhost
+    endpoint: cockpit.memql.localhost:443
     local: true
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
@@ -62,7 +62,7 @@ test("returns the entry it removed, so the caller can act on it", async () => {
   // that would race the cockpit.
   assert.equal(removed.name, "local");
   assert.equal(removed.local, true);
-  assert.equal(removed.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(removed.endpoint, "cockpit.memql.localhost:443");
 });
 
 test("clears selected_cluster when it pointed at the removed cluster", async () => {

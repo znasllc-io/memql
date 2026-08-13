@@ -77,6 +77,12 @@ func raRun(t *testing.T, extraEnv []string, args ...string) (stdout, stderr stri
 	// hostsEntries removal path can elevate itself now, and a test must never be
 	// able to raise a password prompt on the machine running it.
 	cmd.Env = append(os.Environ(), "DISPLAY=", "WAYLAND_DISPLAY=")
+	// An EMPTY resolver stub: nothing resolves (memql#3593). hostsEntries now
+	// skips the write when the front-door names already answer 127.0.0.1, and a
+	// resolver honouring RFC 6761 answers every `*.localhost` on loopback -- so
+	// inheriting the developer's DNS meant the `add` this round-trip depends on
+	// never happened. The case is about the block's bytes, not about DNS.
+	cmd.Env = append(cmd.Env, "MEMQL_RESOLVE_STUB="+t.TempDir())
 	cmd.Env = append(cmd.Env, extraEnv...)
 	cmd.Stdin = nil
 	var out, errb strings.Builder
@@ -222,8 +228,8 @@ func raHostsFile(t *testing.T) string {
 		"127.0.0.1\tlocalhost",
 		"10.1.2.3\tsome-corporate-thing.internal",
 		"# BEGIN memql",
-		"127.0.0.1 cockpit.local.znas.io",
-		"127.0.0.1 identity.local.znas.io",
+		"127.0.0.1 cockpit.memql.localhost",
+		"127.0.0.1 identity.memql.localhost",
 		"# END memql",
 		"::1\tip6-localhost",
 	}, "\n") + "\n"
@@ -539,7 +545,7 @@ func TestRemoveArtifactHostsEntries(t *testing.T) {
 		t.Fatalf("read hosts: %v", err)
 	}
 	body := string(got)
-	for _, gone := range []string{"cockpit.local.znas.io", "identity.local.znas.io", "BEGIN memql", "END memql"} {
+	for _, gone := range []string{"cockpit.memql.localhost", "identity.memql.localhost", "BEGIN memql", "END memql"} {
 		if strings.Contains(body, gone) {
 			t.Errorf("%q survived the removal:\n%s", gone, body)
 		}
@@ -825,6 +831,11 @@ func TestRemoveArtifactHostsRoundTripIsByteIdentical(t *testing.T) {
 			add := exec.Command("bash", adder, "--action=add",
 				"--hosts-file="+hosts, "--confirm=add-memql-hosts")
 			add.Stdin = nil
+			// An EMPTY resolver stub: nothing resolves, so the add actually
+			// writes (memql#3593). This case is about the block's bytes, and a
+			// resolver that answers every `*.localhost` on loopback would make
+			// the probe skip the write the round trip depends on.
+			add.Env = append(os.Environ(), "MEMQL_RESOLVE_STUB="+t.TempDir())
 			if out, err := add.CombinedOutput(); err != nil {
 				t.Fatalf("hosts-entries.sh add failed: %v\n%s", err, out)
 			}

@@ -173,7 +173,7 @@ func (w sbWorld) argv(t *testing.T) string {
 // refusal it names rather than a different missing param.
 func sbCompleteArgs() []string {
 	return []string{
-		"--domain=local.znas.io",
+		"--domain=memql.localhost",
 		"--owner-email=ada@example.com",
 		"--owner-first-name=Ada",
 		"--owner-last-name=Lovelace",
@@ -187,7 +187,7 @@ func sbCompleteArgs() []string {
 
 func TestSeedBootstrapIncompleteSetIsExitTwo(t *testing.T) {
 	required := []string{
-		"--domain=local.znas.io",
+		"--domain=memql.localhost",
 		"--owner-email=ada@example.com",
 		"--owner-first-name=Ada",
 		"--owner-last-name=Lovelace",
@@ -230,7 +230,7 @@ func TestSeedBootstrapIncompleteSetIsExitTwo(t *testing.T) {
 // of them at once is the difference between one fix and four.
 func TestSeedBootstrapNamesEveryMissingFieldAtOnce(t *testing.T) {
 	w := sbNewWorld(t)
-	stdout, _, code := sbRun(t, w.env, "--domain=local.znas.io")
+	stdout, _, code := sbRun(t, w.env, "--domain=memql.localhost")
 	if code != 2 {
 		t.Fatalf("exit %d, want 2\nstdout: %s", code, stdout)
 	}
@@ -337,7 +337,7 @@ func TestSeedBootstrapWritesTheBootstrapEnvNames(t *testing.T) {
 
 	argv := w.argv(t)
 	for _, want := range []string{
-		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=local.znas.io",
+		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=memql.localhost",
 		"MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL=ada@example.com",
 		"MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME=Ada",
 		"MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME=Lovelace",
@@ -387,7 +387,7 @@ func TestSeedBootstrapRejectsBadModes(t *testing.T) {
 			// turns a crash-looping node into one clear sentence.
 			name: "domain_restricted with no allowlist",
 			args: []string{
-				"--domain=local.znas.io", "--owner-email=a@b.c",
+				"--domain=memql.localhost", "--owner-email=a@b.c",
 				"--owner-first-name=A", "--owner-last-name=B",
 				"--registration-mode=domain_restricted",
 			},
@@ -395,7 +395,7 @@ func TestSeedBootstrapRejectsBadModes(t *testing.T) {
 		{
 			name: "unknown registration mode",
 			args: []string{
-				"--domain=local.znas.io", "--owner-email=a@b.c",
+				"--domain=memql.localhost", "--owner-email=a@b.c",
 				"--owner-first-name=A", "--owner-last-name=B",
 				"--registration-mode=freeforall",
 			},

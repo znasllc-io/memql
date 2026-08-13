@@ -47,23 +47,23 @@ test("the entry is marked local, which is what earns it the uninstall action", (
   // The one field that cannot be inferred later. It makes the tree render this
   // as a local cluster and scopes the uninstall menu entry to it; a remote
   // registration never sets it, so neither kind claims the other's status.
-  const entry = installedClusterEntry({ domain: "local.znas.io" });
+  const entry = installedClusterEntry({ domain: "memql.localhost" });
   assert.equal(entry.local, true);
 });
 
 test("the endpoint follows the same convention the rest of the extension composes", () => {
-  const entry = installedClusterEntry({ domain: "local.znas.io" });
-  assert.equal(entry.endpoint, "cockpit.local.znas.io:443");
-  assert.equal(entry.domain, "local.znas.io");
+  const entry = installedClusterEntry({ domain: "memql.localhost" });
+  assert.equal(entry.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(entry.domain, "memql.localhost");
 });
 
 test("no issuer is written -- it is derivable, and storing it would override discovery", () => {
-  const entry = installedClusterEntry({ domain: "local.znas.io" });
+  const entry = installedClusterEntry({ domain: "memql.localhost" });
   assert.equal(entry.issuer, undefined);
 });
 
 test("the name is the domain's first label, the way an operator says it", () => {
-  assert.equal(defaultClusterName("local.znas.io"), "local");
+  assert.equal(defaultClusterName("memql.localhost"), "memql");
   assert.equal(defaultClusterName("staging.example.com"), "staging");
 });
 
@@ -77,12 +77,12 @@ test("a name is never empty, because an empty one orphans the entry", () => {
 });
 
 test("a supplied name wins over the derived one", () => {
-  assert.equal(installedClusterEntry({ domain: "local.znas.io", name: "parity" }).name, "parity");
+  assert.equal(installedClusterEntry({ domain: "memql.localhost", name: "parity" }).name, "parity");
 });
 
 test("surrounding dots and whitespace in a domain do not reach the endpoint", () => {
-  const entry = installedClusterEntry({ domain: "  .local.znas.io.  " });
-  assert.equal(entry.endpoint, "cockpit.local.znas.io:443");
+  const entry = installedClusterEntry({ domain: "  .memql.localhost.  " });
+  assert.equal(entry.endpoint, "cockpit.memql.localhost:443");
 });
 
 // -----------------------------------------------------------------------------
@@ -93,18 +93,18 @@ test("the registry is written, then the tree is repainted, then the row is selec
   // Selecting a row the tree has not drawn yet is a no-op the operator reads as
   // "it installed and then nothing happened".
   const { effects, order } = recorder();
-  return completeInstallHandoff({ domain: "local.znas.io" }, effects).then(() => {
-    assert.deepEqual(order, ["write", "invalidate", "refresh", "select:local"]);
+  return completeInstallHandoff({ domain: "memql.localhost" }, effects).then(() => {
+    assert.deepEqual(order, ["write", "invalidate", "refresh", "select:memql"]);
   });
 });
 
 test("a successful hand-off reports the cluster and that sign-in is reachable", async () => {
   const { effects, written } = recorder();
-  const result = await completeInstallHandoff({ domain: "local.znas.io" }, effects);
+  const result = await completeInstallHandoff({ domain: "memql.localhost" }, effects);
 
   assert.equal(result.ok, true);
   assert.equal(written.length, 1);
-  assert.equal(written[0]?.name, "local");
+  assert.equal(written[0]?.name, "memql");
   if (result.ok) {
     assert.equal(result.cluster.local, true);
     assert.equal(result.canSignIn, true, "a domain is all identityBaseUrlFor needs");
@@ -124,8 +124,8 @@ test("re-running an install updates the entry instead of refusing it", async () 
     },
   });
 
-  await completeInstallHandoff({ domain: "local.znas.io" }, effects);
-  await completeInstallHandoff({ domain: "local.znas.io" }, effects);
+  await completeInstallHandoff({ domain: "memql.localhost" }, effects);
+  await completeInstallHandoff({ domain: "memql.localhost" }, effects);
 
   assert.equal(seen.length, 2, "the second run must write, not throw");
   assert.deepEqual(seen[0], seen[1], "and must write the same entry");
@@ -140,11 +140,11 @@ test("a failed registry write still says where the cluster answers", async () =>
     },
   });
 
-  const result = await completeInstallHandoff({ domain: "local.znas.io" }, effects);
+  const result = await completeInstallHandoff({ domain: "memql.localhost" }, effects);
 
   assert.equal(result.ok, false);
   if (!result.ok) {
-    assert.equal(result.reachableAt, "cockpit.local.znas.io:443");
+    assert.equal(result.reachableAt, "cockpit.memql.localhost:443");
     // Compared against the result's OWN field, not a literal address.
     //
     // Two rewrites got here. A regex over the hostname was
@@ -179,7 +179,7 @@ test("presence is invalidated even when the write fails", async () => {
     },
   });
 
-  await completeInstallHandoff({ domain: "local.znas.io" }, effects);
+  await completeInstallHandoff({ domain: "memql.localhost" }, effects);
   assert.ok(order.includes("invalidate"), `presence was never invalidated: ${order.join(", ")}`);
 });
 
@@ -190,7 +190,7 @@ test("a failed write selects nothing and repaints nothing", async () => {
     },
   });
 
-  await completeInstallHandoff({ domain: "local.znas.io" }, effects);
+  await completeInstallHandoff({ domain: "memql.localhost" }, effects);
   assert.ok(!order.some((o) => o.startsWith("select")), "nothing to select");
   assert.ok(!order.includes("refresh"), "nothing changed for the tree to show");
 });

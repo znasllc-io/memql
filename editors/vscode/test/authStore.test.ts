@@ -70,7 +70,7 @@ function writer(sink: ClusterUpdate[]): ClusterWriter {
 }
 
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name: "local", endpoint: "cockpit.local.znas.io:443", ...overrides };
+  return { name: "local", endpoint: "cockpit.memql.localhost:443", ...overrides };
 }
 
 function tokens(overrides: Partial<Parameters<typeof persistSignIn>[2]> = {}) {

@@ -126,50 +126,62 @@ export function imageTagFor(releaseTag: string): string {
 export const DEFAULT_CAROOT_DIR = ".memql/mkcert";
 
 /**
- * The one domain a cluster built from the pinned release actually serves
- * (memql#3590).
+ * The domain a local install serves unless the operator says otherwise.
  *
- * NOT A DEFAULT -- A CONSTRAINT. The Add-a-cluster page offers this as the
- * domain and lets the operator edit it, and anything they typed used to be
- * accepted. It reached `seedBootstrap`, which bootstrapped identity for it, while
- * `hostsBlock`, `localCA` and `frontDoor` each used their own `local.znas.io`
- * defaults -- so the cluster's issuer named one domain and its hosts block,
- * certificate and probe named another.
+ * A DEFAULT NOW, NOT A CONSTRAINT (memql#3593). This used to be the one value
+ * the installer accepted, because the release's local overlay pinned its
+ * Ingress hosts and identity configuration and nothing the installer passed
+ * could change them. That overlay is parameterised now: the domain reaches the
+ * cluster as the single key of a `memql-domain` ConfigMap, from which every
+ * domain-shaped value is derived at boot, and -- when it differs from the
+ * overlay's committed default -- as two patches on the ArgoCD Application.
  *
- * Threading the typed domain into those three steps (this release does that now)
- * makes the INSTALLER consistent and still cannot make a custom domain work,
- * because the cluster does not serve one: `deploy/k8s/overlays/local` pins the
- * Ingress hosts (`cockpit.local.znas.io`, `identity.local.znas.io`) and identity's
- * `MEMQL_IDENTITY_BASE_URL` / expected issuer / CORS origins, and ArgoCD renders
- * that overlay from the release tag the installer checked out. Nothing the
- * installer passes changes it.
+ * `memql.localhost` rather than a company's domain, because the engine is meant
+ * to carry no product and a hostname is product. It needs no domain ownership,
+ * no DNS provider and no third party: `.localhost` resolves to loopback by RFC
+ * 6761. Its WebAuthn RP id is accepted -- measured in
+ * scripts/spikes/webauthn-rpid (memql#3405), where bare `localhost` is refused
+ * as a public suffix and `memql.localhost` is not -- so one passkey covers every
+ * host under it.
  *
- * So the honest thing is to refuse a domain that cannot be served, before ten
- * minutes of work proves it -- and to keep the refusal HERE, beside the release's
- * other pinned facts, rather than as a literal in a form.
- *
- * Supporting a genuinely custom local domain means parameterising that overlay
- * (its two Ingresses, identity's config, every node's expected issuer) and is
- * tracked in memql#3593; it is a feature, not a value this module can supply.
- *
- * `installDomainProblem` is the single reader, so the sentence an operator sees
- * and the constant it is about cannot drift.
+ * Kept in step with deploy/k8s/overlays/local, whose two Ingresses carry this
+ * same apex as their committed default. installDomain.test.ts asserts that
+ * agreement against the shipped files.
  */
-export const SUPPORTED_LOCAL_DOMAIN = "local.znas.io";
+export const DEFAULT_LOCAL_DOMAIN = "memql.localhost";
+
+/** What a domain may look like: two or more lowercase labels, nothing else. */
+const DOMAIN_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 /**
  * Why this domain will not work, or nothing.
+ *
+ * SYNTAX ONLY. Whether a domain RESOLVES is not knowable here and is not this
+ * function's job: `hostsBlock` probes it and either writes the entry or refuses
+ * with the address it actually answered, and `frontDoor` checks the whole path
+ * end to end. What this catches is the answer that cannot become a hostname at
+ * all -- a pasted URL, a port, a wildcard -- before ten minutes of work proves
+ * it.
  *
  * Empty is accepted: an empty field is "not answered yet", which the required-
  * field check reports in its own words rather than as a domain that is wrong.
  */
 export function installDomainProblem(domain: string): string | undefined {
   const trimmed = domain.trim();
-  if (trimmed === "" || trimmed === SUPPORTED_LOCAL_DOMAIN) return undefined;
-  return (
-    `This installer builds a cluster at ${SUPPORTED_LOCAL_DOMAIN}. The release it installs ` +
-    `pins that hostname in the cluster's own ingress and identity configuration, so a ` +
-    `different domain would resolve and then answer as the wrong site. Use ` +
-    `${SUPPORTED_LOCAL_DOMAIN}, or add the cluster by hand once you have one serving your domain.`
-  );
+  if (trimmed === "") return undefined;
+  if (DOMAIN_PATTERN.test(trimmed)) return undefined;
+
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return "Enter a domain, not a URL: memQL adds the scheme and the front-door hostnames itself, so `memql.localhost` rather than `https://memql.localhost`.";
+  }
+  if (trimmed.includes(":")) {
+    return "Enter a domain with no port. The front door is on 443 and memQL puts the cluster there itself.";
+  }
+  if (trimmed.startsWith("*.")) {
+    return "Enter the domain itself, not a wildcard. memQL derives `cockpit.` and `identity.` from it, and the certificate covers the wildcard for you.";
+  }
+  if (!trimmed.includes(".")) {
+    return `Enter a domain with at least two labels, such as ${DEFAULT_LOCAL_DOMAIN}. A single label cannot carry the front-door subdomains memQL needs.`;
+  }
+  return `That is not a domain memQL can serve. Use lowercase letters, digits and hyphens, with at least two labels -- for example ${DEFAULT_LOCAL_DOMAIN}.`;
 }

@@ -46,7 +46,7 @@
 #
 # Usage:
 #   scripts/install/enrolment-link.sh --local --user-email=owner@example.com
-#   scripts/install/enrolment-link.sh --local --user-email=me@example.com --base-url=https://identity.local.znas.io
+#   scripts/install/enrolment-link.sh --local --user-email=me@example.com --base-url=https://identity.memql.localhost
 #   scripts/install/enrolment-link.sh --print-spec
 #
 # Refs: #3408 #3357 #2221

@@ -400,7 +400,7 @@ cluster. The question splits into two legs, and only one of them is settled
   in hybrid transport the desktop browser does all the network I/O and the phone
   only does cryptography, so the RP ID reaches it as an opaque string -- but
   "sound in principle" is exactly what the spike exists to stop us shipping on.
-  The same is untested for a local `*.local.znas.io`-style domain, so this is
+  The same is untested for a local `*.memql.localhost`-style domain, so this is
   not narrowly about `.localhost`.
 
 So this page promises the **platform authenticator only**: Touch ID, Windows

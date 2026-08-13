@@ -30,9 +30,9 @@ async function tempFile(contents: string): Promise<string> {
 const SAMPLE = `# my clusters
 clusters:
   - name: local
-    display_name: local.znas.io
-    domain: local.znas.io
-    endpoint: cockpit.local.znas.io:443
+    display_name: memql.localhost
+    domain: memql.localhost
+    endpoint: cockpit.memql.localhost:443
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
     domain: staging.example.com
@@ -48,8 +48,8 @@ test("reads clusters and the selected cluster", async () => {
   assert.equal(parsed.clusters.length, 2);
   assert.equal(parsed.selectedCluster, "local");
   assert.equal(parsed.clusters[0]?.name, "local");
-  assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(parsed.clusters[0]?.displayName, "memql.localhost");
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
   assert.equal(parsed.clusters[0]?.token, "eyJhbGci.eyJzdWIi.sig");
   assert.equal(parsed.clusters[1]?.clientId, "cockpit");
 });
@@ -167,7 +167,7 @@ test("a rename carries selected_cluster with it", async () => {
   const f = await tempFile(SAMPLE); // selected_cluster: local
   await upsertCluster(
     f,
-    { name: "local-dev", endpoint: "cockpit.local.znas.io:443" },
+    { name: "local-dev", endpoint: "cockpit.memql.localhost:443" },
     "local",
   );
   const parsed = await readClustersFile(f);
@@ -232,7 +232,7 @@ test("upsertCluster deletes a key the caller explicitly cleared", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
+    endpoint: "cockpit.memql.localhost:443",
     token: "",
   });
   const parsed = await readClustersFile(f);
@@ -246,7 +246,7 @@ test("upsertCluster deletes a key the caller explicitly cleared", async () => {
 
 test("upsertCluster leaves an omitted key alone (undefined is not a clear)", async () => {
   const f = await tempFile(SAMPLE);
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" });
+  await upsertCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" });
   assert.equal(
     (await readClustersFile(f)).clusters[0]?.token,
     "eyJhbGci.eyJzdWIi.sig",
@@ -258,13 +258,13 @@ test("clearing one field does not disturb the others", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
+    endpoint: "cockpit.memql.localhost:443",
     domain: "",
   });
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters[0]?.domain, undefined);
   assert.equal(parsed.clusters[0]?.token, "eyJhbGci.eyJzdWIi.sig");
-  assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
+  assert.equal(parsed.clusters[0]?.displayName, "memql.localhost");
 });
 
 test("a cleared field on a NEW cluster is simply not written", async () => {
@@ -286,7 +286,7 @@ test("a rename and a clear applied together both take effect", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(
     f,
-    { name: "local-dev", endpoint: "cockpit.local.znas.io:443", token: "" },
+    { name: "local-dev", endpoint: "cockpit.memql.localhost:443", token: "" },
     "local",
   );
   const parsed = await readClustersFile(f);
@@ -299,7 +299,7 @@ test("a rename and a clear applied together both take effect", async () => {
 test("writes create the file and its parent directory when absent", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
   const f = path.join(dir, "nested", "clusters.yaml");
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" });
+  await upsertCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" });
   assert.equal((await readClustersFile(f)).clusters[0]?.name, "local");
 });
 
@@ -339,7 +339,7 @@ test("needsAuth is true without an endpoint", () => {
 test("upsertCluster refuses an empty name rather than deleting a node's identity", async () => {
   const f = await tempFile(SAMPLE);
   await assert.rejects(
-    () => upsertCluster(f, { name: "", endpoint: "cockpit.local.znas.io:443" }, "local"),
+    () => upsertCluster(f, { name: "", endpoint: "cockpit.memql.localhost:443" }, "local"),
     /cluster name is required/,
   );
 });
@@ -350,7 +350,7 @@ test("a refused empty name leaves the target node completely intact", async () =
 
   const parsed = await readClustersFile(f);
   assert.deepEqual(parsed.clusters.map((c) => c.name), ["local", "staging"]);
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
   assert.equal(
     parsed.clusters[0]?.token,
     "eyJhbGci.eyJzdWIi.sig",
@@ -388,7 +388,7 @@ test("addCluster writes a new cluster", async () => {
 test("addCluster refuses a name that already exists", async () => {
   const f = await tempFile(SAMPLE);
   await assert.rejects(
-    () => addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443" }),
+    () => addCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" }),
     /already exists/,
   );
 });
@@ -399,7 +399,7 @@ test("a refused add does not clear the existing cluster's PAT or domain", async 
   // name and leaves the optional inputs blank: empties, which upsertCluster
   // would have read as explicit clears.
   await assert.rejects(() =>
-    addCluster(f, { name: "local", endpoint: "cockpit.local.znas.io:443", domain: "", token: "" }),
+    addCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443", domain: "", token: "" }),
   );
 
   const parsed = await readClustersFile(f);
@@ -408,7 +408,7 @@ test("a refused add does not clear the existing cluster's PAT or domain", async 
     "eyJhbGci.eyJzdWIi.sig",
     "an add must not revoke the token on the cluster it collided with",
   );
-  assert.equal(parsed.clusters[0]?.domain, "local.znas.io");
+  assert.equal(parsed.clusters[0]?.domain, "memql.localhost");
   assert.equal(parsed.clusters.length, 2, "and it must not append a duplicate either");
 });
 
@@ -449,8 +449,8 @@ test("a name-only update leaves every other field alone", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, { name: "local", token: "eyJ.fresh.sig" });
   const parsed = await readClustersFile(f);
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.local.znas.io:443");
-  assert.equal(parsed.clusters[0]?.displayName, "local.znas.io");
+  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(parsed.clusters[0]?.displayName, "memql.localhost");
   assert.equal(parsed.clusters[0]?.token, "eyJ.fresh.sig");
 });
 

@@ -59,7 +59,7 @@ EXT_DIR="$REPO_ROOT/editors/vscode"
 LOCAL_ENTRY="vscode-local"
 NONLOCAL_ENTRY="vscode-nonlocal"
 
-DEFAULT_DOMAIN="local.znas.io"
+DEFAULT_DOMAIN="memql.localhost"
 
 #=============================================================================
 # LOGGING
@@ -307,7 +307,7 @@ function verify_tls() {
 
 # read_discovery takes every connection fact from the cluster's own document
 # rather than from a guess. Until memql#3399 this field read
-# "https://bff.local.znas.io" -- a URL form the extension refuses, at a host
+# "https://bff.memql.localhost" -- a URL form the extension refuses, at a host
 # with no ingress -- so it is asserted here rather than trusted.
 function read_discovery() {
     section "Reading the cluster's discovery document"

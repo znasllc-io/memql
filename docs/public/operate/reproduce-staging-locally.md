@@ -46,7 +46,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
 | LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
-| Ingress | k3s-bundled traefik front door (`identity.local.znas.io`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
+| Ingress | k3s-bundled traefik front door (`identity.memql.localhost`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
 | Digest-pinning gate | skipped for `ENV=local` in drift-check.sh | enforced | divergent -- justified |
 
 ## Prerequisites
@@ -55,7 +55,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 - **k3d** -- `brew install k3d`.
 - **kubectl** -- `brew install kubectl`.
 - **mkcert** -- `brew install mkcert`. The front door terminates TLS with a
-  browser-trusted `*.local.znas.io` wildcard; `make secrets` issues that pair
+  browser-trusted `*.memql.localhost` wildcard; `make secrets` issues that pair
   for you (see [Front-door TLS](#front-door-tls) below), but it needs mkcert
   and a root CA on the machine.
 - **certutil (Linux only)** -- `sudo apt-get install -y libnss3-tools`
@@ -91,13 +91,13 @@ this in a terminal: from a process with no terminal attached -- a VS Code
 extension host, a CI step -- sudo has nowhere to prompt, and the capability
 refuses with exit 4 and the exact command to run instead.
 
-After that, `make up` / `make secrets` issue the `*.local.znas.io`
+After that, `make up` / `make secrets` issue the `*.memql.localhost`
 pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
-present, and load it into the cluster as the `local-znas-tls` Secret that both
+present, and load it into the cluster as the `memql-front-door-tls` Secret that both
 front-door ingresses reference. Override the location with
 `MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or `--tls-cert` / `--tls-key`).
 
-The bring-up asserts that `local-znas-tls` exists and FAILS without it
+The bring-up asserts that `memql-front-door-tls` exists and FAILS without it
 (memql#3384). It has to: traefik answers a missing referenced secret by
 silently serving its own `TRAEFIK DEFAULT CERT`, so every TLS client sees an
 untrusted edge while the whole mesh reports Available.
@@ -155,6 +155,53 @@ following in order:
 environment repaves from scratch. It is idempotent and honors the same
 `SERVERS`/`AGENTS`/`REVISION` overrides as `make up`.
 
+## Choosing a domain
+
+The cluster is served at `memql.localhost` by default -- an RFC 6761 loopback
+name that needs no domain ownership, no DNS provider and no third party. Bring
+your own instead with `DOMAIN=`:
+
+    make up DOMAIN=lab.example.com
+
+Everything domain-shaped follows from that one value. It is seeded into the
+cluster as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap, and
+every node derives its identity base URL, expected issuer, discovery endpoint,
+CORS origins and OAuth redirect URIs from it at boot
+(`component/genesis/domain.go`). When the domain differs from the overlay's
+committed default, `k3d.up` also emits two `spec.source.kustomize.patches`
+entries on the ArgoCD Application to repoint the two front-door Ingress hosts.
+No file under `deploy/` names a domain.
+
+### The hosts file is only written when it is needed
+
+The installer points the front-door hostnames at 127.0.0.1 -- unless they
+already resolve there. If your own DNS answers 127.0.0.1 for
+`cockpit.<domain>`, `identity.<domain>` and the apex, the hosts block is
+skipped entirely and no elevation prompt appears. A hostname resolving to some
+OTHER address is refused rather than shadowed, naming the address it answered.
+
+Note that a resolver honouring RFC 6761 -- systemd-resolved does -- already
+answers every `*.localhost` name on loopback, so on those machines the default
+domain needs no hosts entry at all.
+
+### The domain is chosen once
+
+It is baked into every passkey (the WebAuthn RP id is derived from it), every
+session and node token (the issuer is `https://identity.<domain>`), the
+certificate's SANs and the hosts block. `make up DOMAIN=...` refuses a value
+that differs from the one the cluster is already serving; rebuild with
+`make up-refresh DOMAIN=...`.
+
+### If a node will not start
+
+`CreateContainerConfigError` naming `memql-domain` means the ConfigMap is
+missing. Re-run `make secrets`.
+
+The reference is deliberately not optional. A node with no domain would fall
+back to the base manifests' staging placeholder issuer, boot, form a mesh, and
+reject every token with an error naming neither the domain nor the ConfigMap --
+so refusing to start is the honest failure.
+
 ## Port-forward reference
 
 After `make up`, these local ports are forwarded from the k3d cluster:
@@ -170,8 +217,8 @@ plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
 the engine repo's local overlay (#2204); they are wired from the product's own
 overlay (the client image + the `dsl-bundle` component). Clients (the Cockpit,
 SDKs) connect to the product-neutral `bff` node **exactly as in staging/prod** --
-through the `cockpit.local.znas.io` traefik front door (TLS on 443, mkcert
-`*.local.znas.io` wildcard, h2c gRPC to `svc/bff:50051`); no port-forward is in
+through the `cockpit.memql.localhost` traefik front door (TLS on 443, mkcert
+`*.memql.localhost` wildcard, h2c gRPC to `svc/bff:50051`); no port-forward is in
 the connection path (see [environment-parity.md](environment-parity.md)). For
 low-level gRPC debugging only, a raw port-forward is still available:
 
@@ -179,8 +226,8 @@ low-level gRPC debugging only, a raw port-forward is still available:
 kubectl port-forward -n memql svc/bff 50051:50051   # debug only; not the connection path
 ```
 
-Access identity: `https://identity.local.znas.io` (front-door TLS -- needs a
-`*.local.znas.io` hosts entry; the cert is issued and seeded by `make up` /
+Access identity: `https://identity.memql.localhost` (front-door TLS -- needs a
+`*.memql.localhost` hosts entry; the cert is issued and seeded by `make up` /
 `make secrets`, see [Front-door TLS](#front-door-tls)). `http://localhost:8085`
 reaches identity directly, for low-level debugging only -- it is not the
 connection path.
@@ -298,7 +345,7 @@ with its justification.
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
 | 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
-| 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.local.znas.io` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
+| 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
@@ -344,9 +391,9 @@ because:
 - The ArgoCD `ignoreDifferences` and selfHeal behavior matches staging exactly.
 
 There is no *nginx* front door locally, but the local overlay DOES ship a
-k3s-bundled **traefik** front door on 443 for `https://identity.local.znas.io`
+k3s-bundled **traefik** front door on 443 for `https://identity.memql.localhost`
 (`deploy/k8s/overlays/local/front-door.yaml`), terminating TLS with a
-browser-trusted mkcert `*.local.znas.io` wildcard (`local-znas-tls`, issued and
+browser-trusted mkcert `*.memql.localhost` wildcard (`memql-front-door-tls`, issued and
 seeded by `make secrets` at `~/.memql/certs/dev.{crt,key}` -- see
 [Front-door TLS](#front-door-tls); its absence fails the bring-up rather than
 degrading silently). This mirrors the cloud ingress topology. The **gRPC** heads

@@ -20,7 +20,7 @@
 #         so a door that answers but will not speak h2 is a broken door.
 #
 # Each check reports ITSELF -- name, host, passed, detail -- because "the front
-# door is broken" is not actionable and "dns for identity.local.znas.io
+# door is broken" is not actionable and "dns for identity.memql.localhost
 # resolves to 10.0.0.5" is. The rollup `allPassed` is the single boolean the
 # graph verifies on.
 #
@@ -40,7 +40,7 @@
 #
 # Usage:
 #   scripts/install/verify-frontdoor.sh
-#   scripts/install/verify-frontdoor.sh --hosts=cockpit.local.znas.io --report-only
+#   scripts/install/verify-frontdoor.sh --hosts=cockpit.memql.localhost --report-only
 #   scripts/install/verify-frontdoor.sh --print-spec
 #
 # Refs: #3365 #3357 #2221
@@ -50,10 +50,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/resolve.sh
+source "${SCRIPT_DIR}/../lib/resolve.sh"
+# shellcheck source=../lib/localtls.sh
+source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "install.verifyFrontDoor" \
     "Check dns/tls per front-door hostname plus a gRPC (h2) reachability probe."
 cap_spec_param "hosts"       "comma-separated front-door hostnames (default: the local overlay's)"
+cap_spec_param "domain"      "front-door apex; derives cockpit.<d> and identity.<d> (mutually exclusive with --hosts)"
 cap_spec_param "grpc-host"   "hostname for the gRPC reachability probe (default: the first host)"
 cap_spec_param "port"        "TLS port (default 443)"
 cap_spec_param "expect-addr" "the address every hostname must resolve to (default 127.0.0.1)"
@@ -61,8 +66,13 @@ cap_spec_param "timeout"     "per-probe timeout in seconds (default 8)"
 cap_spec_param "report-only" "report failures without failing the run (flag)"
 
 # The local overlay's front door (deploy/k8s/overlays/local): traefik serves
-# both on 443 with the mkcert *.local.znas.io wildcard.
-DEFAULT_HOSTS="cockpit.local.znas.io,identity.local.znas.io"
+# both on 443 with the mkcert *.memql.localhost wildcard.
+# Derived from ONE apex (memql#3593), so the probe cannot name a different
+# front door from the one the hosts block points at and the certificate covers.
+# localtls.sh owns MEMQL_LOCAL_DOMAIN; sourcing it is what keeps the three in
+# step. Overridden per run with --domain or --hosts.
+DEFAULT_DOMAIN="$MEMQL_LOCAL_DOMAIN"
+DEFAULT_HOSTS="cockpit.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN}"
 
 #=============================================================================
 # CHECK LEDGER -- every probe records itself here, pass or fail
@@ -96,14 +106,10 @@ function checks_json() {
 # PREREQUISITES
 #=============================================================================
 
-# resolver_tool -- names the resolver this machine actually has. getent is the
-# Linux/glibc path; dig and host cover macOS, where getent does not exist.
-function resolver_tool() {
-    if command -v getent &>/dev/null; then printf 'getent'; return; fi
-    if command -v dig    &>/dev/null; then printf 'dig';    return; fi
-    if command -v host   &>/dev/null; then printf 'host';   return; fi
-    printf ''
-}
+# resolver_tool and resolve_addresses come from scripts/lib/resolve.sh, which
+# the hosts-entries probe sources too (memql#3593). One copy, because the probe
+# decides whether to write the entry this script then checks -- two spellings of
+# "resolves to 127.0.0.1" is the memql#3384 shape.
 
 function check_prerequisites() {
     if ! command -v curl &>/dev/null; then
@@ -117,17 +123,6 @@ function check_prerequisites() {
 #=============================================================================
 # PROBE 1 -- DNS
 #=============================================================================
-
-# resolve_addresses <host> -- prints each resolved IPv4 address on its own
-# line. Empty output means the name did not resolve.
-function resolve_addresses() {
-    local host="$1"
-    case "$(resolver_tool)" in
-        getent) getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u ;;
-        dig)    dig +short A "$host" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u ;;
-        host)   host -t A "$host" 2>/dev/null | awk '/has address/ {print $NF}' | sort -u ;;
-    esac
-}
 
 # check_dns <host> <expected-addr>
 function check_dns() {
@@ -227,7 +222,19 @@ function main() {
     cap_parse_flags "$@"
 
     local hosts grpc_host port expect timeout report_only
-    hosts="$(cap_param hosts "$DEFAULT_HOSTS")"
+    local domain
+    # --domain and --hosts are two spellings of one answer, the same rule
+    # hosts-entries.sh and mkcert-setup.sh apply.
+    domain="$(cap_param domain "")"
+    hosts="$(cap_param hosts "")"
+    if [[ -n "$domain" && -n "$hosts" ]]; then
+        cap_fail 2 "--domain and --hosts are two spellings of one answer; pass one"
+    fi
+    if [[ -n "$domain" ]]; then
+        hosts="cockpit.${domain},identity.${domain}"
+    elif [[ -z "$hosts" ]]; then
+        hosts="$DEFAULT_HOSTS"
+    fi
     port="$(cap_param port 443)"
     expect="$(cap_param expect-addr 127.0.0.1)"
     timeout="$(cap_param timeout 8)"

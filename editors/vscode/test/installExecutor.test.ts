@@ -674,7 +674,7 @@ test("the install plan supplies exactly what the graph does not pin", async () =
     "install",
     "--tag=v1.4.0",
     "--provider-key-file=/run/secrets/key",
-    "--domain=local.znas.io",
+    "--domain=memql.localhost",
     "--owner-email=dev@example.com",
     "--owner-first-name=Dev",
     "--owner-last-name=Eloper",
@@ -690,7 +690,7 @@ test("the install plan supplies exactly what the graph does not pin", async () =
   assert.equal(paramsFor("stackCheckout").tag, "v1.4.0");
   assert.equal(paramsFor("providerKey")["key-file"], "/run/secrets/key");
   assert.deepEqual(paramsFor("seedBootstrap"), {
-    domain: "local.znas.io",
+    domain: "memql.localhost",
     "owner-email": "dev@example.com",
     "owner-first-name": "Dev",
     "owner-last-name": "Eloper",

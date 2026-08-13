@@ -636,7 +636,7 @@ test("every required param is supplied by the graph or the plan", async () => {
       receiptFile: path.join(mkdtempSync(path.join(os.tmpdir(), "memql-audit-")), "receipt.json"),
       provider: "anthropic",
       providerKeyFile: "/tmp/key",
-      domain: "local.znas.io",
+      domain: "memql.localhost",
       ownerEmail: "op@example.test",
       ownerFirstName: "Op",
       ownerLastName: "Erator",
@@ -758,14 +758,14 @@ test("an explicit tag moves the images with it", async () => {
 // The page asks for a domain. It reached `seedBootstrap` and `enrolmentLink`, and
 // three steps that need it took their own defaults instead:
 //
-//   hostsBlock  wrote cockpit.local.znas.io / identity.local.znas.io / local.znas.io
-//   localCA     issued for *.local.znas.io
-//   frontDoor   probed cockpit.local.znas.io / identity.local.znas.io
+//   hostsBlock  wrote cockpit.memql.localhost / identity.memql.localhost / memql.localhost
+//   localCA     issued for *.memql.localhost
+//   frontDoor   probed cockpit.memql.localhost / identity.memql.localhost
 //
 // while identity WAS bootstrapped for the typed domain -- so the cluster's issuer
 // named one domain and its hosts block, certificate and front-door probe named
 // another. Invisible at the default, because the field's default IS
-// `local.znas.io`; broken for anyone who changed it, and surfacing at `frontDoor`
+// `memql.localhost`; broken for anyone who changed it, and surfacing at `frontDoor`
 // as a DNS failure against hostnames nobody asked for.
 //
 // A field whose answer silently reaches two steps out of five is worse than a
@@ -857,7 +857,7 @@ test("a run with no domain leaves every script's own default alone", () => {
   }
 });
 
-// The apex matters on its own: `local.znas.io` (no subdomain) is in the hosts
+// The apex matters on its own: `memql.localhost` (no subdomain) is in the hosts
 // block today, and dropping it would break any link written against the bare
 // domain.
 test("the hosts block carries the apex as well as the subdomains", () => {

@@ -67,6 +67,7 @@ cap_spec_param "no-secrets"      "skip secret seeding (flag)"
 cap_spec_param "repo-url"        "git repo URL for the ArgoCD Application (downstream repos pass their own)"
 cap_spec_param "app-name"        "ArgoCD Application name (downstream repos pass their own)"
 cap_spec_param "overlay-path"    "kustomize overlay path within the repo"
+cap_spec_param "domain"          "front-door apex the cluster is served at (default: memql.localhost)"
 cap_spec_param "extra-ports"     "additional host:container loadbalancer port mappings, comma-separated"
 cap_spec_param "app-project"     "ArgoCD AppProject the Application belongs to"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
@@ -149,6 +150,7 @@ function bringup() {
         ${REPO_URL:+--repo-url="${REPO_URL}"} \
         ${APP_NAME:+--app-name="${APP_NAME}"} \
         ${OVERLAY_PATH:+--overlay-path="${OVERLAY_PATH}"} \
+        ${DOMAIN:+--domain="${DOMAIN}"} \
         ${EXTRA_PORTS:+--extra-ports="${EXTRA_PORTS}"} \
         ${APP_PROJECT:+--app-project="${APP_PROJECT}"} \
         ${PROJECT_MANIFEST:+--project-manifest="${PROJECT_MANIFEST}"} \
@@ -234,7 +236,7 @@ function run_migration() {
 
 # "Every Deployment is Available" is not the whole of "the cluster is up": the
 # CLIENT-FACING edge is the traefik front door, and both local ingresses
-# (cockpit-front-door / identity-front-door) name the local-znas-tls secret in
+# (cockpit-front-door / identity-front-door) name the memql-front-door-tls secret in
 # their spec.tls. When that secret is absent traefik does not fail -- it
 # silently serves its own "TRAEFIK DEFAULT CERT" for both hosts, so browsers
 # warn and Node clients (the VS Code extension host among them) refuse the
@@ -303,6 +305,10 @@ function main() {
     REPO_URL="$(cap_param repo-url "${MEMQL_K3D_REPO_URL:-}")"
     APP_NAME="$(cap_param app-name "${MEMQL_K3D_APP_NAME:-}")"
     OVERLAY_PATH="$(cap_param overlay-path "${MEMQL_K3D_OVERLAY_PATH:-}")"
+    # Empty means "let up.sh apply its own default" -- the ${VAR:+--flag} form
+    # below then passes no flag at all, which is different from passing an
+    # empty one and the scripts treat it as different.
+    DOMAIN="$(cap_param domain "")"
     EXTRA_PORTS="$(cap_param extra-ports "${MEMQL_K3D_EXTRA_PORTS:-}")"
     APP_PROJECT="$(cap_param app-project "${MEMQL_K3D_APP_PROJECT:-}")"
     PROJECT_MANIFEST="$(cap_param project-manifest "${MEMQL_K3D_PROJECT_MANIFEST:-}")"
@@ -341,7 +347,7 @@ function main() {
     cap_result_set_raw healthy "$HEALTHY"
     cap_result_set_raw frontDoorTls "$FRONT_DOOR_TLS"
     if [[ "$FRONT_DOOR_TLS" != "true" ]]; then
-        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://cockpit.local.znas.io and https://identity.local.znas.io are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
+        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://cockpit.memql.localhost and https://identity.memql.localhost are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
     fi
     cap_ok
 }

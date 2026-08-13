@@ -12,7 +12,7 @@ import (
 // seed_secrets_front_door_tls_test.go -- memql#3384.
 //
 // Both local front-door ingresses (cockpit-front-door / identity-front-door)
-// name the `local-znas-tls` secret in their spec.tls. seed-secrets.sh used to
+// name the `memql-front-door-tls` secret in their spec.tls. seed-secrets.sh used to
 // default to a dev.{crt,key} pair inside the repo's old `docker/` tree -- which
 // was deleted when the Compose local stack was retired -- and, finding nothing
 // there, WARN and move on. Traefik answers a missing referenced secret by serving its own
@@ -230,7 +230,7 @@ func lastJSONObject(out string) string {
 
 func tlsSecretCall(calls []string) string {
 	for _, c := range calls {
-		if strings.Contains(c, "create secret tls local-znas-tls") {
+		if strings.Contains(c, "create secret tls memql-front-door-tls") {
 			return c
 		}
 	}
@@ -242,7 +242,7 @@ func tlsSecretCall(calls []string) string {
 //=============================================================================
 
 // The defect itself: with no pair on disk the script warned and returned, so
-// local-znas-tls was never created and traefik fell back to its default cert.
+// memql-front-door-tls was never created and traefik fell back to its default cert.
 // It must now ISSUE the pair and seed the secret.
 func TestSeedSecretsIssuesTheFrontDoorPairWhenAbsent(t *testing.T) {
 	e := newFrontDoorEnv(t)
@@ -264,7 +264,7 @@ func TestSeedSecretsIssuesTheFrontDoorPairWhenAbsent(t *testing.T) {
 	}
 	call := tlsSecretCall(calls)
 	if call == "" {
-		t.Fatalf("local-znas-tls was never seeded -- the ingresses reference it, so this is "+
+		t.Fatalf("memql-front-door-tls was never seeded -- the ingresses reference it, so this is "+
 			"the whole bug (#3384). kubectl calls:\n%s", strings.Join(calls, "\n"))
 	}
 	if !strings.Contains(call, "--cert="+frontDoorCert(e.home)) {
@@ -300,7 +300,7 @@ func TestSeedSecretsReusesAnExistingFrontDoorPair(t *testing.T) {
 		t.Errorf("existing certificate was overwritten: %q (%v)", string(got), err)
 	}
 	if tlsSecretCall(calls) == "" {
-		t.Errorf("local-znas-tls not seeded from the existing pair; kubectl calls:\n%s",
+		t.Errorf("memql-front-door-tls not seeded from the existing pair; kubectl calls:\n%s",
 			strings.Join(calls, "\n"))
 	}
 	if res.Result.FrontDoorTLSSource != "existing" {

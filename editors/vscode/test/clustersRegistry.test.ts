@@ -44,7 +44,7 @@ class FakeSecrets implements SecretStore {
 
 const SAMPLE = `clusters:
   - name: local
-    endpoint: cockpit.local.znas.io:443
+    endpoint: cockpit.memql.localhost:443
     local: true
   - name: staging
     endpoint: cockpit.staging.example.com:443
@@ -229,7 +229,7 @@ test("a rename moves the credentials with the entry", async () => {
   await saveClusterEdit(
     file,
     "local",
-    { name: "parity", endpoint: "cockpit.local.znas.io:443", local: true },
+    { name: "parity", endpoint: "cockpit.memql.localhost:443", local: true },
     { secrets },
   );
 
@@ -257,7 +257,7 @@ test("the renamed cluster survives the next credential sweep", async () => {
   await saveClusterEdit(
     file,
     "local",
-    { name: "parity", endpoint: "cockpit.local.znas.io:443" },
+    { name: "parity", endpoint: "cockpit.memql.localhost:443" },
     { secrets },
   );
   const live = (await readClustersFile(file)).clusters.map((c) => c.name);

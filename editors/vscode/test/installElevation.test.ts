@@ -206,7 +206,7 @@ function openPanel(options: {
 
 function beginInstall(panel: StubWebviewPanel): void {
   panel.send({ type: "choose", value: "install" });
-  panel.send({ type: "input", value: { field: "domain", text: "local.znas.io" } });
+  panel.send({ type: "input", value: { field: "domain", text: "memql.localhost" } });
   panel.send({ type: "input", value: { field: "ownerFirstName", text: "Ada" } });
   panel.send({ type: "input", value: { field: "ownerLastName", text: "Lovelace" } });
   panel.send({ type: "input", value: { field: "ownerEmail", text: "ada@example.com" } });

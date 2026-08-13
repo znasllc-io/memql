@@ -76,6 +76,12 @@ func main() {
 	// read so every consumer sees the new name.
 	genesis.ApplyLegacyEnvAliases(serviceLogger)
 
+	// One domain in, every domain-shaped env var out (memql#3593). Runs after
+	// the alias shim so a bridged MEMQL_DOMAIN is already on its new name, and
+	// before app.Run so every component reads the derived values. Set-if-absent,
+	// so a deployment that configures these explicitly is untouched.
+	genesis.ApplyDomainDerivations(serviceLogger)
+
 	app.Run(app.RunConfig{
 		Logger:  serviceLogger,
 		Version: resolveVersionFn(),

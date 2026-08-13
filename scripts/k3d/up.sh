@@ -34,7 +34,7 @@
 #
 # The memQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
 # and reached through the same front door, at
-# https://cockpit.local.znas.io/portal/ (memql#3314). Its bundle is baked into
+# https://cockpit.memql.localhost/portal/ (memql#3314). Its bundle is baked into
 # the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
 # rebuilds it like any other change to that node.
 #
@@ -57,6 +57,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/localtls.sh
+source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "k3d.up" "Bootstrap a local k3d cluster running ArgoCD pointed at the local overlay."
 cap_spec_param "cluster"        "k3d cluster name"
@@ -72,6 +74,7 @@ cap_spec_param "extra-ports"    "additional host:container loadbalancer port map
 cap_spec_param "app-project"    "ArgoCD AppProject the Application belongs to"
 cap_spec_param "image-registry" "registry to pull node images from (default: the overlay's own, i.e. locally built)"
 cap_spec_param "image-tag"      "tag for those images; required with --image-registry"
+cap_spec_param "domain"         "front-door apex the cluster is served at (default: memql.localhost)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
@@ -102,6 +105,12 @@ APP_NAME="${MEMQL_K3D_APP_NAME:-memql-local}"
 EXTRA_PORTS="${MEMQL_K3D_EXTRA_PORTS:-}"
 APP_PROJECT="${MEMQL_K3D_APP_PROJECT:-memql}"
 PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
+
+# The overlay's COMMITTED Ingress hostname (memql#3593). Patches are emitted
+# only when the operator's domain differs, so the common case carries no
+# generated YAML and `kubectl apply -k` on a clean checkout still works.
+readonly OVERLAY_DEFAULT_DOMAIN="memql.localhost"
+DOMAIN="$OVERLAY_DEFAULT_DOMAIN"
 
 # k3d cluster config
 K3D_SERVERS="${MEMQL_K3D_SERVERS:-1}"
@@ -484,7 +493,6 @@ YAML
 # ARGOCD APPLICATION
 #=============================================================================
 
-function apply_argocd_app() {
 # kustomize_image_overrides -- the `kustomize.images` block for the Application,
 # or nothing.
 #
@@ -522,9 +530,73 @@ function kustomize_image_overrides() {
         out+="
       - ${name}=${IMAGE_REGISTRY}/$(basename "$name"):${IMAGE_TAG}"
     done
-    printf '\n    kustomize:\n      images:%s' "$out"
+    printf '      images:%s\n' "$out"
 }
 
+# kustomize_host_overrides -- the `kustomize.patches` entries that repoint the
+# two front-door Ingresses, or nothing.
+#
+# WHY THE APPLICATION AND NOT A SECOND OVERLAY. The same reasoning as the image
+# overrides above (memql#3572): the two need different hostname VALUES, not a
+# different topology, so it is expressed where a value belongs. One overlay, one
+# sync path, no `if installing` branch in the manifests.
+#
+# WHY ONLY THESE TWO. Everything else the domain touches is process config and
+# reaches the pods through the memql-domain ConfigMap, derived by
+# component/genesis/domain.go. An Ingress host is a Kubernetes API object, so it
+# has to be in the render.
+#
+# ONLY WHEN OVERRIDDEN. The overlay commits OVERLAY_DEFAULT_DOMAIN as its
+# Ingress hostname, so the common case emits no generated YAML at all and a
+# plain `kubectl apply -k` still produces a working front door.
+function kustomize_host_overrides() {
+    [[ "$DOMAIN" != "$OVERLAY_DEFAULT_DOMAIN" ]] || return 0
+    cat <<EOF
+      patches:
+        - target:
+            kind: Ingress
+            name: cockpit-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: cockpit.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: cockpit.${DOMAIN}
+        - target:
+            kind: Ingress
+            name: identity-front-door
+          patch: |-
+            - op: replace
+              path: /spec/rules/0/host
+              value: identity.${DOMAIN}
+            - op: replace
+              path: /spec/tls/0/hosts/0
+              value: identity.${DOMAIN}
+EOF
+}
+
+# kustomize_source_block -- the whole `kustomize:` mapping, or nothing.
+#
+# ONE `kustomize:` KEY. Both emitters produce sub-blocks of the same mapping, so
+# the key itself is written here exactly once; a second `kustomize:` line would
+# be a duplicate mapping key and ArgoCD would silently keep only one of them.
+function kustomize_source_block() {
+    local images hosts
+    images="$(kustomize_image_overrides)"
+    hosts="$(kustomize_host_overrides)"
+    [[ -n "$images" || -n "$hosts" ]] || return 0
+    # `$(...)` strips trailing newlines, so each part gets one put back. Without
+    # it the last image override and the `patches:` key end up on one line and
+    # the Application's YAML silently loses the host patches entirely.
+    printf '\n    kustomize:\n'
+    [[ -n "$images" ]] && printf '%s\n' "$images"
+    [[ -n "$hosts" ]] && printf '%s\n' "$hosts"
+    return 0
+}
+
+
+function apply_argocd_app() {
     section "Registering Application '${APP_NAME}' in ArgoCD"
 
     info "Target revision: ${TARGET_REVISION}"
@@ -539,8 +611,8 @@ function kustomize_image_overrides() {
 
     # Generate and apply the local Application manifest.
     # We template the targetRevision so it follows the current branch.
-    local image_overrides
-    image_overrides="$(kustomize_image_overrides)"
+    local source_overrides
+    source_overrides="$(kustomize_source_block)"
     kubectl apply -f - >&2 <<YAML
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -557,7 +629,7 @@ spec:
   source:
     repoURL: ${REPO_URL}
     targetRevision: ${TARGET_REVISION}
-    path: ${OVERLAY_PATH}${image_overrides}
+    path: ${OVERLAY_PATH}${source_overrides}
   destination:
     server: https://kubernetes.default.svc
     namespace: ${NAMESPACE}
@@ -605,8 +677,25 @@ function seed_secrets() {
     # that mounts memql-ca stalled in ContainerCreating forever while the
     # install reported success. memql#3491 threaded this value into k3d.up and
     # stopped there; it has to reach the script that actually reads deploy/.
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" --repo-root="${REPO_ROOT}" >&2
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" --repo-root="${REPO_ROOT}" --domain="${DOMAIN}" >&2
     SECRETS_SEEDED=true
+}
+
+# refuse_domain_change -- a cluster's domain is chosen once (memql#3593).
+#
+# Changing it invalidates every passkey (the WebAuthn RP id is derived from the
+# domain), every live session and node token (the issuer is
+# https://identity.<domain>), the certificate SANs and the hosts block. A
+# half-migrated cluster fails at sign-in with an error naming none of those
+# things, so the honest move is to refuse and name the one command that does it
+# properly. Local data is disposable, which is what makes that cheap.
+function refuse_domain_change() {
+    local existing
+    existing="$(kubectl get configmap memql-domain -n "${NAMESPACE}" \
+        -o jsonpath='{.data.MEMQL_DOMAIN}' 2>/dev/null || true)"
+    [[ -n "$existing" ]] || return 0
+    [[ "$existing" == "$DOMAIN" ]] && return 0
+    cap_fail 3 "this cluster is serving ${existing} and --domain says ${DOMAIN}; a domain is chosen once -- it is baked into every passkey, session, certificate and hosts entry. Re-run with --domain=${existing}, or rebuild with: make up-refresh DOMAIN=${DOMAIN}"
 }
 
 #=============================================================================
@@ -623,9 +712,9 @@ function print_summary() {
         echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
-        echo "  Entry points (front door on 443; *.local.znas.io resolves to 127.0.0.1):"
-        echo "    https://identity.local.znas.io          identity (web UI + JWKS)"
-        echo "    https://cockpit.local.znas.io/portal/   memQL Portal (graphical ops console)"
+        echo "  Entry points (front door on 443; *.memql.localhost resolves to 127.0.0.1):"
+        echo "    https://identity.memql.localhost          identity (web UI + JWKS)"
+        echo "    https://cockpit.memql.localhost/portal/   memQL Portal (graphical ops console)"
         echo "    ws://localhost:7880                     livekit"
         echo "    localhost:5432                          postgres (debug)"
         echo ""
@@ -716,6 +805,11 @@ function main() {
     # from carries scripts/ and nothing else -- so the install graph passes the
     # directory `install.cloneStack` put on disk (memql#3491).
     REPO_ROOT="$(cap_param repo-root "${REPO_ROOT}")"
+    # The domain is a VALUE, not the shape of the system, so it arrives as a
+    # parameter and lands in a ConfigMap -- exactly where environment-parity.md
+    # puts a value. The env tier is the FLAG'S DEFAULT, per the capability
+    # contract: cap_param has no env tier of its own.
+    DOMAIN="$(cap_param domain "$MEMQL_LOCAL_DOMAIN")"
     IMAGE_REGISTRY="$(cap_param image-registry "")"
     IMAGE_TAG="$(cap_param image-tag "")"
     if [[ -n "$IMAGE_REGISTRY" && -z "$IMAGE_TAG" ]]; then
@@ -756,6 +850,7 @@ function main() {
     install_argocd
 
     if [[ -z "$skip_secrets" ]]; then
+        refuse_domain_change
         seed_secrets
     else
         info "Skipping secret seeding (--no-secrets)."
@@ -778,6 +873,7 @@ function main() {
     cap_result_set_raw servers        "$K3D_SERVERS"
     cap_result_set_raw agents         "$K3D_AGENTS"
     cap_result_set_raw clusterCreated "$CLUSTER_CREATED"
+    cap_result_set     domain         "$DOMAIN"
     cap_result_set_raw argocdReady    "$ARGOCD_READY"
     cap_result_set_raw workloadsReady "$WORKLOADS_READY"
     cap_result_set_raw secretsSeeded  "$SECRETS_SEEDED"

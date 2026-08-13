@@ -124,7 +124,7 @@ func elParse(t *testing.T, stdout string) (elEnvelope, elResult) {
 }
 
 func elArgs() []string {
-	return []string{"--local", "--user-email=ada@example.com", "--base-url=https://identity.local.znas.io"}
+	return []string{"--local", "--user-email=ada@example.com", "--base-url=https://identity.memql.localhost"}
 }
 
 // -----------------------------------------------------------------------
@@ -229,7 +229,7 @@ func TestEnrolmentLinkFailureWithNoStderrStillExplainsItself(t *testing.T) {
 // stdout. Surfacing stderr on failure must not let those log lines reach the
 // matcher on success -- the reason it was dropped in the first place.
 func TestEnrolmentLinkIgnoresPodLogsWhenPickingTheLink(t *testing.T) {
-	link := "https://identity.local.znas.io/enroll?code=mql_enr_" + strings.Repeat("a", 43)
+	link := "https://identity.memql.localhost/enroll?code=mql_enr_" + strings.Repeat("a", 43)
 	env := []string{
 		"FAKE_EXIT=0",
 		"FAKE_STDOUT=" + link,

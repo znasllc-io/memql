@@ -117,8 +117,20 @@ func hostsSandbox(t *testing.T, sudoBody string) []string {
 	if err := os.WriteFile(filepath.Join(bin, "zenity"), []byte(dialog), 0o755); err != nil {
 		t.Fatalf("write zenity stub: %v", err)
 	}
+	// An EMPTY resolver stub: nothing resolves (memql#3593).
+	//
+	// Every case in this file exercises the WRITE path, which now runs only
+	// when the front-door names do not already answer 127.0.0.1. That was
+	// always the assumption; it was invisible until the probe existed, and on
+	// a machine whose resolver honours RFC 6761 -- systemd-resolved answers
+	// any `*.localhost` on loopback -- the default domain resolves for real
+	// and the write is correctly skipped. Pinning the resolver here states the
+	// assumption instead of inheriting the developer's DNS.
+	//
+	// hosts_entries_probe_test.go appends its own stub to override this.
 	return []string{
 		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"MEMQL_RESOLVE_STUB=" + t.TempDir(),
 		"HOME=" + t.TempDir(),
 		"TMPDIR=" + os.Getenv("TMPDIR"),
 		"DISPLAY=",
@@ -216,7 +228,7 @@ func TestHostsEntriesAddRemoveRoundTripIsByteExact(t *testing.T) {
 			if added == f.content {
 				t.Fatalf("add did not modify the file")
 			}
-			if !strings.Contains(added, "cockpit.local.znas.io") {
+			if !strings.Contains(added, "cockpit.memql.localhost") {
 				t.Errorf("added file is missing the front-door hostname:\n%q", added)
 			}
 			if n := strings.Count(added, "# BEGIN memql"); n != 1 {
@@ -263,7 +275,7 @@ func TestHostsEntriesRoundTripWithContentAfterTheBlock(t *testing.T) {
 
 	// Re-adding with different hostnames must rewrite the block IN PLACE.
 	env, code, out := hostsRun(t, "--action=add", "--hosts-file="+path,
-		"--hostnames=one.local.znas.io,two.local.znas.io", "--confirm="+hostsConfirmAdd)
+		"--hostnames=one.memql.localhost,two.memql.localhost", "--confirm="+hostsConfirmAdd)
 	if code != 0 || !env.OK {
 		t.Fatalf("re-add failed (exit %d): %s", code, out)
 	}
@@ -271,7 +283,7 @@ func TestHostsEntriesRoundTripWithContentAfterTheBlock(t *testing.T) {
 	if !strings.HasSuffix(updated, afterBlock) {
 		t.Errorf("operator's trailing content was not preserved at the end:\n%q", updated)
 	}
-	if strings.Contains(updated, "cockpit.local.znas.io") {
+	if strings.Contains(updated, "cockpit.memql.localhost") {
 		t.Errorf("stale hostname survived the rewrite:\n%q", updated)
 	}
 	if n := strings.Count(updated, "# BEGIN memql"); n != 1 {
@@ -390,7 +402,7 @@ func TestHostsEntriesBadParamsExitTwo(t *testing.T) {
 		{"missing action", []string{"--confirm=" + hostsConfirmAdd}},
 		{"unknown action", []string{"--action=install", "--confirm=" + hostsConfirmAdd}},
 		{"empty hostnames", []string{"--action=add", "--hostnames= ", "--confirm=" + hostsConfirmAdd}},
-		{"wildcard hostname", []string{"--action=add", "--hostnames=*.local.znas.io", "--confirm=" + hostsConfirmAdd}},
+		{"wildcard hostname", []string{"--action=add", "--hostnames=*.memql.localhost", "--confirm=" + hostsConfirmAdd}},
 		{"hostname with a space", []string{"--action=add", "--hostnames=a.local b/c", "--confirm=" + hostsConfirmAdd}},
 		{"bad ip", []string{"--action=add", "--ip=not an ip", "--confirm=" + hostsConfirmAdd}},
 	}
@@ -446,7 +458,7 @@ func TestHostsEntriesUnwritableFileIsExitFour(t *testing.T) {
 // A hand-corrupted block (BEGIN with no END) must fail loudly rather than
 // silently swallowing the rest of the operator's file.
 func TestHostsEntriesUnterminatedBlockIsExitFive(t *testing.T) {
-	original := "127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 cockpit.local.znas.io\n"
+	original := "127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 cockpit.memql.localhost\n"
 	path := hostsFixture(t, original)
 
 	env, code, out := hostsRun(t, "--action=remove", "--hosts-file="+path, "--confirm="+hostsConfirmRemove)
@@ -474,7 +486,7 @@ func TestHostsEntriesDefaultHostnamesAreTheFrontDoor(t *testing.T) {
 		t.Fatalf("add failed (exit %d): %s", code, out)
 	}
 	got := hostsRead(t, path)
-	for _, h := range []string{"cockpit.local.znas.io", "identity.local.znas.io", "local.znas.io"} {
+	for _, h := range []string{"cockpit.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(got, "127.0.0.1 "+h+"\n") {
 			t.Errorf("front-door hostname %q missing from:\n%q", h, got)
 		}
@@ -506,7 +518,7 @@ func TestHostsEntriesCustomIPAndHostnames(t *testing.T) {
 			t.Errorf("missing entry %q in:\n%q", want, got)
 		}
 	}
-	if strings.Contains(got, "cockpit.local.znas.io") {
+	if strings.Contains(got, "cockpit.memql.localhost") {
 		t.Errorf("default hostnames leaked into a custom run:\n%q", got)
 	}
 }
@@ -586,7 +598,7 @@ exec "$@"
 	if !strings.Contains(calls, "tee "+path) {
 		t.Errorf("expected the write to go through `sudo -A tee %s`:\n%s", path, calls)
 	}
-	if got := hostsRead(t, path); !strings.Contains(got, "cockpit.local.znas.io") {
+	if got := hostsRead(t, path); !strings.Contains(got, "cockpit.memql.localhost") {
 		t.Errorf("the elevated write did not land:\n%q", got)
 	}
 }

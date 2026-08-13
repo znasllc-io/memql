@@ -10,7 +10,7 @@
 //
 // The assertion that matters, and the shape of every test here: EACH CHECK
 // REPORTS ITSELF -- name, host, passed, detail. "The front door is broken" is
-// not actionable; "dns for identity.local.znas.io resolves to 10.0.0.5" is. So
+// not actionable; "dns for identity.memql.localhost resolves to 10.0.0.5" is. So
 // a failure in one host's TLS must not erase the other host's passing DNS, and
 // the failing check must name what it actually saw.
 //
@@ -222,8 +222,8 @@ func fdHealthy(t *testing.T, hosts ...string) []string {
 }
 
 const (
-	fdCockpit  = "cockpit.local.znas.io"
-	fdIdentity = "identity.local.znas.io"
+	fdCockpit  = "cockpit.memql.localhost"
+	fdIdentity = "identity.memql.localhost"
 )
 
 // -----------------------------------------------------------------------
@@ -456,7 +456,7 @@ func TestVerifyFrontDoorReportOnlyExitsZero(t *testing.T) {
 // TestVerifyFrontDoorGrpcHostIsParameterisable lets a product front door on a
 // different hostname be probed without editing the script.
 func TestVerifyFrontDoorGrpcHostIsParameterisable(t *testing.T) {
-	const custom = "app.local.znas.io"
+	const custom = "app.memql.localhost"
 	env := fdHealthy(t, fdCockpit, custom)
 	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit, "--grpc-host="+custom)
 	if code != 0 {

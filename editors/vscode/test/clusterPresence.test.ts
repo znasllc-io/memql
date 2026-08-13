@@ -58,7 +58,7 @@ function clustersWith(clusters: ClusterConfig[]): () => Promise<ReadClustersResu
 const NO_CLUSTERS = clustersWith([]);
 const LOCAL_ENTRY: ClusterConfig = {
   name: "local",
-  endpoint: "cockpit.local.znas.io:443",
+  endpoint: "cockpit.memql.localhost:443",
   local: true,
 };
 
@@ -368,8 +368,8 @@ test("the local cluster's registry name comes back with the verdict", async () =
 test("the endpoint comes from the registry, then the receipt's domain, then the default", () => {
   assert.equal(probeEndpointFor(LOCAL_ENTRY, installedReceipt()), LOCAL_ENTRY.endpoint);
   assert.equal(
-    probeEndpointFor(undefined, installedReceipt([entry({ params: { domain: "local.znas.io" } })])),
-    "cockpit.local.znas.io:443"
+    probeEndpointFor(undefined, installedReceipt([entry({ params: { domain: "memql.localhost" } })])),
+    "cockpit.memql.localhost:443"
   );
   assert.equal(probeEndpointFor(undefined, installedReceipt()), DEFAULT_LOCAL_ENDPOINT);
   assert.equal(probeEndpointFor(undefined, null), DEFAULT_LOCAL_ENDPOINT);

@@ -7,7 +7,7 @@
 # hostnames in the system hosts file, inside a delimited managed block.
 #
 # The local stack is reached exactly as staging is: through the front door at
-# https://cockpit.local.znas.io and https://identity.local.znas.io (env parity
+# https://cockpit.memql.localhost and https://identity.memql.localhost (env parity
 # -- see docs/public/operate/environment-parity.md). Those names have to
 # resolve to the loopback address, which on a developer machine means a hosts
 # file entry. This capability owns that edit, on install and on uninstall.
@@ -15,9 +15,9 @@
 # THE MANAGED BLOCK
 #
 #   # BEGIN memql
-#   127.0.0.1 cockpit.local.znas.io
-#   127.0.0.1 identity.local.znas.io
-#   127.0.0.1 local.znas.io
+#   127.0.0.1 cockpit.memql.localhost
+#   127.0.0.1 identity.memql.localhost
+#   127.0.0.1 memql.localhost
 #   # END memql
 #
 # Everything between the markers is ours; everything outside them is the
@@ -40,7 +40,7 @@
 #   scripts/install/hosts-entries.sh --action=add    --confirm=add-memql-hosts
 #   scripts/install/hosts-entries.sh --action=remove --confirm=remove-memql-hosts
 #   scripts/install/hosts-entries.sh --action=add --hosts-file=/tmp/hosts \
-#       --hostnames=a.local.znas.io,b.local.znas.io --ip=127.0.0.1 --confirm=add-memql-hosts
+#       --hostnames=a.memql.localhost,b.memql.localhost --ip=127.0.0.1 --confirm=add-memql-hosts
 #   scripts/install/hosts-entries.sh --print-spec
 #
 # The edit needs write access to the hosts file, so a real run is normally
@@ -65,17 +65,22 @@ _HOSTS_CONFIRM=""
 source "${SCRIPT_DIR}/../lib/capability.sh"
 # shellcheck source=../lib/elevate.sh
 source "${SCRIPT_DIR}/../lib/elevate.sh"
+# shellcheck source=../lib/resolve.sh
+source "${SCRIPT_DIR}/../lib/resolve.sh"
 
 cap_init "install.hostsEntries" "Add or remove the memQL front-door hostnames in the system hosts file."
 cap_spec_param_required "action"     "add | remove (required)"
 cap_spec_param "hosts-file" "hosts file to edit (default: /etc/hosts)"
 cap_spec_param "hostnames"  "comma/space separated hostnames (default: the memQL front door)"
+cap_spec_param "domain"     "front-door apex; derives cockpit.<d>, identity.<d>, <d> (mutually exclusive with --hostnames)"
 cap_spec_param "ip"         "address the hostnames resolve to (default: 127.0.0.1)"
 cap_spec_param "confirm"    "exact phrase: 'add-memql-hosts' or 'remove-memql-hosts'"
 
 readonly DEFAULT_HOSTS_FILE="/etc/hosts"
-# The local front door. Keep in step with deploy/k8s/overlays/local.
-readonly DEFAULT_HOSTNAMES="cockpit.local.znas.io,identity.local.znas.io,local.znas.io"
+# The local front door. Keep in step with deploy/k8s/overlays/local, whose two
+# Ingresses carry the same apex as their committed default (memql#3593).
+readonly DEFAULT_DOMAIN="memql.localhost"
+readonly DEFAULT_HOSTNAMES="cockpit.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN},${DEFAULT_DOMAIN}"
 readonly DEFAULT_IP="127.0.0.1"
 
 readonly BLOCK_BEGIN="# BEGIN memql"
@@ -372,15 +377,82 @@ function offer_terminal_handoff() {
 # ENTRY POINT
 #=============================================================================
 
+# hostnames_for_domain <apex> -- the three names a front door puts on a domain,
+# apex last to match the block this script documents.
+function hostnames_for_domain() {
+    local apex="$1"
+    printf 'cockpit.%s,identity.%s,%s' "$apex" "$apex" "$apex"
+}
+
+# probe_hostnames -- decides whether the block is needed. Sets _PROBE_VERDICT to
+# one of `absent`, `satisfied`, `conflict`, and _PROBE_DETAIL on a conflict.
+#
+# GLOBALS RATHER THAN STDOUT, deliberately: a `$(probe_hostnames)` call would
+# run the whole function in a subshell, so the detail it set would be discarded
+# and the refusal would name no address at all.
+#
+# THREE OUTCOMES, NOT TWO. An operator whose own DNS already answers 127.0.0.1
+# has done this job; writing anyway costs a sudo prompt for no effect. A name
+# answering somewhere ELSE is neither -- shadowing a record they may depend on
+# is the wrong repair, so it is refused rather than overwritten. Partial
+# resolution is refused for its own reason: half through DNS and half through
+# the hosts file is two sources of truth for one front door.
+_PROBE_DETAIL=""
+_PROBE_VERDICT="absent"
+function probe_hostnames() {
+    local host addrs addr resolved=0 unresolved=0
+    _PROBE_DETAIL=""
+    _PROBE_VERDICT="absent"
+    for host in "${HOSTNAMES[@]}"; do
+        addrs="$(resolve_addresses "$host")"
+        if [[ -z "$addrs" ]]; then
+            unresolved=$((unresolved + 1))
+            continue
+        fi
+        while IFS= read -r addr; do
+            [[ -z "$addr" ]] && continue
+            if [[ "$addr" != "$IP" ]]; then
+                _PROBE_DETAIL="${host} resolves to ${addr}, not ${IP}"
+                _PROBE_VERDICT="conflict"
+                return 0
+            fi
+        done <<< "$addrs"
+        resolved=$((resolved + 1))
+    done
+
+    if [[ "$resolved" -gt 0 && "$unresolved" -gt 0 ]]; then
+        _PROBE_DETAIL="${resolved} of ${#HOSTNAMES[@]} front-door names already resolve to ${IP} and the rest do not"
+        _PROBE_VERDICT="conflict"
+        return 0
+    fi
+    if [[ "$unresolved" -eq 0 ]]; then
+        _PROBE_VERDICT="satisfied"
+        return 0
+    fi
+    _PROBE_VERDICT="absent"
+}
+
 function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local action hosts_file hostnames_raw confirm mode expected
+    local action hosts_file hostnames_raw domain confirm mode expected
     action="$(cap_param action "")"
     _HOSTS_ACTION="$action"
     hosts_file="$(cap_param hosts-file "$DEFAULT_HOSTS_FILE")"
-    hostnames_raw="$(cap_param hostnames "$DEFAULT_HOSTNAMES")"
+    # --domain and --hostnames are two spellings of one answer (memql#3593).
+    # Both is a contradiction, and picking a winner silently would mean an
+    # install whose hosts block names something the operator did not ask for.
+    domain="$(cap_param domain "")"
+    hostnames_raw="$(cap_param hostnames "")"
+    if [[ -n "$domain" && -n "$hostnames_raw" ]]; then
+        cap_fail 2 "--domain and --hostnames are two spellings of one answer; pass one"
+    fi
+    if [[ -n "$domain" ]]; then
+        hostnames_raw="$(hostnames_for_domain "$domain")"
+    elif [[ -z "$hostnames_raw" ]]; then
+        hostnames_raw="$DEFAULT_HOSTNAMES"
+    fi
     IP="$(cap_param ip "$DEFAULT_IP")"
     confirm="$(cap_param confirm "")"
 
@@ -399,23 +471,44 @@ function main() {
     _HOSTS_CONFIRM="$expected"
     cap_confirm_or_die "$confirm" "$expected"
 
-    check_hosts_file "$hosts_file"
-
-    read_hosts_file "$hosts_file"
-    if ! scan_blocks; then
-        cap_fail 5 "malformed managed block in ${hosts_file}: '${BLOCK_BEGIN}' with no '${BLOCK_END}' -- fix it by hand"
+    # Probe BEFORE touching the file, and only on the add path: removing our own
+    # block is not conditional on what DNS currently says.
+    local probe="absent"
+    if [[ "$mode" == "upsert" ]]; then
+        probe_hostnames
+        probe="$_PROBE_VERDICT"
+        case "$probe" in
+            conflict)
+                cap_fail 3 "refusing to write hosts entries: ${_PROBE_DETAIL} -- fix the DNS record, or pass --hostnames naming only the names that need an entry"
+                ;;
+            satisfied)
+                cap_info "every front-door hostname already resolves to ${IP} -- nothing to write"
+                ;;
+        esac
     fi
 
-    cap_step "${action} memQL hosts entries in ${hosts_file}"
-    cap_info "hostnames: ${HOSTNAMES[*]}"
-
-    local wrote=false
-    if apply "$mode" "$hosts_file"; then
-        wrote=true
-        cap_changed
-        cap_info "${hosts_file} updated."
+    local wrote=false skipped=false
+    if [[ "$probe" == "satisfied" ]]; then
+        skipped=true
+        cap_info "skipping ${hosts_file} (no elevation needed)"
     else
-        cap_info "${hosts_file} already correct -- no change."
+        check_hosts_file "$hosts_file"
+
+        read_hosts_file "$hosts_file"
+        if ! scan_blocks; then
+            cap_fail 5 "malformed managed block in ${hosts_file}: '${BLOCK_BEGIN}' with no '${BLOCK_END}' -- fix it by hand"
+        fi
+
+        cap_step "${action} memQL hosts entries in ${hosts_file}"
+        cap_info "hostnames: ${HOSTNAMES[*]}"
+
+        if apply "$mode" "$hosts_file"; then
+            wrote=true
+            cap_changed
+            cap_info "${hosts_file} updated."
+        else
+            cap_info "${hosts_file} already correct -- no change."
+        fi
     fi
 
     local block_present=false entries=0
@@ -438,6 +531,11 @@ function main() {
     cap_result_set_raw blockPresent "$block_present"
     cap_result_set_raw entries      "$entries"
     cap_result_set_raw wrote        "$wrote"
+    # What the probe found, and whether it made the write unnecessary. The
+    # wizard reads `skipped` to render the step as done-without-elevation
+    # rather than as a write it never saw happen (memql#3593).
+    cap_result_set_raw skipped      "$skipped"
+    cap_result_set     probe        "$probe"
     cap_result_set_raw blocksFound  "$_BLOCK_COUNT"
     cap_ok
 }

@@ -111,8 +111,8 @@ A live cluster is required from checklist section 2 onward.
 
 ### 3. Trust the local CA
 
-The k3d front door (`cockpit.local.znas.io`, `identity.local.znas.io`)
-terminates TLS with a `*.local.znas.io` wildcard signed by your machine's
+The k3d front door (`cockpit.memql.localhost`, `identity.memql.localhost`)
+terminates TLS with a `*.memql.localhost` wildcard signed by your machine's
 mkcert CA. `make up` / `make secrets` issue and seed that certificate
 automatically (memql#3384). Creating the CA itself is a separate one-time step,
 because it writes to the system trust store:
@@ -145,10 +145,10 @@ reasons.
 Verify before debugging anything else:
 
 ```bash
-echo | openssl s_client -connect cockpit.local.znas.io:443 -servername cockpit.local.znas.io 2>/dev/null \
+echo | openssl s_client -connect cockpit.memql.localhost:443 -servername cockpit.memql.localhost 2>/dev/null \
   | openssl x509 -noout -issuer
 # want: issuer=O = mkcert development CA, ...
-# CN = TRAEFIK DEFAULT CERT means local-znas-tls is missing -- run `make secrets`
+# CN = TRAEFIK DEFAULT CERT means memql-front-door-tls is missing -- run `make secrets`
 ```
 
 ### 4. Get a credential
@@ -172,14 +172,14 @@ The cluster's own discovery document names every connection fact the entries
 below need, so none of them has to be guessed:
 
 ```bash
-curl -s https://identity.local.znas.io/.well-known/memql-config.json
-# {"identityUrl":"https://identity.local.znas.io","grpcEndpoint":"cockpit.local.znas.io:443","clientId":"cockpit","clusterName":"local"}
+curl -s https://identity.memql.localhost/.well-known/memql-config.json
+# {"identityUrl":"https://identity.memql.localhost","grpcEndpoint":"cockpit.memql.localhost:443","clientId":"cockpit","clusterName":"local"}
 ```
 
 `identityUrl` is `issuer`, `clientId` is `client_id`, and `grpcEndpoint` is
 `endpoint` -- a bare `host[:port]` naming the front door, which is exactly the
 form the extension accepts. It was not always: until memql#3399 this field read
-`https://bff.local.znas.io`, a URL at a host with no ingress, and the two wrong
+`https://bff.memql.localhost`, a URL at a host with no ingress, and the two wrong
 guesses in the note below are the ones it handed the reader. Both halves are now
 pinned to one shared statement of the contract
 (`test/fixtures/discovery-endpoint-contract.json`).
@@ -197,19 +197,19 @@ same cluster *without* the flag.
 ```yaml
 clusters:
   - name: vscode-local
-    display_name: local.znas.io (local)
-    domain: local.znas.io
-    endpoint: cockpit.local.znas.io:443
-    issuer: https://identity.local.znas.io   # optional -- derived from domain when absent
+    display_name: memql.localhost (local)
+    domain: memql.localhost
+    endpoint: cockpit.memql.localhost:443
+    issuer: https://identity.memql.localhost   # optional -- derived from domain when absent
     client_id: cockpit                       # optional -- sent as client_id on refresh
     token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
     refresh_token: <the refresh_token from the same response -- ingest only>
     local: true
   - name: vscode-nonlocal
-    display_name: local.znas.io (not local)
-    domain: local.znas.io
-    endpoint: cockpit.local.znas.io:443
-    issuer: https://identity.local.znas.io
+    display_name: memql.localhost (not local)
+    domain: memql.localhost
+    endpoint: cockpit.memql.localhost:443
+    issuer: https://identity.memql.localhost
     client_id: cockpit
     token: <a SECOND access_token -- see below>
     refresh_token: <its matching refresh_token>
@@ -224,7 +224,7 @@ somebody has already made:
   "https://"*. The natural thing to paste -- the `https://` domain the Cockpit
   uses, sitting in this same file -- is exactly what fails.
 - **The host is `cockpit.<domain>`, not `bff.<domain>`.** There is no
-  `bff.local.znas.io` ingress. The front door is `cockpit-front-door`, which
+  `bff.memql.localhost` ingress. The front door is `cockpit-front-door`, which
   routes `/memql/ws` and `/portal` to `bff-http:8085` and `/` to `bff:50051`.
   Targeting "the bff" gets a 404.
 - **Absent `local` means NOT local.** Omit the key on the second entry rather
