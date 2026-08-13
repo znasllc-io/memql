@@ -124,3 +124,52 @@ export function imageTagFor(releaseTag: string): string {
  * or a human runs mkcert, and independent of how the editor was packaged.
  */
 export const DEFAULT_CAROOT_DIR = ".memql/mkcert";
+
+/**
+ * The one domain a cluster built from the pinned release actually serves
+ * (memql#3590).
+ *
+ * NOT A DEFAULT -- A CONSTRAINT. The Add-a-cluster page offers this as the
+ * domain and lets the operator edit it, and anything they typed used to be
+ * accepted. It reached `seedBootstrap`, which bootstrapped identity for it, while
+ * `hostsBlock`, `localCA` and `frontDoor` each used their own `local.znas.io`
+ * defaults -- so the cluster's issuer named one domain and its hosts block,
+ * certificate and probe named another.
+ *
+ * Threading the typed domain into those three steps (this release does that now)
+ * makes the INSTALLER consistent and still cannot make a custom domain work,
+ * because the cluster does not serve one: `deploy/k8s/overlays/local` pins the
+ * Ingress hosts (`cockpit.local.znas.io`, `identity.local.znas.io`) and identity's
+ * `MEMQL_IDENTITY_BASE_URL` / expected issuer / CORS origins, and ArgoCD renders
+ * that overlay from the release tag the installer checked out. Nothing the
+ * installer passes changes it.
+ *
+ * So the honest thing is to refuse a domain that cannot be served, before ten
+ * minutes of work proves it -- and to keep the refusal HERE, beside the release's
+ * other pinned facts, rather than as a literal in a form.
+ *
+ * Supporting a genuinely custom local domain means parameterising that overlay
+ * (its two Ingresses, identity's config, every node's expected issuer) and is
+ * tracked in memql#3593; it is a feature, not a value this module can supply.
+ *
+ * `installDomainProblem` is the single reader, so the sentence an operator sees
+ * and the constant it is about cannot drift.
+ */
+export const SUPPORTED_LOCAL_DOMAIN = "local.znas.io";
+
+/**
+ * Why this domain will not work, or nothing.
+ *
+ * Empty is accepted: an empty field is "not answered yet", which the required-
+ * field check reports in its own words rather than as a domain that is wrong.
+ */
+export function installDomainProblem(domain: string): string | undefined {
+  const trimmed = domain.trim();
+  if (trimmed === "" || trimmed === SUPPORTED_LOCAL_DOMAIN) return undefined;
+  return (
+    `This installer builds a cluster at ${SUPPORTED_LOCAL_DOMAIN}. The release it installs ` +
+    `pins that hostname in the cluster's own ingress and identity configuration, so a ` +
+    `different domain would resolve and then answer as the wrong site. Use ` +
+    `${SUPPORTED_LOCAL_DOMAIN}, or add the cluster by hand once you have one serving your domain.`
+  );
+}

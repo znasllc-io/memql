@@ -20,6 +20,7 @@ import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { looksLikeProviderKey } from "../install/secrets.js";
+import { installDomainProblem, SUPPORTED_LOCAL_DOMAIN } from "../install/stackPin.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -139,7 +140,10 @@ export interface FieldError {
  * empty string and exits 2 naming what is missing.
  */
 export const DEFAULT_INPUTS: Inputs = {
-  domain: "local.znas.io",
+  // The constant, not a copy of it (memql#3590): the form's offer and the
+  // release's one servable domain are the same fact, and a literal here is how
+  // they drift.
+  domain: SUPPORTED_LOCAL_DOMAIN,
   ownerFirstName: "",
   ownerLastName: "",
   ownerEmail: "",
@@ -502,6 +506,15 @@ export class AddClusterState {
     }
     if (field === "domain" && /\s/.test(trimmed)) {
       return "A domain cannot contain spaces.";
+    }
+    // A DOMAIN THE CLUSTER CANNOT SERVE (memql#3590). The release's local overlay
+    // pins its Ingress hosts and identity issuer, so a custom domain resolves and
+    // then answers as the wrong site -- which the operator would discover at
+    // `frontDoor`, as a failure against a hostname they typed themselves. The
+    // reason lives with the pinned release facts; see installDomainProblem.
+    if (field === "domain") {
+      const problem = installDomainProblem(trimmed);
+      if (problem !== undefined) return problem;
     }
     // The refusal is HERE rather than at the script, which would report exit 2
     // -- correctly worded as a fault in memQL rather than in the operator's

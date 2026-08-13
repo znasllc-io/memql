@@ -521,6 +521,7 @@ import * as path from "node:path";
 
 import { addCluster, readClustersFile } from "../src/clusters/file.js";
 import type { ClustersFile } from "../src/clusters/model.js";
+import { SUPPORTED_LOCAL_DOMAIN } from "../src/install/stackPin.js";
 
 // A stand-in for the pasted access token, deliberately NOT shaped like a JWT.
 //
@@ -805,5 +806,74 @@ test("the second wall still refuses a name the first one could not see", async (
   await assert.rejects(
     () => addCluster(file, draft),
     /a cluster named "staging" already exists; edit it instead of adding it again/,
+  );
+});
+
+// -----------------------------------------------------------------------------
+// a domain the cluster cannot serve (memql#3590)
+// -----------------------------------------------------------------------------
+//
+// The field is editable, and until now anything typed into it was accepted. It
+// reached `seedBootstrap` (which bootstrapped identity for it) while the hosts
+// block, the certificate and the front-door probe used their own
+// `local.znas.io` defaults -- and, underneath all three, the release's local
+// overlay pins its Ingress hosts and identity issuer to `local.znas.io` too.
+//
+// So a custom domain could not work no matter how carefully the installer
+// threaded it: the cluster does not serve it. The operator learned this at
+// `frontDoor`, as a TLS or DNS failure against hostnames they had typed
+// themselves, which reads as a broken installer.
+//
+// Refused HERE, before anything runs, naming the real constraint -- the same
+// place and the same reasoning as the unsupported-provider refusal above.
+
+test("a domain the pinned release cannot serve is refused before anything runs", () => {
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.example.test");
+
+  const message = s.errors.find((e) => e.field === "domain")?.message ?? "";
+  assert.notEqual(message, "", "a domain nothing can serve was accepted");
+  assert.match(
+    message,
+    new RegExp(SUPPORTED_LOCAL_DOMAIN.replace(/\./g, "\\.")),
+    `the refusal must name the domain that DOES work, or it is a dead end: ${message}`,
+  );
+
+  s.setInput("domain", SUPPORTED_LOCAL_DOMAIN);
+  assert.deepEqual(
+    s.errors.filter((e) => e.field === "domain"),
+    [],
+    "the supported domain must be accepted",
+  );
+});
+
+test("a run cannot begin on an unservable domain", () => {
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.example.test");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  s.setInput("providerKeyFile", "/home/ada/.anthropic-key");
+
+  assert.equal(
+    s.beginRun(),
+    false,
+    "an install that cannot produce a working front door must not spend ten minutes proving it",
+  );
+  assert.equal(s.screen, "collect");
+});
+
+// A subdomain of the supported domain is NOT the supported domain: the wildcard
+// certificate covers one level, and the overlay's Ingress hosts are exact.
+test("a subdomain of the supported domain is still refused", () => {
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", `sub.${SUPPORTED_LOCAL_DOMAIN}`);
+  assert.notEqual(
+    s.errors.find((e) => e.field === "domain")?.message ?? "",
+    "",
+    "the overlay's Ingress hosts are exact, so a deeper name has no route",
   );
 });
