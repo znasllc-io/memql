@@ -49,6 +49,33 @@ spec:   actor.role == "admin" || actor.role == "owner"
 logic:  if a && (b || !c) { ... }
 ```
 
+> **What actually shipped, recorded against the decision above**
+> (memql#3630). The decision text is left as it was written; these two
+> parts of it were never implemented the way they read.
+>
+> **`!` reaches only ONE of the five surfaces named above.** It lexes and
+> parses everywhere, and `convertNotExpr` then rejects every target it is
+> handed — with the `#2542` expression-led scope error in filters, specs
+> and traits, and with `NOT/! does not convert; write the != comparison
+> form` in logic `return` expressions and collection lambdas. What does
+> work is the `logic: if ...` line of the example: a logic `if`, an
+> automation `Step.Condition`, a trigger `@filter` and a `cond` predicate
+> are all evaluated as CONDITION STRINGS by
+> `component/automations/evaluator.go`, which honours a leading `!`.
+> `dsl/data/logic.memql:41` is the corpus's single use. So "the same
+> expression grammar, everywhere" is not what the two evaluators
+> implement, and the precedence line reads as a specification for
+> something a query has never been able to use.
+>
+> **"Retire" turned out to mean an authoring convention enforced by a TEXT
+> SCAN** (`TestNoRetiredOperatorForms`), not a parser rejection. `;`, `,`,
+> `has` and `?.` all still parse and load, and the engine still computes
+> `;` as AND and `,` as OR — which is why the parenthesised `,` was an
+> authorization bypass closed in the scanner (memql#3612) and why a
+> runtime-mounted product bundle is outside the gate entirely
+> (memql#3629). `has` additionally cannot be removed: it is the
+> desugaring target of `in` (#976).
+
 **Filters become true boolean expressions** (today a filter is a flat
 `;`-separated AND-list compiled straight to SQL `WHERE`). This is the largest
 piece of work and the largest feature win — filters gain OR, and filters + specs

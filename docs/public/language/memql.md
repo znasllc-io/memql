@@ -435,13 +435,13 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 
 | Component            | Description                                                                                                     |
 |----------------------|-----------------------------------------------------------------------------------------------------------------|
-| Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with `!` (NOT) and parentheses, using Go precedence. |
+| Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with parentheses, using Go precedence. **No `!` (NOT)** — it parses and is then refused by the AST converter on every surface (memql#3630); write the `!=` form. |
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or a bare payload property (`status`, `profile.name`).                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
-> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired (#977). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively.
+> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired **from authoring** (#977). Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively. What enforces that is a **text scan** over the embedded `dsl/` tree (`TestNoRetiredOperatorForms`), NOT the parser: all four still parse and load, and `;` / `,` still compute as AND / OR (memql#3630). That is why a `,` inside parentheses was an authorization bypass, fixed in the scanner as memql#3612, and why a product DSL bundle mounted at `MEMQL_DSL_PATH` is not covered at all (memql#3629).
 >
 > **The `??` blank-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. It is universally CALLED null-coalescing and is not one: a string that is empty or WHITESPACE-ONLY also falls through, so a caller who deliberately cleared a text field gets the default written back (`false` / `0` / `[]` / `{}` are kept). Deliberate (#1614), specified in [authoring-rules.md §28](authoring-rules.md); `@noUnset` (memql#3415) is the targeted opt-out. Precedence is deliberately tight: `??` binds tighter than the six symbol comparisons and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. The `in` membership keyword is outside this contract: `in` requires a bare-identifier left side everywhere, so neither spelling of a coalesced membership test parses -- there is no `?? ... in` idiom to bind. `coalesce(...)` remains valid everywhere, permanently.
 
@@ -475,7 +475,9 @@ Filters are core comparison expressions that narrow the set of returned nodes:
 concept==v1:assistant && active==true
 ```
 
-- Use `&&` for AND logic, `||` for OR logic, `!` for negation
+- Use `&&` for AND logic and `||` for OR logic. There is **no `!`** in a
+  filter — it parses and is then refused at load (memql#3630); write the
+  `!=` form
 - Group with parentheses: `(concept==A || concept==B) && active==true`
 - Field paths support dot notation for nested JSON: `profile.name`
 
@@ -1939,11 +1941,19 @@ createdAt>"2025-01-01T00:00:00Z"
 
 - `&&` – AND
 - `||` – OR
-- `!` – NOT
+- `!` – NOT — **runtime condition strings only** (automation `Step.Condition`,
+  trigger `@filter`, a `cond` predicate, a logic `if`). A `!` in a query
+  filter, a spec, a logic `return` expression or a collection lambda is
+  refused at load (memql#3630)
 - `()` – Grouping
-- Go precedence: `!` > arithmetic > `??` > comparisons > `&&` > `||`
+- Go precedence: arithmetic > `??` > comparisons > `&&` > `||` (`!`, where it
+  applies, binds tightest)
 
-(The legacy `;`-AND / `,`-OR separators, `has`, and `?.` are retired and rejected; `??` is live since #2611.)
+(`??` is live since #2611. The legacy `;`-AND / `,`-OR separators, `has`, and
+`?.` are retired **from authoring** — a text scan over the embedded `dsl/` tree
+refuses the spelling, while the parser still accepts all four and the engine
+still computes `;` as AND and `,` as OR; see the retired-forms note above and
+memql#3630.)
 
 ### Defaults / Fallbacks
 

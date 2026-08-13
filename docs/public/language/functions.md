@@ -148,16 +148,41 @@ context:
 | `in` | Membership | `kind in ["a", "b"]`, `args.x in list` |
 | `&&` | Logical AND | `spaceId==args.spaceId && isActiveRecord` |
 | `\|\|` | Logical OR | `actor.role=="admin" \|\| actor.role=="owner"` |
-| `!` | Logical NOT | `!hidden` |
-| `( )` | Grouping (Go precedence: `!` > comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
+| `( )` | Grouping (Go precedence: comparisons > `&&` > `\|\|`) | `(a \|\| b) && c` |
 | `when(args.x) { ... }` | Arg-conditional predicate: when `args.x` is absent, the guarded block and its connective are dropped | `when(args.role) { role==args.role }` |
 
-> **Retired operator forms** (all rejected at parse time and by the
-> conformance suite, `TestNoRetiredOperatorForms`):
+> **`!` (NOT) is not in this grammar** (memql#3630). The row that used
+> to sit in the table above, and the precedence that named `!` as the
+> tightest binder, described an operator the language has never
+> accepted. `!` lexes and parses; the AST converter then refuses it on
+> every surface it serves — with the `#2542` expression-led scope error
+> in filters and specs, and with `NOT/! does not convert; write the !=
+> comparison form` in logic bodies and collection lambdas. Write the
+> `!=` form, or a trait that states the negative. (A bare `!` *does*
+> work in an automation cond-step **condition**, which a separate
+> string evaluator handles.)
+
+> **Retired operator forms.** These are retired **from authoring**, and
+> that is a convention a **text scan** enforces — not a parse error
+> (memql#3630). `TestNoRetiredOperatorForms`
+> (`test/dslconformance/no_retired_operators_test.go`) walks the
+> embedded `dsl/` tree line by line and refuses the spelling in authored
+> files; the parser and the loader still accept all four, and the engine
+> still computes `;` as AND and `,` as OR. Prefer:
 > - `;` AND separator → use `&&`
 > - `,` OR separator → use `||`
 > - `has` membership → use `in`
 > - `?.` optional-chain prefix → use `when(args.x) { ... }`
+>
+> The distinction matters because a `,` inside parentheses still means
+> OR, which turns an authorization conjunction into a disjunction —
+> memql#3612 closed that in the **scanner**, where both gates had missed
+> the parenthesised form. It also means a product DSL bundle mounted at
+> `MEMQL_DSL_PATH` is never scanned at all (memql#3629). And `has` is
+> retired only at the authoring surface: the parser desugars
+> `<scalar> in payload.<arrayField>` **to**
+> `payload.<arrayField> has <scalar>`, so the operator is load-bearing
+> inside the engine and cannot be removed.
 
 ---
 
