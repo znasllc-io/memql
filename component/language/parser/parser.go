@@ -2561,7 +2561,11 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 			}
 			prop.Nested = append(prop.Nested, nested)
 		}
+		closeLine := p.current.Line
 		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "nested object", closeLine); err != nil {
 			return nil, err
 		}
 		return prop, nil
@@ -2625,11 +2629,59 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 			}
 			prop.Variants = append(prop.Variants, variant)
 		}
+		closeLine := p.current.Line
 		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "@variant", closeLine); err != nil {
 			return nil, err
 		}
 	}
 	return prop, nil
+}
+
+// refuseSameLineTrailingAttribute rejects an annotation sitting on the same
+// line as the closing brace of a nested-object or @variant block (memql#3623).
+//
+// Every OTHER property form takes its annotations after the type
+// (`name string @required`), so `outer { ... } @internal` reads as the same
+// postfix position -- but a block-bodied property has never consumed one.
+// parsePropertyDecl returned the moment it saw the closing brace, and
+// parseConceptDecl's body loop then re-read the leftover annotation as a
+// PREFIX attribute of the NEXT property. The result was exactly inverted from
+// what was written, and silent: with @secret / @pii / @internal it left the
+// field the author annotated exposed and hid the one after it.
+//
+// This refuses rather than consuming, and the reason is that the two readings
+// are the same token stream. The lexer strips newlines, so `} @internal` and
+// `}` followed by `@internal` on the next line differ only in Line -- and the
+// second spelling ALREADY has a meaning the tree depends on (prefix attribute
+// of the following property). Binding the same-line spelling to the block
+// would therefore make a reflow load-bearing: a formatter moving the
+// annotation on or off the closing-brace line would silently change which
+// property is hidden, which is the defect again in a new costume. The prefix
+// form keeps working untouched on any later line; only the ambiguous spelling
+// is refused, and the diagnostic names both intents so the author picks one.
+//
+// @relationship is exempt: it is body-level wherever it appears
+// (parseConceptDecl hoists it out of the attribute run and the typed-property
+// branch breaks out of its trailing loop for it), so its position carries no
+// ambiguity to resolve.
+func (p *Parser) refuseSameLineTrailingAttribute(propName, blockKind string, closeLine int) error {
+	if !p.check(TokenAt) || p.current.Line != closeLine {
+		return nil
+	}
+	name := p.peekAhead(1).Literal
+	if name == "relationship" {
+		return nil
+	}
+	return newParseErrorf(&p.current,
+		"property %q: annotation @%s on the same line as the closing brace of its %s block is "+
+			"ambiguous and is refused. A block-bodied property takes no trailing annotation, so "+
+			"this would bind to the property that FOLLOWS -- the opposite of how it reads. "+
+			"If it belongs to %q, write it on the line(s) BEFORE %q; if it belongs to the next "+
+			"property, write it on its own line after the closing brace.",
+		propName, name, blockKind, propName, propName)
 }
 
 // parseVariantBranch parses one `<variantName> { field type ... }`
