@@ -512,6 +512,25 @@ concept fieldTypes {
 //                       ANY depth; stamping is the only mechanism, and it can
 //                       only be spelled for a top-level field.
 //
+// PLACEMENT (memql#3692). A property annotation goes at the END of the
+// property's own declaration line:
+//
+//   ownerUserId  string!  @pii  @description("…")
+//
+// An annotation on a line of its OWN binds to the property that FOLLOWS, and is
+// REFUSED where the property above it could claim the same token -- which is
+// every position except directly after a nested block. The lexer strips
+// newlines, so
+//
+//   a  string
+//   @pii
+//   b  string
+//
+// is the same token stream as `a string @pii` + `b string`: it used to mark `a`,
+// the field ABOVE the one it reads as belonging to, leaving the field the author
+// marked exposed. @relationship is exempt -- it is body-level wherever it
+// appears, which is why every concept writes it on its own line.
+//
 // Declared metadata is still worth writing where it records real intent: @pii
 // began exactly there and is now enforced in two places, with no schema change
 // needed to get from one to the other.
