@@ -63,6 +63,7 @@ import (
 
 	cron "github.com/robfig/cron/v3"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -445,7 +446,7 @@ func (r *ReactiveLoop) recurringIsDue(row map[string]any, now time.Time) bool {
 // the responsibility (matched on input.responsibilityId). Terminal
 // statuses are succeeded / failed / cancelled; anything else is live.
 func (r *ReactiveLoop) hasLivePlan(ctx context.Context, respId string) bool {
-	q := fmt.Sprintf(`query plansForResponsibility(responsibilityId:%q)`, respId)
+	q := fmt.Sprintf(`query plansForResponsibility(responsibilityId:%s)`, langparser.QuoteString(respId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		// Fail open toward NOT-spawning would wedge the responsibility
@@ -522,7 +523,7 @@ func (r *ReactiveLoop) routeResponsibility(ctx context.Context, userId string, r
 // Returns empty when none is found (the loop proceeds; the GA relays at
 // work time once available).
 func (r *ReactiveLoop) resolveAssistant(ctx context.Context, userId string) string {
-	q := fmt.Sprintf(`query assistantAgentForUser(ownerUserId:%q)`, userId)
+	q := fmt.Sprintf(`query assistantAgentForUser(ownerUserId:%s)`, langparser.QuoteString(userId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("planner reactive loop: resolveAssistant failed",
@@ -549,8 +550,8 @@ func (r *ReactiveLoop) mintOrExtendSpecialist(ctx context.Context, userId string
 	}
 	partitionId := getString(row, "scopePartitionId")
 	call := fmt.Sprintf(
-		`builtin ensureAgentForGoal(goal:%q, ownerUserId:%q, partitionId:%q)`,
-		goal, userId, partitionId,
+		`builtin ensureAgentForGoal(goal:%s, ownerUserId:%s, partitionId:%s)`,
+		langparser.QuoteString(goal), langparser.QuoteString(userId), langparser.QuoteString(partitionId),
 	)
 	res, err := r.engine.Execute(ctx, call)
 	if err != nil {
@@ -647,8 +648,8 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 		"successCriteria":  getString(row, "successCriteria"),
 	}
 	call := fmt.Sprintf(
-		`mutation createPlan(planId:%q, partitionId:%q, kind:%q, goal:%q, requestedBy:%q, authorizedBy:%q, triggerSource:"system", input:%s)`,
-		planId, partitionId, reactiveProactivePlanKind, goal, userId, userId, mustJSONObject(input),
+		`mutation createPlan(planId:%s, partitionId:%s, kind:%s, goal:%s, requestedBy:%s, authorizedBy:%s, triggerSource:"system", input:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(partitionId), langparser.QuoteString(reactiveProactivePlanKind), langparser.QuoteString(goal), langparser.QuoteString(userId), langparser.QuoteString(userId), mustJSONObject(input),
 	)
 	if _, err := r.engine.Execute(ctx, call); err != nil {
 		return "", fmt.Errorf("createPlan: %w", err)
@@ -657,8 +658,8 @@ func (r *ReactiveLoop) createResponsibilityPlan(ctx context.Context, userId stri
 	// who runs it. Reuse the plan-status update path.
 	if agentId != "" {
 		upd := fmt.Sprintf(
-			`mutation updatePlanStatus(planId:%q, status:"routing", ownerAgentId:%q)`,
-			planId, agentId,
+			`mutation updatePlanStatus(planId:%s, status:"routing", ownerAgentId:%s)`,
+			langparser.QuoteString(planId), langparser.QuoteString(agentId),
 		)
 		if _, err := r.engine.Execute(ctx, upd); err != nil {
 			r.logger.Debug("planner reactive loop: ownerAgent stamp failed",
@@ -713,8 +714,8 @@ func (r *ReactiveLoop) maybeInjectStanding(ctx context.Context, row map[string]a
 			"extensionGoals": goals,
 		},
 	}
-	call := fmt.Sprintf(`mutation updateAgent(agentId:%q, payload:%s)`,
-		agentId, mustJSONObject(payload))
+	call := fmt.Sprintf(`mutation updateAgent(agentId:%s, payload:%s)`,
+		langparser.QuoteString(agentId), mustJSONObject(payload))
 	if _, err := r.engine.Execute(ctx, call); err != nil {
 		r.logger.Warn("planner reactive loop: standing inject failed",
 			"agentId", agentId, "responsibilityId", respId, "error", err)
@@ -729,8 +730,8 @@ func (r *ReactiveLoop) maybeInjectStanding(ctx context.Context, row map[string]a
 // responsibility (owned-tier, under the impersonated owner ctx).
 func (r *ReactiveLoop) recordEvaluation(ctx context.Context, respId, result string) {
 	q := fmt.Sprintf(
-		`mutation recordResponsibilityEvaluation(responsibilityId:%q, lastResult:%q)`,
-		respId, truncate(result, 280),
+		`mutation recordResponsibilityEvaluation(responsibilityId:%s, lastResult:%s)`,
+		langparser.QuoteString(respId), langparser.QuoteString(truncate(result, 280)),
 	)
 	if _, err := r.engine.Execute(ctx, q); err != nil {
 		r.logger.Warn("planner reactive loop: recordEvaluation failed",
@@ -867,7 +868,7 @@ func (r *ReactiveLoop) dispatchConvergenceAction(ctx context.Context, userId str
 // goal sub-object (#635 lives as v1:cognition:space.goal). Empty for a
 // user with no goal-bearing spaces.
 func (r *ReactiveLoop) loadSpaceGoals(ctx context.Context, userId string) []map[string]any {
-	q := fmt.Sprintf(`query queryActiveSpaces(userId:%q)`, userId)
+	q := fmt.Sprintf(`query queryActiveSpaces(userId:%s)`, langparser.QuoteString(userId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("planner reactive loop: loadSpaceGoals failed",
@@ -898,8 +899,8 @@ func (r *ReactiveLoop) loadSpaceGoals(ctx context.Context, userId string) []map[
 // be wired on every planner binary; a failure yields empty memory and
 // the conductor reasons without it.
 func (r *ReactiveLoop) loadRecentMemory(ctx context.Context) []map[string]any {
-	q := fmt.Sprintf(`builtin recall(text:%q, k:%d)`,
-		"active goals and standing responsibilities I am pursuing", recallTopK)
+	q := fmt.Sprintf(`builtin recall(text:%s, k:%d)`,
+		langparser.QuoteString("active goals and standing responsibilities I am pursuing"), recallTopK)
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("planner reactive loop: recall failed (harness likely unwired)",
@@ -955,7 +956,7 @@ func (r *ReactiveLoop) markConverged(userId string, now time.Time) {
 // --- loaders ---------------------------------------------------------------
 
 func (r *ReactiveLoop) loadAgent(ctx context.Context, agentId string) map[string]any {
-	q := fmt.Sprintf(`query agentById(agentId:%q)`, agentId)
+	q := fmt.Sprintf(`query agentById(agentId:%s)`, langparser.QuoteString(agentId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		return nil

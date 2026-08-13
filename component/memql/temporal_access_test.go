@@ -23,9 +23,18 @@ func temporalLoadRegistry() memoryNodes.Registry {
 
 func loadTemporalQuery(t *testing.T, name, asOfClause string) *Function {
 	t.Helper()
+	// An `asOf args.asOf ?? latest` clause READS an argument, so the fixture
+	// has to declare it -- exactly as the live query carrying that clause does
+	// (deploymentsForCluster: `args { clusterId string!  asOf datetime }`).
+	// Undeclared, it is refused at load (memql#3626).
+	argsBlock := ""
+	if strings.Contains(asOfClause, "args.asOf") {
+		argsBlock = "  args {\n    asOf  datetime\n  }\n"
+	}
 	src := "use cluster.concepts.{ node }\n\n" +
 		"@enabled\n" +
 		"query node " + name + " {\n" +
+		argsBlock +
 		"  " + asOfClause + "\n" +
 		"  filter  payload.active == true\n" +
 		"  shape   nodeCard\n" +

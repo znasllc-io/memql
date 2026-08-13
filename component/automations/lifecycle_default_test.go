@@ -16,7 +16,7 @@ func lifecycleAutomationSource(annotation string) string {
 	if annotation != "" {
 		prefix = annotation + "\n"
 	}
-	return prefix + `@trigger(event="deploy.requested", concept="v1:cluster:deployment", partition="*")
+	return prefix + `@trigger(event="deploy.requested")
 @description("lifecycle default probe")
 automation lifecycleProbe {
   step gate {

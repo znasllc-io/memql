@@ -10,6 +10,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/accounttoken"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -95,7 +96,7 @@ func (s *streamSession) callerScopedContext() context.Context {
 // an oracle for which account ids exist on the cluster.
 func (s *streamSession) callerOwnsAccount(ctx context.Context, accountId string) (bool, error) {
 	res, err := s.service.engine.Execute(ctx,
-		fmt.Sprintf(`query accountById(accountId:%q)`, accountId))
+		fmt.Sprintf(`query accountById(accountId:%s)`, langparser.QuoteString(accountId)))
 	if err != nil {
 		return false, err
 	}

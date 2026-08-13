@@ -55,12 +55,27 @@ func toolDeclToTool(decl *ast.ToolDecl, origin string) ([]*Tool, error) {
 			// and objects alike.
 			prop["items"] = map[string]any{}
 		default:
-			// Unknown type -- fall back to string. Mirrors the
-			// legacy parser's default; an unknown type isn't a hard
-			// error so a typo in a fixture or future-only type slips
-			// through as a permissive string instead of breaking the
-			// loader.
-			prop["type"] = "string"
+			// Unknown type -- REFUSED (memql#3625). This used to fall back
+			// to "string", justified as forward-compat: a typo or a
+			// future-only type slipped through permissively instead of
+			// breaking the loader.
+			//
+			// The fallback is removed rather than downgraded to a warning,
+			// because it does not degrade toward "unconstrained" -- it
+			// degrades toward CONFIDENTLY WRONG, in three places at once:
+			// the LLM is told the field is a string, coerceSchemaDefault
+			// switches on the EMITTED type and so coerces the @default to a
+			// string, and the value then arrives at a `@required integer`
+			// handler argument as "10". One transposed letter (`interger`)
+			// produced all three, silently.
+			//
+			// Nor is there a forward-compat case left to serve: the type
+			// vocabulary is closed and lives in this switch, so adding a
+			// type means editing here anyway. An unknown type today can
+			// only be a typo, and the permissive read of a typo is exactly
+			// the memql#3605 archetype.
+			return nil, fmt.Errorf("tool %q field %q: unknown type %q (supported: string, number, float, integer, int, bool, boolean, object, array) -- an unknown type used to be emitted as \"string\", which advertises the wrong contract to the model and coerces @default to the wrong Go type",
+				decl.Name, f.Name, f.Type)
 		}
 
 		if f.Description != "" {

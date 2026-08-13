@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -252,7 +253,7 @@ func (d *EmbedDomainItemsDispatcher) embedDomain(ctx context.Context, domainId, 
 // --- context loaders ------------------------------------------------------
 
 func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`query planById(planId:%q)`, planId)
+	q := fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId))
 	res, err := d.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -268,8 +269,8 @@ func (d *EmbedDomainItemsDispatcher) loadPlan(ctx context.Context, planId string
 
 func (d *EmbedDomainItemsDispatcher) markRunning(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"running", startedAt:%q)`,
-		planId, time.Now().UTC().Format(time.RFC3339),
+		`mutation updatePlanStatus(planId:%s, status:"running", startedAt:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -281,8 +282,8 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"succeeded", output:%s, completedAt:%q)`,
-		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
+		`mutation updatePlanStatus(planId:%s, status:"succeeded", output:%s, completedAt:%s)`,
+		langparser.QuoteString(planId), string(outputJSON), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err = d.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -290,8 +291,8 @@ func (d *EmbedDomainItemsDispatcher) markSucceeded(ctx context.Context, planId s
 
 func (d *EmbedDomainItemsDispatcher) markFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"failed", errorMessage:%q, completedAt:%q)`,
-		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
+		`mutation updatePlanStatus(planId:%s, status:"failed", errorMessage:%s, completedAt:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(errorMessage), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err := d.engine.Execute(systemActorContext(ctx), q)
 	return err

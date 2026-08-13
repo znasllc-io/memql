@@ -142,6 +142,13 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 	// 1a. Emit the plan.created canvas card with the heuristic
 	// estimate baked in so the user sees the Plan exists from the
 	// moment it lands.
+	//
+	// This map used to carry an "actor" key, and so did the plan.completed
+	// call below. dslCall renders it as `actor: {...}` in the query string,
+	// where `actor` is a reserved engine name -- no args block may declare
+	// one, so the value could never bind and was dropped (memql#3626). It is
+	// removed rather than renamed because the mutation is the bundle's and
+	// never had a field for it.
 	createdStateId := planId + ":created"
 	if cardQ, err := dslCall("mutationCreateCanvasState", map[string]any{
 		"stateId": createdStateId,
@@ -155,7 +162,6 @@ func (s *EnginePlanStore) CreateQueuedAnalyzePlan(ctx context.Context, p CreateP
 		},
 		"visibility": "private",
 		"forUserId":  p.RequestedBy,
-		"actor":      map[string]any{"kind": "user", "userId": p.RequestedBy},
 		"importance": "ambient",
 	}); err == nil {
 		// Non-fatal -- Plan exists, card just won't render.
@@ -292,7 +298,6 @@ func (s *EnginePlanStore) CompleteAnalyzePlan(ctx context.Context, planId string
 		},
 		"visibility": "private",
 		"forUserId":  p.RequestedBy,
-		"actor":      map[string]any{"kind": "user", "userId": p.RequestedBy},
 		"importance": "ambient",
 	})
 	if err != nil {

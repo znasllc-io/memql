@@ -197,8 +197,18 @@ func (s *Sink) classifyActive(rows []map[string]any) (approvedId, pendingId, den
 // the result into a []map[string]any list of payload rows. The
 // engine's Execute returns []any of maps with a "payload" sub-map +
 // "id" top-level; we flatten into one map per row carrying both.
+//
+// The call is composed by buildNamedCall rather than by fmt's %q (memql#3611).
+// %q is Go's escape grammar, not the memQL lexer's: it emits \x00, \a, \v and
+// \xNN, and readString implements the JSON escapes and rejects every one of
+// them, so one such byte in an interpolated value makes the whole statement
+// unparseable. The correlationKey is a SHA-256 hex digest and could never
+// carry one -- but the read path and the write path in this file were
+// composing calls two different ways for no reason, and the way that was
+// wrong-in-principle is the one nobody would notice becoming wrong in fact.
 func (s *Sink) queryActive(ctx context.Context, key string) ([]map[string]any, error) {
-	query := fmt.Sprintf(`query activeApprovalsByCorrelationKey(correlationKey: %q)`, key)
+	query := "query " + buildNamedCall("activeApprovalsByCorrelationKey",
+		map[string]any{"correlationKey": key})
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return nil, err
@@ -235,7 +245,7 @@ func (s *Sink) createPending(ctx context.Context, key string, desc safety.Action
 		"ownerUserId":    desc.Caller.OwnerUserID,
 		"planId":         desc.Caller.PlanID,
 	}
-	query := buildMutationCall("createApprovalRequest", args)
+	query := buildNamedCall("createApprovalRequest", args)
 	res, err := s.engine.Execute(ctx, query)
 	if err != nil {
 		return "", err
@@ -281,13 +291,33 @@ var envLookup = func(k string) string {
 	return getenv(k)
 }
 
-// buildMutationCall composes a memql mutation call string with bare-
-// identifier keys + JSON-marshalled values, keys sorted for stable
-// log lines. Same pattern as component/safety/recorder/persisting.go's
+// buildNamedCall composes a memql named call -- `name(k: v, ...)` -- with
+// bare-identifier keys + JSON-marshalled values, keys sorted for stable log
+// lines. Same pattern as component/safety/recorder/persisting.go's
 // buildMutationQuery -- duplicated rather than exported because the
 // two have different lifetimes (the approval sink's args set may
 // drift independently of the classification recorder's).
-func buildMutationCall(name string, args map[string]any) string {
+//
+// Named buildMutationCall until memql#3611; both of this file's engine calls
+// go through it now, and a query is not a mutation.
+//
+// # Why json.Marshal is the encoder, and why not langparser.QuoteString
+//
+// The one correct definition of "a MemQL string literal" is
+// langparser.QuoteString, which lives beside the lexer whose escape set it
+// targets. This package cannot reach it: `component/safety` is a base-tier
+// module whose only internal dependency is `core` (docs/ci-design.md D3), and
+// requiring `component/language` would give the base tier an upward edge into
+// the engine tier -- the one thing that tier cannot have.
+//
+// encoding/json is what QuoteString itself wraps, and it emits exactly the
+// escapes readString implements, so this composes literals the lexer accepts.
+// It is not a hand-rolled escape table, which is the thing that must never
+// appear here: a second DEFINITION of the escape set is what memql#3035 cost,
+// and a third would cost it again. The only difference from QuoteString is
+// that HTML escaping stays on, which the lexer accepts and which decodes to
+// the identical value.
+func buildNamedCall(name string, args map[string]any) string {
 	keys := make([]string, 0, len(args))
 	for k := range args {
 		keys = append(keys, k)

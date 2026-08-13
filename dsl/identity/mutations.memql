@@ -852,11 +852,15 @@ mutate delegation createDelegation {
 // verified email, OAuth accounts on external apps, API keys, service
 // accounts, worker tokens for memql-cockpit machines).
 //
-// The credentials object must match the identityType variant. This
-// mutation does NOT validate that contract -- callers (the identity
-// service's magic-link verifier on first-login, future OAuth / PAT
-// flows, the worker-token mint flow) are responsible for passing the
-// right shape. Variants:
+// The credentials object must match the identityType variant, and as
+// of memql#3623 the SCHEMA enforces that rather than the caller. This
+// mutation is the one place a caller picks both halves independently,
+// so it was the reachable way to persist a row whose declared family
+// and credential material disagreed -- the concept now emits an
+// if/then per branch keyed on identityType, and such a row is refused
+// at insert. Callers (the identity service's magic-link verifier on
+// first-login, future OAuth / PAT flows, the worker-token mint flow)
+// still pass the shape; they now get told when it is wrong. Variants:
 //   oauth           => { provider, externalUserId, scopes }
 //   api_key         => { keyHash }
 //   service_account => { accountId }

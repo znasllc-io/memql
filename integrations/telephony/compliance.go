@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -60,7 +61,7 @@ func (i *Integration) CheckOutboundAllowed(ctx context.Context, to, from string)
 
 // isOptedOut reports whether the newest consent state for a number is opted_out.
 func (i *Integration) isOptedOut(ctx context.Context, e164 string) (bool, error) {
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query consentOptOut(phoneNumber: %q)`, e164))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query consentOptOut(phoneNumber: %s)`, langparser.QuoteString(e164)))
 	if err != nil {
 		return false, err
 	}
@@ -80,8 +81,8 @@ func (i *Integration) handleSetConsent(ctx context.Context, args map[string]any,
 		return nil, err
 	}
 	q := fmt.Sprintf(
-		`mutation setConsent(phoneNumber: %q, partitionId: %q, status: %q, reason: %q, source: %q)`,
-		phone, partitionID, status, asString(args["reason"]), asString(args["source"]),
+		`mutation setConsent(phoneNumber: %s, partitionId: %s, status: %s, reason: %s, source: %s)`,
+		langparser.QuoteString(phone), langparser.QuoteString(partitionID), langparser.QuoteString(status), langparser.QuoteString(asString(args["reason"])), langparser.QuoteString(asString(args["source"])),
 	)
 	if _, err := eng.Execute(ctx, q); err != nil {
 		return nil, err
@@ -106,8 +107,8 @@ func (i *Integration) handleRegisterE911(ctx context.Context, args map[string]an
 		return nil, err
 	}
 	q := fmt.Sprintf(
-		`mutation setNumberE911(id: %q, e911Registered: true, e911AddressId: %q, callerIdVerified: true)`,
-		id, asString(args["e911AddressId"]),
+		`mutation setNumberE911(id: %s, e911Registered: true, e911AddressId: %s, callerIdVerified: true)`,
+		langparser.QuoteString(id), langparser.QuoteString(asString(args["e911AddressId"])),
 	)
 	if _, err := eng.Execute(ctx, q); err != nil {
 		return nil, err
@@ -117,7 +118,7 @@ func (i *Integration) handleRegisterE911(ctx context.Context, args map[string]an
 
 // numberRowID resolves an owned DID's row id from its E.164.
 func (i *Integration) numberRowID(ctx context.Context, e164 string) (string, error) {
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query numberByE164(e164: %q)`, e164))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query numberByE164(e164: %s)`, langparser.QuoteString(e164)))
 	if err != nil {
 		return "", err
 	}

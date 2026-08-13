@@ -10,6 +10,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -74,9 +75,9 @@ func (s *Store) Create(ctx context.Context, pairingId, ownerUserId, codeHash, cl
 		return errors.New("workerpairing.Store.Create: pairingId, ownerUserId, codeHash, clusterURL all required")
 	}
 	q := fmt.Sprintf(
-		`mutation createWorkerPairingCode(pairingId:%q,ownerUserId:%q,codeHash:%q,clusterURL:%q,expiresAt:%q,sourceIP:%q)`,
-		pairingId, ownerUserId, codeHash, clusterURL,
-		expiresAt.UTC().Format(time.RFC3339Nano), sourceIP,
+		`mutation createWorkerPairingCode(pairingId:%s,ownerUserId:%s,codeHash:%s,clusterURL:%s,expiresAt:%s,sourceIP:%s)`,
+		langparser.QuoteString(pairingId), langparser.QuoteString(ownerUserId), langparser.QuoteString(codeHash), langparser.QuoteString(clusterURL),
+		langparser.QuoteString(expiresAt.UTC().Format(time.RFC3339Nano)), langparser.QuoteString(sourceIP),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("workerpairing.Store.Create: %w", err)
@@ -93,8 +94,8 @@ func (s *Store) Redeem(ctx context.Context, pairingId, redeemedBy, redeemedFromI
 		return errors.New("workerpairing.Store: engine not wired")
 	}
 	q := fmt.Sprintf(
-		`mutation redeemWorkerPairingCode(pairingId:%q,redeemedAt:%q,redeemedBy:%q,redeemedFromIP:%q)`,
-		BareSlug(pairingId), at.UTC().Format(time.RFC3339Nano), redeemedBy, redeemedFromIP,
+		`mutation redeemWorkerPairingCode(pairingId:%s,redeemedAt:%s,redeemedBy:%s,redeemedFromIP:%s)`,
+		langparser.QuoteString(BareSlug(pairingId)), langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)), langparser.QuoteString(redeemedBy), langparser.QuoteString(redeemedFromIP),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("workerpairing.Store.Redeem: %w", err)
@@ -112,7 +113,7 @@ func (s *Store) LookupByHash(ctx context.Context, codeHash string) (*Row, error)
 	if codeHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query workerPairingCodeByHash(codeHash:%q)`, codeHash)
+	q := fmt.Sprintf(`query workerPairingCodeByHash(codeHash:%s)`, langparser.QuoteString(codeHash))
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("workerpairing.Store.LookupByHash: %w", err)
