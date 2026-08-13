@@ -698,47 +698,34 @@ func TestLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
 // `parent` label; asking interactsWith for it is a category error the engine
 // should answer emptily rather than crash on).
 //
-// FINDING -- FOUR OF THESE DO NOT HOLD, and are skipped rather than weakened.
-// Each resolver's len(matches)==0 branch does `continue` when a label filter
-// is present, which is correct. But parentOf / childOf / aliasOf / equals
-// each carry a SECOND gate after the loop -- "produced no parent references",
-// "produced no candidate queries" -- that the continue walks straight into,
-// so a labelled traversal matching nothing returns an ERROR from exactly half
-// the surface. interactsWith / owns / createdBy / contains have no such gate
-// and return empty. The engine's own comments name this disagreement as
-// memql#3671 for the UNLABELLED case; the labelled case inherits it, which
-// leaves this issue's acceptance criterion unmet for four of eight functions.
+// HISTORY. This held for only half the surface when written. Each resolver's
+// len(matches)==0 branch does `continue` when a label filter is present, which
+// is correct -- but parentOf / childOf / aliasOf / equals each carried a SECOND
+// gate after the loop that the continue walked straight into, so a labelled
+// traversal matching nothing returned an ERROR from four of the eight
+// functions. memql#3656 carved the labelled case out of those gates, and
+// memql#3671 removed them entirely: an empty traversal is now an empty answer
+// in BOTH forms, so all eight agree here and the unlabelled counterpart is
+// pinned by TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty.
+//
+// The case table used to carry `wantErr` and `resolver` columns naming those
+// gates. Nothing ever read them -- the loop asserts require.Empty for every
+// case -- so they were removed with the gates rather than left describing
+// error strings that no longer exist.
 func TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
 	eng, ctx, w := labelTestEngine(t, "rel-3656-empty")
 
-	// wantErr is the exact error the resolver returns today, empty when the
-	// function already behaves correctly; resolver names the Go function that
-	// carries the gate, so a failure points at the code to change.
 	cases := []struct {
-		fn       string
-		source   string
-		resolver string
-		wantErr  string
+		fn     string
+		source string
 	}{
 		{fn: "references", source: w.hubFilter()},
 		{fn: "owns", source: w.hubFilter()},
 		{fn: "createdBy", source: w.hubFilter()},
-		{
-			fn: "parentOf", source: w.hubFilter(), resolver: "resolveParentOf",
-			wantErr: "parentOf traversal produced no parent references",
-		},
-		{
-			fn: "childOf", source: w.spaceFilter(), resolver: "resolveChildOf",
-			wantErr: "childOf traversal produced no candidate queries",
-		},
-		{
-			fn: "aliasOf", source: w.hubFilter(), resolver: "resolveAliasOrEquals",
-			wantErr: "alias traversal produced no candidate queries",
-		},
-		{
-			fn: "equals", source: w.hubFilter(), resolver: "resolveAliasOrEquals",
-			wantErr: "equals traversal produced no candidate queries",
-		},
+		{fn: "parentOf", source: w.hubFilter()},
+		{fn: "childOf", source: w.spaceFilter()},
+		{fn: "aliasOf", source: w.hubFilter()},
+		{fn: "equals", source: w.hubFilter()},
 	}
 
 	// Both shapes of "matches nothing". "belongsToSpace" is real, and is a
