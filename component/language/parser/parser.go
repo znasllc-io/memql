@@ -5764,6 +5764,9 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 	// For regular function calls, parse as arguments
 	args := make(map[string]any)
 	argList := []any{}
+	// Positional arguments that scanned as one colon-bearing identifier. Judged
+	// after the loop, because what they mean depends on the rest of the list.
+	var glued []Token
 
 	for !p.check(TokenParenClose) && !p.check(TokenEOF) {
 		// Check for named argument (identifier followed by single =)
@@ -5829,14 +5832,18 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare identifier puns to its own name (%s(x) == %s(x: x))",
 					kind, name, name, name)
 			}
-			// The same glued `key:value` the punning branch refuses, arriving
-			// on a BARE call instead of a kind-prefixed one. Here it lands as
-			// a POSITIONAL argument -- `f(a:"s",b:someIdent)` binds `a` and
-			// turns `b` into args["0"] -- so the declared argument vanishes
-			// just as silently, and named args around it keep working, which
-			// is what makes it look fine.
+			// A glued `key:value` arriving on a BARE call lands here, as a
+			// POSITIONAL argument: `f(a:"s",b:someIdent)` binds `a` and turns
+			// `b` into args["0"], so the declared argument vanishes while the
+			// named args around it keep working.
+			//
+			// It cannot be refused on sight, because a bare call's positional
+			// argument is ALSO where a canonical id legitimately appears --
+			// `from(v1:agents:agent)` is a real runtime query shape, and it is
+			// the same token shape. Remembered here and judged after the whole
+			// argument list is known; see the check below the loop.
 			if p.check(TokenIdentifier) && strings.Contains(p.current.Literal, ":") {
-				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(p.current.Literal, name))
+				glued = append(glued, p.current)
 			}
 			// Positional argument
 			val, err := p.parseValueMaybeCoalesce()
@@ -5855,6 +5862,30 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
+	}
+
+	// A colon-bearing positional token is refused only when the SAME call also
+	// names an argument properly.
+	//
+	// The two readings are indistinguishable token-for-token, so the rest of
+	// the argument list is the only evidence available:
+	//
+	//	from(v1:agents:agent)                       -- no named args: a canonical
+	//	                                               id, passed positionally.
+	//	                                               This is a live query shape.
+	//	updatePlanStatus(planId:event.node.id,      -- names `status`, so the
+	//	                 status: "queued")             author is writing named
+	//	                                               args and `planId` is one
+	//	                                               they lost a space in.
+	//
+	// A call whose arguments are ALL positional is using the positional form
+	// deliberately; a call that mixes the two is far more likely to have meant
+	// them all named. That leaves `f(a:someIdent)` -- a lone glued token, no
+	// named siblings -- accepted, because nothing distinguishes it from
+	// `from(v1:...)`. Deciding it either way is a guess; this refuses only
+	// where the call itself supplies the evidence.
+	if len(glued) > 0 && len(args) > 0 {
+		return nil, newParseErrorf(&glued[0], "%s", colonGlueMessage(glued[0].Literal, name))
 	}
 
 	// Story 9 (#2335): reject the legacy object-literal argument wrapper

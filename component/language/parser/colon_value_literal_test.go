@@ -180,9 +180,10 @@ func TestConstructCallArgNameCannotContainColon(t *testing.T) {
 // only `b` is lost, so the call looks like it works.
 func TestBareCallArgNameCannotContainColon(t *testing.T) {
 	for _, src := range []string{
-		`f(a:someIdent)`,
 		`f(a:"s",b:someIdent)`,
 		`script(script:"install.verifyProviderKey",key-file:args.keyFile)`,
+		// The shape the automation-step normaliser emits.
+		`updatePlanStatus(planId:event.node.id, status: "queued")`,
 	} {
 		t.Run(src, func(t *testing.T) {
 			_, err := ParseExpression(src)
@@ -265,13 +266,40 @@ func TestEveryArgumentPositionRefusesAColonName(t *testing.T) {
 	positions := map[string]string{
 		"colon-named, kind-prefixed": `mutation m(b:someIdent)`,
 		"equals-named":               `mutation m(b:c = 1)`,
-		"punned/positional, bare":    `f(b:someIdent)`,
+		"punned/positional, bare":    `f(a: 1, b:someIdent)`,
 		"object-literal key":         `mutation m(p:{b:someIdent})`,
 	}
 	for position, src := range positions {
 		t.Run(position, func(t *testing.T) {
 			if _, err := ParseExpression(src); err == nil {
 				t.Fatalf("%s still binds a colon-bearing argument name: %q", position, src)
+			}
+		})
+	}
+}
+
+// TestBareCanonicalIdPositionalArgIsStillAccepted is the counterweight to the
+// bare-call guard, and it exists because CI caught the first attempt at it.
+//
+// A bare call's positional argument is ALSO where a canonical id legitimately
+// appears. `from(v1:agents:agent)` is a live runtime query shape, and it is the
+// same token shape as `f(a:someIdent)` -- one colon-bearing identifier. Refusing
+// on sight broke it.
+//
+// So the guard fires only when the call ALSO names an argument properly, which
+// is the evidence that the author was writing named args and lost a space. A
+// lone glued token with no named siblings stays accepted: nothing distinguishes
+// it from a canonical id, and guessing is how the first version broke `from`.
+func TestBareCanonicalIdPositionalArgIsStillAccepted(t *testing.T) {
+	for _, src := range []string{
+		`from(v1:agents:agent)`,
+		`from(v1:knowledge:liveSource)`,
+		// A lone glued token: ambiguous, therefore accepted.
+		`f(a:someIdent)`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if _, err := ParseExpression(src); err != nil {
+				t.Fatalf("ParseExpression(%q): %v -- a positional canonical id must keep parsing", src, err)
 			}
 		})
 	}
