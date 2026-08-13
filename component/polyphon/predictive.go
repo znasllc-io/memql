@@ -68,14 +68,6 @@ func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *Polyphon
 	}
 	threadHolder := session.LastAddressedAgentId
 	threadAt := session.LastAddressedAt
-
-	lastHuman := ""
-	for i := len(session.Transcript) - 1; i >= 0; i-- {
-		if session.Transcript[i].SpeakerType == "human" {
-			lastHuman = session.Transcript[i].SpeakerName
-			break
-		}
-	}
 	session.mu.RUnlock()
 
 	if time.Since(lastActivity) > 5*time.Minute {
@@ -121,9 +113,6 @@ func (a *ModelPredictiveAnalyzer) Analyze(ctx context.Context, session *Polyphon
 	if threadHolder != "" {
 		data["threadHolder"] = threadHolder
 		_ = threadAt // available for future use
-	}
-	if lastHuman != "" {
-		data["lastHumanSpeaker"] = lastHuman
 	}
 	data["timeSinceLastHuman"] = time.Since(lastActivity).Seconds()
 

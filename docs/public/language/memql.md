@@ -262,9 +262,10 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 ```
 
 - `type` — how MemQL interprets the edge (see table below).
-- `field` — the payload field used as the pointer.
+- `field` — the payload field used as the pointer. May be a dotted path when the field lives inside an object block (`field="lineage.originatingPlanId"`).
 - `target` — the target concept (a short name resolved through the file-top `use ...concepts.{ ... }` import).
 - `direction` — `outgoing`, `incoming`, or `bidirectional`.
+- `as` — optional domain label naming what the edge *means* (see "The two axes" below).
 
 | Type | Description | Use When |
 |------|-------------|----------|
@@ -272,8 +273,55 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 | `contains` | This node contains other nodes | The field stores an array of IDs of contained nodes |
 | `owns` | This node owns other nodes | Similar to contains, but implies exclusive ownership |
 | `alias` | This node is an alias for another | The field stores the ID of the aliased node |
+| `equals` | This node is identity-equivalent to another | Reference concepts asserting two ids name the same thing |
 | `createdBy` | This node was created by another | The field stores the creator's ID |
-| `interactsWith` | This node interacts with another | Generic association between nodes |
+| `interactsWith` | This node interacts with another | Generic association — the default for a plain foreign key |
+
+### The two axes: `type` and `as`
+
+A relationship declares two independent things, and keeping them apart is the
+point of the design.
+
+**`type` is what the ENGINE does with the edge.** It is a closed set — the table
+above — fixed by the engine. It decides id canonicalization, traversal, and the
+node-type invariants.
+
+**`as` is what the edge MEANS to your domain.** It is open. Any lowerCamelCase
+identifier is valid, it is validated for *form* only and never checked against a
+list, and it is optional.
+
+```memql
+concept participant {
+  agentId    string
+  forUserId  string
+
+  @relationship(type="interactsWith", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
+  @relationship(type="interactsWith", as="actsFor",    field="forUserId", target=user,  direction="outgoing")
+}
+```
+
+Without `as`, those two edges are structurally identical and there is no way to
+say how they differ. `as` is what makes an edge self-describing.
+
+**Why `as` is never validated against a list.** A closed vocabulary means a verb
+the engine has not heard of is a boot refusal — and because this engine is
+product-agnostic, a repo mounting its own DSL at `MEMQL_DSL_PATH` cannot patch
+it. That is not hypothetical: `dependsOn` and `formedFrom` each cost an engine
+release for exactly this reason before being retired to labels. `as` exists so a
+new domain verb never requires one again.
+
+Writing a domain verb in the `type` slot is the natural mistake, and the loader
+says so directly:
+
+```
+relationship type "assignedTo" is invalid. Structural types are: alias, contains,
+createdBy, equals, interactsWith, owns, parent. For a domain verb, use:
+type="interactsWith", as="assignedTo"
+```
+
+`as` is optional everywhere, including on structural types
+(`type="parent" as="belongsToSpace"` is legal). Two edges may share a label; a
+label-scoped traversal returns their union.
 
 **Common Mistake: Confusing `parent` vs `child`**
 
@@ -725,12 +773,16 @@ AI prompt templates with input schemas and default providers live in `dsl/<names
 @templateFile("prompts/cognitionPrediction.tmpl")
 /// Predict conversation trajectory for proactive cognition behavior
 prompt cognitionPrediction {
-  transcript  []object  @required @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object  @required @description("Available AI agents with name, role, and domains")
+  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
+  agents      []object! @description("Available AI agents with name, role, and domains")
+  phase       string    @description("Conversation phase off the session state machine.")
+  // ... one entry per variable the template renders; see the file for the full list
 }
 ```
 
 Logic prompts (routing / suggest / classification) use the structured-output path (`ChatStructuredProvider.CallChatStructured`); prose prompts (agent replies to users) use regular chat.
+
+**The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.

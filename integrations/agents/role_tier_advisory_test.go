@@ -77,6 +77,14 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		"executor_mutation.go | meta.priorBaseTier = isBaseTier(priorPayload[\"tier\"])":  "healing base tier",
 		"skill_tier_validation.go | tier := readSeedStringField(def.Body, \"tier\")":      "skill/domain tier",
 		"skill_tier_validation.go | skillTier := readSeedStringField(def.Body, \"tier\")": "skill tier",
+		// memql#3616 added the skill catalog to the agentFactoryAnalyze
+		// payload. Both lines read v1:agents:skill.tier off a skillSnapshot
+		// -- a DIFFERENT concept's tier from agentRole.tier -- and both sit
+		// on the same prompt-rendering path the role catalog does: one
+		// populates the snapshot, one projects it into the prompt. Nothing
+		// branches on either.
+		"factory.go | Tier:        stringField(payload, \"tier\"),": "populates skillSnapshot.Tier; not a read",
+		"factory.go | \"tier\":        s.Tier,":                     "skill catalog -> prompt, same advisory role as the role catalog",
 	}
 	// The rowauthz_* files carry a whole rowAuthz decl.Tier surface --
 	// `langparser.RowAuthzDecl.Tier`, the tier a CONCEPT declares about who may
