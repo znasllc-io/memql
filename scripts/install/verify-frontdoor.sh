@@ -50,6 +50,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
+# shellcheck source=../lib/resolve.sh
+source "${SCRIPT_DIR}/../lib/resolve.sh"
 
 cap_init "install.verifyFrontDoor" \
     "Check dns/tls per front-door hostname plus a gRPC (h2) reachability probe."
@@ -96,14 +98,10 @@ function checks_json() {
 # PREREQUISITES
 #=============================================================================
 
-# resolver_tool -- names the resolver this machine actually has. getent is the
-# Linux/glibc path; dig and host cover macOS, where getent does not exist.
-function resolver_tool() {
-    if command -v getent &>/dev/null; then printf 'getent'; return; fi
-    if command -v dig    &>/dev/null; then printf 'dig';    return; fi
-    if command -v host   &>/dev/null; then printf 'host';   return; fi
-    printf ''
-}
+# resolver_tool and resolve_addresses come from scripts/lib/resolve.sh, which
+# the hosts-entries probe sources too (memql#3593). One copy, because the probe
+# decides whether to write the entry this script then checks -- two spellings of
+# "resolves to 127.0.0.1" is the memql#3384 shape.
 
 function check_prerequisites() {
     if ! command -v curl &>/dev/null; then
@@ -117,17 +115,6 @@ function check_prerequisites() {
 #=============================================================================
 # PROBE 1 -- DNS
 #=============================================================================
-
-# resolve_addresses <host> -- prints each resolved IPv4 address on its own
-# line. Empty output means the name did not resolve.
-function resolve_addresses() {
-    local host="$1"
-    case "$(resolver_tool)" in
-        getent) getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u ;;
-        dig)    dig +short A "$host" 2>/dev/null | grep -E '^[0-9]+(\.[0-9]+){3}$' | sort -u ;;
-        host)   host -t A "$host" 2>/dev/null | awk '/has address/ {print $NF}' | sort -u ;;
-    esac
-}
 
 # check_dns <host> <expected-addr>
 function check_dns() {
