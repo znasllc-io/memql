@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/uptrace/bun"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -1101,10 +1102,11 @@ func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timesta
 }
 
 // fetchNodesByJSONFieldValues answers an INCOMING relationship question:
-// which rows of `conceptName` carry one of `values` at `fieldPath`. It backs
-// childOf, the incoming branches of owns / references / createdBy, and the
-// alias/equals canonical lookup -- every one of which is many-rows-per-value,
-// so the target comes from incomingLookupTarget and never from len(values).
+// which rows of `conceptName` carry one of `values` at `fieldPath`, whether
+// that field holds a single id or an ARRAY of them. It backs childOf, the
+// incoming branches of owns / references / createdBy, and the alias/equals
+// canonical lookup -- every one of which is many-rows-per-value, so the target
+// comes from incomingLookupTarget and never from len(values).
 func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptName string, fieldPath []string, values []string, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
 	unique := uniqueStrings(values)
 	if len(unique) == 0 {
@@ -1115,9 +1117,31 @@ func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptNa
 	if err != nil {
 		return nil, err
 	}
+	jsonbExpr, err := buildJSONBPathExpression(fieldPath)
+	if err != nil {
+		return nil, err
+	}
 
-	expr := fmt.Sprintf("(concept = ? AND %s IN (?))", pathExpr)
-	args := []any{strings.TrimSpace(conceptName), bun.In(unique)}
+	// A relationship field holds EITHER one id or an array of them, and the
+	// same declaration is read from both ends: `owns` over memberIds resolves
+	// element-wise going out, so it has to match element-wise coming back.
+	//
+	// The scalar comparison alone could not do that. `#>>` renders an array as
+	// its JSON TEXT -- `["v1:x:cadet:a","v1:x:cadet:b"]` -- which can never
+	// equal a single member id, so every INCOMING lookup against an
+	// array-valued field answered "nobody", with no error and no warning
+	// (memql#3670). The outgoing half of the very same declaration worked,
+	// which is what made one-directional declarations look symmetrical.
+	//
+	// Two branches rather than containment alone: jsonb_exists_any also
+	// matches an OBJECT's top-level keys and does not match a numeric scalar,
+	// so gating it on jsonb_typeof keeps the scalar path exactly as it was.
+	// Same shape the `in` operator compiles to for payload fields.
+	expr := fmt.Sprintf(
+		"(concept = ? AND ((jsonb_typeof(%s) = 'array' AND jsonb_exists_any(%s, ?::text[])) OR (%s IN (?))))",
+		jsonbExpr, jsonbExpr, pathExpr,
+	)
+	args := []any{strings.TrimSpace(conceptName), pq.Array(unique), bun.In(unique)}
 
 	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, incomingLookupTarget(limit), nil)
 	if err != nil {
