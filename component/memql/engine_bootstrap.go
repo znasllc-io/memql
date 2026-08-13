@@ -3,6 +3,8 @@ package memql
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/actions"
@@ -41,6 +43,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 
 	conceptNames := make(map[string]struct{}, len(all))
+	conceptsByName := make(map[string]*concept.Concept, len(all))
 	relationshipsByConcept := make(map[string][]RelationshipDefinition, len(all))
 
 	for _, c := range all {
@@ -59,6 +62,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 
 		c.Name = name
 		conceptNames[name] = struct{}{}
+		conceptsByName[name] = c
 		relationshipsByConcept[name] = nil
 	}
 
@@ -78,15 +82,26 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			}
 
 			if _, ok := conceptNames[normalized.TargetConcept]; !ok {
-				// With @visibility filtering, the target concept may exist
-				// on another node type. Skip validation for targets not in
-				// the local registry — the relationship is structurally
-				// valid, just not resolvable on this node.
-				e.Logger.Debug("relationship target not in local registry (filtered by visibility)",
-					"concept", name,
-					"target", normalized.TargetConcept,
+				// This used to `continue` with a Debug log, justified by
+				// @visibility filtering letting a target live on another node
+				// type. @visibility is RETIRED (zero uses in dsl/; every binary
+				// now loads every concept), so the justification is gone and a
+				// missing target means a typo or a missing `use` import.
+				//
+				// Skipping was not a missing edge, it was silent data
+				// corruption: the relationship drives id canonicalization on
+				// both the write path and the filter path, so no relationship
+				// means ids persist non-canonical and (concept, id) lookups
+				// quietly return nothing, with no error anywhere. memql#3653.
+				return fmt.Errorf(
+					"concept %q relationship[%d] on field %q: target %q is not a registered concept.%s",
+					name, idx, normalized.Field, normalized.TargetConcept,
+					suggestRelationshipTarget(normalized.TargetConcept, conceptNames),
 				)
-				continue
+			}
+
+			if err := checkRelationshipFieldDeclared(normalized, c, conceptsByName[normalized.TargetConcept]); err != nil {
+				return fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
 			}
 
 			if err := checkDuplicateRelationship(duplicateTracker, name, normalized); err != nil {
@@ -189,6 +204,34 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if _, ulErr := LoadUnifiedShapes(e.Logger, shapeRegistry, report); ulErr != nil {
 		e.Logger.Warn("unified shape loader returned an error; legacy covers gap",
 			"component", "memql.engine", "error", ulErr)
+	}
+
+	// memql#3621: compare every shape body against the concept it binds.
+	// Nothing did this before -- the converter has no registry and no later
+	// pass revisited it -- so a body could project a property the concept
+	// does not declare and the only symptom was a wire key whose value was
+	// null (dsl/workbench workspaceFull's bare `createdAt`,
+	// dsl/identity delegationFull's `agentSubject`). A violation is a
+	// strict-boot problem, not a Warn: the shape is registered and every
+	// query bound to it silently returns the wrong projection.
+	// Runs BEFORE the default-projection expansion so the report describes
+	// the AUTHORED state.
+	for _, v := range validateShapeConceptBindings(shapeRegistry, e.concepts) {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("shape does not agree with its bound concept",
+				"component", "memql.engine",
+				"shape", v.Shape,
+				"origin", v.Origin,
+				"detail", v.Detail)
+		}
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.shapeConceptValidator",
+			Keyword:   "shape",
+			Name:      v.Shape,
+			File:      v.Origin,
+			Phase:     "validate",
+			Err:       v.Detail,
+		})
 	}
 
 	// C5 (memql#2035): expand empty-body, signature-bound shapes into a
@@ -477,3 +520,179 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 // Returns the count of providers loaded + any non-fatal load errors
 // (provider files that failed auth resolution are skipped, not
 // fatal). nil error means nothing failed.
+
+// suggestRelationshipTarget returns a trailing hint naming likely intended
+// targets for an unresolvable one, or "" when nothing is close enough.
+//
+// The author who hits this error may be working in a product repo mounted at
+// MEMQL_DSL_PATH and cannot read this engine's source, so the message has to do
+// the work that reading the code would otherwise do for them (memql#3653).
+func suggestRelationshipTarget(target string, registered map[string]struct{}) string {
+	target = strings.TrimSpace(target)
+	if target == "" || len(registered) == 0 {
+		return ""
+	}
+
+	// A bare name (no colons) is almost always a missing `use` import rather
+	// than a typo -- the resolver leaves it unrewritten when it cannot map it.
+	// Say so plainly instead of guessing at spelling.
+	if !strings.Contains(target, ":") {
+		return fmt.Sprintf(
+			" %q is a bare name that resolved to nothing -- add a file-top import: use <ns>.concepts.{ %s }",
+			target, target)
+	}
+
+	// Otherwise look for near neighbours. The threshold scales with the name's
+	// length so a short id does not match half the registry.
+	limit := 3
+	if n := len(target) / 5; n < limit {
+		limit = n
+	}
+	if limit < 1 {
+		limit = 1
+	}
+
+	var close []string
+	for name := range registered {
+		if d := levenshtein(target, name); d <= limit {
+			close = append(close, name)
+		}
+	}
+	if len(close) == 0 {
+		return ""
+	}
+
+	sort.Strings(close)
+	if len(close) > 3 {
+		close = close[:3]
+	}
+	return fmt.Sprintf(" Did you mean %s?", strings.Join(quoteAll(close), " or "))
+}
+
+func quoteAll(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = strconv.Quote(v)
+	}
+	return out
+}
+
+// levenshtein is the standard edit distance, used only to build a
+// did-you-mean hint on an already-failing load. Registry-sized inputs, so the
+// two-row form is plenty.
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ar, br := []rune(a), []rune(b)
+	prev := make([]int, len(br)+1)
+	curr := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		curr[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(br)]
+}
+
+// checkRelationshipFieldDeclared verifies that a relationship's `field` names a
+// field the owning concept actually declares (memql#3654).
+//
+// WHICH concept owns the field depends on DIRECTION, and getting that wrong is
+// the whole subtlety here:
+//
+//   - outgoing: the foreign key lives on the declaring row, so `field` is a
+//     field of the declaring concept.
+//   - incoming: the foreign key lives on the FAR side, so `field` is a field of
+//     the TARGET concept. The live #3432 fixture does exactly this -- `hub`
+//     declares field="hubId" where hubId is a field of `spoke`. A naive
+//     "must be declared here" rule makes every incoming relationship illegal.
+//   - bidirectional: has zero declarations and zero tests, and memql#3658
+//     decides whether it survives v1 at all. Inventing a rule for it here would
+//     be guessing, so it is deliberately not validated.
+//
+// Matching is EXACT, not case-insensitive. The write path and the traversal
+// path already look the field up by exact key, so a case-mismatched field
+// canonicalized on filter and not on write -- an edge that half-works, which is
+// worse than one that plainly does not.
+func checkRelationshipFieldDeclared(def RelationshipDefinition, declaring, target *concept.Concept) error {
+	// A table/metadata field source names a row intrinsic rather than a payload
+	// field (only createdBy may do this), so there is no schema entry to match.
+	if def.FieldSource == concept.FieldSourceTable {
+		return nil
+	}
+
+	var owner *concept.Concept
+	switch def.Direction {
+	case relationshipDirectionOutgoing:
+		owner = declaring
+	case relationshipDirectionIncoming:
+		owner = target
+	default:
+		return nil // bidirectional -- see memql#3658
+	}
+	if owner == nil {
+		// Target unresolvable; the earlier target check already reports that
+		// with a better message than anything available here.
+		return nil
+	}
+
+	// @relationship binds TOP-LEVEL fields. A dotted path names a leaf inside
+	// one, so the root segment is what has to exist.
+	root := def.Field
+	if dot := strings.Index(root, "."); dot >= 0 {
+		root = root[:dot]
+	}
+
+	declared := owner.DeclaredFields()
+	for _, name := range declared {
+		if name == root {
+			return nil
+		}
+	}
+
+	where := "the concept"
+	if def.Direction == relationshipDirectionIncoming {
+		where = fmt.Sprintf("its target %q", owner.Name)
+	}
+	return fmt.Errorf(
+		"field %q is not declared on %s.%s",
+		def.Field, where, suggestRelationshipField(root, declared))
+}
+
+// suggestRelationshipField mirrors suggestRelationshipTarget for field names:
+// a typo is the common case, so name the near neighbour instead of leaving the
+// author to diff two spellings by eye.
+func suggestRelationshipField(field string, declared []string) string {
+	if field == "" || len(declared) == 0 {
+		return ""
+	}
+
+	limit := 2
+	if len(field) <= 4 {
+		limit = 1
+	}
+
+	var close []string
+	for _, name := range declared {
+		if levenshtein(field, name) <= limit {
+			close = append(close, name)
+		}
+	}
+	if len(close) == 0 {
+		return ""
+	}
+	if len(close) > 3 {
+		close = close[:3]
+	}
+	return fmt.Sprintf(" Did you mean %s?", strings.Join(quoteAll(close), " or "))
+}

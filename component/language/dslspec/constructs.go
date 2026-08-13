@@ -102,7 +102,7 @@ func constructs() []Construct {
 		{
 			Keyword:            "shape",
 			Category:           CategoryDeclarative,
-			Doc:                "Reusable field projection. @row projects a concept payload/intrinsics (signature `shape <Concept> <name>`); @actor projects the auth envelope; both = mixed. Body is a path list (+ include).",
+			Doc:                "Reusable field projection. @row projects a concept payload/intrinsics (signature `shape <Concept> <name>`); @actor projects the auth envelope; both = mixed. Body is a path list; there is no composition verb.",
 			AnnotationReceiver: "Shape",
 			RegistryBacked:     true,
 			ConceptInSignature: true,

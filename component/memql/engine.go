@@ -1106,6 +1106,7 @@ func (e *MemQLEngine) buildConceptPayload(c *concept.Concept) map[string]any {
 				"fieldSource":   rel.FieldSource,
 				"targetConcept": rel.TargetConcept,
 				"direction":     rel.Direction,
+				"as":            rel.As,
 			}
 		}
 		metadata["relationships"] = relationships
@@ -1287,7 +1288,16 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		if strings.TrimSpace(def.Type) == "" {
 			return RelationshipDefinition{}, fmt.Errorf("type is required")
 		}
-		return RelationshipDefinition{}, fmt.Errorf("relationship type %q is invalid", def.Type)
+		// The error has to name the way OUT, not just the refusal. `type` is a
+		// closed structural set and always will be, so an author reaching for a
+		// domain verb has to be told where it belongs -- otherwise their only
+		// visible options are to guess another type or to patch an engine they
+		// may not own, which is exactly what `dependsOn` and `formedFrom` each
+		// cost an engine release to discover (memql#3652).
+		return RelationshipDefinition{}, fmt.Errorf(
+			"relationship type %q is invalid. Structural types are: %s. "+
+				"For a domain verb, use: type=\"interactsWith\", as=%q",
+			def.Type, strings.Join(structuralRelationshipTypes(), ", "), def.Type)
 	}
 
 	field := strings.TrimSpace(def.Field)
@@ -1324,12 +1334,18 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		return RelationshipDefinition{}, fmt.Errorf("contains relationships must declare outgoing or bidirectional direction")
 	}
 
+	asLabel := strings.TrimSpace(def.As)
+	if err := validateRelationshipAsLabel(asLabel); err != nil {
+		return RelationshipDefinition{}, err
+	}
+
 	return RelationshipDefinition{
 		Type:          relType,
 		Field:         field,
 		FieldSource:   fieldSource,
 		TargetConcept: target,
 		Direction:     direction,
+		As:            asLabel,
 	}, nil
 }
 

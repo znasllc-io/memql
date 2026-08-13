@@ -766,17 +766,31 @@ shape actorEnvelope {
 }
 ```
 
-### Composition
+### No composition
 
-A shape can `include` another shape (transitive; cycles and field
-collisions are errors):
+`include` is not a shape verb. It was documented here for a long time
+and never implemented (memql#3621): a shape body is a path list, so
+`include spaceCard` parsed as two payload properties and projected two
+always-null keys. It is rejected at load now. To share a projection,
+repeat the paths, or drop the body entirely and take the default
+projection over the bound concept (memql#2035).
 
-```memql
-@row
-shape space spaceCardAlias {
-  include spaceCard
-}
-```
+### What the loader checks
+
+Every shape is validated against the concept it binds (memql#3621):
+
+- a bare payload property must be a **declared field** of the bound
+  concept -- `createdAt` written bare is `payload.createdAt`, which is
+  almost certainly the row intrinsic `row.createdAt` misspelled;
+- the bound concept must **resolve**; an ambiguous bare name (`plan`,
+  `request`, `call`, `invocation` all collide across namespaces)
+  disambiguates through the shape's own domain;
+- two paths may not collapse onto the **same terminal key** -- every
+  path is keyed by its last segment, so `row.id` + `id` used to yield
+  one entry and lose the row id;
+- the **declared kind** must match the body: `actor.*` needs `@actor`,
+  `row.*` / bare payload needs `@row`, at least one is required, and
+  `actor.*` members are the closed envelope set (#2623).
 
 ### Usage in Queries
 

@@ -615,20 +615,28 @@ func toFloat64(v any) (float64, bool) {
 	return 0, false
 }
 
+// relationEdgeTypes maps a shape template's relation NAME onto the graph edge
+// labels it selects. The two vocabularies are deliberately different: a shape
+// author writes `aliases` / `interactions`, which resolve to the
+// GraphEdgeLabel* set. Keys are lower-cased because shapeGraph indexes edges
+// lower-cased (see newShapeGraph), not because the wire labels are.
+//
+// Documenting the shape-relation names as if they were wire edge labels is
+// exactly the drift memql#3657 fixed in docs/public/language/memql.md.
 func relationEdgeTypes(name string) []string {
 	switch strings.ToLower(name) {
 	case "children":
-		return []string{graphEdgeTypeChild}
+		return []string{strings.ToLower(GraphEdgeLabelChild)}
 	case "aliases":
-		return []string{strings.ToLower(relationshipTypeAlias), strings.ToLower(relationshipTypeEquals)}
+		return []string{strings.ToLower(GraphEdgeLabelAlias), strings.ToLower(GraphEdgeLabelEquals)}
 	case "contains":
-		return []string{strings.ToLower(relationshipTypeContains)}
+		return []string{strings.ToLower(GraphEdgeLabelContains)}
 	case "owns":
-		return []string{strings.ToLower(relationshipTypeOwns)}
+		return []string{strings.ToLower(GraphEdgeLabelOwns)}
 	case "createdby":
-		return []string{strings.ToLower(relationshipTypeCreatedBy)}
+		return []string{strings.ToLower(GraphEdgeLabelCreatedBy)}
 	case "interactions":
-		return []string{strings.ToLower(relationshipTypeInteracts)}
+		return []string{strings.ToLower(GraphEdgeLabelInteractsWith)}
 	default:
 		return []string{}
 	}

@@ -566,7 +566,12 @@ func TestIdBearingFieldsDeclareRelationship(t *testing.T) {
 	}
 	conceptStart := regexp.MustCompile(`^\s*concept\s+(\w+)\s*\{`)
 	fieldStart := regexp.MustCompile(`^\s+(\w+)\s+\S`)
-	relField := regexp.MustCompile(`@relationship\([^)]*field="(\w+)"`)
+	// The capture accepts a DOTTED path (memql#3654): a relationship may bind a
+	// field nested inside an object block, e.g. field="lineage.originatingPlanId".
+	// A `\w+`-only capture silently stops matching such a declaration, which
+	// empties the annotated set and erupts in false "unannotated *Id field"
+	// failures rather than pointing at the real cause.
+	relField := regexp.MustCompile(`@relationship\([^)]*field="([\w.]+)"`)
 	descBody := regexp.MustCompile(`@description\("(.*)"\)`)
 
 	exemptSeen := map[string]bool{}
@@ -611,6 +616,14 @@ func TestIdBearingFieldsDeclareRelationship(t *testing.T) {
 			for _, li := range block {
 				for _, rm := range relField.FindAllStringSubmatch(lines[li], -1) {
 					annotated[rm[1]] = true
+					// A dotted path binds a field nested in an object block
+					// (memql#3654). This scan matches fields by BARE name --
+					// it is a line regex, so nesting is invisible to it -- so
+					// record the leaf too: @relationship(field="lineage.originatingPlanId")
+					// does annotate the field written as `originatingPlanId`.
+					if dot := strings.LastIndex(rm[1], "."); dot >= 0 {
+						annotated[rm[1][dot+1:]] = true
+					}
 				}
 			}
 			// Flag id-bearing fields lacking an annotation + not exempted.
