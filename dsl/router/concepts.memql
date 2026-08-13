@@ -20,7 +20,7 @@ concept budget {
   resetAt          datetime  @description("The next UTC moment the period rolls over. The router uses this to decide whether to reset alertSent.")
   active           bool    @default("true")  @description("When false the budget is ignored (calls proceed unchecked). Useful for temporary overrides during incident response.")
 
-  @relationship(type="interactsWith", field="scopeId", target=agent, direction="outgoing")
+  @relationship(type="references", field="scopeId", target=agent, direction="outgoing")
 }
 
 /// One AI invocation recorded by the memQL AI Router. Every call through the router -- agent

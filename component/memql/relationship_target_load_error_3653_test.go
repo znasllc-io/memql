@@ -71,7 +71,7 @@ func TestUnresolvableRelationshipTargetFailsTheLoad(t *testing.T) {
 concept ticket {
   assigneeId  string  @description("Who it is assigned to.")
 
-  @relationship(type="interactsWith", field="assigneeId", target="v1:acme:usr", direction="outgoing")
+  @relationship(type="references", field="assigneeId", target="v1:acme:usr", direction="outgoing")
 }
 `)
 
@@ -98,7 +98,7 @@ func TestResolvableRelationshipTargetStillLoads(t *testing.T) {
 concept ticket {
   assigneeId  string  @description("Who it is assigned to.")
 
-  @relationship(type="interactsWith", field="assigneeId", target="v1:acme:user", direction="outgoing")
+  @relationship(type="references", field="assigneeId", target="v1:acme:user", direction="outgoing")
 }
 `)
 	user := parseFixtureConcept(t, "v1/acme/user", `
@@ -127,7 +127,7 @@ func TestUnresolvableTargetSuggestsTheLikelyConcept(t *testing.T) {
 concept ticket {
   assigneeId  string  @description("Who it is assigned to.")
 
-  @relationship(type="interactsWith", field="assigneeId", target="v1:acme:usr", direction="outgoing")
+  @relationship(type="references", field="assigneeId", target="v1:acme:usr", direction="outgoing")
 }
 `)
 	// Registered, so the typo above has an obvious intended neighbour.

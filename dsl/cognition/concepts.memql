@@ -21,7 +21,7 @@ concept audioOverride {
   mode      enum("always_on", "always_off", "mirror_user")! @description("Effective publication state. The bridge gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses TTS while letting text replies still flow to chat; mirror_user honours the user's current mic state, querying it at TTS-start time (not per-frame).")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="agentId", target=agent, direction="outgoing")
 }
 
 /// A streaming text chunk emitted incrementally during AI response generation. The frontend
@@ -113,9 +113,9 @@ concept participant {
   userId  string  @description("External user ID (for human participants).")
   hidden  bool  @default(false)  @description("When true, the participant is present in the space for routing purposes but is never rendered in participant-facing UI (PresencePanel, invite lists, etc.).")
 
-  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="agentId", target=agent, direction="outgoing")
   @relationship(type="parent", field="userId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", field="forUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="forUserId", target=user, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/participant/presence/concept.memql ----
@@ -248,8 +248,8 @@ concept utterance {
   utteranceType  enum("speech", "text", "action", "system")!  @description("Type of utterance.")
   videoId  string  @description("ID of associated video media asset.")
 
-  @relationship(type="interactsWith", field="participantId", target=participant, direction="outgoing")
-  @relationship(type="interactsWith", field="replyToId", target=utterance, direction="outgoing")
+  @relationship(type="references", field="participantId", target=participant, direction="outgoing")
+  @relationship(type="references", field="replyToId", target=utterance, direction="outgoing")
 }
 
 // ---- concepts/v1/cognition/videoOverride/concept.memql ----
@@ -270,7 +270,7 @@ concept videoOverride {
   mode      enum("always_on", "always_off", "mirror_user")! @description("Effective publication state. The voice-agent's avatar-gating path treats this exactly the same as the agent default once selected: always_on publishes unconditionally; always_off suppresses video while letting audio + chat continue; mirror_user honours the user's current video state at session start.")
   active    bool  @default("true") @description("Soft-revoke flag. Setting active=false collapses back to the agent default without losing the row's history.")
 
-  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="agentId", target=agent, direction="outgoing")
 }
 
 // videoOverride concept above. The product-specific cognition concepts

@@ -708,7 +708,7 @@ concept nestedExample {
 //                      exclusively.
 //     createdBy     -- the named field carries the id of the creator. The
 //                      only type permitted a metadata field source.
-//     interactsWith -- the default plain foreign-key edge. No structural
+//     references    -- the default plain foreign-key edge. No structural
 //                      constraint; the engine canonicalizes the id and
 //                      nothing more. Reach for this when none of the above
 //                      describes what the engine should DO with the edge.
@@ -744,16 +744,16 @@ concept relationshipExample {
 
   // Two plain foreign keys, both pointing at the same concept. There is no
   // structural relationship between a post and either person beyond "points
-  // at", so interactsWith is the right type -- NOT an invented verb, which
+  // at", so references is the right type -- NOT an invented verb, which
   // would refuse boot.
   //
   // Structurally these two edges are identical, so `as` is what tells a
   // reader (and a label-scoped traversal) which is which. Without it they
   // are two indistinguishable shrugs.
-  @relationship(type="interactsWith", as="writtenBy", field="authorId", target=user, direction="outgoing")
+  @relationship(type="references", as="writtenBy", field="authorId", target=user, direction="outgoing")
   authorId   string
 
-  @relationship(type="interactsWith", as="reviewedBy", field="reviewerId", target=user, direction="outgoing")
+  @relationship(type="references", as="reviewedBy", field="reviewerId", target=user, direction="outgoing")
   reviewerId string
 
   // Plain data fields can sit next to relationships.

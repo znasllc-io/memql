@@ -2272,7 +2272,7 @@ func provenanceLeafFromJSON(raw json.RawMessage, leaf string) string {
 // fetchNodesByJSONFieldValues / fetchNodesByNodeFieldValues
 // (executor_mutation.go) each call it with an enumerated `id IN (...)` or
 // `<field> IN (...)` set on behalf of parentOf / childOf / contains / owns /
-// interactsWith / createdBy. Those three are its only live callers, and all
+// references / createdBy. Those three are its only live callers, and all
 // three pass a nil `cmp`.
 //
 // WHO DOES NOT CALL IT (memql#3397, worth stating because the investigation
@@ -2316,7 +2316,7 @@ func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExp
 	// That matters more here than a short page does, because this path is what
 	// the RELATIONSHIP resolvers look ids up through (fetchNodesByIds /
 	// fetchNodesByJSONFieldValues / fetchNodesByNodeFieldValues, on behalf of
-	// parentOf / childOf / contains / owns / interactsWith / createdBy). Those
+	// parentOf / childOf / contains / owns / references / createdBy). Those
 	// callers enumerate the ids they want and read an id's ABSENCE from the
 	// result as a dangling reference -- fetchNodesByIds logs "memql reference
 	// missing; skipping node" and hands back a smaller graph bundle. So a

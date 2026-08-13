@@ -1288,6 +1288,17 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		if strings.TrimSpace(def.Type) == "" {
 			return RelationshipDefinition{}, fmt.Errorf("type is required")
 		}
+		// A spelling that was RENAMED gets its own hint. The generic message
+		// below suggests as="<whatever you wrote>", which for a renamed
+		// structural type is actively misleading -- it would send the author to
+		// write as="interactsWith" on an edge whose structural type is the thing
+		// that actually moved (memql#3663).
+		if renamed, ok := renamedRelationshipTypes[strings.ToLower(strings.ReplaceAll(strings.TrimSpace(def.Type), "_", ""))]; ok {
+			return RelationshipDefinition{}, fmt.Errorf(
+				"relationship type %q was renamed to %q. Change type=%q to type=%q; nothing else about the edge changes",
+				def.Type, renamed, def.Type, renamed)
+		}
+
 		// The error has to name the way OUT, not just the refusal. `type` is a
 		// closed structural set and always will be, so an author reaching for a
 		// domain verb has to be told where it belongs -- otherwise their only
@@ -1296,7 +1307,7 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		// cost an engine release to discover (memql#3652).
 		return RelationshipDefinition{}, fmt.Errorf(
 			"relationship type %q is invalid. Structural types are: %s. "+
-				"For a domain verb, use: type=\"interactsWith\", as=%q",
+				"For a domain verb, use: type=\"references\", as=%q",
 			def.Type, strings.Join(structuralRelationshipTypes(), ", "), def.Type)
 	}
 

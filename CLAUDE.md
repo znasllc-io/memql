@@ -1476,12 +1476,12 @@ concept agent {
 declares a cross-concept edge, and the two axes must not be confused:
 
 ```memql
-@relationship(type="interactsWith", as="respondsAs", field="agentId", target=agent, direction="outgoing")
+@relationship(type="references", as="respondsAs", field="agentId", target=agent, direction="outgoing")
 ```
 
 - **`type`** — what the ENGINE does with the edge. A **closed** set the engine
   owns: `parent`, `owns`, `createdBy`, `alias`, `equals`, `contains`,
-  `interactsWith`. It drives id canonicalization, traversal, and the
+  `references`. It drives id canonicalization, traversal, and the
   collection/reference node-type invariants. An unrecognized value **refuses
   boot** — the error names the `as=` form as the way out.
 - **`as`** — what the edge MEANS to the domain (`assignedTo`, `repliesTo`).

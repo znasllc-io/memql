@@ -5,7 +5,8 @@ package memql
 //
 // Three descriptions of that vocabulary used to exist and two were wrong,
 // including the public docs a downstream repo codes against: memql.md
-// documented `aliases` and `interactions` (actual: `alias`, `interactsWith`)
+// documented `aliases` and `interactions` (actual: `alias`, and the type now
+// spelled `references` after memql#3663)
 // and omitted `equals` entirely, so a client following our own reference
 // never matched. The drift was possible because the values were spelled at
 // seven call sites with nothing tying them to the documentation.
@@ -44,13 +45,13 @@ import (
 // the exported set). Adding an edge label means adding it here, which is the
 // moment to decide whether it belongs on the wire and in the docs.
 var edgeLabelIdentifiers = map[string]string{
-	"GraphEdgeLabelChild":         GraphEdgeLabelChild,
-	"GraphEdgeLabelAlias":         GraphEdgeLabelAlias,
-	"GraphEdgeLabelEquals":        GraphEdgeLabelEquals,
-	"GraphEdgeLabelInteractsWith": GraphEdgeLabelInteractsWith,
-	"GraphEdgeLabelCreatedBy":     GraphEdgeLabelCreatedBy,
-	"GraphEdgeLabelContains":      GraphEdgeLabelContains,
-	"GraphEdgeLabelOwns":          GraphEdgeLabelOwns,
+	"GraphEdgeLabelChild":      GraphEdgeLabelChild,
+	"GraphEdgeLabelAlias":      GraphEdgeLabelAlias,
+	"GraphEdgeLabelEquals":     GraphEdgeLabelEquals,
+	"GraphEdgeLabelReferences": GraphEdgeLabelReferences,
+	"GraphEdgeLabelCreatedBy":  GraphEdgeLabelCreatedBy,
+	"GraphEdgeLabelContains":   GraphEdgeLabelContains,
+	"GraphEdgeLabelOwns":       GraphEdgeLabelOwns,
 }
 
 // edgeLabelDocsHeading anchors the authoritative table in the public guide.

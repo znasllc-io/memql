@@ -53,7 +53,7 @@ func TestRelationshipAsKwargIsOffered(t *testing.T) {
 // with "a", so a prefix of "a" must narrow to exactly it.
 func TestRelationshipAsKwargPrefixFilter(t *testing.T) {
 	got := kwargCompletions(t, `concept ticket {
-  @relationship(type="interactsWith", a`)
+  @relationship(type="references", a`)
 	if !got["as"] {
 		t.Errorf("prefix `a` inside @relationship( should offer `as`, got %v", got)
 	}
@@ -77,7 +77,7 @@ func TestRelationshipAsKwargPrefixFilter(t *testing.T) {
 // invented label vocabulary.
 func TestRelationshipAsValueOffersNoClosedList(t *testing.T) {
 	got := kwargCompletions(t, `concept ticket {
-  @relationship(type="interactsWith", as="`)
+  @relationship(type="references", as="`)
 
 	if got["v1:reference:node"] || got["v1:reference:order"] {
 		t.Errorf("as= must not offer concepts -- that is the target= position, got %v", got)
@@ -106,7 +106,7 @@ func hoverContainsAt(t *testing.T, src string, line, col int) string {
 // to match elsewhere in the language.
 func TestRelationshipKwargHover(t *testing.T) {
 	// One line, so the columns below are unambiguous.
-	const src = `  @relationship(type="interactsWith", as="assignedTo", field="agentId", target=agent, direction="outgoing")`
+	const src = `  @relationship(type="references", as="assignedTo", field="agentId", target=agent, direction="outgoing")`
 
 	cases := []struct {
 		name        string
@@ -208,17 +208,17 @@ func TestRelationshipAxesDiagnostics(t *testing.T) {
 			name:     "an invented structural type names the way out",
 			src:      `concept t {` + "\n" + `  @relationship(type="assignedTo", field="a", target=b, direction="outgoing")` + "\n" + `}`,
 			wantCode: "relationship-type-unknown",
-			wantIn:   `type="interactsWith", as="assignedTo"`,
+			wantIn:   `type="references", as="assignedTo"`,
 		},
 		{
 			name:     "an upper-case as label is malformed",
-			src:      `concept t {` + "\n" + `  @relationship(type="interactsWith", as="AssignedTo", field="a", target=b, direction="outgoing")` + "\n" + `}`,
+			src:      `concept t {` + "\n" + `  @relationship(type="references", as="AssignedTo", field="a", target=b, direction="outgoing")` + "\n" + `}`,
 			wantCode: "relationship-as-malformed",
 			wantIn:   "lowerCamelCase",
 		},
 		{
 			name:     "an underscored as label is malformed",
-			src:      `concept t {` + "\n" + `  @relationship(type="interactsWith", as="assigned_to", field="a", target=b, direction="outgoing")` + "\n" + `}`,
+			src:      `concept t {` + "\n" + `  @relationship(type="references", as="assigned_to", field="a", target=b, direction="outgoing")` + "\n" + `}`,
 			wantCode: "relationship-as-malformed",
 			wantIn:   "lowerCamelCase",
 		},
@@ -253,10 +253,10 @@ func TestRelationshipAxesDiagnostics(t *testing.T) {
 func TestRelationshipAxesDiagnosticsStayQuietOnValidInput(t *testing.T) {
 	valid := []string{
 		`  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")`,
-		`  @relationship(type="interactsWith", as="respondsAs", field="agentId", target=agent, direction="outgoing")`,
+		`  @relationship(type="references", as="respondsAs", field="agentId", target=agent, direction="outgoing")`,
 		`  @relationship(type="parent", as="belongsToSpace", field="spaceId", target=space, direction="outgoing")`,
 		// A verb nobody has ever used before is still legal -- that is the point.
-		`  @relationship(type="interactsWith", as="frobnicatesWith2", field="x", target=y, direction="outgoing")`,
+		`  @relationship(type="references", as="frobnicatesWith2", field="x", target=y, direction="outgoing")`,
 		// Case / underscore insensitivity on the TYPE mirrors
 		// canonicalRelationshipType's normalisation. Uses createdBy rather
 		// than the retired dependsOn: this list is "legal input", and
@@ -277,24 +277,24 @@ func TestRelationshipAxesDiagnosticsStayQuietOnValidInput(t *testing.T) {
 
 // TestRelationshipWrapperSignatureHelp covers the traversal half. Before
 // memql#3661 the wrappers were invisible to sense entirely -- absent from
-// BuiltinFunctions, so SignatureHelp returned nil on `interactsWith(` -- and
+// BuiltinFunctions, so SignatureHelp returned nil on `references(` -- and
 // nothing in the stack could express two arities anyway.
 func TestRelationshipWrapperSignatureHelp(t *testing.T) {
 	svc := New(nil)
 
 	t.Run("both readings are offered for a labelled function", func(t *testing.T) {
-		src := "interactsWith("
+		src := "references("
 		res := svc.SignatureHelp(src, 1, len(src)+1)
 		if res == nil {
-			t.Fatal("no signature help for interactsWith( -- the traversal surface is invisible again")
+			t.Fatal("no signature help for references( -- the traversal surface is invisible again")
 		}
 		if len(res.Signatures) != 2 {
 			t.Fatalf("expected both readings, got %d: %+v", len(res.Signatures), res.Signatures)
 		}
-		if res.Signatures[0].Label != "interactsWith(expr)" {
+		if res.Signatures[0].Label != "references(expr)" {
 			t.Errorf("the unscoped reading should come first, got %q", res.Signatures[0].Label)
 		}
-		if res.Signatures[1].Label != "interactsWith(as, expr)" {
+		if res.Signatures[1].Label != "references(as, expr)" {
 			t.Errorf("second reading should be the label-scoped form, got %q", res.Signatures[1].Label)
 		}
 		if res.ActiveSignature != 0 {
@@ -303,7 +303,7 @@ func TestRelationshipWrapperSignatureHelp(t *testing.T) {
 	})
 
 	t.Run("past the comma the label-scoped reading is active", func(t *testing.T) {
-		src := `interactsWith("assignedTo", `
+		src := `references("assignedTo", `
 		res := svc.SignatureHelp(src, 1, len(src)+1)
 		if res == nil {
 			t.Fatal("no signature help past the comma")
@@ -319,7 +319,7 @@ func TestRelationshipWrapperSignatureHelp(t *testing.T) {
 
 	t.Run("every function that takes the form offers both", func(t *testing.T) {
 		for _, fn := range []string{"parentOf", "childOf", "aliasOf", "equals",
-			"interactsWith", "owns", "createdBy"} {
+			"references", "owns", "createdBy"} {
 			src := fn + "("
 			res := svc.SignatureHelp(src, 1, len(src)+1)
 			if res == nil || len(res.Signatures) != 2 {
@@ -371,7 +371,7 @@ func TestRelationshipTypeValueCompletion(t *testing.T) {
 	t.Run("the structural set is offered", func(t *testing.T) {
 		got := kwargCompletions(t, `concept ticket {
   @relationship(type="`)
-		for _, want := range []string{"parent", "interactsWith", "owns", "createdBy",
+		for _, want := range []string{"parent", "references", "owns", "createdBy",
 			"contains", "alias", "equals"} {
 			if !got[want] {
 				t.Errorf("type= should offer the structural type %q, got %v", want, got)

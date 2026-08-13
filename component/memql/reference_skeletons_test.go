@@ -138,7 +138,7 @@ func TestReferenceRelationshipsAreValid(t *testing.T) {
 						"engine accepts -- an author copying this gets a boot refusal. "+
 						"The closed set is canonicalRelationshipType in "+
 						"component/memql/relations.go; for a plain foreign key use "+
-						"type=\"interactsWith\"", where, index, rel.Type)
+						"type=\"references\"", where, index, rel.Type)
 				}
 
 				switch strings.ToLower(strings.TrimSpace(rel.Direction)) {

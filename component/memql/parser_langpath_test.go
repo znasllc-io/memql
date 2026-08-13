@@ -76,7 +76,7 @@ var representativeRuntimeQueries = []struct {
 	{"relationship childOf", `childOf(concept==v1:cluster:node)`},
 	{"relationship aliasOf", `aliasOf(concept==v1:cluster:node)`},
 	{"relationship equals", `equals(concept==v1:cluster:node)`},
-	{"relationship interactsWith", `interactsWith(concept==v1:cluster:node)`},
+	{"relationship interactsWith", `references(concept==v1:cluster:node)`},
 	{"relationship contains (single-arg)", `contains(concept==v1:cluster:node)`},
 	{"relationship owns", `owns(concept==v1:cluster:node)`},
 	{"relationship createdBy", `createdBy(concept==v1:cluster:node)`},

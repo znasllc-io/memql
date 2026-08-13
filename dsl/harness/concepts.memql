@@ -76,8 +76,8 @@ concept step {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="planId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", as="dependsOn", field="dependsOn", target=step, direction="outgoing")
-  @relationship(type="interactsWith", field="assignedAgent", target=agent, direction="outgoing")
+  @relationship(type="references", as="dependsOn", field="dependsOn", target=step, direction="outgoing")
+  @relationship(type="references", field="assignedAgent", target=agent, direction="outgoing")
 }
 
 /// What actually happened during a step -- the agent's own actions made durable and recall-able.
@@ -151,7 +151,7 @@ concept semanticMemory {
   provenanceMutation  string  @description("Name of the mutation that produced this semanticMemory version (createHarnessSemanticMemory / reinforceHarnessSemanticMemory / decayHarnessSemanticMemory / pruneHarnessSemanticMemory). Pairs with the engine-stamped createdBy intrinsic to name every transition in the audit trail.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", as="formedFrom", field="sourceEpisodes", target=observation, direction="outgoing")
+  @relationship(type="references", as="formedFrom", field="sourceEpisodes", target=observation, direction="outgoing")
 }
 
 /// The per-owner consolidation watermark (#586), stored as a node so the consolidation loop's

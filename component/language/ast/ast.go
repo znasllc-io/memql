@@ -93,15 +93,15 @@ type SortField struct {
 type RelationshipFunction string
 
 const (
-	RelParentOf      RelationshipFunction = "parentOf"
-	RelChildOf       RelationshipFunction = "childOf"
-	RelAliasOf       RelationshipFunction = "aliasOf"
-	RelEquals        RelationshipFunction = "equals"
-	RelInteractsWith RelationshipFunction = "interactsWith"
-	RelContains      RelationshipFunction = "contains"
-	RelOwns          RelationshipFunction = "owns"
-	RelCreatedBy     RelationshipFunction = "createdBy"
-	RelIds           RelationshipFunction = "ids"
+	RelParentOf   RelationshipFunction = "parentOf"
+	RelChildOf    RelationshipFunction = "childOf"
+	RelAliasOf    RelationshipFunction = "aliasOf"
+	RelEquals     RelationshipFunction = "equals"
+	RelReferences RelationshipFunction = "references"
+	RelContains   RelationshipFunction = "contains"
+	RelOwns       RelationshipFunction = "owns"
+	RelCreatedBy  RelationshipFunction = "createdBy"
+	RelIds        RelationshipFunction = "ids"
 )
 
 // ----------------------------------------------------------------------------
@@ -175,8 +175,8 @@ type RelationshipExpr struct {
 	Function RelationshipFunction
 	Target   ExpressionNode
 	// Label scopes the traversal to edges carrying that `as` domain label
-	// (memql#3656): `interactsWith("assignedTo", <expr>)` follows only the
-	// edges labelled assignedTo, while `interactsWith(<expr>)` follows all of
+	// (memql#3656): `references("assignedTo", <expr>)` follows only the
+	// edges labelled assignedTo, while `references(<expr>)` follows all of
 	// them. Empty means unscoped, which every traversal predating #3656 is.
 	//
 	// It is matched against RelationshipDefinition.As, the open vocabulary

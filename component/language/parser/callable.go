@@ -56,7 +56,7 @@ const (
 	// their own AST node types and argument shapes; not regular builtins.
 	CallableDirective
 	// CallableWrapper is a relationship wrapper function (parentOf / childOf /
-	// aliasOf / equals / interactsWith / owns / createdBy / ids). They take a
+	// aliasOf / equals / references / owns / createdBy / ids). They take a
 	// single inner expression and produce a RelationshipExpr.
 	CallableWrapper
 	// CallableRetired is a name the parser still recognises only to emit a
@@ -183,7 +183,7 @@ func callableParsers() map[string]callableEntry {
 // builtin.
 var relationshipWrapperNames = []string{
 	"parentof", "childof", "aliasof",
-	"equals", "interactswith",
+	"equals", "references",
 	"owns", "createdby", "ids",
 }
 

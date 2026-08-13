@@ -636,7 +636,7 @@ func relationEdgeTypes(name string) []string {
 	case "createdby":
 		return []string{strings.ToLower(GraphEdgeLabelCreatedBy)}
 	case "interactions":
-		return []string{strings.ToLower(GraphEdgeLabelInteractsWith)}
+		return []string{strings.ToLower(GraphEdgeLabelReferences)}
 	default:
 		return []string{}
 	}

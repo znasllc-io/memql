@@ -210,7 +210,7 @@ var KeywordArgs = map[string][]ArgSpec{
 		{Name: "periodSeconds", Type: "int", Doc: "Rate-limit window in seconds."},
 	},
 	"relationship": {
-		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, interactsWith."},
+		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, references."},
 		{Name: "field", Type: "string", Doc: "Local field holding the foreign key."},
 		{Name: "target", Type: "string", Doc: "Target concept id, e.g. \"v1:ns:concept\"."},
 		{Name: "direction", Type: "string", Doc: "\"outgoing\" or \"incoming\"."},

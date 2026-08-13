@@ -822,7 +822,7 @@ const relationshipAsLabelMaxLen = 64
 // such list and must never acquire one; that asymmetry is the whole point of
 // memql#3652, so only `type` is checked for membership here.
 var structuralRelationshipTypes = map[string]bool{
-	"parent": true, "alias": true, "equals": true, "interactswith": true,
+	"parent": true, "alias": true, "equals": true, "references": true,
 	"contains": true, "owns": true, "createdby": true,
 }
 
@@ -873,7 +873,7 @@ func relationshipAxesRule(source string) []Diagnostic {
 					Severity: SeverityError,
 					Message: "relationship type " + strconv.Quote(value) + " is invalid. `type` is a closed " +
 						"structural set -- what the engine DOES with the edge. For a domain verb use " +
-						"type=\"interactsWith\", as=" + strconv.Quote(value) + " (memql#3652)",
+						"type=\"references\", as=" + strconv.Quote(value) + " (memql#3652)",
 					Code: "relationship-type-unknown",
 				})
 			}

@@ -1170,7 +1170,7 @@ func annotationsAboveDeclaration(source, name string) []string {
 func completeRelationshipType(prefix string) []CompletionItem {
 	types := []struct{ name, doc string }{
 		{"parent", "Hierarchy: the named field carries the id of a logical parent. Traversable both ways (parentOf / childOf)."},
-		{"interactsWith", "The default plain foreign-key edge. No structural constraint -- the engine canonicalizes the id and nothing more. Reach for this plus an `as` label when none of the others describes what the engine should DO."},
+		{"references", "The default plain foreign-key edge. No structural constraint -- the engine canonicalizes the id and nothing more. Reach for this plus an `as` label when none of the others describes what the engine should DO."},
 		{"owns", "Ownership: the named field carries ids this row owns exclusively."},
 		{"createdBy", "Provenance: the named field carries the creator's id. The only type permitted a metadata field source."},
 		{"contains", "Containment: the named field carries ids of contained children. Required by @type(\"collection\")."},

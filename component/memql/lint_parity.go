@@ -7,7 +7,7 @@ package memql
 // runs a second tier of validators at boot (relationship-type canonicality,
 // the per-function contract gates, CQS, the dependency tree, per-kind
 // uniqueness, ...) that dslimports does not model. Two proven witness classes:
-// a non-canonical @relationship type ("references"), and a mutation that
+// a non-canonical @relationship type ("assignedTo"), and a mutation that
 // declares an arg it never references.
 //
 // Rather than re-implement those rules here (they would drift from the
