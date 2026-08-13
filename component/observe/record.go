@@ -30,6 +30,13 @@ func RedactedArg(name string) ArgKV { return ArgKV{Name: name, Value: nil, Redac
 // the v1:observability:invocation concept on the MemQL side and the
 // code_invocation hypertable on the Postgres side, so a Sink can
 // serialize directly without an intermediate type.
+//
+// One name diverges on purpose: Args lands in the `args` column of
+// code_invocation but is spelled `arguments` on the concept, because
+// `args` is a reserved engine namespace and cannot be a MemQL payload
+// property (memql#3613). The concept is a declaration of this table's
+// shape, not its storage -- nothing maps concept field to column, so
+// the SQL column name is unchanged.
 type Record struct {
 	FQN      string         // matches model.Node.ID for a Method/Func
 	Ts       time.Time      // start time
