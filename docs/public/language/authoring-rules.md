@@ -2267,6 +2267,65 @@ and rejected. **Always put spaces around a `-` you mean as an operator.**
 The reasoning, the candidate rule that was tried, and what it broke are
 recorded at `case '-'` in `component/language/parser/lexer.go`.
 
+## 29. A prompt's declaration must cover its template AND name a real provider (memql#3616)
+
+**Rule.** Two load-time checks now guard the `prompt` construct:
+
+1. Every root-scope variable the `.tmpl` reads must be declared in the
+   prompt body. A prompt whose template reads an undeclared input is
+   **refused at load** (a strict-boot skip).
+2. `@defaultProvider("...")` must name a `provider` the DSL tree
+   declares. A name nothing declares -- a typo, or a **policy** slug in
+   the provider slot -- **refuses boot**.
+
+**Why the first one bites.** A prompt's input schema compiles with
+`additionalProperties: false`, and `aiRuntime.Invoke` validates the
+caller's data **before** rendering the template. So a field the template
+reads but the body omits is not "an input the prompt happens to ignore"
+-- it is a field **no caller can ever supply**:
+
+```
+data validation failed: ... additionalProperties 'phase',
+  'agentTurnCounts', 'threadHolder', 'timeSinceLastHuman' not allowed
+```
+
+`cognitionPrediction` declared two fields while `component/polyphon`
+passed nine, and the caller swallowed the error into its pattern-based
+fallback -- so the entire predictive-cognition LLM path was dead, and
+looked like normal operation the whole time. The same class had already
+been fixed once by hand (the `directive` field on `cognitionReply`).
+
+The check is one-way: template reads must be declared, but a declared
+field the template never reads is inert and allowed. A prompt declaring
+**no** fields compiles to a nil schema, so nothing is rejected and the
+check does not apply.
+
+**Why the second one bites.** `@defaultProvider`, a policy slug and a
+provider name are all bare identifiers. A dangling name does **not**
+error at call time: `resolveProviderName` hands it through,
+`ChatStructuredProviderByName` misses, and the call falls through to the
+default provider -- so the prompt quietly runs on a model its author did
+not choose, leaving one INFO line on the structured path and nothing at
+all on the plain chat path.
+
+```memql
+@defaultProvider("strongReasoning")     // WRONG -- that is a `policy`
+@defaultProvider("streamClaudeSonnet")  // right -- a `provider`
+```
+
+A `@disabled` provider is still **declared**, so pointing at one stays
+legal: dependents degrading to the default is the documented lifecycle
+contract (#1081), not a mistake. The check is about the name existing,
+not about the lane being on.
+
+**Where it is enforced.** `validatePromptTemplateFields`
+(`component/memql/prompt_template_fields.go`), called from
+`LoadUnifiedPrompts`; and `ValidatePromptDefaultProviders`
+(`component/memql/prompt_default_provider.go`), called from engine
+bootstrap once both registries exist. Caller-side payload contracts are
+pinned next to the callers -- `integrations/agents/factory_prompt_contract_test.go`
+and `test/dslconformance/prompt_caller_payload_test.go`.
+
 ## 30. `??` is BLANK-coalescing, not null-coalescing (#1614 / memql#3627)
 
 **Rule.** `a ?? b` (and its longhand `coalesce(a, b)`) falls through to

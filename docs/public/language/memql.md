@@ -723,12 +723,16 @@ AI prompt templates with input schemas and default providers live in `dsl/<names
 @templateFile("prompts/cognitionPrediction.tmpl")
 /// Predict conversation trajectory for proactive cognition behavior
 prompt cognitionPrediction {
-  transcript  []object  @required @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object  @required @description("Available AI agents with name, role, and domains")
+  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
+  agents      []object! @description("Available AI agents with name, role, and domains")
+  phase       string    @description("Conversation phase off the session state machine.")
+  // ... one entry per variable the template renders; see the file for the full list
 }
 ```
 
 Logic prompts (routing / suggest / classification) use the structured-output path (`ChatStructuredProvider.CallChatStructured`); prose prompts (agent replies to users) use regular chat.
+
+**The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.

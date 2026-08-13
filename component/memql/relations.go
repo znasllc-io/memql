@@ -61,20 +61,19 @@ const (
 	relationshipTypeContains  = "contains"
 	relationshipTypeOwns      = "owns"
 	relationshipTypeCreatedBy = "createdBy"
-	// dependsOn models a DAG in-edge between rows (a step depends on other
-	// steps): an outgoing edge whose field is a []string of target ids. Used
-	// by the harness state model (v1:harness:step, #582). Registered so the
-	// engine accepts the concept; graph-expansion traversal of dependsOn edges
-	// is intentionally not wired here (no query needs it yet -- the DAG is read
-	// from the step's dependsOn field directly by the controller, #583).
-	relationshipTypeDependsOn = "dependsOn"
-	// formedFrom models a derivation in-edge: a row was synthesised from a set
-	// of source rows (a semanticMemory formed from sourceEpisodes observations).
-	// Outgoing, field is a []string of target ids. Used by the harness
-	// consolidation / semantic-memory model (v1:harness:semanticMemory, #586).
-	// Same treatment as dependsOn -- registered for concept load; graph-expansion
-	// traversal not wired (the source list is read from the field directly).
-	relationshipTypeFormedFrom = "formedFrom"
+	// `dependsOn` and `formedFrom` used to live here as structural types. They
+	// never were structural: their own comments recorded that graph-expansion
+	// traversal was deliberately unwired and the field was read directly by the
+	// controller, so the engine did nothing with either. They existed only
+	// because, at the time, there was no other way to say the word -- and each
+	// cost an engine release after a boot refusal took the cluster down
+	// (42aeff3b, d45efaa2).
+	//
+	// They are now `as` domain labels (memql#3655), which is the axis they
+	// always belonged on:
+	//
+	//   @relationship(type="interactsWith", as="dependsOn",  field="dependsOn", ...)
+	//   @relationship(type="interactsWith", as="formedFrom", field="sourceEpisodes", ...)
 )
 
 type relationshipRegistry struct {
@@ -104,8 +103,6 @@ var structuralRelationshipTypeSet = map[string]string{
 	"contains":      relationshipTypeContains,
 	"owns":          relationshipTypeOwns,
 	"createdby":     relationshipTypeCreatedBy,
-	"dependson":     relationshipTypeDependsOn,
-	"formedfrom":    relationshipTypeFormedFrom,
 }
 
 func canonicalRelationshipType(value string) (string, bool) {
