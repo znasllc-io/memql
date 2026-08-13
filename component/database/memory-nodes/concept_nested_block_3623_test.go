@@ -102,14 +102,21 @@ func TestNestedBlock_RequiredIsEnforced(t *testing.T) {
 // Closing it is a one-line change to the emitter, and the tree does not survive
 // it. Measured before deciding, not assumed:
 //
-//   - dsl/agents/plannerAgent.memql and trainerAgent.memql both seed
-//     `capabilities.domains` and `capabilities.tools`, neither declared by
-//     v1:agents:agent (the pre-#158 surface skillIds replaced). Both are
-//     @scope("perUser"), so closing the block breaks USER PROVISIONING.
-//   - v1:cognition:utterance.source takes seven undeclared keys from live
-//     writers, one load-bearing: `transcriptOnly`, written by
+//   - [FIXED, memql#3641] dsl/agents/plannerAgent.memql and trainerAgent.memql
+//     seeded `capabilities.domains` and `capabilities.tools`, the pre-#158
+//     surface skillIds replaced. Both wrote empty arrays and nothing but the
+//     legacy-row migration consumes that shape, so the seeds were deleted.
+//   - [FIXED, memql#3641] v1:cognition:utterance.source took seven undeclared
+//     keys from live writers, one load-bearing: `transcriptOnly`, written by
 //     sendRealtimeTranscriptUtterance and read back by
-//     cognition_utterance_auth_validation.go and cognition_handler.go.
+//     cognition_utterance_auth_validation.go and cognition_handler.go. All
+//     seven are now declared, and
+//     test/dslconformance/nested_block_writes_3641_test.go fails on the next
+//     undeclared key written into either block.
+//   - insertSystemActionUtterance merges an ARBITRARY caller-supplied map into
+//     the utterance source. Its keys are all declared today, but the writer is
+//     open by construction, so closing the block moves the next new key from a
+//     silent store to a failed insert on a path whose callers swallow the error.
 //   - assistant_skill_reconcile.go and integrations/agents/factory.go read an
 //     agent's capabilities object out of the DB and write it back wholesale, so
 //     every EXISTING row carrying a legacy key fails on write-back. A data
@@ -124,6 +131,11 @@ func TestNestedBlock_RequiredIsEnforced(t *testing.T) {
 // above are fixed, emit `additionalProperties: false` next to the `required`
 // this issue did ship and invert this test -- it is the flip's checklist, not a
 // claim that open is correct.
+//
+// Note what the three remaining blockers have in common: each is a block a
+// CALLER or a STORED ROW populates, and none of them is `preferences` -- the
+// block memql#3623 named as the risk, whose writers are all in-repo. That is
+// the argument for a per-concept flip landing before a tree-wide one.
 func TestNestedBlock_UndeclaredKeysStillAccepted(t *testing.T) {
 	c := nestedRequiredConcept(t)
 

@@ -103,7 +103,7 @@ automation generateResponse {
         participantId: siParticipantId ?? "",
         text:          steps.decide.result,
         replyToId:     utteranceId ?? "",
-        source:        { inputMethod: "si", agentId: agentId ?? "" }
+        source:        { outputMethod: "text", agentId: agentId ?? "" }
       )
     }
   }

@@ -34,9 +34,7 @@ seed agent trainerAgent {
     vision:       false
     voiceToVoice: false
     claw:         false
-    domains:      []
     keywords:     []
-    tools:        []
   }
 
   triggerBehavior {
