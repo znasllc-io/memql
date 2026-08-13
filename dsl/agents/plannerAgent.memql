@@ -46,9 +46,7 @@ seed agent plannerAgent {
     vision:       false
     voiceToVoice: false
     claw:         false
-    domains:      []
     keywords:     []
-    tools:        []
   }
 
   triggerBehavior {

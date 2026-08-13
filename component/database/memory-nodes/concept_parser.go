@@ -1601,19 +1601,33 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 			}
 			// `additionalProperties: false` is the OTHER half of memql#3623 and
 			// is deliberately NOT emitted here yet. The tree does not survive it
-			// today; measured, not assumed:
+			// today; measured, not assumed.
 			//
-			//   - dsl/agents/plannerAgent.memql + trainerAgent.memql seed
-			//     `capabilities.domains` and `capabilities.tools`, neither of
-			//     which the concept declares (the pre-#158 surface skillIds
-			//     replaced). Both are @scope("perUser") seeds, so closing the
-			//     block fails USER PROVISIONING on every new user.
-			//   - v1:cognition:utterance.source takes seven undeclared keys from
-			//     live writers, one of them load-bearing: `transcriptOnly`
-			//     (dsl/cognition/mutations.memql sendRealtimeTranscriptUtterance)
-			//     is read back by cognition_utterance_auth_validation.go and
-			//     cognition_handler.go. Also `feedbackReason`, `trigger`,
-			//     `severity`, `agentName`, `topic`, `idempotencyKey`.
+			// Step 1 of memql#3641's sequence has SHIPPED -- the two
+			// declaration blockers below are closed, and
+			// test/dslconformance/nested_block_writes_3641_test.go now fails on
+			// any new undeclared key written into either block:
+			//
+			//   - [FIXED] dsl/agents/plannerAgent.memql + trainerAgent.memql
+			//     seeded `capabilities.domains` / `capabilities.tools`, the
+			//     pre-#158 surface skillIds replaced. Both wrote empty arrays,
+			//     and skill_migration.go is the only remaining consumer of that
+			//     shape (it reads legacy ROWS), so the seeds were deleted rather
+			//     than the retired fields re-declared.
+			//   - [FIXED] v1:cognition:utterance.source took seven undeclared
+			//     keys from live writers; all seven are now declared on the
+			//     concept, including the load-bearing `transcriptOnly` that
+			//     cognition_handler.go and cognition_utterance_auth_validation.go
+			//     read back.
+			//
+			// What still blocks the flip:
+			//
+			//   - insertSystemActionUtterance (integrations/cognition/ai_responder.go)
+			//     merges an ARBITRARY caller-supplied map[string]string into the
+			//     source. Every key it passes today is declared, but the writer
+			//     is open by construction, so closing the block turns the next
+			//     un-declared key from a silent store into a failed insert on a
+			//     path whose callers treat the error as non-fatal.
 			//   - assistant_skill_reconcile.go and integrations/agents/factory.go
 			//     (extendAgent) read an agent's capabilities object out of the
 			//     DB and write it back wholesale, so any EXISTING row still
@@ -1631,9 +1645,16 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 			// So the exposure memql#3623 names is still open: an undeclared key
 			// inside a nested block is accepted, and a typo'd write to
 			// v1:identity:user.preferences lands beside the real field while the
-			// computer-use kill switch keeps its old value. Fix the writers
-			// above first; concept_nested_block_3623_test.go characterises the
-			// open state and is where the flip gets pinned.
+			// computer-use kill switch keeps its old value.
+			// concept_nested_block_3623_test.go characterises the open state and
+			// is where the flip gets pinned.
+			//
+			// The three remaining blockers are all about blocks a CALLER or a
+			// STORED ROW populates, and none of them is about `preferences`
+			// itself -- which is the block memql#3623 named as the risk. That
+			// asymmetry is why the next step is per-concept rather than
+			// tree-wide: closing one block whose writers are all in-repo does
+			// not wait on a data migration for another.
 
 			// A @variant nested one level down is tied to a discriminator
 			// sibling INSIDE this block, mirroring the root-level rule.
