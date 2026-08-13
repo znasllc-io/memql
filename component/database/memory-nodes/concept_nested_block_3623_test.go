@@ -127,6 +127,11 @@ func TestNestedBlock_RequiredIsEnforced(t *testing.T) {
 //     client-supplied `object` into one. Closing is a wire-contract change for
 //     every bundle and every client.
 //
+// @closed (memql#3641) is the per-block opt-in that closes ONE block without
+// waiting on any of those: v1:identity:user.preferences carries it now, and
+// concept_closed_block_3641_test.go covers it. This test is about the DEFAULT,
+// which is still open.
+//
 // So this test asserts the CURRENT behaviour deliberately. When the writers
 // above are fixed, emit `additionalProperties: false` next to the `required`
 // this issue did ship and invert this test -- it is the flip's checklist, not a
