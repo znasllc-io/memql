@@ -174,6 +174,15 @@ func (*BinaryComparisonExpr) expressionNode() {}
 type RelationshipExpr struct {
 	Function RelationshipFunction
 	Target   ExpressionNode
+	// Label scopes the traversal to edges carrying that `as` domain label
+	// (memql#3656): `interactsWith("assignedTo", <expr>)` follows only the
+	// edges labelled assignedTo, while `interactsWith(<expr>)` follows all of
+	// them. Empty means unscoped, which every traversal predating #3656 is.
+	//
+	// It is matched against RelationshipDefinition.As, the open vocabulary
+	// #3652 introduced -- so like `as` itself it is never checked against a
+	// list. A label matching no edge yields no rows; it is not an error.
+	Label string
 }
 
 func (*RelationshipExpr) node()           {}

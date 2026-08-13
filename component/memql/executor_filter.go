@@ -703,7 +703,7 @@ func (e *MemQLEngine) resolveCanonicalIdComparisons(ctx context.Context, expr Ex
 		if target == n.Target {
 			return expr
 		}
-		return &RelationshipExpression{Function: n.Function, Target: target}
+		return &RelationshipExpression{Function: n.Function, Target: target, Label: n.Label}
 	default:
 		return expr
 	}

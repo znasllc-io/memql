@@ -82,10 +82,17 @@ func (b *graphBundleBuilder) addNode(node *memqlv1.MemoryNode) {
 	b.order = append(b.order, id)
 }
 
-// addEdge appends one traversed edge. label must be a GraphEdgeLabel*
-// constant -- TestGraphEdgeLabelsAreEmittedFromTheConstantSet fails on a
-// bare string literal reaching this call.
-func (b *graphBundleBuilder) addEdge(fromId, toId, label string, depth int) {
+// addEdge appends one traversed edge.
+//
+// label is the STRUCTURAL edge label and must be a GraphEdgeLabel* constant --
+// TestGraphEdgeLabelsAreEmittedFromTheConstantSet fails on a bare string
+// literal reaching this call. as is the DOMAIN label the traversed
+// relationship declared (memql#3652 / #3656), empty when it declared none.
+//
+// The two are independent axes and are deliberately not interchangeable: an
+// edge is `child` because of what the engine did with it, and `assignedTo`
+// because of what its author said it means.
+func (b *graphBundleBuilder) addEdge(fromId, toId, label, as string, depth int) {
 	if b == nil {
 		return
 	}
@@ -99,6 +106,7 @@ func (b *graphBundleBuilder) addEdge(fromId, toId, label string, depth int) {
 		Type:   edgeLabel,
 		FromId: source,
 		ToId:   target,
+		As:     strings.TrimSpace(as),
 	}
 	if depth >= 0 {
 		edge.Depth = int32(depth)

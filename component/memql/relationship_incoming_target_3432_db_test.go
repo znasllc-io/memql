@@ -183,6 +183,7 @@ func TestRelationshipChildOf_IncomingRelationshipReachesEveryChild(t *testing.T)
 		eng.relationships.ByConcept[hubConcept],
 		relationshipTypeParent,
 		[]string{relationshipDirectionIncoming, relationshipDirectionBidirectional},
+		nil, // unlabelled: this fixture predates the memql#3656 `as` label
 	), 1, "the fixture hub must declare exactly one incoming parent relationship")
 
 	const (

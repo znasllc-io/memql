@@ -323,6 +323,10 @@ type="interactsWith", as="assignedTo"
 (`type="parent" as="belongsToSpace"` is legal). Two edges may share a label; a
 label-scoped traversal returns their union.
 
+A label is not write-only metadata: it is readable from a query (see
+[Label-scoped traversal](#label-scoped-traversal)) and travels on the wire as
+`result.bundle.edges[].as`.
+
 **Common Mistake: Confusing `parent` vs `child`**
 
 When a concept has a field that points TO another concept (like `spaceId` pointing to a space), use `type="parent"`. The relationship type describes the direction from the current node's perspective.
@@ -360,6 +364,12 @@ Two rules explain every difference between that list and the `type` table above:
 Match on these exact strings. The engine emits them from one exported constant
 set (`GraphEdgeLabels()` in `component/memql`), and a test fails if this table
 and that set disagree, so what is written here is what arrives on the wire.
+
+Alongside `type`, each edge carries `as` — the domain label of the relationship
+it was traversed through, empty when that relationship declared none. The two
+are independent: an edge is `child` because of what the engine did with it, and
+`assignedTo` because of what its author said it means. `as` is additive, so a
+client that ignores it sees exactly the previous contract.
 
 ## Executing Queries
 
@@ -566,6 +576,30 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `interactsWith(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
 | `createdBy(expr)` | Resolves creator nodes using payload or table-backed metadata.                                         |
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
+
+#### Label-scoped traversal
+
+Every function above except `contains` and `ids` takes an optional leading
+string: the [`as` label](#type-and-as-are-two-independent-axes) to scope the
+traversal to.
+
+```
+interactsWith(expr)                    # every interactsWith edge
+interactsWith("respondsAs", expr)      # only the edges labelled respondsAs
+parentOf("belongsToSpace", expr)       # structural types take it too
+```
+
+- The one-argument form is unchanged: it follows every edge of that type.
+- Where several edges on a concept share a label, the traversal follows their
+  **union** — that is the useful reading of "every edge meaning *respondsAs*".
+- A label matching no edge returns **empty, not an error**.
+- `contains` does not take the form: its two-argument slot is already the
+  substring search `contains(text, substr)`, and a third reading of
+  `(string, X)` could only be resolved by an arbitrary tie-break. Unlabelled
+  `contains(expr)` traversal is unaffected.
+- `ids` does not take it either, and says so rather than ignoring it: `ids()`
+  projects the rows it is given and follows no edge, so a label on it is
+  always a mistake.
 
 Relationship outputs can be combined with filters:
 `contains(id=="project-123") && status=="open" && priority<=2`

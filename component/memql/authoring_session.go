@@ -411,7 +411,7 @@ func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Sp
 		if err != nil {
 			return nil, err
 		}
-		return &RelationshipExpression{Function: node.Function, Target: target}, nil
+		return &RelationshipExpression{Function: node.Function, Target: target, Label: node.Label}, nil
 	default:
 		// Comparisons, builtins, literals, etc. carry no nested spec refs.
 		return cloneExpressionNode(expr), nil
