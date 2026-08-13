@@ -2193,3 +2193,59 @@ So the fail-open direction above is real but mostly out of reach of a
 typo now. It remains reachable by a caller-supplied id, and by a field
 declared on the concept that is simply absent on a given row -- which is
 the case the null semantics get deliberately right.
+
+## 28. `??` is BLANK-coalescing, not null-coalescing (#1614 / memql#3627)
+
+**Rule.** `a ?? b` (and its longhand `coalesce(a, b)`) falls through to
+`b` when `a` is absent, null, **or a string that is empty or contains
+only whitespace**. It does *not* fall through for `false`, `0`, `[]` or
+`{}` — those are values.
+
+```memql
+// with the caller passing v:
+//   false   -> false        kept
+//   0       -> 0            kept
+//   []      -> []           kept
+//   {}      -> {}           kept
+//   ""      -> "DEFAULT"    REWRITTEN
+//   " "     -> "DEFAULT"    REWRITTEN   <-- the sharp edge
+//   "\t\n"  -> "DEFAULT"    REWRITTEN
+//   "value" -> "value"      kept
+insert { v: args.v ?? "DEFAULT" }
+```
+
+**Why it bites you.** The operator is called null-coalescing everywhere,
+including in this repo, so nothing prepares you for the third line: **a
+user who deliberately clears a text field gets the default written back
+over their clearing**, and a field holding a single space is treated as
+absent when it is not absent by any reading.
+
+**Why it stays this way.** The empty-string behaviour is deliberate
+(#1614): `f: args.f ?? ""` has to be able to land an explicit empty
+string, because a `null` there fails JSON-schema validation on a
+non-required string field. The whole corpus is written against that
+rule, and the ARGUMENT position has no other spelling — `@default` on an
+args field is rejected at load (#991), so `??` is the only mechanism
+that fills a value. Changing the operator under the corpus to settle a
+naming complaint would be the larger defect.
+
+**What to do about it.** When a stored value must survive a caller
+sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
+— the targeted opt-out. It drops a named field from the delta when the
+incoming value is empty and the stored one is not, which is exactly the
+"do not let a blank overwrite this" rule that `??` does not express.
+
+**One rule, one implementation.** Both spellings resolve through
+`coalesceSelect` in `component/memql/mutation_templates.go`: the FINAL
+arm is the ultimate fallback and is returned even when blank, while
+every NON-final arm is skipped when nil, missing, or blank. They were
+two implementations that disagreed on a blank middle arm until
+memql#3627 (`coalesce(args.a, "", args.c)` with nothing resolving gave
+`""` from a payload slot and `nil` from an `id:` slot). Pinned by
+`coalesce_array_missing_3627_test.go`.
+
+**A missing arg contributes NOTHING to either container.** An absent
+optional arg omits its key from an object literal and omits its element
+from an array literal — `{ v: [args.a, args.b, "c"] }` with only `b`
+supplied renders `{"v":["B","c"]}`, not a `null` hole (memql#3627). An
+explicit `null` the author wrote is preserved in both.

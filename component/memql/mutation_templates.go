@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -329,17 +330,26 @@ func (e *mutationTemplateEvaluator) evalValue(ctx context.Context, v any) (any, 
 		}
 		return out, nil
 	case []any:
-		out := make([]any, len(t))
+		// Omit missing optional args, exactly as the map branch above does.
+		// Preserve explicit nulls, also exactly as the map branch does.
+		//
+		// This branch used to convert the sentinel to `nil` instead, so
+		// `[args.a, args.b, "c"]` with only b supplied stored
+		// `[null, "B", "c"]` -- a hole the caller never sent, from the same
+		// input the sibling container drops (memql#3627). Two containers
+		// answering differently for one input is a rule nobody can hold, and
+		// the null is the worse of the two answers: a typed `items` schema
+		// rejects it loudly and an untyped one stores it silently.
+		out := make([]any, 0, len(t))
 		for i := range t {
 			ev, err := e.evalValue(ctx, t[i])
 			if err != nil {
 				return nil, fmt.Errorf("evaluate [%d]: %w", i, err)
 			}
 			if isMissing(ev) {
-				out[i] = nil
-			} else {
-				out[i] = ev
+				continue
 			}
+			out = append(out, ev)
 		}
 		return out, nil
 	default:
@@ -749,48 +759,10 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		return e.engine.canonicalizeIdValue(ctx, fmt.Sprintf("%v", ev), t.Concept)
 	case *languageParser.CoalesceExpr:
-		// #1614 selection, matching evalCoalesce and the automation
-		// evaluator's coalesceFromArgs: the FINAL argument is the
-		// ultimate fallback and is returned even when it resolves to "",
-		// while every NON-final argument is skipped when it is nil,
-		// missing, or a blank string.
-		//
-		// This slot (id / createdAt / parent / aliasOf templates)
-		// previously skipped only nil/missing, so a blank non-final arm
-		// won and `id: args.roleId ?? args.slug` yielded "" when roleId
-		// was the empty string clients send for an absent optional --
-		// which makes the engine mint a RANDOM id instead of the
-		// deterministic fallback, silently turning idempotent upserts
-		// into duplicate rows (memql#2772 review).
-		for i, a := range t.Args {
-			ev, err := e.evalParserExpression(ctx, a)
-			if err != nil {
-				return nil, err
-			}
-			if i == len(t.Args)-1 {
-				// Normalise the sentinel away: a missing final arm is
-				// "no value", matching coalesceFromArgs. (evalCoalesce
-				// returns "" rather than nil for the blank-then-missing
-				// corner; not observable here, since evalStringMaybe maps
-				// nil and missingValue{} alike to "" for these slots.)
-				// The normalisation matters because
-				// IsTruthy(missingValue{}) is TRUE, so leaking the
-				// sentinel would make an all-missing coalesce read as
-				// truthy inside And/Or/Not.
-				if isMissing(ev) {
-					return nil, nil
-				}
-				return ev, nil
-			}
-			if ev == nil || isMissing(ev) {
-				continue
-			}
-			if s, isStr := ev.(string); isStr && strings.TrimSpace(s) == "" {
-				continue
-			}
-			return ev, nil
-		}
-		return nil, nil
+		// One selection rule, shared with the string spelling (memql#3627).
+		return coalesceSelect(len(t.Args), func(i int) (any, error) {
+			return e.evalParserExpression(ctx, t.Args[i])
+		})
 	case *languageParser.CondExpr:
 		cond, err := e.evalParserExpression(ctx, t.Condition)
 		if err != nil {
@@ -829,9 +801,13 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		}
 		return !IsTruthy(ev), nil
 	case *languageParser.BinaryComparisonExpr:
-		// The one comparison shape the builtin-arg grammar emits since
-		// memql#2654 (relationals before it, ==/!= joined by the
-		// normalization). Template cond() predicates land here.
+		// The EXPRESSION-LED comparison shape: both operands are full
+		// expressions. The builtin-arg grammar emits it for a
+		// non-identifier-led LHS (a collection-chain aggregate, a call
+		// result, a literal), and ==/!= were normalized onto it in
+		// memql#2654. Its identifier-led sibling is *ComparisonExpr below;
+		// both funnel into compareTemplateValues so the two shapes of one
+		// operator cannot answer differently.
 		left, err := e.evalParserExpression(ctx, t.Left)
 		if err != nil {
 			return nil, err
@@ -840,23 +816,45 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		if err != nil {
 			return nil, err
 		}
-		cmp := runtimeCompareValues(left, right)
-		switch t.Operator {
-		case languageParser.OpEq:
-			return cmp == 0, nil
-		case languageParser.OpNe:
-			return cmp != 0, nil
-		case languageParser.OpLt:
-			return cmp < 0, nil
-		case languageParser.OpLe:
-			return cmp <= 0, nil
-		case languageParser.OpGt:
-			return cmp > 0, nil
-		case languageParser.OpGe:
-			return cmp >= 0, nil
-		default:
-			return nil, fmt.Errorf("unsupported comparison operator in mutation template: %s", t.Operator)
+		return compareTemplateValues(left, t.Operator, right)
+	case *languageParser.ComparisonExpr:
+		// The FIELD-LED comparison shape -- `args.status == "active"`,
+		// `args.count > 5` -- which parsePrimary folds one level down for
+		// any identifier-led comparison, so it is what an authored
+		// `cond(<predicate>, ...)` in a mutation body actually parses to.
+		//
+		// Missing until memql#3618, which is why the predicate had a second,
+		// hand-rolled evaluator: evalCondition split the raw text on ==/!=
+		// and ran each half through evalString, and evalString hands back a
+		// quoted literal WITH ITS QUOTES, so `"active"` was compared as the
+		// 8-character string `"active"` against the 6-character value
+		// `active` and every quoted-string comparison took the wrong branch.
+		// Relational predicates were worse still -- the split fed
+		// `args.n > 5` to the arg-path resolver, which rejected the space.
+		//
+		// Here the lexer has already decoded the literal, and an operand
+		// that is itself an expression (`args.a == args.b`,
+		// `args.a == actor.userId`) arrives as an ExpressionNode.
+		left, err := e.evalString(ctx, t.Field.Raw)
+		if err != nil {
+			return nil, err
 		}
+		// The nil-comparison operators ask about PRESENCE, so they read the
+		// sentinel before it is normalized away.
+		switch t.Operator {
+		case languageParser.OpMissing:
+			return left == nil || isMissing(left), nil
+		case languageParser.OpNotMissing:
+			return left != nil && !isMissing(left), nil
+		}
+		right := t.Value
+		if node, isNode := t.Value.(languageParser.ExpressionNode); isNode {
+			right, err = e.evalParserExpression(ctx, node)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return compareTemplateValues(left, t.Operator, right)
 	case *languageParser.LtExpr:
 		left, err := e.evalParserExpression(ctx, t.Left)
 		if err != nil {
@@ -983,7 +981,52 @@ func (e *mutationTemplateEvaluator) evalParserExpression(ctx context.Context, ex
 		rt := NewRuntimeEvaluator(nil)
 		return rt.EvaluateDaysBetween(fmt.Sprintf("%v", d1), fmt.Sprintf("%v", d2))
 	default:
-		return nil, fmt.Errorf("unsupported expression in mutation template: %T", expr)
+		return nil, fmt.Errorf("%w: %T", errUnsupportedTemplateExpr, expr)
+	}
+}
+
+// errUnsupportedTemplateExpr marks the typed-node rejection at the bottom of
+// evalParserExpression. It is a sentinel rather than a bare message because
+// evalCondition distinguishes "this node shape has no AST evaluator, read the
+// text instead" from a genuine evaluation failure (a var() that would not
+// resolve, an actor path that does not exist) -- the first is a fall-through,
+// the second must propagate.
+var errUnsupportedTemplateExpr = fmt.Errorf("unsupported expression in mutation template")
+
+// compareTemplateValues applies a comparison operator to two evaluated
+// operands. THE one comparison implementation reachable from a mutation
+// template: both AST comparison shapes call it, and evalCondition routes the
+// authored predicate text into those shapes rather than splitting it by hand
+// (memql#3618).
+//
+// A missing optional arg compares as the empty string. That is the rule the
+// hand-rolled splitter carried (`args.missing == ""` is TRUE, which is the
+// answer an author expects), lifted here so it holds whichever side of the
+// operator the sentinel lands on -- the string path only ever normalized it on
+// the field side.
+func compareTemplateValues(left any, op languageParser.ComparisonOperator, right any) (bool, error) {
+	if isMissing(left) {
+		left = ""
+	}
+	if isMissing(right) {
+		right = ""
+	}
+	cmp := runtimeCompareValues(left, right)
+	switch op {
+	case languageParser.OpEq:
+		return cmp == 0, nil
+	case languageParser.OpNe:
+		return cmp != 0, nil
+	case languageParser.OpLt:
+		return cmp < 0, nil
+	case languageParser.OpLe:
+		return cmp <= 0, nil
+	case languageParser.OpGt:
+		return cmp > 0, nil
+	case languageParser.OpGe:
+		return cmp >= 0, nil
+	default:
+		return false, fmt.Errorf("unsupported comparison operator in mutation template: %s", op)
 	}
 }
 
@@ -1145,62 +1188,72 @@ func (e *mutationTemplateEvaluator) evalCanonicalId(ctx context.Context, expr st
 	return e.engine.canonicalizeIdValue(ctx, value, conceptType)
 }
 
+// coalesceSelect is THE coalesce selection rule (memql#1614), driven over
+// lazily-evaluated arms so both spellings of the operator share it: the string
+// form `coalesce(a, b, c)` reached from a payload slot, and the lowered-AST
+// CoalesceExpr reached from the id / createdAt / parent / aliasOf slots.
+//
+// The rule: the FINAL argument is the ultimate fallback and is returned even
+// when it resolves to a blank string, while every NON-final argument is skipped
+// when it is nil, missing, or blank. `coalesce(args.x, "")` must be able to land
+// an explicit empty -- a null there fails JSON-schema validation on a non-
+// required string field -- and a blank non-final arm must NOT win, or
+// `id: args.roleId ?? args.slug` yields "" when roleId is the empty string
+// clients send for an absent optional, which makes the engine mint a RANDOM id
+// instead of the deterministic fallback and turns idempotent upserts into
+// duplicate rows (memql#2772 review).
+//
+// The two implementations disagreed on one input before memql#3627 -- a blank
+// MIDDLE arm with nothing later resolving gave "" from the string form and nil
+// from the AST form. Harmless where it sat, and that is the point: this file's
+// history (memql#2840, memql#2925, memql#3618) is a list of exactly such
+// divergences sitting harmless until a construct lands in the other slot.
+//
+// A missing FINAL arm is normalised to nil rather than leaked as the sentinel:
+// IsTruthy(missingValue{}) is TRUE, so leaking it would make an all-missing
+// coalesce read as truthy inside And/Or/Not.
+func coalesceSelect(n int, evalArm func(i int) (any, error)) (any, error) {
+	for i := 0; i < n; i++ {
+		ev, err := evalArm(i)
+		if err != nil {
+			return nil, err
+		}
+		if i == n-1 {
+			if isMissing(ev) {
+				return nil, nil
+			}
+			return ev, nil
+		}
+		if ev == nil || isMissing(ev) {
+			continue
+		}
+		if s, isStr := ev.(string); isStr && strings.TrimSpace(s) == "" {
+			continue
+		}
+		return ev, nil
+	}
+	return nil, nil
+}
+
 func (e *mutationTemplateEvaluator) evalCoalesce(ctx context.Context, expr string) (any, error) {
 	args, err := parseArgList(expr, "coalesce")
 	if err != nil {
 		return nil, err
 	}
-	// Track the last non-missing fallback we evaluated so callers can
-	// rely on `coalesce(ctx.X, "")` to land an empty-string default
-	// when the optional arg is missing. The previous implementation
-	// treated empty-string as "still missing" and returned nil, which
-	// produced JSON-schema validation failures on non-required string
-	// fields downstream (the mutation payload had `null` instead of
-	// `""`).
-	var fallback any
-	haveFallback := false
-
-	for i, raw := range args {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
-			continue
-		}
-		var ev any
-		var err error
-		if isQuotedString(raw) {
-			ev = unquoteSafe(raw)
-		} else {
-			ev, err = e.evalOperandString(ctx, raw)
-			if err != nil {
-				return nil, err
-			}
-		}
-		if ev == nil {
-			continue
-		}
-		if isMissing(ev) {
-			continue
-		}
-		// First non-empty value wins, matching the documented
-		// "first non-nil value" semantics.
-		if s, ok := ev.(string); !ok || strings.TrimSpace(s) != "" {
-			return ev, nil
-		}
-		// Empty-string value: remember it as a possible fallback.
-		// We only adopt it if no later arg produces a non-empty
-		// value. The last arg in the list is the canonical default,
-		// so we always update fallback to the latest empty value
-		// we've seen.
-		if i == len(args)-1 || !haveFallback {
-			fallback = ev
-			haveFallback = true
+	// Drop syntactically-empty arms (`coalesce(a, )`) BEFORE selecting, so
+	// "the final argument" names a real arm rather than a hole.
+	arms := make([]string, 0, len(args))
+	for _, raw := range args {
+		if raw = strings.TrimSpace(raw); raw != "" {
+			arms = append(arms, raw)
 		}
 	}
-
-	if haveFallback {
-		return fallback, nil
-	}
-	return nil, nil
+	return coalesceSelect(len(arms), func(i int) (any, error) {
+		if isQuotedString(arms[i]) {
+			return unquoteSafe(arms[i]), nil
+		}
+		return e.evalOperandString(ctx, arms[i])
+	})
 }
 
 func (e *mutationTemplateEvaluator) evalCond(ctx context.Context, expr string) (any, error) {
@@ -1229,62 +1282,60 @@ func (e *mutationTemplateEvaluator) evalCond(ctx context.Context, expr string) (
 	return e.evalOperandString(ctx, chosen)
 }
 
+// evalCondition reads a cond() predicate. It PARSES the predicate and hands the
+// node to evalParserExpression, so the operator has exactly one implementation
+// (memql#3618).
+//
+// It used to split the text on `==` / `!=` by hand and compare the two halves as
+// strings. That was a second implementation of an operator the lowered-AST path
+// already had, and the two disagreed: evalString returns a quoted literal WITH
+// ITS QUOTES ATTACHED, so `args.s == "active"` compared the 8-character string
+// `"active"` against the 6-character value `active` and every quoted-string
+// comparison took the wrong branch, silently. Quoting a string comparison is
+// what any author would write, so the natural spelling was the broken one. This
+// file's history (memql#2840, memql#2925) is a list of exactly that drift, which
+// is why the fix is to delete the second implementation rather than to unquote.
 func (e *mutationTemplateEvaluator) evalCondition(ctx context.Context, raw string) (bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return false, nil
 	}
-	// Support simple boolean literals.
+	// Boolean literals, resolved before the parser for the same reason
+	// evalString resolves them first: they are values, not operators.
 	switch raw {
 	case "true":
 		return true, nil
 	case "false":
 		return false, nil
 	}
-	// Support == and != comparisons for common use cases.
-	if parts := strings.Split(raw, "=="); len(parts) == 2 {
-		left, err := e.evalString(ctx, strings.TrimSpace(parts[0]))
-		if err != nil {
-			return false, err
+
+	if expr, parseErr := languageParser.ParseExpression(raw); parseErr == nil {
+		value, evalErr := e.evalParserExpression(ctx, expr)
+		switch {
+		case evalErr == nil:
+			if isMissing(value) {
+				return false, nil
+			}
+			return IsTruthy(value), nil
+		case !errors.Is(evalErr, errUnsupportedTemplateExpr):
+			// A real failure -- an unresolvable var(), a bad actor path.
+			// Retrying it as text would only hide it.
+			return false, evalErr
 		}
-		right, err := e.evalString(ctx, strings.TrimSpace(parts[1]))
-		if err != nil {
-			return false, err
-		}
-		if isMissing(left) {
-			left = ""
-		}
-		if isMissing(right) {
-			right = ""
-		}
-		return fmt.Sprintf("%v", left) == fmt.Sprintf("%v", right), nil
+		// Node shapes with no AST evaluator (a bare `actor.userId`, a
+		// secret() call) fall through to the text reader below, which has
+		// always handled them. That is a VALUE path, not a second
+		// implementation of the operator: nothing below compares anything.
 	}
-	if parts := strings.Split(raw, "!="); len(parts) == 2 {
-		left, err := e.evalString(ctx, strings.TrimSpace(parts[0]))
-		if err != nil {
-			return false, err
-		}
-		right, err := e.evalString(ctx, strings.TrimSpace(parts[1]))
-		if err != nil {
-			return false, err
-		}
-		if isMissing(left) {
-			left = ""
-		}
-		if isMissing(right) {
-			right = ""
-		}
-		return fmt.Sprintf("%v", left) != fmt.Sprintf("%v", right), nil
-	}
-	// Fallback: evaluate the expression and read it under THE truthiness
-	// rule -- IsTruthy, the one canonical implementation (memql#2963).
+
+	// Bare-value truthiness, read under THE truthiness rule -- IsTruthy, the
+	// one canonical implementation (memql#2963).
 	//
 	// This arm used to carry a rule of its own, and it disagreed on four
 	// inputs: with no numeric, slice or map case, everything non-bool and
 	// non-string fell to `ev != nil`, so 0 / [] / {} read TRUE here and
 	// FALSE under IsTruthy; and it TrimSpace'd, so "   " read FALSE here
-	// and TRUE under IsTruthy. That mattered because this is the arm a
-	// bare-predicate cond() in a mutation template reaches.
+	// and TRUE under IsTruthy.
 	ev, err := e.evalString(ctx, raw)
 	if err != nil {
 		return false, err
