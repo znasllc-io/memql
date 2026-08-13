@@ -44,7 +44,8 @@
 //
 // That is also why this pin cannot stay at v0.16.1 now that the skew is fixed.
 // With the manifests finally following the pin, a v0.16.1 install would
-// faithfully serve local.znas.io while this wizard writes hosts entries and a
+// faithfully serve the PREVIOUS default domain while this wizard writes hosts
+// entries and a
 // certificate for memql.localhost -- correctly pinned, and still wrong. The pin
 // and the default domain have to move together, and v0.17.0 is the first release
 // carrying both.
