@@ -41,5 +41,9 @@ func applySubcommandEnv(prefix string) error {
 	// whose sealed envelope still carries the legacy OPENAI_API_KEY. nil logger:
 	// this path logs to stderr via Fprintf, not slog, so the bridge runs silently.
 	genesis.ApplyLegacyEnvAliases(nil)
+	// Mirrors main(): `memql env` must report the environment a node actually
+	// boots with, derivations included (memql#3593). nil logger -- this path
+	// writes to stderr via Fprintf, not slog.
+	genesis.ApplyDomainDerivations(nil)
 	return nil
 }
