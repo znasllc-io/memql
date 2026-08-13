@@ -5798,6 +5798,19 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// Dotted paths (args.workdir) do not pun (no single name); they
 			// fall through to the positional rejection below with a hint.
 			argName := p.current.Literal
+			// An argument name can never contain a colon, so a punned
+			// identifier that does is a `key:value` the lexer glued into one
+			// token -- and punning would bind it as a NAME, discarding the
+			// declared argument with no error at all. That silence is what
+			// let a passkey row ship with no backupEligible flag. The word
+			// literals (`k:true`) now scan apart in the lexer; anything else
+			// still glues, so refuse it here rather than corrupt it.
+			if strings.Contains(argName, ":") {
+				key, value, _ := strings.Cut(argName, ":")
+				return nil, newParseErrorf(&p.current,
+					"argument name %q contains ':'; an argument name cannot. Put a space after the colon so the value parses on its own: %s(%s: %s, ...)",
+					argName, name, key, value)
+			}
 			val, err := p.parseValue()
 			if err != nil {
 				return nil, err

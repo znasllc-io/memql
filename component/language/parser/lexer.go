@@ -682,6 +682,18 @@ func (l *Lexer) scanIdentifier(start, startLine, startColumn int) (Token, error)
 		// that already terminate the scan), so this never splits a real concept id.
 		if ch == ':' {
 			if l.hasNext() && unicode.IsLetter(l.peekNext()) {
+				// ...unless what follows is a bare WORD LITERAL, in which case
+				// this colon is a key separator exactly as the digit case above
+				// is: `backupEligible:true` is a named argument, not a concept
+				// id. Digits were split by #1118 and words were left glued, so
+				// `{tokenBudget:300000}` bound and `{enabled:true}` did not --
+				// the latter scanned as one valueless identifier that the
+				// parser then read as an argument NAME, silently discarding
+				// the declared argument. That is how registration stored no
+				// backupEligible flag and broke every synced passkey login.
+				if !strings.Contains(builder.String(), ":") && l.wordLiteralFollowsColon() {
+					break
+				}
 				builder.WriteRune(ch)
 				l.advance()
 				continue
@@ -904,6 +916,44 @@ func (l *Lexer) match(expected rune) bool {
 
 func isDigit(ch rune) bool {
 	return ch >= '0' && ch <= '9'
+}
+
+// colonValueLiterals are the bare words that can only ever be a VALUE.
+// A concept-id segment is a namespace or a concept name, never one of
+// these, so a colon followed by one of them separates a key from its
+// value rather than joining another id segment.
+var colonValueLiterals = map[string]bool{
+	"true": true, "false": true, "null": true, "nil": true,
+}
+
+// wordLiteralFollowsColon reports whether the ':' at the cursor is
+// followed by a complete bare word literal -- `:true`, `:false`, `:null`,
+// `:nil` -- and nothing that could continue an identifier after it.
+//
+// The trailing check is what keeps `v1:crm:trueish` whole: "trueish"
+// merely STARTS with a reserved word, so the word does not terminate and
+// the colon still glues. The caller additionally restricts this to the
+// FIRST colon of a run, so a canonical id whose last segment happens to
+// be one of these words (`v1:foo:true`) is likewise untouched -- by then
+// the run has already glued once and is unambiguously an id.
+func (l *Lexer) wordLiteralFollowsColon() bool {
+	var word strings.Builder
+	offset := 1 // skip the ':' at the cursor
+	for {
+		ch := l.peekAt(offset)
+		if ch == 0 || !unicode.IsLetter(ch) {
+			break
+		}
+		word.WriteRune(ch)
+		offset++
+	}
+	if !colonValueLiterals[word.String()] {
+		return false
+	}
+	// A rune that could continue an identifier means the word did not end
+	// where it looked like it did (`:trueish`, `:true_x`, `:null2`).
+	next := l.peekAt(offset)
+	return next == 0 || (!isIdentifierCharNoColon(next) && next != ':' && next != '.')
 }
 
 func isIdentifierCharNoColon(ch rune) bool {
