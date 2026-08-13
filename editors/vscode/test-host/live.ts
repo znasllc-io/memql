@@ -128,6 +128,63 @@ function connected(): ConnectionManager {
 }
 
 /**
+ * bearerClass reads the `class` claim off the configured cluster's token.
+ *
+ * A JWT is three base64url segments and the middle one is the claim set. This
+ * does NOT verify anything -- verification is the cluster's job and it will do
+ * it in a moment -- it only reads what class of credential we are about to
+ * present, which decides which cases can run at all.
+ */
+function bearerClass(cluster: ClusterConfig): string {
+  const segments = (cluster.token ?? "").split(".");
+  if (segments.length !== 3) return "";
+  try {
+    const claims: unknown = JSON.parse(Buffer.from(segments[1], "base64url").toString("utf8"));
+    if (typeof claims !== "object" || claims === null) return "";
+    const cls = (claims as Record<string, unknown>)["class"];
+    return typeof cls === "string" ? cls : "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * requireAuthoringSurface skips when the configured credential cannot reach the
+ * authoring surface at all.
+ *
+ * WHY THIS IS A SKIP AND NOT A FAILURE (memql#3337). A
+ * `class="service_account"` token is SURFACE-PINNED to the read/query message
+ * types (component/grpc/service_account_stream_interceptor.go): the allowlist
+ * covers ExecuteQuery / Subscribe / ConceptsList / MyAccess and deliberately
+ * excludes everything else, so a leaked synthetic credential cannot escalate.
+ * Bundle validation is not on that list.
+ *
+ * And the refusal is not a per-request error. `PermissionDenied` returned from
+ * a stream interceptor TERMINATES THE STREAM, so the first authoring call over
+ * a service-account token surfaces as `Error: stream closed` -- which then
+ * cascades, because every case after it finds the connection gone and skips
+ * "no live connection was established". One credential-class mismatch reads as
+ * a red lane plus three unexplained skips, and the actual sentence -- "this
+ * token was never allowed to do that" -- appears nowhere.
+ *
+ * Naming it here is the difference between a lane that reports what it
+ * measured and one that looks broken. The authoring cases are REAL and worth
+ * running; they need a user-class credential, which is what
+ * scripts/vscode/verification-setup.sh's device-code sign-in produces.
+ */
+function requireAuthoringSurface(cluster: ClusterConfig): void {
+  const cls = bearerClass(cluster);
+  if (cls === "service_account" || cls === "voice_agent") {
+    skip(
+      `the configured credential is class="${cls}", which is surface-pinned to the ` +
+        "read/query message types and cannot reach the authoring surface -- the engine " +
+        "refuses the payload and closes the stream. Sign the cluster in as a USER " +
+        "(scripts/vscode/verification-setup.sh) to run the authoring cases.",
+    );
+  }
+}
+
+/**
  * registerLiveCases registers the live half.
  *
  * Called from index.ts's run() rather than at module load: cases execute in
@@ -255,6 +312,7 @@ function bundleOf(path: string, text: string): Bundle {
 }
 
 smoke("the engine validates a well-formed bundle over the live stream", async () => {
+  requireAuthoringSurface(await configuredCluster());
   const authoring = connected().authoring;
   assert.notEqual(authoring, undefined, "a connected manager must expose an AuthoringClient");
 
@@ -286,6 +344,7 @@ smoke("the engine validates a well-formed bundle over the live stream", async ()
 });
 
 smoke("a broken construct comes back positioned, and maps to the right line", async () => {
+  requireAuthoringSurface(await configuredCluster());
   const authoring = connected().authoring!;
   const path = "/host-smoke/queries.memql";
 
