@@ -193,17 +193,27 @@ automation sweepConditional {
 // switch is engaged). It uses exists(item.payload.computerUseScope) rather than
 // `... != ""` because the automation condition evaluator's `!= ""` fires on an
 // empty-string value (empty resolves as missing; missing != "" -> true), which
-// would over-suspend non-computer-use plans. The event gate
-// event.node.payload.preferences.computerUseEnabled == false reproduces the
+// would over-suspend non-computer-use plans. The event gate reproduces the
 // original !coalesce(computerUseEnabled, true) for the realistic false/true/
 // absent cases (absent -> not engaged -> no suspend).
+//
+// THE GATE IS READ FROM AN ARGS FIELD, and the seeded envelope is the one the
+// CDC publisher actually builds (memql#3610). This fixture used to write
+// `event.node.payload.preferences...` and hand-seed `{"node": {...}}` to match
+// -- an envelope no publisher produces. So the test passed while the real
+// automation, on the real event, never fired once: `event.node.*` resolved to
+// nothing and the filter decided false forever. A fixture that constructs the
+// shape its subject needs is not evidence about production.
 func TestForEachSweep_KillSwitch_EventGate(t *testing.T) {
 	const src = `@description("kill switch sweep")
 automation killSwitch {
+  args {
+    preferences any
+  }
   step decide { logic decideRows { event: event } }
   step apply {
     forEach item in decide.nodes() {
-      if exists(item.payload.computerUseScope) && event.node.payload.preferences.computerUseEnabled == false {
+      if exists(item.payload.computerUseScope) && preferences.computerUseEnabled == false {
         updatePlanStatus { planId: item.id, status: "awaitingFeedback", feedbackReason: "kill_switch_engaged" }
       }
     }
@@ -236,9 +246,17 @@ automation killSwitch {
 		if enabledPresent {
 			prefs["computerUseEnabled"] = enabledVal
 		}
-		ev := map[string]any{"node": map[string]any{"id": "u1", "payload": map[string]any{"preferences": prefs}}}
+		// The CDC envelope shape: flattened node fields at the top level, plus
+		// the nested `payload`. There is no `node` key, which is the whole point.
+		nodePayload := map[string]any{"preferences": prefs}
+		ev := map[string]any{"id": "u1", "nodeId": "u1", "concept": "v1:identity:user", "payload": nodePayload}
+		for k, v := range nodePayload {
+			ev[k] = v
+		}
 		eval := automations.NewEvaluator()
 		eval.SetCustom("event", ev)
+		eval.SetCustom("args", map[string]any{"preferences": prefs})
+		eval.SetCustom("argsDeclared", map[string]bool{"preferences": true})
 		eval.SetStepResult("decide", &automations.StepResult{StepId: "decide", Status: "success", Result: bundleOf(rows...)})
 		rec := &argRecorder{}
 		reg := NewRegistry()
@@ -272,22 +290,27 @@ automation killSwitch {
 //   - teardown (gated step): call the workbenchTeardownDirectory builtin on
 //     terminal status -- even when the plan has ZERO workspace rows (the MVP
 //     integration provisions on-disk without writing the concept row).
+//
 // All gates are `==` / `||` / `exists` (well-behaved in the condition evaluator),
 // so this migration is behavior-faithful to the original.
 func TestForEachSweep_ReleaseWorkspace(t *testing.T) {
 	const src = `@description("release workspace on plan terminal")
 automation rw {
+  args {
+    id any
+    status any
+  }
   step decide { logic decideRows { event: event } }
   step apply {
     forEach item in decide.nodes() {
-      if item.payload.status == "provisioned" && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
+      if item.payload.status == "provisioned" && (status == "succeeded" || status == "failed" || status == "cancelled") {
         releaseWorkspace { workspaceId: item.id, reason: "plan_terminal" }
       }
     }
   }
   step teardown {
-    if exists(event.node.id) && (event.node.payload.status == "succeeded" || event.node.payload.status == "failed" || event.node.payload.status == "cancelled") {
-      workbenchTeardownDirectory { planId: event.node.id }
+    if exists(id) && (status == "succeeded" || status == "failed" || status == "cancelled") {
+      workbenchTeardownDirectory { planId: id }
     }
   }
 }`
@@ -314,9 +337,17 @@ automation rw {
 	}
 
 	scenario := func(status string, workspaces []any) (released []string, teardown bool) {
-		ev := map[string]any{"node": map[string]any{"id": "plan-1", "payload": map[string]any{"status": status}}}
+		// The CDC envelope shape -- see the kill-switch fixture above for why
+		// the hand-built `{"node": ...}` it replaced was misleading (memql#3610).
+		nodePayload := map[string]any{"status": status}
+		ev := map[string]any{"id": "plan-1", "nodeId": "plan-1", "concept": "v1:planner:plan", "payload": nodePayload}
+		for k, v := range nodePayload {
+			ev[k] = v
+		}
 		eval := automations.NewEvaluator()
 		eval.SetCustom("event", ev)
+		eval.SetCustom("args", map[string]any{"id": "plan-1", "status": status})
+		eval.SetCustom("argsDeclared", map[string]bool{"id": true, "status": true})
 		eval.SetStepResult("decide", &automations.StepResult{StepId: "decide", Status: "success", Result: bundleOf(workspaces...)})
 		rec := &argRecorder{}
 		reg := NewRegistry()
