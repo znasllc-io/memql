@@ -4693,19 +4693,17 @@ func CreatePATIdentityBuild(args CreatePATIdentityArgs) string {
 //
 // Bound concept: v1:identity:identity (machine-readable: BoundConcepts["createPasskeyIdentity"] in generated_concepts.go).
 type CreatePasskeyIdentityArgs struct {
-	IdentityId        string
-	UserId            string
-	Label             string
-	CredentialId      string
-	PublicKey         string
-	SignCount         int
-	Aaguid            string
-	Transports        []string
-	BackupEligible    bool
-	BackupEligibleSet bool // set true to send backupEligible; required because zero-value bool is ambiguous
-	BackupState       bool
-	BackupStateSet    bool // set true to send backupState; required because zero-value bool is ambiguous
-	RegisteredBy      string
+	IdentityId     string
+	UserId         string
+	Label          string
+	CredentialId   string
+	PublicKey      string
+	SignCount      int
+	Aaguid         string
+	Transports     []string
+	BackupEligible bool
+	BackupState    bool
+	RegisteredBy   string
 }
 
 // CreatePasskeyIdentity calls the engine mutation createPasskeyIdentity.
@@ -4739,41 +4737,31 @@ func CreatePasskeyIdentityBuild(args CreatePasskeyIdentityArgs) string {
 	}
 	b.WriteString("publicKey: ")
 	b.WriteString(quoteMemQL(args.PublicKey))
-	if args.SignCount != 0 {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("signCount: ")
-		b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	if b.Len() > 31 {
+		b.WriteString(", ")
 	}
-	if args.Aaguid != "" {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("aaguid: ")
-		b.WriteString(quoteMemQL(args.Aaguid))
+	b.WriteString("signCount: ")
+	b.WriteString(fmt.Sprintf("%v", args.SignCount))
+	if b.Len() > 31 {
+		b.WriteString(", ")
 	}
-	if args.Transports != nil {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("transports: ")
-		b.WriteString(renderMemQLValue(args.Transports))
+	b.WriteString("aaguid: ")
+	b.WriteString(quoteMemQL(args.Aaguid))
+	if b.Len() > 31 {
+		b.WriteString(", ")
 	}
-	if args.BackupEligibleSet {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("backupEligible: ")
-		b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	b.WriteString("transports: ")
+	b.WriteString(renderMemQLValue(args.Transports))
+	if b.Len() > 31 {
+		b.WriteString(", ")
 	}
-	if args.BackupStateSet {
-		if b.Len() > 31 {
-			b.WriteString(", ")
-		}
-		b.WriteString("backupState: ")
-		b.WriteString(fmt.Sprintf("%v", args.BackupState))
+	b.WriteString("backupEligible: ")
+	b.WriteString(fmt.Sprintf("%v", args.BackupEligible))
+	if b.Len() > 31 {
+		b.WriteString(", ")
 	}
+	b.WriteString("backupState: ")
+	b.WriteString(fmt.Sprintf("%v", args.BackupState))
 	if b.Len() > 31 {
 		b.WriteString(", ")
 	}

@@ -666,13 +666,15 @@ concept nestedExample {
 //
 //   A concept body can declare zero or more @relationship decorators that
 //   describe how this concept points to others. These live at the top of
-//   the body block (alongside fields) and accept four named args:
+//   the body block (alongside fields) and accept five named args, the last
+//   optional:
 //
 //       @relationship(
 //         type="<structuralType>",
 //         field="<fieldName>",
 //         target=<conceptName>,
-//         direction="outgoing"|"incoming"
+//         direction="outgoing"|"incoming",
+//         as="<domainLabel>"          // optional
 //       )
 //
 //   `target` is a BARE concept name resolved through a file-top `use`
@@ -710,6 +712,27 @@ concept nestedExample {
 //                      constraint; the engine canonicalizes the id and
 //                      nothing more. Reach for this when none of the above
 //                      describes what the engine should DO with the edge.
+//
+//   `as` is the OTHER axis, and the one that carries your domain's meaning.
+//   Where `type` says what the engine does with the edge, `as` says what the
+//   edge MEANS -- "assignedTo", "repliesTo", "producedBy".
+//
+//   It is OPEN. Any lowerCamelCase identifier is valid. It is checked for
+//   FORM only (shape + length) and never against a list, so a verb your
+//   domain needs never requires an engine change. That is deliberate: a
+//   closed vocabulary is what made an unrecognized verb a boot refusal, and
+//   `dependsOn` / `formedFrom` each cost an engine release before being
+//   retired to labels (memql#3655).
+//
+//   `as` is optional, including on structural types -- a plain
+//   `type="parent"` with no label is perfectly correct, and every
+//   declaration predating memql#3652 is exactly that. Reach for `as` when a
+//   concept carries two edges that are structurally identical and a reader
+//   cannot tell them apart, which is the case it exists for.
+//
+//   `field` may be a DOTTED path when the pointer lives inside a nested
+//   object block (`field="lineage.originatingPlanId"`). The engine walks the
+//   path on both the write and the filter side.
 
 @namespace("reference")
 @description("A concept with two relationship decorators.")
@@ -719,12 +742,19 @@ concept relationshipExample {
   @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
   spaceId    string!
 
-  // A plain foreign key: this row may name an author. There is no
-  // structural relationship between a post and its author beyond "points
+  // Two plain foreign keys, both pointing at the same concept. There is no
+  // structural relationship between a post and either person beyond "points
   // at", so interactsWith is the right type -- NOT an invented verb, which
   // would refuse boot.
-  @relationship(type="interactsWith", field="authorId", target=user, direction="outgoing")
+  //
+  // Structurally these two edges are identical, so `as` is what tells a
+  // reader (and a label-scoped traversal) which is which. Without it they
+  // are two indistinguishable shrugs.
+  @relationship(type="interactsWith", as="writtenBy", field="authorId", target=user, direction="outgoing")
   authorId   string
+
+  @relationship(type="interactsWith", as="reviewedBy", field="reviewerId", target=user, direction="outgoing")
+  reviewerId string
 
   // Plain data fields can sit next to relationships.
   content    string!

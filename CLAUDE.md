@@ -1472,6 +1472,36 @@ concept agent {
 }
 ```
 
+**Relationships carry two independent axes** (memql#3652). `@relationship`
+declares a cross-concept edge, and the two axes must not be confused:
+
+```memql
+@relationship(type="interactsWith", as="respondsAs", field="agentId", target=agent, direction="outgoing")
+```
+
+- **`type`** — what the ENGINE does with the edge. A **closed** set the engine
+  owns: `parent`, `owns`, `createdBy`, `alias`, `equals`, `contains`,
+  `interactsWith`. It drives id canonicalization, traversal, and the
+  collection/reference node-type invariants. An unrecognized value **refuses
+  boot** — the error names the `as=` form as the way out.
+- **`as`** — what the edge MEANS to the domain (`assignedTo`, `repliesTo`).
+  **Open**: any lowerCamelCase identifier, validated for FORM only and never
+  against a list, so a new domain verb never needs an engine release. Optional;
+  every declaration predating #3652 is unlabelled and stays valid.
+
+Writing a domain verb in the `type` slot is the natural mistake and the reason
+the split exists: `dependsOn` and `formedFrom` each cost an engine release as
+structural types before being retired to labels (memql#3655). **Never add a
+membership check to `as`** — that rebuilds the treadmill, and a test guards it.
+
+`field` may be a dotted path when the pointer sits inside a nested object block
+(`field="lineage.originatingPlanId"`); the engine walks it on both the write and
+filter side (memql#3672). The field must be declared on the concept — on the
+TARGET concept for `direction="incoming"`, since the FK lives on the far side.
+
+Full authoring reference: [docs/public/language/memql.md](docs/public/language/memql.md#relationships)
+and `dsl/_reference/_concept.memql` section 11.
+
 ### Nodes
 Individual records with time-series history. IDs are
 `{concept}:{shortId}`:
@@ -1598,12 +1628,19 @@ name collides with one of those is rejected at load time.
   ARE the schema and retain it.
 - `@default` is **not** valid on an args field (it was never applied —
   rejected at load, #991). Apply a default in the body with the `??`
-  null-coalescing operator (`args.X ?? <default>`). A concept-field
-  `@default` is NOT a substitute — it is never applied on insert either
+  operator (`args.X ?? <default>`). A concept-field `@default` is NOT a
+  substitute — it is never applied on insert either
   (memql#2960), so `??` is the only mechanism that fills a value. `a ?? b ?? c`
   folds to exactly what `coalesce(a, b, c)` produces; the shorthand is
   the authored form and `test/dslconformance/no_coalesce_longhand_test.go` gates the
   corpus on it (`memqlmigrate --rewrite=null-coalesce` converts).
+  **`??` is BLANK-coalescing, not null-coalescing** (memql#3627): it falls
+  through on an empty OR WHITESPACE-ONLY string as well as on absent/null,
+  so a caller who deliberately clears a text field gets the default written
+  back. `false` / `0` / `[]` / `{}` are kept. Deliberate (#1614) and now
+  specified in [authoring-rules.md §28](docs/public/language/authoring-rules.md);
+  `@noUnset` (memql#3415) is the targeted opt-out for a field a blank must
+  not overwrite.
 
 Queries:
 ```memql

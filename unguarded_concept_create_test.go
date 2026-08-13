@@ -130,7 +130,7 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "vendor", "testdata":
+			case ".git", ".claude", "node_modules", "vendor", "testdata":
 				return filepath.SkipDir
 			}
 			return nil

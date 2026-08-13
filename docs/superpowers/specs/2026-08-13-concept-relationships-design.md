@@ -400,3 +400,84 @@ memql#3652 gates memql#3655, memql#3656, and memql#3661. memql#3657 and
 memql#3660 are independent cleanups claimable by anyone. memql#3663 comes last
 of all -- it needs memql#3652, memql#3655, and memql#3657, and must land as one
 atomic PR, because a half-renamed vocabulary is worse than either name.
+
+---
+
+## Outcome
+
+Recorded 2026-08-13, after the Lane A issues shipped. Kept with the design
+rather than filed separately, because most of what follows is the design being
+corrected by contact with the code -- which is the part worth reading.
+
+### What the design got wrong, and how
+
+**The field check as specified would have broken every incoming relationship.**
+memql#3654 said "field must be a declared field on the concept". An incoming
+edge's foreign key lives on the FAR side, so its `field` names a column on the
+TARGET -- the live memql#3432 fixture declares `field="hubId"` on `hub` where
+`hubId` belongs to `spoke`. The rule became direction-aware before
+implementation. Caught by reading the existing fixtures; it would otherwise
+have been caught by four failing DB-gated tests that skip silently without
+Postgres.
+
+**`as=` did not parse at all.** The design assumed the annotation parser had no
+keyword-argument allow-list, so `as` would simply flow through. It does not:
+`as` is a lexer keyword (`forEach ... as x`, `use ... as`) and argument names
+required `TokenIdentifier`. Fixed by extending the allowance that already
+existed one position over, for annotation NAMES (`isKeywordTokenForAttribute`,
+which already listed `TokenKeywordAs`). Caught only because the test was
+written first.
+
+**The corpus was not clean.** The design recorded that no live relationship
+named an undeclared field. That survey checked top-level spellings only. Four
+declarations bound a field nested inside an object block, and the flat
+`payload[field]` lookup meant **none of them had ever fired**:
+
+| Concept | Declared | Actual location |
+|---|---|---|
+| `v1:agents:agent` | `identityId` | `identity.identityId` |
+| `v1:agents:agent` | `originatingPlanId` | `lineage.originatingPlanId` |
+| `v1:agents:agent` | `extendedFromAgentId` | `lineage.extendedFromAgentId` |
+| `v1:identity:user` | `activeAssistantId` | `preferences.activeAssistantId` |
+
+Three sit on real boundaries: agent→identity, agent→plan, user→agent. The
+limitation was already half-known -- `test/dslconformance/conformance_test.go`
+exempts two other fields with exactly this reason -- but nothing prevented four
+more from being written in the broken shape. Declarations corrected in
+memql#3654; the mechanism fixed in memql#3672, which taught both canonicalizers
+to walk a dotted path.
+
+### The one data implication
+
+memql#3672 changes read behaviour for existing rows. Before, neither side
+canonicalized those four fields, so writes stored bare and filters compared
+bare and they matched. Now both canonicalize, so new rows are self-consistent
+-- but a row written earlier holds a bare id that a canonicalized filter will
+not match. Pre-release a fresh database resolves it; any environment holding
+real rows for those fields needs them normalized. This is the only part of the
+epic with a migration question attached.
+
+### Decisions that held
+
+Every decision in the log above survived implementation unchanged, including
+the two that were close calls:
+
+- **Keeping the zero-user types** (`alias`, `equals`, `contains`). The instinct
+  to cut them applied YAGNI on a false premise -- this is a product-agnostic
+  engine, and absence of a user *in this tree* is the expected state, not
+  evidence.
+- **Reversing the `interactsWith` rename** to go ahead as `references`
+  (memql#3663). Still pending, and last in the order: it renames the traversal
+  function memql#3656 is editing.
+
+### Scope added after the fact
+
+- **`as=` authoring documentation.** It shipped documented nowhere, and no
+  issue covered prose docs -- memql#3661 is tooling, memql#3657 was edge
+  labels. Now in `memql.md`, the `_reference` skeleton, and CLAUDE.md.
+- **A false-failure bug in the test suite**, unrelated to relationships but
+  found while running them: `TestDeclaredMetadataKeysAreReadByNothing` walked
+  into `.claude/worktrees/` and counted the same source file once per worktree,
+  failing locally for anyone with one checked out while staying green in CI.
+  Fixed, plus four more at-risk walkers; the shared-helper extraction is
+  memql#3678.

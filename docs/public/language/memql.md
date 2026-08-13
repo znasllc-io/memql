@@ -262,9 +262,10 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 ```
 
 - `type` — how MemQL interprets the edge (see table below).
-- `field` — the payload field used as the pointer.
+- `field` — the payload field used as the pointer. May be a dotted path when the field lives inside an object block (`field="lineage.originatingPlanId"`).
 - `target` — the target concept (a short name resolved through the file-top `use ...concepts.{ ... }` import).
 - `direction` — `outgoing`, `incoming`, or `bidirectional`.
+- `as` — optional domain label naming what the edge *means* (see "The two axes" below).
 
 | Type | Description | Use When |
 |------|-------------|----------|
@@ -272,8 +273,55 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 | `contains` | This node contains other nodes | The field stores an array of IDs of contained nodes |
 | `owns` | This node owns other nodes | Similar to contains, but implies exclusive ownership |
 | `alias` | This node is an alias for another | The field stores the ID of the aliased node |
+| `equals` | This node is identity-equivalent to another | Reference concepts asserting two ids name the same thing |
 | `createdBy` | This node was created by another | The field stores the creator's ID |
-| `interactsWith` | This node interacts with another | Generic association between nodes |
+| `interactsWith` | This node interacts with another | Generic association — the default for a plain foreign key |
+
+### The two axes: `type` and `as`
+
+A relationship declares two independent things, and keeping them apart is the
+point of the design.
+
+**`type` is what the ENGINE does with the edge.** It is a closed set — the table
+above — fixed by the engine. It decides id canonicalization, traversal, and the
+node-type invariants.
+
+**`as` is what the edge MEANS to your domain.** It is open. Any lowerCamelCase
+identifier is valid, it is validated for *form* only and never checked against a
+list, and it is optional.
+
+```memql
+concept participant {
+  agentId    string
+  forUserId  string
+
+  @relationship(type="interactsWith", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
+  @relationship(type="interactsWith", as="actsFor",    field="forUserId", target=user,  direction="outgoing")
+}
+```
+
+Without `as`, those two edges are structurally identical and there is no way to
+say how they differ. `as` is what makes an edge self-describing.
+
+**Why `as` is never validated against a list.** A closed vocabulary means a verb
+the engine has not heard of is a boot refusal — and because this engine is
+product-agnostic, a repo mounting its own DSL at `MEMQL_DSL_PATH` cannot patch
+it. That is not hypothetical: `dependsOn` and `formedFrom` each cost an engine
+release for exactly this reason before being retired to labels. `as` exists so a
+new domain verb never requires one again.
+
+Writing a domain verb in the `type` slot is the natural mistake, and the loader
+says so directly:
+
+```
+relationship type "assignedTo" is invalid. Structural types are: alias, contains,
+createdBy, equals, interactsWith, owns, parent. For a domain verb, use:
+type="interactsWith", as="assignedTo"
+```
+
+`as` is optional everywhere, including on structural types
+(`type="parent" as="belongsToSpace"` is legal). Two edges may share a label; a
+label-scoped traversal returns their union.
 
 **Common Mistake: Confusing `parent` vs `child`**
 
@@ -387,15 +435,15 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 
 | Component            | Description                                                                                                     |
 |----------------------|-----------------------------------------------------------------------------------------------------------------|
-| Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with `!` (NOT) and parentheses, using Go precedence. |
+| Filters              | Comparison expressions joined by `&&` (AND) and `\|\|` (OR), with parentheses, using Go precedence. **No `!` (NOT)** — it parses and is then refused by the AST converter on every surface (memql#3630); write the `!=` form. |
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or a bare payload property (`status`, `profile.name`).                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
 | Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
-> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired (#977). The parser rejects them in authored DSL filters with migration-pointing errors. Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively.
+> **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired **from authoring** (#977). Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively. What enforces that is a **text scan** over the embedded `dsl/` tree (`TestNoRetiredOperatorForms`), NOT the parser: all four still parse and load, and `;` / `,` still compute as AND / OR (memql#3630). That is why a `,` inside parentheses was an authorization bypass, fixed in the scanner as memql#3612, and why a product DSL bundle mounted at `MEMQL_DSL_PATH` is not covered at all (memql#3629).
 >
-> **The `??` null-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. Precedence is deliberately tight: `??` binds tighter than the six symbol comparisons and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. The `in` membership keyword is outside this contract: `in` requires a bare-identifier left side everywhere, so neither spelling of a coalesced membership test parses -- there is no `?? ... in` idiom to bind. `coalesce(...)` remains valid everywhere, permanently.
+> **The `??` blank-coalescing operator** (retired in struct-form Phase 4, resurrected in #2611): `a ?? b ?? c` is the shorthand for `coalesce(a, b, c)` -- first non-nil/non-empty operand, final operand as the ultimate fallback. It is universally CALLED null-coalescing and is not one: a string that is empty or WHITESPACE-ONLY also falls through, so a caller who deliberately cleared a text field gets the default written back (`false` / `0` / `[]` / `{}` are kept). Deliberate (#1614), specified in [authoring-rules.md §28](authoring-rules.md); `@noUnset` (memql#3415) is the targeted opt-out. Precedence is deliberately tight: `??` binds tighter than the six symbol comparisons and looser than arithmetic, so `args.stage ?? "" == "active"` means `(args.stage ?? "") == "active"` -- the fallback-then-compare idiom needs no parentheses. The `in` membership keyword is outside this contract: `in` requires a bare-identifier left side everywhere, so neither spelling of a coalesced membership test parses -- there is no `?? ... in` idiom to bind. `coalesce(...)` remains valid everywhere, permanently.
 
 IDs are persisted as `<concept>:<raw-id>`. MemQL supports both full IDs and short IDs (when concept context is provided):
 
@@ -427,7 +475,9 @@ Filters are core comparison expressions that narrow the set of returned nodes:
 concept==v1:assistant && active==true
 ```
 
-- Use `&&` for AND logic, `||` for OR logic, `!` for negation
+- Use `&&` for AND logic and `||` for OR logic. There is **no `!`** in a
+  filter — it parses and is then refused at load (memql#3630); write the
+  `!=` form
 - Group with parentheses: `(concept==A || concept==B) && active==true`
 - Field paths support dot notation for nested JSON: `profile.name`
 
@@ -723,12 +773,16 @@ AI prompt templates with input schemas and default providers live in `dsl/<names
 @templateFile("prompts/cognitionPrediction.tmpl")
 /// Predict conversation trajectory for proactive cognition behavior
 prompt cognitionPrediction {
-  transcript  []object  @required @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object  @required @description("Available AI agents with name, role, and domains")
+  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
+  agents      []object! @description("Available AI agents with name, role, and domains")
+  phase       string    @description("Conversation phase off the session state machine.")
+  // ... one entry per variable the template renders; see the file for the full list
 }
 ```
 
 Logic prompts (routing / suggest / classification) use the structured-output path (`ChatStructuredProvider.CallChatStructured`); prose prompts (agent replies to users) use regular chat.
+
+**The body must cover the template, and `@defaultProvider` must name a real provider** (memql#3616). The input schema compiles with `additionalProperties: false` and is validated **before** the template renders, so a variable the `.tmpl` reads but the body omits is a field no caller can ever supply — the load refuses rather than registering a schema that cannot serve its own template. Likewise `@defaultProvider` must name a declared `provider`, never a `policy` slug: a dangling name does not error at call time, it silently falls through to the default provider. A `@disabled` provider still counts as declared. See [authoring rule 28](authoring-rules.md).
 
 Two legacy forms are retired (both rejected at parse time):
 - `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
@@ -1045,7 +1099,7 @@ SDK-generated Go/TS docs (construct and arg), and sense hover.
 
 `args { ... }` field syntax: `<name> <type>[!] [@maxLength(N)] [@pattern("re")]`. The `!` sigil marks the field required (#2618; the `@required` annotation keeps parsing); omitting it makes the field optional. `enum("a", "b")` is a first-class type -- the self-contained spelling of the legacy `string @enum(...)` pair. Do not write `@description` on an args field -- the parser REJECTS it at load (memql#3336), because there is no AST slot for it; an arg description is a `///` doc comment on the line(s) immediately above the field (#2633). A `tool` / `prompt` / `builtin` field keeps its `@description` (those bodies ARE the schema), and the declaration-level `@description` on the construct itself is load-bearing.
 
-> **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body with the `??` null-coalescing operator (`args.X ?? <default>`). A concept-field `@default` is **not** a substitute — it is emitted into the schema and never applied on insert (memql#2960).
+> **`@default` is not valid on an args field** (rejected at load, #991). Apply a default in the body with the `??` blank-coalescing operator (`args.X ?? <default>`; it falls through on a blank or whitespace-only string as well as on absent/null — see [authoring-rules.md §28](authoring-rules.md)). A concept-field `@default` is **not** a substitute — it is emitted into the schema and never applied on insert (memql#2960).
 
 How names resolve inside a body:
 
@@ -1887,11 +1941,19 @@ createdAt>"2025-01-01T00:00:00Z"
 
 - `&&` – AND
 - `||` – OR
-- `!` – NOT
+- `!` – NOT — **runtime condition strings only** (automation `Step.Condition`,
+  trigger `@filter`, a `cond` predicate, a logic `if`). A `!` in a query
+  filter, a spec, a logic `return` expression or a collection lambda is
+  refused at load (memql#3630)
 - `()` – Grouping
-- Go precedence: `!` > arithmetic > `??` > comparisons > `&&` > `||`
+- Go precedence: arithmetic > `??` > comparisons > `&&` > `||` (`!`, where it
+  applies, binds tightest)
 
-(The legacy `;`-AND / `,`-OR separators, `has`, and `?.` are retired and rejected; `??` is live since #2611.)
+(`??` is live since #2611. The legacy `;`-AND / `,`-OR separators, `has`, and
+`?.` are retired **from authoring** — a text scan over the embedded `dsl/` tree
+refuses the spelling, while the parser still accepts all four and the engine
+still computes `;` as AND and `,` as OR; see the retired-forms note above and
+memql#3630.)
 
 ### Defaults / Fallbacks
 

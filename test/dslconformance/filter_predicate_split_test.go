@@ -61,13 +61,21 @@ func TestSplitPredicatesSeesIntoDisjuncts(t *testing.T) {
 			clause:   `fromE164==args.e164 || payload.toE164==args.e164`,
 			wantHead: "payload",
 		},
+		// The next two clauses CANNOT occur in an authored filter today:
+		// `!` lexes and parses and is then refused by the AST converter on
+		// every surface it serves, so no `.memql` file carrying one can
+		// load (memql#3630). They are kept as forward coverage for the
+		// splitter -- if `!` is ever implemented the scanner must already
+		// see through it -- and they are NOT evidence that the filter
+		// grammar has a NOT operator. The names say so, because reading
+		// them as a grammar claim is exactly the mistake #3630 records.
 		{
-			name:     "violation behind a negation",
+			name:     "violation behind a negation (a form the loader refuses; forward coverage only)",
 			clause:   `!payload.deleted && ownerUserId==actor.userId`,
 			wantHead: "payload",
 		},
 		{
-			name:     "violation behind a negated group",
+			name:     "violation behind a negated group (a form the loader refuses; forward coverage only)",
 			clause:   `!(payload.deleted == true)`,
 			wantHead: "payload",
 		},

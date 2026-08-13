@@ -51,9 +51,31 @@ mutate candidate recordActionCandidate {
 // Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1,
 // #1736). ownerUserId is stamped from actor.userId (owned tier). The harness
 // calls this after an LLM step succeeds, passing the captured replayable
-// calls + the input/result fingerprints; kind/sideEffectClass/reliability/
-// reinforceCount/version/status take their concept @default values.
+// calls + the input/result fingerprints.
 // Internal write path -- not on the MCP/SDK surface.
+//
+// EVERY @required concept field is written HERE (memql#3619). It used to write
+// only two of the six that need it and leave kind / reliability /
+// reinforceCount / version to "their concept @default values" -- which do not
+// exist at insert time. A concept-field @default is never applied on insert
+// (memql#2960), so a @required field carrying one is still unset, and this
+// mutation failed JSON-schema validation on EVERY call. mintActionFromRun is
+// best-effort, so the failure became a log line and the replay library never
+// got a row: the whole action-minting path was dead while looking healthy.
+//
+// The four new stamps are CONSTANTS, not args with `??`, unlike
+// sideEffectClass and status. That asymmetry is the point: sideEffectClass and
+// status are computed per-mint by the caller's surface-aware trust gate, while
+// kind / reliability / reinforceCount / version describe what a FRESH mint is
+// by definition -- a primitive, at the starting confidence, with no verified
+// replays, at version 1. Exposing them as args would let a caller mint an
+// action straight at reliability 1.0 and skip the trust ladder the replay path
+// leans on; reinforceAction is the only thing that may move them, and it
+// computes the new values engine-side.
+//
+// The constants MUST track the concept's @default declarations -- the pair is
+// what a reader takes as "the default", and the two disagreeing is how the
+// field went unwritten in the first place.
 /// Mint a v1:actions:action (primitive) from a completed LLM step (Phase 1, #1736). ownerUserId
 /// stamped from actor.userId (owned tier). Stores the replayable capability calls keyed by
 /// inputFingerprint.
@@ -82,8 +104,12 @@ mutate action mintAction {
     stamp {
       id: args.actionId
       ownerUserId: actor.userId
+      kind: "primitive"
       sideEffectClass: args.sideEffectClass ?? "write"
       status: args.status ?? "active"
+      reliability: 0.5
+      reinforceCount: 0
+      version: 1
       provenanceMutation: "mintAction"
     }
   }

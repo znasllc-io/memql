@@ -1776,10 +1776,17 @@ grammar:
 
 - `TestNoRetiredOperatorForms` (#977,
   `test/dslconformance/no_retired_operators_test.go`): filters use the single Go
-  boolean grammar — `&&` / `||` / `!` with parens. The `;`-AND and
-  `,`-OR separators, the `has` membership operator (use `in`), and
-  the `?.` optional-chain prefix (use `when(args.x) { ... }`) are
-  rejected.
+  boolean grammar — `&&` / `||` with parens (no `!`: it parses and is
+  then refused at load on every converter surface, memql#3630). The
+  `;`-AND and `,`-OR separators, the `has` membership operator (use
+  `in`), and the `?.` optional-chain prefix (use `when(args.x) { ... }`)
+  are rejected **by this gate**, which is a line-oriented TEXT SCAN over
+  the embedded `dsl/` tree — not by the parser, which still accepts all
+  four, and not by the engine, which still computes `;` as AND and `,`
+  as OR. That is why a `,` inside parentheses was an authorization
+  bypass and was closed here rather than in the grammar (memql#3612),
+  and why a product bundle mounted at `MEMQL_DSL_PATH` is outside the
+  gate entirely (memql#3629).
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.
@@ -2266,3 +2273,118 @@ silently flipping which reading wins -- both were measured in memql#3624
 and rejected. **Always put spaces around a `-` you mean as an operator.**
 The reasoning, the candidate rule that was tried, and what it broke are
 recorded at `case '-'` in `component/language/parser/lexer.go`.
+
+## 29. A prompt's declaration must cover its template AND name a real provider (memql#3616)
+
+**Rule.** Two load-time checks now guard the `prompt` construct:
+
+1. Every root-scope variable the `.tmpl` reads must be declared in the
+   prompt body. A prompt whose template reads an undeclared input is
+   **refused at load** (a strict-boot skip).
+2. `@defaultProvider("...")` must name a `provider` the DSL tree
+   declares. A name nothing declares -- a typo, or a **policy** slug in
+   the provider slot -- **refuses boot**.
+
+**Why the first one bites.** A prompt's input schema compiles with
+`additionalProperties: false`, and `aiRuntime.Invoke` validates the
+caller's data **before** rendering the template. So a field the template
+reads but the body omits is not "an input the prompt happens to ignore"
+-- it is a field **no caller can ever supply**:
+
+```
+data validation failed: ... additionalProperties 'phase',
+  'agentTurnCounts', 'threadHolder', 'timeSinceLastHuman' not allowed
+```
+
+`cognitionPrediction` declared two fields while `component/polyphon`
+passed nine, and the caller swallowed the error into its pattern-based
+fallback -- so the entire predictive-cognition LLM path was dead, and
+looked like normal operation the whole time. The same class had already
+been fixed once by hand (the `directive` field on `cognitionReply`).
+
+The check is one-way: template reads must be declared, but a declared
+field the template never reads is inert and allowed. A prompt declaring
+**no** fields compiles to a nil schema, so nothing is rejected and the
+check does not apply.
+
+**Why the second one bites.** `@defaultProvider`, a policy slug and a
+provider name are all bare identifiers. A dangling name does **not**
+error at call time: `resolveProviderName` hands it through,
+`ChatStructuredProviderByName` misses, and the call falls through to the
+default provider -- so the prompt quietly runs on a model its author did
+not choose, leaving one INFO line on the structured path and nothing at
+all on the plain chat path.
+
+```memql
+@defaultProvider("strongReasoning")     // WRONG -- that is a `policy`
+@defaultProvider("streamClaudeSonnet")  // right -- a `provider`
+```
+
+A `@disabled` provider is still **declared**, so pointing at one stays
+legal: dependents degrading to the default is the documented lifecycle
+contract (#1081), not a mistake. The check is about the name existing,
+not about the lane being on.
+
+**Where it is enforced.** `validatePromptTemplateFields`
+(`component/memql/prompt_template_fields.go`), called from
+`LoadUnifiedPrompts`; and `ValidatePromptDefaultProviders`
+(`component/memql/prompt_default_provider.go`), called from engine
+bootstrap once both registries exist. Caller-side payload contracts are
+pinned next to the callers -- `integrations/agents/factory_prompt_contract_test.go`
+and `test/dslconformance/prompt_caller_payload_test.go`.
+
+## 30. `??` is BLANK-coalescing, not null-coalescing (#1614 / memql#3627)
+
+**Rule.** `a ?? b` (and its longhand `coalesce(a, b)`) falls through to
+`b` when `a` is absent, null, **or a string that is empty or contains
+only whitespace**. It does *not* fall through for `false`, `0`, `[]` or
+`{}` — those are values.
+
+```memql
+// with the caller passing v:
+//   false   -> false        kept
+//   0       -> 0            kept
+//   []      -> []           kept
+//   {}      -> {}           kept
+//   ""      -> "DEFAULT"    REWRITTEN
+//   " "     -> "DEFAULT"    REWRITTEN   <-- the sharp edge
+//   "\t\n"  -> "DEFAULT"    REWRITTEN
+//   "value" -> "value"      kept
+insert { v: args.v ?? "DEFAULT" }
+```
+
+**Why it bites you.** The operator is called null-coalescing everywhere,
+including in this repo, so nothing prepares you for the third line: **a
+user who deliberately clears a text field gets the default written back
+over their clearing**, and a field holding a single space is treated as
+absent when it is not absent by any reading.
+
+**Why it stays this way.** The empty-string behaviour is deliberate
+(#1614): `f: args.f ?? ""` has to be able to land an explicit empty
+string, because a `null` there fails JSON-schema validation on a
+non-required string field. The whole corpus is written against that
+rule, and the ARGUMENT position has no other spelling — `@default` on an
+args field is rejected at load (#991), so `??` is the only mechanism
+that fills a value. Changing the operator under the corpus to settle a
+naming complaint would be the larger defect.
+
+**What to do about it.** When a stored value must survive a caller
+sending blank, that is `@noUnset("field")` on the mutation (memql#3415)
+— the targeted opt-out. It drops a named field from the delta when the
+incoming value is empty and the stored one is not, which is exactly the
+"do not let a blank overwrite this" rule that `??` does not express.
+
+**One rule, one implementation.** Both spellings resolve through
+`coalesceSelect` in `component/memql/mutation_templates.go`: the FINAL
+arm is the ultimate fallback and is returned even when blank, while
+every NON-final arm is skipped when nil, missing, or blank. They were
+two implementations that disagreed on a blank middle arm until
+memql#3627 (`coalesce(args.a, "", args.c)` with nothing resolving gave
+`""` from a payload slot and `nil` from an `id:` slot). Pinned by
+`coalesce_array_missing_3627_test.go`.
+
+**A missing arg contributes NOTHING to either container.** An absent
+optional arg omits its key from an object literal and omits its element
+from an array literal — `{ v: [args.a, args.b, "c"] }` with only `b`
+supplied renders `{"v":["B","c"]}`, not a `null` hole (memql#3627). An
+explicit `null` the author wrote is preserved in both.

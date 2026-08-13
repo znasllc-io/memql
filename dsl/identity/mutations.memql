@@ -1883,6 +1883,17 @@ mutate identity revokeBadgeIdentity {
 // bypasses that check -- the write is gated to a system actor by the
 // memql#2513 credential-actor guard, which is what keeps the only
 // reachable path the one that checks.
+//
+// EVERY arg is @required, including the five that read like they could be
+// omitted (memql#3617). `credentials` is rebuilt here as an object literal,
+// and an absent optional arg omits its leaf; this is an insert whose id is
+// caller-chosen, so a second write onto the same id read-merges and replaces
+// the whole object -- destroying whatever leaves that call did not pass.
+// @mergeFields, the remedy recordPasskeyAssertion uses, is a load-time error
+// on an insert, so the destroying call is made UNSPELLABLE instead. Nothing is
+// lost by it: a registration ceremony has all ten values by construction, and
+// a zero signCount / false backupEligible / empty transports are all legal
+// values a caller passes explicitly rather than omits.
 
 /// Register a passkey identity (WebAuthn discoverable credential). Stores the credential's PUBLIC
 /// COSE key -- there is no secret half to withhold.
@@ -1893,11 +1904,11 @@ mutate identity createPasskeyIdentity {
     label           string!
     credentialId    string!
     publicKey       string!
-    signCount       int
-    aaguid          string
-    transports      []string
-    backupEligible  bool
-    backupState     bool
+    signCount       int!
+    aaguid          string!
+    transports      []string!
+    backupEligible  bool!
+    backupState     bool!
     registeredBy    string!
   }
   insert {
@@ -1930,17 +1941,28 @@ mutate identity createPasskeyIdentity {
 // (memql#3407): the new signature counter, the current backup state,
 // and lastUsedAt.
 //
-// Partial nested updates are not supported, so this is a WHOLESALE
-// credentials merge and the caller re-passes every field. That is
-// deliberate rather than merely necessary here: `backupEligible` is
-// immutable for a credential's lifetime by spec, and the login handler
-// passes back the value it READ FROM THE ROW rather than the one the
-// assertion reported -- so the only value this mutation can write is the
-// one already stored. `credentialId` and `publicKey` are re-passed for
-// the same reason and are equally unchangeable in practice: the login
-// ceremony resolved the row BY credentialId and verified the signature
-// against that publicKey, so a different value could not have reached
-// here.
+// @mergeFields("credentials") makes the nested write MERGE-SEMANTIC
+// (memql#3617). It used to rely on caller discipline instead -- "partial
+// nested updates are not supported, so the caller re-passes every field" --
+// and five of the ten args are optional, so a legal minimal call rendered a
+// `credentials` object missing those leaves and the wholesale replace
+// DESTROYED them. Dropping `backupEligible` that way reads back false, a
+// synced authenticator asserts true, and WebAuthn refuses: memql#3605
+// reopened by a different route, with no error at any layer. The annotation
+// removes the whole class -- an un-passed leaf now keeps its stored value
+// rather than vanishing -- and it does not weaken anything the caller does
+// pass, which still wins the merge.
+//
+// The caller re-passing every field remains correct and remains what the
+// login handler does; it is simply no longer the only thing standing between
+// a legal call and data loss. `backupEligible` is immutable for a
+// credential's lifetime by spec, and the handler passes back the value it
+// READ FROM THE ROW rather than the one the assertion reported -- so the only
+// value this mutation can write is the one already stored. `credentialId` and
+// `publicKey` are re-passed for the same reason and are equally unchangeable
+// in practice: the login ceremony resolved the row BY credentialId and
+// verified the signature against that publicKey, so a different value could
+// not have reached here.
 //
 // The three fields that actually move -- signCount, backupState,
 // lastUsedAt -- are the ones the spec says move. A counter that fails to
@@ -1954,6 +1976,7 @@ mutate identity createPasskeyIdentity {
 
 /// Stamp the verifier state on a passkey identity after a successful assertion: signature counter,
 /// current backup state, and lastUsedAt. Best-effort; the login succeeds even when this write fails.
+@mergeFields("credentials")
 mutate identity recordPasskeyAssertion {
   args {
     identityId      string!

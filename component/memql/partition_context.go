@@ -166,7 +166,17 @@ func (e *MemQLEngine) canonicalizeRelationshipFields(ctx context.Context, concep
 		if field == "" || target == "" {
 			continue
 		}
-		raw, ok := payload[field]
+		// A relationship may bind a field nested inside an object block, e.g.
+		// field="identity.identityId" (memql#3672). This used to be a flat
+		// `payload[field]` lookup, so such a relationship resolved to nothing --
+		// neither by its leaf name nor by a dotted path, since nothing split on
+		// ".". It passed every gate and then silently did nothing, leaving the
+		// ids it was meant to canonicalize stored bare.
+		container, leaf, ok := resolvePayloadPath(payload, field)
+		if !ok {
+			continue
+		}
+		raw, ok := container[leaf]
 		if !ok {
 			continue
 		}
@@ -180,7 +190,7 @@ func (e *MemQLEngine) canonicalizeRelationshipFields(ctx context.Context, concep
 				return fmt.Errorf("canonicalize %s.%s: %w", conceptName, field, err)
 			}
 			if canon != v {
-				payload[field] = canon
+				container[leaf] = canon
 			}
 		case []any:
 			// Some relationship fields (e.g. groupIds) are arrays of
@@ -197,4 +207,36 @@ func (e *MemQLEngine) canonicalizeRelationshipFields(ctx context.Context, concep
 		}
 	}
 	return nil
+}
+
+// resolvePayloadPath walks a possibly-dotted relationship field to the map that
+// directly holds its leaf, returning that map and the leaf key (memql#3672).
+//
+// A plain field returns the payload itself, so callers need no special case.
+// A dotted field walks each intermediate segment; the walk STOPS rather than
+// creating anything when a segment is absent or is not an object, because this
+// runs on the write path and canonicalization must never materialise a field
+// the caller did not send, nor panic on a payload that disagrees with the
+// schema.
+func resolvePayloadPath(payload map[string]any, field string) (map[string]any, string, bool) {
+	if payload == nil || field == "" {
+		return nil, "", false
+	}
+
+	segments := strings.Split(field, ".")
+	container := payload
+	for _, seg := range segments[:len(segments)-1] {
+		next, ok := container[seg]
+		if !ok {
+			return nil, "", false
+		}
+		nested, ok := next.(map[string]any)
+		if !ok {
+			// The schema says this is an object; a write that disagrees is not
+			// this function's problem to fix, only to survive.
+			return nil, "", false
+		}
+		container = nested
+	}
+	return container, segments[len(segments)-1], true
 }

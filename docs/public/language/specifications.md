@@ -76,7 +76,8 @@ spec participant systemCreatedGuest {
 Called by bare reference inside a query's `filter` clause. The
 query binds its concept in the signature (`query <Concept> <name>`)
 and pulls cross-file constructs in via file-top `use` imports;
-predicates compose with the Go boolean grammar (`&&` / `||` / `!`):
+predicates compose with the Go boolean grammar (`&&` / `||` and parens —
+there is no `!` in a filter or a spec; it is refused at load, memql#3630):
 
 ```memql
 use cognition.concepts.{ participant }

@@ -212,7 +212,7 @@ func TestExecuteQueryGate_HasExactlyOneCallSite(t *testing.T) {
 		}
 		if d.IsDir() {
 			switch d.Name() {
-			case ".git", "node_modules", "vendor", "bin", "gen":
+			case ".git", ".claude", "node_modules", "vendor", "bin", "gen":
 				return filepath.SkipDir
 			}
 			return nil
