@@ -674,16 +674,18 @@ sets; unknown annotations are rejected at load time:
   declares; the load guard exists to catch exactly that. Field-level:
   `@required`, `@default`, `@description`, `@unique`, `@pattern`,
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
-  `@secret`, `@pii`, `@internal`, `@serverSet`, `@variant`, `@closed`. See
+  `@secret`, `@pii`, `@internal`, `@serverSet`, `@variant`, `@open`. See
   `dsl/_reference/_concept.memql`. (Field-level `@internal` is live --
-  only the construct-level form was retired, #2708.) `@closed` takes the
-  TYPED spelling -- `preferences object @closed { ... }` -- because the
+  only the construct-level form was retired, #2708.) A nested block that declares
+  sub-fields is CLOSED -- it emits `additionalProperties: false`, the
+  same as the top level -- and `@open` is the per-block escape for a
+  block whose keys are data rather than schema (memql#3641). `@open`
+  takes the TYPED spelling, `metadata object @open { ... }`, because the
   bare `name { ... }` block form accepts no annotation in either
   position: a trailing one is refused as ambiguous (memql#3623) and a
-  prefix one is consumed by the property ABOVE it, since the lexer
-  strips newlines. It closes ONE block; nested blocks stay open by
-  default, and which ones can be closed next is a question about their
-  writers, not about the annotation (memql#3641).
+  prefix one binds to the property ABOVE it (memql#3692). A bare
+  `object` field with no sub-fields is already free-form and is
+  unaffected by the closure.
 - **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
   `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,

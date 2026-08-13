@@ -486,17 +486,13 @@ concept user {
   birthdate       string  @pii  @description("ISO-8601 date (YYYY-MM-DD), optional. Stored as a string rather than datetime because we never compute against it -- it's reference data the admin sets and the profile UI surfaces.")
   role            enum("owner", "admin", "developer", "writer", "reader")  @default("reader")  @description("Cluster-wide role. owner bypasses the partition ACL; admin sees all partitions but still needs a per-partition grant to mutate data; developer is engineering power (authoring + inline DSL + deploy/cut-version, but no user management); writer and reader need an explicit grant for every partition they operate in.")
   groupIds        []string  @description("Group memberships. Reserved for future cluster-side group-based partition-access derivation.")
-  // @closed (memql#3641): an undeclared key inside a nested block is normally
-  // ACCEPTED -- the emitter closes the top level only -- so `computerUseEnbaled`
-  // would land beside the real field and the computer-use kill switch would keep
-  // its old value with nothing reporting anything. This block is the one #3623
-  // named for exactly that reason, and it is the one whose writers are all
-  // in-repo: toggleComputerUseEnabled writes a single declared key under
-  // @mergeFields, and updateUser's only production caller (identity adminops
-  // writeUser) does not carry preferences at all. The remaining writer is the
-  // caller-supplied bag on createUser / createUserOnFirstLogin, and refusing an
-  // undeclared preference there is the point rather than a side effect.
-  preferences  object  @closed {
+  // Every nested block rejects undeclared keys (memql#3641), and this is the
+  // block that made the case for it: `computerUseEnbaled` used to store
+  // happily beside `computerUseEnabled`, leaving the computer-use kill switch
+  // on its old value with nothing reporting anything (memql#3623). No
+  // annotation needed -- closed is the default; @open would be the opt-out and
+  // this block is the opposite of free-form.
+  preferences {
     language             string  @description("Preferred language as a BCP 47 tag (e.g., en-US, es-MX).")
     notifications        bool    @default("true")  @description("Whether to receive notifications.")
     theme                enum("light", "dark", "system")  @default("system")  @description("UI theme preference.")

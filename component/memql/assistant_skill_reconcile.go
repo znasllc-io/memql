@@ -144,10 +144,7 @@ func (m *SeedMaterializer) reconcileAssistantSkills(ctx context.Context) (Assist
 		// top-level fields (name, avatar persona, personality, ...) are
 		// left out of the payload entirely and inherit from the prior
 		// row. Copying into a fresh map keeps the decoded row untouched.
-		newCaps := make(map[string]any, len(caps))
-		for k, v := range caps {
-			newCaps[k] = v
-		}
+		newCaps := declaredCapabilitiesOnly(caps)
 		newCaps["skillIds"] = toAnySlice(merged)
 
 		if err := m.writeReconciledAssistantSkills(ctx, node.ID, newCaps); err != nil {
@@ -172,6 +169,52 @@ func (m *SeedMaterializer) reconcileAssistantSkills(ctx context.Context) (Assist
 			"canonical", canonical)
 	}
 	return report, nil
+}
+
+// declaredCapabilitiesOnly copies a capabilities object, keeping only the
+// sub-fields v1:agents:agent DECLARES (memql#3641).
+//
+// Every nested block now rejects undeclared keys, and this path is a
+// read-modify-write: it pulls the stored object out of the database and sends
+// it back whole so the replace is a no-op for every field except skillIds. A
+// row written before #158 retired `domains` / `tools` / `liveSources` still
+// carries them, so an unfiltered copy would be refused for keys the caller
+// never chose and the backfill would fail on exactly the oldest rows it exists
+// to repair. Filtering heals such a row the first time it is touched.
+//
+// Reads the CONCEPT rather than a hardcoded exclusion list, so a field declared
+// later is not silently dropped by a list nobody remembered to grow -- the
+// failure mode a "strip the legacy keys" helper would otherwise become.
+//
+// A concept that cannot be resolved yields no filter rather than an empty
+// object: dropping every capability because a registry lookup missed would be
+// far worse than passing a legacy key through to a refusal that names it.
+func declaredCapabilitiesOnly(caps map[string]any) map[string]any {
+	out := make(map[string]any, len(caps))
+	concept, err := memorynodes.DefaultRegistry().Get(conceptAgentsAgent)
+	if err != nil || concept == nil {
+		for k, v := range caps {
+			out[k] = v
+		}
+		return out
+	}
+	declared := concept.DeclaredNestedFields("capabilities")
+	if len(declared) == 0 {
+		for k, v := range caps {
+			out[k] = v
+		}
+		return out
+	}
+	allowed := make(map[string]bool, len(declared))
+	for _, f := range declared {
+		allowed[f] = true
+	}
+	for k, v := range caps {
+		if allowed[k] {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 // canonicalAssistantSkillIds reads capabilities.skillIds off the live

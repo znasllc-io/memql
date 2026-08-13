@@ -405,10 +405,16 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 
 	preExtendSkills := append([]string(nil), target.SkillIds...)
 	mergedSkills := unionStrings(target.SkillIds, decision.SkillIds)
-	caps := map[string]any{}
-	for k, v := range target.Capabilities {
-		caps[k] = v
-	}
+	// Keep only sub-fields v1:agents:agent DECLARES (memql#3641). This is a
+	// read-modify-write -- the stored capabilities object goes back whole so the
+	// replace is a no-op for every field except skillIds -- and a nested block
+	// now rejects undeclared keys. A row written before #158 retired `domains`
+	// / `tools` / `liveSources` still carries them, so an unfiltered copy would
+	// be refused for keys this caller never chose, and the extend path would
+	// fail on precisely the oldest agents. Filtering against the CONCEPT rather
+	// than a hardcoded exclusion list means a field declared later is not
+	// silently dropped.
+	caps := declaredCapabilitiesOnly(target.Capabilities)
 	caps["skillIds"] = mergedSkills
 	payload := map[string]any{"capabilities": caps}
 	payloadJSON, err := json.Marshal(payload)
@@ -1030,6 +1036,44 @@ func skillCatalogForPrompt(skills []skillSnapshot) []map[string]any {
 			"tier":        s.Tier,
 			"tags":        s.Tags,
 		})
+	}
+	return out
+}
+
+// conceptAgentsAgent is the agent concept id this package filters against.
+const conceptAgentsAgent = "v1:agents:agent"
+
+// declaredCapabilitiesOnly copies a capabilities object, keeping only the
+// sub-fields v1:agents:agent declares (memql#3641). See its call site in
+// extendAgent for why a read-modify-write over stored rows needs it.
+//
+// An unresolvable concept yields an unfiltered copy rather than an empty
+// object: dropping every capability because a registry lookup missed would be
+// far worse than passing a legacy key through to a refusal that names it.
+func declaredCapabilitiesOnly(stored map[string]any) map[string]any {
+	out := make(map[string]any, len(stored))
+	concept, err := memorynodes.DefaultRegistry().Get(conceptAgentsAgent)
+	if err != nil || concept == nil {
+		for k, v := range stored {
+			out[k] = v
+		}
+		return out
+	}
+	declared := concept.DeclaredNestedFields("capabilities")
+	if len(declared) == 0 {
+		for k, v := range stored {
+			out[k] = v
+		}
+		return out
+	}
+	allowed := make(map[string]bool, len(declared))
+	for _, f := range declared {
+		allowed[f] = true
+	}
+	for k, v := range stored {
+		if allowed[k] {
+			out[k] = v
+		}
 	}
 	return out
 }

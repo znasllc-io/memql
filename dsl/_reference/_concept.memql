@@ -385,32 +385,40 @@ concept fieldTypes {
 //   @minimum(N)         Min numeric value (int / float).
 //   @maximum(N)         Max numeric value (int / float).
 //   @variant(discriminator="field")  Discriminated-union field. See section 9.
-//   @closed             On a NESTED BLOCK: reject undeclared keys inside it
-//                       (`additionalProperties: false` for that block).
+//   @open               On a NESTED BLOCK: ACCEPT undeclared keys inside it.
+//                       The escape from the default, which is CLOSED --
+//                       `additionalProperties: false` is emitted for every
+//                       nested block that declares sub-fields, matching the
+//                       top level, which has always been closed (memql#3641).
+//
 //                       Written on the typed spelling, because the bare
 //                       `name { ... }` form takes no annotation:
 //
-//                         preferences object @closed {
-//                           theme  enum("light", "dark", "system")
+//                         metadata object @open {
+//                           knownKey  string
 //                         }
 //
-//                       A nested block is OPEN by default -- the top level has
-//                       always been closed, the block never was -- so without
-//                       this a typo lands beside the field it was meant to be
-//                       (`computerUseEnbaled` next to `computerUseEnabled`) and
-//                       the value the author meant to set keeps its old one,
-//                       with nothing reporting anything (memql#3623).
-//                       Per-block rather than tree-wide because who writes a
-//                       block decides whether closing it is safe: a caller-
-//                       supplied splat, a wholesale read-modify-write of a
-//                       stored row, or a product bundle mounting its own blocks
-//                       each need their own migration first (memql#3641).
+//                       Use it only for a block that is free-form BY DESIGN --
+//                       keys as data rather than schema. A block that merely
+//                       HAS an undeclared key today wants the key DECLARED;
+//                       that is what the sweep behind the flip did nearly
+//                       everywhere it looked. A bare `object` field with no
+//                       sub-fields is already free-form and neither needs nor
+//                       accepts this.
+//
+//                       What the default buys: an undeclared key inside a
+//                       block used to be stored and then read by nothing,
+//                       because nothing that reads the row knows it is there.
+//                       `computerUseEnbaled` sat beside `computerUseEnabled`
+//                       in v1:identity:user.preferences and the computer-use
+//                       kill switch kept its old value, with no error at
+//                       either end (memql#3623).
+//
 //                       REFUSED where it cannot mean what it says: on a
-//                       non-object, on an `object` with no declared sub-fields
-//                       (it would reject every key, not only undeclared ones),
-//                       and beside @variant (an arm's fields are not in the
-//                       parent's `properties`, so the parent's
-//                       additionalProperties would refuse every row).
+//                       non-object, on an `object` with no declared
+//                       sub-fields (nothing to relax), and beside @variant
+//                       (an arm's fields are a oneOf branch; "accept keys no
+//                       branch declares" is the union giving up).
 //   @internal           TWO gates. The field is rejected from a mutation's
 //                       caller args, AND excluded from a shape's default
 //                       projection (Concept.ProjectableFields). Server-only in

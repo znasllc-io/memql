@@ -56,6 +56,7 @@ var checkedNestedBlocks = []struct {
 }{
 	{"cognition/concepts.memql", "utterance", "source"},
 	{"agents/concepts.memql", "agent", "capabilities"},
+	{"identity/concepts.memql", "user", "preferences"},
 }
 
 var enumValuesRe = regexp.MustCompile(`enum\(([^)]*)\)`)
