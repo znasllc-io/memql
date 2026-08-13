@@ -2,6 +2,7 @@ package memql
 
 import (
 	"context"
+	"github.com/znasllc-io/memql/component/auth"
 	"sort"
 	"testing"
 
@@ -114,12 +115,16 @@ func TestMintAction_RendersIntegersAsIntegers(t *testing.T) {
 	require.NoError(t, err)
 
 	e := &MemQLEngine{}
-	node, err := e.renderMutationTemplate(context.Background(), fn.MutationTemplate, map[string]any{
-		"slug":             "shell.exec",
-		"intent":           "run the build",
-		"inputFingerprint": "fp-in",
-		"calls":            []any{},
-	})
+	// A caller, for the same reason renderPayload has one: mintAction stamps
+	// ownerUserId from actor.userId (memql#3620).
+	node, err := e.renderMutationTemplate(
+		auth.ContextWithUserActor(context.Background(), "system:render-payload-test"),
+		fn.MutationTemplate, map[string]any{
+			"slug":             "shell.exec",
+			"intent":           "run the build",
+			"inputFingerprint": "fp-in",
+			"calls":            []any{},
+		})
 	require.NoError(t, err)
 
 	require.Contains(t, node.PayloadRaw, `"reinforceCount":0`,

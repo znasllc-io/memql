@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"encoding/json"
+	"github.com/znasllc-io/memql/component/auth"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -48,7 +49,13 @@ func renderPayload(t *testing.T, fnRegistry *FunctionRegistry, name string, args
 	require.NotNil(t, fn.MutationTemplate, "%s must have a mutation template", name)
 
 	e := &MemQLEngine{} // concepts nil -> canonicalize is a no-op
-	mutation, err := e.renderMutationTemplate(context.Background(), fn.MutationTemplate, args)
+	// A CALLER, because several of these mutations stamp
+	// `ownerUserId: actor.userId` and memql#3620 refuses to bind that against
+	// an envelope carrying no caller identity -- a row owned by nobody wears
+	// the value an owned-tier read compares against. No test here asserts an
+	// empty owner; they are about which ARGS reach the payload.
+	ctx := auth.ContextWithUserActor(context.Background(), "system:render-payload-test")
+	mutation, err := e.renderMutationTemplate(ctx, fn.MutationTemplate, args)
 	require.NoError(t, err)
 
 	var payload map[string]any
