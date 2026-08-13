@@ -82,7 +82,7 @@ func findOneByteLookbackScans(root string) ([]lookbackFinding, error) {
 		}
 		if info.IsDir() {
 			switch info.Name() {
-			case ".git", "vendor", "node_modules", "bin", "dist":
+			case ".git", ".claude", "vendor", "node_modules", "bin", "dist":
 				return filepath.SkipDir
 			}
 			return nil
@@ -351,7 +351,7 @@ func TestOneByteLookbackGateScansTheWholeModule(t *testing.T) {
 		}
 		if info.IsDir() {
 			switch info.Name() {
-			case ".git", "vendor", "node_modules", "bin", "dist":
+			case ".git", ".claude", "vendor", "node_modules", "bin", "dist":
 				return filepath.SkipDir
 			}
 			return nil
