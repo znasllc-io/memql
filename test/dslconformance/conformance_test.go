@@ -1439,7 +1439,22 @@ func splitTopLevelConnectives(s string) []string {
 // predicate is bad on either side of either connective) and load-bearing to
 // classification (memql#2832): a conjunct NARROWS what a query returns, a
 // disjunct WIDENS it.
+// splitTopLevelOn splits on a DOUBLED connective (`||`, `&&`).
 func splitTopLevelOn(s string, conn byte) []string {
+	return splitTopLevelSep(s, conn, true)
+}
+
+// splitTopLevelSingle splits on a SINGLE-character separator.
+//
+// The retired `,` OR separator is one character, so the doubled form above
+// could never split it -- which is why the `,` arm of clauseGuaranteesAt found
+// nothing and the classifier reported an OR-widened clause as owner-scoped
+// (memql#3612).
+func splitTopLevelSingle(s string, conn byte) []string {
+	return splitTopLevelSep(s, conn, false)
+}
+
+func splitTopLevelSep(s string, conn byte, doubled bool) []string {
 	var raw []string
 	depth := 0
 	inStr := false
@@ -1463,9 +1478,12 @@ func splitTopLevelOn(s string, conn byte) []string {
 			depth++
 		case c == ')' || c == '}' || c == ']':
 			depth--
-		case depth == 0 && c == conn && i+1 < len(s) && s[i+1] == conn:
+		case depth == 0 && c == conn && doubled && i+1 < len(s) && s[i+1] == conn:
 			raw = append(raw, s[start:i])
 			i++
+			start = i + 1
+		case depth == 0 && c == conn && !doubled:
+			raw = append(raw, s[start:i])
 			start = i + 1
 		}
 	}
@@ -1514,6 +1532,26 @@ func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
 		return false
 	}
 	if arms := splitTopLevelOn(s, '|'); len(arms) > 1 {
+		for _, a := range arms {
+			if !clauseGuaranteesAt(a, leaf, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	// The retired `,` separator is a pure alias for `||` in the engine, at the
+	// same OR precedence -- so it is split HERE, before '&', or `a && b, c`
+	// would be read as a conjunction (memql#3612).
+	//
+	// Without this arm the function fell through to a leaf check on the whole
+	// joined text, found the `actor.userId` substring, and reported
+	// `(ownerUserId==actor.userId, visibility=="public")` OWNER-SCOPED -- while
+	// the engine returned every public row regardless of owner. An
+	// authorization bypass produced by an operator nobody expected to still
+	// work. `hasTopLevelComma` now refuses the spelling outright; this is the
+	// second lock, because a classifier that cannot see an operator the engine
+	// honours is wrong whether or not another gate happens to catch it first.
+	if arms := splitTopLevelSingle(s, ','); len(arms) > 1 {
 		for _, a := range arms {
 			if !clauseGuaranteesAt(a, leaf, depth+1) {
 				return false
@@ -2014,4 +2052,45 @@ func delimitersBalanced(s string) bool {
 		}
 	}
 	return depth == 0 && !inStr
+}
+
+// TestClauseGuaranteesTreatsCommaAsOr is the second half of the memql#3612
+// lock, and it is deliberately redundant with the retired-operator gate.
+//
+// `clauseGuaranteesAt` split on '|' and '&' only. With no ',' case it fell
+// through to a leaf check on the whole joined text, found the `actor.userId`
+// substring, and reported an OR-widened clause OWNER-SCOPED -- while the engine
+// returned every row matching the other disjunct. Two gates, and the clause
+// walked past both.
+//
+// A classifier that cannot see an operator the engine honours is wrong whether
+// or not a different gate happens to refuse the spelling first, so this stays
+// even though `hasTopLevelComma` now rejects it upstream.
+func TestClauseGuaranteesTreatsCommaAsOr(t *testing.T) {
+	owner := func(p string) bool { return strings.Contains(p, "actor.userId") }
+
+	notGuaranteed := []string{
+		`(ownerUserId==actor.userId, visibility=="public")`,
+		`ownerUserId==actor.userId, visibility=="public"`,
+		`a && b, c`, // ',' is OR precedence: (a && b) OR c
+	}
+	for _, s := range notGuaranteed {
+		if clauseGuarantees(s, owner) {
+			t.Errorf("clauseGuarantees(%q) = true; ',' is a pure alias for '||', so the owner "+
+				"term is a DISJUNCT and guarantees nothing", s)
+		}
+	}
+
+	guaranteed := []string{
+		`ownerUserId==actor.userId`,
+		`ownerUserId==actor.userId && status=="x"`,
+		`(ownerUserId==actor.userId, ownerUserId==actor.userId)`, // every arm owner-scoped
+		`name in ["a", "b"] && ownerUserId==actor.userId`,        // list commas must not split
+	}
+	for _, s := range guaranteed {
+		if !clauseGuarantees(s, owner) {
+			t.Errorf("clauseGuarantees(%q) = false; this clause does scope every row to the "+
+				"caller and must not be downgraded", s)
+		}
+	}
 }
