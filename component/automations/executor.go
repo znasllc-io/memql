@@ -21,6 +21,34 @@ const systemActorPrefix = "system:automation:"
 // contextWithSystemActor injects a system actor into the context for automation execution.
 // This allows automations to execute mutations without requiring user authentication.
 // The actor identifier includes the automation name for audit trail purposes.
+//
+// It stamps THREE surfaces, not two (memql#3620). Claims + TokenInfo are what
+// `createdBy` and the engine's mutation-actor presence check read; the
+// AccessContext is what `actor.userId` reads in a DSL `stamp { }` or filter.
+// Setting only the first two is the trap auth.ContextWithUserActor's own doc
+// comment describes: `actor.userId` then rendered as the EMPTY STRING, and
+// dsl/forge's two audit automations wrote `v1:forge:requestEvent.actorUserId:
+// ""` on every routed request and every status transition -- a required field,
+// on a `@relationship(target=user)`, naming nobody. An automation IS a
+// principal; writing its name is honest, writing "" is not.
+//
+// ONLY WHEN ABSENT, and that is load-bearing in both directions:
+//
+//   - AuthoredScheduler (authored_scheduler.go) runs an owner's automations
+//     under AuthorContext, which stamps the AUTHOR's AccessContext precisely so
+//     per-row authz confines the run to what the author may touch. Overwriting
+//     it would hand every authored automation the engine's system principal
+//     instead -- the opposite of what that helper exists to do.
+//   - Conversely this must not INVENT one over an inherited caller: the
+//     documented behaviour (component/server/server.go, memql#2888 / #2890) is
+//     that this replaces claims + TokenInfo and leaves an AccessContext alone.
+//
+// RoleReader, not "system": Role is a closed enum (auth.AllRoles) and "system"
+// is not in it, so stamping it would leave every rank comparison reading a role
+// that ranks below nothing. Reader is the least-privileged valid role, which
+// keeps actor.isClusterOwner FALSE -- the property memql#2801 made the envelope
+// guarantee for an absent caller, and which must not weaken now that the caller
+// is present.
 func contextWithSystemActor(ctx context.Context, automationName string) context.Context {
 	actorId := systemActorPrefix + automationName
 	claims := map[string]any{
@@ -30,7 +58,14 @@ func contextWithSystemActor(ctx context.Context, automationName string) context.
 	}
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)
-	return auth.ContextWithToken(ctx, token)
+	ctx = auth.ContextWithToken(ctx, token)
+	if _, ok := auth.AccessFromContext(ctx); !ok {
+		ctx = auth.ContextWithAccess(ctx, &auth.AccessContext{
+			UserId: actorId,
+			Role:   auth.RoleReader,
+		})
+	}
+	return ctx
 }
 
 // Executor orchestrates automation execution.

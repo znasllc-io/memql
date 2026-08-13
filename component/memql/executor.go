@@ -395,6 +395,16 @@ func resolveActorReferences(ctx context.Context, expr ExpressionNode) (Expressio
 
 // resolveActorPath translates a dotted caller.X path into the scalar
 // value that the comparison evaluator expects.
+//
+// `actor.userId` against a context carrying no caller REFUSES rather
+// than binding "" (memql#3620). The term this feeds is the whole
+// ownership gate on 71 owned-tier reads: `ownerUserId == actor.userId`
+// compiles to a bound `payload #>> '{ownerUserId}' = ?` and nothing
+// else narrows the query, so an empty binding is not an empty result --
+// it is every row whose owner is the empty string, returned to a caller
+// who never authenticated. The row gate two layers down already treats
+// the same emptiness as DENY (rowauthz_enforce.go), and a filter that
+// silently matches while the gate refuses is the asymmetry this closes.
 func resolveActorPath(ctx context.Context, path string, op ComparisonOperator) (any, error) {
 	_ = op
 	ac, _ := auth.AccessFromContext(ctx)
@@ -402,7 +412,16 @@ func resolveActorPath(ctx context.Context, path string, op ComparisonOperator) (
 	// auth.ActorEnvelopeFields drives resolution, the alias mapping,
 	// and this error's accepted-path list, so the four runtime
 	// surfaces and the dslspec editor table cannot drift.
-	if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
+	v, known, err := auth.ActorEnvelopeBind(ac, path)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"actor.%s cannot be bound into a filter: %w. An ownership term compared against "+
+				"nobody is not a narrower read, it is a read of every row whose owner is the "+
+				"empty string. Refused (memql#3620). Authenticate the call, or run the query "+
+				"from a context carrying an AccessContext",
+			path, err)
+	}
+	if known {
 		return v, nil
 	}
 	return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())

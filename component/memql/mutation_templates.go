@@ -640,6 +640,15 @@ func (e *mutationTemplateEvaluator) evalConcat(ctx context.Context, expr string)
 // which is why `update { id: actor.userId }` silently selected nothing. One
 // implementation means a future position that reaches either path is already
 // correct.
+//
+// `actor.userId` against a context carrying no caller REFUSES rather than
+// rendering "" (memql#3620). 75 mutations in the tree stamp an owner from this
+// path; nothing downstream would have caught an empty one -- no concept schema
+// declares a minLength on an owner field, and stampRowAuthzOwner (the create-side
+// backstop that DOES refuse an empty caller) early-returns on FromTemplate, which
+// is exactly what these writes are. The row it would mint is readable and
+// writable by nobody, while wearing the value an unauthenticated owned-tier read
+// compares against -- so the read half of this fix would hand it straight back.
 func resolveActorReference(ctx context.Context, ref string) (any, error) {
 	trimmed := strings.TrimSpace(ref)
 	path := strings.TrimSpace(strings.TrimPrefix(trimmed, "actor."))
@@ -655,7 +664,16 @@ func resolveActorReference(ctx context.Context, ref string) (any, error) {
 	}
 	ac, _ := auth.AccessFromContext(ctx)
 	// One canonical envelope (#2623): auth.ActorEnvelopeFields.
-	if v, ok := auth.ActorEnvelopeValue(ac, path); ok {
+	v, known, err := auth.ActorEnvelopeBind(ac, path)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"actor.%s cannot be bound into a write: %w. Writing the empty string would mint a "+
+				"row owned by nobody, wearing the value an owned-tier read compares against. "+
+				"Refused (memql#3620). Authenticate the call, or run the mutation from a "+
+				"context carrying an AccessContext (auth.ContextWithUserActor stamps one)",
+			path, err)
+	}
+	if known {
 		return v, nil
 	}
 	return nil, fmt.Errorf("unsupported actor reference path %q (valid: %s)", path, auth.ActorEnvelopeValidNames())
