@@ -54,6 +54,8 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeInvocation(ctx)
 	case ContextRelationshipTarget:
 		items = s.completeRelationshipTarget(ctx)
+	case ContextRelationshipType:
+		items = completeRelationshipType(ctx.Prefix)
 	}
 
 	return items
@@ -1152,4 +1154,38 @@ func annotationsAboveDeclaration(source, name string) []string {
 		out = append(out, ann)
 	}
 	return out
+}
+
+// completeRelationshipType offers the structural relationship types inside
+// @relationship(type="...").
+//
+// `type` is a CLOSED set the engine owns, so a completion list is exactly
+// right here -- an unrecognised value refuses boot. Its sibling `as` gets NO
+// such list, on purpose: that vocabulary is open, and offering values would
+// read as an allowed set and rebuild the treadmill memql#3652 removed.
+//
+// The set is the seven structural types memql#3655 left standing -- it retired
+// dependsOn / formedFrom to `as` labels, so they are neither offered here nor
+// accepted by the loader any more.
+func completeRelationshipType(prefix string) []CompletionItem {
+	types := []struct{ name, doc string }{
+		{"parent", "Hierarchy: the named field carries the id of a logical parent. Traversable both ways (parentOf / childOf)."},
+		{"interactsWith", "The default plain foreign-key edge. No structural constraint -- the engine canonicalizes the id and nothing more. Reach for this plus an `as` label when none of the others describes what the engine should DO."},
+		{"owns", "Ownership: the named field carries ids this row owns exclusively."},
+		{"createdBy", "Provenance: the named field carries the creator's id. The only type permitted a metadata field source."},
+		{"contains", "Containment: the named field carries ids of contained children. Required by @type(\"collection\")."},
+		{"alias", "Identity equivalence: this row aliases the target. Required by @type(\"reference\")."},
+		{"equals", "Identity equivalence: this row equals the target. The sibling of alias."},
+	}
+	var items []CompletionItem
+	for i, t := range types {
+		if prefix != "" && !strings.HasPrefix(t.name, prefix) {
+			continue
+		}
+		items = append(items, CompletionItem{
+			Label: t.name, Kind: "value", Detail: "structural type",
+			Documentation: t.doc, InsertText: t.name, SortPriority: i + 1,
+		})
+	}
+	return items
 }
