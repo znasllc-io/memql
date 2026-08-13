@@ -585,7 +585,7 @@ withDepth(parentOf(concept==v1:examples:quest && id=="v1:examples:quest:quest-no
 
 Shapes are reusable field-projection templates, declared in struct form in `dsl/<namespace>/shapes.memql`. Queries reference them via the `shape <name>` directive; the engine projects each matched row through the template and returns the result in `result.data`.
 
-Each shape declares its **kind** (where its fields come from) via `@row` and/or `@actor`. At least one is required; both is allowed (mixed shape). The body is a list of field paths plus optional `include` statements — shapes have no inputs and no return.
+Each shape declares its **kind** (where its fields come from) via `@row` and/or `@actor`. At least one is required (enforced at load since memql#3621); both is allowed (mixed shape). The body is a list of field paths — shapes have no inputs and no return.
 
 **Row shapes** project a concept's payload + row intrinsics. The bound concept is named by the **signature** `shape <Concept> <name>` (the short name resolves through the file-top `use ...concepts.{ ... }` import):
 
@@ -622,14 +622,9 @@ shape actorEnvelope {
 
 **Trait shapes** are `@row` shapes signature-bound to a generic trait concept — scaffolds for cross-concept predicates (`activeRowTrait`, `statusRowTrait`, `deletedRowTrait`, `archivedRowTrait`, etc. in `dsl/common/shapes.memql`).
 
-**Composition.** A shape can `include` another shape; transitive inclusion is supported, cycles and field collisions are errors. Pure aliasing is a shape whose body is a single `include` line:
+**No composition.** `include` is not a shape verb. It was documented for a long time and never implemented (memql#3621): the parser reads a body as a path list, so `include spaceCard` parsed as two payload properties and projected two always-null keys. Zero shapes used it, so the promise was removed rather than built — `include` is now rejected at load. To share a projection, repeat the paths, or drop the body entirely and take the default projection over the bound concept (memql#2035).
 
-```memql
-@row
-shape space spaceCardAlias {
-  include spaceCard
-}
-```
+**What the loader checks (memql#3621).** A bare payload property must be a declared field of the bound concept; the bound concept must resolve (an ambiguous bare name disambiguates through the shape's own domain); two paths may not collapse onto the same terminal key (every path is keyed by its LAST segment, so `row.id` + `id` used to yield one entry and lose the row id); and the declared kind must match the body — `actor.*` needs `@actor`, `row.*` / bare payload needs `@row`, and at least one kind is required.
 
 > **Retired forms.** Receiver-function shapes (`func (Shape) ...`), the `@template` annotation, `node("...")`-wrapped template bodies, and the `@concepts("v1:...")` binding annotation are all retired and rejected at parse time. The concept binding lives in the signature; the body is a plain path list. Runtime `shape(<expr>, {...})` / `select(<expr>, ...)` query strings are retired too (#250) — wanting a projection means defining (or reusing) a DSL query with a `shape` directive.
 

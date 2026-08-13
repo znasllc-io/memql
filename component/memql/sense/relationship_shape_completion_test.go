@@ -1,7 +1,13 @@
 package sense
 
-// Tests for the two remaining reference-completion positions (#2740, follow-up
-// to #2733): a @relationship target concept, and a shape body's `include`.
+// Tests for the @relationship target-concept completion position (#2740,
+// follow-up to #2733).
+//
+// The sibling this file used to cover -- a shape body's `include <name>` --
+// is gone with the verb itself: `include` was documented shape composition
+// that never existed, so the editor was completing a form the loader now
+// rejects (memql#3621). The completion, the context kind, and these tests
+// went together.
 
 import "testing"
 
@@ -87,33 +93,5 @@ func TestRelationshipTarget_NotPoisonedAcrossLines(t *testing.T) {
 		if got["v1:reference:node"] || got["node"] {
 			t.Errorf("relationship-target poisoned a later position: %q -> %v", src, got)
 		}
-	}
-}
-
-func TestShapeInclude_OffersShapes(t *testing.T) {
-	got := completeAtEnd(New(refShapeRegistry()), "shape participant p {\n  include ")
-	for _, want := range []string{"participantFull", "actorEnvelope", "roleFull"} {
-		if !got[want] {
-			t.Errorf("shape include should offer shape %q, got %v", want, got)
-		}
-	}
-	// Not a dump: concepts / keywords must not leak in.
-	if got["v1:reference:node"] {
-		t.Errorf("shape include must not offer concepts")
-	}
-}
-
-func TestShapeInclude_PrefixFilter(t *testing.T) {
-	got := completeAtEnd(New(refShapeRegistry()), "shape participant p {\n  include participant")
-	if !got["participantFull"] || got["actorEnvelope"] {
-		t.Errorf("prefix `participant` should offer only participantFull, got %v", got)
-	}
-}
-
-func TestShapeInclude_OnlyInShapeBody(t *testing.T) {
-	// `include` in a non-shape body is not the shape-include verb.
-	got := completeAtEnd(New(refShapeRegistry()), "logic foo {\n  body {\n    include ")
-	if got["participantFull"] {
-		t.Errorf("shape include fired outside a shape body, got %v", got)
 	}
 }

@@ -295,11 +295,11 @@ mutate widget createWidget {
 	}
 }
 
-// TestLintParity_ShapeBarePayloadFieldIsClean covers the unifiedShapeLoader
-// parse-time checks and pins the removed-payload-prefix rule: a shape
-// projecting a dotless bare name "payload" must mount clean. The check fires
-// only on the removed `payload.<prop>` prefix (with the dot). Lint and the
-// loader share the one convertShapeDecl code path, so they stay in lockstep.
+// TestLintParity_ShapeBarePayloadFieldIsNotTheRemovedPrefixForm covers the
+// unifiedShapeLoader parse-time checks and pins the removed-payload-prefix
+// rule: the check fires only on the removed `payload.<prop>` prefix (WITH the
+// dot), never on a dotless bare name "payload". Lint and the loader share the
+// one convertShapeDecl code path, so they stay in lockstep.
 //
 // The concept here deliberately does NOT declare a top-level property named
 // "payload". It used to, and that made this test pass for the wrong reason:
@@ -310,8 +310,12 @@ mutate widget createWidget {
 // which is what surfaced it.
 //
 // The scenario the old fixture described is unreachable: no concept can
-// declare a top-level "payload", so no shape can project one that exists.
-func TestLintParity_ShapeBarePayloadFieldIsClean(t *testing.T) {
+// declare a top-level "payload", so no shape can project one that exists --
+// which is why this asserts the ABSENCE of the prefix diagnostic rather than
+// the absence of all diagnostics. Since memql#3621 a body path that names no
+// declared field IS reported (it would render null forever), so the fixture
+// draws exactly one diagnostic, from the other rule.
+func TestLintParity_ShapeBarePayloadFieldIsNotTheRemovedPrefixForm(t *testing.T) {
 	root := fstest.MapFS{
 		"lintpayload/concepts.memql": {Data: []byte(`@version("1.0.0")
 @namespace("lintpayload")
@@ -323,6 +327,7 @@ concept record {
 		"lintpayload/shapes.memql": {Data: []byte(`use lintpayload.concepts.{ record }
 
 @description("Projects the field literally named payload by bare name.")
+@row
 shape record recordView {
   row.id
   payload
@@ -331,8 +336,13 @@ shape record recordView {
 `)},
 	}
 	diags := lint(t, root)
-	if len(diags) != 0 {
-		t.Fatalf("a shape projecting a bare field named payload must mount clean; got: %+v", diags)
+	if diagsContain(diags, "removed `payload.` prefix") {
+		t.Fatalf("a dotless bare `payload` must not be mistaken for the removed prefix form; got: %+v", diags)
+	}
+	// The other rule does fire, and should: `payload` is not a declared field
+	// of the concept, so the projection would render null on every read.
+	if !diagsContain(diags, "does not declare") {
+		t.Fatalf("expected the undeclared-field diagnostic for the bare `payload` projection; got: %+v", diags)
 	}
 }
 
@@ -352,6 +362,7 @@ concept record {
 		"lintpayloadbad/shapes.memql": {Data: []byte(`use lintpayloadbad.concepts.{ record }
 
 @description("Uses the removed payload. prefix form.")
+@row
 shape record recordBad {
   row.id
   payload.label

@@ -1762,11 +1762,13 @@ shape space spaceCard {
 ```
 
 **Actor shapes** project the engine envelope (the authenticated
-actor + engine timestamp + allow-listed config). They carry no
-signature concept. Closed field set:
-`actor.userId` / `actor.role` / `actor.identityId` /
-`actor.isClusterOwner` / `actor.now` /
-`actor.config.<allow-listed-key>`.
+actor + engine timestamp). They carry no signature concept. Closed
+field set, enforced at load since memql#3621 and identical to the one
+canonical envelope (#2623): `actor.userId` / `actor.role` /
+`actor.identityId` / `actor.isClusterOwner` / `actor.primaryEmail` /
+`actor.now` (plus the legacy `actor.isOwner` alias).
+`actor.config.<key>` is retired -- bare `config.<key>` is the config
+read, and shapes do not project it.
 ```memql
 @description("Actor identity envelope")
 @actor
@@ -1794,19 +1796,27 @@ shape space ownedSpace {
 }
 ```
 
-**Composition.** A shape can `include` another shape; transitive
-inclusion is supported, cycles + field collisions are errors. Pure
-aliasing is just a shape whose body is a single `include` line:
-```memql
-@row
-shape space spaceCardAlias {
-  include spaceCard
-}
-```
+**No composition.** `include` is NOT a shape verb -- it was documented
+here for a long time and never existed (memql#3621). The parser reads a
+body as a path list, so `include spaceCard` parsed as two payload
+properties (`include`, `spaceCard`) and projected two always-null keys;
+there was no cycle or collision detection because there was no feature.
+Zero shapes in the tree used it, so the promise was removed rather than
+built, and `include` is now REJECTED at load with a message that says
+so. To share a projection, repeat the paths -- or drop the body entirely
+and take the default projection over the bound concept (memql#2035),
+which is the direction the tree is moving anyway.
+
+**Every body path is checked at load** (memql#3621): a bare payload
+property must be a declared field of the bound concept, the bound
+concept must resolve (an ambiguous bare name disambiguates through the
+shape's own domain), two paths may not collapse onto the same terminal
+key, and the declared kind must match the body -- `actor.*` needs
+`@actor`, `row.*` / bare payload needs `@row`, and a shape must declare
+at least one.
 
 No `func`, no `@template`, no `node("…")` wrapping. Shapes have no
-inputs and no return; the body is a path list (+ optional `include`
-statements).
+inputs and no return; the body is a path list.
 
 ### Specs
 Atomic boolean predicates — **signature-bound** (epic #2281). A spec
