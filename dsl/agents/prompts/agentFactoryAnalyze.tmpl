@@ -22,7 +22,8 @@ defaultSkillIds + availableSkillIds + forbiddenSkillIds + maxSkills
 + tier):
 {{ .roleCatalog }}
 
-Skill catalog (id + name + category + description + tier + tags):
+Skill catalog (slug + name + category + description + tier + tags).
+The `slug` is the skill id -- emit those verbatim in skillIds:
 {{ .skillCatalog }}
 
 # Decision rules

@@ -36,6 +36,13 @@ func newPromptRegistry() *PromptRegistry {
 	return &PromptRegistry{byName: make(map[string]*PromptTemplate)}
 }
 
+// NewPromptRegistry returns an empty registry ready for LoadUnifiedPrompts.
+// LoadUnifiedPrompts is exported but takes a *PromptRegistry, which nothing
+// outside this package could build -- so callers that want to load the
+// prompt corpus (the schema-contract tests in the packages that INVOKE
+// prompts, memql#3616) had no way in.
+func NewPromptRegistry() *PromptRegistry { return newPromptRegistry() }
+
 // Get retrieves a prompt template by name.
 func (r *PromptRegistry) Get(name string) (*PromptTemplate, bool) {
 	if r == nil {

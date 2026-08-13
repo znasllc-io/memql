@@ -194,6 +194,10 @@ func registerParsedProviders(logger *slog.Logger, registry *ProviderRegistry, al
 	// explicit set lets us skip the child cleanly instead.
 	disabledBases := make(map[string]bool)
 	for _, p := range all {
+		// Record EVERY parsed name -- including the disabled ones that
+		// never become entries below -- so a dangling @defaultProvider can
+		// be told apart from a deliberately-off lane (memql#3616).
+		registry.markDeclared(p.cfg.Name)
 		if p.cfg.Base && p.cfg.Disabled {
 			disabledBases[strings.TrimSpace(p.cfg.Name)] = true
 		}
@@ -496,6 +500,20 @@ func LoadUnifiedPrompts(logger *slog.Logger, registry *PromptRegistry, partials 
 						"prompt", slice.Name, "error", err)
 				}
 				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "template", Err: err.Error()})
+				continue
+			}
+			// Cross-check the template's root-scope reads against the
+			// declared inputs (memql#3616). A field the template reads but
+			// the body omits is unreachable: additionalProperties:false
+			// rejects the key before rendering, so every caller that
+			// supplies it fails. Refuse the prompt rather than register a
+			// schema that cannot serve its own template.
+			if err := validatePromptTemplateFields(decl, tmpl); err != nil {
+				if logger != nil {
+					logger.Warn("memql.unifiedPromptLoader: template reads an undeclared input",
+						"file", raw.Path, "prompt", slice.Name, "error", err)
+				}
+				rep.AddSkip(baseloader.Skip{Component: "memql.unifiedPromptLoader", Keyword: "prompt", Name: slice.Name, File: raw.Path, Phase: "schema", Err: err.Error()})
 				continue
 			}
 			var compiledSchema *jsonschema.Schema

@@ -69,8 +69,14 @@ prompt cognitionFeedbackRoute {
 @defaultProvider("chat54Mini")
 @templateFile("prompts/cognitionPrediction.tmpl")
 prompt cognitionPrediction {
-  transcript  []object! @description("Recent transcript entries with speakerName, speakerType, text")
-  agents      []object! @description("Available AI agents with name, role, and domains")
+  transcript          []object! @description("Recent transcript entries with speakerName, speakerType, text")
+  agents              []object! @description("Available AI agents with name, role, and domains")
+  phase               string             @description("Conversation phase off the session state machine (greeting / exploration / task / followUp / windingDown). Rendered as CURRENT PHASE.")
+  agentTurnCounts     object             @description("Per-agent turn tally for this session, {agentId: count}. Rendered as the AGENT TURN COUNTS block.")
+  threadHolder        string             @description("The agent the conversation is currently threaded with (session.LastAddressedAgentId). Absent when no agent has been addressed by name.")
+  timeSinceLastHuman  float              @description("Seconds since the last human message. Rendered so the model can tell a live exchange from a stalled one.")
+  detectedPhase       string             @description("Vector-detected phase, present only on a high-confidence (>0.8) embedding match. Rendered alongside phaseConfidence.")
+  phaseConfidence     float              @description("Cosine confidence [0, 1] for detectedPhase. Present exactly when detectedPhase is.")
 }
 
 /// Generate an AI assistant reply for a space based on participants and recent conversation
