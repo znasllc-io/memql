@@ -597,8 +597,8 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 // TestRelationshipOwns_IncomingArrayField_FindsEveryOwner is the array shape of
 // the INCOMING lookup: "which squads have this cadet in their memberIds".
 //
-// SKIPPED, and the skip is the finding. fetchNodesByJSONFieldValues compiles
-// the reverse lookup to
+// This was the finding, and memql#3670 is the fix. fetchNodesByJSONFieldValues
+// used to compile the reverse lookup to
 //
 //	payload #>> '{memberIds}' IN ('v1:reltrav:cadet:...')
 //
@@ -623,13 +623,10 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 // Reaching it needs a jsonb containment predicate (`payload->'memberIds' ?
 // <value>` or `@>`), not the scalar equality the shared helper emits.
 //
-// The assertion below is what the engine SHOULD answer; unskip it when the
-// containment predicate lands. Verified to FAIL as written, with an empty
-// result set against two seeded squads.
+// The containment predicate landed in memql#3670: the lookup now ORs a jsonb
+// `@>` arm alongside the text one, which is true both when the field IS the
+// value and when it is an array CONTAINING it. This is the regression pin.
 func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
-	t.Skip("SUSPECTED DEFECT (memql#3658): fetchNodesByJSONFieldValues compares `payload #>> '{field}'` " +
-		"to a scalar id, so an INCOMING lookup against an ARRAY-valued relationship field matches " +
-		"nothing. Needs a jsonb containment predicate. Unskip when fixed.")
 
 	mountTraversalFixture(t)
 	eng, db, _ := readMergeTestEngine(t)

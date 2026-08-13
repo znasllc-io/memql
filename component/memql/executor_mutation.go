@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -1115,9 +1116,35 @@ func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptNa
 	if err != nil {
 		return nil, err
 	}
+	jsonbExpr, err := buildJSONBPathExpression(fieldPath)
+	if err != nil {
+		return nil, err
+	}
 
-	expr := fmt.Sprintf("(concept = ? AND %s IN (?))", pathExpr)
-	args := []any{strings.TrimSpace(conceptName), bun.In(unique)}
+	// TWO predicates, because a relationship field holds either ONE id or a
+	// LIST of them and the incoming lookup has to find both (memql#3670).
+	//
+	//   - `#>>` extracts the field as TEXT. On a scalar that is the id, which
+	//     is what makes the first arm work. On an ARRAY it is the array's JSON
+	//     text -- `["v1:x:a", "v1:x:b"]` -- which can never equal one member
+	//     id, so this arm alone answered "nobody" for every array-valued
+	//     field, silently, with no error and no log.
+	//   - `@>` is jsonb containment, which is true both when the field IS the
+	//     value and when the field is an array CONTAINING it. That is the arm
+	//     the array case needs.
+	//
+	// The text arm is kept rather than replaced: `@>` compares jsonb types, so
+	// a numeric field would stop matching a text id under containment alone.
+	// Nothing in the tree declares one, but this is a bug fix and widening the
+	// match is the whole point -- narrowing it elsewhere is not.
+	//
+	// The OUTGOING direction was never affected: it reads the payload in Go
+	// via extractStringValueOrArrayFromMap, which has always handled both
+	// shapes. That asymmetry is what made this hard to see -- one declaration
+	// resolved one way and not the other.
+	expr := fmt.Sprintf("(concept = ? AND (%s IN (?) OR %s @> ANY (SELECT to_jsonb(v) FROM unnest(?::text[]) AS v)))",
+		pathExpr, jsonbExpr)
+	args := []any{strings.TrimSpace(conceptName), bun.In(unique), pgdialect.Array(unique)}
 
 	nodes, err := e.executeFilterQuery(ctx, nil, compiledExpression{sql: expr, args: args}, timestamp, incomingLookupTarget(limit), nil)
 	if err != nil {
