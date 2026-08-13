@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // Issue #2885, end to end against a real database: createDeploymentNodeSpec
@@ -38,7 +39,7 @@ func TestDeploymentNodeSpec_CreatePersistsAndIsReadable(t *testing.T) {
 	// Executed directly rather than via runMutation so a failure surfaces
 	// the engine's own rejection rather than a helper assertion.
 	res, err := eng.Execute(ctx, fmt.Sprintf(
-		`mutation createDeploymentNodeSpec(deploymentId: %q, nodeType: "bff", replicas: 2, version: "1.0.0")`, depID))
+		`mutation createDeploymentNodeSpec(deploymentId: %s, nodeType: "bff", replicas: 2, version: "1.0.0")`, langparser.QuoteString(depID)))
 	require.NoError(t, err,
 		"memql#2885: createDeploymentNodeSpec must persist a row; the raw composite id was rejected by the shortId gate before the store")
 	require.NotNil(t, res)

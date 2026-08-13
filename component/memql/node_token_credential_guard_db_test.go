@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 func actorCtx(claims map[string]any) context.Context {
@@ -68,9 +69,9 @@ func writerUserActorCtx() context.Context {
 // exactly as component/identity/store.go's CreateNodeTokenIdentity does.
 func createNodeTokenCall(identityId, nodeId string) string {
 	return fmt.Sprintf(
-		`mutation createNodeTokenIdentity(identityId: %q, userId: %q, nodeId: %q, nodeType: %q, keyHash: %q, mintedBy: %q, expiresAt: %q, bootstrappedAt: %q, bootstrappedFrom: %q)`,
-		identityId, "system:node-bootstrap", nodeId, "bff", "hash-"+nodeId,
-		"system:node-bootstrap", "", "", "")
+		`mutation createNodeTokenIdentity(identityId: %s, userId: %s, nodeId: %s, nodeType: %s, keyHash: %s, mintedBy: %s, expiresAt: %s, bootstrappedAt: %s, bootstrappedFrom: %s)`,
+		langparser.QuoteString(identityId), langparser.QuoteString("system:node-bootstrap"), langparser.QuoteString(nodeId), langparser.QuoteString("bff"), langparser.QuoteString("hash-"+nodeId),
+		langparser.QuoteString("system:node-bootstrap"), langparser.QuoteString(""), langparser.QuoteString(""), langparser.QuoteString(""))
 }
 
 func TestNodeTokenCredentialGuard_CreateActorScope(t *testing.T) {
@@ -119,14 +120,14 @@ func TestNodeTokenCredentialGuard_ReadMergeUpdateLegs(t *testing.T) {
 
 	// Repeat-bootstrap stamp leg (update; read-merge surfaces node_token).
 	stamp := fmt.Sprintf(
-		`mutation stampNodeTokenBootstrap(identityId: %q, keyHash: %q, bootstrappedAt: %q, bootstrappedFrom: %q)`,
-		id, "hash-rotated", "2026-07-14T01:00:00Z", "5.6.7.8")
+		`mutation stampNodeTokenBootstrap(identityId: %s, keyHash: %s, bootstrappedAt: %s, bootstrappedFrom: %s)`,
+		langparser.QuoteString(id), langparser.QuoteString("hash-rotated"), langparser.QuoteString("2026-07-14T01:00:00Z"), langparser.QuoteString("5.6.7.8"))
 	if _, err := eng.Execute(sys, stamp); err != nil {
 		t.Fatalf("stamp leg under credential actor must pass (read-merge node_token): %v", err)
 	}
 
 	// Admin revoke leg (update; read-merge surfaces node_token).
-	revoke := fmt.Sprintf(`mutation revokeNodeTokenIdentity(identityId: %q)`, id)
+	revoke := fmt.Sprintf(`mutation revokeNodeTokenIdentity(identityId: %s)`, langparser.QuoteString(id))
 	if _, err := eng.Execute(sys, revoke); err != nil {
 		t.Fatalf("revoke under credential actor must pass: %v", err)
 	}

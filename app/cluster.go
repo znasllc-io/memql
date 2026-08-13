@@ -61,6 +61,24 @@ func (r *nodeTokenRevocationResolver) IsNodeTokenRevoked(ctx context.Context, no
 // cluster wires distributed node components via bootstrap strategy and emits
 // the system.startup event with infrastructure metadata for automations.
 func (a *App) cluster() {
+	// Integration-executor audit (memql#3614 item 6). Runs HERE because this
+	// is the last phase every Build() calls, and it is the first point at
+	// which every integration has registered -- the integrations phase is not
+	// enough (setupWorkerService registers integration.agentworker from the
+	// TRANSPORT phase). Anything earlier would report registered integrations
+	// as missing.
+	//
+	// Fatal on the decidable half only: a builtin naming a capability its
+	// PRESENT integration does not offer is a typo in every build. The
+	// build-tag-absent half is a warning the engine emits itself; see
+	// component/memql/integration_executor_audit.go for why the split is where
+	// it is.
+	if a.engine != nil {
+		if err := a.engine.AuditIntegrationExecutors(); err != nil {
+			a.fatal("integration executor audit refused boot", "error", err)
+		}
+	}
+
 	nodeIdentity := node.NewIdentity(a.Version)
 
 	// Automation invoke path (memql#3310). Wired here because this is where

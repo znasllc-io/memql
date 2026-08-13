@@ -18,6 +18,7 @@ import (
 
 func TestForEachExecutor_AuthoredDSL_RunsInnerCallPerItem(t *testing.T) {
 	const src = `@description("Retire each stale node.")
+@trigger(event="system.startup")
 automation pruneStaleNodes {
   step prune {
     forEach node in decide.result {

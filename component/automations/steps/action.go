@@ -11,6 +11,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness/actionreplay"
 	"github.com/znasllc-io/memql/component/harness/parambind"
 	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // ActionExecutor replays an action-library action referenced by a step
@@ -228,9 +229,9 @@ func (e *ActionExecutor) replayActionRef(ctx context.Context, stepCtx *Context, 
 
 	var query string
 	if ref.Floating {
-		query = fmt.Sprintf(`query actionById(actionId:%q)`, ref.ID)
+		query = fmt.Sprintf(`query actionById(actionId:%s)`, langparser.QuoteString(ref.ID))
 	} else {
-		query = fmt.Sprintf(`query actionByIdAndVersion(actionId:%q, version:%d)`, ref.ID, ref.Version)
+		query = fmt.Sprintf(`query actionByIdAndVersion(actionId:%s, version:%d)`, langparser.QuoteString(ref.ID), ref.Version)
 	}
 	payload, ok := resolveActionPayload(ctx, stepCtx, query)
 	if !ok {

@@ -32,6 +32,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -118,7 +119,7 @@ func listAuthSessionsForSubject(ctx context.Context, engine *memqlengine.MemQLEn
 	if strings.TrimSpace(subject) == "" {
 		return nil, fmt.Errorf("subject required")
 	}
-	query := fmt.Sprintf(`query authSessionsForSubject(subject: %q)`, subject)
+	query := fmt.Sprintf(`query authSessionsForSubject(subject: %s)`, langparser.QuoteString(subject))
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query auth sessions for subject: %w", err)

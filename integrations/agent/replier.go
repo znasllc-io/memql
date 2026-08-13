@@ -13,6 +13,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/component/router"
@@ -813,7 +814,7 @@ func (r *Replier) resolveOwnerForAgent(ctx context.Context, agentId string) stri
 	if agentId == "" || r.engine == nil {
 		return ""
 	}
-	q := fmt.Sprintf(`query agentOwner(agentId:%q)`, agentId)
+	q := fmt.Sprintf(`query agentOwner(agentId:%s)`, langparser.QuoteString(agentId))
 	result, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: resolveOwnerForAgent query failed",
@@ -881,7 +882,7 @@ func (r *Replier) recentPlanOutcomesForSpace(ctx context.Context, partitionId st
 	if partitionId == "" || r.engine == nil {
 		return nil
 	}
-	q := fmt.Sprintf(`query plansForSpace(partitionId:%q)`, partitionId)
+	q := fmt.Sprintf(`query plansForSpace(partitionId:%s)`, langparser.QuoteString(partitionId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: recentPlanOutcomesForSpace query failed",
@@ -988,7 +989,7 @@ func (r *Replier) fillActingAgentIfEmpty(ctx context.Context, msg *memqlv1.Agent
 	if agentId == "" {
 		return
 	}
-	q := fmt.Sprintf(`query agentById(agentId:%q)`, agentId)
+	q := fmt.Sprintf(`query agentById(agentId:%s)`, langparser.QuoteString(agentId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agentReply: fillActingAgentIfEmpty query failed",

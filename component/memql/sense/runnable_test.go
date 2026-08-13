@@ -675,7 +675,7 @@ func TestRunnableConstructs_CoversTheLiveCorpus(t *testing.T) {
 const lifecycleFixture = `use cognition.concepts.{ space }
 
 @description("Produce a file deliverable")
-@handler(type="function", function="produceArtifact")
+@handler(type="function", name="produceArtifact")
 tool produceArtifact {
   filename     string  @required @description("Name of the file to write")
   ownerUserId  string  @autoInjected @description("Server-stamped owner")

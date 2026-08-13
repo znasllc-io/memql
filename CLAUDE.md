@@ -1350,14 +1350,39 @@ at load (memql#3336, #991).
 | `config.X` | Allow-listed config (`component/config/policy_exposable.go`) | every body |
 | `X`, `id`, `concept`, `type`, `createdAt`, `createdBy`, `schema` | Row fields / intrinsics | queries' `filter` + `shape` only (SQL pushdown) |
 
-For automations, the triggering event is bound as `args`, so
-`args.topic`, `args.kind`, and `args.payload.<field>` are how you
-reach the event from within the automation body.
+For automations, `args` is the automation's own declared `args { ... }`
+block: at fire time the trigger payload is bound INTO that contract and
+validated against it (`@required` / type / `@enum` / `@pattern`), and a
+violation refuses the run rather than binding a partial map
+(`component/automations/args_binding.go`, memql#2352). An automation with no
+args block binds nothing. The triggering **event** rides its own `event`
+envelope (`event.topic` / `event.kind` / `event.payload.<field>`), which a
+step conventionally forwards to logic as `logic name ( event )`; the logic
+declares `event` in its args block and reads `args.event.payload.<field>`.
+
+> This paragraph used to say the triggering event was bound as `args`, so
+> that `args.topic` / `args.payload.<field>` read the event. That has not
+> been true since memql#2352 moved the payload into the declared contract,
+> and it is now load-refused (memql#3626) rather than silently nil.
+
+**Declared and used, in both directions.** An `args` field declared but
+never referenced is refused at load, and (memql#3626) so is an `args.X`
+a body READS but never declares. The second direction covers two failures
+one silence used to hide: an author typo (`args.userld`) whose field is
+simply absent from the write, and a caller-supplied undeclared name that is
+bound and written having passed no declared-schema check at all —
+`validateFunctionArgs` iterates DECLARED fields, and `rejectUnknownArgs` is
+gated behind the MCP boundary.
 
 **Reserved engine names.** `now`, `actor`, `partition`, `config`,
 `trace` are reserved as top-level identifiers. An `args` field that
 collides with one of these names is rejected at load time — keeps
-the resolution rules unambiguous.
+the resolution rules unambiguous. The **call site** refuses the same
+names in argument position (memql#3626): since no args block may declare
+one, `mutation m(now: 1)` could never bind and was silently dropped. A
+repeated argument name (`m(a: 1, a: 2)`) is refused for the same reason
+a repeated annotation argument is — the map collapses last-wins, so the
+value a reader sees is not the value the engine uses.
 
 **Procedural form (internal only).** The struct-form rewriter
 expands every author-side block to a `func (Receiver) NAME(ctx any)
@@ -1878,6 +1903,35 @@ tool searchUsers {
 ```
 The legacy `func (Tool)` form is retired; the parser rejects it
 with a migration hint.
+
+**A tool declaration is CHECKED (memql#3625).** Until that issue a tool was
+the one construct nothing validated: `ValidateTool` existed and was correct,
+but its only caller was `registerFunctionTools` — which validates the tools
+the engine GENERATES from functions — so an authored `.memql` tool went
+parse -> convert -> registry untouched and was advertised to the model
+whatever state it was in. Four gates now close that:
+
+- **`@handler` argument names are closed** (`type`, `name`, `query`, `url`,
+  `method`) and `type` is required. A typo used to be DROPPED, not refused:
+  `nmae=` left the function name empty, and `tipe=` dropped the whole handler.
+  `@rateLimit` is closed the same way, and a non-integer value is refused
+  rather than discarded.
+- **The handler is validated at load** — unknown type, missing function name /
+  query / URL — and a tool must carry a handler at all unless it is
+  `@clientExecution` (whose body lives in the browser).
+- **The handler's TARGET is resolved** against the function + builtin
+  registry at boot (`tool_handler_resolution.go`). A handler naming a function
+  that does not exist, or a query calling a renamed construct, is a load
+  problem the strict-boot gate refuses — not a mid-turn failure the first time
+  a model calls the tool. A builtin is reached through
+  `@handler(type="function", name="<builtin>")`; there is no `"builtin"`
+  handler type.
+- **Field types and field annotations are closed sets.** An unknown type used
+  to be emitted as `"string"` — not a permissive degrade but a confidently
+  wrong one, since the model is told "string", the `@default` is coerced to a
+  string, and the value reaches a `@required integer` handler argument as
+  `"10"`. An unknown annotation (`@enums` for `@enum`) was discarded, so the
+  constraint the author wrote was never enforced.
 
 ### Integration Capabilities
 Go-backed operations callable from the DSL via

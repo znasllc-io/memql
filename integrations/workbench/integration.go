@@ -17,6 +17,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/node"
 	nodev1 "github.com/znasllc-io/memql/component/node/gen"
@@ -580,15 +581,15 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 	// withUserActor returns ctx UNCHANGED for a blank owner, which would
 	// attribute the row to the inbound caller instead.
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, source:%q, format:%q`,
-		outputId, title, "workbench_generated", format)
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%s, title:%s, source:%s, format:%s`,
+		langparser.QuoteString(outputId), langparser.QuoteString(title), langparser.QuoteString("workbench_generated"), langparser.QuoteString(format))
 	if attachmentId != "" {
 		// File-backed: the bytes ARE the deliverable, so reference the
 		// attachment instead of an inline pointer note (mirrors the
 		// uploaded-document path).
-		fmt.Fprintf(&b, `, attachmentId:%q`, attachmentId)
+		fmt.Fprintf(&b, `, attachmentId:%s`, langparser.QuoteString(attachmentId))
 		if mimeType != "" {
-			fmt.Fprintf(&b, `, mimeType:%q`, mimeType)
+			fmt.Fprintf(&b, `, mimeType:%s`, langparser.QuoteString(mimeType))
 		}
 	} else if inline := i.inlineTextBody(planId, path, format, innerArgs, local); inline != "" {
 		// No blob uploader configured (the typical local-dev path): without
@@ -597,25 +598,25 @@ func (i *Integration) promoteWorkbenchOutput(ctx context.Context, planId, agentI
 		// the agent just wrote, so for a text-shaped file inline the content
 		// as the generatedOutput body -- the Library DocumentCard renders it
 		// directly (markdown / plain), no attachment round-trip needed. (memql#889)
-		fmt.Fprintf(&b, `, body:%q`, inline)
+		fmt.Fprintf(&b, `, body:%s`, langparser.QuoteString(inline))
 		// Carry a real one-line summary derived from the content we already
 		// hold, so indexGeneratedOutput stamps a meaningful
 		// artifact.summary instead of nothing (memql#1392). Attachment-backed
 		// and pointer rows have no text to summarize; they simply omit the
 		// field and the index logic resolves it to null.
 		if summary := deriveInlineSummary(inline); summary != "" {
-			fmt.Fprintf(&b, `, summary:%q`, summary)
+			fmt.Fprintf(&b, `, summary:%s`, langparser.QuoteString(summary))
 		}
 	} else {
 		// Pointer row: bytes unavailable or non-text, so describe where the file lives.
-		fmt.Fprintf(&b, `, body:%q`, fmt.Sprintf("File written to the task workspace at `%s`.", path))
+		fmt.Fprintf(&b, `, body:%s`, langparser.QuoteString(fmt.Sprintf("File written to the task workspace at `%s`.", path)))
 	}
 	if agentId = strings.TrimSpace(agentId); agentId != "" {
-		fmt.Fprintf(&b, `, producedByAgentId:%q`, agentId)
+		fmt.Fprintf(&b, `, producedByAgentId:%s`, langparser.QuoteString(agentId))
 	}
-	fmt.Fprintf(&b, `, producedByPlanId:%q`, planId)
+	fmt.Fprintf(&b, `, producedByPlanId:%s`, langparser.QuoteString(planId))
 	if partitionId != "" {
-		fmt.Fprintf(&b, `, partitionId:%q`, partitionId)
+		fmt.Fprintf(&b, `, partitionId:%s`, langparser.QuoteString(partitionId))
 	}
 	b.WriteString(")")
 
@@ -743,8 +744,8 @@ func (i *Integration) uploadAttachmentBytes(ctx context.Context, planId, relPath
 
 	attachmentId = partitionId + ":" + det
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation mutationCreateAttachment(attachmentId:%q, partitionId:%q, fileName:%q, mimeType:%q, fileSize:%d, blobUrl:%q, status:%q, uploadedBy:%q)`,
-		attachmentId, partitionId, fileName, mimeType, len(data), blobUrl, "ready", ownerUserId)
+	fmt.Fprintf(&b, `mutation mutationCreateAttachment(attachmentId:%s, partitionId:%s, fileName:%s, mimeType:%s, fileSize:%d, blobUrl:%s, status:%s, uploadedBy:%s)`,
+		langparser.QuoteString(attachmentId), langparser.QuoteString(partitionId), langparser.QuoteString(fileName), langparser.QuoteString(mimeType), len(data), langparser.QuoteString(blobUrl), langparser.QuoteString("ready"), langparser.QuoteString(ownerUserId))
 	if _, err := i.engine.Execute(ctx, b.String()); err != nil {
 		if i.logger != nil {
 			i.logger.Warn("workbench: attachment row create failed -- using pointer row",
@@ -823,7 +824,7 @@ func (i *Integration) resolvePlanOwner(ctx context.Context, planId string) (owne
 	if i.engine == nil {
 		return "", ""
 	}
-	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%q)`, planId))
+	res, err := i.engine.Execute(ctx, fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId)))
 	if err != nil || res == nil {
 		return "", ""
 	}

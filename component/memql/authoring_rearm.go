@@ -39,6 +39,7 @@ import (
 	"strings"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // registerBundleConstructs registers an activation plan's constructs into the
@@ -247,7 +248,7 @@ func (s *engineRearmStore) LoadConstructsForOwner(ctx context.Context, owner, bu
 		UserId: owner,
 		Role:   auth.RoleWriter,
 	})
-	q := fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%q)`, bundleId)
+	q := fmt.Sprintf(`query authoringConstructsForBundle(bundleId:%s)`, langparser.QuoteString(bundleId))
 	res, err := s.engine.Execute(authorCtx, q)
 	if err != nil {
 		return nil, err

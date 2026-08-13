@@ -66,8 +66,17 @@ func (e *MemQLEngine) initBuiltinExecutorHandlers() error {
 				continue
 			}
 			// Integration capability executors (integration.*) are registered
-			// dynamically via RegisterIntegration after engine startup.
+			// dynamically via RegisterIntegration after engine startup, so
+			// their EXISTENCE cannot be checked here -- that is
+			// AuditIntegrationExecutors, run once the integrations phase has
+			// finished. Their SHAPE can be, and until memql#3614 was not: a
+			// malformed FQN like `integration.foo.` or `integration.foo` names
+			// a capability no binary can ever register, in any build, so it is
+			// a typo by construction and refused here.
 			if strings.HasPrefix(fn.Executor, "integration.") {
+				if err := validateIntegrationExecutorShape(fn.Executor); err != nil {
+					return fmt.Errorf("builtin function %q: %w", fn.Name, err)
+				}
 				continue
 			}
 			if _, ok := handlers[fn.Executor]; !ok {

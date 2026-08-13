@@ -30,6 +30,7 @@ import (
 	"os"
 	"strconv"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	compplanner "github.com/znasllc-io/memql/component/planner"
 )
 
@@ -189,8 +190,8 @@ func (l *PlannerAgentLoop) recordPlannerInvocation(ctx context.Context, plan map
 		metricsJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation recordPlannerInvocation(planId:%q, tokenSpent:%d, metrics:%s)`,
-		planId, newSpent, string(metricsJSON),
+		`mutation recordPlannerInvocation(planId:%s, tokenSpent:%d, metrics:%s)`,
+		langparser.QuoteString(planId), newSpent, string(metricsJSON),
 	)
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner agent loop: recordPlannerInvocation failed",

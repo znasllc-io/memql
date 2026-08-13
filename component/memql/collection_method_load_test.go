@@ -54,6 +54,13 @@ func TestQueryFilterCollectionMethodRejected(t *testing.T) {
 		"@enabled",
 		"@description(\"bad query\")",
 		"query thing queryBadCollection {",
+		// `members` is declared so the SCOPE rule is what this fixture
+		// exercises. Undeclared, it now trips the used-requires-declared
+		// args check first (memql#3626) and the test would pass on the
+		// wrong rejection.
+		"  args {",
+		"    members []object",
+		"  }",
 		"  filter args.members.any(m => m.active)",
 		"  shape thing",
 		"}",
