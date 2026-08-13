@@ -1098,9 +1098,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	interactionDefs := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, nil)
+	interactionDefs := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, nil)
 	for _, asLabel := range relationshipLabelsPresent(interactionDefs) {
-		related, err := e.resolveInteractsWith(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
+		related, err := e.resolveReferences(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1110,7 +1110,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if interactionId == "" || strings.EqualFold(interactionId, id) {
 				continue
 			}
-			builder.addEdge(id, interactionId, GraphEdgeLabelInteractsWith, asLabel, currentDepth+1)
+			builder.addEdge(id, interactionId, GraphEdgeLabelReferences, asLabel, currentDepth+1)
 			if _, ok := visited[interactionId]; ok {
 				continue
 			}

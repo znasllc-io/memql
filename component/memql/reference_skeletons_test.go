@@ -138,7 +138,7 @@ func TestReferenceRelationshipsAreValid(t *testing.T) {
 						"engine accepts -- an author copying this gets a boot refusal. "+
 						"The closed set is canonicalRelationshipType in "+
 						"component/memql/relations.go; for a plain foreign key use "+
-						"type=\"interactsWith\"", where, index, rel.Type)
+						"type=\"references\"", where, index, rel.Type)
 				}
 
 				switch strings.ToLower(strings.TrimSpace(rel.Direction)) {
@@ -199,7 +199,7 @@ func TestReferenceRelationshipTargetsUseImports(t *testing.T) {
 
 // glossaryEntry matches one line of the sheet's `type` values glossary:
 //
-//	//     interactsWith -- the default plain foreign-key edge. ...
+//	//     references -- the default plain foreign-key edge. ...
 //
 // The continuation lines of an entry are indented further and carry no `--`,
 // so they do not match.

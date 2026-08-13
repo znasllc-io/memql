@@ -54,13 +54,13 @@ const (
 )
 
 const (
-	relationshipTypeParent    = "parent"
-	relationshipTypeAlias     = "alias"
-	relationshipTypeEquals    = "equals"
-	relationshipTypeInteracts = "interactsWith"
-	relationshipTypeContains  = "contains"
-	relationshipTypeOwns      = "owns"
-	relationshipTypeCreatedBy = "createdBy"
+	relationshipTypeParent     = "parent"
+	relationshipTypeAlias      = "alias"
+	relationshipTypeEquals     = "equals"
+	relationshipTypeReferences = "references"
+	relationshipTypeContains   = "contains"
+	relationshipTypeOwns       = "owns"
+	relationshipTypeCreatedBy  = "createdBy"
 	// `dependsOn` and `formedFrom` used to live here as structural types. They
 	// never were structural: their own comments recorded that graph-expansion
 	// traversal was deliberately unwired and the field was read directly by the
@@ -72,8 +72,8 @@ const (
 	// They are now `as` domain labels (memql#3655), which is the axis they
 	// always belonged on:
 	//
-	//   @relationship(type="interactsWith", as="dependsOn",  field="dependsOn", ...)
-	//   @relationship(type="interactsWith", as="formedFrom", field="sourceEpisodes", ...)
+	//   @relationship(type="references", as="dependsOn",  field="dependsOn", ...)
+	//   @relationship(type="references", as="formedFrom", field="sourceEpisodes", ...)
 )
 
 type relationshipRegistry struct {
@@ -96,13 +96,13 @@ type relationshipEdge struct {
 // is worse than no message, because it sends the author down a dead end while
 // looking authoritative.
 var structuralRelationshipTypeSet = map[string]string{
-	"parent":        relationshipTypeParent,
-	"alias":         relationshipTypeAlias,
-	"equals":        relationshipTypeEquals,
-	"interactswith": relationshipTypeInteracts,
-	"contains":      relationshipTypeContains,
-	"owns":          relationshipTypeOwns,
-	"createdby":     relationshipTypeCreatedBy,
+	"parent":     relationshipTypeParent,
+	"alias":      relationshipTypeAlias,
+	"equals":     relationshipTypeEquals,
+	"references": relationshipTypeReferences,
+	"contains":   relationshipTypeContains,
+	"owns":       relationshipTypeOwns,
+	"createdby":  relationshipTypeCreatedBy,
 }
 
 func canonicalRelationshipType(value string) (string, bool) {

@@ -5804,15 +5804,15 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 	// 2-arg string search), so contains is a callableParsers builtin.
 	wrapperFunctions := map[string]bool{
 		"parentof": true, "childof": true, "aliasof": true,
-		"equals": true, "interactswith": true,
+		"equals": true, "references": true,
 		"owns": true, "createdby": true, "ids": true,
 	}
 
 	if wrapperFunctions[lname] {
 		// Arg-count discrimination (memql#3656): an optional leading string
 		// literal is the `as` domain label to scope the traversal to --
-		// `interactsWith("assignedTo", <expr>)` follows only edges labelled
-		// assignedTo, `interactsWith(<expr>)` follows all of them.
+		// `references("assignedTo", <expr>)` follows only edges labelled
+		// assignedTo, `references(<expr>)` follows all of them.
 		//
 		// This introduces no new grammar concept: contains() is already
 		// arg-count discriminated inside parseContainsFunction, which is
@@ -6596,8 +6596,8 @@ func (p *Parser) createWrapper(name string, target ExpressionNode, label string)
 		return &RelationshipExpr{Function: RelAliasOf, Target: target, Label: label}, nil
 	case "equals":
 		return &RelationshipExpr{Function: RelEquals, Target: target, Label: label}, nil
-	case "interactswith":
-		return &RelationshipExpr{Function: RelInteractsWith, Target: target, Label: label}, nil
+	case "references":
+		return &RelationshipExpr{Function: RelReferences, Target: target, Label: label}, nil
 	case "contains":
 		return &RelationshipExpr{Function: RelContains, Target: target, Label: label}, nil
 	case "owns":

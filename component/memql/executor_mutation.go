@@ -1102,7 +1102,7 @@ func (e *MemQLEngine) fetchNodesByIds(ctx context.Context, ids []string, timesta
 
 // fetchNodesByJSONFieldValues answers an INCOMING relationship question:
 // which rows of `conceptName` carry one of `values` at `fieldPath`. It backs
-// childOf, the incoming branches of owns / interactsWith / createdBy, and the
+// childOf, the incoming branches of owns / references / createdBy, and the
 // alias/equals canonical lookup -- every one of which is many-rows-per-value,
 // so the target comes from incomingLookupTarget and never from len(values).
 func (e *MemQLEngine) fetchNodesByJSONFieldValues(ctx context.Context, conceptName string, fieldPath []string, values []string, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {

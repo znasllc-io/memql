@@ -280,15 +280,15 @@ func (*SpecReferenceExpression) isExpressionNode() {}
 type RelationshipFunction string
 
 const (
-	RelParentOf      RelationshipFunction = "parentOf"
-	RelChildOf       RelationshipFunction = "childOf"
-	RelAliasOf       RelationshipFunction = "aliasOf"
-	RelEquals        RelationshipFunction = "equals"
-	RelInteractsWith RelationshipFunction = "interactsWith"
-	RelContains      RelationshipFunction = "contains"
-	RelOwns          RelationshipFunction = "owns"
-	RelCreatedBy     RelationshipFunction = "createdBy"
-	RelIds           RelationshipFunction = "ids"
+	RelParentOf   RelationshipFunction = "parentOf"
+	RelChildOf    RelationshipFunction = "childOf"
+	RelAliasOf    RelationshipFunction = "aliasOf"
+	RelEquals     RelationshipFunction = "equals"
+	RelReferences RelationshipFunction = "references"
+	RelContains   RelationshipFunction = "contains"
+	RelOwns       RelationshipFunction = "owns"
+	RelCreatedBy  RelationshipFunction = "createdBy"
+	RelIds        RelationshipFunction = "ids"
 )
 
 // RelationshipExpression wraps a nested expression within a relationship function invocation.

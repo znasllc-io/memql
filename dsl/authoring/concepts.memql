@@ -46,8 +46,8 @@ concept bundle {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="responsibilityId", target=responsibility, direction="outgoing")
-  @relationship(type="interactsWith", field="sourcePlanId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", field="supersedesBundleId", target=bundle, direction="outgoing")
+  @relationship(type="references", field="sourcePlanId", target=plan, direction="outgoing")
+  @relationship(type="references", field="supersedesBundleId", target=bundle, direction="outgoing")
 }
 
 /// One authored DSL construct that is a member of a v1:authoring:bundle: the `.memql` source for an
@@ -77,7 +77,7 @@ concept construct {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
   @relationship(type="parent", field="bundleId", target=bundle, direction="outgoing")
-  @relationship(type="interactsWith", field="catalogedFromBundleId", target=bundle, direction="outgoing")
+  @relationship(type="references", field="catalogedFromBundleId", target=bundle, direction="outgoing")
 }
 
 /// One dependency edge in a bundle's construct graph (epic memql#954, issue #957). Construct

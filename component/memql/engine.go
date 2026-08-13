@@ -11,7 +11,6 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/bus"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -19,6 +18,7 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
@@ -1296,7 +1296,7 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		// cost an engine release to discover (memql#3652).
 		return RelationshipDefinition{}, fmt.Errorf(
 			"relationship type %q is invalid. Structural types are: %s. "+
-				"For a domain verb, use: type=\"interactsWith\", as=%q",
+				"For a domain verb, use: type=\"references\", as=%q",
 			def.Type, strings.Join(structuralRelationshipTypes(), ", "), def.Type)
 	}
 

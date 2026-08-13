@@ -326,8 +326,8 @@ func extractQuotedValue(msg string) string {
 
 // Helper function to extract relationship type from error messages.
 func extractRelationshipType(msg string) string {
-	// Look for patterns like "no parentOf relationship" or "interactsWith relationship not defined"
-	types := []string{"parentOf", "childOf", "contains", "owns", "createdBy", "aliasOf", "equals", "interactsWith"}
+	// Look for patterns like "no parentOf relationship" or "references relationship not defined"
+	types := []string{"parentOf", "childOf", "contains", "owns", "createdBy", "aliasOf", "equals", "references"}
 	for _, t := range types {
 		if strings.Contains(msg, t) {
 			return t

@@ -106,15 +106,15 @@ var relationshipWrapperArities = map[string]struct {
 	labelled bool
 	doc      string
 }{
-	"parentOf":      {labelled: true, doc: "Follow `parent` relationships upward, to the rows this one points at."},
-	"childOf":       {labelled: true, doc: "Follow `parent` relationships downward, to the rows that point at this one."},
-	"aliasOf":       {labelled: true, doc: "Follow `alias` relationships to the rows this one aliases."},
-	"equals":        {labelled: true, doc: "Follow `equals` relationships -- identity equivalence, the sibling of alias."},
-	"interactsWith": {labelled: true, doc: "Follow `interactsWith` relationships -- the plain foreign-key edge."},
-	"owns":          {labelled: true, doc: "Follow `owns` relationships, in whichever direction they are declared."},
-	"createdBy":     {labelled: true, doc: "Follow `createdBy` relationships to the creator row."},
-	"contains":      {labelled: false, doc: "Expand a `contains` collection membership array.\n\nTakes no `as` label: the two-argument form is already the substring search contains(text, substr)."},
-	"ids":           {labelled: false, doc: "Project rows to id-only nodes (no payload, no schema).\n\nTakes no `as` label: ids() follows no relationship, so a label on it is refused rather than ignored."},
+	"parentOf":   {labelled: true, doc: "Follow `parent` relationships upward, to the rows this one points at."},
+	"childOf":    {labelled: true, doc: "Follow `parent` relationships downward, to the rows that point at this one."},
+	"aliasOf":    {labelled: true, doc: "Follow `alias` relationships to the rows this one aliases."},
+	"equals":     {labelled: true, doc: "Follow `equals` relationships -- identity equivalence, the sibling of alias."},
+	"references": {labelled: true, doc: "Follow `references` relationships -- the plain foreign-key edge."},
+	"owns":       {labelled: true, doc: "Follow `owns` relationships, in whichever direction they are declared."},
+	"createdBy":  {labelled: true, doc: "Follow `createdBy` relationships to the creator row."},
+	"contains":   {labelled: false, doc: "Expand a `contains` collection membership array.\n\nTakes no `as` label: the two-argument form is already the substring search contains(text, substr)."},
+	"ids":        {labelled: false, doc: "Project rows to id-only nodes (no payload, no schema).\n\nTakes no `as` label: ids() follows no relationship, so a label on it is refused rather than ignored."},
 }
 
 // relationshipWrapperSignatures returns the readings of a traversal function:

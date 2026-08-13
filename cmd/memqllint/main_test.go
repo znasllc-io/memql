@@ -197,14 +197,14 @@ concept hub {
 concept gadget {
   hubId  string  @required  @description("FK to the owning hub.")
 
-  @relationship(type="references", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="interactsWith", field="hubId", target=hub, direction="outgoing")
 }`,
 		})
 		code, out := captureRun(t, []string{root})
 		if code != 1 {
 			t.Fatalf("run() = %d, want 1; output:\n%s", code, out)
 		}
-		if !strings.Contains(out, `relationship type "references" is invalid`) {
+		if !strings.Contains(out, `relationship type "interactsWith" is invalid`) {
 			t.Fatalf("expected the report to name the invalid relationship type; output:\n%s", out)
 		}
 	})

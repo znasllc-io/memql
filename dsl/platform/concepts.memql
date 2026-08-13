@@ -143,8 +143,8 @@ concept missingCapability {
   resolution      string  @description("Free-text note when status='resolved' or 'wontfix' explaining what shipped (or why we won't ship it).")
   exampleGoals    []string @description("List of Plan.goal strings that triggered this gap. Capped at the most recent N (engine policy); gives the prioritization view 'real users wanted X, Y, Z'.")
 
-  @relationship(type="interactsWith", field="requestedFromPlanId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", field="requestedByAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="requestedFromPlanId", target=plan, direction="outgoing")
+  @relationship(type="references", field="requestedByAgentId", target=agent, direction="outgoing")
 }
 
 // ---- concepts/v1/platform/outboundRequest/concept.memql ----

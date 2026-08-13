@@ -49,7 +49,7 @@ func TestSenseAsLabelDiagnosticMatchesTheLoadGate(t *testing.T) {
 	for _, label := range asLabelCases {
 		engineRefuses := validateRelationshipAsLabel(label) != nil
 
-		src := "concept t {\n  @relationship(type=\"interactsWith\", as=\"" + label +
+		src := "concept t {\n  @relationship(type=\"references\", as=\"" + label +
 			"\", field=\"a\", target=b, direction=\"outgoing\")\n}"
 		editorRefuses := false
 		for _, d := range svc.Diagnose(src, "concepts.memql") {
@@ -69,9 +69,9 @@ func TestSenseAsLabelDiagnosticMatchesTheLoadGate(t *testing.T) {
 // structuralTypeCases spans the closed set plus the shapes that are not in it.
 var structuralTypeCases = []string{
 	// Every member, in its canonical spelling.
-	"parent", "alias", "equals", "interactsWith", "contains", "owns", "createdBy",
+	"parent", "alias", "equals", "references", "contains", "owns", "createdBy",
 	// The normalisation canonicalRelationshipType applies.
-	"INTERACTSWITH", "created_by", "createdby",
+	"REFERENCES", "created_by", "createdby",
 	// Not members. "references" is the one the authoring reference used to
 	// teach (memql#3660); "dependsOn" / "formedFrom" were structural types
 	// until memql#3655 retired them to `as` labels -- and this pin is what

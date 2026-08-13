@@ -101,9 +101,9 @@ concept agent {
   roleEmbedding      []float @description("Embedding of (role + roleSlug + description + the resolved domain union across capabilities.skillIds[]) used by the layered dedupe (Q10) similarity check. Recomputed on insert/update of any of those fields by the agentRoleEmbed automation. Empty for legacy agents until the backfill runs. Stored on the row rather than a sidecar concept for v1 simplicity; can be moved to v1:agents:agentEmbedding later if row width becomes a concern.")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", field="identity.identityId", target=identity, direction="outgoing")
+  @relationship(type="references", field="identity.identityId", target=identity, direction="outgoing")
   @relationship(type="createdBy", field="lineage.originatingPlanId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", field="lineage.extendedFromAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="lineage.extendedFromAgentId", target=agent, direction="outgoing")
 }
 
 /// Standing authorization granting an agent permission to trigger Plans of certain kinds without
@@ -210,8 +210,8 @@ concept skill {
   originatingPlanId string @description("Phase 3 (#159) provenance: the v1:planner:plan.id whose dispatch surfaced the need for this skill. Empty for predefined catalog rows. Stamped by mintSkill at attach time. Pairs with mintedByAgentId for the 'who/when/why' triad the Skills admin view + the trace viewer (cockpit#125) surface as 'Created by planner from Plan X'.")
   mintedByAgentId   string @description("Phase 3 (#159) provenance: the v1:agents:agent.id of the planner agent whose mintSkill action produced this row. Empty for predefined catalog rows. The trace viewer renders this alongside the planner trace tree so an operator can correlate a skill mint with the upstream LLM decision that triggered it.")
 
-  @relationship(type="interactsWith", field="originatingPlanId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", field="mintedByAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="originatingPlanId", target=plan, direction="outgoing")
+  @relationship(type="references", field="mintedByAgentId", target=agent, direction="outgoing")
 }
 
 /// Append-only audit log for every skill attach / reconfigure event on an agent. Mirrors
@@ -231,11 +231,11 @@ concept skillChangeEvent {
   actorUserId     string  @description("v1:identity:user.id of the human that drove the change (cockpit Skills admin view, agent edit modal). Empty for planner-driven attaches.")
   planId          string  @description("v1:planner:plan.id of the Plan that the change happened under, if any. Lets the trace viewer surface 'attached during Plan X' attribution + group co-occurring attaches under the same Plan.")
 
-  @relationship(type="interactsWith", field="targetAgentId", target=agent, direction="outgoing")
-  @relationship(type="interactsWith", field="skillId", target=skill, direction="outgoing")
-  @relationship(type="interactsWith", field="actorAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="targetAgentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="skillId", target=skill, direction="outgoing")
+  @relationship(type="references", field="actorAgentId", target=agent, direction="outgoing")
   @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", field="planId", target=plan, direction="outgoing")
+  @relationship(type="references", field="planId", target=plan, direction="outgoing")
 }
 
 /// Session-scoped memory for UI-driving agents. One record per user; accumulates short notes across

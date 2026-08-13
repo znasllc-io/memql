@@ -37,7 +37,7 @@ import (
 //
 // WHY THIS NEEDED A FIXTURE CONCEPT. Every one of the 141 @relationship
 // declarations in the shipped corpus is direction="outgoing", so childOf and
-// the incoming branches of owns / interactsWith / createdBy are unreachable
+// the incoming branches of owns / references / createdBy are unreachable
 // against it -- the defect is real but latent, and no test written against
 // the corpus can fail. So the fixture below declares the missing shape: a
 // `parent` relationship with direction="incoming", registered through

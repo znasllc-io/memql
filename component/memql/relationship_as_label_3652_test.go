@@ -14,7 +14,7 @@ func conceptForAsLabelTest() *concept.Concept {
 	return &concept.Concept{
 		Name: "v1:cognition:participant",
 		Relationships: []RelationshipDefinition{{
-			Type:          "interactsWith",
+			Type:          "references",
 			Field:         "agentId",
 			TargetConcept: "v1:agents:agent",
 			Direction:     "outgoing",
@@ -27,7 +27,7 @@ func conceptForAsLabelTest() *concept.Concept {
 // in its `as` label, so a failure can only be attributable to that label.
 func validAsLabelDef(as string) RelationshipDefinition {
 	return RelationshipDefinition{
-		Type:          "interactsWith",
+		Type:          "references",
 		Field:         "agentId",
 		TargetConcept: "v1:agents:agent",
 		Direction:     "outgoing",
@@ -41,12 +41,12 @@ func validAsLabelDef(as string) RelationshipDefinition {
 // TestRelationshipAsLabelAcceptsAnyWellFormedVerb for the other half.
 func TestRelationshipAsLabelRejectsMalformed(t *testing.T) {
 	malformed := map[string]string{
-		"underscore":   "assigned_to",
-		"capitalised":  "AssignedTo",
-		"leadingDigit": "1assigned",
-		"hyphen":       "assigned-to",
-		"space":        "assigned to",
-		"dot":          "assigned.to",
+		"underscore":    "assigned_to",
+		"capitalised":   "AssignedTo",
+		"leadingDigit":  "1assigned",
+		"hyphen":        "assigned-to",
+		"space":         "assigned to",
+		"dot":           "assigned.to",
 		"overLengthCap": strings.Repeat("a", 65),
 	}
 
@@ -141,7 +141,7 @@ func TestUnknownRelationshipTypeErrorNamesTheAsForm(t *testing.T) {
 	}
 
 	msg := err.Error()
-	for _, want := range []string{"assignedTo", `as="assignedTo"`, "interactsWith"} {
+	for _, want := range []string{"assignedTo", `as="assignedTo"`, "references"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q does not mention %q", msg, want)
 		}
@@ -170,7 +170,7 @@ func TestRelationshipAsLabelIsOptional(t *testing.T) {
 // which is the "declaration theatre" failure this whole epic exists to remove.
 func TestRelationshipAsLabelIsPreserved(t *testing.T) {
 	def := RelationshipDefinition{
-		Type:          "interactsWith",
+		Type:          "references",
 		Field:         "agentId",
 		TargetConcept: "v1:agents:agent",
 		Direction:     "outgoing",

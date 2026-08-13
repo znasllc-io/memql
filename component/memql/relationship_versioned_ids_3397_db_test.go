@@ -28,7 +28,7 @@ import (
 //     fetchNodesByIds / fetchNodesByJSONFieldValues / fetchNodesByNodeFieldValues
 //     (executor_mutation.go) each hand it a bounded `id IN (...)` or
 //     `<field> IN (...)` lookup on behalf of parentOf / childOf / contains /
-//     owns / interactsWith / createdBy. No cursor ever reaches it.
+//     owns / references / createdBy. No cursor ever reaches it.
 //
 // The defect it carried had Defect A's shape. The SQL LIMIT was `target * 2`
 // RAW rows -- an assumption of at most ~2 versions per id -- and the scan then
