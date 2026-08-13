@@ -236,3 +236,43 @@ func TestWordLiteralsBindInEveryCallShape(t *testing.T) {
 		})
 	}
 }
+
+// TestEqualsNamedArgNameCannotContainColon: the fourth and last position.
+//
+// `m(b:c = 1)` binds an argument named "b:c"; `b` never exists. The `=` form
+// is the least-used of the four, which is exactly why it was the one still
+// standing after two passes at this defect.
+func TestEqualsNamedArgNameCannotContainColon(t *testing.T) {
+	for _, src := range []string{
+		`mutation m(b:c = 1)`,
+		`mutation m(a: 1, b:c = 2)`,
+		`f(b:c = 1)`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if _, err := ParseExpression(src); err == nil {
+				t.Fatalf("ParseExpression(%q) succeeded; the argument the author named is silently absent", src)
+			}
+		})
+	}
+}
+
+// TestEveryArgumentPositionRefusesAColonName is the completeness assertion.
+//
+// Four positions bind an argument name. Two passes at this defect each fixed
+// a subset, so what is pinned here is the SET, not another instance: if a
+// fifth position is added, this test is where the omission should show up.
+func TestEveryArgumentPositionRefusesAColonName(t *testing.T) {
+	positions := map[string]string{
+		"colon-named, kind-prefixed": `mutation m(b:someIdent)`,
+		"equals-named":               `mutation m(b:c = 1)`,
+		"punned/positional, bare":    `f(b:someIdent)`,
+		"object-literal key":         `mutation m(p:{b:someIdent})`,
+	}
+	for position, src := range positions {
+		t.Run(position, func(t *testing.T) {
+			if _, err := ParseExpression(src); err == nil {
+				t.Fatalf("%s still binds a colon-bearing argument name: %q", position, src)
+			}
+		})
+	}
+}

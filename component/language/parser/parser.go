@@ -5769,6 +5769,12 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		// Check for named argument (identifier followed by single =)
 		if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenOperator && p.peekAhead(1).Literal == "=" {
 			argName := p.current.Literal
+			// `m(b:c = 1)` binds an argument named "b:c" and `b` never exists.
+			// The fourth and last position in this family; an argument name
+			// cannot contain a colon in any of them.
+			if strings.Contains(argName, ":") {
+				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
 			p.advance() // consume name
 			p.advance() // consume '='
 			val, err := p.parseValueMaybeCoalesce()
