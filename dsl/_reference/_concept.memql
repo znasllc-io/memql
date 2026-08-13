@@ -561,8 +561,20 @@ concept fieldAnnotations {
 //   discriminator value. Inside the variant body the author writes each
 //   branch keyed by the discriminator value.
 //
-//   Engine validation: payloads carrying this field must match exactly one
-//   declared branch based on the discriminator's value.
+//   Engine validation, in two parts. The field lowers to a `oneOf` over the
+//   branches, so a payload must match exactly one of them; and the emitted
+//   schema also carries one `if`/`then` pair per branch, on the object that
+//   OWNS the field, tying the branch to the discriminator's actual value
+//   (memql#3623). Both halves are needed: the pairs have to live one level up
+//   because a subschema cannot see a sibling field, and the `oneOf` alone
+//   only ever asked that SOME branch match -- so before #3623 a row could
+//   declare kind="image" and carry a text body, and any reader that switched
+//   on the discriminator was reading a shape the schema had permitted.
+//
+//   A discriminator value that names no branch is not constrained by the
+//   pairs, so declare the discriminator as an `enum` (and `!` where a value
+//   is always required) -- that declaration is what closes the remaining
+//   hole, and it is why the example below does both.
 //
 //   The branch block is NOT optional. `@variant(discriminator="kind")` with
 //   no `{ … }` behind it is REFUSED at load, at every depth (`object`,
@@ -601,7 +613,28 @@ concept variantExample {
 //
 //   A field can introduce a nested object by declaring a body block under
 //   its name. Nested objects use the same field-level annotations as
-//   top-level fields.
+//   top-level fields, and `!` / @required inside one is enforced the way it
+//   is at the top level (memql#3623 -- before that it was parsed and then
+//   dropped, so the annotation meant nothing one level down). A `required`
+//   inside a block applies only when the block itself is present, so an
+//   optional nested block stays omittable.
+//
+//   ONE difference from the top level, and it is a live gap rather than a
+//   design: a nested block is still OPEN to keys it does not declare, while
+//   the top level and every @variant branch are closed. A typo inside a
+//   block therefore lands beside the field it was meant to be. Closing it is
+//   memql#3623's unfinished half -- it waits on the writers that put
+//   undeclared keys into a nested block today (the perUser agent seeds,
+//   v1:cognition:utterance.source) and on the bundles and clients that splat
+//   a caller-supplied object into one. Do not rely on the gap: write only
+//   declared keys.
+//
+//   An annotation may NOT trail the closing brace of a nested block on the
+//   same line (`settings { ... } @internal`). That spelling is refused,
+//   because the newline-stripped token stream cannot tell it apart from the
+//   prefix annotation of the property that follows, which is what it used to
+//   silently become. Put the annotation on the line(s) BEFORE the property it
+//   applies to.
 
 @namespace("reference")
 @description("A flat concept with a nested settings sub-object.")
