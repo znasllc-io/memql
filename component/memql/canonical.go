@@ -19,6 +19,17 @@ func canonicalExpression(expr ExpressionNode) string {
 		return canonicalComparisonExpression(node)
 	case *RelationshipExpression:
 		target := canonicalExpression(node.Target)
+		// The `as` label is part of the query's IDENTITY, not decoration
+		// (memql#3656). This string is the result-cache signature, and result
+		// caching is default-on, so omitting the label makes
+		// interactsWith("actsFor", X) and interactsWith("respondsAs", X)
+		// share one entry -- each returning whichever ran first. That is worse
+		// than returning the union, because the answer depends on execution
+		// order. Rendered only when present, so every unlabelled traversal
+		// keeps its existing signature and its existing cache entries.
+		if label := strings.TrimSpace(node.Label); label != "" {
+			return fmt.Sprintf("%s(%s|as=%s)", strings.ToLower(string(node.Function)), target, label)
+		}
 		return fmt.Sprintf("%s(%s)", strings.ToLower(string(node.Function)), target)
 	case *SortExpression:
 		target := canonicalExpression(node.Target)

@@ -5809,6 +5809,23 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 	}
 
 	if wrapperFunctions[lname] {
+		// Arg-count discrimination (memql#3656): an optional leading string
+		// literal is the `as` domain label to scope the traversal to --
+		// `interactsWith("assignedTo", <expr>)` follows only edges labelled
+		// assignedTo, `interactsWith(<expr>)` follows all of them.
+		//
+		// This introduces no new grammar concept: contains() is already
+		// arg-count discriminated inside parseContainsFunction, which is
+		// exactly why it is absent from this map. The two forms cannot be
+		// confused -- an inner filter expression never begins with a bare
+		// string literal followed by a comma.
+		label := ""
+		if p.check(TokenString) && p.peekAhead(1).Type == TokenComma {
+			label = p.current.Literal
+			p.advance() // the label
+			p.advance() // the comma
+		}
+
 		// Parse inner expression
 		inner, err := p.parseExpression()
 		if err != nil {
@@ -5820,7 +5837,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		}
 
 		// Return appropriate wrapper
-		return p.createWrapper(name, inner)
+		return p.createWrapper(name, inner, label)
 	}
 
 	// For regular function calls, parse as arguments
@@ -6569,26 +6586,26 @@ func parseFieldReferenceLiteralLang(value string) (FieldReference, error) {
 }
 
 // createWrapper creates the appropriate expression wrapper for wrapper functions.
-func (p *Parser) createWrapper(name string, target ExpressionNode) (ExpressionNode, error) {
+func (p *Parser) createWrapper(name string, target ExpressionNode, label string) (ExpressionNode, error) {
 	switch strings.ToLower(name) {
 	case "parentof":
-		return &RelationshipExpr{Function: RelParentOf, Target: target}, nil
+		return &RelationshipExpr{Function: RelParentOf, Target: target, Label: label}, nil
 	case "childof":
-		return &RelationshipExpr{Function: RelChildOf, Target: target}, nil
+		return &RelationshipExpr{Function: RelChildOf, Target: target, Label: label}, nil
 	case "aliasof":
-		return &RelationshipExpr{Function: RelAliasOf, Target: target}, nil
+		return &RelationshipExpr{Function: RelAliasOf, Target: target, Label: label}, nil
 	case "equals":
-		return &RelationshipExpr{Function: RelEquals, Target: target}, nil
+		return &RelationshipExpr{Function: RelEquals, Target: target, Label: label}, nil
 	case "interactswith":
-		return &RelationshipExpr{Function: RelInteractsWith, Target: target}, nil
+		return &RelationshipExpr{Function: RelInteractsWith, Target: target, Label: label}, nil
 	case "contains":
-		return &RelationshipExpr{Function: RelContains, Target: target}, nil
+		return &RelationshipExpr{Function: RelContains, Target: target, Label: label}, nil
 	case "owns":
-		return &RelationshipExpr{Function: RelOwns, Target: target}, nil
+		return &RelationshipExpr{Function: RelOwns, Target: target, Label: label}, nil
 	case "createdby":
-		return &RelationshipExpr{Function: RelCreatedBy, Target: target}, nil
+		return &RelationshipExpr{Function: RelCreatedBy, Target: target, Label: label}, nil
 	case "ids":
-		return &RelationshipExpr{Function: RelIds, Target: target}, nil
+		return &RelationshipExpr{Function: RelIds, Target: target, Label: label}, nil
 	default:
 		// Generic function call with target as argument
 		return &FunctionCallExpr{
@@ -7443,6 +7460,17 @@ func (p *Parser) parseContainsFunction() (ExpressionNode, error) {
 	// ~line 535) emits for `contains(filter)`. The two-arg string-
 	// search form (DSL load-time `contains(text, substr)`) keeps its
 	// existing *ContainsExpr shape and falls through below.
+	//
+	// contains() is the ONE traversal function that does not take the
+	// label-scoped form memql#3656 gave the other eight, and the reason is
+	// structural rather than an oversight: its two-argument slot is already
+	// occupied by string search. `contains("a", "b")` is a legal substring
+	// call TODAY, and a leading string literal is also a legal single-arg
+	// relationship target, so a third reading of (string, X) could only be
+	// resolved by an arbitrary tie-break -- turning a mistyped label into a
+	// silent substring search. That is the same silent-misreading class this
+	// epic exists to remove, so contains keeps two readings, not three.
+	// Unlabelled contains() traversal is unaffected.
 	if p.check(TokenParenClose) {
 		p.advance()
 		return &RelationshipExpr{Function: RelContains, Target: target}, nil

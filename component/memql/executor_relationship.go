@@ -24,24 +24,43 @@ func (e *MemQLEngine) evaluateRelationshipExpression(ctx context.Context, expr *
 
 	var related []memorynodes.MemoryNode
 
+	// label scopes the traversal to edges carrying that `as` domain label
+	// (memql#3656). Empty is the unlabelled form -- follow every edge of the
+	// type, which is what every traversal predating #3656 does -- and is
+	// spelled as a nil filter rather than an empty one, because a filter
+	// holding the empty string means "only edges that are unlabelled".
+	label := strings.TrimSpace(expr.Label)
+	var labels []string
+	if label != "" {
+		labels = []string{label}
+	}
+
 	switch expr.Function {
 	case RelParentOf:
-		related, err = e.resolveParentOf(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveParentOf(ctx, innerNodes, timestamp, labels, limit)
 	case RelChildOf:
-		related, err = e.resolveChildOf(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveChildOf(ctx, innerNodes, timestamp, labels, limit)
 	case RelAliasOf:
-		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeAlias, limit)
+		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeAlias, labels, limit)
 	case RelEquals:
-		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeEquals, limit)
+		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeEquals, labels, limit)
 	case RelInteractsWith:
-		related, err = e.resolveInteractsWith(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveInteractsWith(ctx, innerNodes, timestamp, labels, limit)
 	case RelCreatedBy:
-		related, err = e.resolveCreatedBy(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveCreatedBy(ctx, innerNodes, timestamp, labels, limit)
 	case RelContains:
-		related, err = e.resolveContains(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveContains(ctx, innerNodes, timestamp, labels, limit)
 	case RelOwns:
-		related, err = e.resolveOwns(ctx, innerNodes, timestamp, limit)
+		related, err = e.resolveOwns(ctx, innerNodes, timestamp, labels, limit)
 	case RelIds:
+		// ids() projects the rows it is given; it follows no edge and reads no
+		// relationship definition, so a label on it can only be a mistake.
+		// Refusing beats ignoring: a silently-dropped label would be the
+		// declaration theatre this epic exists to remove.
+		if label != "" {
+			err = fmt.Errorf("ids() follows no relationship, so it takes no label; drop %q", label)
+			break
+		}
 		related, err = e.resolveIds(innerNodes, limit)
 	default:
 		err = fmt.Errorf("relationship function %q is not supported", expr.Function)
@@ -62,7 +81,7 @@ func (e *MemQLEngine) evaluateRelationshipExpression(ctx context.Context, expr *
 	return result, nil
 }
 
-func (e *MemQLEngine) resolveContains(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveContains(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	idSet := make(map[string]struct{})
 	allowed := make(map[string]map[string]struct{})
 
@@ -77,8 +96,18 @@ func (e *MemQLEngine) resolveContains(ctx context.Context, nodes []memorynodes.M
 			return nil, err
 		}
 
-		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional})
+		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, labels)
 		if len(defs) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q does not define a 'contains' relationship required by contains()", conceptMeta.Name)
 		}
 
@@ -134,7 +163,7 @@ func (e *MemQLEngine) resolveContains(ctx context.Context, nodes []memorynodes.M
 	return e.fetchNodesByIds(ctx, ids, timestamp, allowed, limit)
 }
 
-func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	idSet := make(map[string]struct{})
 	allowed := make(map[string]map[string]struct{})
 	collected := make([]memorynodes.MemoryNode, 0)
@@ -150,8 +179,18 @@ func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.Memor
 			return nil, err
 		}
 
-		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeOwns, nil)
+		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeOwns, nil, labels)
 		if len(defs) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q does not define an 'owns' relationship required by owns()", conceptMeta.Name)
 		}
 
@@ -236,7 +275,7 @@ func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.Memor
 	return sorted, nil
 }
 
-func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	parentTargets := make(map[string]map[string]struct{})
 
 	for _, node := range nodes {
@@ -251,8 +290,18 @@ func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.M
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional})
+		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, labels)
 		if len(matches) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q has no parent relationship definitions for parentOf", conceptMeta.Name)
 		}
 
@@ -286,6 +335,17 @@ func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.M
 
 	parentIds := keys(parentTargets)
 	if len(parentIds) == 0 {
+		// A LABELLED traversal that found nothing is an empty answer, not an
+		// error (memql#3656). The per-node filter above already skips a node
+		// whose definitions carry no matching label; this SECOND, pre-existing
+		// gate then refused the empty collection it produced, so four of the
+		// eight functions still failed the whole query on a label miss.
+		// Unlabelled behaviour is untouched -- that disagreement across the
+		// family is memql#3671, and pre-empting it here would silently rewrite
+		// the characterization test that pins it.
+		if labels != nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("parentOf traversal produced no parent references")
 	}
 
@@ -296,7 +356,7 @@ func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.M
 	return e.fetchNodesByIds(ctx, parentIds, timestamp, parentTargets, limit)
 }
 
-func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	type relationshipQueryKey struct {
 		targetConcept string
 		field         string
@@ -311,8 +371,18 @@ func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.Me
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional})
+		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional}, labels)
 		if len(matches) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q has no child relationship definitions for childOf", conceptMeta.Name)
 		}
 
@@ -336,6 +406,17 @@ func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.Me
 	}
 
 	if len(queries) == 0 {
+		// A LABELLED traversal that found nothing is an empty answer, not an
+		// error (memql#3656). The per-node filter above already skips a node
+		// whose definitions carry no matching label; this SECOND, pre-existing
+		// gate then refused the empty collection it produced, so four of the
+		// eight functions still failed the whole query on a label miss.
+		// Unlabelled behaviour is untouched -- that disagreement across the
+		// family is memql#3671, and pre-empting it here would silently rewrite
+		// the characterization test that pins it.
+		if labels != nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("childOf traversal produced no candidate queries")
 	}
 
@@ -364,7 +445,7 @@ func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.Me
 	return results, nil
 }
 
-func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, relType string, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, relType string, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	type relationshipQueryKey struct {
 		targetConcept string
 		field         string
@@ -385,8 +466,18 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relType, nil)
+		matches := filterRelationshipDefinitions(defs, relType, nil, labels)
 		if len(matches) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q has no %s relationship definitions", conceptMeta.Name, relType)
 		}
 
@@ -437,6 +528,17 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 	}
 
 	if len(queries) == 0 {
+		// A LABELLED traversal that found nothing is an empty answer, not an
+		// error (memql#3656). The per-node filter above already skips a node
+		// whose definitions carry no matching label; this SECOND, pre-existing
+		// gate then refused the empty collection it produced, so four of the
+		// eight functions still failed the whole query on a label miss.
+		// Unlabelled behaviour is untouched -- that disagreement across the
+		// family is memql#3671, and pre-empting it here would silently rewrite
+		// the characterization test that pins it.
+		if labels != nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("%s traversal produced no candidate queries", relType)
 	}
 
@@ -476,7 +578,7 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 	return related, nil
 }
 
-func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	type relationshipQueryKey struct {
 		targetConcept string
 		field         string
@@ -497,8 +599,18 @@ func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memoryno
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil)
+		matches := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, labels)
 		if len(matches) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q has no interactsWith relationship definitions", conceptMeta.Name)
 		}
 
@@ -588,7 +700,7 @@ func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memoryno
 	return results, nil
 }
 
-func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	type relationshipQueryKey struct {
 		targetConcept string
 		field         string
@@ -610,8 +722,18 @@ func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeCreatedBy, nil)
+		matches := filterRelationshipDefinitions(defs, relationshipTypeCreatedBy, nil, labels)
 		if len(matches) == 0 {
+			// A LABELLED traversal that matches no definition is an empty
+			// answer, not an error (memql#3656): "no edge on this concept
+			// means that label" is an ordinary question with an ordinary negative
+			// answer. Only the UNLABELLED form still refuses -- asking for
+			// this traversal on a concept that declares no such relationship
+			// at all is a different mistake, and its behaviour is pinned by
+			// TestRelationshipEmptyAnswer_ResolversDisagree (memql#3671).
+			if labels != nil {
+				continue
+			}
 			return nil, fmt.Errorf("concept %q has no createdBy relationship definitions", conceptMeta.Name)
 		}
 
@@ -778,7 +900,68 @@ func (e *MemQLEngine) relationshipDefinitionsForConcept(name string) []Relations
 	return e.relationships.ByConcept[strings.TrimSpace(name)]
 }
 
-func filterRelationshipDefinitions(defs []RelationshipDefinition, relType string, directions []string) []RelationshipDefinition {
+// filterRelationshipDefinitions selects the definitions a traversal should
+// follow: those of the given structural type, in one of the given directions
+// (nil means any), and -- when label is non-empty -- carrying that `as` domain
+// label (memql#3656).
+//
+// The label is compared to RelationshipDefinition.As, the open vocabulary
+// #3652 introduced, so it is never checked against a list. Two consequences,
+// both deliberate:
+//
+//   - An empty label matches every definition of the type. That is what keeps
+//     the unlabelled form -- every traversal written before #3656 -- unchanged.
+//   - Several definitions on one concept may share a label, and all of them
+//     are returned, so the traversal follows their UNION. The per-field
+//     duplicate rule (engine.go) already blocks the genuinely ambiguous case,
+//     and the union is the useful reading of "every edge meaning assignedTo".
+//
+// A label matching nothing returns nil, which each resolver turns into an
+// empty result rather than an error.
+// relationshipLabelMatches reports whether a definition's `as` label is
+// selected by a label filter (memql#3656).
+//
+// nil means UNSCOPED -- every label matches, which is what the one-argument
+// traversal form means and what every traversal predating #3656 does. A
+// non-nil filter matches exactly the labels it holds, and the empty string is
+// a legitimate member of it: `[]string{""}` selects only the definitions that
+// carry NO label, which is what graph expansion needs to attribute an edge to
+// the right definition when a concept mixes labelled and unlabelled edges of
+// one type.
+func relationshipLabelMatches(as string, labels []string) bool {
+	if labels == nil {
+		return true
+	}
+	actual := strings.TrimSpace(as)
+	for _, want := range labels {
+		if actual == strings.TrimSpace(want) {
+			return true
+		}
+	}
+	return false
+}
+
+// relationshipLabelsPresent returns the distinct `as` labels across defs, in
+// first-seen order, with the empty string included when any definition is
+// unlabelled. Graph expansion walks these one at a time so every emitted edge
+// can be attributed to the label that produced it (memql#3656) -- resolving
+// the whole type at once would leave a concept's two differently-labelled
+// edges indistinguishable on the wire, which is the case the label exists for.
+func relationshipLabelsPresent(defs []RelationshipDefinition) []string {
+	seen := make(map[string]struct{}, len(defs))
+	out := make([]string, 0, len(defs))
+	for _, def := range defs {
+		label := strings.TrimSpace(def.As)
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, label)
+	}
+	return out
+}
+
+func filterRelationshipDefinitions(defs []RelationshipDefinition, relType string, directions []string, labels []string) []RelationshipDefinition {
 	if len(defs) == 0 {
 		return nil
 	}
@@ -791,6 +974,9 @@ func filterRelationshipDefinitions(defs []RelationshipDefinition, relType string
 	var result []RelationshipDefinition
 	for _, def := range defs {
 		if def.Type != targetType {
+			continue
+		}
+		if !relationshipLabelMatches(def.As, labels) {
 			continue
 		}
 		if len(directions) == 0 {

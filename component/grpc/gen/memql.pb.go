@@ -4256,11 +4256,16 @@ func (x *MemoryNode) GetProvenance() *Provenance {
 }
 
 type GraphEdge struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	FromId        string                 `protobuf:"bytes,2,opt,name=from_id,json=fromId,proto3" json:"from_id,omitempty"`
-	ToId          string                 `protobuf:"bytes,3,opt,name=to_id,json=toId,proto3" json:"to_id,omitempty"`
-	Depth         int32                  `protobuf:"varint,4,opt,name=depth,proto3" json:"depth,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Type   string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	FromId string                 `protobuf:"bytes,2,opt,name=from_id,json=fromId,proto3" json:"from_id,omitempty"`
+	ToId   string                 `protobuf:"bytes,3,opt,name=to_id,json=toId,proto3" json:"to_id,omitempty"`
+	Depth  int32                  `protobuf:"varint,4,opt,name=depth,proto3" json:"depth,omitempty"`
+	// as carries the edge's `as` domain label (memql#3652 / #3656) -- what the
+	// edge MEANS, independent of `type`, which is what the engine DOES with it.
+	// Empty on an unlabelled edge, which is every edge predating the feature.
+	// Additive: a client that ignores it sees exactly the previous contract.
+	As            string `protobuf:"bytes,5,opt,name=as,proto3" json:"as,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4321,6 +4326,13 @@ func (x *GraphEdge) GetDepth() int32 {
 		return x.Depth
 	}
 	return 0
+}
+
+func (x *GraphEdge) GetAs() string {
+	if x != nil {
+		return x.As
+	}
+	return ""
 }
 
 // ListToolsMsg requests available tools (MCP tools/list equivalent).
@@ -17654,12 +17666,13 @@ const file_memql_proto_rawDesc = "" +
 	"\n" +
 	"provenance\x18\n" +
 	" \x01(\v2\x1c.znasllc.memql.v1.ProvenanceR\n" +
-	"provenanceJ\x04\b\b\x10\tR\tpartition\"c\n" +
+	"provenanceJ\x04\b\b\x10\tR\tpartition\"s\n" +
 	"\tGraphEdge\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x17\n" +
 	"\afrom_id\x18\x02 \x01(\tR\x06fromId\x12\x13\n" +
 	"\x05to_id\x18\x03 \x01(\tR\x04toId\x12\x14\n" +
-	"\x05depth\x18\x04 \x01(\x05R\x05depth\"\xac\x01\n" +
+	"\x05depth\x18\x04 \x01(\x05R\x05depth\x12\x0e\n" +
+	"\x02as\x18\x05 \x01(\tR\x02as\"\xac\x01\n" +
 	"\fListToolsMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x16\n" +

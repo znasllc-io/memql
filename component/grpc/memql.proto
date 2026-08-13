@@ -753,6 +753,11 @@ message GraphEdge {
   string from_id = 2;
   string to_id = 3;
   int32 depth = 4;
+  // as carries the edge's `as` domain label (memql#3652 / #3656) -- what the
+  // edge MEANS, independent of `type`, which is what the engine DOES with it.
+  // Empty on an unlabelled edge, which is every edge predating the feature.
+  // Additive: a client that ignores it sees exactly the previous contract.
+  string as = 5;
 }
 
 // -----------------------------------------------------------------------------

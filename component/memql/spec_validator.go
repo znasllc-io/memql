@@ -131,6 +131,7 @@ func (v *specValidator) expandExpression(expr ExpressionNode, allowInline bool) 
 		return &RelationshipExpression{
 			Function: node.Function,
 			Target:   target,
+			Label:    node.Label,
 		}, nil
 	case *SpecReferenceExpression:
 		scope, spec, err := v.lookupSpecForExpansion(node.Name, allowInline)

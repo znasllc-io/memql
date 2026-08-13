@@ -100,6 +100,7 @@ func cloneExpressionNode(expr ExpressionNode) ExpressionNode {
 		return &RelationshipExpression{
 			Function: node.Function,
 			Target:   cloneExpressionNode(node.Target),
+			Label:    node.Label,
 		}
 	case *SpecReferenceExpression:
 		return &SpecReferenceExpression{Name: node.Name}

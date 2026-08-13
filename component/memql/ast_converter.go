@@ -472,6 +472,7 @@ func (c *ASTConverter) convertRelationshipExpr(expr *languageParser.Relationship
 	return &RelationshipExpression{
 		Function: convertRelationshipFunction(expr.Function),
 		Target:   target,
+		Label:    expr.Label,
 	}, nil
 }
 
@@ -1271,6 +1272,7 @@ func normalizeSpecCallsToReferences(expr ExpressionNode) (ExpressionNode, error)
 		return &RelationshipExpression{
 			Function: node.Function,
 			Target:   target,
+			Label:    node.Label,
 		}, nil
 	case *FunctionCallExpression:
 		name := strings.TrimSpace(node.Name)
