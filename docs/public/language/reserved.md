@@ -39,6 +39,11 @@ An args field whose name collides with any of these is a load-time
 error. Defined in `component/memql/keyword_slices.go` and enforced
 during args parsing.
 
+These names, plus `row`, `meta`, and `payload`, are also the
+**reserved filter heads**: the path roots a query `filter` resolves to
+an engine namespace instead of the bound concept's payload. That makes
+them reserved on a concept's payload schema too -- see section 2.
+
 ---
 
 ## 2. Row intrinsics (concept rows)
@@ -61,6 +66,40 @@ the executor reads at SQL push-down time.
 
 Defined in `component/memql/intrinsic_fields.go`. Cross-referenced
 in `docs/public/language/authoring-rules.md` (gotcha #19).
+
+### The engine namespaces are reserved on the payload schema too
+
+The names in section 1 are equally unavailable as concept properties:
+
+| Field | Why a concept may not declare it |
+|-------|----------------------------------|
+| `args` | Caller-arg namespace at the head of any path. |
+| `actor` | Auth-envelope namespace. |
+| `now` | Engine timestamp. |
+| `config` | Allow-listed config namespace. |
+| `trace` | Reserved engine name. |
+| `meta` | Engine namespace at a filter head. |
+| `row` | The row-intrinsic namespace. |
+
+The list a concept is checked against
+(`memoryNodes.reservedPayloadFields`) is a **superset** of the reserved
+filter heads (`component/memql`'s `reservedFilterHead`), pinned by
+`TestReservedPayloadFieldsSupersetOfFilterHeads`. Before memql#3613 it
+was not, and each of the eight missing names was declarable: the
+concept registered with the field intact, no skip and no warning, while
+every filter naming it bare read the namespace instead. `provenance`
+was fully silent -- the SQL push-down compiled clean and the in-process
+post-filter agreed on the same wrong field, so the query returned the
+wrong rows forever. `actor` was silent and authorization-relevant:
+`filter actor.userId == args.v` compiled to `? = ?` over the caller's
+own envelope and a caller-supplied argument, const-folding to true
+whenever a caller passed their own id -- the predicate contributed
+nothing and the query returned every row of the concept.
+
+The gate is case-insensitive, matching how a filter head is classified,
+so `Provenance` and `ACTOR` are refused as well. Only whole names are
+reserved: `arguments`, `metadata`, `configuration`, and `rowCount` are
+ordinary properties.
 
 ### Naming an intrinsic in a filter: the `row.` namespace
 
@@ -89,18 +128,23 @@ predicates (memql#2786): the tree is migrated, and naming an intrinsic bare in
 a `.memql` sort clause fails CI. `provenance` has no sort form -- it is
 object-valued with no ordering, so `row.provenance` is rejected.
 
-The bare spelling remains valid at RUNTIME, where callers pass sort keys in
-through the SDK and the query API; the gate covers authored `.memql` only.
+A sort key rooted at a reserved head is refused outright (memql#3613), at
+runtime as well as in authored `.memql`. The same bare token used to mean the
+row envelope in a filter and the payload in a sort key -- `filter
+provenance.kind == x` compiled to `provenance->>'kind'` while `sort
+"provenance.kind"` compiled to `payload #>> '{provenance,kind}'`. No concept
+may declare `provenance`, so that path exists on no stored row and the
+ordering was a guaranteed no-op. The explicit `payload.<path>` form is
+untouched: its prefix names the surface, so there is nothing left ambiguous.
+
+Otherwise the bare spelling remains valid at RUNTIME, where callers pass sort
+keys in through the SDK and the query API; the `.memql` gate covers authored
+sort clauses only.
 
 Other surfaces are unchanged: a shape body already projects `row.id` /
 `row.createdAt`; a spec/trait body reads its signature-bound fields bare
 and rejects `row.*` (epic #2281); a mutation `insert`/`update` block
 writes `id:` / `createdAt:` as target keys rather than references.
-
-> One consequence worth stating: `row` is now a reserved head in a filter, so
-> a concept that declares a payload property literally named `row` cannot be
-> filtered on it. No concept in the engine tree does, but a product bundle
-> mounted via `MEMQL_DSL_PATH` should avoid the name.
 
 ---
 
