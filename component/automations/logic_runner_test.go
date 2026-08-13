@@ -308,6 +308,11 @@ func TestLogicRunner_EventBindingSeededWhenAbsent(t *testing.T) {
 // revokeExpiredDelegations, the cluster/identity sweeps, etc.
 // compileBodyToAutomation re-attaches a synthetic Step at the end
 // of the slice; this test guards that fix.
+//
+// The queryFoo argument is named "asOf". It read "now" until memql#3626 --
+// a reserved engine name no args block may declare, so queryFoo could never
+// have received it and the value was dropped. This fixture is about the
+// _return step, so the argument name only has to be a legal one.
 func TestLogicRunner_PreservesReturnStep(t *testing.T) {
 	src := `@useQuery(queryFoo)
 @useMutation(mutationBar)
@@ -317,7 +322,7 @@ logic logicSweep {
     asOf string @required
   }
   body {
-    rows := queryFoo( now: args.asOf )
+    rows := queryFoo( asOf: args.asOf )
     for item := range rows.nodes() {
       tick := mutationBar( id: item.id )
     }
