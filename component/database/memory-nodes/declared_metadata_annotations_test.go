@@ -740,6 +740,15 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 			switch info.Name() {
 			case ".git", "vendor", "node_modules":
 				return filepath.SkipDir
+			case ".claude":
+				// `.claude/worktrees/` holds local git worktrees -- FULL copies
+				// of this repo (see CLAUDE.md). Walking into them counts the
+				// same emit site once per worktree, so this test reported "3
+				// non-test Go locations" for a key that has exactly one, and
+				// did so only on machines where somebody happened to have a
+				// worktree checked out. Green in CI, red locally, for a
+				// condition that has nothing to do with the code under test.
+				return filepath.SkipDir
 			}
 			return nil
 		}
