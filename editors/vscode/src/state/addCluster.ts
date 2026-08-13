@@ -360,6 +360,12 @@ export class AddClusterState {
   private connectFailureMessage = "";
   private registry: ClustersFile | undefined;
   private handoffResult: HandoffResult | undefined;
+  // The enrolment link the run minted, held on the HOST side only. It carries
+  // a single-use bearer in its query string, so it is never rendered into the
+  // webview -- the done screen shows a button, and the host opens the URL. The
+  // state keeps it so the screen survives a re-render without re-reading the
+  // execution report.
+  private enrolmentLink = "";
 
   get screen(): Screen {
     return this.currentScreen;
@@ -440,6 +446,26 @@ export class AddClusterState {
   setHandoff(result: HandoffResult): void {
     this.handoffResult = result;
     this.currentScreen = "done";
+  }
+
+  /**
+   * Whether the run produced a passkey enrolment link (memql#3408).
+   *
+   * A boolean, not the link: the done screen only needs to know whether to
+   * offer the button, and the URL is a credential that has no business
+   * crossing into the webview.
+   */
+  get hasEnrolmentLink(): boolean {
+    return this.enrolmentLink !== "";
+  }
+
+  /** The link itself, for the host-side opener only. */
+  get enrolmentUrl(): string {
+    return this.enrolmentLink;
+  }
+
+  setEnrolmentUrl(url: string): void {
+    this.enrolmentLink = url;
   }
 
   // ---------------------------------------------------------------------------
@@ -563,6 +589,9 @@ export class AddClusterState {
     this.didSucceed = false;
     // A second run must not show the first run's outcome while it is going.
     this.handoffResult = undefined;
+    // Nor the first run's enrolment link: it is single-use, so offering a
+    // spent one is worse than offering nothing.
+    this.enrolmentLink = "";
     return true;
   }
 
