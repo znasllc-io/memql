@@ -7,80 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/memql/dslgate"
 	"github.com/znasllc-io/memql/core/dslfs"
 )
-
-// ownerScopeLeaf and adminGateLeaf name the leaf predicates the authz gates
-// recognise. They live here rather than inline so TestPerRowAuthzClassification
-// and TestAdminGateIsATopLevelConjunct cannot drift about what counts as a
-// caller check -- the drift this file's sibling gates keep being filed for.
-func ownerScopeLeaf(pred string) bool { return strings.Contains(pred, "actor.userId") }
-
-// adminGateRe matches a predicate that establishes admin-ness WHEN TRUE.
-//
-// POLARITY is load-bearing, and a bare strings.Contains does not carry it: the
-// composition rule asks whether a FALSE gate zeroes the row set, so the leaf
-// must be a term that is false for a non-admin. `actor.isClusterOwner!=true`
-// and `==false` contain the same identifier and inverT the meaning -- under
-// them a non-owner who satisfies the other conjunct gets rows and the cluster
-// owner gets none, which is the very failure this gate exists to refuse.
-// stripLeadingNot deliberately leaves `!=` alone (it is a comparison, not a
-// negation), so nothing upstream catches it either.
-//
-// Word boundaries matter for the same reason: `requiresClusterOwnerXyz` is a
-// different identifier, and a substring test accepted it as the gate.
-//
-// The spec alternatives are ordered longest-first so `requiresOwnerOrAdmin`
-// cannot be consumed as `requiresOwner`.
-//
-// Which of these names is DECLARED, and which the corpus actually uses, is no
-// longer written here (memql#3016). Both statements went stale: this comment
-// and its twin in the table below claimed "none is currently used in a filter"
-// long after `requiresOwnerOrAdmin` was gating live identity queries. A stale
-// claim in the file that defines the vocabulary is how the classifier drifted
-// from it in the first place.
-//
-// Both facts are now COMPUTED, by TestAdminGateNamesAreDeclaredOrRecorded
-// below, which reads the tree instead of describing it.
-//
-// That covers ONE direction: every name in the recogniser is declared or
-// recorded. The converse -- every declared caller-scope spec appears in the
-// recogniser -- is TestEveryDeclaredActorGateIsRecognised, added in the
-// memql#3071 review after `requiresDeveloperOrAbove` was found declared at
-// dsl/deployment/specs.memql and present in neither pattern. A gate the
-// recogniser does not know is not a gate: adminGateLeaf returns false for it,
-// the composition rule never runs on a filter that uses it, and the per-row
-// authz classifier does not count it as caller-scoped. It is the same defect
-// as the requiresClusterOwner case this file already records, pointing the
-// other way, which is why one direction alone could not be "nothing left that
-// can go stale".
-//
-// That converse check paid for itself immediately. Besides
-// requiresDeveloperOrAbove it found `forgeDeveloper` and `forgeApprover`
-// (dsl/forge/specs.memql), both of which are used as LIVE filter conjuncts --
-// dsl/forge/queries.memql's `status == "needs_validation" && forgeDeveloper`
-// and `status == "needs_approval" && forgeApprover`. Two authorization gates
-// in production filters that the composition rule had never once run on. They
-// are correctly written, top-level and affirmative -- but that was luck rather
-// than a checked property, which is the whole distinction this file exists to
-// make.
-var adminGateRe = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner[ \t]*==[ \t]*true|requiresDeveloperOrAbove|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner|forgeApprover|forgeDeveloper)([^A-Za-z0-9_]|$)`)
-
-func adminGateLeaf(pred string) bool { return adminGateRe.MatchString(pred) }
-
-// adminGateMentionRe is the POLARITY-BLIND twin, and the two must stay
-// separate: selection has to be broad and assertion strict.
-//
-// If the gate selected constructs with the strict predicate, an inverted
-// filter (`actor.isClusterOwner!=true`) would simply not be recognised as
-// admin-gated, get skipped, and sail through -- swapping one fail-open for
-// another. Selecting on any MENTION and then demanding the strict form is what
-// turns the inverted spelling into an error instead of a silence.
-var adminGateMentionRe = regexp.MustCompile(
-	`(^|[^A-Za-z0-9_.])(?:actor\.isClusterOwner|requiresDeveloperOrAbove|requiresOwnerOrAdmin|requiresClusterOwner|requiresAdmin|requiresOwner|forgeApprover|forgeDeveloper)([^A-Za-z0-9_]|$)`)
-
-func mentionsAdminGate(clause string) bool { return adminGateMentionRe.MatchString(clause) }
 
 // TestAdminGateIsATopLevelConjunct hard-fails when an admin-gated filter
 // composes its gate so a FALSE gate cannot zero the result set (memql#2839).
@@ -109,12 +38,21 @@ func mentionsAdminGate(clause string) bool { return adminGateMentionRe.MatchStri
 // user-scope field and an admin filter need not have one. Same predicate,
 // different job: classify there, refuse here.
 func TestAdminGateIsATopLevelConjunct(t *testing.T) {
+	// The verdict comes from dslgate, which the engine runs at boot
+	// (memql#3629) -- so a product DSL bundle composing its admin gate as a
+	// disjunct is now refused at load rather than only in this repo's CI.
+	for _, v := range scanTreeForGate(t, dslgate.GateAdminGateComposition) {
+		t.Errorf("%s:%d  %s: %s", v.File, v.Line, v.Construct, v.Detail)
+	}
+
+	// A corpus that stopped producing admin-gated filters, or an extractor
+	// that stopped finding them, would leave the check above green while
+	// protecting nothing. This counts what it had to reason about.
 	tree := dsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
-
 	checked := 0
 	for _, p := range paths {
 		f, openErr := tree.Open(p)
@@ -127,35 +65,20 @@ func TestAdminGateIsATopLevelConjunct(t *testing.T) {
 			t.Fatalf("read %s: %v", p, readErr)
 		}
 		src := string(raw)
-
 		for _, m := range constructHeaderRe.FindAllStringSubmatchIndex(src, -1) {
 			closeIdx := matchingClose(src, m[1]-1)
 			if closeIdx < 0 {
 				continue
 			}
-			body := src[m[1]:closeIdx]
-			name := src[m[4]:m[5]]
-
 			// filterClauseOf strips comments, so the prose in
 			// dsl/authoring/queries.memql and dsl/identity/queries.memql that
 			// merely NAMES the gate is excluded, as is every `actor.` read in
 			// a logic body -- neither is a filter.
-			clause := filterClauseOf(body)
-			if clause == "" || !mentionsAdminGate(clause) {
-				continue
-			}
-			checked++
-			if !clauseGuarantees(clause, adminGateLeaf) {
-				lineNo := strings.Count(src[:m[0]], "\n") + 1
-				t.Errorf("%s:%d  %s: the admin gate does not hold on every path through its filter -- a false gate would NOT zero the result set.\n    filter  %s\n    The gate must be a top-level conjunct in the affirmative form (`<predicate> && actor.isClusterOwner==true`). A gate inside a disjunction is switched off by the other arm; an inverted one (`!=true`, `==false`) admits exactly the callers it should refuse.",
-					p, lineNo, name, clause)
+			if clause := filterClauseOf(src[m[1]:closeIdx]); clause != "" && mentionsAdminGate(clause) {
+				checked++
 			}
 		}
 	}
-
-	// A corpus that stopped producing admin-gated filters, or an extractor
-	// that stopped finding them, would leave this test green while protecting
-	// nothing.
 	if checked == 0 {
 		t.Fatal("no admin-gated filter clauses found; the corpus shape or filterClauseOf changed and this gate has silently stopped protecting anything")
 	}
