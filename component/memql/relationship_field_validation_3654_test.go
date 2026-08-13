@@ -26,7 +26,7 @@ func TestOutgoingRelationshipFieldMustExistOnTheConcept(t *testing.T) {
 concept ticket {
   assigneeId  string  @description("Who it is assigned to.")
 
-  @relationship(type="interactsWith", field="assigneId", target="v1:acme:user", direction="outgoing")
+  @relationship(type="references", field="assigneId", target="v1:acme:user", direction="outgoing")
 }
 `)
 	user := parseFixtureConcept(t, "v1/acme/user", `
@@ -115,7 +115,7 @@ func TestRelationshipFieldMatchingIsCaseSensitive(t *testing.T) {
 concept ticket {
   assigneeId  string  @description("Who it is assigned to.")
 
-  @relationship(type="interactsWith", field="AssigneeId", target="v1:acme:user", direction="outgoing")
+  @relationship(type="references", field="AssigneeId", target="v1:acme:user", direction="outgoing")
 }
 `)
 	user := parseFixtureConcept(t, "v1/acme/user", `
@@ -140,7 +140,7 @@ func TestDottedRelationshipFieldValidatesRootSegment(t *testing.T) {
 concept ticket {
   source  object  @description("Provenance of the ticket.")
 
-  @relationship(type="interactsWith", field="source.agentId", target="v1:acme:user", direction="outgoing")
+  @relationship(type="references", field="source.agentId", target="v1:acme:user", direction="outgoing")
 }
 `)
 	user := parseFixtureConcept(t, "v1/acme/user", `

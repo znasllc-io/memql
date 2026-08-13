@@ -68,7 +68,7 @@ func TestParseRelationshipFunctions(t *testing.T) {
 		RelChildOf,
 		RelAliasOf,
 		RelEquals,
-		RelInteractsWith,
+		RelReferences,
 		RelContains,
 		RelOwns,
 		RelCreatedBy,

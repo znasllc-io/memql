@@ -97,8 +97,8 @@ concept action {
   provenanceMutation  string  @description("Name of the mutation that produced this action version (audit trail).")
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", field="provenancePlanId", target=plan, direction="outgoing")
-  @relationship(type="interactsWith", field="provenanceStepId", target=step, direction="outgoing")
+  @relationship(type="references", field="provenancePlanId", target=plan, direction="outgoing")
+  @relationship(type="references", field="provenanceStepId", target=step, direction="outgoing")
 }
 
 // surface -- a registered execution backend the resolver binds to (Phase 2,

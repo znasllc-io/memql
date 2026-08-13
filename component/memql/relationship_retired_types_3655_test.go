@@ -37,7 +37,7 @@ func TestRetiredStructuralTypeErrorPointsAtTheLabel(t *testing.T) {
 	if err == nil {
 		t.Fatal("dependsOn was accepted as a structural type, want a load error")
 	}
-	for _, want := range []string{"dependsOn", `as="dependsOn"`, "interactsWith"} {
+	for _, want := range []string{"dependsOn", `as="dependsOn"`, "references"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %q", err.Error(), want)
 		}

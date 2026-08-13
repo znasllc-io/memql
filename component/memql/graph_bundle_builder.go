@@ -26,13 +26,13 @@ import (
 // wire label with it and the docs pin then forces the documentation to follow.
 // Two copies of one vocabulary is exactly how this one went wrong.
 const (
-	GraphEdgeLabelChild         = "child"
-	GraphEdgeLabelAlias         = relationshipTypeAlias
-	GraphEdgeLabelEquals        = relationshipTypeEquals
-	GraphEdgeLabelInteractsWith = relationshipTypeInteracts
-	GraphEdgeLabelCreatedBy     = relationshipTypeCreatedBy
-	GraphEdgeLabelContains      = relationshipTypeContains
-	GraphEdgeLabelOwns          = relationshipTypeOwns
+	GraphEdgeLabelChild      = "child"
+	GraphEdgeLabelAlias      = relationshipTypeAlias
+	GraphEdgeLabelEquals     = relationshipTypeEquals
+	GraphEdgeLabelReferences = relationshipTypeReferences
+	GraphEdgeLabelCreatedBy  = relationshipTypeCreatedBy
+	GraphEdgeLabelContains   = relationshipTypeContains
+	GraphEdgeLabelOwns       = relationshipTypeOwns
 )
 
 // GraphEdgeLabels returns every label the runtime emits on GraphEdge.type,
@@ -42,7 +42,7 @@ func GraphEdgeLabels() []string {
 		GraphEdgeLabelChild,
 		GraphEdgeLabelAlias,
 		GraphEdgeLabelEquals,
-		GraphEdgeLabelInteractsWith,
+		GraphEdgeLabelReferences,
 		GraphEdgeLabelCreatedBy,
 		GraphEdgeLabelContains,
 		GraphEdgeLabelOwns,

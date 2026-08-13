@@ -20,9 +20,9 @@ func nestedRelationshipEngine(t *testing.T) *MemQLEngine {
 		"v1:agents:agent": {
 			Name: "v1:agents:agent",
 			Relationships: []memoryNodes.RelationshipDefinition{
-				{Type: "interactsWith", Field: "identity.identityId", TargetConcept: "v1:identity:identity", Direction: "outgoing"},
+				{Type: "references", Field: "identity.identityId", TargetConcept: "v1:identity:identity", Direction: "outgoing"},
 				{Type: "createdBy", Field: "lineage.originatingPlanId", TargetConcept: "v1:planner:plan", Direction: "outgoing"},
-				{Type: "interactsWith", Field: "lineage.sourcePlanIds", TargetConcept: "v1:planner:plan", Direction: "outgoing"},
+				{Type: "references", Field: "lineage.sourcePlanIds", TargetConcept: "v1:planner:plan", Direction: "outgoing"},
 			},
 		},
 	})

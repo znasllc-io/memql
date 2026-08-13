@@ -32,7 +32,7 @@ func TestAttributeAcceptsKeywordArgumentNames(t *testing.T) {
 concept widget {
   agentId  string  @description("FK.")
 
-  @relationship(type="interactsWith", ` + argName + `="someValue", field="agentId", target="v1:agents:agent", direction="outgoing")
+  @relationship(type="references", ` + argName + `="someValue", field="agentId", target="v1:agents:agent", direction="outgoing")
 }
 `
 			tokens, err := NewLexer(src).Tokenize()

@@ -22,7 +22,7 @@ func canonicalExpression(expr ExpressionNode) string {
 		// The `as` label is part of the query's IDENTITY, not decoration
 		// (memql#3656). This string is the result-cache signature, and result
 		// caching is default-on, so omitting the label makes
-		// interactsWith("actsFor", X) and interactsWith("respondsAs", X)
+		// references("actsFor", X) and references("respondsAs", X)
 		// share one entry -- each returning whichever ran first. That is worse
 		// than returning the union, because the answer depends on execution
 		// order. Rendered only when present, so every unlabelled traversal

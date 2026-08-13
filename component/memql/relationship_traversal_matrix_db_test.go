@@ -21,7 +21,7 @@ import (
 // out that reaches the same resolvers from the other side.
 //
 // WHY A WHOLE FILE FOR CODE NOTHING IN THIS REPO CALLS. `parentOf` / `childOf`
-// / `aliasOf` / `equals` / `interactsWith` / `contains` / `owns` / `createdBy`
+// / `aliasOf` / `equals` / `references` / `contains` / `owns` / `createdBy`
 // / `ids` have ZERO call sites in dsl/, clients/ or editors/. They are reached
 // only over gRPC / WS / MCP, and by downstream client repos this repo cannot
 // see. That makes them look dormant and makes them exactly the wrong thing to
@@ -31,12 +31,12 @@ import (
 // file the coverage was two db tests, both regressions
 // (relationship_versioned_ids_3397_db_test.go, relationship_incoming_target_
 // 3432_db_test.go), leaving resolveContains, resolveOwns, resolveAliasOrEquals,
-// resolveInteractsWith, resolveCreatedBy, resolveIds, the dispatch switch and
+// resolveReferences, resolveCreatedBy, resolveIds, the dispatch switch and
 // expandGraph's fan-out with none at all.
 //
 // WHY A FIXTURE DOMAIN. All 141 @relationship declarations in the shipped
 // corpus are direction="outgoing" and type="parent". Against that corpus
-// childOf, the incoming branches of owns / interactsWith / createdBy, the
+// childOf, the incoming branches of owns / references / createdBy, the
 // array field shape, contains, alias, equals and the table-sourced createdBy
 // are all UNREACHABLE -- a test written against the corpus cannot fail no
 // matter how broken the resolver is. So the fixture below declares the shapes
@@ -103,7 +103,7 @@ concept folder {
   @relationship(type="parent", field="folderId", target=doc, direction="incoming")
 }
 
-/// The fixture's workhorse row: outgoing parent, outgoing interactsWith and
+/// The fixture's workhorse row: outgoing parent, outgoing references and
 /// outgoing payload-sourced createdBy, all on scalar fields.
 concept doc {
   folderId  string @description("The v1:reltrav:folder.id this doc hangs off.")
@@ -112,17 +112,17 @@ concept doc {
   label     string @description("Human label.")
 
   @relationship(type="parent", field="folderId", target=folder, direction="outgoing")
-  @relationship(type="interactsWith", field="authorId", target=person, direction="outgoing")
+  @relationship(type="references", field="authorId", target=person, direction="outgoing")
   @relationship(type="createdBy", field="creatorId", target=person, direction="outgoing")
 }
 
-/// The far side of doc's interactsWith / createdBy edges and of roster's owns
+/// The far side of doc's references / createdBy edges and of roster's owns
 /// edge. Three INCOMING declarations -- the reverse-lookup shape the corpus
 /// has none of.
 concept person {
   label string @description("Human label.")
 
-  @relationship(type="interactsWith", field="authorId", target=doc, direction="incoming")
+  @relationship(type="references", field="authorId", target=doc, direction="incoming")
   @relationship(type="createdBy", field="creatorId", target=doc, direction="incoming")
   @relationship(type="owns", field="ownerPersonId", target=roster, direction="incoming")
 }
@@ -381,9 +381,9 @@ func TestRelationshipFixture_DeclaresEveryShapeUnderTest(t *testing.T) {
 	}{
 		{tvFolder, relationshipTypeParent, "folderId", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
 		{tvDoc, relationshipTypeParent, "folderId", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
-		{tvDoc, relationshipTypeInteracts, "authorId", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
+		{tvDoc, relationshipTypeReferences, "authorId", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
 		{tvDoc, relationshipTypeCreatedBy, "creatorId", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
-		{tvPerson, relationshipTypeInteracts, "authorId", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
+		{tvPerson, relationshipTypeReferences, "authorId", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
 		{tvPerson, relationshipTypeCreatedBy, "creatorId", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
 		{tvPerson, relationshipTypeOwns, "ownerPersonId", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
 		{tvRoster, relationshipTypeOwns, "ownerPersonId", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
@@ -475,14 +475,14 @@ func TestRelationshipTraversalMatrix(t *testing.T) {
 			why:   "equals is alias under a different relationship type",
 		},
 		{
-			name:  "interactsWith/outgoing/scalar/many-to-one",
-			query: traversalQuery("interactsWith", tvDoc, owner),
+			name:  "references/outgoing/scalar/many-to-one",
+			query: traversalQuery("references", tvDoc, owner),
 			want:  []string{w.author},
 			why:   "the outgoing branch reads each doc's authorId and fetches by id",
 		},
 		{
-			name:  "interactsWith/incoming/scalar/one-to-many",
-			query: traversalQuery("interactsWith", tvPerson, owner),
+			name:  "references/incoming/scalar/one-to-many",
+			query: traversalQuery("references", tvPerson, owner),
 			want:  w.docs,
 			why:   "the incoming branch asks which docs name this person as author",
 		},
@@ -613,7 +613,7 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 // warning, exactly the failure mode memql#3432 had.
 //
 // The blast radius is the SHARED HELPER, not owns: childOf, the incoming
-// branch of interactsWith, and the payload-sourced incoming branch of
+// branch of references, and the payload-sourced incoming branch of
 // createdBy all reach the same fetchNodesByJSONFieldValues, so every one of
 // them is blind to an array-valued relationship field the same way.
 //
@@ -861,9 +861,9 @@ func TestRelationshipGraphExpansion_StopsAtRequestedDepth(t *testing.T) {
 		`withDepth(concept==%s && createdBy==%q, 2)`, tvFolder, owner))
 	require.NoError(t, err)
 	require.ElementsMatch(t, append([]string{folder, author}, docs...), bundleIDs(depth2),
-		"depth 2 takes the second hop, through each doc's interactsWith / createdBy edge")
-	require.True(t, hasEdge(depth2.Bundle.GetEdges(), docs[0], author, relationshipTypeInteracts),
-		"the doc -> author interactsWith edge must be recorded at depth 2")
+		"depth 2 takes the second hop, through each doc's references / createdBy edge")
+	require.True(t, hasEdge(depth2.Bundle.GetEdges(), docs[0], author, relationshipTypeReferences),
+		"the doc -> author references edge must be recorded at depth 2")
 	require.True(t, hasEdge(depth2.Bundle.GetEdges(), docs[0], author, relationshipTypeCreatedBy),
 		"the doc -> author createdBy edge must be recorded at depth 2")
 }

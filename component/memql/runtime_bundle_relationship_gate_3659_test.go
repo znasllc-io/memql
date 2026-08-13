@@ -97,7 +97,7 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK to the owning hub.")
 
-  @relationship(type="interactsWith", as="belongsToHub", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="references", as="belongsToHub", field="hubId", target=hub, direction="outgoing")
 }
 `)
 	if err != nil {
@@ -147,7 +147,7 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", as="Belongs_To_Hub", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="references", as="Belongs_To_Hub", field="hubId", target=hub, direction="outgoing")
 }
 `,
 			wantsMsg: "lowerCamelCase",
@@ -159,7 +159,7 @@ concept gadget {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", field="hubId", target="v1:relgate3659:hubb", direction="outgoing")
+  @relationship(type="references", field="hubId", target="v1:relgate3659:hubb", direction="outgoing")
 }
 `,
 			wantsMsg: "not a registered concept",
@@ -176,7 +176,7 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", field="hubbId", target=hub, direction="outgoing")
+  @relationship(type="references", field="hubbId", target=hub, direction="outgoing")
 }
 `,
 			wantsMsg: "is not declared",
@@ -193,7 +193,7 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", field="HubId", target=hub, direction="outgoing")
+  @relationship(type="references", field="HubId", target=hub, direction="outgoing")
 }
 `,
 			wantsMsg: "is not declared",
@@ -210,7 +210,7 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", field="hubId", target=hub, direction="sideways")
+  @relationship(type="references", field="hubId", target=hub, direction="sideways")
 }
 `,
 			wantsMsg: "direction",
@@ -227,8 +227,8 @@ concept hub {
 concept gadget {
   hubId  string  @description("FK.")
 
-  @relationship(type="interactsWith", field="hubId", target=hub, direction="outgoing")
-  @relationship(type="interactsWith", as="second", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="references", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="references", as="second", field="hubId", target=hub, direction="outgoing")
 }
 `,
 			wantsMsg: "duplicate",

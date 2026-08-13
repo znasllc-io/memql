@@ -19,8 +19,8 @@ concept participant {
   agentId    string  @description("The responding agent.")
   forUserId  string  @description("The user being acted for.")
 
-  @relationship(type="interactsWith", as="respondsAs", field="agentId", target="v1:agents:agent", direction="outgoing")
-  @relationship(type="interactsWith", as="actsFor", field="forUserId", target="v1:identity:user", direction="outgoing")
+  @relationship(type="references", as="respondsAs", field="agentId", target="v1:agents:agent", direction="outgoing")
+  @relationship(type="references", as="actsFor", field="forUserId", target="v1:identity:user", direction="outgoing")
 }
 `)
 
@@ -55,7 +55,7 @@ concept participant {
 func TestRelationshipDefinition_UnmarshalJSONKeepsAsLabel(t *testing.T) {
 	var def RelationshipDefinition
 	raw := []byte(`{
-		"type": "interactsWith",
+		"type": "references",
 		"field": "agentId",
 		"targetConcept": "v1:agents:agent",
 		"direction": "outgoing",

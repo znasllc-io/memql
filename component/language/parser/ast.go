@@ -226,7 +226,7 @@ var (
 	RelCreatedBy             = ast.RelCreatedBy
 	RelEquals                = ast.RelEquals
 	RelIds                   = ast.RelIds
-	RelInteractsWith         = ast.RelInteractsWith
+	RelReferences            = ast.RelReferences
 	RelOwns                  = ast.RelOwns
 	RelParentOf              = ast.RelParentOf
 	SortAsc                  = ast.SortAsc

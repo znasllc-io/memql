@@ -1118,8 +1118,8 @@ func convertRelationshipFunction(fn languageParser.RelationshipFunction) Relatio
 		return RelAliasOf
 	case languageParser.RelEquals:
 		return RelEquals
-	case languageParser.RelInteractsWith:
-		return RelInteractsWith
+	case languageParser.RelReferences:
+		return RelReferences
 	case languageParser.RelContains:
 		return RelContains
 	case languageParser.RelOwns:

@@ -54,13 +54,13 @@ const (
 )
 
 const (
-	relationshipTypeParent    = "parent"
-	relationshipTypeAlias     = "alias"
-	relationshipTypeEquals    = "equals"
-	relationshipTypeInteracts = "interactsWith"
-	relationshipTypeContains  = "contains"
-	relationshipTypeOwns      = "owns"
-	relationshipTypeCreatedBy = "createdBy"
+	relationshipTypeParent     = "parent"
+	relationshipTypeAlias      = "alias"
+	relationshipTypeEquals     = "equals"
+	relationshipTypeReferences = "references"
+	relationshipTypeContains   = "contains"
+	relationshipTypeOwns       = "owns"
+	relationshipTypeCreatedBy  = "createdBy"
 	// `dependsOn` and `formedFrom` used to live here as structural types. They
 	// never were structural: their own comments recorded that graph-expansion
 	// traversal was deliberately unwired and the field was read directly by the
@@ -72,8 +72,8 @@ const (
 	// They are now `as` domain labels (memql#3655), which is the axis they
 	// always belonged on:
 	//
-	//   @relationship(type="interactsWith", as="dependsOn",  field="dependsOn", ...)
-	//   @relationship(type="interactsWith", as="formedFrom", field="sourceEpisodes", ...)
+	//   @relationship(type="references", as="dependsOn",  field="dependsOn", ...)
+	//   @relationship(type="references", as="formedFrom", field="sourceEpisodes", ...)
 )
 
 type relationshipRegistry struct {
@@ -96,13 +96,25 @@ type relationshipEdge struct {
 // is worse than no message, because it sends the author down a dead end while
 // looking authoritative.
 var structuralRelationshipTypeSet = map[string]string{
-	"parent":        relationshipTypeParent,
-	"alias":         relationshipTypeAlias,
-	"equals":        relationshipTypeEquals,
-	"interactswith": relationshipTypeInteracts,
-	"contains":      relationshipTypeContains,
-	"owns":          relationshipTypeOwns,
-	"createdby":     relationshipTypeCreatedBy,
+	"parent":     relationshipTypeParent,
+	"alias":      relationshipTypeAlias,
+	"equals":     relationshipTypeEquals,
+	"references": relationshipTypeReferences,
+	"contains":   relationshipTypeContains,
+	"owns":       relationshipTypeOwns,
+	"createdby":  relationshipTypeCreatedBy,
+}
+
+// renamedRelationshipTypes maps a NORMALIZED retired spelling to the structural
+// type it became, so the loader can tell an author the word MOVED rather than
+// only that it is invalid (memql#3663).
+//
+// This is a MESSAGE table, not a compatibility shim: nothing here is accepted at
+// load. The distinction matters -- silently normalizing the old spelling would
+// leave two spellings for one concept, which is the drift memql#3657 exists to
+// remove, and which CLAUDE.md forbids pre-release.
+var renamedRelationshipTypes = map[string]string{
+	"interactswith": relationshipTypeReferences,
 }
 
 func canonicalRelationshipType(value string) (string, bool) {

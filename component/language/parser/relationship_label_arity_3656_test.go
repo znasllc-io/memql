@@ -7,8 +7,8 @@ import (
 
 // relationship_label_arity_3656_test.go is the GRAMMAR half of memql#3656:
 // the optional leading string literal that scopes a traversal to one `as`
-// domain label -- `interactsWith("respondsAs", <expr>)` follows only the edges
-// labelled respondsAs, `interactsWith(<expr>)` follows all of them.
+// domain label -- `references("respondsAs", <expr>)` follows only the edges
+// labelled respondsAs, `references(<expr>)` follows all of them.
 //
 // The whole feature rests on one discrimination made here, in
 // parseFunctionCall's wrapperFunctions branch: a leading TokenString followed
@@ -53,7 +53,7 @@ var labelledTraversalFunctions = []string{
 	"childOf",
 	"aliasOf",
 	"equals",
-	"interactsWith",
+	"references",
 	"owns",
 	"createdBy",
 	"ids",
@@ -284,9 +284,9 @@ func TestContainsKeepsExactlyTwoReadings(t *testing.T) {
 // would be silently stolen from the target.
 func TestRelationshipLabelIsNotConfusedByAnInnerString(t *testing.T) {
 	cases := map[string]string{
-		"stringOnTheRightOfAComparison": `interactsWith(label=="respondsAs")`,
-		"stringInsideAConjunction":      `interactsWith(concept==v1:rel:hub && label=="x")`,
-		"stringInsideADisjunction":      `interactsWith(label=="a" || label=="b")`,
+		"stringOnTheRightOfAComparison": `references(label=="respondsAs")`,
+		"stringInsideAConjunction":      `references(concept==v1:rel:hub && label=="x")`,
+		"stringInsideADisjunction":      `references(label=="a" || label=="b")`,
 	}
 
 	for name, src := range cases {
@@ -312,7 +312,7 @@ func TestRelationshipLabelIsNotConfusedByAnInnerString(t *testing.T) {
 // not change the reading. Cheap to assert, and the failure mode (a label that
 // works on one line and not another) would be baffling to debug.
 func TestRelationshipLabelSurvivesAWhitespacedCall(t *testing.T) {
-	expr, err := ParseExpression("interactsWith(  \"respondsAs\"  ,\n  concept==v1:rel:hub  )")
+	expr, err := ParseExpression("references(  \"respondsAs\"  ,\n  concept==v1:rel:hub  )")
 	if err != nil {
 		t.Fatalf("whitespaced labelled call failed to parse: %v", err)
 	}

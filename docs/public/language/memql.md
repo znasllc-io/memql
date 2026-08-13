@@ -167,7 +167,7 @@ concept audioOverride {
   active   bool    @default("true") @description("Soft-revoke flag.")
 
   @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-  @relationship(type="interactsWith", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="references", field="agentId", target=agent, direction="outgoing")
 }
 ```
 
@@ -275,7 +275,7 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 | `alias` | This node is an alias for another | The field stores the ID of the aliased node |
 | `equals` | This node is identity-equivalent to another | Reference concepts asserting two ids name the same thing |
 | `createdBy` | This node was created by another | The field stores the creator's ID |
-| `interactsWith` | This node interacts with another | Generic association — the default for a plain foreign key |
+| `references` | This node interacts with another | Generic association — the default for a plain foreign key |
 
 ### The two axes: `type` and `as`
 
@@ -295,8 +295,8 @@ concept participant {
   agentId    string
   forUserId  string
 
-  @relationship(type="interactsWith", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
-  @relationship(type="interactsWith", as="actsFor",    field="forUserId", target=user,  direction="outgoing")
+  @relationship(type="references", as="respondsAs", field="agentId",   target=agent, direction="outgoing")
+  @relationship(type="references", as="actsFor",    field="forUserId", target=user,  direction="outgoing")
 }
 ```
 
@@ -315,8 +315,8 @@ says so directly:
 
 ```
 relationship type "assignedTo" is invalid. Structural types are: alias, contains,
-createdBy, equals, interactsWith, owns, parent. For a domain verb, use:
-type="interactsWith", as="assignedTo"
+createdBy, equals, owns, parent, references. For a domain verb, use:
+type="references", as="assignedTo"
 ```
 
 `as` is optional everywhere, including on structural types
@@ -347,7 +347,7 @@ not word-for-word the same. This is the complete emitted set:
 | `child` | a `parent` relationship, walked from the parent down to the child |
 | `alias` | an `alias` relationship |
 | `equals` | an `equals` relationship |
-| `interactsWith` | an `interactsWith` relationship |
+| `references` | an `references` relationship |
 | `createdBy` | a `createdBy` relationship |
 | `contains` | a `contains` relationship |
 | `owns` | an `owns` relationship |
@@ -573,7 +573,7 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `owns(expr)`    | Resolves ownership links in both directions.                                                             |
 | `aliasOf(expr)` | Collects nodes sharing alias groups.                                                                     |
 | `equals(expr)`  | Follows equality relationships similar to alias.                                                         |
-| `interactsWith(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
+| `references(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
 | `createdBy(expr)` | Resolves creator nodes using payload or table-backed metadata.                                         |
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
 
@@ -584,8 +584,8 @@ string: the [`as` label](#type-and-as-are-two-independent-axes) to scope the
 traversal to.
 
 ```
-interactsWith(expr)                    # every interactsWith edge
-interactsWith("respondsAs", expr)      # only the edges labelled respondsAs
+references(expr)                    # every references edge
+references("respondsAs", expr)      # only the edges labelled respondsAs
 parentOf("belongsToSpace", expr)       # structural types take it too
 ```
 

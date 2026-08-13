@@ -421,7 +421,7 @@ func TestRegistryBackedHonesty(t *testing.T) {
 //   - Query directives: paginate / sort / select / asof / withdepth / count /
 //     shape -- they wrap an inner expression / produce specialised AST.
 //   - Relationship wrappers: parentof / childof / aliasof / equals /
-//     interactswith / owns / createdby / ids -- produce a RelationshipExpr.
+//     references / owns / createdby / ids -- produce a RelationshipExpr.
 //   - Retired: caller -- recognised only to emit a migration hint (#221).
 func builtinAllowList() map[string]string {
 	allow := map[string]string{}

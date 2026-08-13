@@ -44,8 +44,8 @@ func (e *MemQLEngine) evaluateRelationshipExpression(ctx context.Context, expr *
 		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeAlias, labels, limit)
 	case RelEquals:
 		related, err = e.resolveAliasOrEquals(ctx, innerNodes, timestamp, relationshipTypeEquals, labels, limit)
-	case RelInteractsWith:
-		related, err = e.resolveInteractsWith(ctx, innerNodes, timestamp, labels, limit)
+	case RelReferences:
+		related, err = e.resolveReferences(ctx, innerNodes, timestamp, labels, limit)
 	case RelCreatedBy:
 		related, err = e.resolveCreatedBy(ctx, innerNodes, timestamp, labels, limit)
 	case RelContains:
@@ -578,7 +578,7 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 	return related, nil
 }
 
-func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
+func (e *MemQLEngine) resolveReferences(ctx context.Context, nodes []memorynodes.MemoryNode, timestamp *time.Time, labels []string, limit int) ([]memorynodes.MemoryNode, error) {
 	type relationshipQueryKey struct {
 		targetConcept string
 		field         string
@@ -599,7 +599,7 @@ func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memoryno
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, labels)
+		matches := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, labels)
 		if len(matches) == 0 {
 			// A LABELLED traversal that matches no definition is an empty
 			// answer, not an error (memql#3656): "no edge on this concept
@@ -611,7 +611,7 @@ func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memoryno
 			if labels != nil {
 				continue
 			}
-			return nil, fmt.Errorf("concept %q has no interactsWith relationship definitions", conceptMeta.Name)
+			return nil, fmt.Errorf("concept %q has no references relationship definitions", conceptMeta.Name)
 		}
 
 		var payloadMap map[string]any
@@ -640,7 +640,7 @@ func (e *MemQLEngine) resolveInteractsWith(ctx context.Context, nodes []memoryno
 
 				value, err := extractStringFromMap(payloadMap, path)
 				if err != nil || strings.TrimSpace(value) == "" {
-					continue // Skip nodes with missing interactsWith pointers
+					continue // Skip nodes with missing references pointers
 				}
 				targetId := strings.TrimSpace(value)
 				addAllowedConcept(outgoingTargets, targetId, targetConcept)

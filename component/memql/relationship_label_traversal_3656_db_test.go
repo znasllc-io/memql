@@ -31,8 +31,8 @@ import (
 // finally SAY they meant different things, and every query still followed
 // both. This issue is what makes the label load-bearing:
 //
-//	interactsWith("respondsAs", <expr>)   -> only the respondsAs edges
-//	interactsWith(<expr>)                 -> every interactsWith edge
+//	references("respondsAs", <expr>)   -> only the respondsAs edges
+//	references(<expr>)                 -> every interactsWith edge
 //
 // WHY THIS NEEDED A FIXTURE DOMAIN. The motivating shape is a concept with
 // several edges of ONE structural type distinguished only by `as`, and the
@@ -186,11 +186,11 @@ concept hub {
   draftId           string @description("The docFile this hub drafts.")
   authorId          string @description("The user who authored this hub.")
 
-  @relationship(type="interactsWith", as="respondsAs", field="agentId", target=agent, direction="outgoing")
-  @relationship(type="interactsWith", as="actsFor", field="forUserId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", field="auditorId", target=user, direction="outgoing")
-  @relationship(type="interactsWith", as="collaboratesWith", field="peerAId", target=agent, direction="outgoing")
-  @relationship(type="interactsWith", as="collaboratesWith", field="peerBId", target=agent, direction="outgoing")
+  @relationship(type="references", as="respondsAs", field="agentId", target=agent, direction="outgoing")
+  @relationship(type="references", as="actsFor", field="forUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="auditorId", target=user, direction="outgoing")
+  @relationship(type="references", as="collaboratesWith", field="peerAId", target=agent, direction="outgoing")
+  @relationship(type="references", as="collaboratesWith", field="peerBId", target=agent, direction="outgoing")
   @relationship(type="parent", as="belongsToSpace", field="spaceId", target=space, direction="outgoing")
   @relationship(type="parent", field="archivedInSpaceId", target=space, direction="outgoing")
   @relationship(type="alias", as="knownAs", field="handleId", target=handle, direction="outgoing")
@@ -213,7 +213,7 @@ query agent labelScopedRespondsAsAgents {
   args {
     hubOwner string!
   }
-  filter interactsWith("respondsAs", row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
+  filter references("respondsAs", row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
 }
 
 /// Every agent a fixture hub interacts with -- the unscoped form, authored.
@@ -221,7 +221,7 @@ query agent labelUnscopedInteractsAgents {
   args {
     hubOwner string!
   }
-  filter interactsWith(row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
+  filter references(row.concept == "v1:rel3656:hub" && row.createdBy == args.hubOwner)
 }
 `
 
@@ -236,7 +236,7 @@ const labelFixtureSpecs = `use rel3656.concepts.{ agent }
 /// True for an agent some fixture hub responds AS -- and NOT for one it merely
 /// collaborates with, which is the whole assertion (memql#3656).
 spec agent labelScopedIsRespondsAsAgent {
-  return interactsWith("respondsAs", marker == "rel3656-hub")
+  return references("respondsAs", marker == "rel3656-hub")
 }
 `
 
@@ -527,7 +527,7 @@ func TestRelationshipLabelFixtureLoads(t *testing.T) {
 
 	byLabel := map[string]int{}
 	for _, def := range eng.relationships.ByConcept[labelHubConcept] {
-		if def.Type == relationshipTypeInteracts {
+		if def.Type == relationshipTypeReferences {
 			byLabel[def.As]++
 		}
 	}
@@ -567,18 +567,18 @@ func TestInteractsWithLabelReturnsOnlyThatLabelsTargets(t *testing.T) {
 
 	require.ElementsMatch(t,
 		[]string{w.respondsAsAgentId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith("respondsAs", %s)`, w.hubFilter())),
-		"interactsWith(\"respondsAs\") must return the respondsAs target and nothing else; "+
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references("respondsAs", %s)`, w.hubFilter())),
+		"references(\"respondsAs\") must return the respondsAs target and nothing else; "+
 			"a label dropped anywhere on the path yields the union of all five interactsWith edges")
 
 	require.ElementsMatch(t,
 		[]string{w.actsForUserId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith("actsFor", %s)`, w.hubFilter())),
-		"interactsWith(\"actsFor\") must return the actsFor target and nothing else")
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references("actsFor", %s)`, w.hubFilter())),
+		"references(\"actsFor\") must return the actsFor target and nothing else")
 
 	require.ElementsMatch(t,
 		[]string{w.peerAAgentId, w.peerBAgentId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith("collaboratesWith", %s)`, w.hubFilter())),
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references("collaboratesWith", %s)`, w.hubFilter())),
 		"two definitions sharing one label are followed TOGETHER -- the per-field duplicate rule "+
 			"already blocks the genuinely ambiguous case, and the union is the useful reading of "+
 			"\"every edge meaning collaboratesWith\"")
@@ -604,7 +604,7 @@ func TestUnlabelledInteractsWithStillReturnsTheUnion(t *testing.T) {
 			w.peerAAgentId,
 			w.peerBAgentId,
 		},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith(%s)`, w.hubFilter())),
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references(%s)`, w.hubFilter())),
 		"the ONE-ARGUMENT form must be exactly what it was before memql#3656: every "+
 			"interactsWith edge, labelled or not. This is the whole backward-compatibility "+
 			"claim of the feature")
@@ -642,7 +642,7 @@ func TestLabelScopedTraversalWorksForEveryTraversalFunction(t *testing.T) {
 		mustMiss []string
 	}{
 		{
-			fn: "interactsWith", label: "respondsAs", source: w.hubFilter(),
+			fn: "references", label: "respondsAs", source: w.hubFilter(),
 			want:     []string{w.respondsAsAgentId},
 			mustMiss: []string{w.actsForUserId, w.auditorUserId},
 		},
@@ -720,7 +720,7 @@ func TestLabelMatchingNoEdgeIsAnEmptyAnswerNotAnError(t *testing.T) {
 		resolver string
 		wantErr  string
 	}{
-		{fn: "interactsWith", source: w.hubFilter()},
+		{fn: "references", source: w.hubFilter()},
 		{fn: "owns", source: w.hubFilter()},
 		{fn: "createdBy", source: w.hubFilter()},
 		{
@@ -854,14 +854,14 @@ func TestGraphEdgeCarriesTheAsLabelPerEdge(t *testing.T) {
 	}
 
 	want := map[edgeKey][]string{
-		{GraphEdgeLabelInteractsWith, "respondsAs"}:       {w.respondsAsAgentId},
-		{GraphEdgeLabelInteractsWith, "actsFor"}:          {w.actsForUserId},
-		{GraphEdgeLabelInteractsWith, ""}:                 {w.auditorUserId},
-		{GraphEdgeLabelInteractsWith, "collaboratesWith"}: {w.peerAAgentId, w.peerBAgentId},
-		{GraphEdgeLabelAlias, "knownAs"}:                  {w.handleId},
-		{GraphEdgeLabelEquals, "mergedWith"}:              {w.twinId},
-		{GraphEdgeLabelOwns, "drafts"}:                    {w.draftDocId},
-		{GraphEdgeLabelCreatedBy, "authoredBy"}:           {w.authorUserId},
+		{GraphEdgeLabelReferences, "respondsAs"}:       {w.respondsAsAgentId},
+		{GraphEdgeLabelReferences, "actsFor"}:          {w.actsForUserId},
+		{GraphEdgeLabelReferences, ""}:                 {w.auditorUserId},
+		{GraphEdgeLabelReferences, "collaboratesWith"}: {w.peerAAgentId, w.peerBAgentId},
+		{GraphEdgeLabelAlias, "knownAs"}:               {w.handleId},
+		{GraphEdgeLabelEquals, "mergedWith"}:           {w.twinId},
+		{GraphEdgeLabelOwns, "drafts"}:                 {w.draftDocId},
+		{GraphEdgeLabelCreatedBy, "authoredBy"}:        {w.authorUserId},
 	}
 
 	for key, wantIds := range want {
@@ -874,7 +874,7 @@ func TestGraphEdgeCarriesTheAsLabelPerEdge(t *testing.T) {
 
 	// The unlabelled edge is the load-bearing one: `as` must be EMPTY there,
 	// not defaulted to the type and not inherited from a sibling edge.
-	require.Contains(t, got, edgeKey{GraphEdgeLabelInteractsWith, ""},
+	require.Contains(t, got, edgeKey{GraphEdgeLabelReferences, ""},
 		"the unlabelled interactsWith edge must reach the wire with an EMPTY as -- an edge "+
 			"whose author said nothing about its meaning must not be given one")
 }
@@ -893,14 +893,14 @@ func TestGraphEdgeAsSurvivesCloning(t *testing.T) {
 		RootIds: []string{"v1:rel3656:hub:x"},
 		Edges: []*memqlv1.GraphEdge{
 			{
-				Type:   GraphEdgeLabelInteractsWith,
+				Type:   GraphEdgeLabelReferences,
 				FromId: "v1:rel3656:hub:x",
 				ToId:   "v1:rel3656:agent:y",
 				As:     "respondsAs",
 				Depth:  1,
 			},
 			{
-				Type:   GraphEdgeLabelInteractsWith,
+				Type:   GraphEdgeLabelReferences,
 				FromId: "v1:rel3656:hub:x",
 				ToId:   "v1:rel3656:user:z",
 				Depth:  1,
@@ -943,14 +943,14 @@ func TestGraphEdgeAsSurvivesBareIdRewriting(t *testing.T) {
 		RootIds: []string{"v1:rel3656:hub:x"},
 		Edges: []*memqlv1.GraphEdge{
 			{
-				Type:   GraphEdgeLabelInteractsWith,
+				Type:   GraphEdgeLabelReferences,
 				FromId: "v1:rel3656:hub:x",
 				ToId:   "v1:rel3656:agent:y",
 				As:     "respondsAs",
 				Depth:  1,
 			},
 			{
-				Type:   GraphEdgeLabelInteractsWith,
+				Type:   GraphEdgeLabelReferences,
 				FromId: "v1:rel3656:hub:x",
 				ToId:   "v1:rel3656:user:z",
 				Depth:  1,
@@ -1006,7 +1006,7 @@ func TestRelationshipLabelSurvivesEveryConstructionSite(t *testing.T) {
 	t.Run("runtimeQueryString", func(t *testing.T) {
 		require.ElementsMatch(t, scoped,
 			runTraversal(t, ctx, eng,
-				fmt.Sprintf(`interactsWith("respondsAs", %s)`, w.hubFilter())),
+				fmt.Sprintf(`references("respondsAs", %s)`, w.hubFilter())),
 			"a label in a runtime query string must survive ASTConverter.convertRelationshipExpr")
 	})
 
@@ -1102,9 +1102,9 @@ func TestEveryRelationshipExpressionLiteralSetsTheLabel(t *testing.T) {
 // traversal alongside them -- share ONE cache entry, and whichever runs first
 // answers for all of them within the TTL. Observed directly:
 //
-//	interactsWith("actsFor",    <hub>)  -> [the actsFor user]     (computed)
-//	interactsWith("respondsAs", <hub>)  -> [the actsFor user]     (cache hit)
-//	interactsWith(<hub>)                -> [the actsFor user]     (cache hit)
+//	references("actsFor",    <hub>)  -> [the actsFor user]     (computed)
+//	references("respondsAs", <hub>)  -> [the actsFor user]     (cache hit)
+//	references(<hub>)                -> [the actsFor user]     (cache hit)
 //
 // and the two plan signatures compare EQUAL:
 //
@@ -1127,16 +1127,16 @@ func TestRelationshipLabelIsPartOfTheResultCacheKey(t *testing.T) {
 	// Ask for actsFor first, so a colliding key is populated with an answer
 	// that is unmistakably not respondsAs.
 	require.ElementsMatch(t, []string{w.actsForUserId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith("actsFor", %s)`, w.hubFilter())))
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references("actsFor", %s)`, w.hubFilter())))
 
 	require.ElementsMatch(t, []string{w.respondsAsAgentId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith("respondsAs", %s)`, w.hubFilter())),
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references("respondsAs", %s)`, w.hubFilter())),
 		"a second label over the same inner filter must not be served the first label's "+
 			"cached rows")
 
 	require.ElementsMatch(t,
 		[]string{w.respondsAsAgentId, w.actsForUserId, w.auditorUserId, w.peerAAgentId, w.peerBAgentId},
-		runTraversal(t, ctx, eng, fmt.Sprintf(`interactsWith(%s)`, w.hubFilter())),
+		runTraversal(t, ctx, eng, fmt.Sprintf(`references(%s)`, w.hubFilter())),
 		"the unlabelled traversal must not be served a labelled traversal's cached rows")
 }
 
@@ -1154,12 +1154,12 @@ func TestRelationshipLabelMatchingIsTrimmedAndCaseSensitive(t *testing.T) {
 
 	require.ElementsMatch(t, []string{w.respondsAsAgentId},
 		runTraversal(t, ctx, eng,
-			fmt.Sprintf(`interactsWith("  respondsAs  ", %s)`, w.hubFilter())),
+			fmt.Sprintf(`references("  respondsAs  ", %s)`, w.hubFilter())),
 		"surrounding whitespace in a label is formatting, not meaning")
 
 	require.Empty(t,
 		runTraversal(t, ctx, eng,
-			fmt.Sprintf(`interactsWith("RespondsAs", %s)`, w.hubFilter())),
+			fmt.Sprintf(`references("RespondsAs", %s)`, w.hubFilter())),
 		"label matching is CASE SENSITIVE: `as` is an open vocabulary the engine never "+
 			"validates against a list, so it cannot know that RespondsAs was meant to be "+
 			"respondsAs -- and guessing would make two spellings one label")
@@ -1179,11 +1179,11 @@ func TestRelationshipLabelMatchingIsTrimmedAndCaseSensitive(t *testing.T) {
 // riding on a traversal that happens to exercise it.
 func TestFilterRelationshipDefinitionsLabelSemantics(t *testing.T) {
 	defs := []RelationshipDefinition{
-		{Type: relationshipTypeInteracts, Field: "agentId", Direction: relationshipDirectionOutgoing, As: "respondsAs"},
-		{Type: relationshipTypeInteracts, Field: "forUserId", Direction: relationshipDirectionOutgoing, As: "actsFor"},
-		{Type: relationshipTypeInteracts, Field: "auditorId", Direction: relationshipDirectionOutgoing},
-		{Type: relationshipTypeInteracts, Field: "peerAId", Direction: relationshipDirectionOutgoing, As: "collaboratesWith"},
-		{Type: relationshipTypeInteracts, Field: "peerBId", Direction: relationshipDirectionOutgoing, As: "collaboratesWith"},
+		{Type: relationshipTypeReferences, Field: "agentId", Direction: relationshipDirectionOutgoing, As: "respondsAs"},
+		{Type: relationshipTypeReferences, Field: "forUserId", Direction: relationshipDirectionOutgoing, As: "actsFor"},
+		{Type: relationshipTypeReferences, Field: "auditorId", Direction: relationshipDirectionOutgoing},
+		{Type: relationshipTypeReferences, Field: "peerAId", Direction: relationshipDirectionOutgoing, As: "collaboratesWith"},
+		{Type: relationshipTypeReferences, Field: "peerBId", Direction: relationshipDirectionOutgoing, As: "collaboratesWith"},
 		{Type: relationshipTypeParent, Field: "spaceId", Direction: relationshipDirectionOutgoing, As: "belongsToSpace"},
 	}
 
@@ -1196,7 +1196,7 @@ func TestFilterRelationshipDefinitionsLabelSemantics(t *testing.T) {
 	}
 
 	t.Run("nilIsUnscoped", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, nil)
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, nil)
 		require.ElementsMatch(t,
 			[]string{"agentId", "forUserId", "auditorId", "peerAId", "peerBId"}, fieldsOf(got),
 			"a nil label filter is the one-argument traversal form: follow every edge of "+
@@ -1204,18 +1204,18 @@ func TestFilterRelationshipDefinitionsLabelSemantics(t *testing.T) {
 	})
 
 	t.Run("exactLabel", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, []string{"respondsAs"})
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, []string{"respondsAs"})
 		require.ElementsMatch(t, []string{"agentId"}, fieldsOf(got))
 	})
 
 	t.Run("sharedLabelIsAUnion", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, []string{"collaboratesWith"})
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, []string{"collaboratesWith"})
 		require.ElementsMatch(t, []string{"peerAId", "peerBId"}, fieldsOf(got),
 			"two definitions carrying one label are BOTH selected")
 	})
 
 	t.Run("emptyStringSelectsOnlyUnlabelled", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, []string{""})
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, []string{""})
 		require.ElementsMatch(t, []string{"auditorId"}, fieldsOf(got),
 			"[]string{\"\"} must mean \"the edges carrying NO label\" -- distinct from nil, "+
 				"which means \"every edge\". Graph expansion depends on being able to ask "+
@@ -1223,12 +1223,12 @@ func TestFilterRelationshipDefinitionsLabelSemantics(t *testing.T) {
 	})
 
 	t.Run("unknownLabelSelectsNothing", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, []string{"nobodyUsesThis"})
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, []string{"nobodyUsesThis"})
 		require.Empty(t, got)
 	})
 
 	t.Run("labelDoesNotCrossStructuralTypes", func(t *testing.T) {
-		got := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, []string{"belongsToSpace"})
+		got := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, []string{"belongsToSpace"})
 		require.Empty(t, got,
 			"belongsToSpace is a `parent` label; the structural type is filtered first and a "+
 				"label never reaches across it")
@@ -1243,7 +1243,7 @@ func TestFilterRelationshipDefinitionsLabelSemantics(t *testing.T) {
 	})
 
 	t.Run("labelsPresentIsDistinctAndIncludesTheUnlabelled", func(t *testing.T) {
-		interacts := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, nil)
+		interacts := filterRelationshipDefinitions(defs, relationshipTypeReferences, nil, nil)
 		require.Equal(t,
 			[]string{"respondsAs", "actsFor", "", "collaboratesWith"},
 			relationshipLabelsPresent(interacts),

@@ -8,7 +8,7 @@ package memql
 // node would reject or skip at boot.
 //
 // The two lead witness classes the epic names:
-//   - a non-canonical @relationship type ("references"), rejected by
+//   - a non-canonical @relationship type ("assignedTo"), rejected by
 //     normalizeRelationshipDefinition (relations.go / engine.go);
 //   - a mutation that declares an arg it never references, rejected by
 //     validateDeclaredUsage (declared_usage_validator.go).
@@ -73,7 +73,7 @@ mutate gizmo createGizmo {
 }
 
 // TestLintParity_NonCanonicalRelationshipType is witness class 1: a
-// @relationship whose type is outside the canonical set ("references" is
+// @relationship whose type is outside the canonical set ("assignedTo" is
 // explicitly rejected). dslimports parses it fine; the engine rejects it at
 // Init.
 func TestLintParity_NonCanonicalRelationshipType(t *testing.T) {
@@ -91,12 +91,12 @@ concept hub {
 concept gadget {
   hubId  string  @required  @description("FK to the owning hub.")
 
-  @relationship(type="references", field="hubId", target=hub, direction="outgoing")
+  @relationship(type="assignedTo", field="hubId", target=hub, direction="outgoing")
 }
 `)},
 	}
 	diags := lint(t, root)
-	if !diagsContain(diags, `relationship type "references" is invalid`) {
+	if !diagsContain(diags, `relationship type "assignedTo" is invalid`) {
 		t.Fatalf("expected a non-canonical relationship-type diagnostic; got: %+v", diags)
 	}
 }
