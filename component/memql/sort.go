@@ -135,7 +135,40 @@ func compileSortField(field SortField) (compiledSortField, error) {
 		case intrinsicFieldType:
 			return compiledSortField{kind: sortFieldType, direction: direction, name: info.canonical}, nil
 		default:
-			// fallthrough to payload handling
+			// `provenance` is the only kind with no branch above: it is
+			// object-valued and has no ordering. It falls through to the
+			// reserved-head refusal immediately below, NOT to payload
+			// handling -- see memql#3613.
+		}
+	}
+
+	// A bare reserved head is not a payload property and never can be
+	// (memql#3613). This is the second surface of the same defect: one bare
+	// token meant the ROW ENVELOPE in a filter and the PAYLOAD in a sort key.
+	//
+	//	filter provenance.kind == x   ->  provenance->>'kind'          (row column)
+	//	sort   "provenance.kind"      ->  payload #>> '{provenance,kind}'
+	//	sort   "provenance"           ->  payload #>> '{provenance}'
+	//
+	// The head is classified here exactly as the plan parser classifies
+	// ref.Parts[0], so the two surfaces answer the same question the same way.
+	// Since reservedPayloadFields now refuses every one of these names as a
+	// declared property -- and StripReservedPayloadFields drops them on the
+	// way in -- no stored row can carry that JSONB path, which made the old
+	// behaviour a guaranteed silent no-op ordering. That is precisely what
+	// rowIntrinsicSortField was written to prevent for the `row.` spelling;
+	// this closes it for the bare one.
+	//
+	// The explicit `payload.<path>` form below is deliberately NOT covered:
+	// its prefix already names the surface, so there is no ambiguity left to
+	// resolve, and it remains the escape hatch for a runtime caller who means
+	// the payload and says so.
+	if !strings.HasPrefix(lowered, "payload.") {
+		head, _, _ := strings.Cut(name, ".")
+		if reservedFilterHead(head) {
+			return compiledSortField{}, fmt.Errorf(
+				"%w: sort key %q is rooted at %q, a reserved engine namespace rather than a payload property -- no concept may declare that name, so ordering on it would silently match nothing. Sortable row intrinsics are id, concept, type, createdAt, createdBy (written \"row.createdAt\"); a payload property is named bare",
+				ErrInvalidArgument, name, head)
 		}
 	}
 
