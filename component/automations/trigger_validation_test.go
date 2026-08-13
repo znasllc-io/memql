@@ -185,7 +185,19 @@ func TestTrigger_NoReachableTriggerIsRefused(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			src := tc.preamble + "\nautomation unwiredProbe" + triggerProbeBody
-			_, err := loader.compileMemQL(src, "test:"+tc.name)
+			// compileMemQL is the SHARED path -- it also serves the authoring
+			// sandbox's Gate 1, which compiles a candidate that legitimately
+			// has no trigger yet. So the wiring refusal lives on the tree walk,
+			// and the two halves are asserted separately here: whatever
+			// compileMemQL rejects on its own, plus validateTriggerWiring for
+			// the rest.
+			automation, err := loader.compileMemQL(src, "test:"+tc.name)
+			if err == nil {
+				if automation == nil {
+					t.Fatalf("compileMemQL returned no automation and no error")
+				}
+				err = loader.validateTriggerWiring(automation)
+			}
 			if err == nil {
 				t.Fatalf("expected a refusal: %s loads wired to nothing", tc.preamble)
 			}
@@ -288,7 +300,13 @@ func TestCron_InvalidExpressionsRefusedAtLoad(t *testing.T) {
 	} {
 		t.Run(expr, func(t *testing.T) {
 			src := `@trigger(schedule="` + expr + `")` + "\nautomation cronProbe" + triggerProbeBody
-			_, err := loader.compileMemQL(src, "test:cron")
+			automation, err := loader.compileMemQL(src, "test:cron")
+			// Same split as the wiring test above: the shared compile path
+			// serves the authoring sandbox, so the refusal lives on the tree
+			// walk and is asserted through the validator here.
+			if err == nil && automation != nil {
+				err = loader.validateTriggerWiring(automation)
+			}
 			if err == nil {
 				t.Fatalf("expected a refusal for schedule %q -- it loads scheduled=true and never fires", expr)
 			}

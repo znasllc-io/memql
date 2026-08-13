@@ -355,17 +355,6 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("automation %q: dotted `event.<field>` reads are retired (G5, epic #2352; widened in memql#3610) -- declare the field in the args { } block and read it bare. Note that `event.node.<field>` never resolved to anything at all: the CDC envelope has no `node` key, so it silently decided false rather than erroring. Migrate with: go run ./scripts/migrations/event_payload_args -write <dsl-root>", automation.Name)
 	}
 
-	// Refuse an automation nothing can ever run (memql#3614 item 3, memql#3615).
-	// This is the DSL-authored path only -- the LogicRunner's parseJSON builds
-	// trigger-less automations by construction and must not be gated here.
-	// The AUTHORED scheduler has always refused a trigger-less construct at
-	// activation; running the check at load makes the two spellings agree AND
-	// puts the refusal in front of the strict-boot gate, which is what the
-	// swallowed cron error was hiding behind.
-	if err := l.validateTriggerWiring(&automation); err != nil {
-		return nil, err
-	}
-
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
 
