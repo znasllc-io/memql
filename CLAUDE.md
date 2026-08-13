@@ -1628,12 +1628,19 @@ name collides with one of those is rejected at load time.
   ARE the schema and retain it.
 - `@default` is **not** valid on an args field (it was never applied —
   rejected at load, #991). Apply a default in the body with the `??`
-  null-coalescing operator (`args.X ?? <default>`). A concept-field
-  `@default` is NOT a substitute — it is never applied on insert either
+  operator (`args.X ?? <default>`). A concept-field `@default` is NOT a
+  substitute — it is never applied on insert either
   (memql#2960), so `??` is the only mechanism that fills a value. `a ?? b ?? c`
   folds to exactly what `coalesce(a, b, c)` produces; the shorthand is
   the authored form and `test/dslconformance/no_coalesce_longhand_test.go` gates the
   corpus on it (`memqlmigrate --rewrite=null-coalesce` converts).
+  **`??` is BLANK-coalescing, not null-coalescing** (memql#3627): it falls
+  through on an empty OR WHITESPACE-ONLY string as well as on absent/null,
+  so a caller who deliberately clears a text field gets the default written
+  back. `false` / `0` / `[]` / `{}` are kept. Deliberate (#1614) and now
+  specified in [authoring-rules.md §28](docs/public/language/authoring-rules.md);
+  `@noUnset` (memql#3415) is the targeted opt-out for a field a blank must
+  not overwrite.
 
 Queries:
 ```memql
