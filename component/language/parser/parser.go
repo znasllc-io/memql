@@ -2561,7 +2561,11 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 			}
 			prop.Nested = append(prop.Nested, nested)
 		}
+		closeLine := p.current.Line
 		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "nested object", closeLine); err != nil {
 			return nil, err
 		}
 		return prop, nil
@@ -2625,11 +2629,59 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 			}
 			prop.Variants = append(prop.Variants, variant)
 		}
+		closeLine := p.current.Line
 		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "@variant", closeLine); err != nil {
 			return nil, err
 		}
 	}
 	return prop, nil
+}
+
+// refuseSameLineTrailingAttribute rejects an annotation sitting on the same
+// line as the closing brace of a nested-object or @variant block (memql#3623).
+//
+// Every OTHER property form takes its annotations after the type
+// (`name string @required`), so `outer { ... } @internal` reads as the same
+// postfix position -- but a block-bodied property has never consumed one.
+// parsePropertyDecl returned the moment it saw the closing brace, and
+// parseConceptDecl's body loop then re-read the leftover annotation as a
+// PREFIX attribute of the NEXT property. The result was exactly inverted from
+// what was written, and silent: with @secret / @pii / @internal it left the
+// field the author annotated exposed and hid the one after it.
+//
+// This refuses rather than consuming, and the reason is that the two readings
+// are the same token stream. The lexer strips newlines, so `} @internal` and
+// `}` followed by `@internal` on the next line differ only in Line -- and the
+// second spelling ALREADY has a meaning the tree depends on (prefix attribute
+// of the following property). Binding the same-line spelling to the block
+// would therefore make a reflow load-bearing: a formatter moving the
+// annotation on or off the closing-brace line would silently change which
+// property is hidden, which is the defect again in a new costume. The prefix
+// form keeps working untouched on any later line; only the ambiguous spelling
+// is refused, and the diagnostic names both intents so the author picks one.
+//
+// @relationship is exempt: it is body-level wherever it appears
+// (parseConceptDecl hoists it out of the attribute run and the typed-property
+// branch breaks out of its trailing loop for it), so its position carries no
+// ambiguity to resolve.
+func (p *Parser) refuseSameLineTrailingAttribute(propName, blockKind string, closeLine int) error {
+	if !p.check(TokenAt) || p.current.Line != closeLine {
+		return nil
+	}
+	name := p.peekAhead(1).Literal
+	if name == "relationship" {
+		return nil
+	}
+	return newParseErrorf(&p.current,
+		"property %q: annotation @%s on the same line as the closing brace of its %s block is "+
+			"ambiguous and is refused. A block-bodied property takes no trailing annotation, so "+
+			"this would bind to the property that FOLLOWS -- the opposite of how it reads. "+
+			"If it belongs to %q, write it on the line(s) BEFORE %q; if it belongs to the next "+
+			"property, write it on its own line after the closing brace.",
+		propName, name, blockKind, propName, propName)
 }
 
 // parseVariantBranch parses one `<variantName> { field type ... }`
@@ -5772,11 +5824,15 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		// Check for named argument (identifier followed by single =)
 		if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenOperator && p.peekAhead(1).Literal == "=" {
 			argName := p.current.Literal
+			nameTok := p.current
 			// `m(b:c = 1)` binds an argument named "b:c" and `b` never exists.
 			// The fourth and last position in this family; an argument name
 			// cannot contain a colon in any of them.
 			if strings.Contains(argName, ":") {
 				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
 			}
 			p.advance() // consume name
 			p.advance() // consume '='
@@ -5794,6 +5850,10 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// are untouched. Nested object values still parse via parseValue
 			// (`payload: { ... }`).
 			argName := p.current.Literal
+			nameTok := p.current
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
+			}
 			p.advance() // consume name
 			p.advance() // consume ':'
 			val, err := p.parseValueMaybeCoalesce()
@@ -5816,6 +5876,10 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// still glues, so refuse it here rather than corrupt it.
 			if strings.Contains(argName, ":") {
 				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
+			nameTok := p.current
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
 			}
 			val, err := p.parseValue()
 			if err != nil {
@@ -5922,6 +5986,38 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		Name: name,
 		Args: args,
 	}, nil
+}
+
+// checkCallArgName refuses the two ways a call-site argument name could be
+// written and then silently not mean what it says (memql#3626). Called at each
+// of the three named-argument positions -- `k = v`, `k: v`, and the punned
+// bare identifier -- BEFORE the name is bound into the args map.
+//
+// # A repeated name
+//
+// Arguments accumulate into a map[string]any, so `m(a: 1, a: 2)` collapsed
+// LAST-WINS with no signal: a reader scanning left to right saw 1, the engine
+// used 2. Same collapse, same reasoning, and the same fix as memql#2968 made
+// for a repeated annotation argument -- refused where the collapse happens,
+// because every consumer downstream of the map has already lost the evidence.
+//
+// # A reserved engine name
+//
+// `now` / `actor` / `partition` / `config` / `trace` are the ambient top-level
+// identifiers every body may read. The args BLOCK refuses exactly these
+// (reservedArgsNames, memql#2361), which means an argument by one of those
+// names can never be DECLARED -- so passing one is guaranteed to be dropped:
+// the callee cannot declare it, and (since memql#3626) cannot read it as
+// `args.<name>` either. The two ends of one contract disagreed, and the
+// caller's end was the one that stayed quiet.
+func checkCallArgName(tok *Token, callName, argName string, args map[string]any) error {
+	if _, exists := args[argName]; exists {
+		return newParseErrorf(tok, "call %s(...): duplicate argument %q -- arguments collapse last-wins into one map, so the first value is discarded with no signal; name each argument once", callName, argName)
+	}
+	if reservedArgsNames[argName] {
+		return newParseErrorf(tok, "call %s(...): %q is a reserved engine name (now / actor / partition / config / trace) and cannot be an argument name -- an args block may not declare it, so the value can never bind and is silently dropped; rename the argument", callName, argName)
+	}
+	return nil
 }
 
 // colonGlueMessage explains a `key:value` the lexer scanned as ONE identifier,

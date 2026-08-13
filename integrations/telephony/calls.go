@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/livekit/protocol/livekit"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // LiveKit webhook event names we act on.
@@ -162,8 +163,8 @@ func (i *Integration) writeCallRecord(ctx context.Context, c openCall, dispositi
 // including the per-call cost estimate. Pure + unit-testable.
 func callRecordMutation(c openCall, durationSeconds int, disposition string, costEstimate float64) string {
 	return fmt.Sprintf(
-		`mutation recordCall(direction: %q, fromE164: %q, toE164: %q, partitionId: %q, room: %q, carrier: %q, agentId: %q, durationSeconds: %d, disposition: %q, costEstimate: %g)`,
-		c.direction, c.fromE164, c.toE164, c.partitionID, c.room, "", c.agentID, durationSeconds, disposition, costEstimate,
+		`mutation recordCall(direction: %s, fromE164: %s, toE164: %s, partitionId: %s, room: %s, carrier: %s, agentId: %s, durationSeconds: %d, disposition: %s, costEstimate: %g)`,
+		langparser.QuoteString(c.direction), langparser.QuoteString(c.fromE164), langparser.QuoteString(c.toE164), langparser.QuoteString(c.partitionID), langparser.QuoteString(c.room), langparser.QuoteString(""), langparser.QuoteString(c.agentID), durationSeconds, langparser.QuoteString(disposition), costEstimate,
 	)
 }
 

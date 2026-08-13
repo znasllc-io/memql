@@ -66,8 +66,13 @@ tool liveProbeTool {
 // any-role; @autoInjected stripped = caller-supplied identity fields) -- a
 // privilege escalation, not a disablement.
 func TestLoadUnifiedTools_DisabledNameNotResurrectedByFunctionTools(t *testing.T) {
+	// `name=`, not `function=`. The latter is not a @handler argument, so it
+	// was read by nobody and the handler shipped with an empty function name
+	// -- invisible here precisely because the tool is @disabled. Refused since
+	// memql#3625: @disabled means "not active right now", never "exempt from
+	// conformance".
 	overlay := fstest.MapFS{"tools.memql": {Data: []byte(`@disabled
-@handler(type="function", function="collidingProbeFn")
+@handler(type="function", name="collidingProbeFn")
 @allowedRoles("specialist")
 @description("governed probe tool")
 tool collidingProbeFn {

@@ -18,6 +18,7 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity/accounttoken"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -89,14 +90,14 @@ func TestAccountIsolationAndTokenLifecycleAgainstLiveDatabase(t *testing.T) {
 	//    the row's owner is decided by the engine from the actor.
 	// ---------------------------------------------------------------
 	driveGateQuery(t, owner, "create-account", fmt.Sprintf(
-		`mutation createAccount(accountId:%q,name:"Northwind Trading",description:"integration fixture")`,
-		accountShort))
+		`mutation createAccount(accountId:%s,name:"Northwind Trading",description:"integration fixture")`,
+		langparser.QuoteString(accountShort)))
 	waitForQueryResult(t, ownerStream, "create-account", 15*time.Second)
 
 	// ---------------------------------------------------------------
 	// 2. READ. The owner sees it; the intruder does not.
 	// ---------------------------------------------------------------
-	read := fmt.Sprintf(`query accountById(accountId:%q)`, accountShort)
+	read := fmt.Sprintf(`query accountById(accountId:%s)`, langparser.QuoteString(accountShort))
 
 	driveGateQuery(t, owner, "owner-read", read)
 	if n := rowsInResult(waitForQueryResult(t, ownerStream, "owner-read", 15*time.Second)); n != 1 {
@@ -136,8 +137,8 @@ func TestAccountIsolationAndTokenLifecycleAgainstLiveDatabase(t *testing.T) {
 	before := accountPayload(t, db, accountRowId)
 
 	for _, tc := range []struct{ id, call string }{
-		{"intruder-update", fmt.Sprintf(`mutation updateAccount(accountId:%q,name:"Taken Over")`, accountShort)},
-		{"intruder-archive", fmt.Sprintf(`mutation archiveAccount(accountId:%q)`, accountShort)},
+		{"intruder-update", fmt.Sprintf(`mutation updateAccount(accountId:%s,name:"Taken Over")`, langparser.QuoteString(accountShort))},
+		{"intruder-archive", fmt.Sprintf(`mutation archiveAccount(accountId:%s)`, langparser.QuoteString(accountShort))},
 	} {
 		driveGateQuery(t, intruder, tc.id, tc.call)
 		_, err := awaitAccountOutcome(t, intruderStream, tc.id, 15*time.Second)

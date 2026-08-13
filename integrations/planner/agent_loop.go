@@ -37,6 +37,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -405,7 +406,7 @@ func (l *PlannerAgentLoop) maybeResumeFromFeedback(ctx context.Context, planId s
 // on failure the plan stays in planning and the safety net never fires (no
 // plannerAgent call was made), so there's nothing to spam. (memql#816)
 func (l *PlannerAgentLoop) startPlanDirect(ctx context.Context, planId string) {
-	q := fmt.Sprintf(`mutation startPlan(planId:%q)`, planId)
+	q := fmt.Sprintf(`mutation startPlan(planId:%s)`, langparser.QuoteString(planId))
 	if _, err := l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		l.logger.Warn("planner agent loop: startPlanDirect failed",
 			"planId", planId, "error", err)
@@ -798,8 +799,8 @@ func (l *PlannerAgentLoop) ensureSpecialistForPlan(ctx context.Context, planId s
 	// new specialist (memql#399). The factory hard-stamps
 	// kind="specialist" on any agent it creates regardless of caller.
 	call := fmt.Sprintf(
-		`builtin ensureAgentForGoal(goal:%q, ownerUserId:%q, partitionId:%q, planId:%q)`,
-		goal, ownerUserId, partitionId, planId,
+		`builtin ensureAgentForGoal(goal:%s, ownerUserId:%s, partitionId:%s, planId:%s)`,
+		langparser.QuoteString(goal), langparser.QuoteString(ownerUserId), langparser.QuoteString(partitionId), langparser.QuoteString(planId),
 	)
 	res, err := l.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {
@@ -863,8 +864,8 @@ func extractAgentFactoryResult(res any) (agentId, action string) {
 // Bare-identifier keys per MemQL function-call syntax.
 func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId string) error {
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"routing", ownerAgentId:%q)`,
-		planId, agentId,
+		`mutation updatePlanStatus(planId:%s, status:"routing", ownerAgentId:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(agentId),
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -879,7 +880,7 @@ func (l *PlannerAgentLoop) assignOwnerAgent(ctx context.Context, planId, agentId
 // support -- the engine's only entry point for reading a concept is
 // a named query function, not an inline `from()` clause.
 func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[string]any, error) {
-	q := fmt.Sprintf(`query planById(planId:%q)`, planId)
+	q := fmt.Sprintf(`query planById(planId:%s)`, langparser.QuoteString(planId))
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -903,7 +904,7 @@ func (l *PlannerAgentLoop) loadPlan(ctx context.Context, planId string) (map[str
 }
 
 func (l *PlannerAgentLoop) loadTasks(ctx context.Context, planId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`query tasksForPlan(planId:%q)`, planId)
+	q := fmt.Sprintf(`query tasksForPlan(planId:%s)`, langparser.QuoteString(planId))
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -920,7 +921,7 @@ func (l *PlannerAgentLoop) loadSpecialists(ctx context.Context, plan map[string]
 	if ownerUserId == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query activeAgentsForUser(ownerUserId:%q)`, ownerUserId)
+	q := fmt.Sprintf(`query activeAgentsForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
 	res, err := l.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -955,8 +956,8 @@ func (l *PlannerAgentLoop) stampPhases(ctx context.Context, planId string, outli
 	// status to "running" here, which prematurely transitioned the
 	// plan out of planning and broke the UI gating + the Run button.
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"planning", phases:%s)`,
-		planId, string(phasesJSON),
+		`mutation updatePlanStatus(planId:%s, status:"planning", phases:%s)`,
+		langparser.QuoteString(planId), string(phasesJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -1027,8 +1028,8 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 	// task list.
 	if task.AgentId != "" {
 		q2 := fmt.Sprintf(
-			`mutation updatePlanStatus(planId:%q, status:"planning", ownerAgentId:%q)`,
-			planId, task.AgentId,
+			`mutation updatePlanStatus(planId:%s, status:"planning", ownerAgentId:%s)`,
+			langparser.QuoteString(planId), langparser.QuoteString(task.AgentId),
 		)
 		if _, err := l.engine.Execute(systemActorContext(ctx), q2); err != nil {
 			return err
@@ -1045,8 +1046,8 @@ func (l *PlannerAgentLoop) insertDispatchedTask(ctx context.Context, planId stri
 // done planning.
 func (l *PlannerAgentLoop) markPlanningComplete(ctx context.Context, planId string) error {
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"queued")`,
-		planId,
+		`mutation updatePlanStatus(planId:%s, status:"queued")`,
+		langparser.QuoteString(planId),
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -1058,8 +1059,8 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 		outputJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"succeeded", output:%s, completedAt:%q)`,
-		planId, string(outputJSON), time.Now().UTC().Format(time.RFC3339),
+		`mutation updatePlanStatus(planId:%s, status:"succeeded", output:%s, completedAt:%s)`,
+		langparser.QuoteString(planId), string(outputJSON), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -1067,8 +1068,8 @@ func (l *PlannerAgentLoop) markPlanSucceeded(ctx context.Context, planId string,
 
 func (l *PlannerAgentLoop) markPlanFailed(ctx context.Context, planId, errorMessage string) error {
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"failed", errorMessage:%q, completedAt:%q)`,
-		planId, errorMessage, time.Now().UTC().Format(time.RFC3339),
+		`mutation updatePlanStatus(planId:%s, status:"failed", errorMessage:%s, completedAt:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(errorMessage), langparser.QuoteString(time.Now().UTC().Format(time.RFC3339)),
 	)
 	_, err := l.engine.Execute(systemActorContext(ctx), q)
 	return err
@@ -1088,8 +1089,8 @@ func (l *PlannerAgentLoop) escalateAwaitingFeedback(ctx context.Context, planId,
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:%q, feedbackRequest:%s)`,
-		planId, reason, string(fbReqJSON),
+		`mutation updatePlanStatus(planId:%s, status:"awaitingFeedback", feedbackReason:%s, feedbackRequest:%s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(reason), string(fbReqJSON),
 	)
 	_, err = l.engine.Execute(systemActorContext(ctx), q)
 	return err

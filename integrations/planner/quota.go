@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"log/slog"
 	"math"
 	"strconv"
@@ -70,7 +71,7 @@ func (r *EntitlementResolver) Resolve(ctx context.Context, accountId string) Ent
 		return unlimited
 	}
 
-	q := fmt.Sprintf(`query accountEntitlement(accountId:%q)`, accountId)
+	q := fmt.Sprintf(`query accountEntitlement(accountId:%s)`, langparser.QuoteString(accountId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Warn("entitlement resolve: query failed; defaulting to unlimited",

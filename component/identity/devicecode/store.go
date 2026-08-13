@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -122,11 +124,11 @@ func (s *Store) Create(ctx context.Context, in CreateInput) error {
 		interval = DefaultIntervalSeconds
 	}
 	q := fmt.Sprintf(
-		`mutation createDeviceCode(deviceCodeId:%q,clientId:%q,deviceCodeHash:%q,userCodeHash:%q,expiresAt:%q,intervalSeconds:%d,scope:%q,codeChallenge:%q,codeChallengeMethod:%q,sourceIP:%q,userAgent:%q)`,
-		BareSlug(in.Id), in.ClientId, in.DeviceCodeHash, in.UserCodeHash,
-		in.ExpiresAt.UTC().Format(time.RFC3339Nano), interval,
-		in.Scope, in.CodeChallenge, in.CodeChallengeMethod,
-		in.SourceIP, truncateUserAgent(in.UserAgent),
+		`mutation createDeviceCode(deviceCodeId:%s,clientId:%s,deviceCodeHash:%s,userCodeHash:%s,expiresAt:%s,intervalSeconds:%d,scope:%s,codeChallenge:%s,codeChallengeMethod:%s,sourceIP:%s,userAgent:%s)`,
+		langparser.QuoteString(BareSlug(in.Id)), langparser.QuoteString(in.ClientId), langparser.QuoteString(in.DeviceCodeHash), langparser.QuoteString(in.UserCodeHash),
+		langparser.QuoteString(in.ExpiresAt.UTC().Format(time.RFC3339Nano)), interval,
+		langparser.QuoteString(in.Scope), langparser.QuoteString(in.CodeChallenge), langparser.QuoteString(in.CodeChallengeMethod),
+		langparser.QuoteString(in.SourceIP), langparser.QuoteString(truncateUserAgent(in.UserAgent)),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("devicecode.Store.Create: %w", err)
@@ -146,8 +148,8 @@ func (s *Store) TouchPoll(ctx context.Context, id string, at time.Time, interval
 		intervalSeconds = DefaultIntervalSeconds
 	}
 	q := fmt.Sprintf(
-		`mutation touchDeviceCodePoll(deviceCodeId:%q,lastPolledAt:%q,intervalSeconds:%d)`,
-		BareSlug(id), at.UTC().Format(time.RFC3339Nano), intervalSeconds,
+		`mutation touchDeviceCodePoll(deviceCodeId:%s,lastPolledAt:%s,intervalSeconds:%d)`,
+		langparser.QuoteString(BareSlug(id)), langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)), intervalSeconds,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("devicecode.Store.TouchPoll: %w", err)
@@ -172,7 +174,7 @@ func (s *Store) transition(ctx context.Context, mutation, id string) error {
 	if s == nil || s.Engine == nil {
 		return errors.New("devicecode.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`mutation %s(deviceCodeId:%q)`, mutation, BareSlug(id))
+	q := fmt.Sprintf(`mutation %s(deviceCodeId:%s)`, mutation, langparser.QuoteString(BareSlug(id)))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("devicecode.Store.%s: %w", mutation, err)
 	}
@@ -188,8 +190,8 @@ func (s *Store) Redeem(ctx context.Context, id string, at time.Time) error {
 		return errors.New("devicecode.Store: engine not wired")
 	}
 	q := fmt.Sprintf(
-		`mutation redeemDeviceCode(deviceCodeId:%q,redeemedAt:%q)`,
-		BareSlug(id), at.UTC().Format(time.RFC3339Nano),
+		`mutation redeemDeviceCode(deviceCodeId:%s,redeemedAt:%s)`,
+		langparser.QuoteString(BareSlug(id)), langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("devicecode.Store.Redeem: %w", err)
@@ -216,7 +218,7 @@ func (s *Store) lookup(ctx context.Context, query, arg, hash string) (*Row, erro
 	if hash == "" {
 		return nil, nil
 	}
-	res, err := s.Engine.Execute(ctx, fmt.Sprintf(`query %s(%s:%q)`, query, arg, hash))
+	res, err := s.Engine.Execute(ctx, fmt.Sprintf(`query %s(%s:%s)`, query, arg, langparser.QuoteString(hash)))
 	if err != nil {
 		return nil, fmt.Errorf("devicecode.Store.%s: %w", query, err)
 	}
@@ -310,12 +312,48 @@ func rowFromNode(n *memqlv1.MemoryNode) *Row {
 // human will later be shown. The approval page renders this string, so
 // an unbounded one is both a storage cost and a place to hide a wall of
 // text that pushes the Approve / Deny buttons off the screen.
+//
+// The bound is in BYTES rather than runes deliberately: what it protects is
+// storage and render width, and a byte budget bounds both. The cut, however,
+// must land on a rune boundary -- see below.
 const userAgentMaxLen = 256
 
+// truncateUserAgent trims to at most userAgentMaxLen bytes, cutting only at a
+// rune boundary.
+//
+// It used to be a plain `ua[:userAgentMaxLen]`, which slices at byte 256
+// regardless of what is there. A UA carrying any multi-byte character
+// positioned across that offset was cut mid-rune, and the result was a string
+// that is not valid UTF-8 -- ending in a lone continuation byte.
+//
+// That mattered because of where the value goes next. `POST /device/code` is
+// UNAUTHENTICATED (RFC 8628), so a caller chooses this header, and
+// createDeviceCode interpolated it into a MemQL statement with %q. %q renders
+// an invalid byte as `\xc3`, and the lexer implements the JSON escape set and
+// rejects `\x` outright -- so the whole mutation failed to parse and the
+// device-code row was never written. Any client could take the endpoint down
+// for its own request just by sending a long enough UA with an accent in it
+// (memql#3611). The %q is fixed at the call site; this fixes the other half,
+// because a string that is not valid UTF-8 is worth refusing to create whatever
+// the next consumer happens to be -- json.Marshal replaces it with U+FFFD, and
+// the approval page renders it.
+//
+// utf8.DecodeLastRuneInString returns (RuneError, 1) for an invalid trailing
+// sequence, which is exactly the case being backed out of, so the loop drops
+// those bytes one at a time until the remainder ends on a real boundary. A
+// well-formed cut needs at most three iterations.
 func truncateUserAgent(ua string) string {
 	ua = strings.TrimSpace(ua)
-	if len(ua) > userAgentMaxLen {
-		return ua[:userAgentMaxLen]
+	if len(ua) <= userAgentMaxLen {
+		return ua
 	}
-	return ua
+	cut := ua[:userAgentMaxLen]
+	for len(cut) > 0 {
+		r, size := utf8.DecodeLastRuneInString(cut)
+		if r != utf8.RuneError || size > 1 {
+			break
+		}
+		cut = cut[:len(cut)-1]
+	}
+	return cut
 }

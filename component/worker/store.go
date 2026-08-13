@@ -9,6 +9,7 @@ import (
 	"time"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 )
 
@@ -185,7 +186,7 @@ func (s *EngineStore) WorkerByIdentityId(ctx context.Context, identityId string)
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query workerByIdentityId(identityId:%q)`, identityId)
+	query := fmt.Sprintf(`query workerByIdentityId(identityId:%s)`, langparser.QuoteString(identityId))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err
@@ -204,7 +205,7 @@ func (s *EngineStore) WorkersForUser(ctx context.Context, ownerUserId string) ([
 	if s == nil || s.Engine == nil {
 		return nil, nil
 	}
-	query := fmt.Sprintf(`query workersForUser(ownerUserId:%q)`, ownerUserId)
+	query := fmt.Sprintf(`query workersForUser(ownerUserId:%s)`, langparser.QuoteString(ownerUserId))
 	nodes, err := s.executeAndExtract(ctx, query)
 	if err != nil {
 		return nil, err

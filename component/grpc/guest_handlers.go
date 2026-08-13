@@ -30,6 +30,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 	"github.com/znasllc-io/memql/integrations/email"
@@ -203,7 +204,7 @@ func listPendingGuestInvitationsForEmail(ctx context.Context, engine *memqlengin
 	// spaceInvitations is shape-projected via invitationFull, which
 	// exposes the fields we need to re-kick the record preserving its
 	// guest context.
-	query := fmt.Sprintf(`query querySpaceInvitations(partitionId: %q)`, partitionId)
+	query := fmt.Sprintf(`query querySpaceInvitations(partitionId: %s)`, langparser.QuoteString(partitionId))
 	result, err := engine.Execute(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("query space invitations: %w", err)
@@ -754,7 +755,7 @@ func lookupInvitationById(ctx context.Context, engine *memqlengine.MemQLEngine, 
 	if strings.TrimSpace(invitationId) == "" {
 		return nil, fmt.Errorf("invitationId required")
 	}
-	q := fmt.Sprintf(`query invitationById(invitationId: %q)`, invitationId)
+	q := fmt.Sprintf(`query invitationById(invitationId: %s)`, langparser.QuoteString(invitationId))
 	result, err := engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("lookup by id: %w", err)

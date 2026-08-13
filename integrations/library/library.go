@@ -56,6 +56,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -390,9 +391,9 @@ type appendArgs struct {
 
 func (i *Integration) appendVersion(ctx context.Context, a appendArgs) error {
 	q := fmt.Sprintf(
-		`mutation appendDocumentVersion(versionId: %q, documentId: %q, versionNumber: %d, content: %q, attachmentId: %q, authorKind: %q, authorId: %q, note: %q, parentVersionId: %q, producedByPlanId: %q, partitionId: %q)`,
-		a.versionId, a.documentId, a.versionNumber, a.content, a.attachmentId,
-		a.authorKind, a.authorId, a.note, a.parentVersionId, a.producedByPlanId, a.partitionId,
+		`mutation appendDocumentVersion(versionId: %s, documentId: %s, versionNumber: %d, content: %s, attachmentId: %s, authorKind: %s, authorId: %s, note: %s, parentVersionId: %s, producedByPlanId: %s, partitionId: %s)`,
+		langparser.QuoteString(a.versionId), langparser.QuoteString(a.documentId), a.versionNumber, langparser.QuoteString(a.content), langparser.QuoteString(a.attachmentId),
+		langparser.QuoteString(a.authorKind), langparser.QuoteString(a.authorId), langparser.QuoteString(a.note), langparser.QuoteString(a.parentVersionId), langparser.QuoteString(a.producedByPlanId), langparser.QuoteString(a.partitionId),
 	)
 	_, err := i.engine.Execute(ctx, q)
 	return err
@@ -411,18 +412,18 @@ func (i *Integration) updateBackingContent(ctx context.Context, doc map[string]a
 	// with withUserActor from the row's own ownerUserId after refusing to
 	// proceed on a blank one, so the re-inserted row keeps the same owner.
 	q := fmt.Sprintf(
-		`mutation updateGeneratedOutputContent(outputId: %q, title: %q, summary: %q, body: %q, attachmentId: %q, format: %q, mimeType: %q, source: %q, partitionId: %q, producedByPlanId: %q, producedByAgentId: %q)`,
-		stringField(doc, "id"),
-		stringField(doc, "title"),
-		stringField(doc, "summary"),
-		content,
-		attachmentId,
-		format,
-		stringField(doc, "mimeType"),
-		source,
-		stringField(doc, "partitionId"),
-		stringField(doc, "producedByPlanId"),
-		stringField(doc, "producedByAgentId"),
+		`mutation updateGeneratedOutputContent(outputId: %s, title: %s, summary: %s, body: %s, attachmentId: %s, format: %s, mimeType: %s, source: %s, partitionId: %s, producedByPlanId: %s, producedByAgentId: %s)`,
+		langparser.QuoteString(stringField(doc, "id")),
+		langparser.QuoteString(stringField(doc, "title")),
+		langparser.QuoteString(stringField(doc, "summary")),
+		langparser.QuoteString(content),
+		langparser.QuoteString(attachmentId),
+		langparser.QuoteString(format),
+		langparser.QuoteString(stringField(doc, "mimeType")),
+		langparser.QuoteString(source),
+		langparser.QuoteString(stringField(doc, "partitionId")),
+		langparser.QuoteString(stringField(doc, "producedByPlanId")),
+		langparser.QuoteString(stringField(doc, "producedByAgentId")),
 	)
 	_, err := i.engine.Execute(ctx, q)
 	return err
@@ -444,16 +445,16 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 		source = "agent_generated"
 	}
 	q := fmt.Sprintf(
-		`mutation createArtifact(sourceConceptRef: %q, ownerUserId: %q, lens: "artifact", kind: "generated_output", source: %q, title: %q, summary: %q, format: %q, mimeType: %q, partitionId: %q, producedByPlanId: %q)`,
-		sourceRef,
-		stringField(doc, "ownerUserId"),
-		source,
-		stringField(doc, "title"),
-		stringField(doc, "summary"),
-		stringField(doc, "format"),
-		stringField(doc, "mimeType"),
-		stringField(doc, "partitionId"),
-		stringField(doc, "producedByPlanId"),
+		`mutation createArtifact(sourceConceptRef: %s, ownerUserId: %s, lens: "artifact", kind: "generated_output", source: %s, title: %s, summary: %s, format: %s, mimeType: %s, partitionId: %s, producedByPlanId: %s)`,
+		langparser.QuoteString(sourceRef),
+		langparser.QuoteString(stringField(doc, "ownerUserId")),
+		langparser.QuoteString(source),
+		langparser.QuoteString(stringField(doc, "title")),
+		langparser.QuoteString(stringField(doc, "summary")),
+		langparser.QuoteString(stringField(doc, "format")),
+		langparser.QuoteString(stringField(doc, "mimeType")),
+		langparser.QuoteString(stringField(doc, "partitionId")),
+		langparser.QuoteString(stringField(doc, "producedByPlanId")),
 	)
 	_, _ = i.engine.Execute(ctx, q)
 }
@@ -462,7 +463,7 @@ func (i *Integration) touchArtifact(ctx context.Context, doc map[string]any) {
 // system actor for the lookup (the row may be needed before the owner
 // is known); the actual edit writes run under the owner actor.
 func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string) (map[string]any, error) {
-	q := fmt.Sprintf(`query generatedOutputById(outputId: %q)`, documentId)
+	q := fmt.Sprintf(`query generatedOutputById(outputId: %s)`, langparser.QuoteString(documentId))
 	raw, err := i.engine.Execute(systemActorContext(ctx), q)
 	if err != nil {
 		return nil, err
@@ -477,7 +478,7 @@ func (i *Integration) loadGeneratedOutput(ctx context.Context, documentId string
 // versionHistory returns every retained version of the document under
 // the owner actor.
 func (i *Integration) versionHistory(ctx context.Context, documentId string) ([]map[string]any, error) {
-	q := fmt.Sprintf(`query documentVersionsForOwner(documentId: %q)`, documentId)
+	q := fmt.Sprintf(`query documentVersionsForOwner(documentId: %s)`, langparser.QuoteString(documentId))
 	raw, err := i.engine.Execute(ctx, q)
 	if err != nil {
 		return nil, err

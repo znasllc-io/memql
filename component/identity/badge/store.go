@@ -12,6 +12,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -50,8 +51,8 @@ func (s *Store) Create(ctx context.Context, identityId, userId, label, keyHash, 
 		return errors.New("badge.Store.Create: identityId, userId, label, keyHash all required")
 	}
 	q := fmt.Sprintf(
-		`mutation createBadgeIdentity(identityId:%q,userId:%q,label:%q,keyHash:%q,registeredBy:%q)`,
-		identityId, userId, label, keyHash, registeredBy,
+		`mutation createBadgeIdentity(identityId:%s,userId:%s,label:%s,keyHash:%s,registeredBy:%s)`,
+		langparser.QuoteString(identityId), langparser.QuoteString(userId), langparser.QuoteString(label), langparser.QuoteString(keyHash), langparser.QuoteString(registeredBy),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("badge.Store.Create: %w", err)
@@ -66,7 +67,7 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 	if s == nil || s.Engine == nil {
 		return errors.New("badge.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`mutation revokeBadgeIdentity(identityId:%q)`, bareSlug(identityId))
+	q := fmt.Sprintf(`mutation revokeBadgeIdentity(identityId:%s)`, langparser.QuoteString(bareSlug(identityId)))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("badge.Store.Revoke: %w", err)
 	}
@@ -84,7 +85,7 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	if keyHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query badgeByKeyHash(keyHash:%q)`, keyHash)
+	q := fmt.Sprintf(`query badgeByKeyHash(keyHash:%s)`, langparser.QuoteString(keyHash))
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("badge.Store.LookupByKeyHash: %w", err)
@@ -145,7 +146,7 @@ func (s *Store) TouchLastUsed(ctx context.Context, row *Row, at time.Time) error
 	// credentials object with only lastUsedAt changed.
 	creds := fmt.Sprintf(`{keyHash:%q,registeredBy:%q,lastUsedAt:%q}`,
 		row.KeyHash, row.RegisteredBy, at.UTC().Format(time.RFC3339Nano))
-	q := fmt.Sprintf(`mutation touchBadgeLastUsed(identityId:%q,credentials:%s)`, bareSlug(row.ID), creds)
+	q := fmt.Sprintf(`mutation touchBadgeLastUsed(identityId:%s,credentials:%s)`, langparser.QuoteString(bareSlug(row.ID)), creds)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("badge.Store.TouchLastUsed: %w", err)
 	}
@@ -171,7 +172,7 @@ func (s *Store) TerminalBearerRevoked(ctx context.Context, bearer string) (bool,
 	}
 	sum := sha256.Sum256([]byte(strings.TrimSpace(bearer)))
 	tokenHash := hex.EncodeToString(sum[:])
-	q := fmt.Sprintf(`query authSessionByTokenHash(tokenHash:%q)`, tokenHash)
+	q := fmt.Sprintf(`query authSessionByTokenHash(tokenHash:%s)`, langparser.QuoteString(tokenHash))
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return false, fmt.Errorf("badge.Store.TerminalBearerRevoked: %w", err)
