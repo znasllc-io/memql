@@ -335,18 +335,16 @@ func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.M
 
 	parentIds := keys(parentTargets)
 	if len(parentIds) == 0 {
-		// A LABELLED traversal that found nothing is an empty answer, not an
-		// error (memql#3656). The per-node filter above already skips a node
-		// whose definitions carry no matching label; this SECOND, pre-existing
-		// gate then refused the empty collection it produced, so four of the
-		// eight functions still failed the whole query on a label miss.
-		// Unlabelled behaviour is untouched -- that disagreement across the
-		// family is memql#3671, and pre-empting it here would silently rewrite
-		// the characterization test that pins it.
-		if labels != nil {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("parentOf traversal produced no parent references")
+		// An empty traversal is an empty answer, not an error (memql#3671).
+		// "Who is this row's parent" asked about a root row is an ordinary
+		// question and "none" is its ordinary answer -- and parentOf is the
+		// most-reached function on this surface, `parent` being 92 of the 141
+		// corpus declarations. Failing the whole query instead only bit when NO
+		// row in the set had a parent, which is why a mixed set hid it.
+		//
+		// memql#3656 had carved out the LABELLED case here; the family agrees
+		// now, so the carve-out goes with it.
+		return nil, nil
 	}
 
 	if limit > 0 && len(parentIds) > limit {
@@ -411,13 +409,10 @@ func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.Me
 		// whose definitions carry no matching label; this SECOND, pre-existing
 		// gate then refused the empty collection it produced, so four of the
 		// eight functions still failed the whole query on a label miss.
-		// Unlabelled behaviour is untouched -- that disagreement across the
-		// family is memql#3671, and pre-empting it here would silently rewrite
-		// the characterization test that pins it.
-		if labels != nil {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("childOf traversal produced no candidate queries")
+		// An empty traversal is an empty answer, not an error (memql#3671), so
+		// the labelled carve-out memql#3656 added here is now the behaviour for
+		// both forms.
+		return nil, nil
 	}
 
 	var results []memorynodes.MemoryNode
@@ -497,12 +492,21 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 				continue // Skip nodes with missing relationship pointers
 			}
 
+			// A blank pointer is a MISSING pointer, skipped exactly like an
+			// absent one. This used to fall back to node.ID, so a dangling
+			// alias reported ITSELF as its own canonical target (memql#3671) --
+			// a self-loop a client following aliasOf takes as a real edge.
+			// `alias` means "this row is an alias FOR that one"; a row aliasing
+			// itself is not a weaker answer than "no target", it is a different
+			// and false one.
+			//
+			// It also put the two spellings of "no target" on opposite sides of
+			// one branch: an absent key errored, a present-but-empty key
+			// returned itself. Which mistake a writer happened to make decided
+			// whether the caller got an error or a wrong answer.
 			canonical := strings.TrimSpace(value)
 			if canonical == "" {
-				canonical = strings.TrimSpace(node.ID)
-			}
-			if canonical == "" {
-				continue // Skip nodes with missing identifier
+				continue
 			}
 
 			targetConcept := strings.TrimSpace(def.TargetConcept)
@@ -533,13 +537,12 @@ func (e *MemQLEngine) resolveAliasOrEquals(ctx context.Context, nodes []memoryno
 		// whose definitions carry no matching label; this SECOND, pre-existing
 		// gate then refused the empty collection it produced, so four of the
 		// eight functions still failed the whole query on a label miss.
-		// Unlabelled behaviour is untouched -- that disagreement across the
-		// family is memql#3671, and pre-empting it here would silently rewrite
-		// the characterization test that pins it.
-		if labels != nil {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("%s traversal produced no candidate queries", relType)
+		// An empty traversal is an empty answer, not an error (memql#3671), so
+		// the labelled carve-out memql#3656 added here is now the behaviour for
+		// both forms. Reached when every node's pointer key is ABSENT; the
+		// present-but-blank spelling is skipped above and lands here too, which
+		// is the point -- both mean "points nowhere".
+		return nil, nil
 	}
 
 	var related []memorynodes.MemoryNode

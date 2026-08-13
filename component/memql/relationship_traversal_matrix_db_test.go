@@ -643,12 +643,13 @@ func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
 		"an incoming owns lookup must find every row whose ARRAY field contains this id")
 }
 
-// TestRelationshipEmptyAnswer_ResolversDisagree is a CHARACTERIZATION
-// test: it pins what each resolver does when the honest answer is "nothing",
-// because they do not agree and a client cannot tell which it will get.
+// TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty pins what each
+// resolver does when the honest answer is "nothing".
 //
-// Same question -- "traverse this edge from rows that have none" -- four
-// different answers:
+// Same question -- "traverse this edge from rows that have none" -- and now
+// one answer: the empty set, with a nil error.
+//
+// It used to give four (memql#3671), and this test pinned them:
 //
 //	contains / childOf / owns(incoming)  -> empty set, nil error
 //	parentOf                             -> ERROR "parentOf traversal produced
@@ -657,25 +658,36 @@ func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
 //	                                        candidate queries"
 //	aliasOf, field EMPTY STRING          -> the alias row ITSELF
 //
-// The last one is the sharpest: resolveAliasOrEquals falls back to
-// `canonical = node.ID` when the extracted value is blank, so a dangling alias
-// reports itself as its own canonical target -- a self-loop a client following
-// aliasOf would take as a real edge. And the two spellings of "no target"
-// (key absent vs key present but empty) land on opposite sides of that
-// fallback, so which one a writer used decides whether the caller gets an
-// error or a wrong answer.
+// The last was the sharpest, and the reason this could not just be left
+// inconsistent: resolveAliasOrEquals fell back to `canonical = node.ID` when
+// the extracted value was blank, so a dangling alias reported itself as its own
+// canonical target. A client following aliasOf takes that self-loop as a real
+// edge -- "this row is an alias for itself" is not a weaker answer than "no
+// target", it is a different and false one. The two spellings of "no target"
+// also landed on OPPOSITE sides of that fallback (key absent -> error, key
+// present but empty -> itself), so which one a writer happened to use decided
+// whether the caller got an error or a wrong answer.
 //
-// parentOf erroring matters because it is one of the two most-reached
-// functions on this surface: "who is this row's parent" asked about root rows
-// is an ordinary question, and "none" is an ordinary answer. Today it fails
-// the whole query instead -- but only when NO row in the set has a parent, so
-// a mixed set hides it.
+// parentOf erroring mattered because it is one of the two most-reached
+// functions here -- `parent` is 92 of 141 corpus declarations -- and "who is
+// this row's parent" asked about a root row is an ordinary question whose
+// ordinary answer is "none". It only bit when NO row in the set had a parent,
+// which is why a mixed set hid it for so long.
 //
-// Written as assertions on the CURRENT behaviour rather than skipped, because
-// none of these is a silently wrong count: they are loud, and pinning them
-// means a future change that makes the family consistent has to update this
-// test deliberately rather than drift past it.
-func TestRelationshipEmptyAnswer_ResolversDisagree(t *testing.T) {
+// memql.md already documented the intent the code now matches: "Relationship
+// pointer fields are optional -- if a node has a null or missing pointer field,
+// it is silently skipped during traversal rather than causing an error."
+//
+// NOT changed, and deliberately: asking for a traversal on a concept that
+// declares no such relationship AT ALL still errors, consistently across all
+// five resolvers. That is a different question -- a query naming an edge the
+// schema does not have -- and answering it "empty" would hide the typo.
+//
+// THE POSITIVE CONTROLS AT THE END ARE LOAD-BEARING. "every resolver answers
+// empty" is satisfied completely by a resolver that answers empty to
+// everything, so the populated cases have to be asserted in the same test or
+// it proves nothing.
+func TestRelationshipEmptyAnswer_EveryResolverAnswersEmpty(t *testing.T) {
 	mountTraversalFixture(t)
 	eng, db, _ := readMergeTestEngine(t)
 	ctx := clusterOwnerCtx("u-rel-empty")
@@ -688,8 +700,7 @@ func TestRelationshipEmptyAnswer_ResolversDisagree(t *testing.T) {
 	}
 
 	// Rows that genuinely have nothing on the far side of the edge.
-	s.row(tvDoc, "orphan-a", 2, map[string]any{"authorId": "x"})
-	s.row(tvDoc, "orphan-b", 2, map[string]any{"authorId": "x"})
+	orphanDoc := s.row(tvDoc, "orphan-a", 2, map[string]any{"authorId": "x"})
 	lonelyFolder := s.row(tvFolder, "lonely", 2, nil)
 	emptyBundle := s.row(tvBundle, "empty", 2, nil)
 	unowned := s.row(tvPerson, "unowned", 2, nil)
@@ -699,43 +710,60 @@ func TestRelationshipEmptyAnswer_ResolversDisagree(t *testing.T) {
 		"targetId": tvDoc + ":" + sfx + "-does-not-exist",
 	})
 
+	// Rows that DO have something there, for the positive controls.
+	realFolder := s.row(tvFolder, "real-folder", 2, nil)
+	childDoc := s.row(tvDoc, "child", 2, map[string]any{"folderId": realFolder, "authorId": "x"})
+	aliasedDoc := s.row(tvDoc, "aliased", 2, map[string]any{"authorId": "x"})
+	goodAlias := s.row(tvDocAlias, "good", 2, map[string]any{"targetId": aliasedDoc})
+
 	byId := func(fn, conceptName, id string) string {
 		return fmt.Sprintf(`%s(concept==%s && id==%q)`, fn, conceptName, id)
 	}
 
-	// The empty-set majority.
-	res, err := eng.Execute(ctx, byId("childOf", tvFolder, lonelyFolder))
-	require.NoError(t, err)
-	require.Empty(t, traversalRootIDs(t, res), "childOf answers a childless parent with an empty set")
+	// Every spelling of "nothing on the far side" answers the same way.
+	empty := []struct {
+		what  string
+		query string
+	}{
+		{"childOf, a childless parent", byId("childOf", tvFolder, lonelyFolder)},
+		{"contains, an empty collection", byId("contains", tvBundle, emptyBundle)},
+		{"owns incoming, a row nobody owns", byId("owns", tvPerson, unowned)},
+		{"aliasOf, target names a row that does not exist", byId("aliasOf", tvDocAlias, danglingAlias)},
+		{"parentOf, a row with no parent pointer", byId("parentOf", tvDoc, orphanDoc)},
+		{"aliasOf, the targetId key is ABSENT", byId("aliasOf", tvDocAlias, absentAlias)},
+		{"aliasOf, the targetId key is the EMPTY STRING", byId("aliasOf", tvDocAlias, blankAlias)},
+	}
+	for _, tc := range empty {
+		t.Run(tc.what, func(t *testing.T) {
+			res, err := eng.Execute(ctx, tc.query)
+			require.NoError(t, err, "an empty traversal is an empty answer, not an error")
+			require.Empty(t, traversalRootIDs(t, res))
+		})
+	}
 
-	res, err = eng.Execute(ctx, byId("contains", tvBundle, emptyBundle))
-	require.NoError(t, err)
-	require.Empty(t, traversalRootIDs(t, res), "contains answers an empty collection with an empty set")
+	// A blank pointer must be a MISSING pointer, never a self-reference. Called
+	// out separately from the loop because this is the one case that used to
+	// return a wrong answer rather than a loud one.
+	t.Run("a blank pointer never resolves to the row itself", func(t *testing.T) {
+		res, err := eng.Execute(ctx, byId("aliasOf", tvDocAlias, blankAlias))
+		require.NoError(t, err)
+		require.NotContains(t, traversalRootIDs(t, res), blankAlias,
+			"a dangling alias reporting ITSELF is a self-loop a client following aliasOf takes as a real edge")
+	})
 
-	res, err = eng.Execute(ctx, byId("owns", tvPerson, unowned))
-	require.NoError(t, err)
-	require.Empty(t, traversalRootIDs(t, res), "an incoming owns lookup with no owners answers with an empty set")
+	// POSITIVE CONTROLS. Without these, a resolver that answered empty to
+	// everything would pass every assertion above.
+	t.Run("positive control: parentOf still finds a real parent", func(t *testing.T) {
+		res, err := eng.Execute(ctx, byId("parentOf", tvDoc, childDoc))
+		require.NoError(t, err)
+		require.Equal(t, []string{realFolder}, traversalRootIDs(t, res))
+	})
 
-	res, err = eng.Execute(ctx, byId("aliasOf", tvDocAlias, danglingAlias))
-	require.NoError(t, err)
-	require.Empty(t, traversalRootIDs(t, res), "an alias naming a row that does not exist answers with an empty set")
-
-	// The two dissenters.
-	_, err = eng.Execute(ctx, traversalQuery("parentOf", tvDoc, owner))
-	require.Error(t, err, "parentOf ERRORS where its siblings return an empty set")
-	require.Contains(t, err.Error(), "produced no parent references")
-
-	_, err = eng.Execute(ctx, byId("aliasOf", tvDocAlias, absentAlias))
-	require.Error(t, err, "an alias row with NO targetId key errors rather than answering empty")
-	require.Contains(t, err.Error(), "produced no candidate queries")
-
-	// The self-loop.
-	res, err = eng.Execute(ctx, byId("aliasOf", tvDocAlias, blankAlias))
-	require.NoError(t, err)
-	require.Equal(t, []string{blankAlias}, traversalRootIDs(t, res),
-		"an alias row whose targetId is the EMPTY STRING resolves to ITSELF: resolveAliasOrEquals "+
-			"falls back to node.ID when the extracted value is blank, so the traversal reports a "+
-			"self-loop instead of 'this alias points nowhere'")
+	t.Run("positive control: aliasOf still finds a real target", func(t *testing.T) {
+		res, err := eng.Execute(ctx, byId("aliasOf", tvDocAlias, goodAlias))
+		require.NoError(t, err)
+		require.Equal(t, []string{aliasedDoc}, traversalRootIDs(t, res))
+	})
 }
 
 // TestRelationshipTraversal_PaginateBoundsTheResult pins the limit the
