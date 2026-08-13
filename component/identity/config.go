@@ -781,7 +781,7 @@ func (c Config) Validate() error {
 		// machine, which cannot have a second replica -- is genuinely safe in
 		// ephemeral-key mode.
 		if !c.AllowEphemeralKey && !isSingleProcessHost(parsed.Host) {
-			return errors.New("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set MEMQL_IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. A local k3d parity cluster seeds this for you -- re-run `make secrets`. Only a loopback issuer (localhost / 127.0.0.1 / *.localhost), which cannot have a second replica, is exempt; a *.local.<domain> issuer is a CLUSTER front door and is not. For a genuinely single-process deployment, set MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
+			return errors.New("identity: MEMQL_IDENTITY_SIGNING_KEY_B64 is not set, so each replica would mint its OWN per-pod ephemeral signing key and /.well-known/jwks.json would diverge across replicas -- ~50% of token verifications (browser sessions AND mesh node tokens) fail with 'unknown kid' (this caused the 2026-06-16 auth outage). Fix: set MEMQL_IDENTITY_SIGNING_KEY_B64 to a shared base64-std-encoded 32-byte Ed25519 seed on every identity replica (generate with: `head -c 32 /dev/urandom | base64`), so all replicas derive the same key. A local k3d parity cluster seeds this for you -- re-run `make secrets`. Only a loopback issuer (localhost / 127.0.0.1), which cannot have a second replica, is exempt; a *.local.<domain> or *.<domain>.localhost issuer is a CLUSTER front door and is not. For a genuinely single-process deployment, set MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true to opt into per-pod ephemeral keys")
 		}
 
 		// Production posture requires the master key. We approximate
@@ -965,6 +965,20 @@ func isLocalHost(host string) bool {
 	if isSingleProcessHost(host) {
 		return true
 	}
+	// The RFC 6761 `.localhost` TLD. Held HERE rather than inherited from
+	// isSingleProcessHost, which stopped accepting it in memql#3593: the two
+	// functions ask different questions and only one of the answers changed.
+	//
+	// "Can there be more than one of me?" -- yes, `*.memql.localhost` is the
+	// local cluster's front door with replicas behind it, so the ephemeral-key
+	// guard must fire.
+	// "Is this a production posture that must encrypt keys at rest?" -- no. A
+	// `.localhost` name resolves to loopback by specification and can hold no
+	// publicly-trusted certificate, so the dev exemption still applies, exactly
+	// as it does for the `*.local.<domain>` wildcard below.
+	if strings.HasSuffix(host, ".localhost") {
+		return true
+	}
 	// Dev wildcard shape: *.local.<domain>. The second label from
 	// the left must be exactly "local" to mark the host as a dev
 	// alias (not a real production hostname that happens to live
@@ -974,9 +988,7 @@ func isLocalHost(host string) bool {
 }
 
 // isSingleProcessHost returns true only for hosts that name a single process
-// on the local machine BY CONSTRUCTION: literal loopback addresses and
-// the RFC 6761 `.localhost` TLD (which resolves to loopback by
-// specification). Nothing behind such a host can be a second replica.
+// on the local machine BY CONSTRUCTION: the literal loopback names.
 //
 // This is deliberately NARROWER than isLocalHost (memql#3400). The
 // `*.local.<domain>` dev wildcard that isLocalHost also accepts points at
@@ -986,13 +998,23 @@ func isLocalHost(host string) bool {
 // as "one process" is what let a local cluster run two ephemeral signing
 // keys. Any check whose real question is "can there be more than one of
 // me?" must use this, not isLocalHost.
+//
+// It used to accept the whole RFC 6761 `.localhost` TLD as well, on the
+// reading that the spec makes it resolve to loopback and therefore nothing
+// behind it can be a second replica. The first half is true and the second
+// does not follow -- and memql#3593 made that concrete by moving the local
+// cluster's front door to `*.memql.localhost`, which is a k8s Service with
+// replicas behind exactly like the `*.local.<domain>` case above. A hostname
+// never told you how many processes are behind it.
+//
+// A genuinely single-process deployment on a `.localhost` name opts in
+// explicitly with MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true.
 func isSingleProcessHost(host string) bool {
-	host = hostWithoutPort(host)
-	switch host {
+	switch hostWithoutPort(host) {
 	case "localhost", "127.0.0.1", "::1", "0.0.0.0":
 		return true
 	}
-	return strings.HasSuffix(host, ".localhost")
+	return false
 }
 
 // hostWithoutPort strips the port from a url.URL.Host and lowercases the
