@@ -1104,11 +1104,15 @@ func (s *Store) IsClusterBootstrappedE(ctx context.Context) (bool, error) {
 }
 
 // HasOwnerUser reports whether at least one active user with the
-// cluster-owner role exists. An existing owner is definitional proof
-// the cluster was claimed (the only sanctioned path that mints an
-// owner is the wizard / auto-bootstrap magic-link consume), so the
-// claim email must NEVER auto-send once this is true — regardless of
-// whether the bootstrappedAt stamp landed (memql#1864).
+// cluster-owner role exists.
+//
+// AN OWNER ROW IS NO LONGER PROOF OF A CLAIM (memql#3591). It was, while the only
+// path that minted one was a magic-link consume. The env bootstrap now writes the
+// owner row when it stamps clusterSettings -- so the cluster has a named owner a
+// passkey-enrolment link can be minted for -- and such a row means nobody has
+// authenticated yet. Use HasClaimedOwner for the "was this cluster claimed"
+// question; this one answers only "is there an owner named", which is what the
+// admin surfaces want.
 //
 // Error-returning by design: a DB failure must surface as "unknown",
 // not be silently swallowed into "no owner", so the caller can
@@ -1121,6 +1125,55 @@ func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("identity.store: has owner user: %w", err)
 	}
 	return len(nodes) > 0, nil
+}
+
+// HasClaimedOwner reports whether the cluster's owner has ever AUTHENTICATED --
+// the question memql#1864's self-heal actually wanted, and the one the
+// auto-bootstrap guard asks (memql#3591).
+//
+// WHY IT IS NOT HasOwnerUser. The install writes the owner user row when it
+// bootstraps from env, so an owner row can exist before anybody has signed in.
+// Reading that as a claim would stamp bootstrappedAt on the next boot: the cluster
+// would report itself claimed while no credential existed, /setup would 404 as a
+// fallback, and both would happen silently.
+//
+// CREDENTIALS ARE THE PROOF. An owner holding an active magic-link or passkey
+// identity has authenticated by one of the two routes there are; an owner holding
+// neither has never signed in. `signInIdentitiesForUser` filters on
+// isActiveRecord, so a revoked credential correctly does not count as a way in.
+//
+// Error-returning by design, like HasOwnerUser: a DB failure must surface as
+// "unknown" rather than be swallowed into "not claimed", so the caller can
+// fail-safe (do not send the claim email) instead of re-spamming the owner.
+func (s *Store) HasClaimedOwner(ctx context.Context) (bool, error) {
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers(role: "owner")`)
+	if err != nil {
+		return false, fmt.Errorf("identity.store: has claimed owner: %w", err)
+	}
+	for _, n := range nodes {
+		userId := strings.TrimSpace(n.GetId())
+		if userId == "" {
+			continue
+		}
+		// One query per owner. A cluster has one owner in every case this runs
+		// for; the loop is here so a cluster with several is answered correctly
+		// rather than by looking at whichever came back first.
+		// dslJSONString, NOT `"%s"` around an escaped value. CodeQL calls the
+		// latter unsafe quoting and it is right to: the quotes are mine and the
+		// escaping is a separate function, so the two can drift, and one
+		// unescaped double quote breaks out of the literal. json.Marshal emits
+		// the whole quoted literal, which cannot. Same form as userByEmail and
+		// userByIdSystem, the two closest analogues.
+		creds, err := s.executeAndExtractInternal(ctx,
+			fmt.Sprintf(`query signInIdentitiesForUser(userId: %s)`, dslJSONString(userId)))
+		if err != nil {
+			return false, fmt.Errorf("identity.store: has claimed owner: sign-in identities: %w", err)
+		}
+		if len(creds) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Internal helpers

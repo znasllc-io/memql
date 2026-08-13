@@ -15,7 +15,7 @@ import (
 
 // retryGuardStore is a BootstrapGuardStore whose IsClusterBootstrappedE
 // fails the first failTimes calls (simulating the #1858 storm) then
-// succeeds, returning bootstrapped state thereafter. HasOwnerUser /
+// succeeds, returning bootstrapped state thereafter. HasClaimedOwner /
 // ReadClusterSettings are inert (fresh cluster) so the post-retry
 // action is deterministic.
 type retryGuardStore struct {
@@ -30,7 +30,10 @@ func (s *retryGuardStore) IsClusterBootstrappedE(_ context.Context) (bool, error
 	}
 	return false, nil
 }
-func (s *retryGuardStore) HasOwnerUser(_ context.Context) (bool, error) { return false, nil }
+// HasClaimedOwner, not HasOwnerUser (memql#3591): the guard asks whether the
+// owner has ever authenticated, since an owner ROW is now written by the env
+// bootstrap and is not proof of a claim.
+func (s *retryGuardStore) HasClaimedOwner(_ context.Context) (bool, error) { return false, nil }
 func (s *retryGuardStore) ReadClusterSettings(_ context.Context) (*identity.ClusterSettingsRow, error) {
 	return nil, nil
 }

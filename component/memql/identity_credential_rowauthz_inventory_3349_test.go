@@ -119,6 +119,22 @@ const (
 	// classMachine -- reads a credential that authenticates a PROCESS.
 	// There is no person whose actor.userId could scope it.
 	classMachine credentialReadClass = "machine-credential"
+	// classBootPredicate -- runs before an AccessContext exists, like
+	// classPreActor, but does NOT resolve one: it asks a yes/no question about
+	// cluster state during startup (memql#3591).
+	//
+	// A SEPARATE CLASS ON PURPOSE. TestCredentialPreActorReadsAreNamed pins the
+	// pre-actor set because that set carries the memql#3349 argument -- a tier is
+	// refused BECAUSE those five reads resolve the caller's identity and so cannot
+	// compare against it. A read that merely happens early is not that, and filing
+	// it there would weaken the argument by making the set mean two things.
+	//
+	// The consequence for a tier is nonetheless identical, which is why it belongs
+	// in this inventory at all: enforceRowAuthzOnPlan takes no context, so an owner
+	// tier would AND userId==actor.userId into a query running with no actor and
+	// return zero rows -- reporting, in the one case that exists, every claimed
+	// cluster as unclaimed.
+	classBootPredicate credentialReadClass = "boot-predicate"
 )
 
 // credentialReadInventory pins every construct binding the credential
@@ -166,6 +182,22 @@ var credentialReadInventory = map[string]struct {
 			"badgesForSelf. Backs both the passkey management list and the excludeCredentials " +
 			"set at register/begin, so it must return the CALLER's authenticators and only " +
 			"those -- a wider set would hand one user another's credential ids."},
+	// --- BOOT PREDICATE: early, but it resolves nobody. ---
+	"signInIdentitiesForUser": {classBootPredicate,
+		"filter (identityIsMagicLink || identityIsPasskey) && userId==args.userId && " +
+			"isActiveRecord (memql#3591). Backs Store.HasClaimedOwner, which the " +
+			"auto-bootstrap guard calls during identity boot to ask whether the cluster's " +
+			"owner has ever authenticated -- the same actorless window as activeUsers and " +
+			"CountActiveUsers, so actor.userId is circular here too. NOT classPreActor: it " +
+			"resolves nobody, and that set carries the memql#3349 argument about " +
+			"verification paths. It exists because the env bootstrap now writes the " +
+			"owner USER row (so a passkey-enrolment link can be minted for a named owner), " +
+			"which means an owner row stopped being proof of a claim and CREDENTIALS became " +
+			"the predicate. @serverOnly, so it is off the wire: the filter keys on a " +
+			"caller-supplied userId, which on the wire would let any client enumerate how " +
+			"recoverable somebody else's account is. Projects identitySummary, which carries " +
+			"no credential material. Its self-scoped twin signInIdentitiesForSelf is the " +
+			"entry below and is unchanged."},
 	"signInIdentitiesForSelf": {classSelfScoped,
 		"filter (identityIsMagicLink || identityIsPasskey) && userId==actor.userId && " +
 			"isActiveRecord (memql#3409). Backs the last-credential warning on /me/devices: " +
@@ -386,7 +418,7 @@ func TestCredentialInventoryEntriesCarryReasons(t *testing.T) {
 			t.Errorf("%s has no reason", construct)
 		}
 		switch entry.class {
-		case classPreActor, classSelfScoped, classAdminScoped, classMachine:
+		case classPreActor, classSelfScoped, classAdminScoped, classMachine, classBootPredicate:
 		default:
 			t.Errorf("%s carries an unknown class %q", construct, entry.class)
 		}
