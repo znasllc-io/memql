@@ -234,53 +234,53 @@ func (v *Verifier) Verify(ctx context.Context, in VerifyInput) (*VerifyResult, e
 				"role":     role,
 			},
 		})
+	}
 
-		// Bootstrap path: the wizard didn't stamp bootstrappedAt at
-		// submission time precisely so /setup remained accessible
-		// until the operator clicked the email and proved control.
-		// Now that the click happened and the owner row is in,
-		// stamp the cluster as fully bootstrapped. Subsequent
-		// /setup hits will 404; subsequent /login hits will route
-		// the operator straight to a magic-link instead of waitlist.
-		if bootstrap {
-			// Retry the stamp once before giving up. A swallowed failure
-			// here is the root cause of memql#1864: the owner row lands but
-			// bootstrappedAt stays empty, so the cluster looks "unclaimed"
-			// forever and the auto-bootstrap path re-emails on every deploy.
-			// Keeping it non-fatal (the login must still succeed) but adding
-			// a retry, backed by the boot-time self-heal in attemptAutoBootstrap
-			// (EvaluateAutoBootstrap -> BootstrapActionSelfHeal), makes the
-			// stamp durable: a transient miss reconciles on the next boot
-			// instead of recurring.
-			stampErr := v.Store.StampClusterBootstrapped(ctx)
-			if stampErr != nil {
-				if v.Logger != nil {
-					v.Logger.Warn("magiclink: stamp bootstrapped failed; retrying once",
-						slog.String("error", stampErr.Error()))
-				}
-				stampErr = v.Store.StampClusterBootstrapped(ctx)
+	// STAMPED WHETHER OR NOT THE USER WAS NEW (memql#3591). This block used to sit
+	// inside the "first login, create the user" branch, so a bootstrap link
+	// consumed by an owner who ALREADY had a row stamped nothing. That was
+	// unreachable while the only way an owner row appeared was this very branch;
+	// the env bootstrap now names the owner up front, which makes it the ordinary
+	// path -- and an unstamped claim leaves /setup reachable on a claimed cluster
+	// until the next boot's self-heal notices.
+	if bootstrap {
+		// Retry the stamp once before giving up. A swallowed failure
+		// here is the root cause of memql#1864: the owner row lands but
+		// bootstrappedAt stays empty, so the cluster looks "unclaimed"
+		// forever and the auto-bootstrap path re-emails on every deploy.
+		// Keeping it non-fatal (the login must still succeed) but adding
+		// a retry, backed by the boot-time self-heal in attemptAutoBootstrap
+		// (EvaluateAutoBootstrap -> BootstrapActionSelfHeal), makes the
+		// stamp durable: a transient miss reconciles on the next boot
+		// instead of recurring.
+		stampErr := v.Store.StampClusterBootstrapped(ctx)
+		if stampErr != nil {
+			if v.Logger != nil {
+				v.Logger.Warn("magiclink: stamp bootstrapped failed; retrying once",
+					slog.String("error", stampErr.Error()))
 			}
-			if stampErr != nil {
-				if v.Logger != nil {
-					v.Logger.Warn("magiclink: stamp bootstrapped failed after retry; owner row exists, next identity boot self-heals the stamp (memql#1864)",
-						slog.String("error", stampErr.Error()))
-				}
-				// Non-fatal: the user row exists, the link consume
-				// succeeded. The boot-time self-heal in attemptAutoBootstrap
-				// reconciles bootstrappedAt on the next identity start.
-			} else {
-				v.audit(ctx, identity.AuditEvent{
-					Category:    identity.AuditCategoryConfiguration,
-					Action:      "cluster_bootstrapped",
-					TargetType:  "clusterSettings",
-					TargetId:    "cluster",
-					TargetEmail: row.Email,
-					ActorUserId: userId,
-					SourceIP:    in.SourceIP,
-					UserAgent:   in.UserAgent,
-					Outcome:     identity.AuditOutcomeSuccess,
-				})
+			stampErr = v.Store.StampClusterBootstrapped(ctx)
+		}
+		if stampErr != nil {
+			if v.Logger != nil {
+				v.Logger.Warn("magiclink: stamp bootstrapped failed after retry; owner row exists, next identity boot self-heals the stamp (memql#1864)",
+					slog.String("error", stampErr.Error()))
 			}
+			// Non-fatal: the user row exists, the link consume
+			// succeeded. The boot-time self-heal in attemptAutoBootstrap
+			// reconciles bootstrappedAt on the next identity start.
+		} else {
+			v.audit(ctx, identity.AuditEvent{
+				Category:    identity.AuditCategoryConfiguration,
+				Action:      "cluster_bootstrapped",
+				TargetType:  "clusterSettings",
+				TargetId:    "cluster",
+				TargetEmail: row.Email,
+				ActorUserId: userId,
+				SourceIP:    in.SourceIP,
+				UserAgent:   in.UserAgent,
+				Outcome:     identity.AuditOutcomeSuccess,
+			})
 		}
 	}
 

@@ -13,7 +13,7 @@ const (
 	// BootstrapActionSkip — the cluster is already fully bootstrapped
 	// (bootstrappedAt stamped). Nothing to do; do NOT email.
 	BootstrapActionSkip BootstrapAction = iota
-	// BootstrapActionSelfHeal — an owner user already exists but the
+	// BootstrapActionSelfHeal — the owner has ALREADY AUTHENTICATED but the
 	// bootstrappedAt stamp is missing (the verifier's stamp write was
 	// swallowed on a prior boot, memql#1864). Reconcile by stamping;
 	// do NOT email — the cluster was already claimed.
@@ -35,7 +35,8 @@ const (
 // instead of being swallowed into a false that re-triggers the email.
 type BootstrapGuardStore interface {
 	IsClusterBootstrappedE(ctx context.Context) (bool, error)
-	HasOwnerUser(ctx context.Context) (bool, error)
+	// HasClaimedOwner, NOT HasOwnerUser (memql#3591). See EvaluateAutoBootstrap.
+	HasClaimedOwner(ctx context.Context) (bool, error)
 	ReadClusterSettings(ctx context.Context) (*ClusterSettingsRow, error)
 }
 
@@ -51,9 +52,22 @@ type BootstrapGuardStore interface {
 //
 // Ordering of the checks is deliberate:
 //  1. bootstrappedAt set            -> Skip      (steady state)
-//  2. owner user exists             -> SelfHeal  (claimed; stamp lost)
+//  2. owner has authenticated       -> SelfHeal  (claimed; stamp lost)
 //  3. clusterSettings row exists    -> Suppress  (mid-claim; email sent)
 //  4. none of the above             -> Send      (truly fresh)
+//
+// STEP 2 ASKS ABOUT CREDENTIALS, NOT ROWS (memql#3591). It used to read
+// HasOwnerUser -- "an owner user exists" -- as definitional proof the cluster was
+// claimed, which was sound only while the one way a user row could appear was
+// somebody logging in. The install now writes the owner row when it bootstraps
+// from env, so that the cluster has a named owner a passkey-enrolment link can be
+// minted for; a row written that way is not a claim, and reading it as one would
+// stamp bootstrappedAt before anybody had claimed anything -- marking the cluster
+// claimed, taking /setup away as a fallback, and doing both silently.
+//
+// An owner holding a magic-link or passkey identity has authenticated, by either
+// route; an owner holding none has never signed in. That is the fact this step
+// always wanted.
 func EvaluateAutoBootstrap(ctx context.Context, store BootstrapGuardStore) (BootstrapAction, error) {
 	if store == nil {
 		return BootstrapActionSkip, errors.New("identity: EvaluateAutoBootstrap: nil store")
@@ -67,15 +81,15 @@ func EvaluateAutoBootstrap(ctx context.Context, store BootstrapGuardStore) (Boot
 		return BootstrapActionSkip, nil
 	}
 
-	// An owner user is definitional proof the cluster was claimed. If
-	// one exists but we got here (bootstrappedAt empty), the verifier's
-	// stamp write was swallowed on a prior boot — self-heal it instead
-	// of emailing.
-	hasOwner, err := store.HasOwnerUser(ctx)
+	// An owner who has AUTHENTICATED is definitional proof the cluster was
+	// claimed. If one exists but we got here (bootstrappedAt empty), the
+	// verifier's stamp write was swallowed on a prior boot — self-heal it
+	// instead of emailing.
+	claimed, err := store.HasClaimedOwner(ctx)
 	if err != nil {
 		return BootstrapActionSkip, err
 	}
-	if hasOwner {
+	if claimed {
 		return BootstrapActionSelfHeal, nil
 	}
 
