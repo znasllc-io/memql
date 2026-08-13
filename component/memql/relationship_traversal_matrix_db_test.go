@@ -613,10 +613,6 @@ func TestRelationshipIds_StripsPayloadAndCollapsesClusteredVersions(t *testing.T
 // containment predicate lands. Verified to FAIL as written, with an empty
 // result set against two seeded squads.
 func TestRelationshipOwns_IncomingArrayField_FindsEveryOwner(t *testing.T) {
-	t.Skip("SUSPECTED DEFECT (memql#3658): fetchNodesByJSONFieldValues compares `payload #>> '{field}'` " +
-		"to a scalar id, so an INCOMING lookup against an ARRAY-valued relationship field matches " +
-		"nothing. Needs a jsonb containment predicate. Unskip when fixed.")
-
 	mountTraversalFixture(t)
 	eng, db, _ := readMergeTestEngine(t)
 	ctx := clusterOwnerCtx("u-rel-owns-array-in")
