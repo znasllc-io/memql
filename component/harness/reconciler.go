@@ -477,10 +477,15 @@ func (r *Reconciler) runStep(ctx context.Context, planID, partition string, step
 		r.logger.Warn("start step write failed", "plan", planID, "step", step.ID, "error", err)
 	}
 
+	// The observation carries `ownerUserId: actor.userId`, and the tick's
+	// system actor is not a person -- so the write runs under the STEP's
+	// owner (memql#3620). See ContextForOwner in adapters.go.
+	obsCtx := ContextForOwner(ctx, step.OwnerUserId)
+
 	result, toolCalls, derr := r.dispatch.Dispatch(ctx, step)
 	if derr != nil {
 		// Record an error observation, then fail the step.
-		_ = r.writer.RecordObservation(ctx, Observation{
+		_ = r.writer.RecordObservation(obsCtx, Observation{
 			StepID:  step.ID,
 			PlanID:  planID,
 			Kind:    "error",
@@ -495,7 +500,7 @@ func (r *Reconciler) runStep(ctx context.Context, planID, partition string, step
 
 	// Record a tool_result observation, then complete the step. The
 	// written observation re-fires graph.node.created -> next tick.
-	if err := r.writer.RecordObservation(ctx, Observation{
+	if err := r.writer.RecordObservation(obsCtx, Observation{
 		StepID:  step.ID,
 		PlanID:  planID,
 		Kind:    "tool_result",
@@ -522,7 +527,9 @@ func (r *Reconciler) haltOnBudget(ctx context.Context, plan PlanView, planID str
 	// (no specific step). The observation concept allows a plan-scoped
 	// row -- stepId is required by the schema, so we anchor it on the
 	// plan id, which is unambiguous for a plan-level decision.
-	_ = r.writer.RecordObservation(ctx, Observation{
+	// Owner-scoped for the same reason as runStep's observations (memql#3620);
+	// here the owner comes off the PLAN rather than a step.
+	_ = r.writer.RecordObservation(ContextForOwner(ctx, plan.OwnerUserId), Observation{
 		StepID:  planID,
 		PlanID:  planID,
 		Kind:    "decision",

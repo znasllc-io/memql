@@ -123,6 +123,23 @@ func (a *App) setupHarnessReconciler() {
 // full claim -> dispatch -> observe -> complete path end to end.
 func (a *App) harnessInnerLoop() harness.InnerLoop {
 	return func(ctx context.Context, step harness.StepView) (map[string]any, int, error) {
+		// ownerCtx names the STEP's owner as the acting identity (memql#3620).
+		// Every graph touch below is owner-scoped by declaration:
+		// v1:actions:action / :candidate / :surface declare
+		// `@rowAuthz(owner="ownerUserId")` and stamp it from actor.userId, and
+		// recordHarnessObservation does the same. The reconcile tick that got
+		// us here carries the controller's system principal and no
+		// AccessContext, so those stamps used to resolve to the EMPTY STRING --
+		// minting rows owned by nobody that the owned-tier read gate then
+		// refused to return, which is why the action library appeared to do
+		// nothing (memql#3619).
+		//
+		// The LLM invocation below deliberately keeps the UNSCOPED ctx: this
+		// binds who OWNS the rows the harness writes, not whose authority the
+		// model's tool calls run under, and widening the second is a separate
+		// decision from fixing the first.
+		ownerCtx := harness.ContextForOwner(ctx, step.OwnerUserId)
+
 		// Action-library replay step (#1758): a planner-emitted step whose
 		// input is `{type:"action", ref:"id@version", args:{...}}` references a
 		// reusable library action by id. Dispatch it through the merged
@@ -132,7 +149,7 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		// (the emission side gates), so on shared main this branch never
 		// triggers -- nothing authors action-typed harness steps otherwise.
 		if at, _ := step.Input["type"].(string); at == "action" {
-			return a.dispatchActionStep(ctx, step)
+			return a.dispatchActionStep(ownerCtx, step)
 		}
 
 		template, _ := step.Input["template"].(string)
@@ -153,14 +170,14 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		if replayEnabled {
 			inputFP = actionreplay.Fingerprint(step.Input)
 			// Exact-input replay (Phase 1, fingerprint-verified).
-			if replayed, result, found := a.tryReplayAction(ctx, step, inputFP); replayed {
+			if replayed, result, found := a.tryReplayAction(ownerCtx, step, inputFP); replayed {
 				return result, 0, nil // token-free: zero LLM tool calls
 			} else if found {
 				actionExisted = true
 			}
 			// Parameterized replay on VARYING input (Phase 3 #1738): match by
 			// the input's structural template fingerprint and re-bind params.
-			if replayed, result, found := a.tryParameterizedReplay(ctx, step); replayed {
+			if replayed, result, found := a.tryParameterizedReplay(ownerCtx, step); replayed {
 				return result, 0, nil // token-free
 			} else if found {
 				actionExisted = true
@@ -172,9 +189,10 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 			data[k] = v
 		}
 		sink := &harnessObservationSink{
-			exec:   &CognitionEngineAdapter{Engine: a.engine},
-			stepID: step.ID,
-			planID: step.PlanID,
+			exec:        &CognitionEngineAdapter{Engine: a.engine},
+			stepID:      step.ID,
+			planID:      step.PlanID,
+			ownerUserId: step.OwnerUserId,
 		}
 		traceSink := newCandidateTraceSink()
 		opts := &memql.ToolLoopOptions{
@@ -187,7 +205,7 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		// capability sequence as a v1:actions:candidate. Best-effort and
 		// non-fatal -- a trace-write error never fails the step, and a
 		// failed step's partial trace is still recorded (useful provenance).
-		a.recordActionCandidate(ctx, step, traceSink)
+		a.recordActionCandidate(ownerCtx, step, traceSink)
 		if err != nil {
 			return nil, sink.toolCalls, err
 		}
@@ -196,7 +214,7 @@ func (a *App) harnessInnerLoop() harness.InnerLoop {
 		// action already existed for this input (avoids duplicate rows on a
 		// stale-replay fall-through). #1736.
 		if replayEnabled && !actionExisted {
-			a.mintActionFromRun(ctx, step, inputFP, traceSink, result)
+			a.mintActionFromRun(ownerCtx, step, inputFP, traceSink, result)
 		}
 		return result, sink.toolCalls, nil
 	}
@@ -243,10 +261,15 @@ func (a *App) dispatchActionStep(ctx context.Context, step harness.StepView) (ma
 // error) as a v1:harness:observation row via the #582 mutation, so the
 // inner loop's reasoning is durable and recall-able (#585).
 type harnessObservationSink struct {
-	exec      *CognitionEngineAdapter
-	stepID    string
-	planID    string
-	toolCalls int
+	exec   *CognitionEngineAdapter
+	stepID string
+	planID string
+	// ownerUserId is the STEP's owner, carried because recordHarnessObservation
+	// stamps `ownerUserId: actor.userId` and the ctx the tool loop hands back
+	// is the reconcile tick's system principal -- which is not a person
+	// (memql#3620). Without it the row lands owned by nobody.
+	ownerUserId string
+	toolCalls   int
 }
 
 // RecordObservation persists a single loop observation. The harness
@@ -257,6 +280,7 @@ func (s *harnessObservationSink) RecordObservation(ctx context.Context, kind, te
 	if s == nil || s.exec == nil {
 		return
 	}
+	ctx = harness.ContextForOwner(ctx, s.ownerUserId)
 	var obsKind string
 	switch kind {
 	case "error":

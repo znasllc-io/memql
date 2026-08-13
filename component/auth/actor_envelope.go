@@ -1,6 +1,10 @@
 package auth
 
-import "time"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 // The ONE canonical actor envelope (#2623). Before this table existed,
 // four runtime resolvers exposed four different property sets and the
@@ -94,10 +98,80 @@ func ActorEnvelopeMap(ac *AccessContext) map[string]any {
 	}
 }
 
+// ErrActorEnvelopeNoCaller is what ActorEnvelopeBind returns when a
+// surface asks to bind `actor.userId` and the envelope names nobody.
+//
+// Sentinel rather than a formatted string so both binding surfaces can
+// wrap it with their own wording (a filter says "this read", a stamp
+// says "this write") while a test can still assert one identity with
+// errors.Is.
+var ErrActorEnvelopeNoCaller = errors.New("actor envelope carries no caller identity")
+
+// ActorEnvelopeBind resolves one envelope path for a surface that will
+// use the result AS A VALUE -- a filter term compiled into SQL, or a
+// field written into a row.
+//
+// It differs from ActorEnvelopeValue in exactly one way, and the
+// difference is the point (memql#3620): `actor.userId` against an
+// envelope that names nobody is REFUSED rather than rendered as "".
+//
+// # Why the two functions are not one
+//
+// They answer different questions. ActorEnvelopeValue answers "what
+// does the envelope say", and its empty string is the honest answer --
+// the row gate (component/memql rowauthz_enforce.go) reads it precisely
+// so it can see the emptiness and DENY. This answers "may this be bound
+// as a value", where the empty string is not an answer at all: it is a
+// legal, matching, writable value standing in for an absence.
+//
+// # Why refusing costs nothing
+//
+// Every legitimate caller has a user id. An authenticated stream
+// resolves one through LoadFromClaims / FallbackFromClaims (whose
+// UserId is the `sub` claim); the operator credential resolves to
+// OperatorSubject; server-side Go acting for a person uses
+// ContextWithUserActor, which refuses a blank id up front. A blank one
+// here means the identity genuinely never arrived.
+//
+// # Why only userId
+//
+//   - role / isClusterOwner: an empty role and a false owner bit both
+//     FAIL a gate rather than passing one, so the absence is already
+//     safe. isClusterOwner was made to deny in memql#2801.
+//   - identityId: LoadFromClaims does not populate it at all, so it is
+//     empty for essentially every authenticated caller. Refusing it
+//     would refuse the normal case.
+//   - primaryEmail: legitimately blank for machine credentials and for
+//     a user row carrying no email. "Blank" there is a fact about the
+//     row, not the absence of a caller.
+//
+// known is false for a path outside the envelope, exactly as
+// ActorEnvelopeValue's ok is -- the caller owns that wording, because
+// each surface names its own construct in the message.
+func ActorEnvelopeBind(ac *AccessContext, path string) (value any, known bool, err error) {
+	v, ok := ActorEnvelopeValue(ac, path)
+	if !ok {
+		return nil, false, nil
+	}
+	canonical, _ := ActorEnvelopeCanonicalName(path)
+	if canonical == "userId" {
+		if s, _ := v.(string); strings.TrimSpace(s) == "" {
+			return nil, true, ErrActorEnvelopeNoCaller
+		}
+	}
+	return v, true, nil
+}
+
 // ActorEnvelopeValue resolves one envelope path against an
 // AccessContext -- the shared implementation behind the query-filter
 // and mutation-value resolvers. ok is false for paths outside the
 // envelope; the caller owns the error wording.
+//
+// Callers that will USE the result as a value (a compiled filter term,
+// a stamped field) want ActorEnvelopeBind instead: this function
+// renders an absent caller as "", which is the right answer for a gate
+// reading the emptiness and the wrong one for anything that compares or
+// writes it.
 func ActorEnvelopeValue(ac *AccessContext, path string) (any, bool) {
 	canonical, ok := ActorEnvelopeCanonicalName(path)
 	if !ok {

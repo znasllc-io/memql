@@ -400,6 +400,12 @@ func isLostClaimError(err error) bool {
 // contextWithSystemActor stamps a system principal so the controller's
 // graph writes attribute createdBy to a stable id. Mirrors the planner
 // integration's helper.
+//
+// It deliberately stamps NO AccessContext. `createdBy` answers "which
+// component wrote this row" and the reconciler is the honest answer;
+// `ownerUserId` answers "whose row is this", and the reconciler is not a
+// person. The two questions are separated by ContextForOwner below,
+// which supplies the second where a write needs it.
 func contextWithSystemActor(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -412,6 +418,47 @@ func contextWithSystemActor(ctx context.Context) context.Context {
 	token := auth.BuildTokenInfo(claims)
 	ctx = auth.ContextWithClaims(ctx, claims)
 	return auth.ContextWithToken(ctx, token)
+}
+
+// ContextForOwner binds the ROW OWNER as the authorization envelope for a
+// write whose target concept stamps `ownerUserId: actor.userId`
+// (recordHarnessObservation is the one the reconciler drives).
+//
+// Exported because the harness's OTHER owner-stamped writes are assembled in
+// package app -- the inner loop's observation sink and the action-library
+// trace/mint calls all run under the same reconcile tick and need the same
+// owner. One helper so they cannot answer "whose row is this" differently.
+//
+// WHY THIS EXISTS (memql#3620). The reconcile tick runs under
+// contextWithSystemActor, which carries no AccessContext, so `actor.userId`
+// used to render as the EMPTY STRING and every observation the controller
+// wrote landed with `ownerUserId: ""` -- a row owned by nobody, on a concept
+// whose own field doc says the owner is "inherited from the parent step's
+// owner". The resolver refuses that now, so the owner has to be supplied,
+// and the reconciler already holds it: StepView.OwnerUserId and
+// PlanView.OwnerUserId are read off the very rows being observed.
+//
+// It layers ONLY the AccessContext, leaving the system claims + TokenInfo in
+// place, so `createdBy` still names the reconciler while `ownerUserId` names
+// the plan's owner. auth.ContextWithUserActor would replace all three and
+// re-attribute createdBy to the user, erasing which component did the work.
+//
+// A BLANK owner returns ctx unchanged rather than inventing one. The write
+// then fails loudly on a row whose parent already has no owner, which is the
+// correct end state: an observation cannot be more attributable than the step
+// it observes.
+func ContextForOwner(ctx context.Context, ownerUserId string) context.Context {
+	owner := strings.TrimSpace(ownerUserId)
+	if owner == "" {
+		return ctx
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: owner,
+		Role:   auth.RoleWriter,
+	})
 }
 
 func stringField(m map[string]any, key string) string {
