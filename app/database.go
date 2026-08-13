@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	memoryNodesDatabase "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/memql"
@@ -33,8 +34,40 @@ func (a *App) databaseAndConcepts() {
 	// (dsl/<domain>/concepts.memql) into the global registry. This is
 	// the sole concept loader; the legacy version-directory walk
 	// (LoadConcepts) was retired once the embedded concept FS emptied.
-	if _, err := memql.LoadUnifiedConcepts(a.Logger); err != nil {
+	// CONCEPT SKIPS REFUSE BOOT, under the same break-glass as every other
+	// construct (memql#3622).
+	//
+	// This used to call LoadUnifiedConcepts, which DISCARDS the skip list --
+	// a malformed concept produced a Warn and a nil error, so a product bundle
+	// with one mistyped field booted green on every node and every query,
+	// mutation and shape bound to that concept failed only at runtime. That is
+	// exactly the pack-rot failure engine_bootstrap.go's strict gate exists to
+	// prevent, and concepts were the one construct outside it: shapes already
+	// fold their drops into the LoadReport and do gate boot.
+	//
+	// Concepts load in this phase, before the engine builds that report, so
+	// the check lives here rather than there. The asymmetry was backwards --
+	// a concept is the base of the dependency tree, so everything else
+	// resolves against it.
+	loaded, skips, err := memql.LoadUnifiedConceptsWithSkips(a.Logger)
+	if err != nil {
 		a.fatal("failed to load unified concepts", "error", err)
+	}
+	if len(skips) > 0 {
+		detail := make([]string, 0, len(skips))
+		for _, s := range skips {
+			detail = append(detail, "  - "+s.File+": "+s.String())
+		}
+		joined := strings.Join(detail, "\n")
+		if !memql.DSLAllowSkips() {
+			a.fatal("strict DSL boot refused: malformed concept(s)",
+				"skipped", len(skips),
+				"loaded", loaded,
+				"breakGlass", memql.AllowSkipsEnvVar+"=1",
+				"detail", "\n"+joined)
+		}
+		a.Logger.Error(memql.AllowSkipsEnvVar+" set: booting despite dropped concept(s) (operator break-glass)",
+			"skipped", len(skips), "loaded", loaded, "detail", "\n"+joined)
 	}
 
 	a.registry = memoryNodesDatabase.DefaultRegistry()
