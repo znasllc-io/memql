@@ -494,6 +494,24 @@ copy is written — but it does not block Units A, C, D or E.
 > ceremony proceeds, and Safari is unmeasured — WebKit is the likeliest place for
 > a divergent local-origin policy, so leg 2's run should start there.
 >
+> **A second engine was attempted and could not be measured (2026-08-12).**
+> Firefox 153 headless, same origin, same abort technique: every `rp.id` came
+> back `NotAllowedError` — **including `example.com`**. A negative control that
+> is not rejected proves the RP ID validator is not what answered; with no
+> authenticator available Gecko refuses the ceremony before the RP ID is ever
+> considered, so nothing in that run is a reading of the validator. Gecko's own
+> soft token (`security.webauth.webauthn_enable_softtoken`) did not change it.
+> Chrome's validator runs early enough for an aborted call to reach it; Gecko's
+> ordering does not.
+>
+> So the browser leg stays **Chrome-only**, and the divergence that would
+> actually matter — WebKit, which is also the engine behind the iOS half of
+> hybrid transport — remains unmeasured. What did change is that the harness
+> now refuses to report a non-measurement as a measurement: the page records
+> `inconclusive` rather than guessing, and `run.sh` exits 5 when the negative
+> control is not rejected. Measuring Safari is now `open one URL on a Mac` —
+> leg 1 runs on page load.
+>
 > **Leg 2 — the authenticators: STILL NOT ANSWERED.** Whether the iOS and Android
 > passkey providers accept it over hybrid transport, and whether Chrome and
 > Safari agree, needs a physical iOS device, a physical Android device, and a
