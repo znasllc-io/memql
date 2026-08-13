@@ -1768,11 +1768,28 @@ type TypeRef struct {
 // concept body. Kept separate from Attributes so downstream consumers
 // have typed access without string-splitting annotation values.
 type RelationshipDecl struct {
-	Type        string // "parent", "child", "alias", "owns", "createdBy", "contains", "interactsWith"
+	// Type is the DECLARED structural type -- what the engine does with the
+	// edge. The closed set is owned by canonicalRelationshipType
+	// (component/memql/relations.go) and deliberately not restated here: a
+	// second copy of a vocabulary is how this comment came to list "child",
+	// which is not declarable, while omitting types that are (memql#3657).
+	//
+	// It is also not the label a traversal emits on the wire -- a `parent`
+	// relationship surfaces as a `child` edge. That set is GraphEdgeLabels()
+	// in component/memql.
+	Type        string
 	Field       string
 	FieldSource string // "payload" (default) or "table" (edge table)
 	Target      string // concept name, e.g. "v1:cognition:space"
 	Direction   string // "outgoing", "incoming", "bidirectional"
+
+	// As is the open DOMAIN label for the edge (memql#3652), independent of
+	// the structural Type above. Type is what the engine DOES with the edge;
+	// As is what the edge MEANS ("assignedTo", "repliesTo"). Validated for
+	// form only and never for membership, so a new domain verb never requires
+	// an engine release. Empty means unlabelled, which every declaration
+	// predating #3652 is.
+	As string
 }
 
 // ProviderDecl is the shared-frontend AST node for an AI provider

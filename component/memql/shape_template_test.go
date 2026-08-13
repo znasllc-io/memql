@@ -63,7 +63,7 @@ func TestApplyShapeTemplateChildren(t *testing.T) {
 		},
 		Edges: []*memqlv1.GraphEdge{
 			{
-				Type:   graphEdgeTypeChild,
+				Type:   GraphEdgeLabelChild,
 				FromId: "root",
 				ToId:   "child-1",
 			},

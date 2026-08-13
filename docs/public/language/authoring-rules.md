@@ -1032,8 +1032,19 @@ shape agent agentFull {
 }
 ```
 
-A shape can `include` another shape for composition; transitive
-inclusion is supported, cycles + field collisions are errors.
+`include` is NOT a shape verb (memql#3621). It was documented for a
+long time and never implemented -- a body is a path list, so
+`include agentFull` parsed as two payload properties and projected two
+always-null keys. It is rejected at load now; repeat the paths, or drop
+the body entirely and take the default projection over the bound
+concept (memql#2035).
+
+Every body path is checked against the bound concept at load: a bare
+payload property must be a declared field of that concept (a bare
+`createdAt` is `payload.createdAt`, not the intrinsic -- write
+`row.createdAt`), two paths may not collapse onto the same terminal
+key, and the declared kind must match the body (`actor.*` needs
+`@actor`, `row.*` / bare payload needs `@row`, at least one required).
 
 **Retired forms (rejected at parse time):** the receiver form and
 its template wrapper are gone --

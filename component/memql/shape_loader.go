@@ -125,8 +125,16 @@ func expandDefaultShapeProjections(logger *slog.Logger, shapes *ShapeRegistry, c
 			}
 			continue
 		}
+		// Resolved through resolveShapeBoundConcept, not a bare
+		// trailing-segment scan: a bare name that collides across namespaces
+		// (`plan`, `request`, `call`, `invocation` all do) is disambiguated
+		// by the shape's own domain, so converting one of those shapes to
+		// this empty-body form no longer yields an empty projection
+		// (memql#3621). validateShapeConceptBindings has already refused any
+		// binding that still fails to resolve; the warn below is the
+		// defensive path for callers that skip it.
 		bare := shape.UseConcepts[0]
-		concept, err := resolveConceptByTrailingSegment(concepts, bare)
+		concept, err := resolveShapeBoundConcept(concepts, shape)
 		if err != nil {
 			if logger != nil {
 				logger.Warn("memql.shapeDefaultProjection: cannot resolve bound concept; leaving shape empty",

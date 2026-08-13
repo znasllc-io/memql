@@ -75,8 +75,8 @@ func nextRules() []NextRule {
 		},
 		{
 			Context: "inShapeBody",
-			Expect:  []string{"rowPath", "actorPath", "include"},
-			Doc:     "Inside a shape body: row.* / actor.* projection paths and `include <shape>` composition.",
+			Expect:  []string{"rowPath", "actorPath"},
+			Doc:     "Inside a shape body: row.* / actor.* projection paths. There is no composition verb -- `include` is rejected at load (memql#3621).",
 		},
 		{
 			Context: "inFunctionBody",

@@ -16,12 +16,10 @@ func TestCanonicalRelationshipType(t *testing.T) {
 		"contains":      relationshipTypeContains,
 		"owns":          relationshipTypeOwns,
 		"createdBy":     relationshipTypeCreatedBy,
-		"dependsOn":     relationshipTypeDependsOn,
-		"formedFrom":    relationshipTypeFormedFrom,
 		// case / underscore insensitivity (normalized lower + strip "_").
-		"DEPENDS_ON":  relationshipTypeDependsOn,
-		"dependson":   relationshipTypeDependsOn,
-		"formed_from": relationshipTypeFormedFrom,
+		"CREATED_BY":     relationshipTypeCreatedBy,
+		"createdby":      relationshipTypeCreatedBy,
+		"interacts_with": relationshipTypeInteracts,
 	}
 	for input, want := range valid {
 		got, ok := canonicalRelationshipType(input)
@@ -34,7 +32,9 @@ func TestCanonicalRelationshipType(t *testing.T) {
 		}
 	}
 
-	for _, input := range []string{"", "references", "bogus", "depends"} {
+	// `dependsOn` / `formedFrom` were retired as structural types in memql#3655
+	// and now live on the `as` label axis, so they belong here.
+	for _, input := range []string{"", "references", "bogus", "depends", "dependsOn", "formedFrom", "DEPENDS_ON", "formed_from"} {
 		if got, ok := canonicalRelationshipType(input); ok {
 			t.Errorf("canonicalRelationshipType(%q) = (%q, true), want invalid", input, got)
 		}

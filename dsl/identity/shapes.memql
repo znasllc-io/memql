@@ -166,12 +166,13 @@ shape delegation delegationFull {
   identitySubject
   identityType
   agentId
-  agentSubject
   roleCeiling
   scopes
   expiresAt
   note
   active
+  createdBySubject
+  approvedBySubject
   revokedAt
   revokedBySubject
   row.createdAt

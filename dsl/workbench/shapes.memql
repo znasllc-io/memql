@@ -8,7 +8,7 @@ shape workspace workspaceFull {
   planId
   status
   storageRoot
-  createdAt
+  row.createdAt
   lastUsedAt
   releasedAt
   releasedReason

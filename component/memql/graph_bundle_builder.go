@@ -6,9 +6,48 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
+// Graph edge labels -- the closed vocabulary a traversal writes to
+// GraphEdge.type on the wire, and the single source of truth for it
+// (memql#3657). Every addEdge call site emits from these constants,
+// docs/public/language/memql.md documents exactly this set, and
+// TestGraphEdgeLabelsMatchPublicDocs pins the two together so neither can
+// move without the other.
+//
+// This is NOT the @relationship `type` vocabulary (canonicalRelationshipType
+// in relations.go). The two overlap but differ at both ends:
+//
+//   - `parent` is declarable and never emitted. It surfaces as `child`,
+//     because an edge is written in the direction it was traversed.
+//   - `dependsOn` / `formedFrom` are declarable types whose graph-expansion
+//     traversal is deliberately unwired, so they emit nothing at all.
+//
+// Where a label does mirror a relationship type it is DEFINED from that
+// constant rather than restating the string, so renaming the type moves the
+// wire label with it and the docs pin then forces the documentation to follow.
+// Two copies of one vocabulary is exactly how this one went wrong.
 const (
-	graphEdgeTypeChild = "child"
+	GraphEdgeLabelChild         = "child"
+	GraphEdgeLabelAlias         = relationshipTypeAlias
+	GraphEdgeLabelEquals        = relationshipTypeEquals
+	GraphEdgeLabelInteractsWith = relationshipTypeInteracts
+	GraphEdgeLabelCreatedBy     = relationshipTypeCreatedBy
+	GraphEdgeLabelContains      = relationshipTypeContains
+	GraphEdgeLabelOwns          = relationshipTypeOwns
 )
+
+// GraphEdgeLabels returns every label the runtime emits on GraphEdge.type,
+// in the order expandGraph walks the edge kinds.
+func GraphEdgeLabels() []string {
+	return []string{
+		GraphEdgeLabelChild,
+		GraphEdgeLabelAlias,
+		GraphEdgeLabelEquals,
+		GraphEdgeLabelInteractsWith,
+		GraphEdgeLabelCreatedBy,
+		GraphEdgeLabelContains,
+		GraphEdgeLabelOwns,
+	}
+}
 
 type graphBundleBuilder struct {
 	nodes    map[string]*memqlv1.MemoryNode
@@ -43,18 +82,21 @@ func (b *graphBundleBuilder) addNode(node *memqlv1.MemoryNode) {
 	b.order = append(b.order, id)
 }
 
-func (b *graphBundleBuilder) addEdge(fromId, toId, relType string, depth int) {
+// addEdge appends one traversed edge. label must be a GraphEdgeLabel*
+// constant -- TestGraphEdgeLabelsAreEmittedFromTheConstantSet fails on a
+// bare string literal reaching this call.
+func (b *graphBundleBuilder) addEdge(fromId, toId, label string, depth int) {
 	if b == nil {
 		return
 	}
 	source := strings.TrimSpace(fromId)
 	target := strings.TrimSpace(toId)
-	edgeType := strings.TrimSpace(relType)
-	if source == "" || target == "" || edgeType == "" {
+	edgeLabel := strings.TrimSpace(label)
+	if source == "" || target == "" || edgeLabel == "" {
 		return
 	}
 	edge := &memqlv1.GraphEdge{
-		Type:   edgeType,
+		Type:   edgeLabel,
 		FromId: source,
 		ToId:   target,
 	}
