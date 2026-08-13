@@ -1773,6 +1773,14 @@ type RelationshipDecl struct {
 	FieldSource string // "payload" (default) or "table" (edge table)
 	Target      string // concept name, e.g. "v1:cognition:space"
 	Direction   string // "outgoing", "incoming", "bidirectional"
+
+	// As is the open DOMAIN label for the edge (memql#3652), independent of
+	// the structural Type above. Type is what the engine DOES with the edge;
+	// As is what the edge MEANS ("assignedTo", "repliesTo"). Validated for
+	// form only and never for membership, so a new domain verb never requires
+	// an engine release. Empty means unlabelled, which every declaration
+	// predating #3652 is.
+	As string
 }
 
 // ProviderDecl is the shared-frontend AST node for an AI provider
