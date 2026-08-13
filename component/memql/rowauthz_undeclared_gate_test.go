@@ -268,6 +268,30 @@ const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-
 // authorization one.
 const undeclared3409SignInRoutesReason = "memql#3409 -- self-scoped sign-in-route count behind the last-credential warning; v1:identity:identity still declares no tier"
 
+// undeclared3591ClaimedOwnerReason covers the one construct memql#3591 added.
+//
+// `signInIdentitiesForUser` is the sibling of the entry above, for a NAMED user
+// rather than the caller, and it lands here for the same single reason the whole
+// list exists: `v1:identity:identity` declares no `@rowAuthz` tier and CANNOT
+// carry an owner one. That is not a backlog note -- it is measured, in the
+// concept's own header (dsl/identity/concepts.memql): `userId` names a
+// credential's SUBJECT rather than an ownership claim, four reads are pre-actor by
+// construction, and the concept is a union of eight credential kinds with
+// different subjects. Declaring a tier is blocked by that, not by this construct.
+//
+// WHY IT CANNOT BE THE SELF-SCOPED TWIN, which is the question a reader will ask.
+// The caller is Store.HasClaimedOwner, running during identity boot to decide
+// whether the cluster's owner has ever authenticated. There is no actor in that
+// window -- the same circularity that keeps activeUsers and CountActiveUsers
+// server-only -- so `userId==actor.userId` would match zero rows and report every
+// claimed cluster as unclaimed, which is the answer that re-sends the owner's
+// claim email on every deploy.
+//
+// What bounds it instead: @serverOnly keeps it off the generated SDK entirely, and
+// the sole caller stamps internal origin, which the engine enforces against
+// auth.CallOrigin.
+const undeclared3591ClaimedOwnerReason = "memql#3591 -- pre-actor owner-claim check at identity boot; v1:identity:identity cannot carry a tier (measured, see the concept header)"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -468,6 +492,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"passkeyByCredentialId":      {"v1:identity:identity", undeclared3406PasskeyReason},
 	"passkeysForSelf":            {"v1:identity:identity", undeclared3406PasskeyReason},
 	"signInIdentitiesForSelf":    {"v1:identity:identity", undeclared3409SignInRoutesReason},
+	"signInIdentitiesForUser":    {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
 	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},

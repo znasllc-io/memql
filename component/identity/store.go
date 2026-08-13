@@ -1158,8 +1158,14 @@ func (s *Store) HasClaimedOwner(ctx context.Context) (bool, error) {
 		// One query per owner. A cluster has one owner in every case this runs
 		// for; the loop is here so a cluster with several is answered correctly
 		// rather than by looking at whichever came back first.
+		// dslJSONString, NOT `"%s"` around an escaped value. CodeQL calls the
+		// latter unsafe quoting and it is right to: the quotes are mine and the
+		// escaping is a separate function, so the two can drift, and one
+		// unescaped double quote breaks out of the literal. json.Marshal emits
+		// the whole quoted literal, which cannot. Same form as userByEmail and
+		// userByIdSystem, the two closest analogues.
 		creds, err := s.executeAndExtractInternal(ctx,
-			fmt.Sprintf(`query signInIdentitiesForUser(userId: "%s")`, escapeMemQLString(userId)))
+			fmt.Sprintf(`query signInIdentitiesForUser(userId: %s)`, dslJSONString(userId)))
 		if err != nil {
 			return false, fmt.Errorf("identity.store: has claimed owner: sign-in identities: %w", err)
 		}
