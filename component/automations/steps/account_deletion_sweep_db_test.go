@@ -22,6 +22,7 @@ import (
 	"github.com/znasllc-io/memql/component/database/dbtest"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 )
 
@@ -151,8 +152,8 @@ func TestAccountDeletionSweep_HardDeletesExpiredUser_DBAcceptance(t *testing.T) 
 	// server) does. The sweep itself never calls updateUser -- this is test
 	// scaffolding standing in for an admin having scheduled the deletion.
 	if _, err := eng.Execute(auth.ContextWithInternalOrigin(ctx), fmt.Sprintf(
-		`mutation updateUser(payload: {"deletionScheduledAt": %q}, userId: %q)`,
-		scheduledAt, uid)); err != nil {
+		`mutation updateUser(payload: {"deletionScheduledAt": %s}, userId: %s)`,
+		langparser.QuoteString(scheduledAt), langparser.QuoteString(uid))); err != nil {
 		t.Fatalf("seed deletionScheduledAt via updateUser: %v", err)
 	}
 

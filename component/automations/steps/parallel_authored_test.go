@@ -56,6 +56,7 @@ func (e *recordingExecutor) executed() []string {
 
 func TestParallelExecutor_AuthoredDSL_WaitAllRunsBothBranches(t *testing.T) {
 	const src = `@description("Gather two reports concurrently.")
+@trigger(event="system.startup")
 automation gather {
   step layer0 {
     parallel {
@@ -132,6 +133,7 @@ automation gather {
 // sub-automation never runs, while the sibling still executes.
 func TestParallelExecutor_AuthoredDSL_BranchConditionSkips(t *testing.T) {
 	const src = `@description("Gated branch probe.")
+@trigger(event="system.startup")
 automation gather {
   step layer0 {
     parallel {

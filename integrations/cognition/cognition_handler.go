@@ -16,6 +16,7 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/id"
@@ -2267,7 +2268,7 @@ func (c *CognitionIntegration) allHumansMuted(ctx context.Context, partitionId s
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" {
 		return false
 	}
-	q := fmt.Sprintf(`query queryUserMicStatesForSpace(partitionId: %q)`, partitionId)
+	q := fmt.Sprintf(`query queryUserMicStatesForSpace(partitionId: %s)`, langparser.QuoteString(partitionId))
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
 		c.Logger.Debug("cognition: mic state lookup failed (non-fatal)", "error", err, "partitionId", partitionId)
@@ -2344,7 +2345,7 @@ func (c *CognitionIntegration) lookupAudioOverride(ctx context.Context, partitio
 	if c == nil || c.engine == nil || strings.TrimSpace(partitionId) == "" || strings.TrimSpace(agentId) == "" {
 		return ""
 	}
-	q := fmt.Sprintf(`query audioOverridesForSpace(partitionId: %q)`, partitionId)
+	q := fmt.Sprintf(`query audioOverridesForSpace(partitionId: %s)`, langparser.QuoteString(partitionId))
 	res, err := c.engine.Execute(ctx, q)
 	if err != nil {
 		c.Logger.Debug("cognition: audio override lookup failed (non-fatal)", "error", err, "partitionId", partitionId)

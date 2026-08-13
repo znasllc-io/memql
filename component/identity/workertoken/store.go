@@ -11,6 +11,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
@@ -76,8 +77,8 @@ func (s *Store) Create(ctx context.Context, identityId, userId, name, keyHash, r
 		expires = expiresAt.UTC().Format(time.RFC3339Nano)
 	}
 	q := fmt.Sprintf(
-		`mutation createWorkerTokenIdentity(identityId:%q,userId:%q,name:%q,keyHash:%q,registeredBy:%q,expiresAt:%q)`,
-		identityId, userId, name, keyHash, registeredBy, expires,
+		`mutation createWorkerTokenIdentity(identityId:%s,userId:%s,name:%s,keyHash:%s,registeredBy:%s,expiresAt:%s)`,
+		langparser.QuoteString(identityId), langparser.QuoteString(userId), langparser.QuoteString(name), langparser.QuoteString(keyHash), langparser.QuoteString(registeredBy), langparser.QuoteString(expires),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("workertoken.Store.Create: %w", err)
@@ -90,7 +91,7 @@ func (s *Store) Revoke(ctx context.Context, identityId string) error {
 	if s == nil || s.Engine == nil {
 		return errors.New("workertoken.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`mutation revokeWorkerTokenIdentity(identityId:%q)`, bareSlug(identityId))
+	q := fmt.Sprintf(`mutation revokeWorkerTokenIdentity(identityId:%s)`, langparser.QuoteString(bareSlug(identityId)))
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("workertoken.Store.Revoke: %w", err)
 	}
@@ -107,7 +108,7 @@ func (s *Store) LookupByKeyHash(ctx context.Context, keyHash string) (*Row, erro
 	if keyHash == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query workerTokenByKeyHash(keyHash:%q)`, keyHash)
+	q := fmt.Sprintf(`query workerTokenByKeyHash(keyHash:%s)`, langparser.QuoteString(keyHash))
 	rows, err := s.executeAndExtract(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("workertoken.Store.LookupByKeyHash: %w", err)
@@ -126,7 +127,7 @@ func (s *Store) ListForUser(ctx context.Context, userId string) ([]Row, error) {
 	if s == nil || s.Engine == nil {
 		return nil, errors.New("workertoken.Store: engine not wired")
 	}
-	q := fmt.Sprintf(`query workerTokensForUser(userId:%q)`, userId)
+	q := fmt.Sprintf(`query workerTokensForUser(userId:%s)`, langparser.QuoteString(userId))
 
 	// workerTokensForUser is @serverOnly (memql#3063). It projects
 	// identityFull, so the row carries `credentials` -- keyHash,

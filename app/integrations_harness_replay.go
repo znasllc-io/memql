@@ -13,6 +13,7 @@ import (
 	"github.com/znasllc-io/memql/component/harness/actiontrust"
 	"github.com/znasllc-io/memql/component/harness/parambind"
 	"github.com/znasllc-io/memql/component/harness/surfaceresolver"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // paramReplayReliabilityFloor gates parameterized (varying-input) replay: an
@@ -49,7 +50,7 @@ func actionReplayEnabled() bool {
 // on a mismatch lands in Phase 4 (#1739); Phase 1 simply declines to replay.
 func (a *App) tryReplayAction(ctx context.Context, step harness.StepView, inputFP string) (replayed bool, result map[string]any, found bool) {
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
-	q := fmt.Sprintf(`query actionByInputFingerprint(inputFingerprint:%q)`, inputFP)
+	q := fmt.Sprintf(`query actionByInputFingerprint(inputFingerprint:%s)`, langparser.QuoteString(inputFP))
 	res, err := adapter.Execute(ctx, q)
 	if err != nil {
 		return false, nil, false
@@ -337,8 +338,8 @@ func (a *App) mintActionFromRun(ctx context.Context, step harness.StepView, inpu
 	}
 
 	q := fmt.Sprintf(
-		`mutation mintAction(slug:%q, intent:%q, capability:%q, sideEffectClass:%q, status:%q, inputFingerprint:%q, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%q, recordedResult:%s, resultFingerprint:%q, recordedSurface:%q, provenancePlanId:%q, provenanceStepId:%q)`,
-		slug, intent, dominantCap, sideEffectClass, status, inputFP, string(callsJSON), string(edgesJSON), string(bindingsJSON), templateFP, string(resultJSON), resultFP, recordedSurfaceKind, step.PlanID, step.ID,
+		`mutation mintAction(slug:%s, intent:%s, capability:%s, sideEffectClass:%s, status:%s, inputFingerprint:%s, calls:%s, resourceEdges:%s, paramBindings:%s, templateFingerprint:%s, recordedResult:%s, resultFingerprint:%s, recordedSurface:%s, provenancePlanId:%s, provenanceStepId:%s)`,
+		langparser.QuoteString(slug), langparser.QuoteString(intent), langparser.QuoteString(dominantCap), langparser.QuoteString(sideEffectClass), langparser.QuoteString(status), langparser.QuoteString(inputFP), string(callsJSON), string(edgesJSON), string(bindingsJSON), langparser.QuoteString(templateFP), string(resultJSON), langparser.QuoteString(resultFP), langparser.QuoteString(recordedSurfaceKind), langparser.QuoteString(step.PlanID), langparser.QuoteString(step.ID),
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {
@@ -353,8 +354,8 @@ func (a *App) reinforceAction(ctx context.Context, id string, payload map[string
 	rel, _ := payload["reliability"].(float64)
 	cnt, _ := payload["reinforceCount"].(float64)
 	nextRel, nextCnt := actionreplay.Reinforce(rel, int(cnt))
-	q := fmt.Sprintf(`mutation reinforceAction(actionId:%q, reliability:%v, reinforceCount:%d)`,
-		id, nextRel, nextCnt)
+	q := fmt.Sprintf(`mutation reinforceAction(actionId:%s, reliability:%v, reinforceCount:%d)`,
+		langparser.QuoteString(id), nextRel, nextCnt)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {
 		a.Logger.Warn("reinforce action failed", "action", id, "error", err)
@@ -463,7 +464,7 @@ func buildParamBindings(trace actiontrace.CandidateTrace, stepInput map[string]a
 func (a *App) tryParameterizedReplay(ctx context.Context, step harness.StepView) (replayed bool, result map[string]any, found bool) {
 	templateFP := actionreplay.Fingerprint(parambind.TemplateFingerprintKeys(step.Input))
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
-	res, err := adapter.Execute(ctx, fmt.Sprintf(`query actionByTemplateFingerprint(templateFingerprint:%q)`, templateFP))
+	res, err := adapter.Execute(ctx, fmt.Sprintf(`query actionByTemplateFingerprint(templateFingerprint:%s)`, langparser.QuoteString(templateFP)))
 	if err != nil {
 		return false, nil, false
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/harness"
 	"github.com/znasllc-io/memql/component/harness/actiontrace"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // candidateTraceSink is the concrete memql.ToolTraceSink for action-library
@@ -89,8 +90,8 @@ func (a *App) recordActionCandidate(ctx context.Context, step harness.StepView, 
 	}
 
 	q := fmt.Sprintf(
-		`mutation recordActionCandidate(planId:%q, stepId:%q, calls:%s, resourceEdges:%s, callCount:%d)`,
-		step.PlanID, step.ID, string(callsJSON), string(edgesJSON), len(trace.Calls),
+		`mutation recordActionCandidate(planId:%s, stepId:%s, calls:%s, resourceEdges:%s, callCount:%d)`,
+		langparser.QuoteString(step.PlanID), langparser.QuoteString(step.ID), string(callsJSON), string(edgesJSON), len(trace.Calls),
 	)
 	adapter := &CognitionEngineAdapter{Engine: a.engine}
 	if _, err := adapter.Execute(ctx, q); err != nil && a.Logger != nil {

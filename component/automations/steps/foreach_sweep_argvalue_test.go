@@ -117,6 +117,7 @@ func runSweepForEach(t *testing.T, src string, rows []any) *argRecorder {
 // row's own values (the magicLinkExpirySweep / revokeExpiredDelegations shape).
 func TestForEachSweep_BareWrite_PerRowArgs(t *testing.T) {
 	const src = `@description("bare per-row write")
+@trigger(event="system.startup")
 automation sweepBare {
   step decide { logic decideRows { event: event } }
   step apply {
@@ -157,6 +158,7 @@ automation sweepBare {
 // the wrong rows must NOT be written.
 func TestForEachSweep_ConditionalWrite_GatesPerRow(t *testing.T) {
 	const src = `@description("conditional per-row write")
+@trigger(event="system.startup")
 automation sweepConditional {
   step decide { logic decideRows { event: event } }
   step apply {
@@ -206,6 +208,7 @@ automation sweepConditional {
 // shape its subject needs is not evidence about production.
 func TestForEachSweep_KillSwitch_EventGate(t *testing.T) {
 	const src = `@description("kill switch sweep")
+@trigger(event="system.startup")
 automation killSwitch {
   args {
     preferences any
@@ -295,6 +298,7 @@ automation killSwitch {
 // so this migration is behavior-faithful to the original.
 func TestForEachSweep_ReleaseWorkspace(t *testing.T) {
 	const src = `@description("release workspace on plan terminal")
+@trigger(event="system.startup")
 automation rw {
   args {
     id any

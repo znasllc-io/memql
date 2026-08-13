@@ -9,6 +9,7 @@ import (
 	"time"
 
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -229,7 +230,7 @@ type roleSnapshot struct {
 // match/extend dedupe targets for a user goal. The schema default
 // is "user" so legacy rows pre-dating the kind field are kept.
 func (i *Integration) loadExistingAgents(ctx context.Context, ownerUserId string) []agentSnapshot {
-	query := fmt.Sprintf(`query activeAgentsForUser(ownerUserId: %q)`, ownerUserId)
+	query := fmt.Sprintf(`query activeAgentsForUser(ownerUserId: %s)`, langparser.QuoteString(ownerUserId))
 	raw, err := i.engine.Execute(ctx, query)
 	if err != nil || raw == nil {
 		return nil
@@ -358,7 +359,7 @@ func (i *Integration) extendAgent(ctx context.Context, ownerUserId string, exist
 	if err != nil {
 		return agentSnapshot{}, fmt.Errorf("marshal update payload: %w", err)
 	}
-	query := fmt.Sprintf(`mutation updateAgent(agentId: %q, payload: %s)`, target.Id, string(payloadJSON))
+	query := fmt.Sprintf(`mutation updateAgent(agentId: %s, payload: %s)`, langparser.QuoteString(target.Id), string(payloadJSON))
 	if _, err := i.engine.Execute(ctx, query); err != nil {
 		return agentSnapshot{}, fmt.Errorf("execute updateAgent: %w", err)
 	}

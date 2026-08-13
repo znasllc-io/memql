@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -172,8 +173,8 @@ func (s *Stamper) finalizeAdHocWrapper(ctx context.Context, pc PlanContext, exec
 
 	if pc.SemanticTaskId != "" {
 		tq := fmt.Sprintf(
-			`mutation updateTaskStatus(taskId: %q, status: %q, completedAt: %q)`,
-			pc.SemanticTaskId, status, ts,
+			`mutation updateTaskStatus(taskId: %s, status: %s, completedAt: %s)`,
+			langparser.QuoteString(pc.SemanticTaskId), langparser.QuoteString(status), langparser.QuoteString(ts),
 		)
 		if _, err := s.Engine.Execute(ctx, tq); err != nil {
 			s.Logger.Warn("taskstamp: finalize ad-hoc semantic task failed",
@@ -182,8 +183,8 @@ func (s *Stamper) finalizeAdHocWrapper(ctx context.Context, pc PlanContext, exec
 	}
 	if pc.PlanId != "" {
 		pq := fmt.Sprintf(
-			`mutation updatePlanStatus(planId: %q, status: %q, completedAt: %q)`,
-			pc.PlanId, status, ts,
+			`mutation updatePlanStatus(planId: %s, status: %s, completedAt: %s)`,
+			langparser.QuoteString(pc.PlanId), langparser.QuoteString(status), langparser.QuoteString(ts),
 		)
 		if _, err := s.Engine.Execute(ctx, pq); err != nil {
 			s.Logger.Warn("taskstamp: finalize ad-hoc plan failed",
@@ -225,8 +226,8 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 	planId := id.NewShortId()
 	goal := fmt.Sprintf("Ad-hoc tool actions by agent %s", pc.AgentId)
 	q := fmt.Sprintf(
-		`mutation createAdHocPlan(planId: %q, partitionId: %q, agentId: %q, ownerUserId: %q, goal: %q)`,
-		planId, pc.PartitionId, pc.AgentId, pc.OwnerUserId, goal,
+		`mutation createAdHocPlan(planId: %s, partitionId: %s, agentId: %s, ownerUserId: %s, goal: %s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(pc.PartitionId), langparser.QuoteString(pc.AgentId), langparser.QuoteString(pc.OwnerUserId), langparser.QuoteString(goal),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return "", err
@@ -252,8 +253,12 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 func (s *Stamper) createSemanticWrapper(ctx context.Context, pc PlanContext) (string, error) {
 	taskId := id.NewShortId()
 	q := fmt.Sprintf(
-		`mutation createSemanticTask(taskId: %q, planId: %q, kind: "callTool", seq: 0, logicalStepId: %q, attemptNumber: 1, input: {"adHoc": true})`,
-		taskId, pc.PlanId, taskId,
+		// QuoteString from memql#3611; no agentId from memql#3630 -- the
+		// concept declares no agent field by design, so the argument was
+		// silently dropped and the parent Plan's ownerAgentId is the
+		// single authority.
+		`mutation createSemanticTask(taskId: %s, planId: %s, kind: "callTool", seq: 0, logicalStepId: %s, attemptNumber: 1, input: {"adHoc": true})`,
+		langparser.QuoteString(taskId), langparser.QuoteString(pc.PlanId), langparser.QuoteString(taskId),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return "", err
@@ -273,8 +278,8 @@ func (s *Stamper) stampPre(ctx context.Context, pc PlanContext, taskId, toolName
 		}
 	}
 	q := fmt.Sprintf(
-		`mutation createToolInvocationTask(taskId: %q, planId: %q, parentTaskId: %q, toolName: %q, toolArgs: %s, seq: 0)`,
-		taskId, pc.PlanId, pc.SemanticTaskId, toolName, argsJSON,
+		`mutation createToolInvocationTask(taskId: %s, planId: %s, parentTaskId: %s, toolName: %s, toolArgs: %s, seq: 0)`,
+		langparser.QuoteString(taskId), langparser.QuoteString(pc.PlanId), langparser.QuoteString(pc.SemanticTaskId), langparser.QuoteString(toolName), argsJSON,
 	)
 	_, err := s.Engine.Execute(ctx, q)
 	return err
@@ -287,8 +292,8 @@ func (s *Stamper) stampPost(ctx context.Context, taskId, result string, execErr 
 	completedAtStr := completedAt.UTC().Format(time.RFC3339)
 	if execErr != nil {
 		q := fmt.Sprintf(
-			`mutation completeToolInvocation(taskId: %q, status: "failed", errorMessage: %q, completedAt: %q)`,
-			taskId, execErr.Error(), completedAtStr,
+			`mutation completeToolInvocation(taskId: %s, status: "failed", errorMessage: %s, completedAt: %s)`,
+			langparser.QuoteString(taskId), langparser.QuoteString(execErr.Error()), langparser.QuoteString(completedAtStr),
 		)
 		_, err := s.Engine.Execute(ctx, q)
 		return err
@@ -301,8 +306,8 @@ func (s *Stamper) stampPost(ctx context.Context, taskId, result string, execErr 
 		resultJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation completeToolInvocation(taskId: %q, status: "succeeded", toolResult: %s, completedAt: %q)`,
-		taskId, string(resultJSON), completedAtStr,
+		`mutation completeToolInvocation(taskId: %s, status: "succeeded", toolResult: %s, completedAt: %s)`,
+		langparser.QuoteString(taskId), string(resultJSON), langparser.QuoteString(completedAtStr),
 	)
 	_, err = s.Engine.Execute(ctx, q)
 	return err

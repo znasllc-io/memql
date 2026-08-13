@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -59,7 +60,21 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 		case "executionTime":
 			decl.ExecutionTime = attrStringValue(attr)
 		case "handler":
+			// A mistyped kwarg used to be DROPPED, not refused (memql#3625).
+			// The two shapes that produced were the memql#3605 archetype
+			// exactly: `@handler(type="function", nmae="createTodo")` left the
+			// function name empty, and `@handler(tipe="function",
+			// name="createTodo")` dropped the ENTIRE handler -- decl.HandlerType
+			// stayed "", so toolDeclToTool never built a ToolHandler and the
+			// tool registered with no way to execute. Both then reached the LLM
+			// as an advertised, callable tool.
+			if err := rejectUnknownAttrArgs(&p.current, decl.Name, "handler", attr, toolHandlerArgNames); err != nil {
+				return nil, err
+			}
 			decl.HandlerType = attrArgString(attr, "type")
+			if decl.HandlerType == "" {
+				return nil, newParseErrorf(&p.current, "tool %q: @handler requires a non-empty type=... argument (\"function\", \"query\", \"webhook\" or \"delegate\") -- a @handler whose type does not resolve is dropped whole, and the tool then registers with no way to execute", decl.Name)
+			}
 			if v := attrArgString(attr, "name"); v != "" {
 				decl.HandlerName = v
 			}
@@ -73,15 +88,25 @@ func (p *Parser) parseToolDecl(attrs []*ast.Attribute) (*ast.ToolDecl, error) {
 				decl.HandlerMethod = strings.ToUpper(v)
 			}
 		case "rateLimit":
+			if err := rejectUnknownAttrArgs(&p.current, decl.Name, "rateLimit", attr, toolRateLimitArgNames); err != nil {
+				return nil, err
+			}
+			// A non-integer value was silently discarded here too, which is the
+			// same defect one annotation over: the author declared a ceiling and
+			// got none (memql#3625).
 			if v := attrArgString(attr, "maxCalls"); v != "" {
-				if n, err := strconv.Atoi(v); err == nil {
-					decl.RateLimitMaxCalls = n
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return nil, newParseErrorf(&p.current, "tool %q: @rateLimit(maxCalls=%q) is not an integer -- a non-integer was discarded, leaving the tool with no rate limit at all", decl.Name, v)
 				}
+				decl.RateLimitMaxCalls = n
 			}
 			if v := attrArgString(attr, "periodSeconds"); v != "" {
-				if n, err := strconv.Atoi(v); err == nil {
-					decl.RateLimitPeriod = n
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return nil, newParseErrorf(&p.current, "tool %q: @rateLimit(periodSeconds=%q) is not an integer -- a non-integer was discarded, leaving the tool with no rate limit period at all", decl.Name, v)
 				}
+				decl.RateLimitPeriod = n
 			}
 		case "clientExecution":
 			decl.ClientExecution = true
@@ -148,6 +173,7 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 
 	// Trailing annotations.
 	for p.check(TokenAt) {
+		at := p.current
 		attr, err := p.parseAttribute()
 		if err != nil {
 			return nil, err
@@ -166,10 +192,63 @@ func (p *Parser) parseToolFieldDecl(toolName string) (*ast.ToolFieldDecl, error)
 			field.Default = attrStringValue(attr)
 		case "enum":
 			field.EnumValues = attrEnumValues(attr)
+		default:
+			// Anything else used to fall off the end of this switch and be
+			// discarded (memql#3625). `@enums("a", "b")` was the measured case:
+			// pure declaration theatre -- the constraint the author wrote never
+			// reached the JSON schema, so the LLM was told the field was an
+			// unconstrained string and nothing complained. Concept property
+			// annotations are already closed this way; tool fields now are too.
+			return nil, newParseErrorf(&at, "tool %q field %q: unknown annotation @%s (supported: @required, @autoInjected, @description, @default, @enum) -- an unknown annotation was silently discarded, so the constraint you wrote was never enforced", toolName, field.Name, attr.Name)
 		}
 	}
 
 	return field, nil
+}
+
+// toolHandlerArgNames is the closed set of `@handler(...)` keyword arguments.
+// `type` picks the dispatch arm; the rest carry that arm's target.
+var toolHandlerArgNames = map[string]bool{
+	"type": true, "name": true, "query": true, "url": true, "method": true,
+}
+
+// toolRateLimitArgNames is the closed set of `@rateLimit(...)` keyword
+// arguments.
+var toolRateLimitArgNames = map[string]bool{
+	"maxCalls": true, "periodSeconds": true,
+}
+
+// rejectUnknownAttrArgs refuses any keyword argument on a typed-payload
+// annotation that is not in the allowed set, naming the offender and the
+// supported spellings.
+//
+// The annotations this guards read their arguments by NAME out of
+// attr.Args, so an unrecognised key is not an error today -- it is simply
+// never read. That makes a single-letter typo indistinguishable from
+// omitting the argument, which is how a tool with `nmae=` shipped an empty
+// function name and a tool with `tipe=` shipped no handler at all
+// (memql#3625, the memql#3605 archetype).
+func rejectUnknownAttrArgs(tok *Token, toolName, annotation string, attr *ast.Attribute, allowed map[string]bool) error {
+	if attr == nil || len(attr.Args) == 0 {
+		return nil
+	}
+	unknown := make([]string, 0, len(attr.Args))
+	for k := range attr.Args {
+		if !allowed[k] {
+			unknown = append(unknown, k)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Strings(unknown)
+	supported := make([]string, 0, len(allowed))
+	for k := range allowed {
+		supported = append(supported, k)
+	}
+	sort.Strings(supported)
+	return newParseErrorf(tok, "tool %q: unknown @%s argument(s) %s (supported: %s) -- an unrecognised argument name is never read, so the value you wrote was dropped",
+		toolName, annotation, strings.Join(unknown, ", "), strings.Join(supported, ", "))
 }
 
 // attrArgString fetches a named argument from an annotation's

@@ -41,6 +41,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/component/events"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/core/id"
 )
@@ -330,8 +331,8 @@ func (c *RefreshCron) spawnRefreshPlan(ctx context.Context, row map[string]any) 
 	// when wired -- createPlan's arg surface doesn't carry mode,
 	// so we don't pass it. The dispatcher branches on input.mode.
 	call := fmt.Sprintf(
-		`mutation createPlan(planId: %q, partitionId: %q, kind: "trainSpecialist", goal: %q, requestedBy: %q, triggerSource: "system", input: %s)`,
-		planId, refreshSystemPartitionId, goal, requestedBy, inputJSON,
+		`mutation createPlan(planId: %s, partitionId: %s, kind: "trainSpecialist", goal: %s, requestedBy: %s, triggerSource: "system", input: %s)`,
+		langparser.QuoteString(planId), langparser.QuoteString(refreshSystemPartitionId), langparser.QuoteString(goal), langparser.QuoteString(requestedBy), inputJSON,
 	)
 	_, err := c.engine.Execute(systemActorContext(ctx), call)
 	if err != nil {

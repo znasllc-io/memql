@@ -1369,6 +1369,9 @@ func buildJSONSchema(conceptName string, parsed *parsedConcept) (map[string]any,
 			props[prop.name] = propSchema
 		}
 		schema["properties"] = props
+		if allOf := variantDiscriminatorConstraints(parsed.properties, props); len(allOf) > 0 {
+			schema["allOf"] = allOf
+		}
 	}
 
 	if len(parsed.required) > 0 {
@@ -1376,6 +1379,73 @@ func buildJSONSchema(conceptName string, parsed *parsedConcept) (map[string]any,
 	}
 
 	return schema, nil
+}
+
+// variantDiscriminatorConstraints makes `@variant(discriminator="...")` mean
+// something (memql#3623). It returns one `if`/`then` pair per branch, to be
+// emitted as the `allOf` of the object that OWNS the variant property.
+//
+// The pairs have to live at that level rather than inside the variant property
+// itself, because the discriminator names a SIBLING: `credentials` cannot see
+// `identityType` from inside its own subschema, and JSON Schema has no way to
+// reach a parent. Before this, the discriminator was emitted as
+// `x-discriminator` and enforced by nothing -- `oneOf` asks only that the value
+// match exactly one branch, so on the real v1:identity:identity a row could
+// declare identityType="passkey" and carry api_key credential material, and any
+// Go reader that switches on identityType and then type-asserts into
+// credentials was reading a shape the schema had permitted.
+//
+// The `if` requires the discriminator to be PRESENT as well as equal. Without
+// `required` an absent discriminator satisfies every `if` (a `properties`
+// constraint says nothing about presence), every `then` would then apply at
+// once, and the contradiction would reject every payload. With it, a payload
+// that does not name a branch is simply unconstrained here -- which is why the
+// discriminator's own declaration (an `enum`, and `!` where it matters) stays
+// load-bearing for the rows this cannot speak about.
+//
+// Branch schemas are read back out of the emitted `oneOf` rather than rebuilt,
+// so the two can never describe different things. A discriminator naming a
+// field that is not a sibling produces `if`s that never fire, which is inert
+// rather than wrong -- the conservative direction, since the alternative would
+// be refusing rows over a declaration mistake this function is not the place to
+// diagnose.
+func variantDiscriminatorConstraints(props []parsedProperty, schemas map[string]any) []any {
+	var allOf []any
+	for _, prop := range props {
+		if len(prop.variants) == 0 || prop.variantDiscriminator == "" {
+			continue
+		}
+		propSchema, ok := schemas[prop.name].(map[string]any)
+		if !ok {
+			continue
+		}
+		oneOf, ok := propSchema["oneOf"].([]any)
+		if !ok {
+			continue
+		}
+		for _, member := range oneOf {
+			branch, ok := member.(map[string]any)
+			if !ok {
+				continue
+			}
+			title, _ := branch["title"].(string)
+			if title == "" {
+				continue
+			}
+			allOf = append(allOf, map[string]any{
+				"if": map[string]any{
+					"required": []string{prop.variantDiscriminator},
+					"properties": map[string]any{
+						prop.variantDiscriminator: map[string]any{"const": title},
+					},
+				},
+				"then": map[string]any{
+					"properties": map[string]any{prop.name: branch},
+				},
+			})
+		}
+	}
+	return allOf
 }
 
 func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
@@ -1505,14 +1575,70 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 		schema["type"] = "object"
 		if len(prop.nested) > 0 {
 			nestedProps := make(map[string]any, len(prop.nested))
+			var nestedRequired []string
 			for _, nested := range prop.nested {
 				nestedSchema, err := propertyToJSONSchema(nested)
 				if err != nil {
 					return nil, fmt.Errorf("nested property %q: %w", nested.name, err)
 				}
 				nestedProps[nested.name] = nestedSchema
+				if nested.required {
+					nestedRequired = append(nestedRequired, nested.name)
+				}
 			}
 			schema["properties"] = nestedProps
+			// A nested block now enforces the `!` / @required it declares
+			// (memql#3623). It used to emit `properties` alone, so the identical
+			// annotation that is enforced at the top level -- and inside every
+			// @variant branch -- was accepted by the parser and then dropped
+			// here: no error at load, no error at insert, nothing enforced.
+			//
+			// `required` applies only when the block itself is present, so an
+			// optional nested block stays omittable.
+			if len(nestedRequired) > 0 {
+				schema["required"] = nestedRequired
+			}
+			// `additionalProperties: false` is the OTHER half of memql#3623 and
+			// is deliberately NOT emitted here yet. The tree does not survive it
+			// today; measured, not assumed:
+			//
+			//   - dsl/agents/plannerAgent.memql + trainerAgent.memql seed
+			//     `capabilities.domains` and `capabilities.tools`, neither of
+			//     which the concept declares (the pre-#158 surface skillIds
+			//     replaced). Both are @scope("perUser") seeds, so closing the
+			//     block fails USER PROVISIONING on every new user.
+			//   - v1:cognition:utterance.source takes seven undeclared keys from
+			//     live writers, one of them load-bearing: `transcriptOnly`
+			//     (dsl/cognition/mutations.memql sendRealtimeTranscriptUtterance)
+			//     is read back by cognition_utterance_auth_validation.go and
+			//     cognition_handler.go. Also `feedbackReason`, `trigger`,
+			//     `severity`, `agentName`, `topic`, `idempotencyKey`.
+			//   - assistant_skill_reconcile.go and integrations/agents/factory.go
+			//     (extendAgent) read an agent's capabilities object out of the
+			//     DB and write it back wholesale, so any EXISTING row still
+			//     carrying a legacy key fails on write-back. That one is a data
+			//     migration, not an edit.
+			//   - the blast radius does not stop at this repo. Product DSL
+			//     bundles arrive at runtime via MEMQL_DSL_PATH with nested blocks
+			//     of their own, and mutations like addAgentToSpace /
+			//     updateSessionDevices / updateParticipantPresence splat a
+			//     client-supplied `object` straight into one. Closing them is a
+			//     wire-contract change for every bundle and every client, which
+			//     is its own issue with its own migration -- not a side effect of
+			//     this one.
+			//
+			// So the exposure memql#3623 names is still open: an undeclared key
+			// inside a nested block is accepted, and a typo'd write to
+			// v1:identity:user.preferences lands beside the real field while the
+			// computer-use kill switch keeps its old value. Fix the writers
+			// above first; concept_nested_block_3623_test.go characterises the
+			// open state and is where the flip gets pinned.
+
+			// A @variant nested one level down is tied to a discriminator
+			// sibling INSIDE this block, mirroring the root-level rule.
+			if allOf := variantDiscriminatorConstraints(prop.nested, nestedProps); len(allOf) > 0 {
+				schema["allOf"] = allOf
+			}
 		}
 		// Discriminated-union variants: emit a oneOf where each
 		// branch lists the fields required/allowed for that variant.
