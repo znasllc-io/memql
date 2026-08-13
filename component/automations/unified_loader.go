@@ -191,6 +191,33 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 				})
 				continue
 			}
+			// Refuse an automation nothing can ever run (memql#3614 item 3,
+			// memql#3615).
+			//
+			// HERE, not in compileMemQL, and CI is why. compileMemQL is shared
+			// with CompileSource -- the authoring sandbox's Gate 1 -- which
+			// compiles a CANDIDATE construct that legitimately has no trigger
+			// yet because it is still being written. Gating the shared path
+			// made every sandbox compile fail. The LogicRunner's parseJSON
+			// builds trigger-less automations by construction and is likewise
+			// none of this check's business.
+			//
+			// This walk is the one place that means "an automation the tree
+			// ships", which is the only population the claim is true of. The
+			// AUTHORED scheduler has always refused a trigger-less construct at
+			// activation; refusing it at load makes the two spellings agree and
+			// puts the refusal in front of the strict-boot gate, which is what
+			// the swallowed cron error was hiding behind.
+			if wiringErr := l.validateTriggerWiring(automation); wiringErr != nil {
+				if l.logger != nil {
+					l.logger.Warn("unified automation loader: trigger wiring refused",
+						"component", ComponentName, "path", origin, "error", wiringErr)
+				}
+				problems = append(problems, automationLoadProblem{
+					Path: path, Name: slice.Name, Phase: "compile", Err: wiringErr.Error(),
+				})
+				continue
+			}
 			automation.Origin = origin
 			// #2800: this is the ONLY place trust is granted. These bodies
 			// come from the embedded/registered DSL tree, so they are
