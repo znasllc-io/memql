@@ -511,7 +511,7 @@ concept user {
   dataExportLastAt datetime  @description("Timestamp of the most recent /me/export download. Drives rate-limiting per MEMQL_IDENTITY_DATA_EXPORT_RATE_LIMIT_HOURS.")
   revocationEpoch  int       @description("Monotonically-increasing per-user counter, starting at 0. Not stamped on create and it does not need to be: the identity store reads it through int64Field, which yields 0 for an absent key (component/identity/store.go). Stamped into every JWT this user is issued; the verifier rejects any JWT whose revocation_epoch claim is below the user's current value. Bumping this field invalidates every token issued before the bump, on the next stream-open or periodic in-stream re-check (default ~5 minutes). Bulk-revoke / role-change / security-event tooling is the intended writer. See memql#106.")
 
-  @relationship(type="interactsWith", field="activeAssistantId", target=agent, direction="outgoing")
+  @relationship(type="interactsWith", field="preferences.activeAssistantId", target=agent, direction="outgoing")
 }
 
 /// Short-lived pairing credential for the computer-use enrollment flow. The frontend's Settings ->

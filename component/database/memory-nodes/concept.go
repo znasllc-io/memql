@@ -15,12 +15,19 @@ import (
 
 type (
 	// RelationshipDefinition captures the structure of relationship metadata declared in concept.json files.
+	//
+	// Type and As are two INDEPENDENT axes (memql#3652). Type is the closed,
+	// engine-defined structural set -- what the engine does with the edge. As is
+	// the open, author-defined domain label -- what the edge MEANS -- validated
+	// for form only and never for membership, so a new domain verb can never
+	// require an engine release.
 	RelationshipDefinition struct {
 		Type          string `json:"type"`
 		Field         string `json:"field"`
 		FieldSource   string `json:"fieldSource,omitempty"`
 		TargetConcept string `json:"targetConcept"`
 		Direction     string `json:"direction"`
+		As            string `json:"as,omitempty"`
 	}
 
 	// Store defines the persistence operations required by concept runtime helpers.
@@ -124,6 +131,7 @@ func (r *RelationshipDefinition) UnmarshalJSON(data []byte) error {
 		FieldSource   string `json:"fieldSource"`
 		TargetConcept string `json:"targetConcept"`
 		Direction     string `json:"direction"`
+		As            string `json:"as"`
 	}
 
 	var a alias
@@ -134,6 +142,7 @@ func (r *RelationshipDefinition) UnmarshalJSON(data []byte) error {
 	r.Type = strings.TrimSpace(a.Type)
 	r.Field = strings.TrimSpace(a.Field)
 	r.Direction = strings.TrimSpace(a.Direction)
+	r.As = strings.TrimSpace(a.As)
 
 	r.FieldSource = strings.TrimSpace(a.FieldSource)
 	if r.FieldSource == "" {

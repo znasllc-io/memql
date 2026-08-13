@@ -54,8 +54,6 @@ func (s *Service) Complete(source string, line, col int, filePath string) []Comp
 		items = s.completeInvocation(ctx)
 	case ContextRelationshipTarget:
 		items = s.completeRelationshipTarget(ctx)
-	case ContextShapeInclude:
-		items = s.completeShapeInclude(ctx.Prefix)
 	}
 
 	return items
@@ -331,23 +329,6 @@ func (s *Service) completeRelationshipTarget(ctx CursorContext) []CompletionItem
 			Label: value, Kind: "concept", Detail: detail,
 			InsertText: value, SortPriority: 1,
 		})
-	}
-	return items
-}
-
-// completeShapeInclude offers shape names for a shape body's `include <name>`.
-func (s *Service) completeShapeInclude(prefix string) []CompletionItem {
-	if s.registries == nil {
-		return nil
-	}
-	var items []CompletionItem
-	for _, name := range s.registries.ShapeNames() {
-		if strings.HasPrefix(name, prefix) {
-			items = append(items, CompletionItem{
-				Label: name, Kind: "shape", Detail: "shape",
-				InsertText: name, SortPriority: 1,
-			})
-		}
 	}
 	return items
 }

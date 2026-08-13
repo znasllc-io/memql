@@ -26,7 +26,6 @@ const (
 	ContextUseImportList                         // Inside "use <ns>.<kind>.{ ... }" -> importable ids
 	ContextInvocation                            // After an in-body invocation verb (query/mutation/logic <name>)
 	ContextRelationshipTarget                    // Inside @relationship(... target="<cursor>
-	ContextShapeInclude                          // Inside a shape body after `include `
 )
 
 // CursorContext describes the syntactic context at a cursor position.
@@ -142,12 +141,6 @@ func analyzeCursorContextInner(source string, line, col int) CursorContext {
 	// only functions of that kind, not the whole registry. Sits above the body
 	// fallback so the verb's name position is kind-scoped.
 	if ctx, ok := checkInvocationContext(tokens, prefix); ok {
-		return ctx
-	}
-
-	// 4.65 A shape body's `include <name>` names another shape: offer shapes,
-	// not the everything list.
-	if ctx, ok := checkShapeIncludeContext(tokens, prefix); ok {
 		return ctx
 	}
 
@@ -571,33 +564,6 @@ func checkRelationshipTargetContext(textBefore string) (CursorContext, bool) {
 	}
 	if m := relationshipTargetBareRe.FindStringSubmatch(textBefore); m != nil {
 		return CursorContext{Kind: ContextRelationshipTarget, Prefix: m[1], ConstructKey: "short"}, true
-	}
-	return CursorContext{}, false
-}
-
-// checkShapeIncludeContext detects `include <partial>` inside a shape body, where
-// another shape's name is expected (`shape X { include Y }`). Gated on the
-// enclosing construct being a shape so an identifier `include` elsewhere is not
-// mistaken for the shape-include verb.
-func checkShapeIncludeContext(tokens []parser.Token, prefix string) (CursorContext, bool) {
-	// Must be directly in the shape body (a shape declares no nested blocks), not
-	// inside some `{ }` a malformed shape might contain.
-	if enc, ok := resolveEnclosingConstruct(tokens); !ok || enc.Keyword != "shape" || len(enc.Blocks) > 0 {
-		return CursorContext{}, false
-	}
-	n := len(tokens)
-	// `include ` -- the last token is the verb, cursor just past it.
-	if prefix == "" {
-		if n >= 1 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == "include" {
-			return CursorContext{Kind: ContextShapeInclude}, true
-		}
-		return CursorContext{}, false
-	}
-	// `include <partial>` -- the last token is the partial, the one before it the
-	// verb.
-	if n >= 2 && tokens[n-1].Type == parser.TokenIdentifier && tokens[n-1].Literal == prefix &&
-		tokens[n-2].Type == parser.TokenIdentifier && tokens[n-2].Literal == "include" {
-		return CursorContext{Kind: ContextShapeInclude, Prefix: prefix}, true
 	}
 	return CursorContext{}, false
 }

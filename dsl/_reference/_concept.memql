@@ -22,6 +22,15 @@
 // engine assembles the ID; authors never write the prefix.
 //
 // =============================================================================
+
+// File-top imports. A @relationship target in another namespace is a BARE
+// concept name resolved through one of these (memql#1067); the quoted
+// canonical-ID form is retired. A target in this file's own namespace needs no
+// import -- see section 6's collectionExample.
+use cognition.concepts.{ space }
+use identity.concepts.{ user }
+
+// =============================================================================
 //   1. Concept-level annotations
 // =============================================================================
 //
@@ -205,7 +214,9 @@ concept objectExample {
 @description("Collection concept -- requires a @relationship(type=\"contains\", ...).")
 concept collectionExample {
   // Body decorator: every collection MUST declare what it contains.
-  @relationship(type="contains", field="memberIds", target="v1:reference:objectExample", direction="outgoing")
+  // `objectExample` is in this file's own namespace, so it resolves with no
+  // `use` import.
+  @relationship(type="contains", field="memberIds", target=objectExample, direction="outgoing")
   memberIds []string
 }
 
@@ -213,7 +224,7 @@ concept collectionExample {
 @type("reference")
 @description("Reference concept -- requires a @relationship(type=\"alias\"|\"equals\", ...).")
 concept referenceExample {
-  @relationship(type="alias", field="targetId", target="v1:reference:objectExample", direction="outgoing")
+  @relationship(type="alias", field="targetId", target=objectExample, direction="outgoing")
   targetId string!
 }
 
@@ -658,38 +669,61 @@ concept nestedExample {
 //   the body block (alongside fields) and accept four named args:
 //
 //       @relationship(
-//         type="parent"|"contains"|"alias"|"equals"|"references",
+//         type="<structuralType>",
 //         field="<fieldName>",
-//         target="v1:<ns>:<conceptName>",
+//         target=<conceptName>,
 //         direction="outgoing"|"incoming"
 //       )
 //
+//   `target` is a BARE concept name resolved through a file-top `use`
+//   import (see the top of this file), or -- for a concept in this file's
+//   own namespace -- resolved directly with no import. The quoted
+//   canonical-ID form `target="v1:ns:name"` is RETIRED (memql#1067).
+//
 //   The engine uses these to:
-//     - validate referential integrity at insert time
+//     - canonicalize the named field's id on write and on filter, so that
+//       (concept, id) lookups match whichever form the caller wrote
 //     - drive graph-bundle expansion in queries
 //     - enforce the @type("collection") / @type("reference") constraints
 //
+//   `type` is a CLOSED set the engine owns. An unrecognized value is a
+//   load-time error, not a warning -- so do not invent one here. The
+//   authority is canonicalRelationshipType in component/memql/relations.go,
+//   and TestReferenceRelationshipsAreValid pins every type this file names
+//   against it.
+//
 //   `type` values:
-//     parent      -- the named field carries the id of a logical parent.
-//                    Required for concepts that nest under another.
-//     contains    -- the named field carries ids of contained children.
-//                    Required when @type("collection").
-//     alias       -- this concept aliases the target concept's row.
-//                    Required when @type("reference").
-//     equals      -- this concept equals the target concept's row (id
-//                    identity). Alternative form of alias for the
-//                    @type("reference") requirement.
-//     references  -- soft reference -- no constraint, just metadata.
+//     parent        -- the named field carries the id of a logical parent.
+//                      Required for concepts that nest under another.
+//     contains      -- the named field carries ids of contained children.
+//                      Required when @type("collection").
+//     alias         -- this concept aliases the target concept's row.
+//                      Required when @type("reference").
+//     equals        -- this concept equals the target concept's row (id
+//                      identity). Alternative form of alias for the
+//                      @type("reference") requirement.
+//     owns          -- the named field carries ids this row owns
+//                      exclusively.
+//     createdBy     -- the named field carries the id of the creator. The
+//                      only type permitted a metadata field source.
+//     interactsWith -- the default plain foreign-key edge. No structural
+//                      constraint; the engine canonicalizes the id and
+//                      nothing more. Reach for this when none of the above
+//                      describes what the engine should DO with the edge.
 
 @namespace("reference")
-@description("A concept with three different relationship decorators.")
+@description("A concept with two relationship decorators.")
 concept relationshipExample {
-  // Parent: this row hangs off a space.
-  @relationship(type="parent", field="partitionId", target="v1:cognition:space", direction="outgoing")
-  partitionId    string!
+  // Parent: this row hangs off a space. `space` resolves through the
+  // file-top `use cognition.concepts.{ space }`.
+  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
+  spaceId    string!
 
-  // References (soft): this row may name an author.
-  @relationship(type="references", field="authorId", target="v1:identity:user", direction="outgoing")
+  // A plain foreign key: this row may name an author. There is no
+  // structural relationship between a post and its author beyond "points
+  // at", so interactsWith is the right type -- NOT an invented verb, which
+  // would refuse boot.
+  @relationship(type="interactsWith", field="authorId", target=user, direction="outgoing")
   authorId   string
 
   // Plain data fields can sit next to relationships.

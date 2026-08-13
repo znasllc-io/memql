@@ -204,10 +204,11 @@ var KeywordArgs = map[string][]ArgSpec{
 		{Name: "periodSeconds", Type: "int", Doc: "Rate-limit window in seconds."},
 	},
 	"relationship": {
-		{Name: "type", Type: "string", Doc: "Relationship type: parent, alias, equals, contains, ..."},
+		{Name: "type", Type: "string", Doc: "STRUCTURAL type -- what the engine does with the edge. Closed set: parent, owns, createdBy, alias, equals, contains, interactsWith."},
 		{Name: "field", Type: "string", Doc: "Local field holding the foreign key."},
 		{Name: "target", Type: "string", Doc: "Target concept id, e.g. \"v1:ns:concept\"."},
 		{Name: "direction", Type: "string", Doc: "\"outgoing\" or \"incoming\"."},
+		{Name: "as", Type: "string", Doc: "DOMAIN label -- what the edge means, e.g. as=\"assignedTo\". Optional. Any lowerCamelCase identifier; validated for form only and never checked against a list, so a new verb never needs an engine release (memql#3652)."},
 	},
 }
 

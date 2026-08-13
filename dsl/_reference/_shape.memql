@@ -138,8 +138,13 @@ shape participant participantWithCallerContext {
 // Each line in the body is one of:
 //
 //   <fieldPath>           Project the named field.
-//   include <otherShape>  Include every field from another shape.
 //   // <comment>          Inline comment -- ignored by the parser.
+//
+// There is NO composition verb: `include <otherShape>` was documented
+// for a long time and never implemented, so it parsed as two payload
+// properties and projected two always-null keys. It is rejected at load
+// (memql#3621). Repeat the paths, or drop the body entirely to take the
+// default projection over the bound concept (memql#2035).
 //
 // Field path translation rules:
 //
