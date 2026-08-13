@@ -212,6 +212,29 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   }
 
   const clustersPath = defaultClustersPath();
+
+  // The sign-in persistence seam (memql#3403 / memql#3404).
+  //
+  // This DELEGATES to src/auth/store.ts rather than reimplementing the split.
+  // It is tempting to inline it -- write the access token to clusters.yaml,
+  // the refresh token to SecretStorage, done -- and an earlier draft of this
+  // file did exactly that. It is wrong for a reason that is invisible from
+  // here: SecretStorage cannot be enumerated, so #3404 keeps an INDEX of which
+  // clusters have secrets, and sweeps any secret whose cluster is gone. A
+  // sign-in that wrote a secret without indexing it would look fine until the
+  // next sweep silently deleted the credential it had just stored.
+  //
+  // Built HERE, above the ConnectionManager, because the manager needs it too:
+  // it is the seam a REFUSED credential is cleared through (memql#3529), and
+  // clearing is the same write signing out performs. Every other consumer
+  // (sign-in, sign-out, rename, the secret sweep) takes the same object, which
+  // is the point -- one place decides how a credential is stored, so there is
+  // one place it can be removed from.
+  const storeDeps = {
+    secrets: context.secrets,
+    writeCluster: (update: ClusterUpdate) => upsertCluster(clustersPath, update),
+  };
+
   // The credential resolver (memql#3383 / memql#3385). This is the only place
   // the three things it needs actually exist:
   //
@@ -237,7 +260,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           refreshToken: update.clearStoredRefreshToken ? '' : undefined,
         });
       },
-    })
+    }),
+    // The reactive half (memql#3529): when the cluster REFUSES a bearer we
+    // believed was good, the manager refreshes once, retries once, and -- if
+    // that is refused too -- clears the credential through this seam so the
+    // next action starts a clean sign-in instead of replaying a dead one.
+    storeDeps
   );
 
   const clustersTree = new ClustersTreeProvider(clustersPath, connections);
@@ -304,20 +332,6 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
-  // The sign-in persistence seam (memql#3403 / memql#3404).
-  //
-  // This DELEGATES to src/auth/store.ts rather than reimplementing the split.
-  // It is tempting to inline it -- write the access token to clusters.yaml,
-  // the refresh token to SecretStorage, done -- and an earlier draft of this
-  // file did exactly that. It is wrong for a reason that is invisible from
-  // here: SecretStorage cannot be enumerated, so #3404 keeps an INDEX of which
-  // clusters have secrets, and sweeps any secret whose cluster is gone. A
-  // sign-in that wrote a secret without indexing it would look fine until the
-  // next sweep silently deleted the credential it had just stored.
-  const storeDeps = {
-    secrets: context.secrets,
-    writeCluster: (update: ClusterUpdate) => upsertCluster(clustersPath, update),
-  };
   const signInStore: SignInTokenStore = {
     persistSignIn: (clusterName, credentials) =>
       persistSignIn(storeDeps, clusterName, {
