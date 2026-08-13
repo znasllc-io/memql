@@ -1,8 +1,8 @@
 # Local cockpit front door -- mirrors the cloud cockpit ingress topology so the
-# Cockpit connects to https://cockpit.local.znas.io EXACTLY as it connects to
+# Cockpit connects to https://cockpit.memql.localhost EXACTLY as it connects to
 # https://cockpit.<staging-domain>: no ports, no port-forward. The k3s-bundled
 # traefik terminates TLS on 443 with the operator's browser-trusted wildcard
-# (local-znas-tls, seeded by seed-secrets.sh) and routes by hostname to the
+# (memql-front-door-tls, seeded by seed-secrets.sh) and routes by hostname to the
 # product-neutral bff gRPC edge.
 #
 # The bff serves PLAINTEXT gRPC on :50051, so traefik forwards HTTP/2 cleartext
@@ -12,6 +12,13 @@
 # cloud fronts the bff with nginx). Only the ingress-controller annotation +
 # the cert/DNS source differ per env -- the topology + the Cockpit dial path are
 # identical.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
+# that chooses another domain overrides it through the ArgoCD Application's
+# spec.source.kustomize.patches, emitted by scripts/k3d/up.sh -- the same seam
+# memql#3572 uses for image overrides. The default is committed so that a plain
+# `kubectl apply -k` still produces a working front door, and so that the common
+# case carries no generated YAML at all.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -28,15 +35,15 @@ metadata:
 # deploy/k8s/components/engine-bff/bff.yaml. Traefik orders rules by
 # specificity, so the two longer paths below win over `/`.
 #
-# The portal therefore lives at https://cockpit.local.znas.io/portal/ -- the
+# The portal therefore lives at https://cockpit.memql.localhost/portal/ -- the
 # ops edge's graphical half, alongside the gRPC half the terminal Cockpit
 # uses. Same front door, same TLS, no port, no port-forward.
 spec:
   tls:
-    - hosts: ["cockpit.local.znas.io"]
-      secretName: local-znas-tls
+    - hosts: ["cockpit.memql.localhost"]
+      secretName: memql-front-door-tls
   rules:
-    - host: cockpit.local.znas.io
+    - host: cockpit.memql.localhost
       http:
         paths:
           # The portal's static bundle.
