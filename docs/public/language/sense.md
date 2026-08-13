@@ -188,9 +188,7 @@ legal-next rule:
   value, never at `type=` / `field=` / `direction=`. Both are matched from the
   raw text before tokenizing (the quoted form's unterminated string zeroes the
   lexer's tokens), confined to a single well-formed annotation call so an
-  unclosed `@relationship(` elsewhere cannot poison a later `target=`. A shape
-  body's `include <cursor>` offers shape names, scoped to a shape enclosing
-  construct.
+  unclosed `@relationship(` elsewhere cannot poison a later `target=`.
 
 ---
 

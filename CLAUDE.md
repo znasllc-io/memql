@@ -1276,9 +1276,8 @@ How the DSL constructs lean on each other. Each layer can only depend
   `@row` shapes signature-bound to a generic trait concept —
   scaffolds for cross-concept predicates (`activeRowTrait`,
   `statusRowTrait`, etc.). The legacy `@concepts(...)` binding
-  annotation is retired. Shapes CANNOT `include` other shapes --
-  the composition + aliasing this line used to promise is unimplemented
-  (memql#3630 / memql#3621); see the Shapes section below.
+  annotation is retired. Shapes can `include` other shapes for
+  composition + aliasing.
 - **Specs** are atomic boolean predicates. A spec **binds one shape XOR
   concept in its signature** (`spec <boundName> <name>`) and the body
   `return`s a boolean over bare field names. The binding picks the eval
@@ -1565,44 +1564,12 @@ concept id.
   (`sort "version", "desc"`), `provenance` has no sort form, and the
   runtime/SDK sort surface still accepts either spelling.
 - **One Go boolean grammar** (operator standardization #971): `&&`
-  (AND), `||` (OR), parens `( )`, with Go precedence
-  (comparisons > `&&` > `||`).
-  **`!` (NOT) is NOT part of this grammar** and never has been
-  (memql#3630). It lexes and parses, and the AST converter then refuses
-  every `!` it is handed: in a query filter or spec with the `#2542`
-  expression-led scope error, and in a logic body or collection lambda
-  with `NOT/! does not convert; write the != comparison form`. So it is
-  refused on **every** surface `ASTConverter` serves -- the `#2542`
-  message's "only available in logic / collection lambdas" is not true
-  of `!` either. The one place a bare `!` does work is an automation
-  cond-step **condition**, which a separate string evaluator
-  (`component/automations/evaluator.go`) handles; `dsl/data/logic.memql`
-  is the single corpus use. Write the `!=` form, or a trait that
-  states the negative. This bullet used to list `!` with a precedence,
-  which read as a specification for an operator no query has ever been
-  able to use.
-- **"Retired" names an authoring convention a TEXT SCAN enforces, not
-  something the loader refuses** (memql#3630). The legacy `;`-AND and
-  `,`-OR separators, the `has` membership operator, and the `?.`
-  optional-chain prefix are all still **accepted by the parser and the
-  loader**; `TestNoRetiredOperatorForms`
-  (`test/dslconformance/no_retired_operators_test.go`) is a line-oriented
-  scan over the **embedded** `dsl/` tree that refuses the spelling in
-  authored files. Say it that way, because the difference is
-  load-bearing: `,` still computes as OR, so a `,` inside parentheses
-  turns an authz conjunction into a disjunction -- which memql#3612
-  fixed **in the scanner** (both gates missed the parenthesised form),
-  not in the parser -- and no test-time scan reaches a product DSL
-  bundle mounted at `MEMQL_DSL_PATH` (memql#3629). `dslspec` is the
-  other half of the enforcement: it is what MemQL Sense reads, and its
-  drift test keeps `has` out of the offered operator set.
+  (AND), `||` (OR), `!` (NOT), parens `( )` with Go precedence
+  (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR
+  separators are retired in authored filters and rejected by the
+  conformance test (`TestNoRetiredOperatorForms`).
 - Membership is the single `in` operator: `args.x in list`
-  or `kind in ["a", "b"]` (payload props bare). `has` (its reverse) is
-  retired **from authoring only**, on exactly the terms above -- and
-  `OpHas` stays load-bearing INSIDE the engine, because the parser
-  desugars `<scalar> in payload.<arrayField>` **to**
-  `payload.<arrayField> has <scalar>` (#976). Every authored `in`
-  becomes an `OpHas` node; removing it would break `in`.
+  or `kind in ["a", "b"]` (payload props bare). `has` (its reverse) is retired.
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
   if `args.x` is absent the guarded block AND its connective are
   dropped as if never written (unambiguous under `||`). The `?.`
@@ -1820,11 +1787,13 @@ shape space spaceCard {
 ```
 
 **Actor shapes** project the engine envelope (the authenticated
-actor + engine timestamp + allow-listed config). They carry no
-signature concept. Closed field set:
-`actor.userId` / `actor.role` / `actor.identityId` /
-`actor.isClusterOwner` / `actor.now` /
-`actor.config.<allow-listed-key>`.
+actor + engine timestamp). They carry no signature concept. Closed
+field set, enforced at load since memql#3621 and identical to the one
+canonical envelope (#2623): `actor.userId` / `actor.role` /
+`actor.identityId` / `actor.isClusterOwner` / `actor.primaryEmail` /
+`actor.now` (plus the legacy `actor.isOwner` alias).
+`actor.config.<key>` is retired -- bare `config.<key>` is the config
+read, and shapes do not project it.
 ```memql
 @description("Actor identity envelope")
 @actor
@@ -1852,22 +1821,27 @@ shape space ownedSpace {
 }
 ```
 
-**Composition -- `include` DOES NOT EXIST** (memql#3630; the
-implementation half is memql#3621). This section used to read "a shape
-can `include` another shape; transitive inclusion is supported, cycles
-and field collisions are errors." None of that is implemented.
-`parseShapeDecl` appends **every** body identifier to `Paths`, so
-`include spaceCard` becomes the two payload paths `include` and
-`spaceCard` -- two always-null projection keys, accepted with no error
-and no warning. `ast.ShapeDecl` has no include field for anything to
-land in, and there is no cycle or collision detection because there is
-no inclusion for them to detect. Zero authored shapes use it. Repeat
-the paths, or project a wider shape. Whether `include` gets built or
-its remaining mentions get deleted is memql#3621's call.
+**No composition.** `include` is NOT a shape verb -- it was documented
+here for a long time and never existed (memql#3621). The parser reads a
+body as a path list, so `include spaceCard` parsed as two payload
+properties (`include`, `spaceCard`) and projected two always-null keys;
+there was no cycle or collision detection because there was no feature.
+Zero shapes in the tree used it, so the promise was removed rather than
+built, and `include` is now REJECTED at load with a message that says
+so. To share a projection, repeat the paths -- or drop the body entirely
+and take the default projection over the bound concept (memql#2035),
+which is the direction the tree is moving anyway.
+
+**Every body path is checked at load** (memql#3621): a bare payload
+property must be a declared field of the bound concept, the bound
+concept must resolve (an ambiguous bare name disambiguates through the
+shape's own domain), two paths may not collapse onto the same terminal
+key, and the declared kind must match the body -- `actor.*` needs
+`@actor`, `row.*` / bare payload needs `@row`, and a shape must declare
+at least one.
 
 No `func`, no `@template`, no `node("…")` wrapping. Shapes have no
-inputs and no return; the body is a path list, and nothing else — an
-`include` line is read as one more path (see above).
+inputs and no return; the body is a path list.
 
 ### Specs
 Atomic boolean predicates — **signature-bound** (epic #2281). A spec

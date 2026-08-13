@@ -16,7 +16,7 @@ MemQL is the query and mutation language that powers the memory engine. It provi
 ## When to Use MemQL
 
 - Retrieving concept instances (agents, spaces, participants, etc.) with filterable JSON payloads.
-- Traversing graph-like relationships (parent/child, contains, alias, owns, createdBy, interactsWith).
+- Traversing graph-like relationships — parent/child hierarchies, containment, aliasing, ownership, and provenance edges (see [Relationships](#relationships)).
 - Inserting new immutable records via mutations.
 
 ## Two Authoring Surfaces
@@ -98,7 +98,7 @@ This returns all active worlds. MemQL responses use **omission semantics**—fie
 ```
 
 - `result.bundle.nodes` is a flat slice of every memory node touched during evaluation (matching records + relationship expansions).
-- `result.bundle.edges` describes the relationships that were traversed. Edge types include `child`, `contains`, `aliases`, `createdBy`, `interactions`, and `owns`. Omitted when no edges exist.
+- `result.bundle.edges` describes the relationships that were traversed. Each edge's `type` is one of the [edge labels](#edge-labels-on-the-wire) — that table is the complete set. Omitted when no edges exist.
 - `result.bundle.rootIds` captures the IDs that directly satisfied the query before relationship expansion.
 - `result.data` carries shaped output when the executed query carries a shape projection (i.e. a DSL-defined query with a `shape` directive). Omitted otherwise; when shaped, contains one element per root.
 - `errors` is omitted on success; on failure, contains an array of structured issues (`code`, `message`, optional `metadata`).
@@ -283,6 +283,35 @@ When a concept has a field that points TO another concept (like `spaceId` pointi
 - If concept A has a field storing concept B's ID → A declares `type="parent"` pointing to B
 - If concept A has an array of concept B IDs → A declares `type="contains"` pointing to B
 - The `child` type is not directly declared; child relationships are inferred by querying `childOf()`, which finds nodes that have a `parent` relationship to the target
+
+#### Edge labels on the wire
+
+`type` is what you **declare**. The label a traversal **emits** on
+`result.bundle.edges[].type` is a separate, closed vocabulary, and the two are
+not word-for-word the same. This is the complete emitted set:
+
+| Edge label | Emitted when a traversal follows |
+|---|---|
+| `child` | a `parent` relationship, walked from the parent down to the child |
+| `alias` | an `alias` relationship |
+| `equals` | an `equals` relationship |
+| `interactsWith` | an `interactsWith` relationship |
+| `createdBy` | a `createdBy` relationship |
+| `contains` | a `contains` relationship |
+| `owns` | an `owns` relationship |
+
+Two rules explain every difference between that list and the `type` table above:
+
+- **An edge is written in the direction it was traversed.** `parent` is
+  therefore declarable but never emitted — following it produces a `child`
+  edge, pointing from the parent to the child it found.
+- **A relationship type whose graph expansion is not wired contributes no
+  edge.** Declaring it is still meaningful (it drives id canonicalization on
+  the field), but no bundle edge appears for it.
+
+Match on these exact strings. The engine emits them from one exported constant
+set (`GraphEdgeLabels()` in `component/memql`), and a test fails if this table
+and that set disagree, so what is written here is what arrives on the wire.
 
 ## Executing Queries
 
@@ -486,8 +515,8 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `owns(expr)`    | Resolves ownership links in both directions.                                                             |
 | `aliasOf(expr)` | Collects nodes sharing alias groups.                                                                     |
 | `equals(expr)`  | Follows equality relationships similar to alias.                                                         |
-| `interactsWith` | Traverses recorded interaction edges (e.g., conversation participants).                                  |
-| `createdBy`     | Resolves creator nodes using payload or table-backed metadata.                                           |
+| `interactsWith(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
+| `createdBy(expr)` | Resolves creator nodes using payload or table-backed metadata.                                         |
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
 
 Relationship outputs can be combined with filters:
@@ -587,7 +616,7 @@ withDepth(parentOf(concept==v1:examples:quest && id=="v1:examples:quest:quest-no
 
 Shapes are reusable field-projection templates, declared in struct form in `dsl/<namespace>/shapes.memql`. Queries reference them via the `shape <name>` directive; the engine projects each matched row through the template and returns the result in `result.data`.
 
-Each shape declares its **kind** (where its fields come from) via `@row` and/or `@actor`. At least one is required; both is allowed (mixed shape). The body is a list of field paths plus optional `include` statements — shapes have no inputs and no return.
+Each shape declares its **kind** (where its fields come from) via `@row` and/or `@actor`. At least one is required (enforced at load since memql#3621); both is allowed (mixed shape). The body is a list of field paths — shapes have no inputs and no return.
 
 **Row shapes** project a concept's payload + row intrinsics. The bound concept is named by the **signature** `shape <Concept> <name>` (the short name resolves through the file-top `use ...concepts.{ ... }` import):
 
@@ -624,14 +653,9 @@ shape actorEnvelope {
 
 **Trait shapes** are `@row` shapes signature-bound to a generic trait concept — scaffolds for cross-concept predicates (`activeRowTrait`, `statusRowTrait`, `deletedRowTrait`, `archivedRowTrait`, etc. in `dsl/common/shapes.memql`).
 
-**Composition.** A shape can `include` another shape; transitive inclusion is supported, cycles and field collisions are errors. Pure aliasing is a shape whose body is a single `include` line:
+**No composition.** `include` is not a shape verb. It was documented for a long time and never implemented (memql#3621): the parser reads a body as a path list, so `include spaceCard` parsed as two payload properties and projected two always-null keys. Zero shapes used it, so the promise was removed rather than built — `include` is now rejected at load. To share a projection, repeat the paths, or drop the body entirely and take the default projection over the bound concept (memql#2035).
 
-```memql
-@row
-shape space spaceCardAlias {
-  include spaceCard
-}
-```
+**What the loader checks (memql#3621).** A bare payload property must be a declared field of the bound concept; the bound concept must resolve (an ambiguous bare name disambiguates through the shape's own domain); two paths may not collapse onto the same terminal key (every path is keyed by its LAST segment, so `row.id` + `id` used to yield one entry and lose the row id); and the declared kind must match the body — `actor.*` needs `@actor`, `row.*` / bare payload needs `@row`, and at least one kind is required.
 
 > **Retired forms.** Receiver-function shapes (`func (Shape) ...`), the `@template` annotation, `node("...")`-wrapped template bodies, and the `@concepts("v1:...")` binding annotation are all retired and rejected at parse time. The concept binding lives in the signature; the body is a plain path list. Runtime `shape(<expr>, {...})` / `select(<expr>, ...)` query strings are retired too (#250) — wanting a projection means defining (or reusing) a DSL query with a `shape` directive.
 

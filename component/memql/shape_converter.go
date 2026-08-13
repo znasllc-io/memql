@@ -17,6 +17,12 @@ package memql
 //   * Template key: path's terminal identifier segment.
 //   * Validation: every @useConcept(name) entry must be referenced by
 //     at least one body path (signature-bound concepts are exempt).
+//   * Validation (memql#3621): validateShapeBody runs every decl-local
+//     check -- kind declared AND honoured, a closed actor.* set, and a
+//     refusal of the phantom `include` verb -- plus a terminal-key
+//     collision refusal in the body walk below. The remaining half (does
+//     a projected payload property exist on the bound concept?) needs the
+//     concept registry and runs at bootstrap: shape_concept_validator.go.
 
 import (
 	"fmt"
@@ -95,6 +101,15 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 		useConcepts = append([]string{signatureConcept}, useConcepts...)
 	}
 
+	// Decl-local validation (memql#3621): kind declared + honoured, no
+	// `include` (composition was documented and never implemented), and a
+	// closed actor.* set. Runs before the body walk so a shape that lies
+	// about where its fields come from is refused rather than registered
+	// with a template whose values resolve to nil.
+	if err := validateShapeBody(decl, kindRow, kindActor, origin); err != nil {
+		return nil, err
+	}
+
 	// Empty body. C5 (memql#2035): a signature-bound shape with no body
 	// defaults to projecting every projectable field of its concept --
 	// "concept is the single source of truth for fields." We can't
@@ -117,17 +132,24 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 			}
 		}
 		return &ShapeDefinition{
-			Name:              decl.Name,
-			Description:       languageParser.EffectiveDescription(decl.DocComment, description),
-			Template:          map[string]any{},
-			Origin:            origin,
-			KindRow:           true,
+			Name:        decl.Name,
+			Description: languageParser.EffectiveDescription(decl.DocComment, description),
+			Template:    map[string]any{},
+			Origin:      origin,
+			// The DECLARED kind, not a hardcoded true (memql#3621).
+			// validateShapeBody has already refused an empty body that does
+			// not declare @row, so this is @row -- but it now says so
+			// because the annotation says so.
+			KindRow:           kindRow,
 			KindActor:         kindActor,
 			UseConcepts:       useConcepts,
 			DefaultProjection: true,
 		}, nil
 	}
 	template := make(map[string]any, len(decl.Paths))
+	// keySource remembers which authored path claimed each template key, so a
+	// collision names both sides (memql#3621).
+	keySource := make(map[string]string, len(decl.Paths))
 	usedConcepts := make(map[string]bool, len(useConcepts))
 
 	for _, path := range decl.Paths {
@@ -167,6 +189,16 @@ func shapeDeclToShapeDefinition(decl *languageParser.ShapeDecl, origin string) (
 		if key == "" {
 			return nil, fmt.Errorf("%s: shape field path %q has no usable terminal key (must end in a simple identifier)", origin, path)
 		}
+		// Terminal-key collision (memql#3621). Every path collapses to its
+		// LAST segment and the template is a plain map, so two paths sharing
+		// a terminal silently became one entry -- last write wins, the other
+		// projection gone. `row.id` + `id` is the sharp case: the row id is
+		// dropped in favour of a payload property. A shape body has no
+		// aliasing form, so the only fix is dropping one of the two paths.
+		if prev, dup := keySource[key]; dup {
+			return nil, fmt.Errorf("%s: shape %q projects %q and %q onto the same template key %q -- every path is keyed by its terminal segment, so the second would silently replace the first; drop one of the two paths", origin, decl.Name, prev, path, key)
+		}
+		keySource[key] = path
 		template[key] = `node(\"` + storedPath + `\")`
 	}
 

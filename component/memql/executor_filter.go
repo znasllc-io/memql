@@ -763,7 +763,17 @@ func (e *MemQLEngine) canonicalizeRelationshipFieldValue(ctx context.Context, co
 		if !strings.EqualFold(strings.TrimSpace(rel.Direction), "outgoing") {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(rel.Field), fieldName) {
+		// EXACT, not EqualFold (memql#3654). The write path looks the field up
+		// with an exact `payload[field]` map lookup, so a case-insensitive match
+		// here made a mismatched field canonicalize on filter but NOT on write
+		// -- writes landing non-canonical while reads looked correct. The load
+		// gate now rejects a field whose case does not match the concept's
+		// declaration, so the two sides agree on one spelling.
+		//
+		// The direction comparison above stays EqualFold: normalization
+		// lowercases it, but fixtures that construct definitions directly
+		// without going through Init rely on the fold.
+		if strings.TrimSpace(rel.Field) != fieldName {
 			continue
 		}
 		target := strings.TrimSpace(rel.TargetConcept)

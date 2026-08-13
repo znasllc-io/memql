@@ -10,10 +10,8 @@
 //
 // A shape is a projection template. Queries and mutations apply shapes to
 // rows; specs bind to shapes to express predicates over projected fields.
-// Shapes have NO inputs, NO outputs -- the body is a list of field paths,
-// and nothing else. (This line used to promise "optional `include`
-// statements". There is no include mechanism -- see section 6 and
-// memql#3630 / memql#3621.)
+// Shapes have NO inputs, NO outputs -- the body is a list of field paths
+// and optional `include` statements.
 //
 // =============================================================================
 //   1. Shape-level annotations
@@ -68,12 +66,11 @@ shape participant participantFull {
 // =============================================================================
 //
 // A trait shape is `@row` WITHOUT a signature-bound concept. It declares
-// row fields that any concept might have. (This line used to say these
-// scaffolds "support shape composition (`include`) across concepts".
-// They do not -- there is no include mechanism; see section 6.)
-// (Note: cross-concept boolean predicates are now authored as a `trait`
-// -- the deliberately UNBOUND row predicate -- not by pinning a trait
-// shape; the spec `@shape("...")` pin was removed in epic #2281.)
+// row fields that any concept might have. These scaffolds support shape
+// composition (`include`) across concepts. (Note: cross-concept boolean
+// predicates are now authored as a `trait` -- the deliberately UNBOUND
+// row predicate -- not by pinning a trait shape; the spec `@shape("...")`
+// pin was removed in epic #2281.)
 //
 // Trait shapes shipped under `dsl/common/shapes.memql`:
 //   activeRowTrait      payload.active
@@ -143,16 +140,11 @@ shape participant participantWithCallerContext {
 //   <fieldPath>           Project the named field.
 //   // <comment>          Inline comment -- ignored by the parser.
 //
-// THERE IS NO `include`. This list used to carry an
-// `include <otherShape>  Include every field from another shape.` line.
-// parseShapeDecl appends EVERY body identifier to Paths, so a line reading
-// `include spaceCard` becomes the two payload paths `include` and
-// `spaceCard` -- two always-null projection keys, accepted with no error
-// and no warning. ast.ShapeDecl has no include field, and no cycle or
-// collision detection exists because there is no inclusion to detect.
-// Zero authored shapes use it. Repeat the paths, or project a wider shape.
-// Whether include gets built or these mentions get deleted outright is
-// memql#3621's call; the documentation correction is memql#3630.
+// There is NO composition verb: `include <otherShape>` was documented
+// for a long time and never implemented, so it parsed as two payload
+// properties and projected two always-null keys. It is rejected at load
+// (memql#3621). Repeat the paths, or drop the body entirely to take the
+// default projection over the bound concept (memql#2035).
 //
 // Field path translation rules:
 //

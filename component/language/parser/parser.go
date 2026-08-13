@@ -826,7 +826,16 @@ func (p *Parser) parseAttribute() (*Attribute, error) {
 
 		// Named arguments: @trigger(event="value", filter="...")
 		for !p.check(TokenParenClose) && !p.check(TokenEOF) {
-			if !p.check(TokenIdentifier) {
+			// A lexer-promoted keyword is a valid argument name here
+			// (memql#3652). `as` is promoted to TokenKeywordAs for
+			// `forEach ... as x` and `use ... as` aliasing, but an argument
+			// name sits after `(` or `,` and is followed by `=` -- a position
+			// no control-flow keyword can occupy, so there is nothing to
+			// disambiguate. The identical allowance already exists one position
+			// over, for annotation NAMES (@default, @return, @case), and its
+			// predicate already lists TokenKeywordAs; this keeps the two
+			// positions from drifting apart.
+			if !p.check(TokenIdentifier) && !isKeywordTokenForAttribute(p.current.Type) {
 				return nil, newParseErrorf(&p.current, "expected argument name in attribute, got %q", p.current.Literal)
 			}
 			argName := p.current.Literal
@@ -2868,6 +2877,7 @@ func attributeToRelationshipDecl(attr *Attribute) (*RelationshipDecl, error) {
 		FieldSource: get("fieldSource"),
 		Target:      get("target"),
 		Direction:   get("direction"),
+		As:          get("as"),
 	}, nil
 }
 

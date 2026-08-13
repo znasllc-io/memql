@@ -23,9 +23,14 @@ import (
 //   - Unused-trait shapes / traits (concept-agnostic predicates) are
 //     out of scope -- their body forms differ from function bodies
 //     and they're already enforced by the kind validator.
-//   - `@row` / `@caller` kind annotations on shapes are not checked
-//     here (the shape kind validator already verifies the body
-//     contains at least one matching path).
+//   - `@row` / `@actor` kind annotations on shapes are not checked
+//     here. That is validateShapeBody's job (shape_body_validator.go):
+//     it verifies the declared kind is honoured AND used -- every path
+//     matches a declared kind, and every declared kind has at least one
+//     matching path. This comment claimed as much for a long time
+//     before any such validator existed (memql#3621), which is how a
+//     kind-less shape, and an @row-only shape projecting actor.userId,
+//     both loaded.
 func validateDeclaredUsage(rawSource string, funcDef *languageParser.FunctionDef) error {
 	if funcDef == nil {
 		return nil
