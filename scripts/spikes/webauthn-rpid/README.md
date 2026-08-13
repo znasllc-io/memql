@@ -99,6 +99,40 @@ it would.
 This covers the browser's validator, headless, Chrome only. It says nothing
 about what an authenticator does once the ceremony proceeds - that is leg 2.
 
+#### Gecko was attempted and CANNOT be measured this way (2026-08-12)
+
+Firefox **153.0** on Linux, same origin, same abort technique, driven headless
+by `run.sh --probe-firefox`. The result is a **non-result**, and the controls
+are how we know:
+
+| RP ID | Role | Expected | Outcome | Error |
+|---|---|---|---|---|
+| `memql.localhost` | parent | accepted | inconclusive | `NotAllowedError` |
+| `identity.memql.localhost` | exact match | accepted | inconclusive | `NotAllowedError` |
+| `localhost` | positive control | rejected | inconclusive | `NotAllowedError` |
+| `example.com` | negative control | **rejected** | inconclusive | `NotAllowedError` |
+
+`example.com` must be refused with a `SecurityError` at this origin. It was
+not - it came back with the same `NotAllowedError` as everything else, which
+means **the RP ID validator is not what answered**. With no authenticator
+available, Gecko rejects the ceremony before the RP ID is ever considered, so
+every row in that run is a reading off an instrument that was not connected.
+Enabling Gecko's software authenticator
+(`security.webauth.webauthn_enable_softtoken`, which `run.sh` sets in the
+throwaway profile) did not change it.
+
+Chrome's validator runs early enough that an aborted call still reaches it;
+Gecko's ordering does not give the same opening. **So the browser leg remains
+Chrome-only, and the interesting divergence - WebKit - is still unmeasured.**
+
+Two things this bought anyway, both of which outlast the spike:
+
+- The page reports `inconclusive` rather than folding an unexpected error name
+  into accepted-or-rejected, so the row is honest on its face.
+- `run.sh` now **exits 5** when the negative control is not rejected. A run
+  that could not measure no longer looks like a run that measured, which is the
+  failure this whole harness exists to prevent one level up.
+
 ### Leg 2 - the authenticators: NOT ANSWERABLE FROM CODE. Needs a human.
 
 Nothing above tells us what four independent implementations actually *do*:
@@ -121,76 +155,106 @@ the `needs-human` label.
 
 ---
 
-## Prerequisites
-
-1. `/etc/hosts` entries for the test domain (the install wizard's
-   `install.hostsEntries` capability does this for a real install; do it by hand
-   for the spike):
-
-   ```
-   127.0.0.1  identity.memql.localhost cockpit.memql.localhost bff.memql.localhost
-   ```
-
-   **On macOS this step turned out to be unnecessary** - verified on 26.5.1 with
-   no such entries present: the system resolver already maps `*.localhost` to
-   `127.0.0.1`, so `curl https://identity.memql.localhost:8444/` returned 200
-   with no `--resolve` and no hosts file edit, and Safari inherits that. Chrome
-   maps `*.localhost` internally regardless of the resolver. Keep the entries
-   documented for other platforms, but do not burn a `sudo` on them here before
-   checking whether you need one.
-
-2. An mkcert wildcard certificate and a trusted local CA. Generate it **outside
-   the repository** - `*.pem` is not gitignored here, so a private key written
-   into the repo root sits untracked next to your work and can be swept into a
-   commit:
-
-   ```
-   mkcert -install
-   mkdir -p /tmp/memql-spike-3405 && cd /tmp/memql-spike-3405
-   mkcert "*.memql.localhost" memql.localhost
-   ```
-
-   Because two names are passed, mkcert **suffixes the output with `+1`**: it
-   writes `_wildcard.memql.localhost+1.pem` and
-   `_wildcard.memql.localhost+1-key.pem` into the current directory. Use those
-   exact names below - the unsuffixed spelling does not exist.
-
-3. **A phone on the same Bluetooth range as the desktop** for the hybrid legs.
-   Hybrid transport needs BLE for proximity attestation; being on the same
-   Wi-Fi is not sufficient and not a substitute.
-
 ## Run
 
-Run from the repository root (`go run` needs the module), pointing at the
-certificate directory from step 2:
+**One command.** It issues the certificate (creating the local CA if this
+machine has none), starts the TLS server, measures the browser leg by itself,
+and prints what is left for you:
 
 ```bash
-CERTS=/tmp/memql-spike-3405
-go run ./scripts/spikes/webauthn-rpid \
-  --rp-id=memql.localhost \
-  --addr=127.0.0.1:8443 \
-  --cert=$CERTS/_wildcard.memql.localhost+1.pem \
-  --key=$CERTS/_wildcard.memql.localhost+1-key.pem
+scripts/spikes/webauthn-rpid/run.sh
 ```
 
-Smoke-tested on 2026-08-09 (mkcert v1.4.4, macOS): the server comes up and
-`https://identity.memql.localhost:8443/` returns 200 with a CA-trusted
-certificate - verified with `curl --resolve` and *without* `-k`, so TLS trust is
-genuinely working rather than being bypassed. Everything up to the ceremony is
-confirmed good; the phones are the only untested variable left.
+Then open the URL it prints. Everything below happens for you:
 
-Open `https://identity.memql.localhost:8443/` and work down the four buttons.
-Then re-run with `--rp-id=identity.memql.localhost` to measure Case A
-separately - if Case B fails and Case A passes, the consequence is that a
-passkey must be enrolled per subdomain rather than once per cluster, which is a
-materially different (and worse, but survivable) design.
+- the certificate lands in `/tmp/memql-spike-3405`, **outside the repository** -
+  `*.pem` is not gitignored here, and memql#3518 was filed over a private key
+  written next to your work;
+- **no `mkcert -install`, and no `sudo`.** Issuing a certificate creates the CA
+  on its own; the system trust store is only needed if you want the browser to
+  stop warning, which is a separate decision;
+- the server binds **both loopback stacks**. `identity.memql.localhost` resolves
+  to `::1` under systemd-resolved and `127.0.0.1` from an `/etc/hosts` line, and
+  a v4-only bind refuses the connection on exactly the machines where the name
+  resolved fine;
+- leg 1 runs on page load and is recorded before you touch anything;
+- every outcome is written to `/tmp/memql-spike-3405/results.md` as it happens,
+  so **nothing needs transcribing**.
 
-The page distinguishes the two failure modes for you:
+Other forms:
+
+```bash
+scripts/spikes/webauthn-rpid/run.sh --probe-firefox   # headless Gecko (see above: it cannot measure)
+scripts/spikes/webauthn-rpid/run.sh --control         # the local.znas.io control
+scripts/spikes/webauthn-rpid/run.sh --help
+```
+
+### What still needs you
+
+Three buttons and a phone:
+
+1. **platform authenticator** - Touch ID / Windows Hello. No phone.
+2. **hybrid -> iOS** - scan the QR with an iPhone.
+3. **hybrid -> Android** - scan the QR with an Android phone.
+
+plus button 5 (usernameless assertion) to confirm discoverable login.
+
+The iOS and Android buttons issue an identical ceremony - the browser shows one
+QR code and cannot know which phone scans it. They are two buttons so that YOU
+declare which device you used, because that is the axis the finding is reported
+along and nothing in the API reveals it.
+
+**Hybrid transport needs BLUETOOTH between the phone and the desktop.** Same
+Wi-Fi is not a substitute and not a fallback.
+
+**Do Safari first.** Chrome's validator is already measured, so Chrome can no
+longer surprise you on the browser leg. WebKit can, and it is also the engine
+behind the iOS half of hybrid transport. If Safari's auto-run leg 1 shows
+`memql.localhost` REJECTED, that is a browser-leg divergence from Chrome and the
+single most consequential outcome available here - stop and record it before
+touching a phone.
+
+### Reading a failure
 
 - `SecurityError` - the **browser** rejected the RP ID. Leg 1 was wrong.
 - `NotAllowedError` **after** the platform UI appeared - the **authenticator**
   refused, or you dismissed the prompt. Re-run and complete the prompt before
   concluding anything.
+- Every control row unexpected - **the run measured nothing.** See the Gecko
+  section above; `run.sh` exits 5 rather than let this pass as a result.
+
+## Prerequisites (only if you are not using run.sh)
+
+1. `/etc/hosts` entries for the test domain:
+
+   ```
+   127.0.0.1  identity.memql.localhost cockpit.memql.localhost bff.memql.localhost
+   ```
+
+   **On macOS this is unnecessary** - verified on 26.5.1: the system resolver
+   already maps `*.localhost` to `127.0.0.1`, and Chrome maps it internally
+   regardless of the resolver. On Linux, systemd-resolved answers `::1`, which
+   the harness handles by binding both stacks.
+
+2. An mkcert certificate, generated **outside the repository**:
+
+   ```
+   mkdir -p /tmp/memql-spike-3405 && cd /tmp/memql-spike-3405
+   mkcert "*.memql.localhost" memql.localhost
+   ```
+
+   Two names means mkcert **suffixes the output with `+1`**:
+   `_wildcard.memql.localhost+1.pem` and `_wildcard.memql.localhost+1-key.pem`.
+
+3. Then, from the repository root:
+
+   ```bash
+   go run ./scripts/spikes/webauthn-rpid \
+     --rp-id=memql.localhost --addr=127.0.0.1:8443 \
+     --cert=/tmp/memql-spike-3405/_wildcard.memql.localhost+1.pem \
+     --key=/tmp/memql-spike-3405/_wildcard.memql.localhost+1-key.pem \
+     --results=/tmp/memql-spike-3405
+   ```
 
 ## Control
 
