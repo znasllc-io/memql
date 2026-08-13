@@ -735,7 +735,23 @@ func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes
 			if conceptId == "" || !strings.Contains(conceptId, ":") {
 				return fmt.Errorf("automation %q: @trigger concept=%q must be a fully-qualified concept id", fd.Name, parsed.Concept)
 			}
-			if registry != nil {
+			// An EMPTY registry means concepts have not been loaded yet, not
+			// that every concept is unknown -- and the loader cannot tell the
+			// two apart from in here (memql#3614).
+			//
+			// Concepts load in the database phase, before automations, on the
+			// real boot path. They do NOT on every other path that reaches
+			// this loader: `LoadByName` serves MCP `run_automation` at runtime,
+			// and several test binaries construct a loader directly. Validating
+			// against a registry this function does not populate made all 13
+			// concept-scoped automations in the shipped tree "unregistered"
+			// under `-tags mcp`, which is how CI caught it.
+			//
+			// So the check runs only when there is a registry to check against.
+			// This is the same decidability rule the integration-executor check
+			// below applies: refuse what this binary can actually judge, and
+			// stay quiet about what it cannot.
+			if registry != nil && len(registry.List()) > 0 {
 				if _, cerr := registry.Get(conceptId); cerr != nil {
 					return fmt.Errorf("automation %q: @trigger concept=%q is not a registered concept, so the compiled topic %q can never match a CDC event: %w",
 						fd.Name, conceptId, "graph."+eventStr+"."+conceptId, cerr)
