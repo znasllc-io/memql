@@ -47,6 +47,16 @@ func TestNoVendorDomainLiterals(t *testing.T) {
 		"node_modules": true,
 		"dist":         true,
 		"dist-test":    true,
+		// A spike harness names domains as EXPERIMENTAL INPUTS, not as
+		// configuration. scripts/spikes/webauthn-rpid runs its RP-id ceremony
+		// against a deliberate control -- a real domain that already resolves to
+		// 127.0.0.1 -- precisely to separate "`.localhost` specifically is the
+		// problem" from "local development origins are the problem", which are
+		// different findings. Renaming that control to the new default would
+		// collapse the two cases it exists to tell apart, i.e. it would break the
+		// experiment to satisfy a linter. The directory is also documented
+		// delete-on-completion (memql#3405).
+		"spikes": true,
 	}
 
 	// Police GIT-TRACKED files only, exactly as the neutrality sweep does:
