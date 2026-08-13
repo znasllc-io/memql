@@ -97,9 +97,9 @@ A cluster entry therefore looks like this:
 ```yaml
 clusters:
   - name: local
-    domain: local.znas.io
-    endpoint: cockpit.local.znas.io:443
-    issuer: https://identity.local.znas.io   # optional; derived from domain
+    domain: memql.localhost
+    endpoint: cockpit.memql.localhost:443
+    issuer: https://identity.memql.localhost   # optional; derived from domain
     client_id: cockpit                       # optional
     token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
     refresh_token: <ingest only -- moved to SecretStorage on first use>

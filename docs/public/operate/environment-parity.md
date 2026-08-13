@@ -50,9 +50,9 @@ overlay, the cluster registry, or the environment — never in application logic
 |---|---|---|
 | Image references | `:local` (built + imported to k3d) | pinned `@sha256` digests |
 | Replicas / resources | 1×, small | N×, sized per env |
-| Domain | `local.znas.io` | `staging.<domain>` / prod domain |
+| Domain | `memql.localhost` | `staging.<domain>` / prod domain |
 | DNS | `/etc/hosts` wildcard → 127.0.0.1 | real DNS → ingress IP |
-| TLS cert source | mkcert `*.local.znas.io` (`local-znas-tls`) | cert-manager / Let's Encrypt |
+| TLS cert source | mkcert `*.memql.localhost` (`memql-front-door-tls`) | cert-manager / Let's Encrypt |
 | Ingress controller | k3s-bundled **traefik** (`serversscheme: h2c`) | **nginx** (`backend-protocol: GRPC`) |
 | Secrets source | `make secrets` from the genesis envelope | External Secrets + Key Vault |
 
@@ -60,7 +60,7 @@ Everything in this table is a config cell. The topology above it is untouched.
 The ingress-controller row is the one place the *manifest* genuinely differs
 (k3d ships traefik, the cloud runs nginx) — that divergence is annotation-level,
 sits entirely below the connection abstraction, and is the same divergence
-accepted for every host (`identity.local.znas.io`, `cockpit.local.znas.io`).
+accepted for every host (`identity.memql.localhost`, `cockpit.memql.localhost`).
 
 ## The connection model in practice
 
@@ -69,7 +69,7 @@ ingress terminating TLS on 443 and forwarding HTTP/2 to `svc/bff:50051`:
 
 ```
 client ──https://cockpit.<domain>──▶ [ingress :443, TLS] ──h2 gRPC──▶ svc/bff:50051
-   local:  cockpit.local.znas.io      traefik + mkcert wildcard        (h2c)
+   local:  cockpit.memql.localhost      traefik + mkcert wildcard        (h2c)
    cloud:  cockpit.<env-domain>        nginx + cert-manager cert        (GRPC)
 ```
 
@@ -77,13 +77,13 @@ So the Cockpit connects the same way everywhere — it is just another cluster
 entry in `~/.memql/clusters.yaml` (`Domain` → `Endpoint = https://cockpit.<domain>`):
 
 ```bash
-memql-cockpit --cluster local      # https://cockpit.local.znas.io
+memql-cockpit --cluster local      # https://cockpit.memql.localhost
 memql-cockpit --cluster staging    # https://cockpit.staging.<domain>
 ```
 
 Locally this needs the two config knobs the cloud gets from its provider: the
-`*.local.znas.io` wildcard in `/etc/hosts` (→ 127.0.0.1) and a trusted mkcert
-cert (`mkcert -install`) — both already required to reach `identity.local.znas.io`.
+`*.memql.localhost` wildcard in `/etc/hosts` (→ 127.0.0.1) and a trusted mkcert
+cert (`mkcert -install`) — both already required to reach `identity.memql.localhost`.
 A raw `kubectl port-forward svc/bff 50051` (`make forward`) remains available for
 low-level debugging, but it is **not** part of the connection path.
 

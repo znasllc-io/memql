@@ -277,7 +277,7 @@ error.
 machine and cannot have a second replica.
 
 > The `*.local.<domain>` dev wildcard used to be exempt too, and that was
-> the hole (memql#3400). `identity.local.znas.io` is the local parity
+> the hole (memql#3400). `identity.memql.localhost` is the local parity
 > cluster's **front door**: it resolves to 127.0.0.1, but what listens there
 > is traefik, proxying to a Service that `make scale N=2` puts two identity
 > pods behind. The guard therefore stayed silent on exactly the topology it
@@ -536,14 +536,14 @@ For running the binaries standalone (no cluster), set the same URL:
 ```bash
 # Identity binary
 MEMQL_IDENTITY_ENABLED=true \
-MEMQL_IDENTITY_BASE_URL=https://identity.local.znas.io \
+MEMQL_IDENTITY_BASE_URL=https://identity.memql.localhost \
 MEMQL_IDENTITY_REGISTRATION_MODE=open \
 make identity-assets identity
 ./bin/memql-identity
 
 # bff binary, points at the identity binary above
 MEMQL_IDENTITY_VERIFIER_BASE_URL=http://identity:8081 \
-MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER=https://identity.local.znas.io \
+MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER=https://identity.memql.localhost \
 make bff
 ./bin/memql-bff
 ```

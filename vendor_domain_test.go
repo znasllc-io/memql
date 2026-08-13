@@ -58,8 +58,11 @@ func TestNoVendorDomainLiterals(t *testing.T) {
 
 	var hits []string
 	for _, rel := range strings.Split(string(out), "\x00") {
-		if rel == "" || rel == "vendor_domain_test.go" {
-			continue // this file names it by necessity
+		// Two files name it by necessity: this one, and the overlay render test
+		// that asserts the rendered output does NOT contain it.
+		if rel == "" || rel == "vendor_domain_test.go" ||
+			rel == "deploy/k8s/overlays/local/render_domain_test.go" {
+			continue
 		}
 		var inScope bool
 		for _, root := range roots {
