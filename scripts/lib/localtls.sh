@@ -43,10 +43,26 @@ MEMQL_LOCAL_TLS_DIR="${_MEMQL_LOCALTLS_HOME}/.memql/certs"
 MEMQL_LOCAL_TLS_DEFAULT_CERT="${MEMQL_LOCAL_TLS_DIR}/dev.crt"
 MEMQL_LOCAL_TLS_DEFAULT_KEY="${MEMQL_LOCAL_TLS_DIR}/dev.key"
 
+# The domain the local front door is served at (memql#3593).
+#
+# ONE value: the certificate SANs below, the hosts block, the two Ingress
+# hostnames and identity's issuer are all derived from it. Kept in step with
+# deploy/k8s/overlays/local, whose Ingresses carry the same apex as their
+# committed default.
+#
+# Overridden per invocation with --domain. This variable is the flag's DEFAULT,
+# not a second input path -- the capability contract gives cap_param no env
+# tier, so a script resolves an env value and passes it as the default.
+MEMQL_LOCAL_DOMAIN="${MEMQL_LOCAL_DOMAIN:-memql.localhost}"
+
 # The names the certificate must carry. The wildcard covers cockpit. /
 # identity. / anything else the local overlay adds; the apex is listed
 # separately because a wildcard label does not match it.
-MEMQL_LOCAL_TLS_HOSTNAMES="*.local.znas.io,local.znas.io"
+MEMQL_LOCAL_TLS_HOSTNAMES="*.${MEMQL_LOCAL_DOMAIN},${MEMQL_LOCAL_DOMAIN}"
 
 # The k8s Secret both local front-door ingresses name in their spec.tls.
-MEMQL_LOCAL_TLS_SECRET="local-znas-tls"
+#
+# RENAMED from local-znas-tls (memql#3593). The old name embedded one company's
+# domain in a secret every install creates. The name is a fact about the front
+# door, not about whose domain it happens to serve.
+MEMQL_LOCAL_TLS_SECRET="memql-front-door-tls"

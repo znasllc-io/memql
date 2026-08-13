@@ -7,10 +7,10 @@
 # door's wildcard certificate.
 #
 # The local cluster is reached exactly as staging is: over TLS, at
-# https://cockpit.local.znas.io and https://identity.local.znas.io (env
+# https://cockpit.memql.localhost and https://identity.memql.localhost (env
 # parity -- docs/public/operate/environment-parity.md). Traefik terminates
-# that with the browser-trusted `*.local.znas.io` pair which
-# scripts/k3d/seed-secrets.sh loads into the cluster as the local-znas-tls
+# that with the browser-trusted `*.memql.localhost` pair which
+# scripts/k3d/seed-secrets.sh loads into the cluster as the memql-front-door-tls
 # secret. This capability produces that pair.
 #
 # THE RESTRAINT THAT MATTERS
@@ -59,7 +59,7 @@
 #
 # Usage:
 #   scripts/install/mkcert-setup.sh --confirm=install-memql-ca
-#   scripts/install/mkcert-setup.sh --hostnames='*.local.znas.io,local.znas.io' \
+#   scripts/install/mkcert-setup.sh --hostnames='*.memql.localhost,memql.localhost' \
 #       --cert-file=/path/dev.crt --key-file=/path/dev.key
 #   scripts/install/mkcert-setup.sh --force        # reissue an existing pair
 #   scripts/install/mkcert-setup.sh --print-spec
@@ -85,6 +85,7 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 
 cap_init "install.mkcert" "Ensure a trusted local CA and issue the front-door wildcard certificate."
 cap_spec_param "hostnames" "comma/space separated names for the cert (default: the front-door wildcard + apex)"
+cap_spec_param "domain"    "front-door apex; derives the wildcard + apex SANs (mutually exclusive with --hostnames)"
 cap_spec_param "cert-file" "where to write the certificate"
 cap_spec_param "key-file"  "where to write the private key"
 cap_spec_param "caroot"    "mkcert CAROOT to use (default: whatever mkcert reports)"
@@ -321,6 +322,36 @@ function ensure_ca_trusted() {
 # THE CERTIFICATE
 #=============================================================================
 
+# cert_mismatches <cert-path> -- true ONLY when the certificate demonstrably
+# does not cover every name in HOSTNAMES.
+#
+# WHY THE QUESTION IS PHRASED NEGATIVELY. Existence alone is not enough to reuse
+# a pair (memql#3593): one on disk was issued for whatever domain the last run
+# used, and reusing it for a different one leaves traefik serving a certificate
+# for a name nobody dialed -- a TLS failure against a hostname the operator
+# typed themselves, which is the failure this issue was opened about.
+#
+# But "cannot tell" is not "does not cover". With no openssl, or a file that
+# does not parse as a certificate, this returns FALSE and the existing pair is
+# kept, because a capability that reissued whenever it was unsure would stop
+# being idempotent -- and a second identical run reporting changed=true is its
+# own contract violation. Only a certificate we could read, and whose SANs are
+# missing a name we need, is replaced.
+function cert_mismatches() {
+    local cert="$1" sans host
+    [[ -f "$cert" ]] || return 1
+    command -v openssl &>/dev/null || return 1
+    sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
+    # Unreadable: cannot tell, so do not claim a mismatch.
+    [[ -n "$sans" ]] || return 1
+    for host in "${HOSTNAMES[@]}"; do
+        if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 function issue_cert() {
     local bin="$1" caroot="$2" cert="$3" key="$4"
     mkdir -p "$(dirname "$cert")" "$(dirname "$key")"
@@ -341,9 +372,22 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local hostnames_raw cert key caroot_override mkcert_bin force confirm
+    local hostnames_raw domain cert key caroot_override mkcert_bin force confirm
     local certutil_bin allow_missing_certutil
-    hostnames_raw="$(cap_param hostnames "$DEFAULT_HOSTNAMES")"
+    # --domain and --hostnames are two spellings of one answer (memql#3593), the
+    # same rule hosts-entries.sh applies. Both is a contradiction, and the two
+    # scripts must not resolve it differently: the certificate has to cover what
+    # the hosts block points at.
+    domain="$(cap_param domain "")"
+    hostnames_raw="$(cap_param hostnames "")"
+    if [[ -n "$domain" && -n "$hostnames_raw" ]]; then
+        cap_fail 2 "--domain and --hostnames are two spellings of one answer; pass one"
+    fi
+    if [[ -n "$domain" ]]; then
+        hostnames_raw="*.${domain},${domain}"
+    elif [[ -z "$hostnames_raw" ]]; then
+        hostnames_raw="$DEFAULT_HOSTNAMES"
+    fi
     cert="$(cap_param cert-file "${MEMQL_LOCAL_TLS_CERT:-$MEMQL_LOCAL_TLS_DEFAULT_CERT}")"
     key="$(cap_param key-file  "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
     caroot_override="$(cap_param caroot "")"
@@ -423,10 +467,14 @@ function main() {
         fi
     fi
 
-    local cert_issued=false
-    if [[ -f "$cert" && -f "$key" && -z "$force" ]]; then
+    local cert_issued=false reissued=false
+    if [[ -f "$cert" && -f "$key" && -z "$force" ]] && ! cert_mismatches "$cert"; then
         cap_info "certificate already present at ${cert} -- pass --force to reissue."
     else
+        if [[ -f "$cert" && -z "$force" ]] && cert_mismatches "$cert"; then
+            reissued=true
+            cap_warn "certificate at ${cert} does not cover ${HOSTNAMES[*]} -- reissuing."
+        fi
         issue_cert "$bin" "$caroot" "$cert" "$key"
         cert_issued=true
         cap_changed
@@ -439,12 +487,13 @@ function main() {
         hostnames_json+="\"$(cap_json_escape "$host")\""
     done
 
-    cap_info "Done. seed-secrets.sh loads this pair into the cluster as local-znas-tls."
+    cap_info "Done. seed-secrets.sh loads this pair into the cluster as ${MEMQL_LOCAL_TLS_SECRET}."
     cap_result_set     caroot        "$caroot"
     cap_result_set     certFile      "$cert"
     cap_result_set     keyFile       "$key"
     cap_result_set     mkcertBin     "$bin"
     cap_result_set_raw hostnames     "[${hostnames_json}]"
+    cap_result_set_raw reissued      "$reissued"
     cap_result_set_raw caPreExisting "$ca_pre_existing"
     cap_result_set_raw caInstalled   "$ca_installed"
     # The field the graph verifies. Reaching here means `mkcert -install`

@@ -12,7 +12,7 @@ import (
 //
 // `make up` used to end in "All Deployments in 'memql' are Available" while the
 // front door served traefik's own self-signed certificate, because nothing
-// asserted that the `local-znas-tls` Secret the ingresses reference actually
+// asserted that the `memql-front-door-tls` Secret the ingresses reference actually
 // exists. Deployment readiness cannot see it: traefik does not fail on a
 // missing referenced secret, it substitutes TRAEFIK DEFAULT CERT and carries
 // on. So the bring-up asserts the secret itself.
@@ -28,11 +28,11 @@ import (
 const bringupFakeKubectl = `#!/usr/bin/env bash
 args="$*"
 case "$args" in
-  *"get secret local-znas-tls"*)
+  *"get secret memql-front-door-tls"*)
     if [ "$FAKE_TLS_SECRET_STATE" = "present" ]; then
-      printf 'secret/local-znas-tls\n'; exit 0
+      printf 'secret/memql-front-door-tls\n'; exit 0
     fi
-    printf 'Error from server (NotFound): secrets "local-znas-tls" not found\n' >&2
+    printf 'Error from server (NotFound): secrets "memql-front-door-tls" not found\n' >&2
     exit 1 ;;
 esac
 exit 0

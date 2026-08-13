@@ -16,7 +16,7 @@ import (
 //
 // scripts/install/mkcert-setup.sh ensures the operator has a trusted local CA
 // and issues the front-door wildcard pair the local ingress terminates TLS
-// with (the *.local.znas.io cert seed-secrets.sh loads as local-znas-tls).
+// with (the *.memql.localhost cert seed-secrets.sh loads as memql-front-door-tls).
 //
 // The assertion that matters is the RESTRAINT one: when a rootCA.pem already
 // exists, the script reports caPreExisting=true / caInstalled=false and the
@@ -430,7 +430,7 @@ func TestMkcertIssuesTheFrontDoorWildcardPair(t *testing.T) {
 	log := e.stubLog(t)
 	// The wildcard covers cockpit./identity./anything else the overlay adds;
 	// the apex is listed too because a wildcard does not match it.
-	for _, want := range []string{"*.local.znas.io", "local.znas.io"} {
+	for _, want := range []string{"*.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(log, want) {
 			t.Errorf("mkcert was not asked to cover %q.\nstub log:\n%s", want, log)
 		}
@@ -457,7 +457,7 @@ func TestMkcertCustomHostnames(t *testing.T) {
 	if !strings.Contains(log, "*.example.test") || !strings.Contains(log, "example.test") {
 		t.Errorf("custom hostnames not passed to mkcert.\nstub log:\n%s", log)
 	}
-	if strings.Contains(log, "local.znas.io") {
+	if strings.Contains(log, "memql.localhost") {
 		t.Errorf("default hostnames leaked into a custom run.\nstub log:\n%s", log)
 	}
 }
@@ -731,7 +731,7 @@ func TestMkcertBadParamsExitTwo(t *testing.T) {
 		{"empty hostnames", []string{"--hostnames= "}},
 		{"hostname with a space", []string{"--hostnames=a b/c"}},
 		{"hostname with a metacharacter", []string{"--hostnames=a;rm -rf /"}},
-		{"wildcard in the middle", []string{"--hostnames=foo.*.local.znas.io"}},
+		{"wildcard in the middle", []string{"--hostnames=foo.*.memql.localhost"}},
 	}
 	for _, tc := range cases {
 		tc := tc
