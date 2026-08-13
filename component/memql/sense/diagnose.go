@@ -89,6 +89,12 @@ func (s *Service) Diagnose(source string, filePath string) []Diagnostic {
 		diagnostics = append(diagnostics, s.importDiagnostics(file, source)...)
 		diagnostics = append(diagnostics, s.signatureConceptDiagnostics(file, source)...)
 		diagnostics = append(diagnostics, s.signatureKindDiagnostics(file, source)...)
+		// The @relationship axes need no vocabulary at all -- the structural
+		// type set and the `as` label form are both static -- so they run in
+		// the registry-less case too. An author whose workspace has not
+		// loaded still gets told their relationship type refuses boot
+		// (memql#3661).
+		diagnostics = append(diagnostics, relationshipAxesRule(source)...)
 	}
 
 	return diagnostics

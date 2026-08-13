@@ -19,6 +19,7 @@ package sense
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -792,4 +793,111 @@ func bareRowIntrinsicSortKeyRule(source string) []Diagnostic {
 		})
 	}
 	return diagnostics
+}
+
+// ---------------------------------------------------------------------------
+// @relationship: the two axes (memql#3661)
+// ---------------------------------------------------------------------------
+//
+// These mirror the engine's load-time rules so the squiggle and the boot error
+// say the same thing. They are RESTATED rather than imported because the
+// dependency runs the wrong way -- component/memql imports sense, so sense
+// cannot import component/memql -- which is the same constraint
+// actorUnknownPropertyRule works under. The restatement is pinned:
+// TestSenseRelationshipDiagnosticsMatchTheLoadGate (component/memql) runs the
+// same inputs through both layers and fails if they disagree, so this cannot
+// drift into a second, softer opinion.
+
+// relationshipAsLabelPattern mirrors relationshipAsLabelPattern in
+// component/memql/relations.go: lowerCamelCase, letters and digits.
+var relationshipAsLabelPattern = regexp.MustCompile(`^[a-z][a-zA-Z0-9]*$`)
+
+// relationshipAsLabelMaxLen mirrors relationshipAsLabelMaxLen there.
+const relationshipAsLabelMaxLen = 64
+
+// structuralRelationshipTypes mirrors structuralRelationshipTypeSet in
+// component/memql/relations.go -- the CLOSED set `type` accepts. It lost
+// `dependsOn` and `formedFrom` when memql#3655 retired them to `as` labels,
+// and the parity test named that drift the moment it landed. `as` has no
+// such list and must never acquire one; that asymmetry is the whole point of
+// memql#3652, so only `type` is checked for membership here.
+var structuralRelationshipTypes = map[string]bool{
+	"parent": true, "alias": true, "equals": true, "interactswith": true,
+	"contains": true, "owns": true, "createdby": true,
+}
+
+// relationshipKwargRe extracts one keyword argument's value from an authored
+// @relationship line. Line-scoped, matching the convention the sibling
+// target-completion regex established.
+var (
+	relationshipLineRe = regexp.MustCompile(`@relationship\s*\(`)
+	relationshipAsRe   = regexp.MustCompile(`\bas\s*=\s*"([^"]*)"`)
+	relationshipTypeRe = regexp.MustCompile(`\btype\s*=\s*"([^"]*)"`)
+)
+
+// relationshipAxesRule flags a malformed `as` label and an unknown structural
+// `type` on an authored @relationship, with the engine's own wording.
+func relationshipAxesRule(source string) []Diagnostic {
+	var diagnostics []Diagnostic
+
+	offset := 0
+	for _, line := range strings.Split(source, "\n") {
+		lineStart := offset
+		offset += len(line) + 1
+
+		if strings.HasPrefix(strings.TrimLeft(line, " \t"), "//") {
+			continue
+		}
+		if !relationshipLineRe.MatchString(line) {
+			continue
+		}
+
+		if m := relationshipAsRe.FindStringSubmatchIndex(line); m != nil {
+			label := line[m[2]:m[3]]
+			if msg := asLabelProblem(label); msg != "" {
+				diagnostics = append(diagnostics, Diagnostic{
+					Range:    spanAt(positionFromOffset(source, lineStart+m[2]), m[3]-m[2]),
+					Severity: SeverityError,
+					Message:  msg,
+					Code:     "relationship-as-malformed",
+				})
+			}
+		}
+
+		if m := relationshipTypeRe.FindStringSubmatchIndex(line); m != nil {
+			value := line[m[2]:m[3]]
+			normalized := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(value), "_", ""))
+			if !structuralRelationshipTypes[normalized] {
+				diagnostics = append(diagnostics, Diagnostic{
+					Range:    spanAt(positionFromOffset(source, lineStart+m[2]), m[3]-m[2]),
+					Severity: SeverityError,
+					Message: "relationship type " + strconv.Quote(value) + " is invalid. `type` is a closed " +
+						"structural set -- what the engine DOES with the edge. For a domain verb use " +
+						"type=\"interactsWith\", as=" + strconv.Quote(value) + " (memql#3652)",
+					Code: "relationship-type-unknown",
+				})
+			}
+		}
+	}
+
+	return diagnostics
+}
+
+// asLabelProblem returns the engine's message for a malformed `as` label, or
+// "" when the label is well-formed. An empty label is well-formed: `as` is
+// optional on every relationship type.
+func asLabelProblem(label string) string {
+	trimmed := strings.TrimSpace(label)
+	if trimmed == "" {
+		return ""
+	}
+	if len(trimmed) > relationshipAsLabelMaxLen {
+		return "as label " + strconv.Quote(trimmed) + " is " + strconv.Itoa(len(trimmed)) +
+			" characters, over the " + strconv.Itoa(relationshipAsLabelMaxLen) + " limit"
+	}
+	if !relationshipAsLabelPattern.MatchString(trimmed) {
+		return "as label " + strconv.Quote(trimmed) +
+			" must be lowerCamelCase (letters and digits, starting lowercase), e.g. as=\"assignedTo\""
+	}
+	return ""
 }

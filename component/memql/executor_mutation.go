@@ -676,7 +676,7 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, fmt.Errorf("parent hint must not be empty")
 		}
 
-		parentDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional})
+		parentDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, nil)
 		if len(parentDefs) == 0 {
 			return nil, meta, fmt.Errorf("no relationship definition for parent on concept %q", conceptMeta.Name)
 		}
@@ -694,9 +694,9 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			return nil, meta, fmt.Errorf("aliasOf hint must not be empty")
 		}
 
-		aliasDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeAlias, nil)
+		aliasDefs := filterRelationshipDefinitions(conceptDefs, relationshipTypeAlias, nil, nil)
 		if len(aliasDefs) == 0 {
-			aliasDefs = filterRelationshipDefinitions(conceptDefs, relationshipTypeEquals, nil)
+			aliasDefs = filterRelationshipDefinitions(conceptDefs, relationshipTypeEquals, nil, nil)
 		}
 
 		if len(aliasDefs) == 0 {

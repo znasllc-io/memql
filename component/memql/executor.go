@@ -387,7 +387,7 @@ func resolveActorReferences(ctx context.Context, expr ExpressionNode) (Expressio
 		if err != nil {
 			return nil, err
 		}
-		return &RelationshipExpression{Function: node.Function, Target: target}, nil
+		return &RelationshipExpression{Function: node.Function, Target: target, Label: node.Label}, nil
 	default:
 		return expr, nil
 	}
@@ -492,6 +492,7 @@ func (e *MemQLEngine) expandSpecReferences(expr ExpressionNode) (ExpressionNode,
 		return &RelationshipExpression{
 			Function: node.Function,
 			Target:   target,
+			Label:    node.Label,
 		}, nil
 	default:
 		// Other expression types don't contain nested expressions that need expansion
@@ -1050,9 +1051,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		return nil
 	}
 
-	childDefs := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional})
-	if len(childDefs) > 0 {
-		children, err := e.resolveChildOf(ctx, []memorynodes.MemoryNode{node}, timestamp, e.config.MaxResults)
+	childDefs := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional}, nil)
+	for _, asLabel := range relationshipLabelsPresent(childDefs) {
+		children, err := e.resolveChildOf(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1062,7 +1063,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if childId == "" {
 				continue
 			}
-			builder.addEdge(id, childId, GraphEdgeLabelChild, currentDepth+1)
+			builder.addEdge(id, childId, GraphEdgeLabelChild, asLabel, currentDepth+1)
 			if _, ok := visited[childId]; ok {
 				continue
 			}
@@ -1072,9 +1073,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	aliasDefs := filterRelationshipDefinitions(defs, relationshipTypeAlias, nil)
-	if len(aliasDefs) > 0 {
-		aliases, err := e.resolveAliasOrEquals(ctx, []memorynodes.MemoryNode{node}, timestamp, relationshipTypeAlias, e.config.MaxResults)
+	aliasDefs := filterRelationshipDefinitions(defs, relationshipTypeAlias, nil, nil)
+	for _, asLabel := range relationshipLabelsPresent(aliasDefs) {
+		aliases, err := e.resolveAliasOrEquals(ctx, []memorynodes.MemoryNode{node}, timestamp, relationshipTypeAlias, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1084,7 +1085,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if aliasId == "" || strings.EqualFold(aliasId, id) {
 				continue
 			}
-			builder.addEdge(id, aliasId, GraphEdgeLabelAlias, currentDepth+1)
+			builder.addEdge(id, aliasId, GraphEdgeLabelAlias, asLabel, currentDepth+1)
 			if _, ok := visited[aliasId]; ok {
 				continue
 			}
@@ -1094,9 +1095,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	equalsDefs := filterRelationshipDefinitions(defs, relationshipTypeEquals, nil)
-	if len(equalsDefs) > 0 {
-		equalNodes, err := e.resolveAliasOrEquals(ctx, []memorynodes.MemoryNode{node}, timestamp, relationshipTypeEquals, e.config.MaxResults)
+	equalsDefs := filterRelationshipDefinitions(defs, relationshipTypeEquals, nil, nil)
+	for _, asLabel := range relationshipLabelsPresent(equalsDefs) {
+		equalNodes, err := e.resolveAliasOrEquals(ctx, []memorynodes.MemoryNode{node}, timestamp, relationshipTypeEquals, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1106,7 +1107,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if eqId == "" || strings.EqualFold(eqId, id) {
 				continue
 			}
-			builder.addEdge(id, eqId, GraphEdgeLabelEquals, currentDepth+1)
+			builder.addEdge(id, eqId, GraphEdgeLabelEquals, asLabel, currentDepth+1)
 			if _, ok := visited[eqId]; ok {
 				continue
 			}
@@ -1116,9 +1117,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	interactionDefs := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil)
-	if len(interactionDefs) > 0 {
-		related, err := e.resolveInteractsWith(ctx, []memorynodes.MemoryNode{node}, timestamp, e.config.MaxResults)
+	interactionDefs := filterRelationshipDefinitions(defs, relationshipTypeInteracts, nil, nil)
+	for _, asLabel := range relationshipLabelsPresent(interactionDefs) {
+		related, err := e.resolveInteractsWith(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1128,7 +1129,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if interactionId == "" || strings.EqualFold(interactionId, id) {
 				continue
 			}
-			builder.addEdge(id, interactionId, GraphEdgeLabelInteractsWith, currentDepth+1)
+			builder.addEdge(id, interactionId, GraphEdgeLabelInteractsWith, asLabel, currentDepth+1)
 			if _, ok := visited[interactionId]; ok {
 				continue
 			}
@@ -1138,9 +1139,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	createdByDefs := filterRelationshipDefinitions(defs, relationshipTypeCreatedBy, nil)
-	if len(createdByDefs) > 0 {
-		related, err := e.resolveCreatedBy(ctx, []memorynodes.MemoryNode{node}, timestamp, e.config.MaxResults)
+	createdByDefs := filterRelationshipDefinitions(defs, relationshipTypeCreatedBy, nil, nil)
+	for _, asLabel := range relationshipLabelsPresent(createdByDefs) {
+		related, err := e.resolveCreatedBy(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1150,7 +1151,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if creatorId == "" || strings.EqualFold(creatorId, id) {
 				continue
 			}
-			builder.addEdge(id, creatorId, GraphEdgeLabelCreatedBy, currentDepth+1)
+			builder.addEdge(id, creatorId, GraphEdgeLabelCreatedBy, asLabel, currentDepth+1)
 			if _, ok := visited[creatorId]; ok {
 				continue
 			}
@@ -1160,9 +1161,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	containsDefs := filterRelationshipDefinitions(defs, relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional})
-	if len(containsDefs) > 0 {
-		contained, err := e.resolveContains(ctx, []memorynodes.MemoryNode{node}, timestamp, e.config.MaxResults)
+	containsDefs := filterRelationshipDefinitions(defs, relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, nil)
+	for _, asLabel := range relationshipLabelsPresent(containsDefs) {
+		contained, err := e.resolveContains(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1172,7 +1173,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if childId == "" || strings.EqualFold(childId, id) {
 				continue
 			}
-			builder.addEdge(id, childId, GraphEdgeLabelContains, currentDepth+1)
+			builder.addEdge(id, childId, GraphEdgeLabelContains, asLabel, currentDepth+1)
 			if _, ok := visited[childId]; ok {
 				continue
 			}
@@ -1182,9 +1183,9 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	ownsDefs := filterRelationshipDefinitions(defs, relationshipTypeOwns, nil)
-	if len(ownsDefs) > 0 {
-		owned, err := e.resolveOwns(ctx, []memorynodes.MemoryNode{node}, timestamp, e.config.MaxResults)
+	ownsDefs := filterRelationshipDefinitions(defs, relationshipTypeOwns, nil, nil)
+	for _, asLabel := range relationshipLabelsPresent(ownsDefs) {
+		owned, err := e.resolveOwns(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
 			return err
 		}
@@ -1194,7 +1195,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if ownedId == "" || strings.EqualFold(ownedId, id) {
 				continue
 			}
-			builder.addEdge(id, ownedId, GraphEdgeLabelOwns, currentDepth+1)
+			builder.addEdge(id, ownedId, GraphEdgeLabelOwns, asLabel, currentDepth+1)
 			if _, ok := visited[ownedId]; ok {
 				continue
 			}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/language/annotations"
 	"github.com/znasllc-io/memql/component/language/parser"
 )
 
@@ -23,6 +24,23 @@ func (s *Service) Hover(source string, line, col int, filePath string) *HoverRes
 	}
 
 	// Check in priority order.
+
+	// 0. Annotation keyword argument. This sits ABOVE everything else because
+	// the ladder below resolves a bare token with no idea of its surroundings,
+	// and two of @relationship's own argument names collide with entries in it
+	// (memql#3661):
+	//
+	//   - `as` is a lexer keyword (`forEach ... as x`), so it matched
+	//     KeywordDocs at step 1 and hovered as the forEach alias.
+	//   - `type` is an annotation name, so it matched AnnotationDocs at step 3
+	//     and hovered as the @type concept/provider annotation.
+	//
+	// Both were unrelated to relationships, and `field` / `target` /
+	// `direction` hovered as nothing at all. Inside an annotation's
+	// parentheses the argument registry is the authority, so consult it first.
+	if contents, ok := annotationKwargHover(source, line, col, token); ok {
+		return &HoverResult{Contents: contents, Range: tokenRange}
+	}
 
 	// 1. Keyword.
 	if doc, ok := KeywordDocs[token]; ok {
@@ -234,4 +252,83 @@ func formatFunctionHover(fn *FunctionInfo) string {
 		sb.WriteString(fmt.Sprintf("\n\n**Arguments:** %s", fn.ArgsDoc))
 	}
 	return sb.String()
+}
+
+// annotationKwargHover renders hover for a keyword argument NAME inside an
+// annotation's parentheses -- the `type` in `@relationship(type="parent", ...)`
+// (memql#3661).
+//
+// The documentation comes from annotations.KeywordArgs, the same registry
+// completion offers these names from, so the two surfaces cannot describe an
+// argument differently and a newly-modelled argument gets hover for free.
+//
+// Scoped to the cursor's own LINE, matching the convention
+// checkRelationshipTargetContext already established for the sibling
+// target-value completion: annotations are written on one line in practice,
+// and a multi-line scan would let an unclosed paren far above hijack every
+// identifier below it.
+func annotationKwargHover(source string, line, col int, token string) (string, bool) {
+	if token == "" {
+		return "", false
+	}
+	name, ok := enclosingAnnotationOnLine(source, line, col)
+	if !ok {
+		return "", false
+	}
+	for _, spec := range annotations.KeywordArgsFor(name) {
+		if spec.Name != token {
+			continue
+		}
+		contents := fmt.Sprintf("**%s** (`@%s` argument)\n\n%s", spec.Name, name, spec.Doc)
+		if spec.Type != "" {
+			contents = fmt.Sprintf("**%s** (`@%s` argument, %s)\n\n%s", spec.Name, name, spec.Type, spec.Doc)
+		}
+		return contents, true
+	}
+	return "", false
+}
+
+// enclosingAnnotationOnLine returns the annotation whose parentheses the cursor
+// sits inside, looking only at the text before the cursor on its own line.
+func enclosingAnnotationOnLine(source string, line, col int) (string, bool) {
+	lines := strings.Split(source, "\n")
+	if line < 1 || line > len(lines) {
+		return "", false
+	}
+	text := lines[line-1]
+	if col-1 < len(text) {
+		text = text[:col-1]
+	}
+
+	depth := 0
+	for i := len(text) - 1; i >= 0; i-- {
+		switch text[i] {
+		case ')':
+			depth++
+		case '(':
+			if depth > 0 {
+				depth--
+				continue
+			}
+			// Unmatched open paren: the annotation name runs back from here to
+			// the '@'.
+			end := i
+			start := end
+			for start > 0 && isAnnotationNameByte(text[start-1]) {
+				start--
+			}
+			if start == end || start == 0 || text[start-1] != '@' {
+				return "", false
+			}
+			return text[start:end], true
+		}
+	}
+	return "", false
+}
+
+func isAnnotationNameByte(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }

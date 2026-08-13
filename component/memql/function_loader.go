@@ -997,6 +997,7 @@ func resolveBareConcept(expr ExpressionNode, boundConcept string) ExpressionNode
 		return &RelationshipExpression{
 			Function: n.Function,
 			Target:   resolveBareConcept(n.Target, boundConcept),
+			Label:    n.Label,
 		}
 	case *SortExpression:
 		return &SortExpression{

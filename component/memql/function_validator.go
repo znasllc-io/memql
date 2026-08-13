@@ -1078,6 +1078,7 @@ func (v *functionValidator) expandExpressionWithArgs(expr ExpressionNode, args m
 		return &RelationshipExpression{
 			Function: node.Function,
 			Target:   target,
+			Label:    node.Label,
 		}, nil
 
 	case *SortExpression:

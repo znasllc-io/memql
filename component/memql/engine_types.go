@@ -295,6 +295,16 @@ const (
 type RelationshipExpression struct {
 	Function RelationshipFunction
 	Target   ExpressionNode
+	// Label scopes the traversal to edges carrying that `as` domain label
+	// (memql#3656). Empty means unscoped -- follow every edge of this type,
+	// which is what every traversal predating #3656 does.
+	//
+	// This struct is built at ten sites across eight files, and any one of
+	// them that forgets to carry Label drops a label-scoped traversal back to
+	// unscoped SILENTLY -- returning more rows than asked for rather than
+	// failing. TestRelationshipLabelSurvivesEveryConstructionSite is the pin
+	// against that.
+	Label string
 }
 
 func (*RelationshipExpression) isExpressionNode() {}
