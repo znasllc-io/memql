@@ -2648,8 +2648,8 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 	//
 	// Annotated nested block:
 	//
-	//   preferences object @closed {
-	//     theme  enum("light", "dark", "system")
+	//   metadata object @open {
+	//     knownKey  string
 	//   }
 	//
 	// The bare `name { ... }` form takes no annotation at all -- it returns at
@@ -2661,9 +2661,9 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 	// finding (memql#3692). An annotation describing the block itself therefore
 	// needs the typed spelling, which is the same shape @variant already uses.
 	//
-	// Gated on @closed rather than on `object` generally, to widen the grammar
-	// by exactly one accepted declaration instead of by a class of them.
-	if hasClosedAttribute(prop.Attributes) && !hasVariantAttribute(prop.Attributes) && p.check(TokenBraceOpen) {
+	// Gated on @open rather than on `object` generally, to widen the grammar by
+	// exactly one accepted declaration instead of by a class of them.
+	if hasOpenAttribute(prop.Attributes) && !hasVariantAttribute(prop.Attributes) && p.check(TokenBraceOpen) {
 		p.advance()
 		for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
 			nested, err := p.parsePropertyDecl()
@@ -2676,7 +2676,7 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 		if err := p.expect(TokenBraceClose); err != nil {
 			return nil, err
 		}
-		if err := p.refuseSameLineTrailingAttribute(prop.Name, "@closed", closeLine); err != nil {
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "@open", closeLine); err != nil {
 			return nil, err
 		}
 		return prop, nil
@@ -2839,12 +2839,12 @@ func (p *Parser) parseVariantBranch() (*PropertyVariant, error) {
 // hasVariantAttribute reports whether the attribute list contains an
 // @variant annotation -- used to decide whether to expect a variant
 // body block after the property's primary declaration.
-// hasClosedAttribute reports whether the attribute list contains @closed --
-// used to decide whether to expect a nested block body after a typed `object`
+// hasOpenAttribute reports whether the attribute list contains @open -- used to
+// decide whether to expect a nested block body after a typed `object`
 // declaration (memql#3641).
-func hasClosedAttribute(attrs []*Attribute) bool {
+func hasOpenAttribute(attrs []*Attribute) bool {
 	for _, a := range attrs {
-		if a != nil && a.Name == "closed" {
+		if a != nil && a.Name == "open" {
 			return true
 		}
 	}

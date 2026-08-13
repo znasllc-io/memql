@@ -744,6 +744,50 @@ func (c *Concept) DeclaredFields() []string {
 	return out
 }
 
+// DeclaredNestedFields returns the declared sub-field names of one nested
+// block, or nil when the concept declares no such block (or declares it as a
+// free-form object with no sub-fields).
+//
+// It exists for the read-modify-write paths that pull a nested object out of
+// the database and write it back whole (memql#3641). Since every nested block
+// now rejects undeclared keys, such a path has to filter the object it read --
+// a row written before a field was retired still carries it, and the write-back
+// would be refused for a key the CALLER never chose. Filtering against the
+// CONCEPT rather than a hardcoded list is the point: a field declared later is
+// not silently dropped by a stale list somebody forgot to grow.
+//
+// Reads the same definition schema classifyFields does, so "declared" means one
+// thing across this file.
+func (c *Concept) DeclaredNestedFields(block string) []string {
+	if c == nil {
+		return nil
+	}
+	raw, ok := c.Schemas[definitionSchemaKey]
+	if !ok || len(raw) == 0 {
+		return nil
+	}
+	var schema struct {
+		Properties map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil
+	}
+	prop, ok := schema.Properties[strings.TrimSpace(block)]
+	if !ok || len(prop.Properties) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(prop.Properties))
+	for name := range prop.Properties {
+		if trimmed := strings.TrimSpace(name); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ProjectableFields returns the names of every top-level payload field
 // a shape's default projection should expose: all declared fields
 // EXCEPT those marked @internal (x-internal). @serverSet fields ARE

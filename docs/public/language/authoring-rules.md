@@ -1678,6 +1678,47 @@ reach the event from inside the automation body.
 
 ---
 
+## 21b. Nested object blocks are CLOSED
+
+A nested block that declares sub-fields rejects undeclared keys, exactly as the
+top level always has (memql#3641):
+
+```memql
+concept user {
+  preferences {
+    theme               enum("light", "dark", "system")
+    computerUseEnabled  bool  @default("true")
+  }
+}
+```
+
+`{"preferences": {"computerUseEnbaled": true}}` is now REFUSED. Before the flip
+it was stored: the typo sat beside the real field, nothing read it, and the
+computer-use kill switch kept its old value with no error at either end
+(memql#3623). A key nothing can read is not data, and storing it only delays
+the discovery.
+
+Two things this does NOT touch:
+
+- **A bare `object` field** (`payload object`) declares no sub-fields, so it is
+  free-form by construction and unaffected.
+- **`@variant` arms**, whose fields live in their own `oneOf` branch.
+
+`@open` is the escape, for a block that is free-form BY DESIGN -- keys as data
+rather than schema. It takes the typed spelling, because a block-bodied
+property accepts no annotation in either other position (memql#3623,
+memql#3692):
+
+```memql
+metadata  object  @open {
+  knownKey  string
+}
+```
+
+Reach for a DECLARATION first. Nearly every block that had an undeclared key
+when this landed wanted the key declared, not the block opened -- the sub-field
+was real, and the schema had simply stopped describing the row.
+
 ## 22. Tree-wide conformance gates (`test/dslconformance/conformance_test.go`)
 
 CI enforces a set of static rules over every loaded `.memql` file.
