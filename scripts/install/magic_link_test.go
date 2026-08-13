@@ -158,7 +158,7 @@ cat "$STUB_LOGS"
 // mlLogLine renders the slog INFO record identity actually emits in dev mode.
 func mlLogLine(email, token string) string {
 	return `{"time":"2026-08-08T10:00:00Z","level":"INFO","msg":"identity: DEV magic link (also sent via configured email)",` +
-		`"to":"` + email + `","link":"https://identity.local.znas.io/auth/complete?ml=` + token + `"}`
+		`"to":"` + email + `","link":"https://identity.memql.localhost/auth/complete?ml=` + token + `"}`
 }
 
 func mlArgv(t *testing.T, argvFile string) []string {

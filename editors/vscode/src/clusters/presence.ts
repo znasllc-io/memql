@@ -108,7 +108,7 @@ export const PRESENCE_TTL_MS = 30_000;
  * ever reached for a receipt that recorded no `--domain`, i.e. an install that
  * took every default.
  */
-export const DEFAULT_LOCAL_ENDPOINT = "cockpit.local.znas.io:443";
+export const DEFAULT_LOCAL_ENDPOINT = "cockpit.memql.localhost:443";
 
 /** The synthetic name the probe dials under; never written anywhere. */
 const PROBE_CLUSTER_NAME = "local";

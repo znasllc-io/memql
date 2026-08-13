@@ -62,8 +62,8 @@ function jwtExpiringIn(seconds: number): string {
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
   return {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
-    domain: "local.znas.io",
+    endpoint: "cockpit.memql.localhost:443",
+    domain: "memql.localhost",
     ...overrides,
   };
 }
@@ -227,7 +227,7 @@ test("an expired access token is exchanged against the identity token endpoint",
 
   assert.deepEqual(result, { ok: true, bearer: "REFRESHED" });
   assert.equal(http.calls.length, 1);
-  assert.equal(http.calls[0]?.url, "https://identity.local.znas.io/oauth/token");
+  assert.equal(http.calls[0]?.url, "https://identity.memql.localhost/oauth/token");
   assert.deepEqual(http.calls[0]?.body, {
     grant_type: "refresh_token",
     refresh_token: "RT-1",
@@ -285,7 +285,7 @@ test("a REFUSED refresh token asks for a fresh sign-in, naming the rejection", a
 test("the identity service's OWN error body shape is read, not just the RFC one", async () => {
   // Captured verbatim from a live cluster:
   //
-  //   POST https://identity.local.znas.io/oauth/token -> 400
+  //   POST https://identity.memql.localhost/oauth/token -> 400
   //   {"error":"invalid_grant","errorId":"ERR-1845ef",
   //    "message":"refresh token is no longer valid"}
   //

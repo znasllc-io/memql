@@ -599,7 +599,7 @@ function errorText(err: unknown): string {
 // It reads `message` AS WELL AS RFC 6749 §5.2's `error_description`, because
 // the identity service emits the former. Verified against a live cluster:
 //
-//   POST https://identity.local.znas.io/oauth/token
+//   POST https://identity.memql.localhost/oauth/token
 //   {"error":"invalid_grant","errorId":"ERR-1845ef",
 //    "message":"refresh token is no longer valid"}
 //

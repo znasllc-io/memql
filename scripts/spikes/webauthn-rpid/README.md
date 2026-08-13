@@ -195,7 +195,7 @@ The page distinguishes the two failure modes for you:
 ## Control
 
 If a leg fails, re-run the identical sequence with
-`--rp-id=local.znas.io` against `https://identity.local.znas.io:8443` (a real
+`--rp-id=memql.localhost` against `https://identity.memql.localhost:8443` (a real
 domain that already resolves to `127.0.0.1`, and the shape the install wizard's
 "Advanced" BYO-domain path offers). That isolates *"`.localhost` specifically is
 the problem"* from *"local development origins are the problem"*, which are
@@ -219,7 +219,7 @@ before touching a phone.
 | 3 | `memql.localhost` | hybrid -> Android | | | | |
 | 4 | `memql.localhost` | usernameless assertion | | | | |
 | 5 | `identity.memql.localhost` | platform authenticator | | | | |
-| 6 | `local.znas.io` (control) | hybrid -> iOS | | | | |
+| 6 | `memql.localhost` (control) | hybrid -> iOS | | | | |
 
 ## The consequence to state
 

@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { clusterRowStatus } from "../src/clusters/status.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
-const CLUSTER = { name: "local", endpoint: "cockpit.local.znas.io:443", token: "eyJ.a.b" };
+const CLUSTER = { name: "local", endpoint: "cockpit.memql.localhost:443", token: "eyJ.a.b" };
 
 function status(state: ConnectionState, cluster = CLUSTER) {
   return clusterRowStatus(cluster, state);
@@ -101,7 +101,7 @@ test("a cluster carrying a PAT is flagged BEFORE anyone tries to connect with it
   // memql#3383: an operator who follows the old field comment mints a PAT. The
   // tree can say so at rest, without a dial and without a round trip.
   const view = clusterRowStatus(
-    { name: "x", endpoint: "cockpit.local.znas.io:443", token: "mql_pat_abc" },
+    { name: "x", endpoint: "cockpit.memql.localhost:443", token: "mql_pat_abc" },
     { status: "disconnected" },
   );
   assert.equal(view.icon, "credential");
@@ -110,7 +110,7 @@ test("a cluster carrying a PAT is flagged BEFORE anyone tries to connect with it
 
 test("a cluster with an endpoint and no token asks for a JWT, not for a PAT", () => {
   const view = clusterRowStatus(
-    { name: "x", endpoint: "cockpit.local.znas.io:443" },
+    { name: "x", endpoint: "cockpit.memql.localhost:443" },
     { status: "disconnected" },
   );
   assert.equal(view.icon, "credential");

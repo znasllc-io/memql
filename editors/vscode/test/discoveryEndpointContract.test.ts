@@ -4,7 +4,7 @@
 // This extension is one of the clients that reads it, and webSocketUrlFor is
 // where that value becomes a connection. Nothing in the build links the two, so
 // the live cluster spent the whole life of memql#3399 publishing
-// "https://bff.local.znas.io" -- a form this parser refuses by design -- while
+// "https://bff.memql.localhost" -- a form this parser refuses by design -- while
 // both sides' own tests stayed green.
 //
 // So both sides are asserted against ONE file. The Go half is

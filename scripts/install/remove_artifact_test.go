@@ -228,8 +228,8 @@ func raHostsFile(t *testing.T) string {
 		"127.0.0.1\tlocalhost",
 		"10.1.2.3\tsome-corporate-thing.internal",
 		"# BEGIN memql",
-		"127.0.0.1 cockpit.local.znas.io",
-		"127.0.0.1 identity.local.znas.io",
+		"127.0.0.1 cockpit.memql.localhost",
+		"127.0.0.1 identity.memql.localhost",
 		"# END memql",
 		"::1\tip6-localhost",
 	}, "\n") + "\n"
@@ -545,7 +545,7 @@ func TestRemoveArtifactHostsEntries(t *testing.T) {
 		t.Fatalf("read hosts: %v", err)
 	}
 	body := string(got)
-	for _, gone := range []string{"cockpit.local.znas.io", "identity.local.znas.io", "BEGIN memql", "END memql"} {
+	for _, gone := range []string{"cockpit.memql.localhost", "identity.memql.localhost", "BEGIN memql", "END memql"} {
 		if strings.Contains(body, gone) {
 			t.Errorf("%q survived the removal:\n%s", gone, body)
 		}

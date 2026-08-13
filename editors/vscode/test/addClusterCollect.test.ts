@@ -32,12 +32,12 @@ const ALL_FIELDS = Object.keys(DEFAULT_INPUTS) as InputField[];
 
 test("the form opens pre-filled with the installer's own domain default", () => {
   // Not invented here: scripts/install/hosts-entries.sh writes
-  // cockpit.local.znas.io,identity.local.znas.io,local.znas.io when given no
+  // cockpit.memql.localhost,identity.memql.localhost,memql.localhost when given no
   // --hostnames, and verify-frontdoor.sh checks the same hosts. A different
   // value would make the form disagree with the scripts it is about to run.
   const state = new AddClusterState();
-  assert.equal(state.inputs.domain, "local.znas.io");
-  assert.equal(DEFAULT_INPUTS.domain, "local.znas.io");
+  assert.equal(state.inputs.domain, "memql.localhost");
+  assert.equal(DEFAULT_INPUTS.domain, "memql.localhost");
 });
 
 test("a repair can be started without typing anything, once the receipt is in", () => {

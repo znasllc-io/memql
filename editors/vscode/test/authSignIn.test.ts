@@ -24,7 +24,7 @@ import {
 import type { ClusterConfig } from "../src/clusters/model.js";
 
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name: "local", endpoint: "cockpit.local.znas.io:443", ...overrides };
+  return { name: "local", endpoint: "cockpit.memql.localhost:443", ...overrides };
 }
 
 function tokens(overrides: Partial<AuthFlowTokens> = {}): AuthFlowTokens {
@@ -88,7 +88,7 @@ function recorder(
 
 test("canSignIn accepts a cluster whose identity service is derivable", () => {
   assert.equal(canSignIn(cluster({ issuer: "https://identity.example.com" })), true);
-  assert.equal(canSignIn(cluster({ domain: "local.znas.io" })), true);
+  assert.equal(canSignIn(cluster({ domain: "memql.localhost" })), true);
   // The endpoint convention's other half: cockpit.<domain> implies its sibling.
   assert.equal(canSignIn(cluster()), true);
 });

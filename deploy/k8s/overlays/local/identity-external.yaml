@@ -1,5 +1,5 @@
 # Local-only LoadBalancer exposing the identity service through the k3d
-# serviceLB on host port 8085 (identity.local.znas.io:8085 -> 127.0.0.1:8085
+# serviceLB on host port 8085 (identity.memql.localhost:8085 -> 127.0.0.1:8085
 # -> this Service). Historically the port mapping existed but nothing claimed
 # it -- identity was only reachable via a manual kubectl port-forward; this
 # makes the documented entry point real. Staging/prod expose identity via

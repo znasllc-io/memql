@@ -66,7 +66,7 @@
 #
 # Usage:
 #   scripts/install/seed-bootstrap.sh \
-#       --domain=local.znas.io --owner-email=me@example.com \
+#       --domain=memql.localhost --owner-email=me@example.com \
 #       --owner-first-name=Ada --owner-last-name=Lovelace \
 #       --registration-mode=invite_only \
 #       --provider=anthropic --provider-key-file=$HOME/.memql/anthropic.key
@@ -85,7 +85,7 @@ cap_init "install.seedBootstrap" \
 cap_spec_param "namespace"            "k8s namespace to seed into (default memql)"
 cap_spec_param "context"              "kubectl context to pin (default: whatever is current)"
 cap_spec_param "secret"               "Secret name to write (default memql-bootstrap)"
-cap_spec_param_required "domain"               "REQUIRED cluster domain, e.g. local.znas.io"
+cap_spec_param_required "domain"               "REQUIRED cluster domain, e.g. memql.localhost"
 cap_spec_param_required "owner-email"          "REQUIRED email the cluster owner receives the first magic link at"
 cap_spec_param_required "owner-first-name"     "REQUIRED cluster owner's first name"
 cap_spec_param_required "owner-last-name"      "REQUIRED cluster owner's last name"

@@ -26,10 +26,10 @@ export interface InstalledCluster {
  * The registry name for a freshly installed cluster.
  *
  * The domain's first label, because that is what an operator calls it: a
- * cluster at `local.znas.io` is "local", the same name the installer's own
- * default endpoint (`cockpit.local.znas.io:443`) implies. Falls back to "local"
- * for a domain with nothing usable in front, so this never yields an empty name
- * -- `upsertCluster` rejects one outright, and it would orphan the entry.
+ * cluster at `lab.example.com` is "lab", and one at the default
+ * `memql.localhost` is "memql". Falls back to "local" for a domain with nothing
+ * usable in front, so this never yields an empty name -- `upsertCluster`
+ * rejects one outright, and it would orphan the entry.
  */
 export function defaultClusterName(domain: string): string {
   const first = trimDomain(domain).split(".")[0] ?? "";

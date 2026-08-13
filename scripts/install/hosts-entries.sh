@@ -7,7 +7,7 @@
 # hostnames in the system hosts file, inside a delimited managed block.
 #
 # The local stack is reached exactly as staging is: through the front door at
-# https://cockpit.local.znas.io and https://identity.local.znas.io (env parity
+# https://cockpit.memql.localhost and https://identity.memql.localhost (env parity
 # -- see docs/public/operate/environment-parity.md). Those names have to
 # resolve to the loopback address, which on a developer machine means a hosts
 # file entry. This capability owns that edit, on install and on uninstall.
@@ -15,9 +15,9 @@
 # THE MANAGED BLOCK
 #
 #   # BEGIN memql
-#   127.0.0.1 cockpit.local.znas.io
-#   127.0.0.1 identity.local.znas.io
-#   127.0.0.1 local.znas.io
+#   127.0.0.1 cockpit.memql.localhost
+#   127.0.0.1 identity.memql.localhost
+#   127.0.0.1 memql.localhost
 #   # END memql
 #
 # Everything between the markers is ours; everything outside them is the
@@ -40,7 +40,7 @@
 #   scripts/install/hosts-entries.sh --action=add    --confirm=add-memql-hosts
 #   scripts/install/hosts-entries.sh --action=remove --confirm=remove-memql-hosts
 #   scripts/install/hosts-entries.sh --action=add --hosts-file=/tmp/hosts \
-#       --hostnames=a.local.znas.io,b.local.znas.io --ip=127.0.0.1 --confirm=add-memql-hosts
+#       --hostnames=a.memql.localhost,b.memql.localhost --ip=127.0.0.1 --confirm=add-memql-hosts
 #   scripts/install/hosts-entries.sh --print-spec
 #
 # The edit needs write access to the hosts file, so a real run is normally

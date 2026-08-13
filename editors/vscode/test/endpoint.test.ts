@@ -16,22 +16,22 @@ import {
 
 test("derives a wss URL from a host:port endpoint", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:443" }),
-    "wss://cockpit.local.znas.io/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:443" }),
+    "wss://cockpit.memql.localhost/memql/ws",
   );
 });
 
 test("preserves a non-standard port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:8443" }),
-    "wss://cockpit.local.znas.io:8443/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:8443" }),
+    "wss://cockpit.memql.localhost:8443/memql/ws",
   );
 });
 
 test("handles an endpoint with no port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.local.znas.io" }),
-    "wss://cockpit.local.znas.io/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost" }),
+    "wss://cockpit.memql.localhost/memql/ws",
   );
 });
 
@@ -106,8 +106,8 @@ test("identityBaseUrlFor prefers an explicit issuer, trimming its trailing slash
   assert.equal(
     identityBaseUrlFor({
       name: "l",
-      endpoint: "cockpit.local.znas.io:443",
-      domain: "local.znas.io",
+      endpoint: "cockpit.memql.localhost:443",
+      domain: "memql.localhost",
       issuer: "https://auth.example.com/",
     }),
     "https://auth.example.com",
@@ -116,8 +116,8 @@ test("identityBaseUrlFor prefers an explicit issuer, trimming its trailing slash
 
 test("identityBaseUrlFor falls back to the identity.<domain> convention", () => {
   assert.equal(
-    identityBaseUrlFor({ name: "l", endpoint: "cockpit.local.znas.io:443", domain: "local.znas.io" }),
-    "https://identity.local.znas.io",
+    identityBaseUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:443", domain: "memql.localhost" }),
+    "https://identity.memql.localhost",
   );
 });
 
@@ -148,8 +148,8 @@ test("composeEndpointFromDomain normalizes what an operator actually types", () 
   // fully-qualified name. Both resolve identically in DNS and neither matches
   // the endpoint the same operator composes without them, so they are
   // normalized in ONE place rather than at each of the three call sites.
-  for (const typed of ["  local.znas.io  ", "local.znas.io.", ".local.znas.io"]) {
-    assert.equal(composeEndpointFromDomain(typed), "cockpit.local.znas.io:443", typed);
+  for (const typed of ["  memql.localhost  ", "memql.localhost.", ".memql.localhost"]) {
+    assert.equal(composeEndpointFromDomain(typed), "cockpit.memql.localhost:443", typed);
   }
 });
 

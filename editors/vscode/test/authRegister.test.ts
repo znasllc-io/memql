@@ -24,7 +24,7 @@ import {
   registerPublicClient,
 } from "../src/auth/register.js";
 
-const ISSUER = "https://identity.local.znas.io";
+const ISSUER = "https://identity.memql.localhost";
 
 interface FakeHttp {
   fetch: (url: string, init: HttpRequestInit) => Promise<HttpResponseLike>;

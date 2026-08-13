@@ -20,7 +20,7 @@ import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { looksLikeProviderKey } from "../install/secrets.js";
-import { installDomainProblem, SUPPORTED_LOCAL_DOMAIN } from "../install/stackPin.js";
+import { installDomainProblem, DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -126,12 +126,15 @@ export interface FieldError {
  * operator asked for, so it stays visible and editable rather than becoming
  * something the wizard decides silently.
  *
- * `local.znas.io` is not invented here. It is the installer's OWN default:
- * `scripts/install/hosts-entries.sh` writes
- * `cockpit.local.znas.io,identity.local.znas.io,local.znas.io` when given no
- * `--hostnames`, and `verify-frontdoor.sh` checks the same two hosts. Picking
- * any other value here would make the form disagree with the scripts it is
- * about to run.
+ * `memql.localhost` is not invented here. It is the installer's OWN default:
+ * `scripts/install/hosts-entries.sh` derives its three hostnames from it when
+ * given no `--domain`, `mkcert-setup.sh` covers it, and the local overlay's two
+ * Ingresses carry it as their committed hostname. Picking any other value here
+ * would make the form disagree with the scripts it is about to run.
+ *
+ * It is a DEFAULT, not the only accepted answer (memql#3593): any well-formed
+ * domain now reaches the cluster, through the memql-domain ConfigMap and two
+ * patches on the ArgoCD Application.
  *
  * THE OTHER FOUR ARE DELIBERATELY BLANK. A person's name, their email and
  * where they keep an API key are facts about them, and a wizard that guessed
@@ -141,9 +144,9 @@ export interface FieldError {
  */
 export const DEFAULT_INPUTS: Inputs = {
   // The constant, not a copy of it (memql#3590): the form's offer and the
-  // release's one servable domain are the same fact, and a literal here is how
+  // overlay's committed default are the same fact, and a literal here is how
   // they drift.
-  domain: SUPPORTED_LOCAL_DOMAIN,
+  domain: DEFAULT_LOCAL_DOMAIN,
   ownerFirstName: "",
   ownerLastName: "",
   ownerEmail: "",

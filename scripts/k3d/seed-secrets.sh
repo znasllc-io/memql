@@ -8,7 +8,7 @@
 #
 #   identity-tls           -- identity server TLS cert (self-signed cluster CA)
 #   memql-ca               -- the cluster CA cert, mounted on every node
-#   local-znas-tls         -- front-door TLS (the mkcert *.local.znas.io pair)
+#   local-znas-tls         -- front-door TLS (the mkcert *.memql.localhost pair)
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
 #                             MEMQL_GENESIS_B64,
 #                             MEMQL_IDENTITY_SIGNING_KEY_B64, DATABASE_DSN, ...)

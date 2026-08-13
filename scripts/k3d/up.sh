@@ -34,7 +34,7 @@
 #
 # The memQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
 # and reached through the same front door, at
-# https://cockpit.local.znas.io/portal/ (memql#3314). Its bundle is baked into
+# https://cockpit.memql.localhost/portal/ (memql#3314). Its bundle is baked into
 # the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
 # rebuilds it like any other change to that node.
 #
@@ -712,9 +712,9 @@ function print_summary() {
         echo "  Application:    ${APP_NAME} (${TARGET_REVISION} -> ${OVERLAY_PATH})"
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
-        echo "  Entry points (front door on 443; *.local.znas.io resolves to 127.0.0.1):"
-        echo "    https://identity.local.znas.io          identity (web UI + JWKS)"
-        echo "    https://cockpit.local.znas.io/portal/   memQL Portal (graphical ops console)"
+        echo "  Entry points (front door on 443; *.memql.localhost resolves to 127.0.0.1):"
+        echo "    https://identity.memql.localhost          identity (web UI + JWKS)"
+        echo "    https://cockpit.memql.localhost/portal/   memQL Portal (graphical ops console)"
         echo "    ws://localhost:7880                     livekit"
         echo "    localhost:5432                          postgres (debug)"
         echo ""

@@ -1533,7 +1533,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   }
 
   const domain = await window.showInputBox({
-    prompt: 'Domain (e.g. local.znas.io). The endpoint is composed as cockpit.<domain>:443.',
+    prompt: 'Domain (e.g. memql.localhost). The endpoint is composed as cockpit.<domain>:443.',
     value: existing?.domain ?? '',
     ignoreFocusOut: true,
   });

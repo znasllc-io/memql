@@ -29,14 +29,14 @@ import type { AuthFlowDeps } from "../src/auth/flow.js";
 import type { LoopbackListener } from "../src/auth/loopback.js";
 import { persistSignIn, refreshTokenSecretKey, type SecretStore } from "../src/auth/store.js";
 
-const ISSUER = "https://identity.local.znas.io";
+const ISSUER = "https://identity.memql.localhost";
 const NOW_MS = 1_800_000_000_000;
 
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
   return {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
-    domain: "local.znas.io",
+    endpoint: "cockpit.memql.localhost:443",
+    domain: "memql.localhost",
     clientId: "mcp_existing",
     ...overrides,
   };

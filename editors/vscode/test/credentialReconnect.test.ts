@@ -91,8 +91,8 @@ test("a credential refresh reconnect re-injects the session-define before the re
 
   const cluster: ClusterConfig = {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
-    domain: "local.znas.io",
+    endpoint: "cockpit.memql.localhost:443",
+    domain: "memql.localhost",
     local: true,
     token: jwtExpiringIn(600),
     refreshToken: "RT-1",
@@ -165,8 +165,8 @@ test("a session whose token expires survives past the 15-minute access-token lif
   const rotations: string[] = [];
   const cluster: ClusterConfig = {
     name: "local",
-    endpoint: "cockpit.local.znas.io:443",
-    domain: "local.znas.io",
+    endpoint: "cockpit.memql.localhost:443",
+    domain: "memql.localhost",
     token: jwtExpiringIn(-1),
     refreshToken: "RT-0",
   };

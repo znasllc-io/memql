@@ -193,14 +193,15 @@ function present(params: Record<string, string | undefined>): Record<string, str
 /**
  * The front door, as the three steps that build and check it need it named.
  *
- * ONE DERIVATION, THREE CONSUMERS (memql#3590). The page asks for a domain and it
+ * ONE DERIVATION, FOUR CONSUMERS (memql#3590, memql#3593). The page asks for a
+ * domain and it
  * reached `seedBootstrap` and `enrolmentLink` only; `hostsBlock`, `localCA` and
- * `frontDoor` each fell back to their own `local.znas.io` defaults. So identity
+ * `frontDoor` each fell back to their own hardcoded defaults. So identity
  * was bootstrapped for the typed domain while the hosts block, the certificate
  * and the front-door probe named another -- three artifacts that each look
  * correct alone and cannot work together.
  *
- * It was invisible because the field's default IS `local.znas.io`, where the
+ * It was invisible because the field's default WAS that same hardcoded value, where the
  * hardcoded value and the typed one agree. Anyone who changed it got a DNS
  * failure at `frontDoor` against hostnames they never asked for, which reads as a
  * broken installer.
@@ -284,6 +285,17 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // CONVERTED, not passed through: git tags carry the `v` and image
           // tags do not. See imageTagFor.
           "image-tag": imageTagFor(opts.tag || DEFAULT_STACK_TAG),
+          // The FOURTH consumer of the typed domain (memql#3593). The other
+          // three place it on the MACHINE -- the hosts block, the certificate,
+          // the front-door probe. This one places it in the CLUSTER: k3d.up
+          // seeds the memql-domain ConfigMap every node derives its issuer from
+          // and, when the domain differs from the overlay's committed default,
+          // patches the two Ingress hostnames on the ArgoCD Application.
+          //
+          // Without it the cluster serves the default while the machine is set
+          // up for something else, which is memql#3593 exactly: a domain that
+          // resolves and then answers as the wrong site.
+          domain: opts.domain,
         });
         break;
       case "hostsBlock":
@@ -332,7 +344,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           //
           // invite_only is the answer for the cluster this wizard builds: one
           // owner, bootstrapped from these very values, on a machine reachable
-          // at local.znas.io. `open` would let anyone who can reach it register.
+          // on the operator's own machine. `open` would let anyone who can reach it register.
           // An operator who wants otherwise passes --registration-mode.
           "registration-mode": opts.registrationMode || DEFAULT_REGISTRATION_MODE,
           provider: opts.providerKeyFile ? opts.provider : undefined,
