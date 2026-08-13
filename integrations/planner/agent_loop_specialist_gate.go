@@ -33,6 +33,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"os"
 	"strings"
 	"time"
@@ -168,8 +169,8 @@ func (l *PlannerAgentLoop) parkForSpecialistApproval(ctx context.Context, plan m
 		fbReqJSON = []byte(`{}`)
 	}
 	q := fmt.Sprintf(
-		`mutation updatePlanStatus(planId:%q, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s)`,
-		planId, string(fbReqJSON),
+		`mutation updatePlanStatus(planId:%s, status:"awaitingFeedback", feedbackReason:"specialist_approval_required", feedbackRequest:%s)`,
+		langparser.QuoteString(planId), string(fbReqJSON),
 	)
 	if _, err = l.engine.Execute(systemActorContext(ctx), q); err != nil {
 		return err

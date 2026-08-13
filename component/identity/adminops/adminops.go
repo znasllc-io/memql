@@ -55,6 +55,7 @@ import (
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/pat"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/id"
 )
 
@@ -782,7 +783,19 @@ func (s *Service) writeUser(ctx context.Context, u *userRow) error {
 	return nil
 }
 
-// quote renders a Go string as a MemQL string literal. %q is the same escape
-// grammar the identity store and the templ admin handlers use for every
-// caller-supplied value that reaches a query string.
-func quote(s string) string { return fmt.Sprintf("%q", s) }
+// quote renders a Go string as a MemQL string literal.
+//
+// It was `fmt.Sprintf("%q", s)` until memql#3611, on the stated belief that %q
+// "is the same escape grammar" the rest of the identity path used. It is not
+// the lexer's grammar, and the rest of the identity path was wrong in the same
+// way. Go's %q emits `\x00`, `\a`, `\v` and `\xNN`; readString implements the
+// JSON escape set and rejects every one of them, so a single control byte or
+// one invalid UTF-8 byte anywhere in a value made the WHOLE statement
+// unparseable and the write never happened. Every value below is
+// operator-supplied over the wire -- a brand name, a pasted data-URI, a
+// registered-clients JSON blob -- so none of them is a value this package gets
+// to assume is clean.
+//
+// One helper, so one edit fixed all eleven call sites; that is the only good
+// thing about having had it.
+func quote(s string) string { return langparser.QuoteString(s) }

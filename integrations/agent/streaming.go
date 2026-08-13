@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/taskstamp"
 	"github.com/znasllc-io/memql/core/common"
@@ -1290,19 +1291,19 @@ func (r *Replier) promoteCanvasOutput(ctx context.Context, turnCtx turnContext, 
 	// attribute the row to the inbound caller instead.
 	mutationCtx := withUserActor(ctx, ownerUserId)
 	var b strings.Builder
-	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%q, title:%q, body:%q, source:%q`,
-		outputId, title, body, "agent_generated")
+	fmt.Fprintf(&b, `mutation createGeneratedOutput(outputId:%s, title:%s, body:%s, source:%s`,
+		langparser.QuoteString(outputId), langparser.QuoteString(title), langparser.QuoteString(body), langparser.QuoteString("agent_generated"))
 	if summary != "" {
-		fmt.Fprintf(&b, `, summary:%q`, summary)
+		fmt.Fprintf(&b, `, summary:%s`, langparser.QuoteString(summary))
 	}
 	if turnCtx.AgentId != "" {
-		fmt.Fprintf(&b, `, producedByAgentId:%q`, turnCtx.AgentId)
+		fmt.Fprintf(&b, `, producedByAgentId:%s`, langparser.QuoteString(turnCtx.AgentId))
 	}
 	if turnCtx.PlanId != "" {
-		fmt.Fprintf(&b, `, producedByPlanId:%q`, turnCtx.PlanId)
+		fmt.Fprintf(&b, `, producedByPlanId:%s`, langparser.QuoteString(turnCtx.PlanId))
 	}
 	if turnCtx.PartitionId != "" {
-		fmt.Fprintf(&b, `, partitionId:%q`, turnCtx.PartitionId)
+		fmt.Fprintf(&b, `, partitionId:%s`, langparser.QuoteString(turnCtx.PartitionId))
 	}
 	b.WriteString(")")
 

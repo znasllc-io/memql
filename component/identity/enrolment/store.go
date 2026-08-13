@@ -10,6 +10,7 @@ import (
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -131,9 +132,9 @@ func (s *Store) Create(ctx context.Context, enrolmentId, userId, tokenHash, issu
 		return errors.New("enrolment.Store.Create: expiresAt required -- a token with no expiry is not a short-lived credential")
 	}
 	q := fmt.Sprintf(
-		`mutation createEnrolmentToken(enrolmentId:%q,userId:%q,tokenHash:%q,issuedBy:%q,expiresAt:%q,sourceIP:%q)`,
-		BareSlug(enrolmentId), userId, tokenHash, issuedBy,
-		expiresAt.UTC().Format(time.RFC3339Nano), sourceIP,
+		`mutation createEnrolmentToken(enrolmentId:%s,userId:%s,tokenHash:%s,issuedBy:%s,expiresAt:%s,sourceIP:%s)`,
+		langparser.QuoteString(BareSlug(enrolmentId)), langparser.QuoteString(userId), langparser.QuoteString(tokenHash), langparser.QuoteString(issuedBy),
+		langparser.QuoteString(expiresAt.UTC().Format(time.RFC3339Nano)), langparser.QuoteString(sourceIP),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("enrolment.Store.Create: %w", err)
@@ -151,8 +152,8 @@ func (s *Store) Consume(ctx context.Context, enrolmentId, consumedFromIP string,
 		return errors.New("enrolment.Store.Consume: enrolmentId required")
 	}
 	q := fmt.Sprintf(
-		`mutation consumeEnrolmentToken(enrolmentId:%q,consumedAt:%q,consumedFromIP:%q)`,
-		BareSlug(enrolmentId), at.UTC().Format(time.RFC3339Nano), consumedFromIP,
+		`mutation consumeEnrolmentToken(enrolmentId:%s,consumedAt:%s,consumedFromIP:%s)`,
+		langparser.QuoteString(BareSlug(enrolmentId)), langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)), langparser.QuoteString(consumedFromIP),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("enrolment.Store.Consume: %w", err)
@@ -169,8 +170,8 @@ func (s *Store) Revoke(ctx context.Context, enrolmentId string, at time.Time) er
 		return errors.New("enrolment.Store.Revoke: enrolmentId required")
 	}
 	q := fmt.Sprintf(
-		`mutation revokeEnrolmentToken(enrolmentId:%q,revokedAt:%q)`,
-		BareSlug(enrolmentId), at.UTC().Format(time.RFC3339Nano),
+		`mutation revokeEnrolmentToken(enrolmentId:%s,revokedAt:%s)`,
+		langparser.QuoteString(BareSlug(enrolmentId)), langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)),
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return fmt.Errorf("enrolment.Store.Revoke: %w", err)
@@ -188,7 +189,7 @@ func (s *Store) LookupByHash(ctx context.Context, tokenHash string) (*Row, error
 	if strings.TrimSpace(tokenHash) == "" {
 		return nil, nil
 	}
-	q := fmt.Sprintf(`query enrolmentTokenByHash(tokenHash:%q)`, tokenHash)
+	q := fmt.Sprintf(`query enrolmentTokenByHash(tokenHash:%s)`, langparser.QuoteString(tokenHash))
 	res, err := s.Engine.Execute(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("enrolment.Store.LookupByHash: %w", err)

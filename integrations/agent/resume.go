@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -35,7 +36,7 @@ func (r *Replier) loadResumeContext(ctx context.Context, taskId string) (string,
 	if taskId == "" || r.engine == nil {
 		return "", false
 	}
-	q := fmt.Sprintf(`query taskStateById(taskId:%q)`, taskId)
+	q := fmt.Sprintf(`query taskStateById(taskId:%s)`, langparser.QuoteString(taskId))
 	res, err := r.engine.Execute(ctx, q)
 	if err != nil {
 		r.logger.Debug("agent background: resume taskState lookup failed",
