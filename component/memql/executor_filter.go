@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -1649,35 +1650,48 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 	field := strings.TrimSpace(cmp.Field.Parts[0])
 
 	if info, ok := resolveIntrinsicField(field); ok {
+		// Each arm below normalises the LITERAL exactly as its compile
+		// counterpart does, and reads the STORED column verbatim -- because
+		// that is what the emitted SQL compares (memql#3628). These used to
+		// strings.TrimSpace both sides, which no `=` in Postgres does: the
+		// compile functions normalise only the bound parameter
+		// (compileIdComparison / compileCreatedByComparison trim,
+		// compileTypeComparison lowercases and trims, compileConceptComparison
+		// trims, compileProvenanceComparison does neither) and leave the
+		// column alone.
+		//
+		// KNOWN RESIDUAL, out of scope here: compileIdComparison also runs
+		// resolveFullId, which expands a BARE shortId to `{concept}:{shortId}`
+		// against the query's concept context. This evaluator has no concept
+		// context to expand with, so `row.id=="abc"` still matches in SQL and
+		// misses in process. Fail-closed like the rest of this class, and
+		// fixing it means threading conceptContext through nodeMatches ->
+		// nodeMatchesComparison rather than changing a comparison rule.
 		switch info.kind {
 		case intrinsicFieldConcept:
 			want, err := ensureString(cmp.Value)
 			if err != nil {
 				return false, err
 			}
-			actual := strings.TrimSpace(node.Concept)
-			return compareStringValues(actual, strings.TrimSpace(want), cmp.Operator)
+			return compareStringValues(node.Concept, strings.TrimSpace(want), cmp.Operator)
 		case intrinsicFieldId:
 			want, err := ensureString(cmp.Value)
 			if err != nil {
 				return false, err
 			}
-			actual := strings.TrimSpace(node.ID)
-			return compareStringValues(actual, strings.TrimSpace(want), cmp.Operator)
+			return compareStringValues(node.ID, strings.TrimSpace(want), cmp.Operator)
 		case intrinsicFieldType:
 			want, err := ensureString(cmp.Value)
 			if err != nil {
 				return false, err
 			}
-			actual := strings.TrimSpace(node.Type)
-			return compareStringValues(actual, strings.TrimSpace(want), cmp.Operator)
+			return compareStringValues(node.Type, strings.ToLower(strings.TrimSpace(want)), cmp.Operator)
 		case intrinsicFieldCreatedBy:
 			want, err := ensureString(cmp.Value)
 			if err != nil {
 				return false, err
 			}
-			actual := strings.TrimSpace(node.CreatedBy)
-			return compareStringValues(actual, strings.TrimSpace(want), cmp.Operator)
+			return compareStringValues(node.CreatedBy, strings.TrimSpace(want), cmp.Operator)
 		case intrinsicFieldCreatedAt:
 			want, err := ensureString(cmp.Value)
 			if err != nil {
@@ -1708,7 +1722,9 @@ func nodeMatchesComparison(node memorynodes.MemoryNode, cmp *ComparisonExpressio
 			if err != nil {
 				return false, fmt.Errorf("provenance.%s comparison requires a string: %w", leaf, err)
 			}
-			return compareStringValues(provenanceLeafFromJSON(node.Provenance, leaf), strings.TrimSpace(want), cmp.Operator)
+			// compileProvenanceComparison binds the literal untouched, so
+			// this must not trim it either (memql#3628).
+			return compareStringValues(provenanceLeafFromJSON(node.Provenance, leaf), want, cmp.Operator)
 		default:
 			return false, fmt.Errorf("field %q is not supported in queries", cmp.Field.Raw)
 		}
@@ -1838,7 +1854,7 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		// numeric path first; if expected is a string and actual is
 		// a string, fall through to lexicographic comparison.
 		if expectedStr, ok := expected.(string); ok {
-			if actualStr, ok := toString(actual); ok {
+			if actualStr, ok := payloadText(actual); ok {
 				switch op {
 				case OpGt:
 					return actualStr > expectedStr, nil
@@ -1856,7 +1872,7 @@ func compareScalarValues(actual any, op ComparisonOperator, expected any) (bool,
 		if !ok {
 			return false, fmt.Errorf("numeric comparison requires a number literal")
 		}
-		actualNum, ok := toFloat(actual)
+		actualNum, ok := payloadNumeric(actual)
 		if !ok {
 			return false, nil
 		}
@@ -1960,7 +1976,7 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 		}
 		return !match, nil
 	case bool:
-		actualBool, ok := toBool(actual)
+		actualBool, ok := payloadBool(actual)
 		if !ok {
 			if op == OpEq {
 				return false, nil
@@ -1972,7 +1988,7 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 		}
 		return actualBool != want, nil
 	case int64:
-		actualNum, ok := toFloat(actual)
+		actualNum, ok := payloadNumeric(actual)
 		if !ok {
 			if op == OpEq {
 				return false, nil
@@ -1985,7 +2001,7 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 		}
 		return actualNum != expectedNum, nil
 	case float64:
-		actualNum, ok := toFloat(actual)
+		actualNum, ok := payloadNumeric(actual)
 		if !ok {
 			if op == OpEq {
 				return false, nil
@@ -1997,7 +2013,7 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 		}
 		return actualNum != want, nil
 	case string:
-		actualStr, ok := toString(actual)
+		actualStr, ok := payloadText(actual)
 		if !ok {
 			if op == OpEq {
 				return false, nil
@@ -2013,7 +2029,85 @@ func compareEquality(actual any, expected any, op ComparisonOperator) (bool, err
 	}
 }
 
-func toFloat(value any) (float64, bool) {
+// payloadText / payloadNumeric / payloadBool model ONE thing between them:
+// what the SQL push-down does to a STORED payload value before comparing it
+// (memql#3628).
+//
+// compilePayloadComparison emits `payload #>> '{path}'` -- a TEXT extraction
+// of the stored JSONB -- and then casts that text by the LITERAL's type:
+// `::numeric` for a number literal, `::boolean` for a boolean, no cast at all
+// for a string. executeCombinedFilterQuery re-evaluates the same predicate in
+// process on every scanned candidate, so these three have to reach the same
+// answer the database does or a combined-filter query returns different rows
+// depending on which path ran.
+//
+// So the rule is: render the decoded value as `#>>` renders it, then apply the
+// cast the literal selects. Nothing else normalises. Two consequences worth
+// stating, because their previous versions got both backwards:
+//
+//   - the TEXT comparison is VERBATIM. The `toString` these replace ran
+//     strings.TrimSpace over the stored value, which no `=` in Postgres does,
+//     so a payload of `" u-1 "` matched `== "u-1"` in process and not in SQL.
+//   - the numeric and boolean casts DO skip surrounding whitespace, because
+//     numeric_in and boolin do. Trimming is not banned; it belongs to the
+//     cast, not to the comparison.
+//
+// Direction of the fix, deliberately: the DATABASE is the source of truth.
+// The push-down is the primary filter and it runs against the stored bytes;
+// the post-filter is a re-check of the rows it already returned. Where the two
+// disagreed the composition was an intersection, so the old divergence was
+// always fail-CLOSED -- rows silently missing, no error explaining why.
+
+// payloadText renders a decoded payload value the way `payload #>> '{path}'`
+// renders the stored JSONB: a string as itself, a boolean as `true`/`false`,
+// a number in numeric's plain (never exponent) notation.
+//
+// Two shapes are deliberately NOT reproduced, and report themselves
+// un-renderable so the comparison is a non-match rather than a wrong match:
+//
+//   - the exact spelling of a JSON number. jsonb keeps the token's numeric
+//     scale, so a stored `5.0` extracts as "5.0", and encoding/json has thrown
+//     the source text away by the time this sees a float64. Only reachable by
+//     comparing a fractional-zero or exponent-spelled number against a STRING
+//     literal; no authored filter in the corpus does that. A json.Number (if a
+//     caller decoded with UseNumber) keeps its source text and is exact.
+//   - objects and arrays. `#>>` renders those as jsonb's own normalised JSON
+//     text -- keys re-ordered, whitespace collapsed -- and reproducing that
+//     byte for byte is a jsonb serialiser, not a comparison helper.
+func payloadText(value any) (string, bool) {
+	switch v := value.(type) {
+	case string:
+		return v, true
+	case bool:
+		return strconv.FormatBool(v), true
+	case json.Number:
+		return v.String(), true
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64), true
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 64), true
+	case int:
+		return strconv.Itoa(v), true
+	case int32:
+		return strconv.FormatInt(int64(v), 10), true
+	case int64:
+		return strconv.FormatInt(v, 10), true
+	default:
+		return "", false
+	}
+}
+
+// payloadNumeric mirrors `(payload #>> '{path}')::numeric`: the extracted text
+// parsed as a number. A JSON STRING holding digits therefore compares equal to
+// a numeric literal, exactly as it does in SQL. numeric_in ignores surrounding
+// whitespace, so this does too.
+//
+// Residual, deliberate: text that will not parse is a Postgres ERROR
+// ("invalid input syntax for type numeric") and a non-match here. That is a
+// query-fails-versus-returns-nothing difference rather than a which-rows-do-I-
+// get one, and closing it would mean turning queries that work today into
+// failures -- the wrong direction for a fail-closed divergence.
+func payloadNumeric(value any) (float64, bool) {
 	switch v := value.(type) {
 	case float64:
 		return v, true
@@ -2031,9 +2125,76 @@ func toFloat(value any) (float64, bool) {
 			return 0, false
 		}
 		return f, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if err != nil {
+			return 0, false
+		}
+		return f, true
 	default:
+		// A boolean is NOT 1/0 here: `'true'::numeric` is an error in
+		// Postgres, not one.
 		return 0, false
 	}
+}
+
+// payloadBool mirrors `(payload #>> '{path}')::boolean`: the extracted text
+// parsed by Postgres's boolean input. A JSON STRING "true" therefore compares
+// equal to a boolean literal, exactly as it does in SQL.
+//
+// Same ERROR-versus-non-match residual as payloadNumeric: `'maybe'::boolean`
+// is a Postgres error and a non-match here.
+func payloadBool(value any) (bool, bool) {
+	switch v := value.(type) {
+	case bool:
+		return v, true
+	case string:
+		return parsePostgresBool(v)
+	default:
+		return false, false
+	}
+}
+
+// parsePostgresBool reproduces boolin (src/backend/utils/adt/bool.c): any
+// unambiguous PREFIX of true / false / yes / no / on / off, plus the single
+// characters 1 and 0, case-insensitively, with surrounding whitespace ignored.
+// A bare "o" is ambiguous between on and off and is an error there, so it is a
+// non-parse here.
+//
+// Spelled out rather than narrowed to "true"/"false" on purpose: the point of
+// this file's changes is that the post-filter answers what the database
+// answers, and a narrower reader would re-open the divergence for every other
+// spelling instead of the two JSON happens to use.
+func parsePostgresBool(s string) (bool, bool) {
+	lower := strings.ToLower(strings.TrimSpace(s))
+	if lower == "" {
+		return false, false
+	}
+	switch lower[0] {
+	case 't':
+		return true, strings.HasPrefix("true", lower)
+	case 'f':
+		return false, strings.HasPrefix("false", lower)
+	case 'y':
+		return true, strings.HasPrefix("yes", lower)
+	case 'n':
+		return false, strings.HasPrefix("no", lower)
+	case 'o':
+		switch {
+		case lower == "o":
+			return false, false
+		case strings.HasPrefix("off", lower):
+			return false, true
+		case strings.HasPrefix("on", lower):
+			return true, true
+		}
+		return false, false
+	case '1':
+		return true, lower == "1"
+	case '0':
+		return false, lower == "0"
+	}
+	return false, false
 }
 
 func literalToFloat(value any) (float64, bool) {
@@ -2047,31 +2208,13 @@ func literalToFloat(value any) (float64, bool) {
 	}
 }
 
-func toBool(value any) (bool, bool) {
-	switch v := value.(type) {
-	case bool:
-		return v, true
-	default:
-		return false, false
-	}
-}
-
-func toString(value any) (string, bool) {
-	switch v := value.(type) {
-	case string:
-		return strings.TrimSpace(v), true
-	default:
-		return "", false
-	}
-}
-
 func valueInCollection(actual any, collection *normalizedCollection) (bool, error) {
 	if collection == nil {
 		return false, fmt.Errorf("collection is nil")
 	}
 	switch collection.kind {
 	case valueKindString:
-		actualStr, ok := toString(actual)
+		actualStr, ok := payloadText(actual)
 		if !ok {
 			return false, nil
 		}
@@ -2082,7 +2225,7 @@ func valueInCollection(actual any, collection *normalizedCollection) (bool, erro
 		}
 		return false, nil
 	case valueKindNumber:
-		actualNum, ok := toFloat(actual)
+		actualNum, ok := payloadNumeric(actual)
 		if !ok {
 			return false, nil
 		}
@@ -2093,7 +2236,7 @@ func valueInCollection(actual any, collection *normalizedCollection) (bool, erro
 		}
 		return false, nil
 	case valueKindBool:
-		actualBool, ok := toBool(actual)
+		actualBool, ok := payloadBool(actual)
 		if !ok {
 			return false, nil
 		}
