@@ -70,7 +70,7 @@ func TestWorkerTokenListForUserIsAlwaysCallerScoped(t *testing.T) {
 		}
 		if info.IsDir() {
 			switch info.Name() {
-			case ".git", "node_modules", "vendor", "sdk":
+			case ".git", ".claude", "node_modules", "vendor", "sdk":
 				return filepath.SkipDir
 			}
 			return nil
