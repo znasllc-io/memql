@@ -30,20 +30,35 @@
 // one that reached the network to try would fail offline for a reason that has
 // nothing to do with the change under test.
 //
-// BUMPED TO v0.16.1 (memql#3580). v0.16.0's local overlay leaves genesis
-// autoload on, and the envelope it then demands is authored by hand -- so every
-// node in a cluster installed from it exits at boot. The engine images are
-// unchanged between the two; only the deploy tree moves.
+// BUMPED TO v0.17.0 (memql#3600, memql#3602). Two bugs made a v0.16.1 install
+// produce a cluster nobody could sign into, and only one of them was in the
+// installer.
 //
-// WHY IT IS NOT v0.15.0, WHICH WAS THE NEWEST TAG WHEN THIS LANDED. The install
-// path is younger than the last release. v0.15.0's local overlay carries no
-// `bootstrap-secret-envfrom` patch (#3375), so `seedBootstrap` would write the
-// identity bootstrap secret and no pod would read it -- the install would run
-// to the end and leave a cluster with no owner and no way in. A pin is only as
-// good as the release it names, which is why bumping it belongs to the release
-// and not to whoever last touched the installer.
+// memql#3602: clone-stack.sh leaves a DETACHED checkout at this tag, and
+// `git rev-parse --abbrev-ref HEAD` answers the literal "HEAD" for one, which
+// ArgoCD resolves to the default branch. So every install so far pinned its
+// IMAGES to this tag and reconciled its MANIFESTS from main. The two drifted the
+// moment they disagreed: main's overlay stopped setting identity's domain env
+// because the engine derives it now (memql#3593), and a v0.16.1 binary derives
+// nothing.
 //
-// Refs: #3560 #3375 #3363 #3357
+// That is also why this pin cannot stay at v0.16.1 now that the skew is fixed.
+// With the manifests finally following the pin, a v0.16.1 install would
+// faithfully serve local.znas.io while this wizard writes hosts entries and a
+// certificate for memql.localhost -- correctly pinned, and still wrong. The pin
+// and the default domain have to move together, and v0.17.0 is the first release
+// carrying both.
+//
+// WHY IT IS NOT v0.16.1, WHICH WAS THE NEWEST TAG WHEN THIS LANDED. The install
+// path is younger than the last release, and that keeps being true: v0.16.1's
+// local overlay pins identity's domain env to staging placeholders that defeat
+// the derivation (memql#3600), so identity would issue a magic link at
+// identity.staging.example.com -- a host nobody can reach, so no owner account is
+// ever created and the install ends green with no way in. A pin is only as good
+// as the release it names, which is why bumping it belongs to the release and
+// not to whoever last touched the installer.
+//
+// Refs: #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
  * The release tag an install checks out unless told otherwise.
@@ -51,7 +66,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.16.1";
+export const DEFAULT_STACK_TAG = "v0.17.0";
 
 /**
  * How a cluster the wizard builds treats people who are not its owner.
