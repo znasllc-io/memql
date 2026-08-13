@@ -43,6 +43,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 
 	conceptNames := make(map[string]struct{}, len(all))
+	conceptsByName := make(map[string]*concept.Concept, len(all))
 	relationshipsByConcept := make(map[string][]RelationshipDefinition, len(all))
 
 	for _, c := range all {
@@ -61,6 +62,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 
 		c.Name = name
 		conceptNames[name] = struct{}{}
+		conceptsByName[name] = c
 		relationshipsByConcept[name] = nil
 	}
 
@@ -96,6 +98,10 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 					name, idx, normalized.Field, normalized.TargetConcept,
 					suggestRelationshipTarget(normalized.TargetConcept, conceptNames),
 				)
+			}
+
+			if err := checkRelationshipFieldDeclared(normalized, c, conceptsByName[normalized.TargetConcept]); err != nil {
+				return fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
 			}
 
 			if err := checkDuplicateRelationship(duplicateTracker, name, normalized); err != nil {
@@ -596,4 +602,97 @@ func levenshtein(a, b string) int {
 		prev, curr = curr, prev
 	}
 	return prev[len(br)]
+}
+
+// checkRelationshipFieldDeclared verifies that a relationship's `field` names a
+// field the owning concept actually declares (memql#3654).
+//
+// WHICH concept owns the field depends on DIRECTION, and getting that wrong is
+// the whole subtlety here:
+//
+//   - outgoing: the foreign key lives on the declaring row, so `field` is a
+//     field of the declaring concept.
+//   - incoming: the foreign key lives on the FAR side, so `field` is a field of
+//     the TARGET concept. The live #3432 fixture does exactly this -- `hub`
+//     declares field="hubId" where hubId is a field of `spoke`. A naive
+//     "must be declared here" rule makes every incoming relationship illegal.
+//   - bidirectional: has zero declarations and zero tests, and memql#3658
+//     decides whether it survives v1 at all. Inventing a rule for it here would
+//     be guessing, so it is deliberately not validated.
+//
+// Matching is EXACT, not case-insensitive. The write path and the traversal
+// path already look the field up by exact key, so a case-mismatched field
+// canonicalized on filter and not on write -- an edge that half-works, which is
+// worse than one that plainly does not.
+func checkRelationshipFieldDeclared(def RelationshipDefinition, declaring, target *concept.Concept) error {
+	// A table/metadata field source names a row intrinsic rather than a payload
+	// field (only createdBy may do this), so there is no schema entry to match.
+	if def.FieldSource == concept.FieldSourceTable {
+		return nil
+	}
+
+	var owner *concept.Concept
+	switch def.Direction {
+	case relationshipDirectionOutgoing:
+		owner = declaring
+	case relationshipDirectionIncoming:
+		owner = target
+	default:
+		return nil // bidirectional -- see memql#3658
+	}
+	if owner == nil {
+		// Target unresolvable; the earlier target check already reports that
+		// with a better message than anything available here.
+		return nil
+	}
+
+	// @relationship binds TOP-LEVEL fields. A dotted path names a leaf inside
+	// one, so the root segment is what has to exist.
+	root := def.Field
+	if dot := strings.Index(root, "."); dot >= 0 {
+		root = root[:dot]
+	}
+
+	declared := owner.DeclaredFields()
+	for _, name := range declared {
+		if name == root {
+			return nil
+		}
+	}
+
+	where := "the concept"
+	if def.Direction == relationshipDirectionIncoming {
+		where = fmt.Sprintf("its target %q", owner.Name)
+	}
+	return fmt.Errorf(
+		"field %q is not declared on %s.%s",
+		def.Field, where, suggestRelationshipField(root, declared))
+}
+
+// suggestRelationshipField mirrors suggestRelationshipTarget for field names:
+// a typo is the common case, so name the near neighbour instead of leaving the
+// author to diff two spellings by eye.
+func suggestRelationshipField(field string, declared []string) string {
+	if field == "" || len(declared) == 0 {
+		return ""
+	}
+
+	limit := 2
+	if len(field) <= 4 {
+		limit = 1
+	}
+
+	var close []string
+	for _, name := range declared {
+		if levenshtein(field, name) <= limit {
+			close = append(close, name)
+		}
+	}
+	if len(close) == 0 {
+		return ""
+	}
+	if len(close) > 3 {
+		close = close[:3]
+	}
+	return fmt.Sprintf(" Did you mean %s?", strings.Join(quoteAll(close), " or "))
 }
