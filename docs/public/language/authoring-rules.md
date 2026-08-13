@@ -1750,10 +1750,17 @@ grammar:
 
 - `TestNoRetiredOperatorForms` (#977,
   `test/dslconformance/no_retired_operators_test.go`): filters use the single Go
-  boolean grammar — `&&` / `||` / `!` with parens. The `;`-AND and
-  `,`-OR separators, the `has` membership operator (use `in`), and
-  the `?.` optional-chain prefix (use `when(args.x) { ... }`) are
-  rejected.
+  boolean grammar — `&&` / `||` with parens (no `!`: it parses and is
+  then refused at load on every converter surface, memql#3630). The
+  `;`-AND and `,`-OR separators, the `has` membership operator (use
+  `in`), and the `?.` optional-chain prefix (use `when(args.x) { ... }`)
+  are rejected **by this gate**, which is a line-oriented TEXT SCAN over
+  the embedded `dsl/` tree — not by the parser, which still accepts all
+  four, and not by the engine, which still computes `;` as AND and `,`
+  as OR. That is why a `,` inside parentheses was an authorization
+  bypass and was closed here rather than in the grammar (memql#3612),
+  and why a product bundle mounted at `MEMQL_DSL_PATH` is outside the
+  gate entirely (memql#3629).
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.

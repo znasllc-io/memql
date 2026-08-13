@@ -68,7 +68,17 @@ func operators() []Operator {
 		{Symbol: ">=", Doc: "Greater than or equal."},
 		{Symbol: "&&", Doc: "Logical AND."},
 		{Symbol: "||", Doc: "Logical OR."},
-		{Symbol: "!", Doc: "Logical NOT (highest precedence)."},
+		// `!` is listed so Sense can EXPLAIN the token an author types,
+		// not to offer it as usable. It lexes and parses and is then
+		// refused by every ASTConverter surface -- filters and specs get
+		// the #2542 expression-led scope error, logic bodies and
+		// collection lambdas get "NOT/! does not convert". Its only
+		// working home is an automation cond-step condition, which the
+		// string evaluator in component/automations/evaluator.go handles.
+		// The Doc used to read "Logical NOT (highest precedence)", which
+		// advertised an operator the loader has never accepted
+		// (memql#3630).
+		{Symbol: "!", Doc: "Logical NOT -- NOT SUPPORTED in filters, specs, logic bodies or collection lambdas; rejected at load. Write the != comparison form. Works only in an automation cond-step condition."},
 		{Symbol: "in", Doc: "Membership: lhs in rhsCollection."},
 		{Symbol: "??", Doc: "Null-coalescing: first non-nil/non-empty operand; a ?? b ?? c folds to coalesce(a, b, c) with the final operand as the ultimate fallback. Binds tighter than comparison, looser than arithmetic (#2611)."},
 	}

@@ -238,11 +238,22 @@ func (s *Stamper) createAdHocPlan(ctx context.Context, pc PlanContext) (string, 
 // the upcoming toolInvocation rows. logicalStepId = the synthetic Task's
 // own id (one attempt; the threshold model is for retries on a real
 // step, not for ad-hoc grouping).
+//
+// pc.AgentId is deliberately NOT passed (memql#3630). This call used to
+// send `agentId: %q`, which createSemanticTask does not declare among its
+// nine args and does not list in its `accept {}` -- so it was silently
+// dropped, and an internal caller never reaches the unknown-arg rejection
+// (that check is MCP-gated). Agent attribution is not lost by removing it:
+// v1:planner:task carries no agent field by design, because the parent
+// Plan's ownerAgentId is the single authority on who runs the Tasks under
+// it, and createAdHocPlan above stamps exactly that. The sibling caller in
+// integrations/planner/agent_loop.go omits the argument for the same
+// reason and says so; this one was the outlier.
 func (s *Stamper) createSemanticWrapper(ctx context.Context, pc PlanContext) (string, error) {
 	taskId := id.NewShortId()
 	q := fmt.Sprintf(
-		`mutation createSemanticTask(taskId: %q, planId: %q, kind: "callTool", seq: 0, logicalStepId: %q, attemptNumber: 1, agentId: %q, input: {"adHoc": true})`,
-		taskId, pc.PlanId, taskId, pc.AgentId,
+		`mutation createSemanticTask(taskId: %q, planId: %q, kind: "callTool", seq: 0, logicalStepId: %q, attemptNumber: 1, input: {"adHoc": true})`,
+		taskId, pc.PlanId, taskId,
 	)
 	if _, err := s.Engine.Execute(ctx, q); err != nil {
 		return "", err
