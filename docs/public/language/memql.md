@@ -604,7 +604,11 @@ parentOf("belongsToSpace", expr)       # structural types take it too
 Relationship outputs can be combined with filters:
 `contains(id=="project-123") && status=="open" && priority<=2`
 
-**Note:** Relationship pointer fields are optional — if a node has a null or missing pointer field, it is silently skipped during traversal rather than causing an error.
+**Note:** Relationship pointer fields are optional — if a node has a null or missing pointer field, it is silently skipped during traversal rather than causing an error. A pointer present but set to the empty string counts as missing, and is skipped the same way.
+
+**A traversal that finds nothing returns an empty result, not an error** — uniformly across `parentOf`, `childOf`, `contains`, `owns`, `references`, `createdBy`, `aliasOf` and `equals`. "Who is this row's parent" asked about a root row is an ordinary question whose answer is "none". This holds whether the pointer key is absent, blank, or names a row that does not exist.
+
+What *does* still error is a different question: asking for a traversal on a concept that declares no such relationship at all (`aliasOf` on a concept with no `alias` edge). That names an edge the schema does not have, so answering it "empty" would hide the typo.
 
 ### Sorting
 
