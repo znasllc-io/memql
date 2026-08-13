@@ -15,6 +15,8 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // declared_metadata_annotations_test.go -- memql#2960.
@@ -737,6 +739,9 @@ func keyLiteralsInNonTestGo(t *testing.T, root, key string) []keyHit {
 			return nil // an unreadable path is not this test's business
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			switch info.Name() {
 			case ".git", "vendor", "node_modules":
 				return filepath.SkipDir

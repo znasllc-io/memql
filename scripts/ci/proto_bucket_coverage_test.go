@@ -48,6 +48,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // generatedProtoFiles returns every generated protobuf file in the repository,
@@ -62,6 +64,9 @@ func generatedProtoFiles(t *testing.T, root string) []string {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			switch d.Name() {
 			case ".git", "node_modules", "vendor":
 				return fs.SkipDir

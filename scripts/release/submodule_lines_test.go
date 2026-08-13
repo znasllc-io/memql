@@ -31,6 +31,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // bashArrayRe pulls the entries out of `readonly NAME=( "a" "b" )`.
@@ -86,6 +88,9 @@ func modulesOnDisk(t *testing.T, root string) map[string]bool {
 			return err
 		}
 		if info.IsDir() && (info.Name() == ".git" || info.Name() == "node_modules") {
+			return filepath.SkipDir
+		}
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
 			return filepath.SkipDir
 		}
 		if info.IsDir() || info.Name() != "go.mod" {

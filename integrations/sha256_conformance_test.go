@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // TestNoSHA256InIntegrations enforces that no file under integrations/
@@ -50,6 +52,9 @@ func TestNoSHA256InIntegrations(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") {

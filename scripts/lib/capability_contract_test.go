@@ -30,6 +30,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // repoRoot resolves the repository root from this test file's location
@@ -53,6 +55,9 @@ func capabilityScripts(t *testing.T) []string {
 	err := filepath.Walk(scriptsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
+			return filepath.SkipDir
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".sh") {
 			return nil
@@ -127,6 +132,9 @@ func TestDeployScriptsAreNonInteractive(t *testing.T) {
 		err := filepath.Walk(full, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
+			}
+			if info.IsDir() && repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
 			}
 			if info.IsDir() || !strings.HasSuffix(path, ".sh") {
 				return nil

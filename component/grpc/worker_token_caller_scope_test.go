@@ -47,6 +47,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 const workerTokenPkgPath = "component/identity/workertoken"
@@ -69,8 +71,11 @@ func TestWorkerTokenListForUserIsAlwaysCallerScoped(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			switch info.Name() {
-			case ".git", ".claude", "node_modules", "vendor", "sdk":
+			case "sdk":
 				return filepath.SkipDir
 			}
 			return nil

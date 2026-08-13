@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 func TestRewriteDocComments_CorpusConverged(t *testing.T) {
@@ -21,7 +23,8 @@ func TestRewriteDocComments_CorpusConverged(t *testing.T) {
 	files := 0
 	err := filepath.Walk(root, func(p string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
-			if info != nil && info.IsDir() && strings.HasPrefix(info.Name(), "_") {
+			if info != nil && info.IsDir() &&
+				(repowalk.SkipDir(info.Name()) || strings.HasPrefix(info.Name(), "_")) {
 				return filepath.SkipDir
 			}
 			return err

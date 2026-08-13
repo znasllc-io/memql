@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // TestNoUnguardedDirectToStoreConceptCreate keeps the write path single
@@ -129,8 +131,11 @@ func TestNoUnguardedDirectToStoreConceptCreate(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			switch d.Name() {
-			case ".git", ".claude", "node_modules", "vendor", "testdata":
+			case "testdata":
 				return filepath.SkipDir
 			}
 			return nil

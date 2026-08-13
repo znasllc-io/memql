@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // onebyte_lookback_gate_test.go -- memql#3190's gate.
@@ -81,8 +83,11 @@ func findOneByteLookbackScans(root string) ([]lookbackFinding, error) {
 			return err
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			switch info.Name() {
-			case ".git", ".claude", "vendor", "node_modules", "bin", "dist":
+			case "bin", "dist":
 				return filepath.SkipDir
 			}
 			return nil
@@ -350,8 +355,11 @@ func TestOneByteLookbackGateScansTheWholeModule(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			switch info.Name() {
-			case ".git", ".claude", "vendor", "node_modules", "bin", "dist":
+			case "bin", "dist":
 				return filepath.SkipDir
 			}
 			return nil

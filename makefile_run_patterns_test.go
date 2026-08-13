@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // TestMakefileRunPatternsMatchARealTest closes the class of defect that #2923
@@ -216,6 +218,9 @@ func testNamesInPackages(t *testing.T, pkgs []string) []string {
 				root = "."
 			}
 			_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+				if d.IsDir() && repowalk.SkipDir(d.Name()) {
+					return filepath.SkipDir
+				}
 				if err != nil || d.IsDir() || !strings.HasSuffix(path, "_test.go") {
 					return nil
 				}
