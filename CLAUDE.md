@@ -1472,6 +1472,36 @@ concept agent {
 }
 ```
 
+**Relationships carry two independent axes** (memql#3652). `@relationship`
+declares a cross-concept edge, and the two axes must not be confused:
+
+```memql
+@relationship(type="interactsWith", as="respondsAs", field="agentId", target=agent, direction="outgoing")
+```
+
+- **`type`** — what the ENGINE does with the edge. A **closed** set the engine
+  owns: `parent`, `owns`, `createdBy`, `alias`, `equals`, `contains`,
+  `interactsWith`. It drives id canonicalization, traversal, and the
+  collection/reference node-type invariants. An unrecognized value **refuses
+  boot** — the error names the `as=` form as the way out.
+- **`as`** — what the edge MEANS to the domain (`assignedTo`, `repliesTo`).
+  **Open**: any lowerCamelCase identifier, validated for FORM only and never
+  against a list, so a new domain verb never needs an engine release. Optional;
+  every declaration predating #3652 is unlabelled and stays valid.
+
+Writing a domain verb in the `type` slot is the natural mistake and the reason
+the split exists: `dependsOn` and `formedFrom` each cost an engine release as
+structural types before being retired to labels (memql#3655). **Never add a
+membership check to `as`** — that rebuilds the treadmill, and a test guards it.
+
+`field` may be a dotted path when the pointer sits inside a nested object block
+(`field="lineage.originatingPlanId"`); the engine walks it on both the write and
+filter side (memql#3672). The field must be declared on the concept — on the
+TARGET concept for `direction="incoming"`, since the FK lives on the far side.
+
+Full authoring reference: [docs/public/language/memql.md](docs/public/language/memql.md#relationships)
+and `dsl/_reference/_concept.memql` section 11.
+
 ### Nodes
 Individual records with time-series history. IDs are
 `{concept}:{shortId}`:
