@@ -319,7 +319,7 @@ func TestServer_InitializeAdvertisesRunnableConstructsCapability(t *testing.T) {
 //	line 2: tool produceArtifact {
 //	line 9: automation disabledBootstrap {
 const lifecycleDoc = `@description("Produce a file deliverable")
-@handler(type="function", function="produceArtifact")
+@handler(type="function", name="produceArtifact")
 tool produceArtifact {
   filename     string  @required @description("Name of the file to write")
   ownerUserId  string  @autoInjected @description("Server-stamped owner")

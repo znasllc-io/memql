@@ -5772,11 +5772,15 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		// Check for named argument (identifier followed by single =)
 		if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenOperator && p.peekAhead(1).Literal == "=" {
 			argName := p.current.Literal
+			nameTok := p.current
 			// `m(b:c = 1)` binds an argument named "b:c" and `b` never exists.
 			// The fourth and last position in this family; an argument name
 			// cannot contain a colon in any of them.
 			if strings.Contains(argName, ":") {
 				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
 			}
 			p.advance() // consume name
 			p.advance() // consume '='
@@ -5794,6 +5798,10 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// are untouched. Nested object values still parse via parseValue
 			// (`payload: { ... }`).
 			argName := p.current.Literal
+			nameTok := p.current
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
+			}
 			p.advance() // consume name
 			p.advance() // consume ':'
 			val, err := p.parseValueMaybeCoalesce()
@@ -5816,6 +5824,10 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// still glues, so refuse it here rather than corrupt it.
 			if strings.Contains(argName, ":") {
 				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
+			nameTok := p.current
+			if err := checkCallArgName(&nameTok, name, argName, args); err != nil {
+				return nil, err
 			}
 			val, err := p.parseValue()
 			if err != nil {
@@ -5922,6 +5934,38 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		Name: name,
 		Args: args,
 	}, nil
+}
+
+// checkCallArgName refuses the two ways a call-site argument name could be
+// written and then silently not mean what it says (memql#3626). Called at each
+// of the three named-argument positions -- `k = v`, `k: v`, and the punned
+// bare identifier -- BEFORE the name is bound into the args map.
+//
+// # A repeated name
+//
+// Arguments accumulate into a map[string]any, so `m(a: 1, a: 2)` collapsed
+// LAST-WINS with no signal: a reader scanning left to right saw 1, the engine
+// used 2. Same collapse, same reasoning, and the same fix as memql#2968 made
+// for a repeated annotation argument -- refused where the collapse happens,
+// because every consumer downstream of the map has already lost the evidence.
+//
+// # A reserved engine name
+//
+// `now` / `actor` / `partition` / `config` / `trace` are the ambient top-level
+// identifiers every body may read. The args BLOCK refuses exactly these
+// (reservedArgsNames, memql#2361), which means an argument by one of those
+// names can never be DECLARED -- so passing one is guaranteed to be dropped:
+// the callee cannot declare it, and (since memql#3626) cannot read it as
+// `args.<name>` either. The two ends of one contract disagreed, and the
+// caller's end was the one that stayed quiet.
+func checkCallArgName(tok *Token, callName, argName string, args map[string]any) error {
+	if _, exists := args[argName]; exists {
+		return newParseErrorf(tok, "call %s(...): duplicate argument %q -- arguments collapse last-wins into one map, so the first value is discarded with no signal; name each argument once", callName, argName)
+	}
+	if reservedArgsNames[argName] {
+		return newParseErrorf(tok, "call %s(...): %q is a reserved engine name (now / actor / partition / config / trace) and cannot be an argument name -- an args block may not declare it, so the value can never bind and is silently dropped; rename the argument", callName, argName)
+	}
+	return nil
 }
 
 // colonGlueMessage explains a `key:value` the lexer scanned as ONE identifier,
