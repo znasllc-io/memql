@@ -674,9 +674,16 @@ sets; unknown annotations are rejected at load time:
   declares; the load guard exists to catch exactly that. Field-level:
   `@required`, `@default`, `@description`, `@unique`, `@pattern`,
   `@minLength`, `@maxLength`, `@minimum`, `@maximum`, `@immutable`,
-  `@secret`, `@pii`, `@internal`, `@serverSet`, `@variant`. See
+  `@secret`, `@pii`, `@internal`, `@serverSet`, `@variant`, `@closed`. See
   `dsl/_reference/_concept.memql`. (Field-level `@internal` is live --
-  only the construct-level form was retired, #2708.)
+  only the construct-level form was retired, #2708.) `@closed` takes the
+  TYPED spelling -- `preferences object @closed { ... }` -- because the
+  bare `name { ... }` block form accepts no annotation in either
+  position: a trailing one is refused as ambiguous (memql#3623) and a
+  prefix one is consumed by the property ABOVE it, since the lexer
+  strips newlines. It closes ONE block; nested blocks stay open by
+  default, and which ones can be closed next is a question about their
+  writers, not about the annotation (memql#3641).
 - **Tools**: `@allowedRoles`, `@clientExecution`, `@description`,
   `@destructive`, `@disabled`, `@enabled`, `@executionTime`, `@handler`,
   `@rateLimit(maxCalls=N, periodSeconds=N)`, `@requiresConfirmation`,

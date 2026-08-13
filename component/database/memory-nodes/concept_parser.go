@@ -360,6 +360,20 @@ type parsedProperty struct {
 	// mutation's caller args (it must be stamped) but MAY be projected.
 	// Surfaces as the x-serverSet custom JSON-Schema keyword.
 	serverSet bool
+	// closed marks a NESTED BLOCK as rejecting undeclared keys -- it emits
+	// `additionalProperties: false` for that block's schema (memql#3641).
+	//
+	// Opt-in per block rather than on by default, and the asymmetry is the
+	// point: the top level is closed for everyone, but a nested block is
+	// populated by writers this repo cannot always see. A product bundle
+	// mounts its own blocks through MEMQL_DSL_PATH; mutations like
+	// addAgentToSpace and createUser splat a caller-supplied object into one;
+	// two agent paths read `capabilities` out of the database and write it
+	// back wholesale, so an existing row carrying a legacy key would fail on
+	// write-back. Closing every block at once is those migrations plus a wire-
+	// contract change for every client; closing ONE whose writers are all
+	// in-repo is neither.
+	closed bool
 	// Phase 3 discriminated-union variants
 	variantDiscriminator string
 	variants             []parsedPropertyVariant
@@ -557,6 +571,7 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		elem.minimum, out.minimum = out.minimum, nil
 		elem.maximum, out.maximum = out.maximum, nil
 		elem.nested, out.nested = out.nested, nil
+		elem.closed, out.closed = out.closed, false
 		elem.variants, out.variants = out.variants, nil
 		elem.variantDiscriminator, out.variantDiscriminator = out.variantDiscriminator, ""
 
@@ -580,8 +595,54 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	if err := checkConstraintsCarried(target, prop); err != nil {
 		return parsedProperty{}, err
 	}
+	if err := checkClosedIsCloseable(target, prop); err != nil {
+		return parsedProperty{}, err
+	}
 
 	return out, nil
+}
+
+// checkClosedIsCloseable refuses the two @closed declarations that would not
+// mean what they say (memql#3641). Both are the declaration-theatre shape the
+// v1 hardening pass keeps finding: an annotation that parses, is stored, and
+// then does something other than what was written.
+//
+//   - @closed on an object with NO nested block closes a block that declares
+//     nothing, so `additionalProperties: false` rejects EVERY key. A free-form
+//     `object` field is free-form on purpose (planner's feedbackRequest,
+//     updateAgent's payload); refusing rows outright is never what the author
+//     meant by it.
+//   - @closed beside @variant would reject every branch-only key. The arms'
+//     properties live in the oneOf sub-schemas, not in the parent's
+//     `properties`, so the parent's additionalProperties does not know about
+//     them -- v1:identity:identity's `credentials.keyHash` lives in an arm, and
+//     closing its parent would refuse every credential row in the cluster.
+//     Closing a variant block needs additionalProperties inside each ARM, which
+//     is a different change than this one.
+//
+// The "not an object at all" case is handled with the rest of its family in
+// checkConstraintsCarried.
+func checkClosedIsCloseable(target *parsedProperty, prop *parser.PropertyDecl) error {
+	if target == nil || !target.closed {
+		return nil
+	}
+	if len(target.variants) > 0 {
+		return fmt.Errorf(
+			"@closed cannot be combined with @variant on `%s`: a variant's fields live in its own "+
+				"oneOf branch, not in the parent's `properties`, so closing the parent would reject "+
+				"every branch-only key and refuse every row of the union. Drop @closed, or close the "+
+				"branches (memql#3641)",
+			prop.Name)
+	}
+	if target.typeName == "object" && len(target.nested) == 0 {
+		return fmt.Errorf(
+			"@closed on `%s` has no block to close: the field declares no sub-fields, so "+
+				"`additionalProperties: false` would reject EVERY key rather than only undeclared "+
+				"ones. A free-form `object` field is free-form on purpose; declare the sub-fields "+
+				"first, or drop the annotation (memql#3641)",
+			prop.Name)
+	}
+	return nil
 }
 
 // carriesStringConstraints reports whether a property type EMITS a JSON Schema
@@ -669,6 +730,9 @@ func checkConstraintsCarried(target *parsedProperty, prop *parser.PropertyDecl) 
 		}
 		if len(target.nested) > 0 {
 			offenders = append(offenders, "a nested block")
+		}
+		if target.closed {
+			offenders = append(offenders, "@closed")
 		}
 	}
 	if len(offenders) == 0 {
@@ -776,6 +840,9 @@ func valueAnnotationNames(prop *parsedProperty) []string {
 	}
 	if len(prop.nested) > 0 {
 		names = append(names, "a nested block")
+	}
+	if prop.closed {
+		names = append(names, "@closed")
 	}
 	return names
 }
@@ -1094,6 +1161,8 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.internal = true
 	case "serverSet":
 		prop.serverSet = true
+	case "closed":
+		prop.closed = true
 	case "variant":
 		// @variant(discriminator="field") is handled structurally
 		// in propertyDeclToParsed (it triggers variant-branch
@@ -1598,6 +1667,15 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 			// optional nested block stays omittable.
 			if len(nestedRequired) > 0 {
 				schema["required"] = nestedRequired
+			}
+			// @closed (memql#3641): this block rejects undeclared keys. Opt-in
+			// per block -- see the parsedProperty.closed comment for why the
+			// tree-wide flip is a different change, and the paragraphs below
+			// for what still blocks it. v1:identity:user.preferences is the
+			// first block to carry it, which closes the exposure memql#3623
+			// actually named.
+			if prop.closed {
+				schema["additionalProperties"] = false
 			}
 			// `additionalProperties: false` is the OTHER half of memql#3623 and
 			// is deliberately NOT emitted here yet. The tree does not survive it
