@@ -3,6 +3,8 @@ package memql
 import (
 	"context"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/actions"
@@ -78,15 +80,22 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			}
 
 			if _, ok := conceptNames[normalized.TargetConcept]; !ok {
-				// With @visibility filtering, the target concept may exist
-				// on another node type. Skip validation for targets not in
-				// the local registry — the relationship is structurally
-				// valid, just not resolvable on this node.
-				e.Logger.Debug("relationship target not in local registry (filtered by visibility)",
-					"concept", name,
-					"target", normalized.TargetConcept,
+				// This used to `continue` with a Debug log, justified by
+				// @visibility filtering letting a target live on another node
+				// type. @visibility is RETIRED (zero uses in dsl/; every binary
+				// now loads every concept), so the justification is gone and a
+				// missing target means a typo or a missing `use` import.
+				//
+				// Skipping was not a missing edge, it was silent data
+				// corruption: the relationship drives id canonicalization on
+				// both the write path and the filter path, so no relationship
+				// means ids persist non-canonical and (concept, id) lookups
+				// quietly return nothing, with no error anywhere. memql#3653.
+				return fmt.Errorf(
+					"concept %q relationship[%d] on field %q: target %q is not a registered concept.%s",
+					name, idx, normalized.Field, normalized.TargetConcept,
+					suggestRelationshipTarget(normalized.TargetConcept, conceptNames),
 				)
-				continue
 			}
 
 			if err := checkDuplicateRelationship(duplicateTracker, name, normalized); err != nil {
@@ -477,3 +486,86 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 // Returns the count of providers loaded + any non-fatal load errors
 // (provider files that failed auth resolution are skipped, not
 // fatal). nil error means nothing failed.
+
+// suggestRelationshipTarget returns a trailing hint naming likely intended
+// targets for an unresolvable one, or "" when nothing is close enough.
+//
+// The author who hits this error may be working in a product repo mounted at
+// MEMQL_DSL_PATH and cannot read this engine's source, so the message has to do
+// the work that reading the code would otherwise do for them (memql#3653).
+func suggestRelationshipTarget(target string, registered map[string]struct{}) string {
+	target = strings.TrimSpace(target)
+	if target == "" || len(registered) == 0 {
+		return ""
+	}
+
+	// A bare name (no colons) is almost always a missing `use` import rather
+	// than a typo -- the resolver leaves it unrewritten when it cannot map it.
+	// Say so plainly instead of guessing at spelling.
+	if !strings.Contains(target, ":") {
+		return fmt.Sprintf(
+			" %q is a bare name that resolved to nothing -- add a file-top import: use <ns>.concepts.{ %s }",
+			target, target)
+	}
+
+	// Otherwise look for near neighbours. The threshold scales with the name's
+	// length so a short id does not match half the registry.
+	limit := 3
+	if n := len(target) / 5; n < limit {
+		limit = n
+	}
+	if limit < 1 {
+		limit = 1
+	}
+
+	var close []string
+	for name := range registered {
+		if d := levenshtein(target, name); d <= limit {
+			close = append(close, name)
+		}
+	}
+	if len(close) == 0 {
+		return ""
+	}
+
+	sort.Strings(close)
+	if len(close) > 3 {
+		close = close[:3]
+	}
+	return fmt.Sprintf(" Did you mean %s?", strings.Join(quoteAll(close), " or "))
+}
+
+func quoteAll(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[i] = strconv.Quote(v)
+	}
+	return out
+}
+
+// levenshtein is the standard edit distance, used only to build a
+// did-you-mean hint on an already-failing load. Registry-sized inputs, so the
+// two-row form is plenty.
+func levenshtein(a, b string) int {
+	if a == b {
+		return 0
+	}
+	ar, br := []rune(a), []rune(b)
+	prev := make([]int, len(br)+1)
+	curr := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		curr[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			curr[j] = min(prev[j]+1, min(curr[j-1]+1, prev[j-1]+cost))
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(br)]
+}
