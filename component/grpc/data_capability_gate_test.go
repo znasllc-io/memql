@@ -16,6 +16,8 @@ import (
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	memqlengine "github.com/znasllc-io/memql/component/memql"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // gateTestEngine boots a DB-less engine carrying the full embedded DSL tree.
@@ -211,8 +213,11 @@ func TestExecuteQueryGate_HasExactlyOneCallSite(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			switch d.Name() {
-			case ".git", ".claude", "node_modules", "vendor", "bin", "gen":
+			case "bin", "gen":
 				return filepath.SkipDir
 			}
 			return nil

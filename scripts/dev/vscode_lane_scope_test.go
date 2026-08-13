@@ -48,6 +48,8 @@ import (
 	"testing"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // lspCmdDir is the tree whose packages the vscode-extension lane must cover.
@@ -233,6 +235,9 @@ func testBearingLSPPackages(t *testing.T) []string {
 			return err
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			base := filepath.Base(path)
 			if base == "testdata" || strings.HasPrefix(base, "_") || strings.HasPrefix(base, ".") {
 				return filepath.SkipDir

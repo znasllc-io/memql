@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // dslRoot resolves the repo-root dsl/ tree relative to this package
@@ -87,6 +89,9 @@ func TestDiagnose_EmbeddedTree_NoErrors(t *testing.T) {
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
+			return filepath.SkipDir
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".memql") {
 			return nil

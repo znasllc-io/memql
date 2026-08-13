@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/language/parser"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 func parseForTest(t *testing.T, src string) *parser.File {
@@ -188,6 +190,9 @@ func TestRedundantEnabledRule_EmbeddedTreeClean(t *testing.T) {
 	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
+			return filepath.SkipDir
 		}
 		if info.IsDir() || !strings.HasSuffix(path, ".memql") {
 			return nil

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // The deploy half of the discovery-endpoint contract (memql#3399).
@@ -104,6 +106,9 @@ func TestDiscoveryEndpointManifestValuesAreDialable(t *testing.T) {
 			return err
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if ext := filepath.Ext(path); ext != ".yaml" && ext != ".yml" {

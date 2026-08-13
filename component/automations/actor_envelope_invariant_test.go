@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // Every NewEvaluator() must be the RHS of a plain assignment to a local,
@@ -321,6 +323,9 @@ func TestNoEvaluatorConstructionOutsideThisPackage(t *testing.T) {
 	var outside []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
+			return filepath.SkipDir
+		}
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
@@ -419,6 +424,9 @@ func TestActorRootIsSetOnlyByTheBinder(t *testing.T) {
 	root := filepath.Join("..", "..")
 	var offenders []string
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if info.IsDir() && repowalk.SkipDir(info.Name()) {
+			return filepath.SkipDir
+		}
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}

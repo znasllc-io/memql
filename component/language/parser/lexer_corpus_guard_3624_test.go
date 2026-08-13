@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // memqlCorpusFiles collects every .memql file in the repository, including the
@@ -36,6 +38,9 @@ func memqlCorpusFiles(t *testing.T) []string {
 			return nil // an unreadable path is not this test's business
 		}
 		if info.IsDir() {
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
 			switch info.Name() {
 			case ".git", "node_modules", "vendor", "worktrees":
 				return filepath.SkipDir

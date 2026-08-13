@@ -40,6 +40,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // generateDirective is one `//go:generate` line and where it was found.
@@ -83,6 +85,9 @@ func collectGenerateDirectives(t *testing.T, root string) []generateDirective {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			switch d.Name() {
 			case ".git", "node_modules", "vendor", "testdata":
 				return fs.SkipDir
@@ -387,6 +392,9 @@ func protoDirs(t *testing.T, root string) map[string]string {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			switch d.Name() {
 			case ".git", "node_modules", "vendor", "testdata":
 				return fs.SkipDir

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // memql#3068: `v1:agents:agentRole.tier` documented safety behaviour that was
@@ -117,6 +119,9 @@ func TestAgentRoleTierIsPromptAdvisoryOnly(t *testing.T) {
 		err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
+			}
+			if d.IsDir() && repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
 			}
 			if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 				return nil

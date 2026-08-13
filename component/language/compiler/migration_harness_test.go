@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 func TestMigrationHarness_CompileAllMemQLSources(t *testing.T) {
@@ -186,6 +188,9 @@ func collectMemQLFiles(t *testing.T, root string) []string {
 			return err
 		}
 		if d.IsDir() {
+			if repowalk.SkipDir(d.Name()) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if filepath.Ext(path) == ".memql" {

@@ -7,6 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // TestNoNewSpaceIdInCore guards the partition-adoption boundary (issue 2.2):
@@ -36,6 +38,9 @@ func TestNoNewSpaceIdInCore(t *testing.T) {
 				return err
 			}
 			if info.IsDir() {
+				if repowalk.SkipDir(info.Name()) {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			name := info.Name()
