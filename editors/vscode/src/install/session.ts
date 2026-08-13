@@ -191,6 +191,56 @@ function present(params: Record<string, string | undefined>): Record<string, str
 }
 
 /**
+ * The front door, as the three steps that build and check it need it named.
+ *
+ * ONE DERIVATION, THREE CONSUMERS (memql#3590). The page asks for a domain and it
+ * reached `seedBootstrap` and `enrolmentLink` only; `hostsBlock`, `localCA` and
+ * `frontDoor` each fell back to their own `local.znas.io` defaults. So identity
+ * was bootstrapped for the typed domain while the hosts block, the certificate
+ * and the front-door probe named another -- three artifacts that each look
+ * correct alone and cannot work together.
+ *
+ * It was invisible because the field's default IS `local.znas.io`, where the
+ * hardcoded value and the typed one agree. Anyone who changed it got a DNS
+ * failure at `frontDoor` against hostnames they never asked for, which reads as a
+ * broken installer.
+ *
+ * Derived HERE rather than in each case of the switch below, because the failure
+ * of the three disagreeing is silent. One function is the only shape in which
+ * "the certificate covers what the probe dials" is true by construction.
+ *
+ * Empty in, empty out: `present()` drops empty values, so a run with no domain
+ * passes no flag at all and each script keeps its own default. That is different
+ * from passing an empty flag, and the scripts treat it as different.
+ */
+export interface FrontDoor {
+  /** Everything the hosts block points at 127.0.0.1: the subdomains and the apex. */
+  hostnames: string[];
+  /** What the certificate must cover: the wildcard and the apex. */
+  certNames: string[];
+  /** What the front-door probe dials -- the hosts that carry ingress. */
+  probeHosts: string[];
+}
+
+/** The subdomains memQL puts on a front door. Kept as data, used three times. */
+const FRONT_DOOR_SUBDOMAINS = ["cockpit", "identity"] as const;
+
+export function frontDoorFor(domain: string): FrontDoor | undefined {
+  const apex = domain.trim().replace(/^\.+|\.+$/g, "");
+  if (apex === "") return undefined;
+  const subdomains = FRONT_DOOR_SUBDOMAINS.map((s) => `${s}.${apex}`);
+  return {
+    // The apex last, matching the block hosts-entries.sh documents.
+    hostnames: [...subdomains, apex],
+    // The WILDCARD, not the two subdomains: it is what the local overlay's
+    // `local-znas-tls` secret carries, so a cluster whose ingress adds a third
+    // host does not need a reissued certificate.
+    certNames: [`*.${apex}`, apex],
+    probeHosts: subdomains,
+  };
+}
+
+/**
  * The install plan: the run-time half of each step's params.
  *
  * Nothing here is invented for a step the graph already pins. seedBootstrap
@@ -204,6 +254,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
       return { action: "skip", reason: `skipped: ${step.id}` };
     }
     const stackDir = resolveStackDir(opts);
+    const frontDoor = frontDoorFor(opts.domain ?? "");
     let params: Record<string, string> = {};
     switch (step.id) {
       case "stackCheckout":
@@ -235,13 +286,31 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           "image-tag": imageTagFor(opts.tag || DEFAULT_STACK_TAG),
         });
         break;
+      case "hostsBlock":
+        // The hostnames the operator's domain implies, so the block points at
+        // what they asked for rather than at this file's idea of a domain
+        // (memql#3590).
+        params = present({ hostnames: frontDoor?.hostnames.join(",") });
+        break;
       case "localCA":
         // PINNED, not inherited (memql#3576). mkcert reads CAROOT out of
         // XDG_DATA_HOME, which snapd points at a revision-scoped directory
         // for a snap-packaged editor -- so the CA landed somewhere the
         // operator's own mkcert would never look, under a path that moves on
         // the next refresh.
-        params = present({ caroot: path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR) });
+        //
+        // And issued for the DOMAIN THAT WAS TYPED (memql#3590): a certificate
+        // covering someone else's front door is an untrusted front door.
+        params = present({
+          caroot: path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR),
+          hostnames: frontDoor?.certNames.join(","),
+        });
+        break;
+      case "frontDoor":
+        // Probing the hosts this install actually created. Against the default
+        // hostnames it was checking a front door nobody built, and reporting a
+        // broken installer for a cluster that was fine (memql#3590).
+        params = present({ hosts: frontDoor?.probeHosts.join(",") });
         break;
       case "providerKey":
         params = present({ "key-file": opts.providerKeyFile, provider: opts.provider });

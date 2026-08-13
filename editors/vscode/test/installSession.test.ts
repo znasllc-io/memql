@@ -26,6 +26,7 @@ import {
   loadGraph,
   loadGraphFile,
   type Graph,
+  type Step,
 } from "../src/install/graph.js";
 import { capabilityScriptPath, type RunScript } from "../src/install/runner.js";
 import {
@@ -41,7 +42,7 @@ import {
   DEFAULT_STACK_TAG,
   imageTagFor,
 } from "../src/install/stackPin.js";
-import type { ExecEvent } from "../src/install/executor.js";
+import type { ExecEvent, StepPlan } from "../src/install/executor.js";
 
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 
@@ -748,4 +749,119 @@ test("an explicit tag moves the images with it", async () => {
   if (decision.action === "run") {
     assert.equal(decision.params["image-tag"], "9.9.9");
   }
+});
+
+// -----------------------------------------------------------------------------
+// the domain the operator typed (memql#3590)
+// -----------------------------------------------------------------------------
+//
+// The page asks for a domain. It reached `seedBootstrap` and `enrolmentLink`, and
+// three steps that need it took their own defaults instead:
+//
+//   hostsBlock  wrote cockpit.local.znas.io / identity.local.znas.io / local.znas.io
+//   localCA     issued for *.local.znas.io
+//   frontDoor   probed cockpit.local.znas.io / identity.local.znas.io
+//
+// while identity WAS bootstrapped for the typed domain -- so the cluster's issuer
+// named one domain and its hosts block, certificate and front-door probe named
+// another. Invisible at the default, because the field's default IS
+// `local.znas.io`; broken for anyone who changed it, and surfacing at `frontDoor`
+// as a DNS failure against hostnames nobody asked for.
+//
+// A field whose answer silently reaches two steps out of five is worse than a
+// constant: it invites an answer that cannot be honoured.
+
+/** A step shell, so each case names only what it is about. */
+function stepFor(id: string, script: string): Step {
+  return {
+    id,
+    script,
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  };
+}
+
+function paramsFor(plan: (step: Step) => StepPlan, id: string, script: string): Record<string, string> {
+  const decision = plan(stepFor(id, script));
+  assert.equal(decision.action, "run", `${id} was not planned as a run`);
+  return decision.action === "run" ? decision.params : {};
+}
+
+test("every step that needs the domain is told the domain", () => {
+  const plan = installPlan(options({ domain: "memql.example.test" }));
+
+  const hosts = paramsFor(plan, "hostsBlock", "install.hostsEntries");
+  assert.ok(
+    (hosts["hostnames"] ?? "").includes("cockpit.memql.example.test"),
+    `hostsBlock was given ${JSON.stringify(hosts["hostnames"])} -- without the typed domain it writes a\n` +
+      `hosts block for names the operator never asked for, and nothing they DID ask for resolves`,
+  );
+
+  const ca = paramsFor(plan, "localCA", "install.mkcert");
+  assert.ok(
+    (ca["hostnames"] ?? "").includes("memql.example.test"),
+    `localCA was given ${JSON.stringify(ca["hostnames"])} -- a certificate that does not cover the\n` +
+      `front door is an untrusted front door`,
+  );
+
+  const door = paramsFor(plan, "frontDoor", "install.verifyFrontDoor");
+  assert.ok(
+    (door["hosts"] ?? "").includes("cockpit.memql.example.test"),
+    `frontDoor was given ${JSON.stringify(door["hosts"])} -- probing the wrong hostnames reports a\n` +
+      `broken installer for a cluster that is fine`,
+  );
+});
+
+// The three have to agree, and the failure of disagreement is silent: a hosts
+// block for one name, a certificate for another, and a probe for a third would
+// each look correct on its own.
+test("the hosts block, the certificate and the probe name the same front door", () => {
+  const plan = installPlan(options({ domain: "memql.example.test" }));
+  const hosts = paramsFor(plan, "hostsBlock", "install.hostsEntries")["hostnames"] ?? "";
+  const door = paramsFor(plan, "frontDoor", "install.verifyFrontDoor")["hosts"] ?? "";
+  const ca = paramsFor(plan, "localCA", "install.mkcert")["hostnames"] ?? "";
+
+  for (const host of door.split(",")) {
+    assert.ok(
+      hosts.split(",").includes(host),
+      `frontDoor probes ${host}, which hostsBlock never pointed at 127.0.0.1 (${hosts})`,
+    );
+  }
+  assert.ok(
+    ca.split(",").some((n) => n === "*.memql.example.test" || n === "memql.example.test"),
+    `the certificate (${ca}) does not cover the domain the other two use`,
+  );
+});
+
+// NO DOMAIN, NO OVERRIDE. `present()` drops empty values, so a run without a
+// domain must fall through to each script's own default rather than passing an
+// empty flag -- which is a different thing from passing none, and the scripts
+// treat it as one.
+test("a run with no domain leaves every script's own default alone", () => {
+  const plan = installPlan(options());
+  for (const [id, script, key] of [
+    ["hostsBlock", "install.hostsEntries", "hostnames"],
+    ["localCA", "install.mkcert", "hostnames"],
+    ["frontDoor", "install.verifyFrontDoor", "hosts"],
+  ] as const) {
+    const params = paramsFor(plan, id, script);
+    assert.ok(
+      !(key in params),
+      `${id} was handed ${key}=${JSON.stringify(params[key])} with no domain collected`,
+    );
+  }
+});
+
+// The apex matters on its own: `local.znas.io` (no subdomain) is in the hosts
+// block today, and dropping it would break any link written against the bare
+// domain.
+test("the hosts block carries the apex as well as the subdomains", () => {
+  const plan = installPlan(options({ domain: "memql.example.test" }));
+  const hosts = (paramsFor(plan, "hostsBlock", "install.hostsEntries")["hostnames"] ?? "").split(",");
+  assert.ok(hosts.includes("memql.example.test"), `the apex is missing from ${hosts.join(",")}`);
 });
