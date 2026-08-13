@@ -5764,11 +5764,20 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 	// For regular function calls, parse as arguments
 	args := make(map[string]any)
 	argList := []any{}
+	// Positional arguments that scanned as one colon-bearing identifier. Judged
+	// after the loop, because what they mean depends on the rest of the list.
+	var glued []Token
 
 	for !p.check(TokenParenClose) && !p.check(TokenEOF) {
 		// Check for named argument (identifier followed by single =)
 		if p.check(TokenIdentifier) && p.peekAhead(1).Type == TokenOperator && p.peekAhead(1).Literal == "=" {
 			argName := p.current.Literal
+			// `m(b:c = 1)` binds an argument named "b:c" and `b` never exists.
+			// The fourth and last position in this family; an argument name
+			// cannot contain a colon in any of them.
+			if strings.Contains(argName, ":") {
+				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
+			}
 			p.advance() // consume name
 			p.advance() // consume '='
 			val, err := p.parseValueMaybeCoalesce()
@@ -5806,10 +5815,7 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 			// literals (`k:true`) now scan apart in the lexer; anything else
 			// still glues, so refuse it here rather than corrupt it.
 			if strings.Contains(argName, ":") {
-				key, value, _ := strings.Cut(argName, ":")
-				return nil, newParseErrorf(&p.current,
-					"argument name %q contains ':'; an argument name cannot. Put a space after the colon so the value parses on its own: %s(%s: %s, ...)",
-					argName, name, key, value)
+				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(argName, name))
 			}
 			val, err := p.parseValue()
 			if err != nil {
@@ -5825,6 +5831,19 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 				return nil, newParseErrorf(&p.current,
 					"positional args are removed on construct calls; name the argument: %s %s(k: v, ...) -- a bare identifier puns to its own name (%s(x) == %s(x: x))",
 					kind, name, name, name)
+			}
+			// A glued `key:value` arriving on a BARE call lands here, as a
+			// POSITIONAL argument: `f(a:"s",b:someIdent)` binds `a` and turns
+			// `b` into args["0"], so the declared argument vanishes while the
+			// named args around it keep working.
+			//
+			// It cannot be refused on sight, because a bare call's positional
+			// argument is ALSO where a canonical id legitimately appears --
+			// `from(v1:agents:agent)` is a real runtime query shape, and it is
+			// the same token shape. Remembered here and judged after the whole
+			// argument list is known; see the check below the loop.
+			if p.check(TokenIdentifier) && strings.Contains(p.current.Literal, ":") {
+				glued = append(glued, p.current)
 			}
 			// Positional argument
 			val, err := p.parseValueMaybeCoalesce()
@@ -5843,6 +5862,30 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 
 	if err := p.expect(TokenParenClose); err != nil {
 		return nil, err
+	}
+
+	// A colon-bearing positional token is refused only when the SAME call also
+	// names an argument properly.
+	//
+	// The two readings are indistinguishable token-for-token, so the rest of
+	// the argument list is the only evidence available:
+	//
+	//	from(v1:agents:agent)                       -- no named args: a canonical
+	//	                                               id, passed positionally.
+	//	                                               This is a live query shape.
+	//	updatePlanStatus(planId:event.node.id,      -- names `status`, so the
+	//	                 status: "queued")             author is writing named
+	//	                                               args and `planId` is one
+	//	                                               they lost a space in.
+	//
+	// A call whose arguments are ALL positional is using the positional form
+	// deliberately; a call that mixes the two is far more likely to have meant
+	// them all named. That leaves `f(a:someIdent)` -- a lone glued token, no
+	// named siblings -- accepted, because nothing distinguishes it from
+	// `from(v1:...)`. Deciding it either way is a guess; this refuses only
+	// where the call itself supplies the evidence.
+	if len(glued) > 0 && len(args) > 0 {
+		return nil, newParseErrorf(&glued[0], "%s", colonGlueMessage(glued[0].Literal, name))
 	}
 
 	// Story 9 (#2335): reject the legacy object-literal argument wrapper
@@ -5879,6 +5922,34 @@ func (p *Parser) parseFunctionCallWithKind(name, kind string) (ExpressionNode, e
 		Name: name,
 		Args: args,
 	}, nil
+}
+
+// colonGlueMessage explains a `key:value` the lexer scanned as ONE identifier,
+// and names both ways out.
+//
+// The lexer joins ':' into an identifier so a canonical id scans as one token
+// (`concept==v1:cluster:node`). A value that begins with a LETTER is
+// indistinguishable from the next segment of such an id, so `b:someIdent`
+// arrives here as a single token. Word LITERALS (true/false/null/nil) are
+// split by the lexer and never reach this; everything else cannot be, so the
+// only honest options are to refuse it or to corrupt it silently -- and
+// silently is how a WebAuthn passkey came to be stored with no backupEligible
+// flag, breaking login for every synced credential (memql#3605).
+//
+// `callName` is the enclosing call when there is one, so the suggestion can be
+// shown in place; empty inside an object literal, which has no name to use.
+func colonGlueMessage(glued, callName string) string {
+	key, value, _ := strings.Cut(glued, ":")
+	suggestion := fmt.Sprintf("%s: %s", key, value)
+	if callName != "" {
+		suggestion = fmt.Sprintf("%s(%s: %s, ...)", callName, key, value)
+	}
+	return fmt.Sprintf(
+		"%q was scanned as ONE identifier because no space follows the ':'. Write %s -- "+
+			"or quote the value if it really is a single string (%q). A ':' directly before a "+
+			"letter joins an identifier so canonical ids scan whole (v1:cluster:node), which is "+
+			"why the space is what tells the two apart",
+		glued, suggestion, glued)
 }
 
 // parseShapeFunction parses shape(query, template) with two arguments.
@@ -6676,6 +6747,19 @@ func (p *Parser) parseObject() (map[string]any, error) {
 			p.advance()
 		} else if p.check(TokenIdentifier) {
 			ident := p.current.Literal
+			// A glued `key:value`, in the other place a colon separates the
+			// two. Checked BEFORE Shorthand A, which is what makes this case
+			// the most deceptive of the family: `{userId:args.userId}` glues
+			// into one token that CONTAINS A DOT, so the shorthand splits it
+			// on the dot and produces the expected-looking key `userId` whose
+			// value is the raw text "userId:args.userId". Anything reading the
+			// map sees the right key and a plausible string.
+			//
+			// An object KEY cannot contain a colon, so there is nothing to
+			// disambiguate here.
+			if strings.Contains(ident, ":") {
+				return nil, newParseErrorf(&p.current, "%s", colonGlueMessage(ident, ""))
+			}
 			p.advance()
 
 			// Shorthand A: a bare dotted path like `event.payload.partitionId`

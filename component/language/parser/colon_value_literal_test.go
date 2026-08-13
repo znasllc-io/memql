@@ -149,8 +149,157 @@ func TestConstructCallArgNameCannotContainColon(t *testing.T) {
 				t.Fatalf("ParseExpression(%q) succeeded; an argument name containing ':' "+
 					"must be rejected rather than silently bound as a punned name", src)
 			}
-			if !strings.Contains(err.Error(), "argument name") {
-				t.Errorf("error %q should name the problem (an argument name)", err)
+			if !strings.Contains(err.Error(), "ONE identifier") {
+				t.Errorf("error %q should explain that the token was scanned as one identifier, "+
+					"which is the part an author cannot see for themselves", err)
+			}
+		})
+	}
+}
+
+// -----------------------------------------------------------------------------
+// the two places the FIRST guard did not reach
+// -----------------------------------------------------------------------------
+//
+// The lexer fix above is universal -- it splits `k:true` wherever it appears.
+// The parser guard was not: it sat only in the punning branch, which is reached
+// only by a KIND-PREFIXED call. Two other positions take a glued token and bind
+// it, and both were still silent afterwards:
+//
+//   - a BARE call, where the glued token falls through to the positional
+//     branch and becomes args["0"];
+//   - an OBJECT LITERAL key.
+//
+// Shipping a guard narrower than the defect is the exact shape of memql#1118,
+// which fixed the digit half of this and left the word half live for months.
+// Doing it again in the fix FOR #1118's omission would be a poor joke.
+
+// TestBareCallArgNameCannotContainColon: the bare-call half.
+//
+// `f(a:"s",b:someIdent)` is the dangerous spelling -- `a` binds correctly and
+// only `b` is lost, so the call looks like it works.
+func TestBareCallArgNameCannotContainColon(t *testing.T) {
+	for _, src := range []string{
+		`f(a:"s",b:someIdent)`,
+		`script(script:"install.verifyProviderKey",key-file:args.keyFile)`,
+		// The shape the automation-step normaliser emits.
+		`updatePlanStatus(planId:event.node.id, status: "queued")`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := ParseExpression(src)
+			if err == nil {
+				t.Fatalf("ParseExpression(%q) succeeded; the glued token binds as a POSITIONAL "+
+					"argument and the declared one vanishes with no error", src)
+			}
+			if !strings.Contains(err.Error(), "ONE identifier") {
+				t.Errorf("error %q should explain that the token was scanned as one identifier", err)
+			}
+		})
+	}
+}
+
+// TestObjectLiteralKeyCannotContainColon: the object-literal half, and the
+// most deceptive member of the family.
+//
+// `{userId:args.userId}` glues into a token CONTAINING A DOT, so the dotted-path
+// shorthand splits it on the dot and yields the expected-looking key `userId`
+// whose value is the raw text "userId:args.userId". A reader of the map sees
+// the right key and a plausible string, which is why this one survives review.
+func TestObjectLiteralKeyCannotContainColon(t *testing.T) {
+	for _, src := range []string{
+		`mutation m(payload:{userId:args.userId})`,
+		`mutation m(payload:{a:b})`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			_, err := ParseExpression(src)
+			if err == nil {
+				t.Fatalf("ParseExpression(%q) succeeded; an object key cannot contain ':' and "+
+					"the value bound here is the glued text, not the reference that was written", src)
+			}
+		})
+	}
+}
+
+// TestWordLiteralsBindInEveryCallShape is the counterpart guard: the LEXER fix
+// must reach all three positions, so none of these may be refused.
+func TestWordLiteralsBindInEveryCallShape(t *testing.T) {
+	cases := map[string]string{
+		"bare call":          `f(a:true)`,
+		"kind-prefixed call": `mutation m(a:true)`,
+		"object literal":     `mutation m(payload:{enabled:true})`,
+	}
+	for shape, src := range cases {
+		t.Run(shape, func(t *testing.T) {
+			if _, err := ParseExpression(src); err != nil {
+				t.Fatalf("ParseExpression(%q): %v -- a word literal is split by the lexer and "+
+					"must bind in every position, not just the guarded one", src, err)
+			}
+		})
+	}
+}
+
+// TestEqualsNamedArgNameCannotContainColon: the fourth and last position.
+//
+// `m(b:c = 1)` binds an argument named "b:c"; `b` never exists. The `=` form
+// is the least-used of the four, which is exactly why it was the one still
+// standing after two passes at this defect.
+func TestEqualsNamedArgNameCannotContainColon(t *testing.T) {
+	for _, src := range []string{
+		`mutation m(b:c = 1)`,
+		`mutation m(a: 1, b:c = 2)`,
+		`f(b:c = 1)`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if _, err := ParseExpression(src); err == nil {
+				t.Fatalf("ParseExpression(%q) succeeded; the argument the author named is silently absent", src)
+			}
+		})
+	}
+}
+
+// TestEveryArgumentPositionRefusesAColonName is the completeness assertion.
+//
+// Four positions bind an argument name. Two passes at this defect each fixed
+// a subset, so what is pinned here is the SET, not another instance: if a
+// fifth position is added, this test is where the omission should show up.
+func TestEveryArgumentPositionRefusesAColonName(t *testing.T) {
+	positions := map[string]string{
+		"colon-named, kind-prefixed": `mutation m(b:someIdent)`,
+		"equals-named":               `mutation m(b:c = 1)`,
+		"punned/positional, bare":    `f(a: 1, b:someIdent)`,
+		"object-literal key":         `mutation m(p:{b:someIdent})`,
+	}
+	for position, src := range positions {
+		t.Run(position, func(t *testing.T) {
+			if _, err := ParseExpression(src); err == nil {
+				t.Fatalf("%s still binds a colon-bearing argument name: %q", position, src)
+			}
+		})
+	}
+}
+
+// TestBareCanonicalIdPositionalArgIsStillAccepted is the counterweight to the
+// bare-call guard, and it exists because CI caught the first attempt at it.
+//
+// A bare call's positional argument is ALSO where a canonical id legitimately
+// appears. `from(v1:agents:agent)` is a live runtime query shape, and it is the
+// same token shape as `f(a:someIdent)` -- one colon-bearing identifier. Refusing
+// on sight broke it.
+//
+// So the guard fires only when the call ALSO names an argument properly, which
+// is the evidence that the author was writing named args and lost a space. A
+// lone glued token with no named siblings stays accepted: nothing distinguishes
+// it from a canonical id, and guessing is how the first version broke `from`.
+func TestBareCanonicalIdPositionalArgIsStillAccepted(t *testing.T) {
+	for _, src := range []string{
+		`from(v1:agents:agent)`,
+		`from(v1:knowledge:liveSource)`,
+		// A lone glued token: ambiguous, therefore accepted.
+		`f(a:someIdent)`,
+	} {
+		t.Run(src, func(t *testing.T) {
+			if _, err := ParseExpression(src); err != nil {
+				t.Fatalf("ParseExpression(%q): %v -- a positional canonical id must keep parsing", src, err)
 			}
 		})
 	}
