@@ -769,8 +769,8 @@ The five value positions:
 ## 12. `partition` is still a reserved payload field -- pick another name
 
 **Rule.** `partition` is one of the engine's reserved payload-level
-fields (alongside `id`, `createdAt`, `createdBy`, `concept`, `payload`,
-`schema`, `type`). Declaring a concept property named `partition`
+fields (see [#19](#19-reserved-intrinsics-do-not-redeclare-id--createdby--createdat--partition)
+for the full set). Declaring a concept property named `partition`
 fails `ensureReservedFieldsNotDeclared` at startup:
 
 ```
@@ -1180,9 +1180,24 @@ If a single concept fails to load, the whole concept loader bails --
 which means **no concepts get registered**, the BFF can't serve any
 graph queries, and the entire cluster is bricked at startup.
 
-The reserved set today: `id`, `createdAt`, `createdBy`, `partition`,
-`concept`, `payload`, `schema`, `type`. Full list in
+The reserved set today: the row's storage columns -- `id`, `createdAt`,
+`createdBy`, `partition`, `concept`, `payload`, `schema`, `type`,
+`provenance` -- plus the engine namespaces a filter resolves at the
+head of a path: `row`, `actor`, `args`, `now`, `config`, `trace`,
+`meta`. Full list in
 `component/database/memory-nodes/constants.go`.
+
+The second group joined the list in memql#3613. Each of them was
+declarable, and a concept declaring one registered with the field
+intact -- while every filter naming it bare read the ENGINE NAMESPACE
+instead. `provenance` was fully silent (the push-down and the
+in-process post-filter agreed on the same wrong field, so the query
+returned the wrong rows with no error) and `actor` was silent AND
+authorization-relevant (`filter actor.userId == args.v` const-folded
+to true whenever the caller passed their own id, so the predicate
+contributed nothing and the query returned every row). Matching is
+case-insensitive and by whole name, so `Provenance` is refused while
+`arguments`, `metadata`, and `rowCount` are ordinary properties.
 
 Practical consequences for concept authors:
 
