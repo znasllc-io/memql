@@ -62,6 +62,7 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
 cap_spec_param "gate-voice-lane-only" "only re-run the voice-lane gate (scale voice/voice-agent per LiveKit config)"
 cap_spec_param "namespace" "k8s namespace to seed into"
+cap_spec_param "domain"    "front-door apex; seeded as the memql-domain ConfigMap (default: memql.localhost)"
 cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
 cap_spec_param "tls-key"   "front-door TLS private key path (issued with mkcert when absent)"
 cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-door pair"
@@ -591,6 +592,27 @@ function ensure_front_door_pair() {
     cap_changed
 }
 
+# seed_domain_configmap -- the cluster's domain, as ONE key.
+#
+# Everything domain-shaped is derived from it at boot by
+# component/genesis/domain.go: identity's base URL, the issuer every node
+# verifies against, the discovery endpoint, the CORS origins and the OAuth
+# redirect URIs. So this ConfigMap is the whole of what the cluster is told
+# about its own hostname (memql#3593).
+#
+# The local overlay mounts it via envFrom on all nine node Deployments, NOT
+# optional: a node with no domain would fall back to the base manifests'
+# staging placeholder issuer and reject every token while looking healthy.
+function seed_domain_configmap() {
+    info "seeding memql-domain (MEMQL_DOMAIN=${DOMAIN})..."
+    kubectl create configmap memql-domain \
+        --namespace "${NAMESPACE}" \
+        --from-literal=MEMQL_DOMAIN="${DOMAIN}" \
+        --dry-run=client -o yaml | kubectl apply -f - >&2
+    SEEDED_COUNT=$((SEEDED_COUNT + 1))
+    info "memql-domain seeded."
+}
+
 function seed_front_door_tls() {
     ensure_front_door_pair
     info "seeding ${MEMQL_LOCAL_TLS_SECRET} (front-door TLS for the local ingress)..."
@@ -806,6 +828,10 @@ function main() {
     cap_parse_flags "$@"
 
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
+    # The env tier is the FLAG'S DEFAULT (the capability contract gives
+    # cap_param no env tier of its own); localtls.sh resolves MEMQL_LOCAL_DOMAIN
+    # so the certificate SANs and this ConfigMap cannot name different domains.
+    DOMAIN="$(cap_param domain "$MEMQL_LOCAL_DOMAIN")"
     # The checkout deploy/k8s/base/tls/gen-internal-ca.sh is read from. Defaults
     # to the derived root so a run from a checkout is unchanged; the install
     # graph passes the cloned stack (memql#3491).
@@ -851,6 +877,7 @@ function main() {
     resolve_genesis_b64
 
     seed_internal_ca
+    seed_domain_configmap
     seed_front_door_tls
     seed_db_creds
     seed_memql_secrets

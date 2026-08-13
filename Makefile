@@ -266,6 +266,7 @@ up:
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
+		$${DOMAIN:+--domain="$${DOMAIN}"} \
 		$${EXTRA_PORTS:+--extra-ports="$${EXTRA_PORTS}"} \
 		$${APP_PROJECT:+--app-project="$${APP_PROJECT}"} \
 		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
@@ -290,6 +291,7 @@ up-refresh:
 		$${REPO_URL:+--repo-url="$${REPO_URL}"} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"} \
 		$${OVERLAY_PATH:+--overlay-path="$${OVERLAY_PATH}"} \
+		$${DOMAIN:+--domain="$${DOMAIN}"} \
 		$${EXTRA_PORTS:+--extra-ports="$${EXTRA_PORTS}"} \
 		$${APP_PROJECT:+--app-project="$${APP_PROJECT}"} \
 		$${PROJECT_MANIFEST:+--project-manifest="$${PROJECT_MANIFEST}"} \
@@ -308,7 +310,8 @@ down:
 ## Required after 'make up NO_SECRETS=1' or if secrets drift.
 secrets:
 	@bash scripts/k3d/seed-secrets.sh \
-		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}}
+		$${CLUSTER:+--namespace=$${NAMESPACE:-memql}} \
+		$${DOMAIN:+--domain="$${DOMAIN}"}
 
 ## Inner-loop dev: rebuild image(s) + import into k3d + restart Deployment(s) (NODE=<type> for one node)
 ## No direct-apply bypass -- ArgoCD owns the manifests; only pods restart.
