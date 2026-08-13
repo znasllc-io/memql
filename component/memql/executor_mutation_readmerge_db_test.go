@@ -62,8 +62,16 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 
 	// A non-empty actor is required by the mutation executor's
 	// mutationActor helper; mirror status_writer's system attribution.
-	ctx := auth.ContextWithToken(context.Background(),
-		&auth.TokenInfo{Subject: "system:readmerge-test"})
+	//
+	// The AccessContext is layered too, and it is not decoration: these
+	// mutations stamp `ownerUserId: actor.userId`, and a token-only context
+	// carries claims with no caller identity -- exactly the shape memql#3620
+	// now refuses rather than minting a row owned by nobody. A real caller
+	// always has one, so the fixture should as well.
+	ctx := auth.ContextWithUserActor(
+		auth.ContextWithToken(context.Background(),
+			&auth.TokenInfo{Subject: "system:readmerge-test"}),
+		"system:readmerge-test")
 	return eng, db, ctx
 }
 
