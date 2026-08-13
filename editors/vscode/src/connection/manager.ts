@@ -23,6 +23,7 @@ import type { ConnectOptions, Dispatcher, QueryClient, SubscriptionManager } fro
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { Latest, type LatestToken } from "../async/latest.js";
+import { runAuthenticated, type AuthenticatedRunResult, type CredentialStoreDeps } from "../auth/store.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import {
   jwtExpirySeconds,
@@ -96,6 +97,12 @@ export class ConnectionManager {
     // the fully-wired resolver; a manager built bare still refuses a PAT by
     // name rather than dialing with one.
     private readonly credentials: CredentialSource = staticCredentials,
+    // Where a credential the cluster has REFUSED gets cleared from (memql#3529).
+    // Optional because a manager built bare has nowhere to write: it still
+    // refreshes once and retries once, and still reports
+    // `reauthenticationRequired`, it just cannot blank the dead token on the
+    // way out. src/extension.ts injects the real one.
+    private readonly credentialStore: CredentialStoreDeps | undefined = undefined,
   ) {}
 
   get state(): ConnectionState {
@@ -156,62 +163,81 @@ export class ConnectionManager {
     // cluster's.
     if (!this.latest.isCurrent(token)) return;
 
-    // The credential is resolved BEFORE anything is dialed. Three of the four
-    // failure reasons are knowable without touching the network -- a cluster
-    // with no endpoint, no credential, or a credential of a class the mesh
-    // structurally rejects -- and answering them here is what turns
-    // "handshake failed" into a sentence naming the problem (memql#3383). The
-    // resolution may also RENEW an expired token in passing (memql#3385), so
-    // this is both the gate and the refresh point.
-    const credential = await this.credentials.resolve(cluster);
-    if (!this.latest.isCurrent(token)) return;
-    if (!credential.ok) {
-      this.publish({
-        status: "error",
-        clusterName: cluster.name,
-        message: credential.message,
-        reason: credential.reason,
-      });
-      return;
-    }
-
-    this.publish({ status: "connecting", clusterName: cluster.name });
+    // The dial runs INSIDE runAuthenticated (src/auth/store.ts), which owns
+    // both halves of the credential story:
+    //
+    //   BEFORE the dial, it resolves. Three of the four failure reasons are
+    //   knowable without touching the network -- a cluster with no endpoint, no
+    //   credential, or a credential of a class the mesh structurally rejects --
+    //   and answering them here is what turns "handshake failed" into a
+    //   sentence naming the problem (memql#3383). The resolution may also RENEW
+    //   a near-expiry token in passing (memql#3385).
+    //
+    //   AFTER a 401, it refreshes ONCE and retries ONCE (memql#3529). That is
+    //   the case the proactive half cannot see: a bearer whose `exp` is
+    //   comfortably in the future, refused anyway -- the session was revoked,
+    //   the cluster was signed out elsewhere, identity's signing keys rotated,
+    //   or a replica is serving a keyset this token was not minted against
+    //   (memql#3400). A second 401 CLEARS the stored tokens and reports
+    //   `reauthenticationRequired`, so the next action starts a clean sign-in
+    //   instead of replaying a credential already proven dead.
+    //
+    // The bearer actually sent is captured here because the catch below still
+    // needs it: a NON-401 failure is rethrown untouched, and classifying that
+    // one is this function's job.
+    let dialedBearer = "";
+    let announced = false;
+    let outcome: AuthenticatedRunResult<Connection>;
     try {
-      const conn = await this.dial({
-        endpoint: webSocketUrlFor(cluster),
-        auth: {
-          bearer: credential.bearer,
-          // In-place re-auth on a LIVE stream (sdk/ts ConnectionAuth). The SDK
-          // arms a timer against this bearer's `exp` and calls the hook shortly
-          // before it runs out, rotating the credential over the existing
-          // socket. That is what lets a verification-length session outlive the
-          // 15-minute access token WITHOUT a reconnect -- and therefore without
-          // dropping the session-defined constructs a reconnect would take with
-          // it (src/run/session.ts).
-          onTokenExpired: () => this.credentials.forceRefresh(cluster),
+      outcome = await runAuthenticated(
+        cluster,
+        { credentials: this.credentials, store: this.credentialStore },
+        async (bearer) => {
+          dialedBearer = bearer;
+          // Published from INSIDE the attempt, not before the call. A credential
+          // refused before the dial (memql#3383) must never flash the cluster as
+          // "connecting" -- there was never a connection attempt to describe.
+          // The retry does not re-announce: it is the same connect, one bearer
+          // later.
+          if (!announced) {
+            announced = true;
+            this.publish({ status: "connecting", clusterName: cluster.name });
+          }
+          return this.dial({
+            endpoint: webSocketUrlFor(cluster),
+            auth: {
+              bearer,
+              // In-place re-auth on a LIVE stream (sdk/ts ConnectionAuth). The SDK
+              // arms a timer against this bearer's `exp` and calls the hook shortly
+              // before it runs out, rotating the credential over the existing
+              // socket. That is what lets a verification-length session outlive the
+              // 15-minute access token WITHOUT a reconnect -- and therefore without
+              // dropping the session-defined constructs a reconnect would take with
+              // it (src/run/session.ts).
+              //
+              // Distinct from the retry above, and both are needed: this one
+              // renews a stream we still hold, that one recovers a dial the
+              // cluster refused.
+              onTokenExpired: () => this.credentials.forceRefresh(cluster),
+            },
+            clientId: "memql-vscode",
+            sdkName: "memql-vscode",
+          });
         },
-        clientId: "memql-vscode",
-        sdkName: "memql-vscode",
-      });
-      if (!this.latest.isCurrent(token)) {
-        // Superseded while dialing; drop this connection on the floor.
-        conn.close();
-        return;
-      }
-      this.conn = conn;
-      this.authoringClient = undefined;
-      this.publish({ status: "connected", clusterName: cluster.name, nodeId: conn.nodeId });
-      // Not awaited: this resolves only when the socket eventually dies.
-      void this.watchForTermination(conn, token, cluster.name);
+      );
     } catch (err) {
       if (!this.latest.isCurrent(token)) return;
+      // Not a 401 -- runAuthenticated rethrows those untouched, because
+      // relabelling "the cluster is down" as "sign in again" is the same defect
+      // pointing the other way.
+      //
       // A dial that fails while the bearer we sent has ALREADY passed its `exp`
       // is a credential failure wearing a transport failure's clothes: the
       // resolver could not renew it (no refresh token, or the exchange was
       // refused) and the server then refused the handshake. Reporting that as
       // "unreachable" is exactly the confusion memql#3385 is about, so the
       // expiry is re-checked here rather than trusting the error text.
-      const expiry = jwtExpirySeconds(credential.bearer);
+      const expiry = jwtExpirySeconds(dialedBearer);
       const expired = expiry !== undefined && expiry * 1000 <= Date.now();
       this.publish({
         status: "error",
@@ -223,7 +249,30 @@ export class ConnectionManager {
             : String(err),
         reason: expired ? "credentialExpired" : "unreachable",
       });
+      return;
     }
+
+    if (!this.latest.isCurrent(token)) {
+      // Superseded while resolving, dialing, or retrying; drop whatever we got.
+      if (outcome.ok) outcome.value.close();
+      return;
+    }
+    if (!outcome.ok) {
+      this.publish({
+        status: "error",
+        clusterName: cluster.name,
+        message: outcome.message,
+        reason: outcome.reason,
+      });
+      return;
+    }
+
+    const conn = outcome.value;
+    this.conn = conn;
+    this.authoringClient = undefined;
+    this.publish({ status: "connected", clusterName: cluster.name, nodeId: conn.nodeId });
+    // Not awaited: this resolves only when the socket eventually dies.
+    void this.watchForTermination(conn, token, cluster.name);
   }
 
   async disconnect(): Promise<void> {

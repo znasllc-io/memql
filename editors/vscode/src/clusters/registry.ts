@@ -24,7 +24,7 @@
 //
 // Refs: #3465 #3464 #3463
 
-import { ClusterCredentialStore, type SecretStore } from "../auth/store.js";
+import { ClusterCredentialStore, renameClusterCredentials, type SecretStore } from "../auth/store.js";
 import { readClustersFile, removeCluster, upsertCluster } from "./file.js";
 import type { ClusterConfig } from "./model.js";
 
@@ -120,7 +120,14 @@ export async function removeClusterCompletely(
  *
  * `renameClusterCredentials` existed for this, correct and tested, with no
  * callers -- which is the same defect as the unreachable device-code fallback
- * #3515 was filed about, in a second place.
+ * #3515 was filed about, in a second place. It is what this calls (memql#3529):
+ * the first fix reached past it to `ClusterCredentialStore.rename` directly,
+ * which closed the operator-visible bug while leaving the named function still
+ * importable and still called by nothing -- two spellings of one decision, and
+ * a reader who found the free function had no way to know which one ran. Its
+ * sibling `reconcileClusterCredentials` is already used in its free-function
+ * form; going through this one makes the pair symmetric and lets the wiring
+ * guard (test/authWiring.test.ts) cover both.
  *
  * ORDER: the file write runs FIRST. It is the step that can fail (a
  * clusters.yaml the Cockpit is mid-write, a read-only home directory), and a
@@ -141,7 +148,7 @@ export async function saveClusterEdit(
 ): Promise<void> {
   await upsertCluster(clustersPath, edited, previousName);
   if (edited.name !== previousName) {
-    await new ClusterCredentialStore(deps.secrets).rename(previousName, edited.name);
+    await renameClusterCredentials(deps, previousName, edited.name);
   }
 }
 

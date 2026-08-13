@@ -579,6 +579,26 @@ func (a *App) attemptAutoBootstrap(
 		return
 	}
 
+	// NAME THE OWNER NOW (memql#3591).
+	//
+	// Until this existed, an env bootstrap produced a clusterSettings row and a
+	// magic link and NO user: the owner came into being inside the magic-link
+	// verifier, on the click (Store.CreateUserOnFirstLogin -- the name says when).
+	// So the install's last step, which mints a passkey-enrolment link for the
+	// owner, was asking for a credential naming somebody who would not exist until
+	// after the install had ended.
+	//
+	// WHAT THIS DOES NOT GRANT. A user row is not a way in. Access still requires
+	// one of the two credentials -- clicking the magic link issued below, or
+	// enrolling a passkey with a single-use token -- and neither exists yet. That
+	// is exactly why the auto-bootstrap guard now asks HasClaimedOwner
+	// (credentials) rather than HasOwnerUser (rows): naming an owner must not make
+	// the cluster look claimed.
+	//
+	// Non-fatal, like everything else here: an operator can still reach /setup, and
+	// the click path creates the user itself when this did not.
+	a.provisionBootstrapOwner(ctx, cfg, store)
+
 	// MEMQL_EMAIL_SUPPRESS_OWNER_BOOTSTRAP suppresses the owner magic-link email
 	// (memql#374). Set by `make dev-refresh` so iterative DB wipes don't
 	// produce an inbox storm; the operator is the same person across
@@ -608,6 +628,71 @@ func (a *App) attemptAutoBootstrap(
 		"owner_email", cfg.Bootstrap.OwnerEmail,
 		"domain", cfg.Bootstrap.Domain,
 		"component", identity.ComponentName)
+}
+
+// provisionBootstrapOwner writes the owner user row for an env bootstrap, if it is
+// not already there (memql#3591).
+//
+// IDEMPOTENT BY LOOKUP, not by write. `CreateUserOnFirstLogin` inserts a new
+// time-series version under a fresh id, so calling it on every boot would
+// accumulate owner rows -- and `HasOwnerUser` counts them. The email is the
+// identity, so an existing user with that address IS this owner, whether a
+// previous boot wrote it or the operator has since signed in.
+//
+// The profile fields come from the same clusterSettings row the /setup wizard
+// seeds from, so an owner named here and an owner named by a click are the same
+// shape. Role owner + internal, matching the bootstrap branch in the magic-link
+// verifier: this is the wizard-issued owner mint, and the values are the ones that
+// branch would have applied.
+func (a *App) provisionBootstrapOwner(
+	ctx context.Context,
+	cfg identity.Config,
+	store *identity.Store,
+) {
+	email := strings.TrimSpace(cfg.Bootstrap.OwnerEmail)
+	if email == "" {
+		return
+	}
+	existing, err := store.LookupUserByEmail(ctx, email)
+	if err != nil {
+		a.Logger.Warn("identity auto-bootstrap: owner lookup failed; the click path will create the user",
+			"error", err, "owner_email", email, "component", identity.ComponentName)
+		return
+	}
+	if existing != nil && existing.ID != "" {
+		a.Logger.Info("identity auto-bootstrap: owner already named",
+			"owner_email", email, "component", identity.ComponentName)
+		return
+	}
+
+	userId, err := identity.NewRandomId("")
+	if err != nil {
+		a.Logger.Warn("identity auto-bootstrap: generate owner id failed; the click path will create the user",
+			"error", err, "component", identity.ComponentName)
+		return
+	}
+	displayName := strings.TrimSpace(cfg.Bootstrap.OwnerFirstName + " " + cfg.Bootstrap.OwnerLastName)
+	if displayName == "" {
+		displayName = email
+	}
+	seed := identity.UserProfileSeed{
+		FirstName:   cfg.Bootstrap.OwnerFirstName,
+		LastName:    cfg.Bootstrap.OwnerLastName,
+		Phone:       cfg.Bootstrap.OwnerPhone,
+		PrimaryRole: cfg.Bootstrap.OwnerPrimaryRole,
+		Gender:      cfg.Bootstrap.OwnerGender,
+		Birthdate:   cfg.Bootstrap.OwnerBirthdate,
+	}
+	// The engine requires a system actor for any mutation, exactly as the
+	// clusterSettings write above does.
+	writeCtx := identity.ContextWithSystemActor(ctx)
+	if err := store.CreateUserOnFirstLogin(writeCtx, userId, displayName, email, "owner", true, seed); err != nil {
+		a.Logger.Warn("identity auto-bootstrap: create owner user failed; the click path will create the user",
+			"error", err, "owner_email", email, "component", identity.ComponentName)
+		return
+	}
+	a.Logger.Info("identity auto-bootstrap: owner named; no credential exists yet, so the cluster is not claimed until the first sign-in",
+		"owner_email", email, "user_id", userId, "component", identity.ComponentName)
 }
 
 // autoBootstrapReadRetries bounds how many times the claim-email guard

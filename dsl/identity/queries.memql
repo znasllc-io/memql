@@ -1992,6 +1992,60 @@ query identity signInIdentitiesForSelf {
   shape    identitySummary
 }
 
+// signInIdentitiesForUser
+// =======================
+//
+// The same row set as signInIdentitiesForSelf, for a NAMED user, asked before any
+// actor exists (memql#3591).
+//
+// WHY IT CANNOT BE THE SELF-SCOPED ONE. The single caller is
+// `Store.HasClaimedOwner`, which answers "has the cluster's owner ever
+// authenticated" during identity boot -- the same first-run window as
+// `activeUsers` and `CountActiveUsers`, where there is no actor at all.
+// `userId==actor.userId` would evaluate against an empty actor, return zero rows,
+// and report every claimed cluster as unclaimed.
+//
+// WHY THE QUESTION EXISTS. The install writes the owner user row when it
+// bootstraps from env, so the cluster has a named owner a passkey-enrolment link
+// can be minted for. A row written that way is not a claim, so the auto-bootstrap
+// guard can no longer read "an owner row exists" as "somebody signed in" -- it
+// asks for CREDENTIALS instead, and this is that read. A magic-link or passkey
+// identity means the owner authenticated by one of the two routes there are.
+//
+// isActiveRecord is load-bearing rather than tidy, exactly as in the self-scoped
+// twin: a revoked credential is precisely the thing that must not count as a way
+// in.
+//
+// @serverOnly on the userByEmail / activeUsers precedent (memql#2881, #2987): the
+// filter keys on a caller-supplied userId with no caller check, so leaving it on
+// the wire would let any authenticated client enumerate how recoverable somebody
+// else's account is. The projection carries no credential material either way.
+// Origin is runtime-enforced against auth.CallOrigin, and the one caller stamps
+// auth.ContextWithInternalOrigin.
+
+/// List a NAMED user's ACTIVE sign-in routes -- magic-link and passkey credentials only.
+/// Backs Store.HasClaimedOwner, which asks whether the cluster's owner has ever
+/// authenticated. Projection is identitySummary: the type and the label, no credential
+/// material.
+///
+/// Why actor.userId scoping is not the fix: the caller runs BEFORE any actor exists. This
+/// answers "has this cluster's owner ever signed in" during identity boot -- the same
+/// first-run window as activeUsers and CountActiveUsers -- so `userId==actor.userId` would
+/// evaluate against an empty actor, match zero rows, and report every claimed cluster as
+/// unclaimed. That is the same circularity that kept activeUsers and userByEmail
+/// server-only (memql#2881), and the reason the self-scoped twin
+/// signInIdentitiesForSelf cannot serve this caller.
+@serverOnly
+query identity signInIdentitiesForUser {
+  args {
+    userId  string!
+  }
+  filter   (identityIsMagicLink || identityIsPasskey) && userId==args.userId && isActiveRecord
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    identitySummary
+}
+
 // ---- queries/v1/identity/nodeTokenIdentityByBinding.memql ----
 
 // nodeTokenIdentityByBinding

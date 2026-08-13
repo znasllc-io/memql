@@ -443,3 +443,151 @@ test("a credential-less cluster with no endpoint reports 'not configured', not a
   assert.equal(state.reason, "notConfigured");
   assert.match(state.message, /not configured/);
 });
+
+// --- The reactive 401: the cluster refused a bearer we believed was good -----
+//
+// memql#3529. `src/connection/credentials.ts` carries the PROACTIVE half --
+// it renews a token it can SEE is near expiry. These cases are the other half:
+// the token's `exp` is comfortably in the future, and the cluster rejects it
+// anyway. That happens whenever the reason is not time -- the session was
+// revoked, the cluster was signed out elsewhere, identity's signing keys
+// rotated, a replica is serving a keyset the token was not minted against
+// (memql#3400).
+//
+// Until this was wired, `connect()` classified a failed dial by re-reading the
+// bearer's own `exp`, so every one of those arrived at the operator as
+// `unreachable` with the raw text `Unexpected server response: 401` -- which
+// sends them to look at a cluster that is fine. `runAuthenticated`
+// (src/auth/store.ts) was written for exactly this and was imported by nothing
+// but its own unit test.
+
+/** A bearer-rejecting dial: the shape `ws` actually produces on a refused upgrade. */
+function refusedUpgrade(): Error {
+  return new Error("Unexpected server response: 401");
+}
+
+test("a 401 on an unexpired bearer refreshes once and retries once", async () => {
+  const attempts: string[] = [];
+  const manager = new ConnectionManager(
+    (opts) => {
+      attempts.push(opts.auth?.bearer ?? "");
+      return attempts.length === 1 ? Promise.reject(refusedUpgrade()) : Promise.resolve(fakeConn("x"));
+    },
+    {
+      resolve: async () => ({ ok: true, bearer: "STALE" }),
+      forceRefresh: async () => "ROTATED",
+    },
+  );
+
+  await manager.connect(cluster("a"));
+
+  assert.deepEqual(attempts, ["STALE", "ROTATED"], "the retry must carry the REFRESHED bearer");
+  assert.equal(manager.state.status, "connected");
+});
+
+test("a 401 that survives a freshly minted token asks for a new sign-in, not a cluster hunt", async () => {
+  // The retry is bounded at one on purpose: a 401 that survives a fresh access
+  // token is not a stale-token problem, and spinning past it is how a client
+  // ends up replaying a dead credential forever.
+  let attempts = 0;
+  const manager = new ConnectionManager(
+    () => {
+      attempts += 1;
+      return Promise.reject(refusedUpgrade());
+    },
+    {
+      resolve: async () => ({ ok: true, bearer: "STALE" }),
+      forceRefresh: async () => "ALSO-REFUSED",
+    },
+  );
+
+  await manager.connect(cluster("a"));
+
+  assert.equal(attempts, 2, "exactly one retry");
+  const state = manager.state as { status: string; message: string; reason: string };
+  assert.equal(state.status, "error");
+  assert.equal(state.reason, "reauthenticationRequired");
+  assert.match(state.message, /sign in/i);
+  assert.doesNotMatch(state.message, /unreachable/i);
+});
+
+test("a terminal 401 clears the stored tokens so the next action starts clean", async () => {
+  // Leaving the dead credential on disk is what makes the NEXT action fail the
+  // same way. signOut() is the seam: it clears SecretStorage and blanks both
+  // token fields in clusters.yaml.
+  const writes: Array<{ name: string; token?: string; refreshToken?: string }> = [];
+  const manager = new ConnectionManager(
+    () => Promise.reject(refusedUpgrade()),
+    {
+      resolve: async () => ({ ok: true, bearer: "STALE" }),
+      forceRefresh: async () => null, // the exchange itself was refused
+    },
+    {
+      writeCluster: async (update) => {
+        writes.push(update);
+      },
+    },
+  );
+
+  await manager.connect(cluster("a"));
+
+  assert.equal((manager.state as { reason: string }).reason, "reauthenticationRequired");
+  assert.deepEqual(
+    writes,
+    [{ name: "a", token: "", refreshToken: "" }],
+    "a terminal rejection must blank the credential it just proved dead",
+  );
+});
+
+test("a NON-401 dial failure is still a transport failure, and is not retried", async () => {
+  // The guard on the whole mechanism. Relabelling "the cluster is down" as
+  // "sign in again" would be the same defect pointing the other way, and a
+  // refresh + retry against an unreachable cluster is two timeouts instead of
+  // one.
+  let attempts = 0;
+  let refreshed = false;
+  const manager = new ConnectionManager(
+    () => {
+      attempts += 1;
+      return Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1:443"));
+    },
+    {
+      resolve: async () => ({ ok: true, bearer: "GOOD" }),
+      forceRefresh: async () => {
+        refreshed = true;
+        return "ROTATED";
+      },
+    },
+  );
+
+  await manager.connect(cluster("a"));
+
+  assert.equal(attempts, 1, "a transport failure must not be retried");
+  assert.equal(refreshed, false, "and must not spend a refresh");
+  const state = manager.state as { status: string; reason: string; message: string };
+  assert.equal(state.reason, "unreachable");
+  assert.match(state.message, /ECONNREFUSED/);
+});
+
+test("a cluster whose credential never resolves still never reaches the dial", async () => {
+  // runAuthenticated resolves the credential itself, so the pre-dial refusals
+  // (memql#3383) now run inside it. They must behave exactly as before:
+  // no dial, no "connecting" state, and the reason preserved.
+  let dialed = false;
+  const seen: ConnectionState[] = [];
+  const manager = new ConnectionManager(() => {
+    dialed = true;
+    return Promise.resolve(fakeConn("x"));
+  });
+  manager.onDidChangeState((s) => seen.push(s));
+
+  await manager.connect(cluster("local", { token: "mql_pat_abcdef" }));
+
+  assert.equal(dialed, false);
+  assert.equal(
+    seen.some((s) => s.status === "connecting"),
+    false,
+    "a credential refused before the dial must never show the cluster as connecting",
+  );
+  assert.equal((manager.state as { reason: string }).reason, "wrongTokenClass");
+});

@@ -249,6 +249,25 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// one. Sole caller: component/memql/agents.go, which stamps
 		// auth.ContextWithInternalOrigin.
 		{Path: "agents/queries.memql", Name: "agentsForRegistry"}: true,
+		// memql#3591. The credential read behind Store.HasClaimedOwner, which
+		// answers "has this cluster's owner ever authenticated" during identity
+		// boot. Caller-scoping is circular in the #2800 sense and in the same
+		// window as activeUsers above: there is no requesting user at that
+		// moment, so `userId==actor.userId` would match zero rows and report
+		// every claimed cluster as unclaimed.
+		//
+		// The question exists because the env bootstrap now writes the owner USER
+		// row -- so a passkey-enrolment link can be minted for a named owner --
+		// and a row written that way is not a claim. The auto-bootstrap guard
+		// therefore asks about CREDENTIALS rather than rows.
+		//
+		// @serverOnly rather than merely unscoped because the filter keys on a
+		// caller-supplied userId with no caller check: on the wire it would let
+		// any authenticated client enumerate how recoverable somebody else's
+		// account is. Its self-scoped twin signInIdentitiesForSelf stays on the
+		// wire and is unchanged. Sole caller: component/identity/store.go, which
+		// stamps auth.ContextWithInternalOrigin.
+		{Path: "identity/queries.memql", Name: "signInIdentitiesForUser"}: true,
 	}
 	for k := range want {
 		if !set[k] {

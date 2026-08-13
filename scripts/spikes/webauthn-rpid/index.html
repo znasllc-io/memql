@@ -7,13 +7,14 @@
     <style>
       body {
         font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
-        max-width: 46rem;
+        max-width: 52rem;
         margin: 3rem auto;
         padding: 0 1.25rem;
         color: #111;
         background: #fff;
       }
       h1 { font-size: 1.1rem; }
+      h2 { font-size: 0.95rem; margin-top: 2rem; }
       dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1rem; }
       dt { color: #666; }
       button {
@@ -22,6 +23,9 @@
         margin: 0.35rem 0.35rem 0.35rem 0;
         cursor: pointer;
       }
+      table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+      th, td { border: 1px solid #ddd; padding: 0.35rem 0.5rem; text-align: left; font-size: 0.85rem; }
+      th { background: #f4f4f4; }
       pre {
         background: #f4f4f4;
         padding: 1rem;
@@ -32,38 +36,76 @@
       }
       .ok { color: #0a6b23; }
       .err { color: #a01020; }
+      .muted { color: #666; }
     </style>
   </head>
   <body>
     <h1>memql#3405 &mdash; does an RP ID under <code>.localhost</code> work?</h1>
 
     <dl>
-      <dt>RP ID under test</dt><dd><code id="rpid">{{.RPID}}</code></dd>
+      <dt>Ceremony RP ID</dt><dd><code id="rpid">{{.RPID}}</code></dd>
       <dt>Page origin</dt><dd><code id="origin"></code></dd>
       <dt>Expected origin</dt><dd><code>{{.Origin}}</code></dd>
       <dt>User agent</dt><dd><code id="ua"></code></dd>
     </dl>
 
+    <h2>Leg 1 &mdash; the browser's RP ID validator (runs by itself)</h2>
+
+    <p class="muted">
+      These four ran the moment the page loaded, and are already recorded. Each
+      calls <code>create()</code> under an <code>AbortController</code> that
+      fires after 2.5s: RP ID validation happens <em>before</em> any
+      authenticator is consulted, so the verdict arrives without an
+      authenticator having to exist &mdash; which is why this leg needs no
+      hardware and no human.
+    </p>
+    <p class="muted">
+      <strong>Read the controls first.</strong> <code>example.com</code> must be
+      REJECTED or the discriminator is not firing and none of the other rows
+      mean anything. <code>localhost</code> must ALSO be rejected: it is refused
+      as an RP ID for this very origin only if the browser is treating
+      <code>localhost</code> as a public suffix, which is the exact behaviour
+      that makes <code>memql.localhost</code> a registrable domain and the
+      parent-RP-ID case legal.
+    </p>
+
+    <table id="probes">
+      <thead>
+        <tr><th>RP ID</th><th>Role</th><th>Expected</th><th>Outcome</th><th>Error</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Leg 2 &mdash; the authenticators (needs you, and a phone)</h2>
+
     <p>
-      Run each button and record the outcome in the results table in
-      <code>README.md</code>. A <code>SecurityError</code> means the BROWSER
-      rejected the RP ID. A <code>NotAllowedError</code> after the platform UI
-      appeared means the AUTHENTICATOR refused (or you dismissed it). Those two
-      are different answers &mdash; note which one you got.
+      Each button runs a real ceremony against <code id="rpid2"></code> and
+      records what happened. Complete the prompt before judging: a
+      <code>SecurityError</code> means the BROWSER rejected the RP ID, whereas a
+      <code>NotAllowedError</code> after the platform UI appeared means the
+      AUTHENTICATOR refused &mdash; <em>or</em> that you dismissed it. Those are
+      different answers, and only one of them is a finding.
     </p>
 
     <button id="platform">1. Register &mdash; platform authenticator (Touch ID / Windows Hello)</button>
-    <button id="hybrid">2. Register &mdash; hybrid transport (QR &rarr; phone)</button>
-    <button id="any">3. Register &mdash; no attachment hint (browser picks)</button>
-    <button id="assert">4. Authenticate with whatever was just registered</button>
+    <button id="hybridIos">2. Register &mdash; hybrid (QR) &rarr; <b>iOS</b></button>
+    <button id="hybridAndroid">3. Register &mdash; hybrid (QR) &rarr; <b>Android</b></button>
+    <button id="any">4. Register &mdash; no attachment hint (browser picks)</button>
+    <button id="assert">5. Authenticate (usernameless) with what was just registered</button>
 
     <pre id="out">INFO: ready.</pre>
+
+    <p class="muted">
+      Everything above is being written to <code>results.md</code> next to the
+      certificates as it happens. Nothing needs transcribing.
+    </p>
 
     <script>
       const RP_ID = document.getElementById("rpid").textContent.trim();
       const out = document.getElementById("out");
       document.getElementById("origin").textContent = window.location.origin;
       document.getElementById("ua").textContent = navigator.userAgent;
+      document.getElementById("rpid2").textContent = RP_ID;
 
       // Built as DOM nodes with textContent rather than appended to innerHTML.
       // Everything logged here is attacker-adjacent by construction -- an
@@ -75,6 +117,7 @@
         if (cls) line.className = cls;
         line.textContent = "\n" + new Date().toISOString() + " " + msg;
         out.appendChild(line);
+        out.scrollTop = out.scrollHeight;
       }
 
       function randomBytes(n) {
@@ -86,10 +129,126 @@
           .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
       }
 
-      // report distinguishes the two failure modes the spike actually cares
-      // about. err.name is the discriminator: SecurityError comes from the
-      // browser's RP ID validation, before any authenticator is consulted;
-      // NotAllowedError comes from the ceremony itself.
+      // record posts one outcome to the harness, which appends it to
+      // results.jsonl and re-renders results.md.
+      //
+      // Deliberately awaited by every caller BEFORE the next case runs. The
+      // probe sequence is four ceremonies in a row and the whole point is that
+      // the file is complete when the page settles -- a fire-and-forget POST
+      // racing a headless browser's exit loses rows, which is precisely the
+      // run where nobody is watching to notice.
+      async function record(row) {
+        try {
+          await fetch("/result", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...row, origin: window.location.origin, userAgent: navigator.userAgent }),
+          });
+        } catch (err) {
+          log("WARNING: could not record result: " + err, "err");
+        }
+      }
+
+      // ---------------------------------------------------------------------
+      // Leg 1: the validator probes
+      // ---------------------------------------------------------------------
+
+      // The four cases, in the order the README argues them.
+      const PROBES = [
+        { rpId: RP_ID, role: "parent (the shape D5 wants)", expect: "accepted" },
+        { rpId: window.location.hostname, role: "exact match", expect: "accepted" },
+        { rpId: "localhost", role: "positive control", expect: "rejected" },
+        { rpId: "example.com", role: "negative control", expect: "rejected" },
+      ];
+
+      // probeRpId asks ONLY "does this browser's validator accept this RP ID",
+      // and gets an answer without an authenticator existing.
+      //
+      // The trick is the abort. create() validates rp.id synchronously against
+      // the caller's effective domain and throws SecurityError before it goes
+      // looking for an authenticator; if it gets past that it sits waiting for
+      // one. So: abort at 2.5s and read which error came back. AbortError means
+      // the validator was satisfied and we interrupted the wait. SecurityError
+      // means it was not.
+      //
+      // Any OTHER error name is reported as inconclusive rather than folded
+      // into one of those two -- NotAllowedError from a browser that
+      // synthesises a refusal, say. Guessing there would put a wrong row in the
+      // table, which is worse than an honest gap.
+      async function probeRpId(rpId) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 2500);
+        try {
+          await navigator.credentials.create({
+            signal: controller.signal,
+            publicKey: {
+              challenge: randomBytes(32),
+              rp: { id: rpId, name: "memQL spike 3405" },
+              user: { id: randomBytes(16), name: "probe@" + rpId, displayName: "Probe" },
+              pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+              authenticatorSelection: { userVerification: "discouraged" },
+              timeout: 2000,
+              attestation: "none",
+            },
+          });
+          // A credential actually came back inside 2.5s. Unlikely (it needs a
+          // user gesture on every implementation we know of) but unambiguous:
+          // the validator accepted the RP ID.
+          return { outcome: "accepted", errorName: "", detail: "create() resolved" };
+        } catch (err) {
+          clearTimeout(timer);
+          if (err.name === "AbortError") {
+            return { outcome: "accepted", errorName: "AbortError", detail: "our own 2.5s abort -- the validator was satisfied" };
+          }
+          if (err.name === "SecurityError") {
+            return { outcome: "rejected", errorName: "SecurityError", detail: err.message };
+          }
+          return { outcome: "inconclusive", errorName: err.name, detail: err.message };
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+
+      async function runProbes() {
+        const tbody = document.querySelector("#probes tbody");
+        for (const probe of PROBES) {
+          const tr = document.createElement("tr");
+          for (const text of [probe.rpId, probe.role, probe.expect, "running...", ""]) {
+            const td = document.createElement("td");
+            td.textContent = text;
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+
+          const res = await probeRpId(probe.rpId);
+          const matched = res.outcome === probe.expect;
+          tr.children[3].textContent = res.outcome;
+          tr.children[3].className = matched ? "ok" : "err";
+          tr.children[4].textContent = res.errorName;
+
+          log(`PROBE ${probe.rpId} (${probe.role}): ${res.outcome}` +
+              (matched ? "" : "  <-- DOES NOT MATCH the expected " + probe.expect),
+              matched ? "ok" : "err");
+
+          await record({
+            leg: "validator probe",
+            rpId: probe.rpId,
+            outcome: res.outcome,
+            errorName: res.errorName,
+            detail: res.detail,
+            note: probe.role + (matched ? "" : "; EXPECTED " + probe.expect),
+          });
+        }
+        log("INFO: leg 1 complete and recorded. The buttons below need you.", "ok");
+        // A marker the headless probe runner waits on, so it knows the page is
+        // finished rather than guessing with a sleep.
+        document.body.dataset.probesComplete = "true";
+      }
+
+      // ---------------------------------------------------------------------
+      // Leg 2: the ceremonies
+      // ---------------------------------------------------------------------
+
       function report(err) {
         log(`ERROR: ${err.name}: ${err.message}`, "err");
         if (err.name === "SecurityError") {
@@ -99,7 +258,7 @@
         }
       }
 
-      async function register(attachment, label) {
+      async function register(attachment, label, leg) {
         try {
           log(`INFO: create() with rp.id=${RP_ID} attachment=${attachment ?? "(unset)"} ...`);
           const authenticatorSelection = {
@@ -123,18 +282,33 @@
             },
           });
           window.__lastCredId = cred.rawId;
+          const transports = cred.response.getTransports ? cred.response.getTransports() : [];
           log(`SUCCESS: ${label} registered. credentialId=${b64url(cred.rawId)}`, "ok");
-          const t = cred.response.getTransports ? cred.response.getTransports() : [];
-          log(`  transports: ${JSON.stringify(t)}`, "ok");
+          log(`  transports: ${JSON.stringify(transports)}`, "ok");
           log(`  -> The RP ID "${RP_ID}" WAS accepted end to end for this path.`, "ok");
+          await record({
+            leg, rpId: RP_ID, outcome: "accepted",
+            detail: "transports=" + JSON.stringify(transports),
+            note: label,
+          });
         } catch (err) {
           report(err);
+          await record({
+            leg, rpId: RP_ID, outcome: "rejected",
+            errorName: err.name, detail: err.message, note: label,
+          });
         }
       }
 
-      document.getElementById("platform").onclick = () => register("platform", "platform authenticator");
-      document.getElementById("hybrid").onclick = () => register("cross-platform", "hybrid / cross-platform");
-      document.getElementById("any").onclick = () => register(null, "unhinted");
+      // The iOS and Android buttons issue an IDENTICAL ceremony -- the browser
+      // shows one QR code and cannot know which phone will scan it. They are
+      // two buttons so the operator declares which device they used, because
+      // that is the axis the finding is reported along and nothing in the API
+      // reveals it.
+      document.getElementById("platform").onclick = () => register("platform", "platform authenticator", "platform authenticator");
+      document.getElementById("hybridIos").onclick = () => register("cross-platform", "hybrid / cross-platform, scanned with iOS", "hybrid -> iOS");
+      document.getElementById("hybridAndroid").onclick = () => register("cross-platform", "hybrid / cross-platform, scanned with Android", "hybrid -> Android");
+      document.getElementById("any").onclick = () => register(null, "unhinted", "unhinted");
 
       document.getElementById("assert").onclick = async () => {
         try {
@@ -150,10 +324,17 @@
           });
           log(`SUCCESS: assertion returned. credentialId=${b64url(assertion.rawId)}`, "ok");
           log(`  -> Discoverable (usernameless) login works against this RP ID.`, "ok");
+          await record({ leg: "usernameless assertion", rpId: RP_ID, outcome: "accepted" });
         } catch (err) {
           report(err);
+          await record({
+            leg: "usernameless assertion", rpId: RP_ID, outcome: "rejected",
+            errorName: err.name, detail: err.message,
+          });
         }
       };
+
+      runProbes();
     </script>
   </body>
 </html>
