@@ -43,10 +43,10 @@ const factoryResultConcept = "integration:agents:factory-result"
 // Behavior:
 //
 //  1. Load the user's existing agents via activeAgentsForUser.
-//  2. Load the role catalog via activeAgentRoles.
+//  2. Load the role catalog via activeAgentRoles and the skill catalog
+//     via activeSkills.
 //  3. Call ai("agentFactoryAnalyze", {...}) for the structured
-//     decision -- {action, targetAgentId, roleSlug, domainIds,
-//     liveSourceIds, toolSlugs, reasoning}.
+//     decision -- {action, targetAgentId, roleSlug, skillIds, reasoning}.
 //  4. Dispatch on action:
 //     - "match":   return the targetAgentId unchanged.
 //     - "extend":  union the proposed domains + tools onto the
@@ -85,13 +85,15 @@ func (i *Integration) handleEnsureForGoal(ctx context.Context, args map[string]a
 	}
 	planId, _ := args["planId"].(string)
 
-	// Step 1-2: load the user's agents + the role catalog. Both are
-	// best-effort -- the analysis prompt tolerates an empty slice.
+	// Step 1-2: load the user's agents + the role catalog + the skill
+	// catalog. All three are best-effort -- the analysis prompt tolerates
+	// an empty slice.
 	existing := i.loadExistingAgents(ctx, ownerUserId)
 	roleCatalog := i.loadRoleCatalog(ctx)
+	skillCatalog := i.loadSkillCatalog(ctx)
 
 	// Step 3: structured analysis.
-	decision, err := i.analyzeGoal(ctx, goal, existing, roleCatalog)
+	decision, err := i.analyzeGoal(ctx, goal, existing, roleCatalog, skillCatalog)
 	if err != nil {
 		return nil, fmt.Errorf("ensureForGoal: analyze: %w", err)
 	}
@@ -219,6 +221,26 @@ type roleSnapshot struct {
 	ID string
 }
 
+// skillSnapshot is the compact view of a v1:agents:skill catalog row --
+// the summary projection (activeSkills), not the full bundle. The factory
+// needs only enough for the model to choose ids: what the skill is called,
+// what it covers, and which tier it sits in. The bundle composition
+// (domainIds / toolSlugs / liveSourceIds) is resolved server-side after
+// the decision lands, so it is deliberately absent here.
+type skillSnapshot struct {
+	// Slug is the identity the model must emit. Role catalog rows store
+	// bare slugs in lockedSkillIds / defaultSkillIds / availableSkillIds /
+	// forbiddenSkillIds, and buildCreateAgentArgs unions the decision's
+	// skillIds straight onto those -- so a canonical `v1:agents:skill:<slug>`
+	// id here would silently break every subset + forbidden check.
+	Slug        string
+	Name        string
+	Category    string
+	Description string
+	Tier        string
+	Tags        []string
+}
+
 // loadExistingAgents walks the user's active agents. Best-effort:
 // failures (no engine, query error, no rows) yield an empty slice
 // so the analysis prompt still runs and `action: "create"` is
@@ -269,18 +291,52 @@ func (i *Integration) loadRoleCatalog(ctx context.Context) []roleSnapshot {
 	return out
 }
 
+// loadSkillCatalog walks the v1:agents:skill catalog. Same
+// best-effort tolerance as loadRoleCatalog.
+//
+// The catalog is the SECOND half of the prompt's decision surface: the
+// role catalog says which skill ids a role may carry, and this says what
+// each of those ids actually is. Without it the model is asked to pick
+// skillIds "from the catalog" while holding only the role rows' bare id
+// lists (memql#3616).
+func (i *Integration) loadSkillCatalog(ctx context.Context) []skillSnapshot {
+	raw, err := i.engine.Execute(ctx, `activeSkills()`)
+	if err != nil || raw == nil {
+		return nil
+	}
+	rows := extractRowsFromExecuteResult(raw)
+	out := make([]skillSnapshot, 0, len(rows))
+	for _, row := range rows {
+		s, ok := skillSnapshotFromRow(row)
+		if !ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// analyzeGoalPromptData builds the exact data map the agentFactoryAnalyze
+// prompt is invoked with. Split out of analyzeGoal so the schema contract
+// -- every key declared, every required key present -- is testable without
+// an engine handle (memql#3616). The prompt's input schema is
+// additionalProperties:false and is validated BEFORE the template renders,
+// so an undeclared key here fails the call outright; it is not "extra
+// context the prompt ignores".
+func analyzeGoalPromptData(goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot, now string) map[string]any {
+	return map[string]any{
+		"goal":           goal,
+		"existingAgents": existingForPrompt(existing),
+		"roleCatalog":    roleCatalogForPrompt(roles),
+		"skillCatalog":   skillCatalogForPrompt(skills),
+		"now":            now,
+	}
+}
+
 // analyzeGoal invokes the agentFactoryAnalyze prompt via
 // InvokeAIStructured. Returns the parsed decision struct.
-func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot) (factoryDecision, error) {
-	data := map[string]any{
-		"goal":              goal,
-		"existingAgents":    existingForPrompt(existing),
-		"roleCatalog":       roleCatalogForPrompt(roles),
-		"domainCatalog":     []any{}, // populated by a future commit; the prompt tolerates empty
-		"liveSourceCatalog": []any{},
-		"toolCatalog":       []any{},
-		"now":               time.Now().UTC().Format(time.RFC3339),
-	}
+func (i *Integration) analyzeGoal(ctx context.Context, goal string, existing []agentSnapshot, roles []roleSnapshot, skills []skillSnapshot) (factoryDecision, error) {
+	data := analyzeGoalPromptData(goal, existing, roles, skills, time.Now().UTC().Format(time.RFC3339))
 	rawJSON, err := i.engine.InvokeAIStructured(
 		ctx,
 		"agentFactoryAnalyze",
@@ -715,6 +771,28 @@ func roleSnapshotFromRow(row map[string]any) (roleSnapshot, bool) {
 	}, true
 }
 
+// skillSnapshotFromRow decodes one v1:agents:skill summary row. A row with
+// no slug is dropped: the slug IS the identity the factory decision has to
+// name, so a row without one is unusable rather than partially usable.
+func skillSnapshotFromRow(row map[string]any) (skillSnapshot, bool) {
+	payload := row
+	if p, ok := row["payload"].(map[string]any); ok && p != nil {
+		payload = p
+	}
+	slug, _ := payload["slug"].(string)
+	if strings.TrimSpace(slug) == "" {
+		return skillSnapshot{}, false
+	}
+	return skillSnapshot{
+		Slug:        slug,
+		Name:        stringField(payload, "name"),
+		Category:    stringField(payload, "category"),
+		Description: stringField(payload, "description"),
+		Tier:        stringField(payload, "tier"),
+		Tags:        stringSliceFromAny(payload["tags"]),
+	}, true
+}
+
 // boolField reads a boolean payload field, tolerating the shapes a JSON
 // round-trip produces. Absent or unparseable reads as false, which is the safe
 // default here: an unrecognised row is treated as NOT predefined, so it can
@@ -931,6 +1009,25 @@ func roleCatalogForPrompt(roles []roleSnapshot) []map[string]any {
 			"availableSkillIds": r.AvailableSkillIds,
 			"forbiddenSkillIds": r.ForbiddenSkillIds,
 			"maxSkills":         r.MaxSkills,
+		})
+	}
+	return out
+}
+
+// skillCatalogForPrompt formats the skill catalog for the
+// agentFactoryAnalyze prompt. Keyed on `slug` -- see skillSnapshot.Slug
+// for why the canonical row id would be the wrong identity to hand the
+// model.
+func skillCatalogForPrompt(skills []skillSnapshot) []map[string]any {
+	out := make([]map[string]any, 0, len(skills))
+	for _, s := range skills {
+		out = append(out, map[string]any{
+			"slug":        s.Slug,
+			"name":        s.Name,
+			"category":    s.Category,
+			"description": s.Description,
+			"tier":        s.Tier,
+			"tags":        s.Tags,
 		})
 	}
 	return out

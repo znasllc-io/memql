@@ -325,6 +325,17 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 		e.Logger.Warn("unified policy loader returned an error; legacy stub covers gap",
 			"component", "memql.engine", "error", ulErr)
 	}
+	// Prompt -> provider reference check (memql#3616). Prompts load before
+	// providers, so this is the first point at which a prompt's
+	// @defaultProvider can be resolved against the tree that declares
+	// providers. A dangling name never errors at call time -- it falls
+	// through to the default provider -- so the prompt just runs on a model
+	// nobody chose. Refuse instead. No escape valve: the fix is a one-word
+	// edit in the .memql file.
+	if err := ValidatePromptDefaultProviders(promptRegistry, providerRegistry); err != nil {
+		return err
+	}
+
 	e.prompts = promptRegistry
 	e.providers = providerRegistry
 	e.policies = policyRegistry

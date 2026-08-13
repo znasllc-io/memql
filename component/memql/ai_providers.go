@@ -20,8 +20,8 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/packages/param"
 	"github.com/sashabaranov/go-openai"
 
-	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/audio"
+	"github.com/znasllc-io/memql/core/common"
 )
 
 const envDefaultProvider = "MEMQL_DEFAULT_PROVIDER"
@@ -293,6 +293,13 @@ type ProviderRegistry struct {
 	// construction time; in that case no @default annotation or
 	// first-wins fallback is allowed to override the operator's choice.
 	defaultPinned bool
+	// declared holds every provider NAME the DSL tree declares, including
+	// the @disabled ones that never become registry entries. The two sets
+	// differ on purpose and the difference is load-bearing: "@disabled, so
+	// dependents fall back" is a documented lifecycle state (#1081), while
+	// "named nowhere in the tree" is a typo. Only the second is a load
+	// failure -- see ValidatePromptDefaultProviders.
+	declared map[string]bool
 }
 
 // ProviderConfigEntry stores metadata + instantiated client for a provider.
@@ -309,7 +316,49 @@ func newProviderRegistry(defaultName string) *ProviderRegistry {
 		byName:          make(map[string]*ProviderConfigEntry),
 		defaultProvider: strings.TrimSpace(defaultName),
 		defaultPinned:   pinned,
+		declared:        make(map[string]bool),
 	}
+}
+
+// markDeclared records that the DSL tree declares a provider by this name,
+// whether or not it ends up registered (a @disabled provider is declared
+// but never registered).
+func (r *ProviderRegistry) markDeclared(name string) {
+	if r == nil {
+		return
+	}
+	key := strings.TrimSpace(name)
+	if key == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.declared == nil {
+		r.declared = make(map[string]bool)
+	}
+	r.declared[key] = true
+}
+
+// Declared reports whether the DSL tree declares a provider by this name.
+// True for registered providers AND for @disabled ones -- the question it
+// answers is "does this name exist?", not "can it serve a call right now?".
+func (r *ProviderRegistry) Declared(name string) bool {
+	if r == nil {
+		return false
+	}
+	key := strings.TrimSpace(name)
+	if key == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.declared[key] {
+		return true
+	}
+	// A registry seeded by a path that predates the declared set (tests
+	// that call setEntry directly) still answers honestly.
+	_, ok := r.byName[key]
+	return ok
 }
 
 func (r *ProviderRegistry) setEntry(entry *ProviderConfigEntry) {

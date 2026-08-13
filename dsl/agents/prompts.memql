@@ -61,8 +61,11 @@ prompt askSpecialist {
 /// 'match'|'extend'|'create', targetAgentId?: string, roleSlug: string, skillIds: []string,
 /// reasoning: string }. The ensureAgent executor reads the structured output, validates against the
 /// role catalog (the role's maxSkills cap + forbiddenSkillIds + lockedSkillIds) + the skill
-/// catalog, and issues the appropriate mutation.
-@defaultProvider("strongReasoning")
+/// catalog, and issues the appropriate mutation. @defaultProvider names a PROVIDER, not a policy:
+/// this read "strongReasoning" (the policy) until memql#3616, which resolved to nothing and quietly
+/// dropped the call onto whatever ChatProvider()'s hardcoded preference list picked. streamClaudeSonnet
+/// is that policy's own @primary, so the intended model is what now actually runs.
+@defaultProvider("streamClaudeSonnet")
 @templateFile("prompts/agentFactoryAnalyze.tmpl")
 prompt agentFactoryAnalyze {
   goal              string! @description("The user-stated goal driving the agent-provisioning decision. Forwarded verbatim from the ensureAgent tool call.")
