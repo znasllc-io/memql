@@ -486,3 +486,54 @@ test("shared belongs to an uninstall graph and retained to an install one", () =
     "retained",
   );
 });
+
+// -----------------------------------------------------------------------------
+// the passkey path must not be gated on the magic-link fallback (memql#3632)
+// -----------------------------------------------------------------------------
+//
+// `enrolmentLink` used to depend on `magicLink`, and `magicLink` used to exit 5
+// when the identity pod's log window held no link. Both halves were reasonable
+// alone and ruinous together:
+//
+//   * identity logs a magic link only when one is REQUESTED, so a pod that has
+//     since restarted carries none -- and a restarted pod is the normal state of
+//     a cluster old enough to be repaired;
+//   * a failed dependency makes the executor skip the dependent step, so no
+//     enrolment link was minted;
+//   * a failed step makes `report.ok` false, so the wizard rendered its
+//     failed-step screen -- which is not the done screen, and the done screen is
+//     the only place the passkey is offered.
+//
+// The operator repaired a working cluster, was told the repair had failed, and
+// was shown no way in. Over a fallback link nobody had asked for.
+//
+// These two assertions are the ordering rule, not the incident: since the
+// wizard offers the passkey as the PRIMARY route and the magic link as the
+// fallback, the primary must never wait on the fallback.
+
+test("enrolmentLink does not depend on magicLink", async () => {
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const enrol = g.steps.find((s) => s.id === "enrolmentLink");
+  assert.ok(enrol, "the install graph must still mint a passkey enrolment link");
+  assert.ok(
+    !(enrol.dependsOn ?? []).includes("magicLink"),
+    "the passkey enrolment step must not wait on magic-link RECOVERY: identity logs a " +
+      "link only when one is requested, so a restarted pod has none, and gating the " +
+      "primary credential route on the fallback's recovery leaves the operator with no " +
+      "way in at all",
+  );
+});
+
+test("magicLink verifies on the state it found, not on having found a link", async () => {
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const ml = g.steps.find((s) => s.id === "magicLink");
+  assert.ok(ml, "the install graph must still offer magic-link recovery");
+  assert.notEqual(
+    ml.verify.field,
+    "result.link",
+    "verifying on the LINK makes an empty window a failed step, and a failed step " +
+      "takes the whole run to the failed-step screen. Verify on linkState, as the " +
+      "sibling enrolmentLink step verifies on enrolmentState",
+  );
+  assert.equal(ml.verify.field, "result.linkState");
+});

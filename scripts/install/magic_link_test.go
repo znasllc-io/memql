@@ -49,10 +49,14 @@ type mlEnvelope struct {
 }
 
 type mlResult struct {
-	Link       string `json:"link"`
-	Namespace  string `json:"namespace"`
-	Target     string `json:"target"`
-	Context    string `json:"context"`
+	Link      string `json:"link"`
+	Namespace string `json:"namespace"`
+	Target    string `json:"target"`
+	Context   string `json:"context"`
+	// What was in the window: "recovered" or "none". The field the graph
+	// verifies on, so that an empty window is a reported state rather than a
+	// failed step (memql#3632).
+	LinkState  string `json:"linkState"`
 	Candidates int    `json:"candidates"`
 }
 
@@ -300,17 +304,40 @@ func TestMagicLinkFiltersByEmail(t *testing.T) {
 // Failure modes
 // -----------------------------------------------------------------------
 
-// TestMagicLinkNoLinkInLogs: an empty log window is an operational failure
-// with an actionable message, not a silent success with an empty link.
+// TestMagicLinkNoLinkInLogs: an empty log window is a STATE, reported as
+// linkState=none, not an operational failure.
+//
+// This assertion was inverted deliberately (memql#3632). It used to require
+// exit 5, and that exit failed the whole install: `report.ok` is
+// `outcomes.every(o => o.status !== "failed")`, so one unrecoverable link took
+// the wizard to its failed-step screen -- which is not the done screen, and the
+// done screen is where the passkey the install just minted is offered. An
+// operator repairing a cluster was told the repair had failed and shown no way
+// in, over a fallback link nobody had asked for.
+//
+// The window is empty for an ordinary reason: identity logs a link only when
+// one is REQUESTED, so a pod that has since restarted carries none however wide
+// --since is, and a restarted pod is the normal state of a cluster old enough
+// to be repaired.
+//
+// kubectl erroring is still exit 5 -- see the test below. That is a failed op;
+// this is not.
 func TestMagicLinkNoLinkInLogs(t *testing.T) {
 	env, _ := mlStubKubectl(t, `{"level":"INFO","msg":"identity: boot complete"}`+"\n", "0")
 	stdout, _, code := mlRun(t, env, "--local")
-	if code != 5 {
-		t.Fatalf("exit %d, want 5 (operation failed)\nstdout: %s", code, stdout)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 (an empty window is a state, not a failure)\nstdout: %s", code, stdout)
 	}
-	e, _ := mlParse(t, stdout)
-	if e.OK || e.Error == nil || e.Error.Code != 5 {
-		t.Errorf("want ok=false error.code=5, got: %s", stdout)
+	e, res := mlParse(t, stdout)
+	if !e.OK || e.Error != nil {
+		t.Errorf("want ok=true error=nil, got: %s", stdout)
+	}
+	if res.LinkState != "none" {
+		t.Errorf("linkState = %q, want \"none\" -- the caller distinguishes "+
+			"\"nothing to recover\" from \"recovered\" by this field, not by an exit code", res.LinkState)
+	}
+	if res.Link != "" {
+		t.Errorf("link = %q, want empty", res.Link)
 	}
 }
 

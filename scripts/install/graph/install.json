@@ -231,7 +231,7 @@
     {
       "id": "magicLink",
       "script": "install.magicLink",
-      "description": "Recover the cluster owner's magic link from the identity pod so the operator can sign in.",
+      "description": "Recover the cluster owner's magic link from the identity pod, as a fallback sign-in route. Identity logs a link only when one is REQUESTED, so a restarted pod carries none -- an empty window is reported as linkState=none rather than failing the install.",
       "params": {
         "local": "1"
       },
@@ -242,7 +242,7 @@
       "elevation": "none",
       "verify": {
         "kind": "resultNonEmpty",
-        "field": "result.link"
+        "field": "result.linkState"
       }
     },
     {
@@ -253,7 +253,7 @@
         "local": "1"
       },
       "dependsOn": [
-        "magicLink"
+        "frontDoor"
       ],
       "elevation": "none",
       "containedBy": "clusterUp",

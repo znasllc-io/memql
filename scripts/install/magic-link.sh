@@ -26,11 +26,17 @@
 #
 # EXIT CODES:
 #
-#   0  a link was recovered (it is on stdout, inside the result envelope)
+#   0  the window was read. `linkState` says what was in it: `recovered` (the
+#      link is on stdout, inside the result envelope) or `none`.
 #   2  bad param
 #   3  REFUSED: --local was not passed
 #   4  prerequisite missing (kubectl absent)
-#   5  operation failed (kubectl errored, or the window holds no link)
+#   5  operation failed (kubectl errored)
+#
+# AN EMPTY WINDOW IS NOT EXIT 5. It was, and that failed the whole install for
+# an ordinary reason -- identity logs a link only when one is REQUESTED, so a
+# restarted pod has none (memql#3632). Callers that need a link should read
+# `linkState`, which is also what the graph verifies on.
 #
 # NOTE: the recovered link IS a credential. It goes to stdout because that is
 # the capability's entire product; treat the output like a password.
@@ -185,12 +191,36 @@ function main() {
     cap_result_set     email      "$email"
     cap_result_set_raw candidates "$_ML_CANDIDATES"
 
+    # AN EMPTY WINDOW IS A STATE, NOT A FAILURE.
+    #
+    # This used to cap_fail 5, and that failed the whole install (memql#3632).
+    # `report.ok` is `outcomes.every(o => o.status !== "failed")`, so one
+    # unrecoverable link took the wizard to its failed-step screen -- which is
+    # not the done screen, and the done screen is where the passkey the install
+    # just minted is offered. An operator repairing a cluster was told the
+    # repair failed and shown no way in, over a link nobody had asked for.
+    #
+    # And the window is empty for an ORDINARY reason: identity logs the link at
+    # INFO, so a pod that has since RESTARTED has none, however wide --since is.
+    # A restarted pod is the normal state of a cluster old enough to be
+    # repaired.
+    #
+    # Reporting the state instead mirrors the sibling step this graph already
+    # got right: enrolment-link.sh verifies on `enrolmentState`, not on the URL,
+    # precisely so "there was nothing to produce" reads differently from "I
+    # could not do my job". kubectl erroring is still exit 5, above -- THAT is
+    # a failed op.
     if [[ -z "$_ML_LINK" ]]; then
         cap_result_set link ""
-        cap_fail 5 "no magic link found in the last ${since} of ${target} logs\
-${email:+ for ${email}}; request one at the login page, then re-run"
+        cap_result_set linkState "none"
+        cap_info "No magic link in the last ${since} of ${target} logs\
+${email:+ for ${email}}. Identity logs a link when one is REQUESTED, and a \
+restarted pod carries none; request one at the login page and re-run if you \
+need this route. A passkey enrolment link is minted separately."
+        cap_ok
     fi
 
+    cap_result_set linkState "recovered"
     cap_result_set link "$_ML_LINK"
     cap_warn "The link below is a single-use CREDENTIAL -- treat it like a password."
     cap_info "Recovered the newest of ${_ML_CANDIDATES} link(s) in the window."
