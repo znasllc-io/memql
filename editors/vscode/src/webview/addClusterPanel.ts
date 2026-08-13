@@ -52,6 +52,7 @@ import {
   readReceipt,
   recordedProvider,
   recordedProviderKeyFile,
+  recordedStackTag,
 } from "../install/receipt.js";
 import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
 import {
@@ -766,8 +767,11 @@ export class AddClusterPanel {
     // even though it leaves no artifact, so the path is already on disk.
     let providerKeyFile = inputs.providerKeyFile;
     let provider = inputs.provider;
+    // Read ONCE, up here: the recorded tag is needed at the run call below, and
+    // a second read could see a different file (memql#3605).
+    const priorReceipt = await readReceipt(this.deps.receiptFile);
     if (providerKeyFile === "") {
-      const receipt = await readReceipt(this.deps.receiptFile);
+      const receipt = priorReceipt;
       // `usablePath`, because the receipt can hold a value that is not one: a
       // redaction marker where a key was given instead of a path (memql#3545),
       // or -- on a receipt written before that guard existed -- the key itself.
@@ -830,6 +834,11 @@ export class AddClusterPanel {
           // A PATH, never the key. argv is world-readable in `ps`. On a
           // repair this is the path the receipt recorded (memql#3512).
           providerKeyFile,
+          // On a REPAIR, the tag the receipt recorded (memql#3605). Without it
+          // the run fell through to DEFAULT_STACK_TAG and a repair from a newer
+          // extension silently upgraded the cluster. A fresh install records no
+          // checkout, so this is empty and the default applies.
+          tag: recordedStackTag(priorReceipt),
           timeoutMs: STEP_TIMEOUT_MS,
           env: this.sudoEnv(),
         }),

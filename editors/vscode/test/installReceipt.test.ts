@@ -120,14 +120,45 @@ test("appendReceiptEntry writes each step and leaves the file readable after eve
   assert.deepEqual(left, ["install-receipt.json"]);
 });
 
-test("appendReceiptEntry replaces an entry for a step that ran twice", async () => {
+test("appendReceiptEntry replaces an entry for a step that ran twice, but preExisting RATCHETS", async () => {
+  // THIS ASSERTION USED TO READ `true`, and that was the bug (memql#3605).
+  //
+  // `preExisting` answers "was this artifact on the machine before memQL ever
+  // ran" -- a fact about the PAST, which a later run cannot change. Newest-wins
+  // let it flip anyway: a repair re-runs `clusterUp` against a cluster that now
+  // exists, reports `clusterCreated: false`, and the derivation reads that as
+  // "it was already here".
+  //
+  // The damage lands at uninstall, which cannot afford to be wrong:
+  // `refuse_if_pre_existing` is an unconditional exit 3, so after any repair the
+  // uninstall REFUSED to delete a cluster memQL had created -- leaving the
+  // operator to run `k3d cluster delete` by hand, the very manual step the
+  // installer exists to remove.
+  //
+  // Everything else about the entry is still newest-wins: where the artifact
+  // landed is a present-tense fact and the latest run knows it best.
   const dir = await tempDir();
   const file = path.join(dir, "r.json");
   await appendReceiptEntry(file, "install", entry({ stepId: "toolK3d", preExisting: false }));
   await appendReceiptEntry(file, "install", entry({ stepId: "toolK3d", preExisting: true }));
   const r = await readReceipt(file);
   assert.equal(r?.entries.length, 1);
-  assert.equal(entryFor(r!, "toolK3d")?.preExisting, true);
+  assert.equal(
+    entryFor(r!, "toolK3d")?.preExisting,
+    false,
+    "a later run must not be able to claim memQL found an artifact it created",
+  );
+});
+
+test("preExisting stays true when it was true from the start", async () => {
+  // The ratchet only runs one way. An artifact genuinely already on the machine
+  // stays protected no matter how many times the step re-runs.
+  const dir = await tempDir();
+  const file = path.join(dir, "r.json");
+  await appendReceiptEntry(file, "install", entry({ stepId: "toolMkcert", preExisting: true }));
+  await appendReceiptEntry(file, "install", entry({ stepId: "toolMkcert", preExisting: true }));
+  const r = await readReceipt(file);
+  assert.equal(entryFor(r!, "toolMkcert")?.preExisting, true);
 });
 
 test("concurrent appends -- a wave's steps all land", async () => {
