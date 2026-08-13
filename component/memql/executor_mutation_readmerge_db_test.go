@@ -96,9 +96,17 @@ func runMutation(t *testing.T, ctx context.Context, eng *MemQLEngine, name strin
 	// identity -- the shape memql#3620 refuses rather than minting a row owned
 	// by nobody. Layered here, on the write, so the shared engine context stays
 	// actor-free for the ambient-predicate tests that need it that way.
-	res, err := eng.Execute(
-		auth.ContextWithUserActor(ctx, "system:readmerge-test"),
-		"mutation "+name+"("+strings.Join(parts, ", ")+")")
+	//
+	// ONLY WHEN THE CALLER SUPPLIED NONE. Several tests pass their OWN caller
+	// context (rowAuthzCallerCtx) precisely to prove that two callers get two
+	// differently-owned rows. Stamping a fixed identity over the top made both
+	// rows belong to the fixture, which is how six ownership tests started
+	// failing on a change that was supposed to be about an ABSENT actor.
+	writeCtx := ctx
+	if _, ok := auth.AccessFromContext(writeCtx); !ok {
+		writeCtx = auth.ContextWithUserActor(writeCtx, "system:readmerge-test")
+	}
+	res, err := eng.Execute(writeCtx, "mutation "+name+"("+strings.Join(parts, ", ")+")")
 	require.NoError(t, err, "mutation %s must succeed with the minimal arg set (memql#1628)", name)
 	require.NotNil(t, res)
 	require.NotNil(t, res.Bundle)
