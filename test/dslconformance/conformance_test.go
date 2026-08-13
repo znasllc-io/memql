@@ -12,8 +12,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/language/dslclause"
 	"github.com/znasllc-io/memql/component/language/pagination"
-	languageParser "github.com/znasllc-io/memql/component/language/parser"
-	"github.com/znasllc-io/memql/component/memql/sense"
+	"github.com/znasllc-io/memql/component/memql/dslgate"
 	"github.com/znasllc-io/memql/core/baseparser"
 	"github.com/znasllc-io/memql/core/dslfs"
 )
@@ -44,37 +43,18 @@ func itoa(i int) string { return strconv.Itoa(i) }
 // parenthesized-OR filter, so that hole was reachable, not theoretical. One
 // detector, one answer.
 //
+// The rule runs at LOAD time now (memql#3629, component/memql/dslgate), so a
+// product DSL bundle mounted at MEMQL_DSL_PATH is covered as well; this is the
+// corpus assertion over the embedded tree, running the same scan.
+//
 // Scope: filter predicates only. A spec/trait body still reads its
 // signature-bound fields BARE and rejects `row.*` outright (epic #2281) --
 // the binding lives in the signature there, so the namespace would be
 // redundant. Mutation insert/update blocks write `id:` / `createdAt:` as
 // target keys rather than references, and are likewise untouched.
 func TestFilterIntrinsicsUseRowNamespace(t *testing.T) {
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
-	violations := 0
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		for _, hit := range sense.ScanBareRowIntrinsics(string(raw)) {
-			violations++
-			t.Errorf("%s:%d:%d  filter names the row intrinsic %q bare -- write `row.%s`",
-				p, hit.Line, hit.Column, hit.Text, hit.Name)
-		}
-	}
-	if violations > 0 {
-		t.Errorf("found %d filter predicate(s) naming a row intrinsic bare; the `row.` namespace is the canonical form (memql#2779)", violations)
+	for _, v := range scanTreeForGate(t, dslgate.GateFilterRowIntrinsic) {
+		t.Errorf("%s:%d %s", v.File, v.Line, v.Detail)
 	}
 }
 
@@ -90,38 +70,16 @@ func TestFilterIntrinsicsUseRowNamespace(t *testing.T) {
 //
 // Detection is shared with the edit-time Cockpit rule via
 // sense.ScanBareRowIntrinsicSortKeys, for the same reason the filter gate
-// shares ScanBareRowIntrinsics: two detectors drift, one does not.
+// shares ScanBareRowIntrinsics: two detectors drift, one does not. Both run at
+// load time now (memql#3629), so a mounted product bundle is covered too.
 //
 // Scope is authored `.memql` only. The runtime and SDK sort surfaces accept
 // bare keys from callers and keep working -- compileSortField still resolves
 // them (locked by TestSortKeysWithoutRowNamespaceUnchanged) -- exactly as the
 // filter gate leaves the runtime filter surface alone.
 func TestSortKeysUseRowNamespace(t *testing.T) {
-	tree := dsl.Tree()
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		t.Fatalf("WalkMemqlFiles: %v", err)
-	}
-
-	violations := 0
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			t.Fatalf("open %s: %v", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			t.Fatalf("read %s: %v", p, readErr)
-		}
-		for _, hit := range sense.ScanBareRowIntrinsicSortKeys(string(raw)) {
-			violations++
-			t.Errorf("%s:%d:%d  sort key names the row intrinsic %q bare -- write \"row.%s\"",
-				p, hit.Line, hit.Column, hit.Text, hit.Name)
-		}
-	}
-	if violations > 0 {
-		t.Errorf("found %d sort key(s) naming a row intrinsic bare; the `row.` namespace is the canonical form (memql#2786)", violations)
+	for _, v := range scanTreeForGate(t, dslgate.GateSortRowIntrinsic) {
+		t.Errorf("%s:%d %s", v.File, v.Line, v.Detail)
 	}
 }
 
@@ -764,185 +722,12 @@ func TestRelationshipTargetsUseImports(t *testing.T) {
 // (`actor.userId` reference, or an `isClusterOwner` admin gate)
 // or carry an explicit `@public` annotation acknowledging the
 // intent.
-// constructHeaderRe matches a top-level query / mutate / seed declaration.
-//
-// It said `(query|mutation)` until memql#2799. memql#2041 renamed the write
-// keyword `mutation` -> `mutate`, so the corpus carries 213 `mutate` and 25
-// `seed` declarations and ZERO `mutation` ones -- this classifier was walking
-// 197 of 435 constructs, and every mutation and seed in the tree was invisible
-// to it. component/language/dslspec already hard-fails if `mutation` is still a
-// construct keyword; this test never got the memo.
-//
-// That is the same defect as the field-spelling one below, on a second axis: a
-// security gate matching a form the language retired, and reporting a clean
-// result because it was looking for something that no longer exists.
-var constructHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(query|mutate|seed)[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*\{`)
-
-// userScopeFieldRe matches a user-scope payload field referenced BARE.
-//
-// The detector this replaces looked for the `payload.`-prefixed spelling
-// (`payload.ownerUserId`, ...), which epic #2292 retired -- payload properties
-// are referenced bare in filters now. So it was searching for a spelling the
-// corpus had migrated off, reported 0 flagged across ~198 constructs, and that
-// zero read as "audited and clean" rather than "not measuring what its name
-// says" (memql#2799).
-//
-// The leading `(^|[^.\w])` group is what keeps `actor.userId`, `args.userId`
-// and `row.createdBy` out: a dotted reference is a caller/envelope/intrinsic
-// read, not the row's own user-scope column. Go's RE2 has no lookbehind, so the
-// boundary is a consumed group rather than `(?<![.\w])`.
-var userScopeFieldRe = regexp.MustCompile(`(^|[^.\w])(ownerUserId|userId|actorUserId|targetId|createdBy|requestedBy)\b`)
-
-// rowSelectionSurface returns only the parts of a body that SELECT rows: the
-// `filter` clause, and an `update { }` block's `id:` line.
-//
-// Scope matters as much as spelling. Matching the WHOLE body flags every
-// `create*` mutation that stamps an owner on insert (`ownerUserId:
-// args.ownerUserId`) -- 43 constructs tree-wide, almost all of them writes that
-// legitimately record who owns the new row. That is a different question from
-// the one this gate asks, which is row SELECTION: does this construct pick rows
-// by a user-scope column without checking the caller? Restricting to the filter
-// clause asks exactly that, and takes the corpus from 43 matches to 1.
-//
-// A struct-form filter is a single line -- the parser rejects a multi-line
-// clause -- so line extraction is sufficient here.
-// The update block is tracked by BRACE DEPTH, not by the first line that
-// trims to `}`. A nested object closes with its own `}`, so the naive version
-// left the block early and every `id:` after a nested field became invisible
-// (memql#2840 review). That is not a corner case: it is the shape of
-// `toggleComputerUseEnabled`, the construct that opened #2840, with two lines
-// swapped --
-//
-//	update {
-//	  preferences: { computerUseEnabled: args.enabled }
-//	  id: args.userId          // <- was not part of the selection surface
-//	}
-//
-// A same-line `update { id: args.x` opener is handled too: the remainder after
-// the brace is scanned like any other line, so the one-line spelling is not an
-// escape hatch either.
-func rowSelectionSurface(body string) string {
-	body = blankComments(body)
-	var b strings.Builder
-	depth := 0
-	awaitingOpen := false
-
-	for _, line := range strings.Split(body, "\n") {
-		t := strings.TrimSpace(line)
-
-		if strings.HasPrefix(t, "filter") {
-			b.WriteString(t)
-			b.WriteByte('\n')
-			continue
-		}
-
-		rest := t
-		switch {
-		case depth > 0:
-			// already inside the update block
-		case awaitingOpen:
-			open := strings.IndexByte(structureOf(t), '{')
-			if open < 0 {
-				continue // still between `update` and its `{`
-			}
-			awaitingOpen = false
-			depth = 1
-			rest = strings.TrimSpace(t[open+1:])
-		case strings.HasPrefix(t, "update"):
-			if open := strings.IndexByte(structureOf(t), '{'); open >= 0 {
-				depth = 1
-				rest = strings.TrimSpace(t[open+1:])
-			} else {
-				// `update` on its own line; the `{` is on a following line.
-				// The old helper handled this by flagging on the `update`
-				// line alone; dropping the flag made the new version WEAKER
-				// than the one it replaced (memql#2840 review round 2).
-				awaitingOpen = true
-				continue
-			}
-		default:
-			continue
-		}
-
-		// Inside the update block: collect every `id:` assignment, wherever it
-		// sits, then account for this line's braces.
-		for _, seg := range strings.Split(rest, ",") {
-			seg = strings.TrimSpace(seg)
-			if strings.HasPrefix(seg, "id:") {
-				b.WriteString(seg)
-				b.WriteByte('\n')
-			}
-		}
-		// Braces are counted on the STRUCTURE of the line -- string literals
-		// blanked, comments dropped -- so `displayName: "}"` or a trailing
-		// `// ends with }` cannot close the block early. That is HIGH-1's
-		// failure mode reached through a different brace; matchingClose in
-		// this file has been string- and comment-aware all along.
-		s := structureOf(rest)
-		depth += strings.Count(s, "{") - strings.Count(s, "}")
-		if depth <= 0 {
-			depth = 0
-		}
-	}
-	return b.String()
-}
-
-// blankComments removes BOTH comment forms -- `//` line and `/* */` block --
-// via the parser's own offset-preserving blanker, so a construct's structure
-// is read the way the lexer reads it.
-//
-// Three hand-rolled attempts preceded this, each blind to something the
-// previous one handled (memql#2840 review rounds 1-3): the first ended an
-// update block at a nested `}`, the second truncated a filter clause at the
-// `//` inside a URL, the third handled `//` but not `/* */`, so a gate term
-// commented out with `/* && requiresOwnerOrAdmin */` still read as live.
-// parser.BlankComments is string-, line-comment- AND block-comment-aware, is
-// documented for exactly this use ("the text-based header detectors that run
-// BEFORE the lexer/parser"), and preserves byte offsets so line-oriented
-// walkers keep working.
-func blankComments(s string) string { return languageParser.BlankComments(s) }
-
-// structureOf returns line with double-quoted string contents blanked, so
-// brace counting sees only structural punctuation. Comments must already be
-// blanked by blankComments -- BlankComments deliberately preserves string
-// CONTENT, which is what a `}` inside a string literal hides behind.
-func structureOf(line string) string {
-	out := make([]byte, 0, len(line))
-	inString := false
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		switch {
-		case inString && c == '\\' && i+1 < len(line):
-			out = append(out, ' ', ' ')
-			i++
-		case c == '"':
-			inString = !inString
-			out = append(out, ' ')
-		case inString:
-			out = append(out, ' ')
-		default:
-			out = append(out, c)
-		}
-	}
-	return string(out)
-}
-
-// userScopeSelectionExemptions records constructs that select rows by a user-scope
-// column without a caller check, and are known-outstanding rather than
-// accepted. Keyed "<file> <constructName>".
-//
-// An entry here is DEBT, not a blessing: it keeps the gate green for a finding
-// already tracked elsewhere while still failing on anything new. Removing the
-// entry is part of closing the issue it names.
-var userScopeSelectionExemptions = map[string]string{
-	// Empty on purpose. runningPlansForUser was the last entry; #2800 resolved
-	// it by marking the construct @serverOnly rather than by exempting it, so
-	// the debt is paid rather than deferred. Both halves of the old rationale
-	// are now false: it is no longer on the generated SDK surface (the
-	// generator skips @serverOnly), and a client can no longer pass any
-	// userId because a client cannot call it at all.
-}
-
+// The user-scope exemption table lives in dslgate.UserScopeSelectionExemptions
+// (memql#3629). It moved with the gate because the ENGINE consults it too: a
+// table here that the engine did not read would silence this test while a node
+// refused to boot on the same construct. An entry in it is DEBT, not a
+// blessing -- it keeps the gate green for a finding tracked elsewhere while
+// still failing on anything new, and pruning it is part of closing that issue.
 var userScopeExemptSeen = map[string]bool{}
 
 // serverOnlyAnnotationRe is GONE (memql#2875). All four dsl-side gates that
@@ -971,21 +756,24 @@ func TestPerRowAuthzClassification(t *testing.T) {
 		other      int
 	}
 	byDomain := map[string]*counts{}
-	type flag struct {
-		file string
-		line int
-		name string
-		kind string
+
+	// The classification itself lives in dslgate and runs at engine boot
+	// (memql#3629), so a product DSL bundle mounted at MEMQL_DSL_PATH is
+	// covered by the same rule this table reports on. What remains here is the
+	// per-domain AUDIT TABLE over the embedded tree, plus the exemption-table
+	// hygiene check -- neither of which belongs in a node's boot path.
+	serverOnly := serverOnlyConstructs(t)
+	opts := dslgate.Options{
+		ServerOnly: func(file, name string) bool {
+			return serverOnly[serverOnlyKey{Path: file, Name: name}]
+		},
 	}
-	var flagged []flag
 
 	tree := dsl.Tree()
 	paths, err := dslfs.WalkMemqlFiles(tree)
 	if err != nil {
 		t.Fatalf("WalkMemqlFiles: %v", err)
 	}
-	headerRe := constructHeaderRe
-
 	for _, p := range paths {
 		file, openErr := tree.Open(p)
 		if openErr != nil {
@@ -996,141 +784,27 @@ func TestPerRowAuthzClassification(t *testing.T) {
 		if readErr != nil {
 			t.Fatalf("read %s: %v", p, readErr)
 		}
-		src := string(raw)
-		matches := headerRe.FindAllStringSubmatchIndex(src, -1)
 		domain := strings.SplitN(p, "/", 2)[0]
 		if byDomain[domain] == nil {
 			byDomain[domain] = &counts{}
 		}
-		for _, m := range matches {
-			openIdx := m[1] - 1
-			closeIdx := matchingClose(src, openIdx)
-			if closeIdx < 0 {
-				continue
-			}
-			preambleStart := m[0]
-			for k := m[0] - 1; k >= 0; k-- {
-				lineStart := strings.LastIndexByte(src[:k], '\n') + 1
-				line := strings.TrimSpace(strings.TrimRight(src[lineStart:k+1], "\r\n"))
-				if strings.HasPrefix(line, "@") || strings.HasPrefix(line, "//") {
-					preambleStart = lineStart
-					k = lineStart - 1
-					continue
-				}
-				if line == "" {
-					break
-				}
-				break
-			}
-			preamble := src[preambleStart:m[0]]
-			body := src[m[1]:closeIdx]
-			kind := src[m[2]:m[3]]
-			name := src[m[4]:m[5]]
-
-			hasPublic := strings.Contains(preamble, "@public")
-
-			// @serverOnly resolves the same question @public does, from the
-			// other direction (memql#2800). @public says "callable by anyone
-			// and that is intended"; @serverOnly says "not callable by a
-			// client at all", which is why a caller-scope filter is neither
-			// present nor meaningful -- there is no client caller to scope to.
-			//
-			// Unlike @public it is not merely an author's acknowledgement: it
-			// is ENFORCED at every dispatch point against auth.CallOrigin, so
-			// accepting it here rests on a runtime guarantee rather than on a
-			// promise. Constructs carrying it are the ones where scoping is
-			// impossible -- the auth path resolving `sub` -> user before an
-			// actor exists, an automation acting on a user other than the
-			// actor.
-			//
-			// Matched at LINE START, not by substring. A substring test let a
-			// COMMENT merely mentioning the annotation silence the gate --
-			// and in that shape there is no annotation, so Function.ServerOnly
-			// stays false and there is no runtime guarantee at all. The
-			// justification above ("rests on a runtime guarantee rather than
-			// on a promise") is exactly what a prose mention does not buy.
-			// sdk/gen/gen.go's serverOnlyRe already had this right.
-			//
-			// #2875: the verdict now comes from the PARSED tree, not from this
-			// regex. serverOnlyConstructs applies the loader's own rule --
-			// hasFlagAttribute(attrs, "serverOnly") -- to the same parse, so the
-			// gate's answer and Function.ServerOnly cannot diverge. The regex
-			// could be satisfied by an `@serverOnly` inside a multi-line
-			// annotation string or a block comment opened on an `@`-line, which
-			// EXEMPTED the construct here while nothing enforced it at runtime.
-			hasServerOnly := serverOnlyConstructs(t)[serverOnlyKey{Path: p, Name: name}]
-
-			// A QUERY's scoping lives in its filter's boolean STRUCTURE, so
-			// the gate evaluates the clause rather than substring-matching
-			// the body (memql#2832). A substring test reads
-			// `ownerUserId==actor.userId || visibility=="public"` as owned,
-			// even though the right arm returns rows the caller does not own
-			// -- and since `owned` is checked before the hard-failing
-			// `flagged` bucket, one permissive disjunct made the gate
-			// unreachable while reporting that authz had been classified.
-			//
-			// A MUTATION is not a filter: `actor.userId` there appears as a
-			// stamped VALUE (`ownerUserId: actor.userId`), which is exactly
-			// what makes the write caller-scoped, so the substring test is
-			// the right question for that kind.
-			isQuery := kind == "query"
-			clause := ""
-			if isQuery {
-				clause = filterClauseOf(body)
-			}
-			// Shared with TestAdminGateIsATopLevelConjunct (memql#2839), so
-			// the two gates cannot drift about what counts as a gate term.
-			ownerLeaf := ownerScopeLeaf
-			adminLeaf := adminGateLeaf
-
-			// Presence test over the SAME leaf vocabulary adminLeaf uses, for
-			// the reason stated two lines above: these two gates must not
-			// drift about what counts as a gate term. They had. This was a
-			// pair of hand-inlined Contains checks naming `actor.isClusterOwner`
-			// and `requiresClusterOwner` -- the latter a spec declared nowhere
-			// in the tree, the former one of four real terms -- so a construct
-			// gated by `requiresOwnerOrAdmin` or `requiresAdmin` satisfied
-			// TestAdminGateIsATopLevelConjunct and was still reported `other`
-			// here. dsl/identity/queries.memql:204 and :1172 are exactly that:
-			// correctly admin-gated, counted as ungated. It also made the
-			// remediation this test's own failure text prescribes not work
-			// (memql#2983 landing review).
-			//
-			// adminGateMentionRe rather than adminGateRe: this is the
-			// polarity-BLIND mention test, matching hasOwner's shape. The
-			// affirmative-polarity requirement is enforced where it belongs,
-			// by clauseGuarantees(clause, adminLeaf) below.
-			hasAdmin := adminGateMentionRe.MatchString(body)
-			hasOwner := strings.Contains(body, "actor.userId")
-			if isQuery {
-				// An empty filter guarantees nothing, so a query with no
-				// clause can never classify as owned/admin on this path.
-				hasAdmin = hasAdmin && clauseGuarantees(clause, adminLeaf)
-				hasOwner = hasOwner && clauseGuarantees(clause, ownerLeaf)
-			}
-			referencesUserScope := userScopeFieldRe.MatchString(rowSelectionSurface(body))
-			lineNo := strings.Count(src[:m[0]], "\n") + 1
-			exemptKey := p + " " + name
-
-			switch {
-			case hasServerOnly:
+		for _, c := range dslgate.ClassifySource(p, string(raw), opts) {
+			switch c.Bucket {
+			case dslgate.BucketServerOnly:
 				byDomain[domain].serverOnly++
-			case hasPublic:
+			case dslgate.BucketPublic:
 				byDomain[domain].public++
-			case hasOwner:
+			case dslgate.BucketOwned:
 				byDomain[domain].owned++
-			case hasAdmin:
+			case dslgate.BucketAdmin:
 				byDomain[domain].admin++
-			case referencesUserScope:
-				if _, ok := userScopeSelectionExemptions[exemptKey]; ok {
-					userScopeExemptSeen[exemptKey] = true
-					byDomain[domain].other++
-					break
-				}
+			case dslgate.BucketFlagged:
 				byDomain[domain].flagged++
-				flagged = append(flagged, flag{p, lineNo, name, kind})
 			default:
 				byDomain[domain].other++
+			}
+			if _, exempt := dslgate.UserScopeSelectionExemptions[p+" "+c.Name]; exempt {
+				userScopeExemptSeen[p+" "+c.Name] = true
 			}
 		}
 	}
@@ -1149,69 +823,25 @@ func TestPerRowAuthzClassification(t *testing.T) {
 			d, c.owned, c.admin, c.public, c.serverOnly, c.flagged, c.other)
 	}
 	t.Logf("")
+
 	// Keep the exemption table honest: an entry whose construct no longer
 	// matches (fixed, renamed, removed) should be pruned, not left to rot into
-	// a blanket the gate silently applies to nothing.
-	for key := range userScopeSelectionExemptions {
+	// a blanket the gate silently applies to nothing. The table lives in
+	// dslgate now, because the ENGINE consults it too -- an entry that silenced
+	// this test while a node refused to boot would be a trap.
+	for key := range dslgate.UserScopeSelectionExemptions {
 		if !userScopeExemptSeen[key] {
-			t.Errorf("stale userScopeSelectionExemptions entry %q -- the construct no longer selects rows by a user-scope column without a caller check (fixed / renamed / removed?); prune it", key)
+			t.Errorf("stale UserScopeSelectionExemptions entry %q -- the construct no longer selects rows by a user-scope column without a caller check (fixed / renamed / removed?); prune it", key)
 		}
 	}
 
-	if len(flagged) > 0 {
-		t.Errorf("found %d flagged constructs that select rows by a user-scope column without a caller-check or @public annotation:", len(flagged))
-		for _, f := range flagged {
-			t.Errorf("  %s:%d  %s %s", f.file, f.line, f.kind, f.name)
-		}
-		t.Logf("\nResolution options:\n" +
-			"  (1) add a caller-scope filter: `args.X == actor.userId` (or the canonical caller-id check for the domain)\n" +
-			"  (2) add an admin gate: reference `actor.isClusterOwner`, or name an admin context-spec (`requiresAdmin` / `requiresOwner` / `requiresOwnerOrAdmin`) as a top-level conjunct\n" +
-			"  (3) add `@public` to the construct's annotations with a comment explaining why no caller-check applies\n" +
-			"See docs/public/operate/auth/per-row-authz-audit.md for the bucket definitions + the audit history.")
+	// The hard failure. Same detector the engine refuses a boot with, so a
+	// construct that fails here would also CrashLoop a node -- which is the
+	// point of memql#3629: before it, this test was the only thing that ran
+	// the check, and it never ran over a product's DSL at all.
+	for _, v := range scanTreeForGate(t, dslgate.GateUserScopeSelection) {
+		t.Errorf("%s:%d  %s %s: %s", v.File, v.Line, v.Kind, v.Construct, v.Detail)
 	}
-}
-
-// matchingClose walks src from openIdx (position of `{`) and returns
-// the index of the matching `}`. String + line-comment aware.
-func matchingClose(src string, openIdx int) int {
-	if openIdx < 0 || openIdx >= len(src) || src[openIdx] != '{' {
-		return -1
-	}
-	depth := 0
-	inString := false
-	for i := openIdx; i < len(src); i++ {
-		c := src[i]
-		if inString {
-			if c == '\\' && i+1 < len(src) {
-				i++
-				continue
-			}
-			if c == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch c {
-		case '"':
-			inString = true
-		case '/':
-			if i+1 < len(src) && src[i+1] == '/' {
-				nl := strings.IndexByte(src[i:], '\n')
-				if nl < 0 {
-					return -1
-				}
-				i += nl
-			}
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return i
-			}
-		}
-	}
-	return -1
 }
 
 // visitFilterPredicates walks every .memql file in the unified tree,
@@ -1382,10 +1012,6 @@ func splitPredicates(s string) []string {
 	return appendSplitPredicates(nil, s, 0)
 }
 
-// maxPredicateNesting bounds the recursion. Nothing in the corpus approaches
-// it; it exists so a malformed clause cannot spin.
-const maxPredicateNesting = 64
-
 func appendSplitPredicates(out []string, s string, depth int) []string {
 	if depth > maxPredicateNesting {
 		if p := strings.TrimSpace(s); p != "" {
@@ -1442,270 +1068,6 @@ func splitTopLevelConnectives(s string) []string {
 		}
 	}
 	return append(raw, s[start:])
-}
-
-// splitTopLevelOn splits on ONE connective at paren/brace/bracket depth 0,
-// outside string literals -- the sibling of splitTopLevelConnectives, which
-// splits on both and so cannot tell a conjunct from a disjunct.
-//
-// That distinction is irrelevant to the violation-hunting gates (a bad
-// predicate is bad on either side of either connective) and load-bearing to
-// classification (memql#2832): a conjunct NARROWS what a query returns, a
-// disjunct WIDENS it.
-// splitTopLevelOn splits on a DOUBLED connective (`||`, `&&`).
-func splitTopLevelOn(s string, conn byte) []string {
-	return splitTopLevelSep(s, conn, true)
-}
-
-// splitTopLevelSingle splits on a SINGLE-character separator.
-//
-// The retired `,` OR separator is one character, so the doubled form above
-// could never split it -- which is why the `,` arm of clauseGuaranteesAt found
-// nothing and the classifier reported an OR-widened clause as owner-scoped
-// (memql#3612).
-func splitTopLevelSingle(s string, conn byte) []string {
-	return splitTopLevelSep(s, conn, false)
-}
-
-func splitTopLevelSep(s string, conn byte, doubled bool) []string {
-	var raw []string
-	depth := 0
-	inStr := false
-	start := 0
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		// An escaped quote does not end the literal. Without this, odd quote
-		// parity leaves inStr stuck true for the rest of the clause and a
-		// top-level connective after it goes unseen -- respelling the exact
-		// hole this gate closes (`name=="a\"b" || ownerUserId==actor.userId`).
-		// matchingClose in this file already handles the escape;
-		// splitTopLevelConnectives still does not.
-		case inStr && c == '\\' && i+1 < len(s):
-			i++
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(' || c == '{' || c == '[':
-			depth++
-		case c == ')' || c == '}' || c == ']':
-			depth--
-		case depth == 0 && c == conn && doubled && i+1 < len(s) && s[i+1] == conn:
-			raw = append(raw, s[start:i])
-			i++
-			start = i + 1
-		case depth == 0 && c == conn && !doubled:
-			raw = append(raw, s[start:i])
-			start = i + 1
-		}
-	}
-	return append(raw, s[start:])
-}
-
-// clauseGuarantees reports whether EVERY row a filter clause can admit
-// satisfies `leaf` -- i.e. whether the guarantee holds on all paths through
-// the clause's boolean structure, not merely somewhere in its text.
-//
-// The rules follow from what each connective does to a result set:
-//
-//   - DISJUNCTION widens. `A || B` guarantees the property only if BOTH arms
-//     do; one unscoped arm returns rows the property does not cover.
-//   - CONJUNCTION narrows. `A && B` guarantees it if EITHER conjunct does;
-//     the other can only remove rows.
-//   - NEGATION inverts. `!A` is never a guarantee -- `!(ownerUserId ==
-//     actor.userId)` is precisely "rows I do not own".
-//   - A `when(args.x) { A }` guard is CONDITIONAL: when the arg is absent the
-//     predicate is dropped as if never written, so it cannot guarantee
-//     anything on its own.
-//
-// Parens are peeled before each test so `(A || B) && C` is read as a
-// conjunction, not as text containing `||`.
-func clauseGuarantees(clause string, leaf func(string) bool) bool {
-	return clauseGuaranteesAt(clause, leaf, 0)
-}
-
-func clauseGuaranteesAt(clause string, leaf func(string) bool, depth int) bool {
-	if depth > maxPredicateNesting {
-		return false // Unreadable structure never counts as a guarantee.
-	}
-	s := strings.TrimSpace(clause)
-	// Refuse to reason about text that does not close cleanly. The
-	// struct-query parser rejects such a clause long before the gate sees it,
-	// so this is unreachable today -- but a depth counter with no floor reads
-	// `) || ownerUserId==actor.userId` as one scoped predicate, and failing
-	// OPEN is the wrong default for an authz gate.
-	if depth == 0 && !delimitersBalanced(s) {
-		return false
-	}
-	if inner, ok := stripOuterParens(s); ok {
-		return clauseGuaranteesAt(inner, leaf, depth+1)
-	}
-	if s == "" {
-		return false
-	}
-	if arms := splitTopLevelOn(s, '|'); len(arms) > 1 {
-		for _, a := range arms {
-			if !clauseGuaranteesAt(a, leaf, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	// The retired `,` separator is a pure alias for `||` in the engine, at the
-	// same OR precedence -- so it is split HERE, before '&', or `a && b, c`
-	// would be read as a conjunction (memql#3612).
-	//
-	// Without this arm the function fell through to a leaf check on the whole
-	// joined text, found the `actor.userId` substring, and reported
-	// `(ownerUserId==actor.userId, visibility=="public")` OWNER-SCOPED -- while
-	// the engine returned every public row regardless of owner. An
-	// authorization bypass produced by an operator nobody expected to still
-	// work. `hasTopLevelComma` now refuses the spelling outright; this is the
-	// second lock, because a classifier that cannot see an operator the engine
-	// honours is wrong whether or not another gate happens to catch it first.
-	if arms := splitTopLevelSingle(s, ','); len(arms) > 1 {
-		for _, a := range arms {
-			if !clauseGuaranteesAt(a, leaf, depth+1) {
-				return false
-			}
-		}
-		return true
-	}
-	if arms := splitTopLevelOn(s, '&'); len(arms) > 1 {
-		for _, a := range arms {
-			if clauseGuaranteesAt(a, leaf, depth+1) {
-				return true
-			}
-		}
-		return false
-	}
-	if _, isNot := stripLeadingNot(s); isNot {
-		return false
-	}
-	if inner := unwrapWhenPredicate(s); inner != s {
-		return false
-	}
-	return leaf(s)
-}
-
-// filterClauseOf returns a struct-form construct's `filter` clause with its
-// boolean structure intact, or "" when the construct has none.
-//
-// This is a SIXTH notion of "what is a filter clause" in this repo, and
-// memql#2815 tracks consolidating them -- recorded here rather than quietly
-// making that problem worse. Note the classifier now calls two of them on the
-// same body in the same switch: rowSelectionSurface (memql#2799) feeds the
-// user-scope regex, this feeds clauseGuarantees. They disagree about whether a
-// clause can span lines, and are only both correct because the grammar rejects
-// the shape they disagree on -- parseStructQueryBody hard-errors on a
-// continuation line.
-//
-// It exists separately because every other extractor FLATTENS the clause into
-// a predicate list, and flattening is exactly what classification cannot use:
-// see clauseGuarantees.
-func filterClauseOf(body string) string {
-	var out []string
-	inFilter := false
-	for _, line := range strings.Split(blankComments(body), "\n") {
-		trim := strings.TrimSpace(line)
-		if !inFilter {
-			if rest, ok := strings.CutPrefix(trim, "filter"); ok && (rest == "" || rest[0] == ' ' || rest[0] == '\t') {
-				inFilter = true
-				out = append(out, strings.TrimSpace(rest))
-			}
-			continue
-		}
-		if trim == "" || strings.HasPrefix(trim, "@") || strings.HasPrefix(trim, "}") || isClauseEndKeyword(trim) {
-			break
-		}
-		out = append(out, trim)
-	}
-	return strings.TrimSpace(strings.Join(out, " "))
-}
-
-// isClauseEndKeyword reports whether a line starts the next clause of a
-// struct-form body, terminating the filter.
-//
-// Delegates to the shared set (memql#2815). This was a THIRD local copy --
-// added by #2832 a few hours before the consolidation -- which is the pattern
-// the shared package exists to stop: each new gate spelled the list again,
-// slightly differently, and nothing compared them.
-//
-// This is a NARROWING, not a pure delegation. The three things it drops were
-// each checked against the corpus rather than assumed:
-//
-//	depth   never a parseStructQueryBody directive; zero lines in dsl/
-//	asof    lowercase -- the parser accepts only `asOf`, so this spelling
-//	        parse-errors before any gate sees it
-//	`(`     the old list also ended a clause on `shape(` / `count(`, an
-//	        artifact of the retired procedural form; zero such lines in dsl/
-//
-// If `depth` ever becomes a real directive it has to be added to the parser,
-// and TestStructQueryDirectivesMatchTheParser then fails until the shared list
-// learns it -- which is the point of routing through it.
-func isClauseEndKeyword(trim string) bool {
-	return dslclause.StartsAnyOf(trim, dslclause.BodyKeywords)
-}
-
-// stripLeadingNot removes a negation prefix. `!=` is a comparison operator,
-// never a leading negation, so it is left alone.
-func stripLeadingNot(p string) (string, bool) {
-	if !strings.HasPrefix(p, "!") || strings.HasPrefix(p, "!=") {
-		return p, false
-	}
-	return strings.TrimSpace(p[1:]), true
-}
-
-// stripOuterParens peels a paren pair wrapping the WHOLE predicate. It declines
-// when the opener closes early (`(a) == (b)`), which is a comparison between
-// groups rather than one parenthesized predicate.
-func stripOuterParens(p string) (string, bool) {
-	if len(p) < 2 || p[0] != '(' || p[len(p)-1] != ')' {
-		return p, false
-	}
-	depth := 0
-	inStr := false
-	for i := 0; i < len(p); i++ {
-		c := p[i]
-		switch {
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(':
-			depth++
-		case c == ')':
-			depth--
-			if depth == 0 && i != len(p)-1 {
-				return p, false
-			}
-		}
-	}
-	if depth != 0 {
-		return p, false
-	}
-	return strings.TrimSpace(p[1 : len(p)-1]), true
-}
-
-// unwrapWhenPredicate returns the inner predicate of a `when(args.x) { <inner> }`
-// guard, or the predicate unchanged when it is not a guard.
-func unwrapWhenPredicate(p string) string {
-	// The lexer is token-based, so `when (args.x) { ... }` with a space is
-	// legal MemQL, and memqlfmt does not normalise it away (it is a lexical
-	// formatter). A HasPrefix(p, "when(") test missed that spelling entirely,
-	// which for the guard rule in clauseGuarantees silently turned a
-	// CONDITIONAL predicate back into a guarantee (memql#2832).
-	rest, isWhen := strings.CutPrefix(p, "when")
-	if !isWhen || !strings.HasPrefix(strings.TrimLeft(rest, " \t"), "(") {
-		return p
-	}
-	open := strings.Index(p, "{")
-	closeIdx := strings.LastIndex(p, "}")
-	if open < 0 || closeIdx <= open {
-		return p
-	}
-	return strings.TrimSpace(p[open+1 : closeIdx])
 }
 
 // splitFilterRef peels the leading identifier (and optional `?.`
@@ -2044,29 +1406,6 @@ var _ fs.FS = (fs.FS)(nil)
 // delimitersBalanced reports whether a clause's quotes and brackets close
 // cleanly. See clauseGuaranteesAt for why an authz gate must not reason about
 // text it cannot parse.
-func delimitersBalanced(s string) bool {
-	depth := 0
-	inStr := false
-	for i := 0; i < len(s); i++ {
-		switch c := s[i]; {
-		case inStr && c == '\\' && i+1 < len(s):
-			i++
-		case c == '"':
-			inStr = !inStr
-		case inStr:
-			// skip
-		case c == '(' || c == '{' || c == '[':
-			depth++
-		case c == ')' || c == '}' || c == ']':
-			depth--
-			if depth < 0 {
-				return false
-			}
-		}
-	}
-	return depth == 0 && !inStr
-}
-
 // TestClauseGuaranteesTreatsCommaAsOr is the second half of the memql#3612
 // lock, and it is deliberately redundant with the retired-operator gate.
 //

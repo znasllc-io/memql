@@ -18,7 +18,7 @@ owner: znas
 >
 > That "11" is history, not an inventory. The live figures move, and
 > this document does not carry them: regenerate with
-> `go test ./dsl/ -run TestPerRowAuthzClassification -v`. The `#54`-era
+> `go test ./test/dslconformance/ -run TestPerRowAuthzClassification -v`. The `#54`-era
 > counts and tables that
 > used to sit further down have been **deleted rather than corrected**
 > (memql#2983) — see "Counts: regenerate, do not read".
@@ -562,8 +562,19 @@ as an exemption knob.
 
 ## Validator
 
-`dsl.TestPerRowAuthzClassification` walks every `query`, `mutate`
-**and `seed`** in the tree and classifies each one.
+The classifier lives in `component/memql/dslgate` and walks every
+`query`, `mutate` **and `seed`** in the tree, classifying each one.
+
+**It runs at LOAD time** (memql#3629). `MemQLEngine.Init` scans the merged
+tree -- embedded core plus every registered overlay, which is where a
+`MEMQL_DSL_PATH` product bundle lands -- records each flagged construct on
+the `LoadReport`, and strict boot REFUSES rather than warns
+(`MEMQL_DSL_ALLOW_SKIPS` is the operator break-glass). Until then the only
+thing running this classification was a Go test over this repo's own tree,
+so a product's DSL -- the primary delivery path under platform
+consolidation, memql#2472 -- was classified by nothing at all.
+`dsl.TestPerRowAuthzClassification` still runs it over the embedded corpus,
+through the same code rather than a second copy of it.
 
 It does not merely scan for a substring. Flagging evaluates the
 **boolean structure** of the filter over the row-selection surface —
@@ -582,7 +593,7 @@ worse than either:
 - a **flagged construct is a hard failure** — `t.Errorf`, one line per
   construct, plus the resolution options;
 - a **stale exemption is a hard failure** too — an entry in
-  `userScopeSelectionExemptions` whose construct no longer matches must
+  `dslgate.UserScopeSelectionExemptions` whose construct no longer matches must
   be pruned rather than left to rot into a blanket that covers nothing.
 
 So: counts to read, findings that fail.
@@ -618,7 +629,7 @@ in prose at all: a table that does not exist cannot drift.
 **To get the live figures:**
 
 ```bash
-go test ./dsl/ -run TestPerRowAuthzClassification -v
+go test ./test/dslconformance/ -run TestPerRowAuthzClassification -v
 ```
 
 That prints the per-domain table across all six states — `owned`,

@@ -463,7 +463,31 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// spans core + the product pack. S5 gave this ERROR visibility; S2
 	// makes it a strict-boot signal (below) alongside the skipped
 	// constructs each loader recorded on the report.
-	dups := DetectDuplicateConstructs(baseloader.ReadAll(e.Logger))
+	// One read of the merged tree serves both whole-tree source passes below.
+	rawTree := baseloader.ReadAll(e.Logger)
+
+	// DSL contract gates (memql#3629). Authorization scoping, retired filter
+	// operators the engine still honours, and the `row.` intrinsic namespace
+	// were each enforced only by a Go test walking THIS repo's tree, so a
+	// product DSL bundle mounted at MEMQL_DSL_PATH -- the primary delivery path
+	// under platform consolidation (memql#2472) -- ran none of them. They run
+	// here instead, over the same merged source the loaders register from, and
+	// land on the report as strict-boot problems. See contract_gates.go for
+	// which gates moved and which deliberately stayed as tests.
+	if violations := recordContractGateProblems(report, rawTree, functionRegistry); len(violations) > 0 &&
+		e.Component != nil && e.Logger != nil {
+		for _, v := range violations {
+			e.Logger.Error("DSL contract gate violation",
+				"component", "memql.engine",
+				"gate", string(v.Gate),
+				"construct", v.Construct,
+				"origin", v.File,
+				"line", v.Line,
+				"detail", v.Detail)
+		}
+	}
+
+	dups := DetectDuplicateConstructs(rawTree)
 	report.SetDuplicates(dups)
 	if e.Component != nil && e.Logger != nil && len(dups) > 0 {
 		for _, d := range dups {

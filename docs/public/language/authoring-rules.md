@@ -1684,6 +1684,27 @@ CI enforces a set of static rules over every loaded `.memql` file.
 A PR that violates any of them fails before the engine ever parses
 the change. The gates, with their test names:
 
+> **Contract gates run at LOAD time, not only in CI** (memql#3629).
+> Five of the gates below -- retired operator forms, the two `row.`
+> namespace rules, the per-row authz user-scope bucket, and the admin-gate
+> composition rule -- live in `component/memql/dslgate` and are run by
+> `MemQLEngine.Init` over the merged tree. A violation lands on the
+> `LoadReport` and **strict boot refuses it**, with `MEMQL_DSL_ALLOW_SKIPS`
+> as the operator break-glass, exactly like a construct that fails to parse.
+>
+> That is what covers a **product DSL bundle** delivered at runtime through
+> `MEMQL_DSL_PATH` -- the primary delivery path under platform consolidation
+> (memql#2472), and a tree no Go test in this repo ever walks. `cmd/memqllint`
+> drives the same `Init`, so a bundle author gets the verdict offline before
+> the deploy rather than as a CrashLoop after it.
+>
+> The tests below run the **same detector** over this repo's corpus rather
+> than a second copy of the rule: the recurring defect in this area is two
+> detectors drifting, always fail-open (memql#2779, memql#3612, memql#2875).
+> The remaining gates are house style -- naming, redundant annotations,
+> canonical short forms -- and stay test-only on purpose: failing a fleet's
+> boot over a convention would be worse than the convention drifting.
+
 - **Canonical filter prefixes** (`TestFilterSyntaxCanonical`).
   Filter predicates reference payload fields as `<field>` -- bare, with
   no prefix. The `payload.<field>` and `<conceptName>.<field>` forms are
@@ -1784,9 +1805,10 @@ grammar:
   the embedded `dsl/` tree — not by the parser, which still accepts all
   four, and not by the engine, which still computes `;` as AND and `,`
   as OR. That is why a `,` inside parentheses was an authorization
-  bypass and was closed here rather than in the grammar (memql#3612),
-  and why a product bundle mounted at `MEMQL_DSL_PATH` is outside the
-  gate entirely (memql#3629).
+  bypass and was closed here rather than in the grammar (memql#3612).
+  The scan itself now runs at load time over whatever tree the node
+  mounted, so a product bundle at `MEMQL_DSL_PATH` is covered too
+  (memql#3629); this test runs it over the embedded corpus.
 - `TestNoInfixWordAndOr` (#973,
   `test/dslconformance/no_word_logical_operators_test.go`): the English `and` / `or`
   infix forms are rejected.

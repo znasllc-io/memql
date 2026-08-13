@@ -1569,8 +1569,19 @@ signature, so `` is removed) and from mutation bodies via the
 bare `insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
-**Canonical filter-clause syntax** (enforced by
-`test/dslconformance/conformance_test.go`):
+**Canonical filter-clause syntax** (enforced at LOAD time by
+`component/memql/dslgate`, and over this repo's corpus by
+`test/dslconformance/conformance_test.go`, which runs the same detector):
+
+> **Where these rules are enforced (memql#3629).** The CONTRACT gates --
+> retired operator forms, the two `row.` namespace rules, the per-row authz
+> user-scope bucket, and the admin-gate composition rule -- run inside
+> `MemQLEngine.Init`, land on the `LoadReport`, and are refused by strict boot
+> (`MEMQL_DSL_ALLOW_SKIPS` is the break-glass). That is what covers a **product
+> DSL bundle** mounted at `MEMQL_DSL_PATH`, which no Go test in this repo
+> walks; `cmd/memqllint` runs the same `Init` offline. House-style gates
+> (naming, redundant annotations, canonical short forms) stay test-only --
+> failing a fleet's boot over a convention would be worse than the drift.
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
   `<field>` (removed, epic #2292) and never `<conceptName>.<field>`
