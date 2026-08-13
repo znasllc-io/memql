@@ -200,6 +200,34 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 			"component", "memql.engine", "error", ulErr)
 	}
 
+	// memql#3621: compare every shape body against the concept it binds.
+	// Nothing did this before -- the converter has no registry and no later
+	// pass revisited it -- so a body could project a property the concept
+	// does not declare and the only symptom was a wire key whose value was
+	// null (dsl/workbench workspaceFull's bare `createdAt`,
+	// dsl/identity delegationFull's `agentSubject`). A violation is a
+	// strict-boot problem, not a Warn: the shape is registered and every
+	// query bound to it silently returns the wrong projection.
+	// Runs BEFORE the default-projection expansion so the report describes
+	// the AUTHORED state.
+	for _, v := range validateShapeConceptBindings(shapeRegistry, e.concepts) {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("shape does not agree with its bound concept",
+				"component", "memql.engine",
+				"shape", v.Shape,
+				"origin", v.Origin,
+				"detail", v.Detail)
+		}
+		report.AddSkip(baseloader.Skip{
+			Component: "memql.shapeConceptValidator",
+			Keyword:   "shape",
+			Name:      v.Shape,
+			File:      v.Origin,
+			Phase:     "validate",
+			Err:       v.Detail,
+		})
+	}
+
 	// C5 (memql#2035): expand empty-body, signature-bound shapes into a
 	// projection over every projectable (non-@internal) field of their
 	// concept. Runs after both concepts and shapes are loaded so the

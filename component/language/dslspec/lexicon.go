@@ -31,7 +31,6 @@ func keywords() []Keyword {
 		{Name: "body", Doc: "Logic/automation block: named statements ending in `return <expr>`.", Kind: "clause"},
 		{Name: "params", Doc: "Provider block: model/window/cost parameters.", Kind: "clause"},
 		{Name: "auth", Doc: "Provider block: vendor auth (e.g. apiKey env(\"...\")).", Kind: "clause"},
-		{Name: "include", Doc: "Shape statement: compose another shape's fields (with optional aliasing).", Kind: "clause"},
 
 		// Reserved engine identifiers (bare top-level names, not args).
 		{Name: "now", Doc: "Reserved: RFC3339 timestamp captured at eval start.", Kind: "reserved"},
