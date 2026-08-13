@@ -355,6 +355,17 @@ func (l *Loader) compileMemQL(source, path string) (*Automation, error) {
 		return nil, fmt.Errorf("automation %q: dotted `event.<field>` reads are retired (G5, epic #2352; widened in memql#3610) -- declare the field in the args { } block and read it bare. Note that `event.node.<field>` never resolved to anything at all: the CDC envelope has no `node` key, so it silently decided false rather than erroring. Migrate with: go run ./scripts/migrations/event_payload_args -write <dsl-root>", automation.Name)
 	}
 
+	// Refuse an automation nothing can ever run (memql#3614 item 3, memql#3615).
+	// This is the DSL-authored path only -- the LogicRunner's parseJSON builds
+	// trigger-less automations by construction and must not be gated here.
+	// The AUTHORED scheduler has always refused a trigger-less construct at
+	// activation; running the check at load makes the two spellings agree AND
+	// puts the refusal in front of the strict-boot gate, which is what the
+	// swallowed cron error was hiding behind.
+	if err := l.validateTriggerWiring(&automation); err != nil {
+		return nil, err
+	}
+
 	// Validate trigger for potential misconfigurations
 	l.validateTrigger(&automation)
 
@@ -438,7 +449,7 @@ func (l *Loader) parseResolveCompile(source, path string) (*compiler.CompileResu
 	// topic string. Runs regardless of whether the file carries `use`
 	// declarations -- the unified automation loader extracts a single
 	// automation slice that strips any sibling `use` lines.
-	if err := normalizeStructuredTriggers(file); err != nil {
+	if err := normalizeStructuredTriggers(file, l.registry); err != nil {
 		return nil, fmt.Errorf("trigger normalization: %w", err)
 	}
 
@@ -628,28 +639,89 @@ func resolveConceptByTrailingSegment(registry memoryNodes.Registry, name, nsHint
 //
 // Recognised when event= is one of the allowed action kinds (no
 // "graph." prefix) AND a concept= field is present. Other event-only
-// forms (system.startup, cognition.*, schedule=) are left alone.
+// forms (system.startup, cognition.*, schedule=) are left alone -- an
+// `event=` the structured form does not recognise is a RAW TOPIC and
+// subscribes verbatim.
 //
-// concept= must be a fully-qualified concept id string -- the structured
-// form in the new tree carries the literal id, since the unified
-// automation loader strips sibling `use` decls from each slice.
-func normalizeStructuredTriggers(file *languageParser.File) error {
+// concept= must be a fully-qualified concept id string that RESOLVES in the
+// supplied registry -- the structured form in the new tree carries the literal
+// id, since the unified automation loader strips sibling `use` decls from each
+// slice. registry may be nil (in-package tests, the LogicRunner's loader), in
+// which case existence is not checked; every production construction site
+// passes the live registry.
+//
+// Three load-time refusals live here (memql#3614):
+//
+//   - Exactly one @trigger per automation. The parser folds attributes in
+//     order, so a second @trigger silently overwrote the first.
+//
+//   - An unrecognised `event=` may not carry concept= / partition=. Those
+//     kwargs are meaningful ONLY to the structured node.* form: for any other
+//     event kind the old code hit `continue`, dropped them on the floor, and
+//     subscribed to the bare `event=` string. `dsl/deployment/automations.memql`
+//     shipped `@trigger(event="deploy.requested", concept="v1:cluster:deployment",
+//     partition="*")` and got plain `deploy.requested` -- the concept scoping
+//     the author wrote was not in effect and nothing said so. The fix REFUSES
+//     rather than inventing a `deploy.requested.<concept>` topic shape: the
+//     concept segment exists because the graph CDC publisher composes it into
+//     `graph.node.<action>.<concept>`, and an arbitrary application topic has
+//     no such convention to honour. An author who wants concept scoping wants a
+//     node.* kind; an author who wants a raw topic wants no concept= kwarg.
+//
+//   - concept= must name a registered concept. `strings.Contains(id, ":")` was
+//     the whole check, so `v1:cluster:nodeZZZ` compiled to a topic no CDC event
+//     will ever carry. The loader already holds the registry for
+//     `use`-import resolution.
+func normalizeStructuredTriggers(file *languageParser.File, registry memoryNodes.Registry) error {
 	for _, def := range file.Definitions {
 		fd, ok := def.(*languageParser.FunctionDef)
 		if !ok {
 			continue
 		}
 		autoBody, _ := fd.Body.(*languageParser.AutomationDef)
+
+		// One @trigger, and only one. The parser's attribute fold is
+		// last-write-wins per kwarg, so two triggers produced an automation
+		// wired to whichever one happened to come second -- with the first
+		// discarded and no signal at all.
+		triggers := 0
+		for _, attr := range fd.Attributes {
+			if attr.Name == languageParser.AttrTrigger {
+				triggers++
+			}
+		}
+		if triggers > 1 {
+			return fmt.Errorf("automation %q carries %d @trigger annotations -- exactly one is allowed. "+
+				"The parser folds them in order, so all but the last are silently discarded. "+
+				"Merge them into one @trigger, or split the automation",
+				fd.Name, triggers)
+		}
+
 		for _, attr := range fd.Attributes {
 			if attr.Name != languageParser.AttrTrigger {
 				continue
 			}
 			eventVal, hasEvent := attr.Args["event"]
 			if !hasEvent {
+				// schedule-only trigger, or a trigger with no wiring at all.
+				// validateTriggerWiring is what refuses the latter, after the
+				// compile has produced the Automation.
+				if err := rejectStrayStructuredKwargs(fd.Name, attr.Args, ""); err != nil {
+					return err
+				}
 				continue
 			}
 			eventStr, isStr := eventVal.(string)
-			if !isStr || !ast.EventKindAllowed(eventStr) {
+			if !isStr {
+				return fmt.Errorf("automation %q: @trigger event= must be a string, got %T", fd.Name, eventVal)
+			}
+			if !ast.EventKindAllowed(eventStr) {
+				// Raw-topic subscription (system.startup, an already-composed
+				// graph.node.* topic, an application topic). Legal -- but the
+				// structured kwargs mean nothing here and were being dropped.
+				if err := rejectStrayStructuredKwargs(fd.Name, attr.Args, eventStr); err != nil {
+					return err
+				}
 				continue
 			}
 			parsed, err := ast.ParseStructuredTriggerArgs(attr.Args)
@@ -662,6 +734,12 @@ func normalizeStructuredTriggers(file *languageParser.File) error {
 			conceptId := strings.TrimSpace(parsed.Concept)
 			if conceptId == "" || !strings.Contains(conceptId, ":") {
 				return fmt.Errorf("automation %q: @trigger concept=%q must be a fully-qualified concept id", fd.Name, parsed.Concept)
+			}
+			if registry != nil {
+				if _, cerr := registry.Get(conceptId); cerr != nil {
+					return fmt.Errorf("automation %q: @trigger concept=%q is not a registered concept, so the compiled topic %q can never match a CDC event: %w",
+						fd.Name, conceptId, "graph."+eventStr+"."+conceptId, cerr)
+				}
 			}
 			topic, err := ast.BuildTriggerTopic(eventStr, conceptId)
 			if err != nil {
@@ -682,6 +760,30 @@ func normalizeStructuredTriggers(file *languageParser.File) error {
 		}
 	}
 	return nil
+}
+
+// rejectStrayStructuredKwargs refuses concept= / partition= on a @trigger
+// whose event= is not one of the structured node.* kinds (or is absent
+// entirely). Those two kwargs are consumed ONLY by the structured rewrite
+// above; anywhere else they were read, discarded, and never mentioned again.
+func rejectStrayStructuredKwargs(automationName string, args map[string]any, eventStr string) error {
+	var stray []string
+	for _, k := range []string{"concept", "partition"} {
+		if _, ok := args[k]; ok {
+			stray = append(stray, k+"=")
+		}
+	}
+	if len(stray) == 0 {
+		return nil
+	}
+	where := "a @trigger with no event="
+	if eventStr != "" {
+		where = fmt.Sprintf("@trigger event=%q", eventStr)
+	}
+	return fmt.Errorf("automation %q: %s carries %s, which only the structured graph-CDC form consumes -- "+
+		"they were being dropped, so the scoping you wrote was not in effect. "+
+		"Either use a structured event kind (%s) to get concept scoping, or drop the stray kwarg(s) and subscribe to the raw topic as written",
+		automationName, where, strings.Join(stray, " + "), strings.Join(ast.AllowedEventKinds(), " / "))
 }
 
 // versionFromFilePath extracts the version directory from a file path.

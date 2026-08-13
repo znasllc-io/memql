@@ -269,7 +269,7 @@ func TestValidateArgsResolution_ArgsLessExempt(t *testing.T) {
 // rejects a typo'd one with the unknown-identifier error.
 // ---------------------------------------------------------------------------
 
-const g2E2ESource = `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
+const g2E2ESource = `@trigger(event="deploy.requested")
 automation g2BareFieldsDeploy {
   args {
     environment     string   @required
@@ -321,7 +321,7 @@ func TestCompileMemQL_TypoedBareFieldRejected(t *testing.T) {
 // @description strings never trips the scan.
 func TestCompileMemQL_EventPayloadReadRetired(t *testing.T) {
 	loader := NewLoader(LoaderOptions{})
-	src := `@trigger(event="deploy.requested", concept="v1:cluster:deployment")
+	src := `@trigger(event="deploy.requested")
 automation legacyReader {
   step run {
     logic doThing(deploymentId: event.payload.deploymentId)
@@ -370,7 +370,7 @@ automation forwardsEnvelope {
 
 	// Prose mentions are fine: comment + @description string.
 	prose := `// reads event.payload.id historically
-@trigger(event="deploy.requested", concept="v1:cluster:deployment")
+@trigger(event="deploy.requested")
 @description("binds args from event.payload.status transitions")
 automation proseOnly {
   args {

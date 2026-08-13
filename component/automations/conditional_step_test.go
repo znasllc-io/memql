@@ -22,6 +22,7 @@ func TestCompileSource_ConditionalStep(t *testing.T) {
 	loader := NewLoader(LoaderOptions{Logger: logger})
 
 	const src = `@description("Gather then merge.")
+@trigger(event="system.startup")
 automation gather {
   step fetchA {
     automation fetchA { }

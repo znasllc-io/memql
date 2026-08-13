@@ -62,6 +62,27 @@ automation bootstrapSession {
 // `steps.decide.result != ""` and reading the reply text via
 // `steps.decide.result`. The #2271 engine fix unwraps the Bundle-wrapped step
 // result so that read resolves flat at real-DB runtime.
+//
+// NO PUBLISHER IN THIS REPO (memql#3614 item 2, audited 2026-08-13). The topic
+// `cognition.response.requested` is named by this trigger, by the logic's
+// @eventField docs, and by three documentation examples -- and by nothing that
+// publishes. It never has been: `git log -S` reaches the post-split root commit
+// with only the subscriber present. Meanwhile the Go handler does this
+// automation's exact three operations inline --
+// integrations/cognition/cognition_handler.go:813 (the hasAIResponseForReply
+// idempotency read), :1453 (insertAIResponse), :1493 (the idle presence bump)
+// -- plus streaming, the cross-replica dispatch gate, conductor sequencing and
+// citations, which the automation cannot do.
+//
+// LEFT IN PLACE DELIBERATELY, not overlooked. "No in-repo publisher" is not
+// evidence of a dead topic in this architecture: deploy.requested is published
+// from the memql-cockpit repo, and any product DSL bundle mounted at
+// MEMQL_DSL_PATH can publish anything. The engine cannot see either from here,
+// so removing a subscriber on that inference is exactly the guess memql#3614
+// warns against. Retiring this construct is a decision for someone who can
+// confirm no downstream emitter exists; it is also the canonical bare-`event=`
+// trigger example in docs/public/language/attribute-matrix.md and
+// docs/public/language/memql.md, which would need a replacement.
 /// Generate and insert AI response for an utterance
 @trigger(event="cognition.response.requested")
 automation generateResponse {
