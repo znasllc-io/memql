@@ -408,6 +408,25 @@ patches:
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     $patch: delete
+                  # ALL SIX, not just the issuer (memql#3600). The base sets
+                  # every one of these to a staging placeholder, and an explicit
+                  # env entry beats envFrom -- so leaving any of them in place
+                  # means the derivation never runs for it and identity serves a
+                  # domain nothing resolves. That is not hypothetical: the first
+                  # install after memql#3593 produced a magic link at
+                  # https://identity.staging.example.com, which nobody can click,
+                  # so no owner account was ever created and the cluster could
+                  # not be signed into at all.
+                  - name: MEMQL_IDENTITY_BASE_URL
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN
+                    $patch: delete
+                  - name: MEMQL_DISCOVERY_GRPC_ENDPOINT
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS
+                    $patch: delete
+                  - name: MEMQL_IDENTITY_REGISTERED_CLIENTS
+                    $patch: delete
   - target: { kind: Deployment, name: bff }
     patch: |
       apiVersion: apps/v1
