@@ -126,7 +126,21 @@ interface FakeRunner {
  * for this installer (every step verifies a `result.*` field), so a case that
  * fails a step is exercising the path a real failure takes.
  */
-async function fakeRunner(failing: Record<string, number> = {}): Promise<FakeRunner> {
+async function fakeRunner(
+  failing: Record<string, number> = {},
+  /**
+   * Extra result fields per capability, merged over what the verify asks for.
+   *
+   * `satisfying()` derives only the ONE field a step's verify names, which is
+   * right for proving a step passed and not enough for a step whose result the
+   * wizard then READS. `enrolmentLink` verifies `result.enrolmentState` and
+   * carries the link on `result.enrolUrl`, so without this the happy path
+   * produces a step that passed and no link -- and a test asserting the link
+   * reaches the screen would be asserting against a fixture that cannot
+   * produce one.
+   */
+  extraResults: Record<string, Record<string, unknown>> = {},
+): Promise<FakeRunner> {
   const graph = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
   const verifyFor = new Map<string, Verify>();
   for (const step of graph.steps) verifyFor.set(step.script, step.verify);
@@ -154,7 +168,7 @@ async function fakeRunner(failing: Record<string, number> = {}): Promise<FakeRun
           // A failed step's result does NOT satisfy its verify -- which is what
           // makes it failed. `{}` has no field at all, so evaluateVerify
           // returns false for every kind.
-          result: ok ? satisfying(verify) : {},
+          result: ok ? { ...satisfying(verify), ...(extraResults[capability] ?? {}) } : {},
           error: ok ? null : { code: exitCode, message: `the fake refused ${capability}` },
         },
       };
@@ -877,3 +891,110 @@ test("the command comes from the panel's state, never from the message", async (
 function escapeForRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// -----------------------------------------------------------------------------
+// the enrolment link the install minted and then threw away (memql#3408)
+// -----------------------------------------------------------------------------
+//
+// The `enrolmentLink` step mints a single-use passkey link inside the cluster
+// and puts it on `result.enrolUrl`. `src/install/enrolment.ts` was written to
+// open it -- and was reachable from nothing but its own test. An operator
+// finished a successful install with no way to reach the credential the
+// install had just created for them; the URL survived only in the receipt on
+// disk, which nothing tells them about.
+//
+// The failure shape is this file's recurring one: every piece existed and was
+// individually green, and the operator's path still did not work.
+
+const ENROL_LINK = "https://identity.memql.localhost/enroll?code=mql_enr_" + "a".repeat(43);
+
+async function runToDoneWithEnrolment(link: string): Promise<Harness> {
+  const runner = await fakeRunner({}, { "install.enrolmentLink": { enrolUrl: link } });
+  const h = open({ runner });
+  beginInstall(h);
+  await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+  return h;
+}
+
+test("a successful install offers the passkey it just minted", async () => {
+  const h = await runToDoneWithEnrolment(ENROL_LINK);
+  try {
+    const html = h.html();
+    assert.match(html, /Your cluster is ready/, "the run should have reached the done screen");
+    assert.match(
+      html,
+      /data-act="enrolPasskey"/,
+      "the done screen must offer the enrolment link. Minting a credential and " +
+        "discarding it leaves the operator holding nothing at the one moment they " +
+        "are ready to use it",
+    );
+    assert.match(
+      html,
+      /class="primary" type="button" data-act="enrolPasskey"/,
+      "and offer it as the PRIMARY action: the link is already minted, whereas the " +
+        "magic-link route waits on a mailbox a local cluster does not have",
+    );
+    assert.match(
+      html,
+      /class="secondary" type="button" data-act="signInAsOwner"/,
+      "which demotes the magic link to the fallback it now is",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// The link carries a plaintext single-use bearer in its query string. The
+// webview is a separate document with its own script; keeping the credential
+// on the host side means a bug in the page -- or anything that can read the
+// rendered HTML -- cannot walk off with it. The button therefore carries no
+// href and no token, and the URL is looked up host-side on click.
+test("the enrolment link itself never reaches the webview", async () => {
+  const h = await runToDoneWithEnrolment(ENROL_LINK);
+  try {
+    const html = h.html();
+    // Asserted FIRST so this cannot pass vacuously. "the token is absent" is
+    // trivially true of a screen that rendered no enrolment at all, which is
+    // exactly the state this test would otherwise keep passing against.
+    assert.match(
+      html,
+      /data-act="enrolPasskey"/,
+      "the enrolment must actually be on screen for its containment to mean anything",
+    );
+    assert.ok(
+      !html.includes(ENROL_LINK),
+      "the full enrolment URL must not be rendered into the page",
+    );
+    assert.ok(
+      !html.includes("mql_enr_"),
+      "and neither must the bearer token inside it, in any form",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+// An install that never ran the step -- or ran it against a cluster with no
+// account to enrol, which is what `enrolmentState` reports -- is not a broken
+// install. It just has no button, and the magic link goes back to primary.
+test("no minted link means no button, and the magic link is primary again", async () => {
+  const runner = await fakeRunner();
+  const h = open({ runner });
+  try {
+    beginInstall(h);
+    await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+
+    const html = h.html();
+    assert.ok(
+      !/data-act="enrolPasskey"/.test(html),
+      "offering an enrolment button with no link behind it would open nothing",
+    );
+    assert.match(
+      html,
+      /class="primary" type="button" data-act="signInAsOwner"/,
+      "with no passkey to offer, signing in is the primary route again",
+    );
+  } finally {
+    h.close();
+  }
+});
