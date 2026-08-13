@@ -696,6 +696,14 @@ func LoadConfigFromEnv() (Config, error) {
 	cfg.RegistrationDomains = envStringList("MEMQL_IDENTITY_REGISTRATION_DOMAINS")
 	cfg.InternalDomains = envStringList("MEMQL_IDENTITY_INTERNAL_DOMAINS")
 	cfg.CORSAllowedOrigins = envStringList("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS")
+	// Domain-free additions to the derived-or-explicit set (memql#3593).
+	//
+	// The local overlay admits the vite dev servers (localhost:8080 / :3000).
+	// Those are not domain-shaped, so folding them into what MEMQL_DOMAIN
+	// derives would mean a staging deployment that forgot to set CORS silently
+	// admits localhost. A separate knob keeps the derivation production-honest.
+	cfg.CORSAllowedOrigins = append(cfg.CORSAllowedOrigins,
+		envStringList("MEMQL_IDENTITY_CORS_EXTRA_ORIGINS")...)
 	cfg.AccessRequestNotifyEmails = envStringList("MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS")
 
 	cfg.RiskThreshold = envInt("MEMQL_IDENTITY_RISK_THRESHOLD", DefaultRiskThreshold)
@@ -706,6 +714,30 @@ func LoadConfigFromEnv() (Config, error) {
 		return cfg, fmt.Errorf("MEMQL_IDENTITY_REGISTERED_CLIENTS: %w", err)
 	}
 	cfg.RegisteredClients = clients
+
+	// Same reasoning as CORS_EXTRA_ORIGINS above. Merged BY clientId: a client
+	// present in both lists is one client with more redirect URIs. Two entries
+	// sharing an id would make FindClient's answer depend on list order, which
+	// is how a redirect URI silently stops being accepted.
+	extraClients, err := envRegisteredClients("MEMQL_IDENTITY_EXTRA_REGISTERED_CLIENTS")
+	if err != nil {
+		return cfg, fmt.Errorf("MEMQL_IDENTITY_EXTRA_REGISTERED_CLIENTS: %w", err)
+	}
+	for _, extra := range extraClients {
+		merged := false
+		for i := range cfg.RegisteredClients {
+			if cfg.RegisteredClients[i].ClientId != extra.ClientId {
+				continue
+			}
+			cfg.RegisteredClients[i].RedirectURIs = append(
+				cfg.RegisteredClients[i].RedirectURIs, extra.RedirectURIs...)
+			merged = true
+			break
+		}
+		if !merged {
+			cfg.RegisteredClients = append(cfg.RegisteredClients, extra)
+		}
+	}
 
 	if cfg.JWKSURL == "" && cfg.BaseURL != "" {
 		cfg.JWKSURL = cfg.BaseURL + "/.well-known/jwks.json"

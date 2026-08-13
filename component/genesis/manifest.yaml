@@ -1344,6 +1344,12 @@ variables:
     optional: true
     description: "Minimum interval in hours between a single user's own data exports, limiting compromised-account exfiltration."
 
+  - name: MEMQL_IDENTITY_CORS_EXTRA_ORIGINS
+    component: identity
+    scope: node
+    optional: true
+    description: "Comma-separated CORS origins APPENDED to the derived-or-explicit allowed set. Domain-free additions only (local vite dev servers); the domain-shaped origins come from MEMQL_DOMAIN so that a deployment which never sets CORS cannot silently admit localhost (memql#3593)."
+
   - name: MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS
     component: identity
     scope: node
@@ -1364,6 +1370,12 @@ variables:
     default: "none"
     optional: true
     description: "Selects the third-party email-deliverability validation provider plug-in."
+
+  - name: MEMQL_IDENTITY_EXTRA_REGISTERED_CLIENTS
+    component: identity
+    scope: node
+    optional: true
+    description: "JSON array of OAuth clients APPENDED to the derived-or-explicit set, merged by clientId so an id in both lists is one client with more redirect URIs. Domain-free additions only (local vite dev servers), the counterpart of MEMQL_IDENTITY_CORS_EXTRA_ORIGINS (memql#3593)."
 
   - name: MEMQL_IDENTITY_ENABLED
     component: identity
