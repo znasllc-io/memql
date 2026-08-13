@@ -79,7 +79,6 @@ const (
 	tvAudit     = "v1:reltrav:auditEntry"
 	tvSquad     = "v1:reltrav:squad"
 	tvCadet     = "v1:reltrav:cadet"
-	tvProbe     = "v1:reltrav:probe"
 )
 
 // traversalFixtureConcepts declares one concept per cell of the matrix.
@@ -92,7 +91,7 @@ const (
 //     different fields.
 //   - checkRelationshipDirection keys on (source, target, type, fieldSource)
 //     WITHOUT the field, and requires a pair linked by the same type from both
-//     sides to be outgoing/incoming (or bidirectional). folder/doc,
+//     sides to be outgoing/incoming. folder/doc,
 //     doc/person, roster/person, squad/cadet and signer/auditEntry are each
 //     declared from both ends and satisfy it.
 const traversalFixtureConcepts = `/// Fixture container. Declares the INCOMING side of a parent relationship,
@@ -206,17 +205,6 @@ concept cadet {
   label string @description("Human label.")
 
   @relationship(type="owns", field="memberIds", target=squad, direction="incoming")
-}
-
-/// Two relationships of the SAME type over payload string fields, differing
-/// only in direction. Subject of TestRelationshipBidirectional_SkipsIdCanonicalization.
-concept probe {
-  outgoingRef string @description("A bare or canonical v1:reltrav:doc.id.")
-  bidiRef     string @description("A bare or canonical v1:reltrav:person.id.")
-  label       string @description("Human label.")
-
-  @relationship(type="parent", field="outgoingRef", target=doc, direction="outgoing")
-  @relationship(type="parent", field="bidiRef", target=person, direction="bidirectional")
 }
 `
 
@@ -395,8 +383,6 @@ func TestRelationshipFixture_DeclaresEveryShapeUnderTest(t *testing.T) {
 		{tvAudit, relationshipTypeCreatedBy, "createdBy", relationshipDirectionOutgoing, memorynodes.FieldSourceTable},
 		{tvSquad, relationshipTypeOwns, "memberIds", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
 		{tvCadet, relationshipTypeOwns, "memberIds", relationshipDirectionIncoming, memorynodes.FieldSourcePayload},
-		{tvProbe, relationshipTypeParent, "outgoingRef", relationshipDirectionOutgoing, memorynodes.FieldSourcePayload},
-		{tvProbe, relationshipTypeParent, "bidiRef", relationshipDirectionBidirectional, memorynodes.FieldSourcePayload},
 	}
 
 	for _, tc := range cases {
@@ -897,50 +883,3 @@ func TestRelationshipDispatch_RejectsAnUnknownFunction(t *testing.T) {
 		"an unsupported relationship function must be refused by name, not silently resolved to nothing")
 }
 
-// TestRelationshipBidirectional_SkipsIdCanonicalization is a CHARACTERIZATION
-// test recording why direction="bidirectional" is being removed before v1
-// (memql#3658). DELETE IT ALONG WITH THE FEATURE.
-//
-// `bidirectional` is accepted by normalizeRelationshipDefinition, is honoured
-// by every resolver in executor_relationship.go, and has ZERO declarations
-// across the whole corpus. What it does NOT have is the two id canonicalizers,
-// both of which test the string literal "outgoing":
-//
-//	partition_context.go  canonicalizeRelationshipFields      (the WRITE path)
-//	executor_filter.go    canonicalizeRelationshipFieldValue  (the FILTER path)
-//
-// So a bidirectional relationship field is skipped by both. Its ids persist in
-// whatever shape the caller sent, and the `(concept, id)` lookups that assume
-// the canonical form quietly miss -- while an outgoing field on the same row,
-// written in the same insert, is rewritten. That divergence is invisible: no
-// error, no warning, and the write succeeds.
-//
-// The two fields below differ ONLY in direction. Same relationship type, same
-// declared payload type, same insert, both targets registered concepts.
-func TestRelationshipBidirectional_SkipsIdCanonicalization(t *testing.T) {
-	mountTraversalFixture(t)
-	eng, db, _ := readMergeTestEngine(t)
-	ctx := clusterOwnerCtx("u-rel-bidi")
-	sfx := uniqueSuffix("rel-bidi")
-
-	res, err := eng.Execute(ctx, fmt.Sprintf(
-		`insert(%q, id=%q, payload={"outgoingRef":"bare-doc","bidiRef":"bare-person","label":"probe"})`,
-		tvProbe, "probe-"+sfx))
-	require.NoError(t, err)
-	require.NotNil(t, res.Bundle)
-	require.NotEmpty(t, res.Bundle.Nodes)
-	storedId := res.Bundle.Nodes[0].GetId()
-
-	stored := latestPayload(t, ctx, db, tvProbe, storedId)
-
-	require.Equal(t, tvDoc+":bare-doc", stored["outgoingRef"],
-		"CONTROL: an outgoing relationship field IS canonicalized on write")
-
-	require.Equal(t, "bare-person", stored["bidiRef"],
-		"EVIDENCE FOR REMOVAL: the bidirectional field on the same row, written by the same "+
-			"insert, is skipped by canonicalizeRelationshipFields -- it tests the literal "+
-			"\"outgoing\". The bare id persists, and every (concept, id) lookup that assumes "+
-			"canonical form misses it. If this assertion starts failing because the value is now "+
-			"%q, bidirectional has been taught to the write path and this test should be "+
-			"re-read rather than re-pinned.", tvPerson+":bare-person")
-}

@@ -47,10 +47,19 @@ func validateRelationshipAsLabel(as string) error {
 // RelationshipDefinition reuses the concept-level structure for engine consumption.
 type RelationshipDefinition = concept.RelationshipDefinition
 
+// A relationship's direction says which side of the edge carries the pointer
+// field: outgoing means the declaring row's field holds the target id, incoming
+// means the target's field holds the declaring row's id.
+//
+// There is deliberately no third value. `bidirectional` was one until
+// memql#3668, and it was a category error rather than an unimplemented feature
+// -- an edge carried on both sides is two relationships, one declared from each
+// concept. Nothing implemented it coherently, and both id canonicalizers
+// skipped such a field outright, persisting non-canonical ids that
+// (concept, id) lookups then quietly failed to find.
 const (
-	relationshipDirectionOutgoing      = "outgoing"
-	relationshipDirectionIncoming      = "incoming"
-	relationshipDirectionBidirectional = "bidirectional"
+	relationshipDirectionOutgoing = "outgoing"
+	relationshipDirectionIncoming = "incoming"
 )
 
 const (

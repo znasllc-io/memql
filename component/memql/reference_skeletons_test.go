@@ -143,8 +143,7 @@ func TestReferenceRelationshipsAreValid(t *testing.T) {
 
 				switch strings.ToLower(strings.TrimSpace(rel.Direction)) {
 				case relationshipDirectionOutgoing,
-					relationshipDirectionIncoming,
-					relationshipDirectionBidirectional:
+					relationshipDirectionIncoming:
 				default:
 					t.Errorf("%s relationship[%d]: direction %q is invalid",
 						where, index, rel.Direction)
