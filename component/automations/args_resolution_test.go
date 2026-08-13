@@ -328,8 +328,44 @@ automation legacyReader {
   }
 }`
 	_, err := loader.compileMemQL(src, "test:legacyReader")
-	if err == nil || !strings.Contains(err.Error(), "event.payload.<field> reads are retired") {
+	if err == nil || !strings.Contains(err.Error(), "reads are retired") {
 		t.Fatalf("event.payload read must be rejected with the migration hint, got: %v", err)
+	}
+
+	// memql#3610: the scan was `event.payload.` ONLY, which made it blind to
+	// the spelling authors actually reached for. `event.node.payload.X` reads
+	// exactly like the shape of a graph-node event and resolves to NOTHING --
+	// the CDC envelope has no `node` key -- so the filter decided false forever
+	// and the automation never fired. That is how the computer-use kill switch
+	// went inert. The narrow scan could not have caught it, because the broken
+	// spelling was not the retired one; any dotted read off `event` is refused.
+	for _, body := range []string{
+		`logic doThing(userId: event.node.id)`,
+		`logic doThing(status: event.node.payload.status)`,
+		`logic doThing(x: event.anythingElse)`,
+	} {
+		bad := `@trigger(event="node.updated", concept="v1:identity:user")
+automation dottedEventRead {
+  step run {
+    ` + body + `
+  }
+}`
+		if _, err := loader.compileMemQL(bad, "test:dottedEventRead"); err == nil {
+			t.Errorf("%s must be rejected: a dotted read off `event` either is the "+
+				"retired payload form or resolves to nothing at all, and BOTH are silent", body)
+		}
+	}
+
+	// A bare `event` forwarded as a step argument carries no dot and stays legal
+	// -- it is how a logic body receives the whole envelope.
+	okSrc := `@trigger(event="node.updated", concept="v1:identity:user")
+automation forwardsEnvelope {
+  step run {
+    logic doThing ( event: event )
+  }
+}`
+	if _, err := loader.compileMemQL(okSrc, "test:forwardsEnvelope"); err != nil {
+		t.Errorf("forwarding the bare envelope must stay legal, got: %v", err)
 	}
 
 	// Prose mentions are fine: comment + @description string.

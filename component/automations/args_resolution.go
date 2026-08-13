@@ -321,9 +321,24 @@ func checkExprIdentifiers(a *Automation, where, expr string, fields, stepIDs, lo
 // G5 (memql#2367): retired event.payload reads -- source-level scan
 // ---------------------------------------------------------------------------
 
-// eventPayloadReadPattern matches a live `event.payload.<field>` (or the
-// `$event.payload.<field>` dollar form) read in authored automation source.
-var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.payload\.[A-Za-z_]`)
+// eventPayloadReadPattern matches a live `event.<anything>` (or the
+// `$event.<anything>` dollar form) read in authored automation source.
+//
+// DELIBERATELY WIDER THAN `event.payload.` (memql#3610). It used to match that
+// prefix alone, which made it blind to the one spelling authors actually
+// reached for: `event.node.payload.X` reads exactly like the shape of a
+// graph-node event, and there is no `node` key anywhere in the envelope the CDC
+// publisher builds -- so it resolved to nothing, the filter decided false, and
+// the automation never fired. That is how the computer-use kill switch came to
+// be inert, and how per-Plan workbench directories stopped being torn down.
+//
+// The narrow pattern could not have caught it: the broken spelling was not the
+// retired one. Any dotted read off `event` is now refused, because in an
+// automation body the payload binds to the args { } contract and is read bare.
+// A bare `event` passed along as a step argument (`logic f ( event: event )`)
+// carries no dot and is unaffected, as are logic bodies, which read
+// `args.event.payload.X` on a different surface.
+var eventPayloadReadPattern = regexp.MustCompile(`[$]?\bevent\.[A-Za-z_]`)
 
 // scrubSourceForPayloadScan blanks string literals AND both comment forms so
 // the retirement scan never fires on prose (@description text, header

@@ -15,11 +15,16 @@
 /// writing the row), both gated on the terminal scalar.
 @trigger(event="graph.node.updated.v1:planner:plan")
 automation releaseWorkspaceOnPlanTerminal {
+  args {
+    id any
+    status any
+  }
+
   step terminal {
-    logic planIsTerminal ( status: event.node.payload.status )
+    logic planIsTerminal ( status )
   }
   step decide {
-    logic releaseWorkspaceOnPlanTerminal ( event: event )
+    logic releaseWorkspaceOnPlanTerminal ( event )
   }
   step apply {
     forEach item in decide.nodes() {
@@ -32,9 +37,9 @@ automation releaseWorkspaceOnPlanTerminal {
     }
   }
   step teardown {
-    if steps.terminal.result == true && exists(event.node.id) {
+    if steps.terminal.result == true && exists(id) {
       builtin workbenchTeardownDirectory (
-        planId: event.node.id
+        planId: id
       )
     }
   }
