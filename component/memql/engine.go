@@ -1336,13 +1336,18 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 	direction := strings.TrimSpace(def.Direction)
 	direction = strings.ToLower(direction)
 	switch direction {
-	case relationshipDirectionOutgoing, relationshipDirectionIncoming, relationshipDirectionBidirectional:
+	case relationshipDirectionOutgoing, relationshipDirectionIncoming:
 	default:
-		return RelationshipDefinition{}, fmt.Errorf("direction %q is invalid", def.Direction)
+		return RelationshipDefinition{}, fmt.Errorf(
+			"direction %q is invalid; a relationship is %q (this concept's field holds the target id) "+
+				"or %q (the target's field holds this concept's id). An edge carried on both sides is "+
+				"two relationships, one declared from each concept",
+			def.Direction, relationshipDirectionOutgoing, relationshipDirectionIncoming)
 	}
 
 	if relType == relationshipTypeContains && direction == relationshipDirectionIncoming {
-		return RelationshipDefinition{}, fmt.Errorf("contains relationships must declare outgoing or bidirectional direction")
+		return RelationshipDefinition{}, fmt.Errorf(
+			"contains relationships must declare %q direction", relationshipDirectionOutgoing)
 	}
 
 	asLabel := strings.TrimSpace(def.As)
@@ -1433,11 +1438,15 @@ func relationshipKey(source, target, relType, fieldSource string) string {
 	return source + "|" + target + "|" + relType + "|" + fieldSource
 }
 
+// relationshipDirectionsCompatible reports whether two declarations of the same
+// edge, one from each end, agree about which side carries the pointer field.
+// One must be outgoing and the other incoming; two declarations claiming the
+// same side contradict each other.
+//
+// Until memql#3668 a single word switched this check off: `bidirectional`
+// returned true against anything, so declaring it disabled reverse-direction
+// consistency for that edge entirely.
 func relationshipDirectionsCompatible(a, b string) bool {
-	if a == relationshipDirectionBidirectional || b == relationshipDirectionBidirectional {
-		return true
-	}
-
 	return (a == relationshipDirectionOutgoing && b == relationshipDirectionIncoming) ||
 		(a == relationshipDirectionIncoming && b == relationshipDirectionOutgoing)
 }

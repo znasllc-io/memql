@@ -1790,7 +1790,7 @@ type RelationshipDecl struct {
 	Field       string
 	FieldSource string // "payload" (default) or "table" (edge table)
 	Target      string // concept name, e.g. "v1:cognition:space"
-	Direction   string // "outgoing", "incoming", "bidirectional"
+	Direction   string // "outgoing" or "incoming" -- there is no third value, see memql#3668
 
 	// As is the open DOMAIN label for the edge (memql#3652), independent of
 	// the structural Type above. Type is what the engine DOES with the edge;

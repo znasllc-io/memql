@@ -96,7 +96,7 @@ func (e *MemQLEngine) resolveContains(ctx context.Context, nodes []memorynodes.M
 			return nil, err
 		}
 
-		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, labels)
+		defs := filterRelationshipDefinitions(e.relationshipDefinitionsForConcept(conceptMeta.Name), relationshipTypeContains, []string{relationshipDirectionOutgoing}, labels)
 		if len(defs) == 0 {
 			// A LABELLED traversal that matches no definition is an empty
 			// answer, not an error (memql#3656): "no edge on this concept
@@ -212,7 +212,7 @@ func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.Memor
 
 			direction := strings.ToLower(strings.TrimSpace(def.Direction))
 
-			if direction == relationshipDirectionOutgoing || direction == relationshipDirectionBidirectional {
+			if direction == relationshipDirectionOutgoing {
 				values, exists, err := extractStringValueOrArrayFromMap(payloadMap, path)
 				if err != nil {
 					return nil, err
@@ -228,7 +228,7 @@ func (e *MemQLEngine) resolveOwns(ctx context.Context, nodes []memorynodes.Memor
 				}
 			}
 
-			if direction == relationshipDirectionIncoming || direction == relationshipDirectionBidirectional {
+			if direction == relationshipDirectionIncoming {
 				incoming, err := e.fetchNodesByJSONFieldValues(ctx, targetConcept, path, []string{strings.TrimSpace(node.ID)}, timestamp, limit)
 				if err != nil {
 					return nil, err
@@ -290,7 +290,7 @@ func (e *MemQLEngine) resolveParentOf(ctx context.Context, nodes []memorynodes.M
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, labels)
+		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionOutgoing}, labels)
 		if len(matches) == 0 {
 			// A LABELLED traversal that matches no definition is an empty
 			// answer, not an error (memql#3656): "no edge on this concept
@@ -371,7 +371,7 @@ func (e *MemQLEngine) resolveChildOf(ctx context.Context, nodes []memorynodes.Me
 		}
 
 		defs := e.relationshipDefinitionsForConcept(conceptMeta.Name)
-		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional}, labels)
+		matches := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming}, labels)
 		if len(matches) == 0 {
 			// A LABELLED traversal that matches no definition is an empty
 			// answer, not an error (memql#3656): "no edge on this concept
@@ -630,7 +630,7 @@ func (e *MemQLEngine) resolveReferences(ctx context.Context, nodes []memorynodes
 
 			direction := strings.ToLower(strings.TrimSpace(def.Direction))
 
-			if direction == relationshipDirectionOutgoing || direction == relationshipDirectionBidirectional {
+			if direction == relationshipDirectionOutgoing {
 				if payloadMap == nil && payloadErr == nil {
 					payloadMap, payloadErr = payloadToMap(node.Payload)
 				}
@@ -649,7 +649,7 @@ func (e *MemQLEngine) resolveReferences(ctx context.Context, nodes []memorynodes
 				}
 			}
 
-			if direction == relationshipDirectionIncoming || direction == relationshipDirectionBidirectional {
+			if direction == relationshipDirectionIncoming {
 				key := relationshipQueryKey{
 					targetConcept: targetConcept,
 					field:         strings.TrimSpace(def.Field),
@@ -752,7 +752,7 @@ func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.
 			direction := strings.ToLower(strings.TrimSpace(def.Direction))
 			switch def.FieldSource {
 			case memorynodes.FieldSourcePayload:
-				if direction == relationshipDirectionOutgoing || direction == relationshipDirectionBidirectional {
+				if direction == relationshipDirectionOutgoing {
 					if !payloadLoaded {
 						payloadMap, payloadErr = payloadToMap(node.Payload)
 						payloadLoaded = true
@@ -779,7 +779,7 @@ func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.
 					}
 				}
 
-				if direction == relationshipDirectionIncoming || direction == relationshipDirectionBidirectional {
+				if direction == relationshipDirectionIncoming {
 					key := relationshipQueryKey{
 						targetConcept: targetConcept,
 						field:         strings.TrimSpace(def.Field),
@@ -791,7 +791,7 @@ func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.
 					}
 				}
 			case memorynodes.FieldSourceTable:
-				if direction == relationshipDirectionOutgoing || direction == relationshipDirectionBidirectional {
+				if direction == relationshipDirectionOutgoing {
 					value, err := nodeFieldValue(node, def.Field)
 					if err != nil {
 						return nil, err
@@ -805,7 +805,7 @@ func (e *MemQLEngine) resolveCreatedBy(ctx context.Context, nodes []memorynodes.
 					}
 				}
 
-				if direction == relationshipDirectionIncoming || direction == relationshipDirectionBidirectional {
+				if direction == relationshipDirectionIncoming {
 					key := relationshipQueryKey{
 						targetConcept: targetConcept,
 						field:         strings.TrimSpace(def.Field),

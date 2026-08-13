@@ -158,7 +158,7 @@ func (e *MemQLEngine) canonicalizeRelationshipFields(ctx context.Context, concep
 		return nil
 	}
 	for _, rel := range c.Relationships {
-		if !strings.EqualFold(strings.TrimSpace(rel.Direction), "outgoing") {
+		if !strings.EqualFold(strings.TrimSpace(rel.Direction), relationshipDirectionOutgoing) {
 			continue
 		}
 		field := strings.TrimSpace(rel.Field)

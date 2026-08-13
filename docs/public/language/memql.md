@@ -264,7 +264,7 @@ The `@relationship` annotation inside a concept body declares a graph edge:
 - `type` — how MemQL interprets the edge (see table below).
 - `field` — the payload field used as the pointer. May be a dotted path when the field lives inside an object block (`field="lineage.originatingPlanId"`).
 - `target` — the target concept (a short name resolved through the file-top `use ...concepts.{ ... }` import).
-- `direction` — `outgoing`, `incoming`, or `bidirectional`.
+- `direction` — `outgoing` (this concept's field holds the target id) or `incoming` (the target's field holds this concept's id). There is no third value: an edge carried on both sides is two relationships, one declared from each concept.
 - `as` — optional domain label naming what the edge *means* (see "The two axes" below).
 
 | Type | Description | Use When |

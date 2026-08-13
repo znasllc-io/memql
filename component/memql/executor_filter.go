@@ -760,7 +760,7 @@ func (e *MemQLEngine) canonicalizeRelationshipFieldValue(ctx context.Context, co
 		return value, false
 	}
 	for _, rel := range c.Relationships {
-		if !strings.EqualFold(strings.TrimSpace(rel.Direction), "outgoing") {
+		if !strings.EqualFold(strings.TrimSpace(rel.Direction), relationshipDirectionOutgoing) {
 			continue
 		}
 		// EXACT, not EqualFold (memql#3654). The write path looks the field up
