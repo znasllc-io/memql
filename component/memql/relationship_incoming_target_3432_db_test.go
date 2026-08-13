@@ -71,7 +71,7 @@ const (
 // The incoming declaration lives on the HUB and names a field on the SPOKE:
 // "spoke rows point at me through spoke.hubId". That is what makes
 // childOf(<a hub>) resolvable -- resolveChildOf filters the source concept's
-// relationships for type=parent with direction incoming/bidirectional, and
+// relationships for type=parent with direction incoming, and
 // queries the named target concept by the named field.
 const incomingFixtureConcepts = `/// Fixture parent for memql#3432. Declares the INCOMING side of a parent
 /// relationship, which no concept in the shipped corpus does, so childOf and
@@ -182,7 +182,7 @@ func TestRelationshipChildOf_IncomingRelationshipReachesEveryChild(t *testing.T)
 	require.Len(t, filterRelationshipDefinitions(
 		eng.relationships.ByConcept[hubConcept],
 		relationshipTypeParent,
-		[]string{relationshipDirectionIncoming, relationshipDirectionBidirectional},
+		[]string{relationshipDirectionIncoming},
 		nil, // unlabelled: this fixture predates the memql#3656 `as` label
 	), 1, "the fixture hub must declare exactly one incoming parent relationship")
 

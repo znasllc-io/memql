@@ -627,9 +627,9 @@ func levenshtein(a, b string) int {
 //     the TARGET concept. The live #3432 fixture does exactly this -- `hub`
 //     declares field="hubId" where hubId is a field of `spoke`. A naive
 //     "must be declared here" rule makes every incoming relationship illegal.
-//   - bidirectional: has zero declarations and zero tests, and memql#3658
-//     decides whether it survives v1 at all. Inventing a rule for it here would
-//     be guessing, so it is deliberately not validated.
+//
+// There is no third case: normalizeRelationshipDefinition runs first and
+// refuses any other direction (memql#3668).
 //
 // Matching is EXACT, not case-insensitive. The write path and the traversal
 // path already look the field up by exact key, so a case-mismatched field
@@ -642,14 +642,13 @@ func checkRelationshipFieldDeclared(def RelationshipDefinition, declaring, targe
 		return nil
 	}
 
-	var owner *concept.Concept
-	switch def.Direction {
-	case relationshipDirectionOutgoing:
-		owner = declaring
-	case relationshipDirectionIncoming:
+	// Two directions, so this is a choice rather than a switch with a silent
+	// default. There used to be a third (`bidirectional`, removed in
+	// memql#3668) whose default branch returned nil -- skipping the check
+	// entirely for the one direction nobody had reasoned about.
+	owner := declaring
+	if def.Direction == relationshipDirectionIncoming {
 		owner = target
-	default:
-		return nil // bidirectional -- see memql#3658
 	}
 	if owner == nil {
 		// Target unresolvable; the earlier target check already reports that

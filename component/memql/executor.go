@@ -1051,7 +1051,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		return nil
 	}
 
-	childDefs := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming, relationshipDirectionBidirectional}, nil)
+	childDefs := filterRelationshipDefinitions(defs, relationshipTypeParent, []string{relationshipDirectionIncoming}, nil)
 	for _, asLabel := range relationshipLabelsPresent(childDefs) {
 		children, err := e.resolveChildOf(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
@@ -1161,7 +1161,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 		}
 	}
 
-	containsDefs := filterRelationshipDefinitions(defs, relationshipTypeContains, []string{relationshipDirectionOutgoing, relationshipDirectionBidirectional}, nil)
+	containsDefs := filterRelationshipDefinitions(defs, relationshipTypeContains, []string{relationshipDirectionOutgoing}, nil)
 	for _, asLabel := range relationshipLabelsPresent(containsDefs) {
 		contained, err := e.resolveContains(ctx, []memorynodes.MemoryNode{node}, timestamp, []string{asLabel}, e.config.MaxResults)
 		if err != nil {
