@@ -51,6 +51,19 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 		dbtest.Unreachable(t, "read-merge mutation DB test", dsn, err)
 	}
 
+	// Close the pool with the test. 92 tests call this helper and every one of
+	// them used to leak its pool, each holding database/sql's default two idle
+	// connections open for the rest of the package run -- up to 184 against a
+	// stock max_connections of 100. The lane survived only because it sat just
+	// under the ceiling: adding ONE more db test (memql#3670 unskipping the
+	// incoming-array repro) tipped it into
+	// `FATAL: sorry, too many clients already`, in an unrelated test, chosen by
+	// run order rather than by anything the change touched.
+	//
+	// Registered here, so it runs LAST (t.Cleanup is LIFO) -- after any cleanup
+	// the test body registers that still needs the connection.
+	t.Cleanup(func() { _ = db.Close() })
+
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
 	}
