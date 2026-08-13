@@ -16,7 +16,7 @@ MemQL is the query and mutation language that powers the memory engine. It provi
 ## When to Use MemQL
 
 - Retrieving concept instances (agents, spaces, participants, etc.) with filterable JSON payloads.
-- Traversing graph-like relationships (parent/child, contains, alias, owns, createdBy, interactsWith).
+- Traversing graph-like relationships — parent/child hierarchies, containment, aliasing, ownership, and provenance edges (see [Relationships](#relationships)).
 - Inserting new immutable records via mutations.
 
 ## Two Authoring Surfaces
@@ -98,7 +98,7 @@ This returns all active worlds. MemQL responses use **omission semantics**—fie
 ```
 
 - `result.bundle.nodes` is a flat slice of every memory node touched during evaluation (matching records + relationship expansions).
-- `result.bundle.edges` describes the relationships that were traversed. Edge types include `child`, `contains`, `aliases`, `createdBy`, `interactions`, and `owns`. Omitted when no edges exist.
+- `result.bundle.edges` describes the relationships that were traversed. Each edge's `type` is one of the [edge labels](#edge-labels-on-the-wire) — that table is the complete set. Omitted when no edges exist.
 - `result.bundle.rootIds` captures the IDs that directly satisfied the query before relationship expansion.
 - `result.data` carries shaped output when the executed query carries a shape projection (i.e. a DSL-defined query with a `shape` directive). Omitted otherwise; when shaped, contains one element per root.
 - `errors` is omitted on success; on failure, contains an array of structured issues (`code`, `message`, optional `metadata`).
@@ -283,6 +283,35 @@ When a concept has a field that points TO another concept (like `spaceId` pointi
 - If concept A has a field storing concept B's ID → A declares `type="parent"` pointing to B
 - If concept A has an array of concept B IDs → A declares `type="contains"` pointing to B
 - The `child` type is not directly declared; child relationships are inferred by querying `childOf()`, which finds nodes that have a `parent` relationship to the target
+
+#### Edge labels on the wire
+
+`type` is what you **declare**. The label a traversal **emits** on
+`result.bundle.edges[].type` is a separate, closed vocabulary, and the two are
+not word-for-word the same. This is the complete emitted set:
+
+| Edge label | Emitted when a traversal follows |
+|---|---|
+| `child` | a `parent` relationship, walked from the parent down to the child |
+| `alias` | an `alias` relationship |
+| `equals` | an `equals` relationship |
+| `interactsWith` | an `interactsWith` relationship |
+| `createdBy` | a `createdBy` relationship |
+| `contains` | a `contains` relationship |
+| `owns` | an `owns` relationship |
+
+Two rules explain every difference between that list and the `type` table above:
+
+- **An edge is written in the direction it was traversed.** `parent` is
+  therefore declarable but never emitted — following it produces a `child`
+  edge, pointing from the parent to the child it found.
+- **A relationship type whose graph expansion is not wired contributes no
+  edge.** Declaring it is still meaningful (it drives id canonicalization on
+  the field), but no bundle edge appears for it.
+
+Match on these exact strings. The engine emits them from one exported constant
+set (`GraphEdgeLabels()` in `component/memql`), and a test fails if this table
+and that set disagree, so what is written here is what arrives on the wire.
 
 ## Executing Queries
 
@@ -484,8 +513,8 @@ Relationship expressions wrap another MemQL query and expand results through con
 | `owns(expr)`    | Resolves ownership links in both directions.                                                             |
 | `aliasOf(expr)` | Collects nodes sharing alias groups.                                                                     |
 | `equals(expr)`  | Follows equality relationships similar to alias.                                                         |
-| `interactsWith` | Traverses recorded interaction edges (e.g., conversation participants).                                  |
-| `createdBy`     | Resolves creator nodes using payload or table-backed metadata.                                           |
+| `interactsWith(expr)` | Traverses recorded interaction edges (e.g., conversation participants).                            |
+| `createdBy(expr)` | Resolves creator nodes using payload or table-backed metadata.                                         |
 | `ids(expr)`     | Returns lightweight nodes (no payload/schema) useful for identifier lists.                               |
 
 Relationship outputs can be combined with filters:

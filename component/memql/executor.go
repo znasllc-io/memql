@@ -1043,7 +1043,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if childId == "" {
 				continue
 			}
-			builder.addEdge(id, childId, graphEdgeTypeChild, currentDepth+1)
+			builder.addEdge(id, childId, GraphEdgeLabelChild, currentDepth+1)
 			if _, ok := visited[childId]; ok {
 				continue
 			}
@@ -1065,7 +1065,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if aliasId == "" || strings.EqualFold(aliasId, id) {
 				continue
 			}
-			builder.addEdge(id, aliasId, relationshipTypeAlias, currentDepth+1)
+			builder.addEdge(id, aliasId, GraphEdgeLabelAlias, currentDepth+1)
 			if _, ok := visited[aliasId]; ok {
 				continue
 			}
@@ -1087,7 +1087,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if eqId == "" || strings.EqualFold(eqId, id) {
 				continue
 			}
-			builder.addEdge(id, eqId, relationshipTypeEquals, currentDepth+1)
+			builder.addEdge(id, eqId, GraphEdgeLabelEquals, currentDepth+1)
 			if _, ok := visited[eqId]; ok {
 				continue
 			}
@@ -1109,7 +1109,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if interactionId == "" || strings.EqualFold(interactionId, id) {
 				continue
 			}
-			builder.addEdge(id, interactionId, relationshipTypeInteracts, currentDepth+1)
+			builder.addEdge(id, interactionId, GraphEdgeLabelInteractsWith, currentDepth+1)
 			if _, ok := visited[interactionId]; ok {
 				continue
 			}
@@ -1131,7 +1131,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if creatorId == "" || strings.EqualFold(creatorId, id) {
 				continue
 			}
-			builder.addEdge(id, creatorId, relationshipTypeCreatedBy, currentDepth+1)
+			builder.addEdge(id, creatorId, GraphEdgeLabelCreatedBy, currentDepth+1)
 			if _, ok := visited[creatorId]; ok {
 				continue
 			}
@@ -1153,7 +1153,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if childId == "" || strings.EqualFold(childId, id) {
 				continue
 			}
-			builder.addEdge(id, childId, relationshipTypeContains, currentDepth+1)
+			builder.addEdge(id, childId, GraphEdgeLabelContains, currentDepth+1)
 			if _, ok := visited[childId]; ok {
 				continue
 			}
@@ -1175,7 +1175,7 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 			if ownedId == "" || strings.EqualFold(ownedId, id) {
 				continue
 			}
-			builder.addEdge(id, ownedId, relationshipTypeOwns, currentDepth+1)
+			builder.addEdge(id, ownedId, GraphEdgeLabelOwns, currentDepth+1)
 			if _, ok := visited[ownedId]; ok {
 				continue
 			}

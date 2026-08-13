@@ -403,6 +403,7 @@ func conceptDeclToParsed(decl *parser.ConceptDecl) (*parsedConcept, error) {
 			FieldSource:   rel.FieldSource,
 			TargetConcept: rel.Target,
 			Direction:     rel.Direction,
+			As:            rel.As,
 		})
 	}
 
