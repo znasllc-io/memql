@@ -409,14 +409,23 @@ func ValidateTool(tool *Tool) error {
 		return fmt.Errorf("tool %q: inputSchema is not valid JSON: %w", tool.Name, err)
 	}
 
-	// Validate handler if present
-	if tool.Handler != nil {
-		if err := validateToolHandler(tool.Name, tool.Handler); err != nil {
-			return err
+	// A tool needs SOMETHING to execute (memql#3625). The one exception is
+	// a client-executed tool: its body lives in the connected browser, and
+	// ExecuteTool routes to the ClientToolInvoker before it ever reads
+	// tool.Handler.
+	//
+	// Without this, a tool declaring no handler at all registered fine and
+	// was advertised to the model, which then received
+	// `Tool %q has no handler defined` as its RESULT -- see the
+	// IsError:true fix at the same call site.
+	if tool.Handler == nil {
+		if tool.ClientExecution {
+			return nil
 		}
+		return fmt.Errorf("tool %q: a handler is required (@handler(type=...)) unless the tool is @clientExecution -- a tool with neither has no way to execute, but is still advertised to the model", tool.Name)
 	}
 
-	return nil
+	return validateToolHandler(tool.Name, tool.Handler)
 }
 
 // validateToolHandler validates a tool handler configuration.

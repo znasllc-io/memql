@@ -632,11 +632,20 @@ func (e *MemQLEngine) ExecuteTool(ctx context.Context, tool *Tool, args map[stri
 		return invoker.InvokeClientTool(ctx, tool.Name, argsJSON, callerRole)
 	}
 
-	// If no handler is defined, return tool info as a text response.
+	// No handler and not client-executed: the tool cannot run. ValidateTool
+	// now refuses this at load (memql#3625), so reaching here means a tool
+	// built in Go rather than declared in `.memql`.
+	//
+	// IsError was FALSE here, which is the part that mattered: the streaming
+	// tool loop hands a non-error result to the model as the tool's
+	// successful response, so "Tool %q has no handler defined" arrived as an
+	// ANSWER and the model reasoned on from it. A failure must be delivered
+	// as a failure or the model cannot correct.
 	if tool.Handler == nil {
 		return &ToolCallResult{
+			IsError: true,
 			Content: []ToolResultContent{
-				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined", tool.Name)},
+				{Type: "text", Text: fmt.Sprintf("Tool %q has no handler defined and is not client-executed -- it cannot be invoked", tool.Name)},
 			},
 		}, nil
 	}

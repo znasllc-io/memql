@@ -314,7 +314,24 @@ func LoadUnifiedTools(logger *slog.Logger, registry *ToolRegistry, report ...*Lo
 				}
 				return nil, nil
 			}
-			return toolDeclToTool(decl, origin)
+			tools, convErr := toolDeclToTool(decl, origin)
+			if convErr != nil {
+				return nil, convErr
+			}
+			// AUTHORED tools were never validated (memql#3625). ValidateTool
+			// existed and was correct, but its only caller was
+			// registerFunctionTools -- which validates the tools the engine
+			// GENERATES from functions. A `.memql` tool went decl -> convert ->
+			// Upsert untouched, so an unknown handler type, an empty function
+			// name and a missing handler all registered and were advertised to
+			// the model. A failure here becomes a baseloader Skip, which the
+			// strict-boot gate refuses to boot on.
+			for _, t := range tools {
+				if vErr := ValidateTool(t); vErr != nil {
+					return nil, fmt.Errorf("%s: %w", origin, vErr)
+				}
+			}
+			return tools, nil
 		},
 		registry.Upsert,
 		sink,
