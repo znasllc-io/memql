@@ -23,9 +23,13 @@
 /// the builtin decides both, because both are deployment configuration rather than graph state.
 @trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
 automation ingestCampaignFeedback {
+  args {
+    id any
+  }
+
   step ingest {
     builtin campaignIngestFeedback (
-      inboundRequestId: event.node.id
+      inboundRequestId: id
     )
   }
 }

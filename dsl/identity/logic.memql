@@ -345,14 +345,14 @@ logic onDelegationCreated {
   emitEvent := publishEvent(
     topic: "delegation.created",
     payload: {
-      delegationId: args.event.node.id,
-      args.event.node.payload.identityId,
-      args.event.node.payload.identitySubject,
-      args.event.node.payload.identityType,
-      args.event.node.payload.agentId,
-      args.event.node.payload.roleCeiling,
-      args.event.node.payload.scopes,
-      args.event.node.payload.createdBySubject,
+      delegationId: args.event.payload.id,
+      args.event.payload.identityId,
+      args.event.payload.identitySubject,
+      args.event.payload.identityType,
+      args.event.payload.agentId,
+      args.event.payload.roleCeiling,
+      args.event.payload.scopes,
+      args.event.payload.createdBySubject,
       timestamp: now
     }
   )

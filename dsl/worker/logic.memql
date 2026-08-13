@@ -28,7 +28,7 @@ logic killSwitchSuspendsRunningPlans {
     event object!
   }
   body {
-  return query runningPlansForUser( userId: args.event.node.id ?? "", withComputerUseScope: true )
+  return query runningPlansForUser( userId: args.event.payload.id ?? "", withComputerUseScope: true )
   }
 }
 

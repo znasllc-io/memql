@@ -10,7 +10,7 @@ use planner.mutations.{ updatePlanStatus }
 /// computerUseScope) is pushed down into runningPlansForUser by the decide logic; the forEach
 /// transitions each returned plan unconditionally (#2370).
 @trigger(event="node.updated", concept="v1:identity:user", partition="*")
-@filter(event.node.payload.preferences.computerUseEnabled == false)
+@filter(payload.preferences.computerUseEnabled == false)
 automation killSwitchSuspendsRunningPlans {
   step decide {
     logic killSwitchSuspendsRunningPlans ( event: event )
