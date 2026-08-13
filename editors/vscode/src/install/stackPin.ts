@@ -67,7 +67,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.17.0";
+export const DEFAULT_STACK_TAG = "v0.17.1";
 
 /**
  * How a cluster the wizard builds treats people who are not its owner.
