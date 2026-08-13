@@ -129,6 +129,14 @@ export interface WizardAnswers {
   ownerEmail: string;
   ownerFirstName: string;
   ownerLastName: string;
+  /**
+   * The release tag to check out. Empty falls back to DEFAULT_STACK_TAG.
+   *
+   * A REPAIR MUST PIN THE RECORDED ONE (memql#3605): without it a repair run
+   * from a newer extension silently upgraded the cluster it was meant to
+   * restore.
+   */
+  tag?: string;
   timeoutMs?: number;
   /** See SessionOptions.env -- in practice, the sudo agent's SUDO_ASKPASS. */
   env?: Record<string, string>;
@@ -160,6 +168,7 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     ownerEmail: answers.ownerEmail,
     ownerFirstName: answers.ownerFirstName,
     ownerLastName: answers.ownerLastName,
+    tag: answers.tag,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
     env: answers.env,

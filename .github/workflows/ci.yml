@@ -255,6 +255,13 @@ jobs:
               # both, or the coupling the fixture exists to create is only
               # enforced on whichever half a PR happens to touch.
               - 'test/fixtures/**'
+              # component/backup/testdata/** -> the backup COMPATIBILITY GATE
+              # (component/backup/compatibility_test.go). Each fixture is a real
+              # backup in a format version this engine once wrote, and the test
+              # restores every one. They are the only evidence behind the promise
+              # that a newer engine reads every older backup, so a change to one
+              # has to run the gate that reads it.
+              - 'component/backup/testdata/**'
               # The REST of the env-registry corpus (memql#3223).
               #
               # `cmd/envscan/scan.repoCorpus` walks the WHOLE repository and

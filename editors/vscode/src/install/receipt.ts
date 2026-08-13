@@ -261,8 +261,30 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
     const recorded: ReceiptEntry = { ...entry, params: redactSecrets(entry.params) };
 
     const at = receipt.entries.findIndex((e) => e.stepId === recorded.stepId);
-    if (at >= 0) receipt.entries[at] = recorded;
-    else receipt.entries.push(recorded);
+    if (at >= 0) {
+      // `preExisting` RATCHETS: once false, always false (memql#3605).
+      //
+      // It answers "was this artifact already on the machine before memQL ever
+      // ran", which is a fact about the PAST. A later run cannot change it, and
+      // a newest-wins upsert let it flip anyway -- because a repair re-runs
+      // `clusterUp` against a cluster that now exists, reports
+      // `clusterCreated: false`, and the derivation reads that as "it was
+      // already here".
+      //
+      // The consequence lands at uninstall, which is the one place that cannot
+      // afford to be wrong: `refuse_if_pre_existing` is an unconditional exit 3,
+      // so after any repair the uninstall REFUSED to delete a cluster memQL had
+      // created -- leaving the operator to run `k3d cluster delete` by hand,
+      // which is exactly the manual step the installer exists to remove.
+      //
+      // Carrying the recorded value forward is the fix, and it fails in the safe
+      // direction: an artifact ever seen as pre-existing stays protected.
+      const previous = receipt.entries[at];
+      if (previous.preExisting === false) recorded.preExisting = false;
+      receipt.entries[at] = recorded;
+    } else {
+      receipt.entries.push(recorded);
+    }
 
     await writeAtomic(file, serializeReceipt(receipt));
     return receipt;
@@ -460,4 +482,26 @@ function recordedProviderParam(receipt: Receipt | null, name: string): string {
   const entry = entryFor(receipt, "providerKey");
   const recorded = entry?.params[name];
   return typeof recorded === "string" ? recorded : "";
+}
+
+/**
+ * The release tag a previous run CHECKED OUT (memql#3605).
+ *
+ * Travels with the provider and the key path above, and for a sharper reason: a
+ * repair that supplied no tag fell through to `DEFAULT_STACK_TAG`, so repairing
+ * a v0.16.1 cluster from a v0.17.0 extension SILENTLY UPGRADED it -- new
+ * manifests reconciled over old binaries, which is exactly the skew memql#3602
+ * was opened about, arriving this time by way of a button labelled "repair".
+ *
+ * A repair returns a cluster to the state its receipt describes. It is not an
+ * upgrade, and it must not become one by omission; upgrading is a different
+ * verb, which the operator picks by name.
+ *
+ * Empty means the receipt records no checkout, so the caller's default applies.
+ */
+export function recordedStackTag(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "stackCheckout");
+  const tag = entry?.params?.tag;
+  return typeof tag === "string" ? tag.trim() : "";
 }

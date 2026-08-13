@@ -21,7 +21,6 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/automations"
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"
@@ -36,6 +35,7 @@ import (
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/service"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/core/logger"
 )
 
@@ -298,6 +298,29 @@ func (a *App) directDBGetter() func() *bun.DB {
 // Used by operator subcommands (mint, etc.) that bootstrap the App but
 // don't bring up transport. Nil until engineAndBus() has run.
 func (a *App) Engine() *memql.MemQLEngine { return a.engine }
+
+// BunDB exposes the pooled database handle, for the operator subcommands that
+// work at the ROW level rather than through the engine.
+//
+// `memql backup export` is the case that needs it: a backup is every row in the
+// cluster, in storage order, streamed at constant memory. The engine's query
+// path is the wrong instrument for that -- it shapes and filters per concept
+// and gates per row, which is exactly right for serving a caller and exactly
+// wrong for taking a faithful copy. A backup that silently omitted rows the
+// query layer chose not to return would be discovered only during a restore,
+// which is the worst possible moment.
+//
+// The authorization for this is the same one `pat mint` and
+// `enrolment-token mint` rely on: somebody who can exec the binary inside the
+// pod already holds the cluster's secrets. It is not reachable over any wire.
+//
+// Nil until the database phase has run.
+func (a *App) BunDB() *bun.DB {
+	if a.db == nil {
+		return nil
+	}
+	return a.db.BunDB()
+}
 
 // IdentityService exposes the identity service wired during the
 // identity integrations phase. Returned as `any` to keep
