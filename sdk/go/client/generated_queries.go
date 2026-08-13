@@ -2657,7 +2657,7 @@ func InboundRequestByDedupeKeyBuild(args InboundRequestByDedupeKeyArgs) string {
 	return b.String()
 }
 
-// InboundRequestById -- One staged inbound request by its row id. The read a product's handler does when an automation hands it `event.node.id` and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
+// InboundRequestById -- One staged inbound request by its row id. The read a product's handler does when an automation hands it `event.payload.id` and it needs the body, the source and the verification bit (memql#3461 -- the campaign feedback ingestion reads all three before it will act on a payload). A by-id read returns at most one row, so it is not a list and declares no pagination.
 //
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["inboundRequestById"] in generated_concepts.go).
 type InboundRequestByIdArgs struct {
