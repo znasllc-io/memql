@@ -63,15 +63,14 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	// A non-empty actor is required by the mutation executor's
 	// mutationActor helper; mirror status_writer's system attribution.
 	//
-	// The AccessContext is layered too, and it is not decoration: these
-	// mutations stamp `ownerUserId: actor.userId`, and a token-only context
-	// carries claims with no caller identity -- exactly the shape memql#3620
-	// now refuses rather than minting a row owned by nobody. A real caller
-	// always has one, so the fixture should as well.
-	ctx := auth.ContextWithUserActor(
-		auth.ContextWithToken(context.Background(),
-			&auth.TokenInfo{Subject: "system:readmerge-test"}),
-		"system:readmerge-test")
+	// DELIBERATELY NO AccessContext. Tests that WRITE owned rows layer one
+	// via insertViaMutation; tests of ambient-predicate semantics
+	// (memql#2801) depend on this context carrying no caller identity, which
+	// is the state they exist to pin. Adding one here made
+	// TestExecute_CondAmbientPredicate_NegatedAbsentActorDenies pass a
+	// resolved actor into a gate whose whole point is that there isn't one.
+	ctx := auth.ContextWithToken(context.Background(),
+		&auth.TokenInfo{Subject: "system:readmerge-test"})
 	return eng, db, ctx
 }
 
@@ -92,7 +91,14 @@ func runMutation(t *testing.T, ctx context.Context, eng *MemQLEngine, name strin
 		require.NoError(t, err)
 		parts = append(parts, k+": "+string(vb))
 	}
-	res, err := eng.Execute(ctx, "mutation "+name+"("+strings.Join(parts, ", ")+")")
+	// The write needs a CALLER, not just claims: these mutations stamp
+	// `ownerUserId: actor.userId`, and a token-only context carries no caller
+	// identity -- the shape memql#3620 refuses rather than minting a row owned
+	// by nobody. Layered here, on the write, so the shared engine context stays
+	// actor-free for the ambient-predicate tests that need it that way.
+	res, err := eng.Execute(
+		auth.ContextWithUserActor(ctx, "system:readmerge-test"),
+		"mutation "+name+"("+strings.Join(parts, ", ")+")")
 	require.NoError(t, err, "mutation %s must succeed with the minimal arg set (memql#1628)", name)
 	require.NotNil(t, res)
 	require.NotNil(t, res.Bundle)
