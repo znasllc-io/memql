@@ -834,9 +834,12 @@ test("a domain the pinned release cannot serve is refused before anything runs",
 
   const message = s.errors.find((e) => e.field === "domain")?.message ?? "";
   assert.notEqual(message, "", "a domain nothing can serve was accepted");
-  assert.match(
-    message,
-    new RegExp(SUPPORTED_LOCAL_DOMAIN.replace(/\./g, "\\.")),
+  // `includes`, not a regex built from the hostname. Escaping dots by hand is
+  // incomplete escaping (CodeQL is right: it leaves backslashes alone), and a
+  // hostname pattern with an unescaped `.` matches more hosts than intended --
+  // neither of which a substring check can get wrong.
+  assert.ok(
+    message.includes(SUPPORTED_LOCAL_DOMAIN),
     `the refusal must name the domain that DOES work, or it is a dead end: ${message}`,
   );
 
