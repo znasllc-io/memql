@@ -110,6 +110,10 @@ import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
+import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
+import { ConstructPanel } from './webview/constructPanel.js';
+import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
+import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
 import { ConnectionPanel } from './webview/connectionPanel.js';
@@ -484,6 +488,44 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     w.onDidDelete(() => deploymentsTree.refresh());
     context.subscriptions.push(w);
   }
+
+  // The Constructs tree (memql#3752): every construct the connected cluster has
+  // LOADED, read from the live registries -- so a promoted construct appears
+  // the moment it is promoted. A different question from the pack browser's,
+  // which answers "show me this file".
+  const constructsTree = new ConstructsTreeProvider({
+    connections,
+    load: async (): Promise<CatalogState> => {
+      const dispatcher = connections?.dispatcher;
+      if (dispatcher === undefined) {
+        // NOT AN EMPTY CATALOG. An empty list reads as "this cluster has no
+        // constructs", which is the one wrong answer available here.
+        return { kind: 'notConnected' };
+      }
+      try {
+        const result = await new ConstructsClient(dispatcher).listConstructs();
+        return catalogFrom(result.constructs);
+      } catch (err) {
+        // A cluster predating the message answers with an envelope the client
+        // does not recognise, which throws -- rendered as a stated version
+        // mismatch naming ListConstructs, never as a blank view.
+        return classifyCatalogFailure(err);
+      }
+    },
+  });
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlConstructs', constructsTree),
+    commands.registerCommand('memql.constructs.refresh', () => constructsTree.refresh()),
+    // Not palette-invokable ("when": "false"): it needs the construct the tree
+    // row carries, which the palette cannot supply. Guarded anyway, so a
+    // future caller with no argument cannot throw inside the panel.
+    commands.registerCommand('memql.constructs.open', (node?: ConstructNode) => {
+      if (node?.kind !== 'construct') {
+        return;
+      }
+      ConstructPanel.open(context, node.construct);
+    })
+  );
 
   const conceptsTree = new ConceptsTreeProvider(connections);
   context.subscriptions.push(
