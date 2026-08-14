@@ -434,12 +434,14 @@ _FD_HZ_RC=0
 _FD_HZ_CODE=""
 _FD_HZ_NODETYPE=""
 _FD_HZ_NODEID=""
+_FD_HZ_CONTENT_TYPE=""
 function healthz_probe() {
-    local host="$1" port="$2" timeout="$3" addr="$4" out="" body=""
+    local host="$1" port="$2" timeout="$3" addr="$4" out="" body="" tail=""
     _FD_HZ_RC=0
     _FD_HZ_CODE=""
     _FD_HZ_NODETYPE=""
     _FD_HZ_NODEID=""
+    _FD_HZ_CONTENT_TYPE=""
 
     # --resolve pins the address WITHOUT going through the resolver, and only
     # the caller that asks for it gets it. The wildcard probe host needs it: a
@@ -456,15 +458,26 @@ function healthz_probe() {
     # --write-out separates it from the status code (a body may itself contain
     # newlines, so the code is read back from the LAST one).
     # ${pin[@]+...} guards the empty-array expansion under `set -u` on bash 3.2.
+    #
+    # CONTENT TYPE IS READ TOO (memql#3814), on the same trailing line so the
+    # last-newline parse above is untouched. It is what lets this probe tell
+    # "the response identified nobody" from "the response identified the WRONG
+    # backend": an h2c gRPC server answering an HTTP/1.1 request emits
+    # `application/grpc` and nothing else does. See check_precedence.
     out="$(curl --silent --show-error \
                 --http2 \
                 --max-time "$timeout" \
                 ${pin[@]+"${pin[@]}"} \
-                --write-out '\n%{http_code}' \
+                --write-out '\n%{http_code} %{content_type}' \
                 "https://${host}:${port}/healthz" 2>/dev/null)" || _FD_HZ_RC=$?
     [[ "$_FD_HZ_RC" == "0" ]] || return 0
 
-    _FD_HZ_CODE="${out##*$'\n'}"
+    tail="${out##*$'\n'}"
+    _FD_HZ_CODE="${tail%% *}"
+    # No space means no content_type was written (an older curl, or a response
+    # that carried no Content-Type header); empty is the honest answer and the
+    # caller treats it as "not established" rather than as "not grpc".
+    [[ "$tail" == *" "* ]] && _FD_HZ_CONTENT_TYPE="${tail#* }"
     body="${out%$'\n'*}"
     # `|| true`: no match is a legitimate answer (the response named no node),
     # and grep's exit 1 under `set -e` would abort the run instead.
@@ -595,6 +608,29 @@ function check_precedence() {
         if [[ "$_FD_HZ_RC" != "0" ]]; then
             record_check_status precedence "$host" inconclusive \
                 "the wildcard router is live (nodeType=${wildcard_type}) but ${host} did not answer (curl exit ${_FD_HZ_RC}: $(curl_tls_hint "$_FD_HZ_RC")), so which backend serves it cannot be established"
+        elif [[ -z "$_FD_HZ_NODETYPE" && "$_FD_HZ_CONTENT_TYPE" == application/grpc* ]]; then
+            # INDIRECT IS NOT INSUFFICIENT (memql#3814).
+            #
+            # This response names no node, so the branch below would have
+            # called it inconclusive -- and did, for the whole life of
+            # memql#3810, while every HTTP path on api. was being answered by
+            # the gRPC backend. The check was looking straight at the defect
+            # and declining to use what it could see.
+            #
+            # `application/grpc` is a FINGERPRINT, not an inference. /healthz
+            # is declared to the HTTP Service (bff-http:8085); only an h2c gRPC
+            # server produces this content type, and it produces it precisely
+            # because it was handed an HTTP/1.1 request it cannot parse. No
+            # correct configuration yields this response at this path, so the
+            # responder has identified itself as the wrong backend without
+            # naming itself.
+            #
+            # The rule this encodes: report inconclusive when the evidence is
+            # INSUFFICIENT, never when it is merely INDIRECT. An
+            # honest-uncertainty verdict that fires on sufficient-but-indirect
+            # evidence becomes its own way of not looking.
+            record_check_status precedence "$host" failed \
+                "${host} is answered by a gRPC backend on a path declared to the HTTP one: HTTP ${_FD_HZ_CODE} with Content-Type ${_FD_HZ_CONTENT_TYPE}. /healthz routes to the bff's HTTP Service, and only an h2c gRPC server answers an HTTP/1.1 request this way -- so an HTTP path is falling through to the gRPC catch-all rule. This is memql#3703's failure mode (a protocol error naming nothing, not a 404) and memql#3810 is the worked example: an Ingress-level router.priority flattened the path ordering so \`/\` outranked the 21 specific paths. Check that no multi-path Ingress carries a uniform traefik.ingress.kubernetes.io/router.priority (deploy/k8s/overlays/local/render_priority_test.go gates this)"
         elif [[ -z "$_FD_HZ_NODETYPE" ]]; then
             record_check_status precedence "$host" inconclusive \
                 "the wildcard router is live (nodeType=${wildcard_type}) but ${host} answered HTTP ${_FD_HZ_CODE} without naming a memQL node, so which backend serves it cannot be established"
