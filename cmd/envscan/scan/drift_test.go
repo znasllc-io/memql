@@ -33,8 +33,20 @@ func TestNoEnvRegistryDrift(t *testing.T) {
 		t.Errorf("reverse drift: registry entry %q appears nowhere in the repo (stale registration)", k)
 	}
 
+	// The residual and the pre-convention exemption are logged whatever the
+	// outcome. "Clean" here means clean about the reads this check can
+	// RESOLVE, and a log line that omits the two carve-outs is how that gets
+	// read as coverage instead (memql#3818).
+	t.Logf("%d read-shaped site(s) unresolvable (key is a parameter / loop variable / computed); "+
+		"run `go run ./cmd/envscan -unresolvable` for the file:line list", len(res.Unresolvable))
+	if len(res.ExemptUnprefixed) > 0 {
+		t.Logf("%d memQL-owned key(s) read but NOT registered, exempt from forward drift pending a "+
+			"MEMQL_ rename: %v", len(res.ExemptUnprefixed), res.ExemptUnprefixed)
+	}
+
 	if res.OK() {
-		t.Logf("env registry clean: %d reads, %d registry entries, no drift", res.ReadCount, res.RegistrySize)
+		t.Logf("env registry clean: %d resolved reads, %d registry entries, no drift",
+			res.ReadCount, res.RegistrySize)
 	}
 }
 
