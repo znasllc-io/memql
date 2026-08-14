@@ -327,7 +327,9 @@ func seedPromotedConcept(t *testing.T, e *MemQLEngine, owner, source, name strin
 		t.Fatalf("session define did not register concept %q", name)
 	}
 	persist := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), persist, owner, c); err != nil {
+	// A nil gate is the ordinary strict-classification promote (memql#3757).
+	// This is a seed, so there is no prior version to diff against.
+	if err := e.promoteConstructDurableWithStore(context.Background(), persist, nil, owner, c); err != nil {
 		t.Fatalf("seed durable promote: %v", err)
 	}
 	bundleId := persist.bundles[0].Id
@@ -434,7 +436,9 @@ func TestDemoteBundleDurable_ReportsPerConstructOutcomes(t *testing.T) {
 	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
 
 	persist := &fakePromoteStore{}
-	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle); err != nil {
+	// allowBreaking=false is the ordinary promote (memql#3757); this bundle has
+	// no prior version to break against.
+	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, false); err != nil {
 		t.Fatalf("promote bundle: %v", err)
 	}
 	store := &fakeDemoteStore{constructs: map[string][]AuthoringConstructRow{}}
