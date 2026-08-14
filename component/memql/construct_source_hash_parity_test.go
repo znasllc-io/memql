@@ -218,27 +218,20 @@ func engineConstructHashes() map[string]parityConstruct {
 // both sides rather than two different ones -- which would show up as a hash
 // mismatch that is really a keying artifact.
 func lspConstructHashes(files []baseloader.RawFile) map[string]parityConstruct {
-	kindOfKeyword := map[string]string{}
-	for kind, keyword := range constructKeyword {
-		kindOfKeyword[keyword] = kind
-	}
-
 	out := map[string]parityConstruct{}
 	for _, f := range files {
 		domain := treeDomainOf(f.Path)
 		runes := []rune(f.Content)
 		for _, c := range sense.ConstructHashes(f.Content) {
-			kind, known := kindOfKeyword[c.Kind]
+			kind, known := ConstructKindForKeyword(c.Kind)
 			if !known {
-				// A keyword the engine does not catalog (`use`, or a kind a
-				// future grammar epic adds). Not this gate's business: there is
-				// no catalog entry for it to be compared against.
+				// A keyword the engine does not catalog (`action`,
+				// `capability`, or a kind a future grammar epic adds). Not this
+				// gate's business: there is no catalog entry for it to be
+				// compared against.
 				continue
 			}
-			key := kind + "\x00" + c.Name
-			if kind == ConstructKindConcept {
-				key = kind + "\x00" + domain + "/" + c.Name
-			}
+			key := DocumentConstructKey(kind, c.Name, domain)
 			if _, exists := out[key]; exists {
 				continue
 			}
