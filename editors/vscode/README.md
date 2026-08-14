@@ -15,6 +15,10 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
   including segment-aware `use`-line completion (namespaces -> kinds -> ids) and
   kind-filtered in-body invocation completion.
 - Hover documentation and signature help.
+- Per-construct **training state** against the connected cluster -- a gutter
+  icon, a CodeLens and a status-bar item saying which constructs in this file
+  the cluster does not know, or knows in an older version, plus the actions
+  that change that. See [Training](#training-what-the-cluster-knows-about-the-file-you-are-editing).
 
 ## The five views, and which question each answers
 
@@ -253,6 +257,112 @@ language server owns it. A surface that could change a construct from here
 would be a second authoring path for something that already has one.
 
 Full rationale: [the Constructs view design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-constructs-view-design.md).
+
+## Training: what the cluster knows about the file you are editing
+
+The Constructs view answers *what is loaded on this cluster*. Training answers
+the same question **about the buffer in front of you**, construct by
+construct, and offers the actions that change the answer.
+
+The distinction it exists to make visible: a construct is either **seeded** --
+loaded from disk when the cluster booted, changeable only by a rollout -- or
+**trained**, a row in the cluster's database that went live in seconds and
+survives restart. Both are real. Until this surface existed, only the first was
+visible. The full model is in
+[Training Constructs Into a Running Cluster](https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md).
+
+### Three surfaces, one state
+
+The language server owns the state. It parses the document, hashes each
+construct's source, compares against the cluster's catalog, and reports one of
+`untrained` / `drifted` / `trained` / `seeded` / `unknown`. The extension
+renders; it never computes a state, because a client re-deriving drift would be
+a second opinion about the one question the surface exists to answer.
+
+**A gutter icon** beside each construct's signature. Three marks, not five,
+because the gutter answers one question -- *does what I am looking at match
+what runs?* -- and that question has three answers: `untrained`, `drifted`, and
+live (`trained` and `seeded` both). They are distinguishable without relying on
+colour.
+
+`unknown` gets **no mark at all**. Not a grey icon, not a question mark: at
+sixteen pixels, a mark meaning "we do not know" is indistinguishable from one
+meaning "something is wrong here", and a disconnection must not look like a
+problem with your file.
+
+**A CodeLens** above each signature, beside the Run lens, naming the state and
+offering what can be done about it:
+
+```
+untrained   Dry-run   Try in session   Promote
+drifted     Dry-run   Try in session   Promote (updates the trained version)
+trained     Demote
+seeded      (no action -- changing it needs a rollout)
+```
+
+The state label is not a command. It is a fact about the construct, and making
+it clickable would leave a developer wondering what clicking it does. A
+`seeded` construct gets no disabled buttons either -- a control that cannot
+work is not drawn.
+
+**A status-bar item** for the active document: `3 untrained - 1 drifted`. It
+reports only what needs attention, so a file whose constructs are all trained
+shows nothing -- an item that is always present saying "12 trained" is one you
+stop reading, and it would take the warning with it. Its hover is where
+*saving does not promote anything* is said in words.
+
+**Nothing runs automatically.** No promote-on-save, no train-on-save. The
+extension already holds that line for runs, and a promotion is a strictly
+larger commitment than a run.
+
+### The four actions
+
+| Action | What it does | Scope |
+|---|---|---|
+| **Dry-run** | compiles and binds in the engine's sandbox against a read-only clone of the live registry | nothing is mutated; safe against production |
+| **Try in session** | makes the construct callable by name | this connection only, dropped at disconnect |
+| **Promote** | persists it, registers it cluster-wide, propagates to every node | durable; survives restart; owner-only |
+| **Demote** | withdraws it | owner-only |
+
+Dry-run diagnostics land **at the construct**, and clear on the next run.
+
+**Promote carries the closure, not just the construct.** Promoting a query
+whose spec is untrained must not half-land, so what is being committed is shown
+before it is committed.
+
+**Try in session is visibly temporary**, in the confirmation and in the lens.
+Mistaking it for a promote is the most expensive confusion this surface can
+cause, because the difference between the two is the whole design.
+
+For a **concept**, two outcomes render structurally rather than as an error
+string: a demote reports whether the concept was *retired* (rows exist) or
+*removed* (it was empty), with the row count; and a re-promote whose schema
+changed reports the classified diff, additive versus breaking, with the field
+named and the override alongside it.
+
+### Read-only files
+
+Some `.memql` files are marked read-only, under one rule: **a file is read-only
+exactly when editing it cannot change what the cluster runs.** Core engine DSL
+is sealed by the engine's core-first invariant. A product bundle is editable
+against a local cluster and read-only against a remote one, because a remote
+cluster loads its bundle from its own image. A **new file is never blocked** --
+adding one is how training starts.
+
+The classification comes from the cluster's own `origin` for each construct,
+not from the shape of the path: guessing by matching a directory called `dsl/`
+would be wrong the first time a product bundle also lives in one, which is the
+convention.
+
+The marking is a **courtesy, not the control**. The extension manages
+`files.readonlyInclude` in workspace settings and you can override it. What
+actually refuses is the engine, which will not let a promoted construct shadow
+a core name. The editor explains; the engine enforces.
+
+With no connected cluster, every file stays editable -- there is no "what the
+cluster runs" for an edit to fail to change.
+
+Full rationale: [the construct-training design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-construct-training-design.md).
 
 ## Data
 
