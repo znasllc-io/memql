@@ -11,7 +11,7 @@ import (
 // so -- that form is pinned by test/fixtures/discovery-endpoint-contract.json
 // and asserted from Go and TypeScript. The worker-pairing reply has a
 // different consumer, sdk/go/worker.ParseClusterURL, which reads a bare
-// address as useTLS=false; a bare "cockpit.local.znas.io:443" therefore told
+// address as useTLS=false; a bare "api.local.znas.io:443" therefore told
 // a cockpit to dial a TLS port in plaintext.
 //
 // So there are two renderings of ONE answer, and the property that keeps them
@@ -66,16 +66,16 @@ func TestDialURLFromEndpoint_HonoursASchemeAndInventsNone(t *testing.T) {
 	}{
 		// Rule 1 -- a scheme is authoritative, including on a port that no
 		// convention covers.
-		{"https implies TLS on the front-door port", "https://cockpit.acme.com", "https://cockpit.acme.com:443"},
-		{"https on a non-standard port keeps both", "https://cockpit.acme.com:8443", "https://cockpit.acme.com:8443"},
-		{"wss is the same statement", "wss://cockpit.acme.com", "https://cockpit.acme.com:443"},
+		{"https implies TLS on the front-door port", "https://api.acme.com", "https://api.acme.com:443"},
+		{"https on a non-standard port keeps both", "https://api.acme.com:8443", "https://api.acme.com:8443"},
+		{"wss is the same statement", "wss://api.acme.com", "https://api.acme.com:443"},
 		{"http implies plaintext on the dev gRPC port", "http://localhost", "http://localhost:50050"},
 		{"http keeps an explicit port", "http://localhost:50050", "http://localhost:50050"},
 		{"ws is the same statement", "ws://agent.internal:9000", "http://agent.internal:9000"},
 
 		// Rule 2 -- no scheme, no port: state the transport the port
 		// inference already implies, and nothing more.
-		{"a bare remote host is the TLS front door", "cockpit.acme.com", "https://cockpit.acme.com:443"},
+		{"a bare remote host is the TLS front door", "api.acme.com", "https://api.acme.com:443"},
 		{"a bare loopback host is a plaintext dev listener", "localhost", "http://localhost:50050"},
 		{"127.0.0.1 likewise", "127.0.0.1", "http://127.0.0.1:50050"},
 
@@ -83,7 +83,7 @@ func TestDialURLFromEndpoint_HonoursASchemeAndInventsNone(t *testing.T) {
 		// DELIBERATE ONE: reading `:443` as https is exactly as much of a
 		// guess as reading `:8443` as http, and the server does not guess on
 		// a credential-carrying hop.
-		{"the deployed discovery value names a port, not a transport", "cockpit.local.znas.io:443", "cockpit.local.znas.io:443"},
+		{"the deployed discovery value names a port, not a transport", "api.local.znas.io:443", "api.local.znas.io:443"},
 		{"a non-standard port is equally silent", "agent.acme.com:8443", "agent.acme.com:8443"},
 
 		// An unrecognised scheme falls into rules 2/3 -- the same vocabulary
@@ -159,10 +159,10 @@ func TestDialURLFormsAgreeWithTheDiscoveryContract(t *testing.T) {
 // property of the refactor that gave both forms one parser.
 func TestDiscoveryDocumentIsUnaffectedByTheSchemeStatingForms(t *testing.T) {
 	inputs := []string{
-		"", "://", "cockpit.local.znas.io:443", "https://bff.local.znas.io",
-		"https://cockpit.example.com:8443", "http://localhost:50050",
-		"https://cockpit.example.com/", "cockpit.example.com", "localhost",
-		"grpc://cockpit.example.com:443", "user@cockpit.example.com",
+		"", "://", "api.local.znas.io:443", "https://bff.local.znas.io",
+		"https://api.example.com:8443", "http://localhost:50050",
+		"https://api.example.com/", "api.example.com", "localhost",
+		"grpc://api.example.com:443", "user@api.example.com",
 		"[::1]:443", "::1", "https://[::1]:8443",
 	}
 	for _, in := range inputs {

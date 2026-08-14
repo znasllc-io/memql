@@ -106,9 +106,9 @@ func TestKustomizeHostOverridesRepointBothIngresses(t *testing.T) {
 	for _, want := range []string{
 		"kustomize:",
 		"patches:",
-		"name: cockpit-front-door",
+		"name: api-front-door",
 		"name: identity-front-door",
-		"value: cockpit.lab.example.com",
+		"value: api.lab.example.com",
 		"value: identity.lab.example.com",
 		"/spec/rules/0/host",
 		"/spec/tls/0/hosts/0",
@@ -117,8 +117,8 @@ func TestKustomizeHostOverridesRepointBothIngresses(t *testing.T) {
 			t.Errorf("emitted block missing %q:\n%s", want, got)
 		}
 	}
-	if n := strings.Count(got, "value: cockpit.lab.example.com"); n != 2 {
-		t.Errorf("cockpit host replaced %d times, want 2 (rule + tls)", n)
+	if n := strings.Count(got, "value: api.lab.example.com"); n != 2 {
+		t.Errorf("api host replaced %d times, want 2 (rule + tls)", n)
 	}
 }
 

@@ -137,8 +137,8 @@ export interface SignInOutcome {
  * canSignIn reports whether a browser sign-in has anywhere to go.
  *
  * The flow needs an ISSUER, which is a different fact from the endpoint the
- * stream dials -- `identity.<domain>` versus `cockpit.<domain>`. A cluster that
- * names neither an `issuer` nor a `domain` nor a `cockpit.`-prefixed endpoint
+ * stream dials -- `identity.<domain>` versus `api.<domain>`. A cluster that
+ * names neither an `issuer` nor a `domain` nor an `api.`-prefixed endpoint
  * cannot be signed into, and offering the action anyway would put a button on
  * screen whose only possible outcome is an error toast.
  */

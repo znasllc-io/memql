@@ -67,7 +67,7 @@ func DiscoveryHandler(cfg Config, envLookup func(string) string) http.Handler {
 //  1. MEMQL_DISCOVERY_GRPC_ENDPOINT explicit env override, NORMALIZED
 //     to a dial address. This is the deployment posture: the operator
 //     knows the public dial address -- the FRONT DOOR,
-//     cockpit.<domain>:443 -- and deploy/k8s/base/identity.yaml writes
+//     api.<domain>:443 -- and deploy/k8s/base/identity.yaml writes
 //     it into the env, per overlay. An override that cannot be read as
 //     a host falls through to (2) rather than being published as-is.
 //
@@ -163,7 +163,7 @@ func DialEndpointFromOrigin(origin string) string {
 //   - The WORKER-PAIRING REPLY hands its value to sdk/go/worker.ParseClusterURL,
 //     which maps a bare `host:port` to useTLS=FALSE. The same string that is
 //     correct in the discovery document therefore told a cockpit to dial
-//     cockpit.local.znas.io:443 in plaintext -- putting its `mql_wkr_` bearer
+//     api.local.znas.io:443 in plaintext -- putting its `mql_wkr_` bearer
 //     token on the wire in the clear before the handshake failed.
 //
 // The server was never guessing: the origin it is handed carries the answer,

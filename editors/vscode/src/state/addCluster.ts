@@ -175,7 +175,7 @@ export const DEFAULT_INPUTS: Inputs = {
  * are not symmetry:
  *   - the domain names where sign-in POSTs (identityBaseUrlFor); without it
  *     that derivation depends on the endpoint happening to be spelled
- *     `cockpit.<domain>`, which a hand-registered cluster need not be;
+ *     `api.<domain>`, which a hand-registered cluster need not be;
  *   - the token is the paste-a-credential path, which "memQL: Sign In" has
  *     made the exception rather than the rule -- so the field stays, and the
  *     ordinary answer is to leave it empty.
@@ -663,7 +663,7 @@ export class AddClusterState {
 
     // The endpoint is DERIVABLE from the domain, so an empty box is only a
     // problem when nothing else names the front door. This is the same
-    // `cockpit.<domain>:443` convention identityBaseUrlFor reads back off a
+    // `api.<domain>:443` convention identityBaseUrlFor reads back off a
     // registered endpoint, called rather than copied.
     const endpoint = values.endpoint.trim() || composeEndpointFromDomain(domain);
     if (endpoint === "") {

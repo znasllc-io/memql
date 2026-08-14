@@ -6,7 +6,7 @@
 # Capability: install.verifyFrontDoor -- prove the local front door works.
 #
 # The front door is the ONE connection path clients use in every environment
-# (env parity: ingress -> TLS -> gRPC -> bff, dialed as https://cockpit.<domain>).
+# (env parity: ingress -> TLS -> gRPC -> bff, dialed as https://api.<domain>).
 # Locally it stands on three independent legs, each of which can be broken
 # while the other two look perfect:
 #
@@ -40,7 +40,7 @@
 #
 # Usage:
 #   scripts/install/verify-frontdoor.sh
-#   scripts/install/verify-frontdoor.sh --hosts=cockpit.memql.localhost --report-only
+#   scripts/install/verify-frontdoor.sh --hosts=api.memql.localhost --report-only
 #   scripts/install/verify-frontdoor.sh --print-spec
 #
 # Refs: #3365 #3357 #2221
@@ -58,7 +58,7 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 cap_init "install.verifyFrontDoor" \
     "Check dns/tls per front-door hostname plus a gRPC (h2) reachability probe."
 cap_spec_param "hosts"       "comma-separated front-door hostnames (default: the local overlay's)"
-cap_spec_param "domain"      "front-door apex; derives cockpit.<d> and identity.<d> (mutually exclusive with --hosts)"
+cap_spec_param "domain"      "front-door apex; derives api.<d> and identity.<d> (mutually exclusive with --hosts)"
 cap_spec_param "grpc-host"   "hostname for the gRPC reachability probe (default: the first host)"
 cap_spec_param "port"        "TLS port (default 443)"
 cap_spec_param "expect-addr" "the address every hostname must resolve to (default 127.0.0.1)"
@@ -72,7 +72,7 @@ cap_spec_param "report-only" "report failures without failing the run (flag)"
 # localtls.sh owns MEMQL_LOCAL_DOMAIN; sourcing it is what keeps the three in
 # step. Overridden per run with --domain or --hosts.
 DEFAULT_DOMAIN="$MEMQL_LOCAL_DOMAIN"
-DEFAULT_HOSTS="cockpit.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN}"
+DEFAULT_HOSTS="api.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN}"
 
 #=============================================================================
 # CHECK LEDGER -- every probe records itself here, pass or fail
@@ -231,7 +231,7 @@ function main() {
         cap_fail 2 "--domain and --hosts are two spellings of one answer; pass one"
     fi
     if [[ -n "$domain" ]]; then
-        hosts="cockpit.${domain},identity.${domain}"
+        hosts="api.${domain},identity.${domain}"
     elif [[ -z "$hosts" ]]; then
         hosts="$DEFAULT_HOSTS"
     fi

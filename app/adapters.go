@@ -333,3 +333,19 @@ func (a *App) campaignEmailSender() email.Sender {
 	}
 	return emailInt.SenderAccess()
 }
+
+// EdgeEngineAdapter wraps MemQLEngine to satisfy edge.Engine (memql#3710).
+// Same (any, error) seam as the outbound, inbound and campaigns adapters --
+// edge.NewEngineExecutor's own tests fake this narrow shape directly, and
+// MaterializeRows unwraps either form.
+type EdgeEngineAdapter struct {
+	Engine *memql.MemQLEngine
+}
+
+func (a *EdgeEngineAdapter) Execute(ctx context.Context, query string) (any, error) {
+	result, err := a.Engine.Execute(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}

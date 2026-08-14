@@ -111,7 +111,7 @@ A live cluster is required from checklist section 2 onward.
 
 ### 3. Trust the local CA
 
-The k3d front door (`cockpit.memql.localhost`, `identity.memql.localhost`)
+The k3d front door (`api.memql.localhost`, `identity.memql.localhost`)
 terminates TLS with a `*.memql.localhost` wildcard signed by your machine's
 mkcert CA. `make up` / `make secrets` issue and seed that certificate
 automatically (memql#3384). Creating the CA itself is a separate one-time step,
@@ -145,7 +145,7 @@ reasons.
 Verify before debugging anything else:
 
 ```bash
-echo | openssl s_client -connect cockpit.memql.localhost:443 -servername cockpit.memql.localhost 2>/dev/null \
+echo | openssl s_client -connect api.memql.localhost:443 -servername api.memql.localhost 2>/dev/null \
   | openssl x509 -noout -issuer
 # want: issuer=O = mkcert development CA, ...
 # CN = TRAEFIK DEFAULT CERT means memql-front-door-tls is missing -- run `make secrets`
@@ -173,7 +173,7 @@ below need, so none of them has to be guessed:
 
 ```bash
 curl -s https://identity.memql.localhost/.well-known/memql-config.json
-# {"identityUrl":"https://identity.memql.localhost","grpcEndpoint":"cockpit.memql.localhost:443","clientId":"cockpit","clusterName":"local"}
+# {"identityUrl":"https://identity.memql.localhost","grpcEndpoint":"api.memql.localhost:443","clientId":"cockpit","clusterName":"local"}
 ```
 
 `identityUrl` is `issuer`, `clientId` is `client_id`, and `grpcEndpoint` is
@@ -199,7 +199,7 @@ clusters:
   - name: vscode-local
     display_name: memql.localhost (local)
     domain: memql.localhost
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     issuer: https://identity.memql.localhost   # optional -- derived from domain when absent
     client_id: cockpit                       # optional -- sent as client_id on refresh
     token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
@@ -208,7 +208,7 @@ clusters:
   - name: vscode-nonlocal
     display_name: memql.localhost (not local)
     domain: memql.localhost
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     issuer: https://identity.memql.localhost
     client_id: cockpit
     token: <a SECOND access_token -- see below>
@@ -223,10 +223,10 @@ somebody has already made:
   rejects a scheme outright: *endpoint scheme must be ws:// or wss://, got
   "https://"*. The natural thing to paste -- the `https://` domain the Cockpit
   uses, sitting in this same file -- is exactly what fails.
-- **The host is `cockpit.<domain>`, not `bff.<domain>`.** There is no
-  `bff.memql.localhost` ingress. The front door is `cockpit-front-door`, which
-  routes `/memql/ws` and `/portal` to `bff-http:8085` and `/` to `bff:50051`.
-  Targeting "the bff" gets a 404.
+- **The host is `api.<domain>`, not `bff.<domain>`.** There is no
+  `bff.memql.localhost` ingress. The front door is `api-front-door`, which
+  routes the HTTP paths -- `/memql/ws`, `/portal`, `/healthz` -- to
+  `bff-http:8085` and `/` to `bff:50051`. Targeting "the bff" gets a 404.
 - **Absent `local` means NOT local.** Omit the key on the second entry rather
   than writing `local: false`; the Cockpit declares the field `omitempty` and
   drops a false on its next write, so the two tools would churn the file

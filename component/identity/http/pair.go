@@ -401,7 +401,7 @@ func (s *Server) requireBearer(w http.ResponseWriter, r *http.Request) (*identit
 // THE VALUE CARRIES ITS TRANSPORT (memql#3437). Each tier resolves through a
 // scheme-STATING mapping rather than the bare `host:port` one the discovery
 // document publishes. The consumer is sdk/go/worker.ParseClusterURL, which
-// reads a bare address as useTLS=false -- so the old bare "cockpit.<domain>:443"
+// reads a bare address as useTLS=false -- so the old bare "api.<domain>:443"
 // told a worker to dial a TLS port in plaintext, with its `mql_wkr_` bearer
 // token in the clear. The dial TARGET is unchanged; strip the scheme from any
 // value below and the pre-fix string comes back exactly.

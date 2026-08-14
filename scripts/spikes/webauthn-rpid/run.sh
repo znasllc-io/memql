@@ -41,7 +41,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 WORK_DIR="${MEMQL_SPIKE_3405_DIR:-/tmp/memql-spike-3405}"
 
 # The default case: the parent RP ID the install wizard's D5 wants, so one
-# passkey covers identity. / cockpit. / bff.
+# passkey covers identity. / api. / bff.
 DEFAULT_RP_ID="memql.localhost"
 DEFAULT_PORT="8443"
 
@@ -146,7 +146,7 @@ function check_resolution() {
     warn "${ORIGIN_HOST} does not resolve on this machine."
     warn "Chrome maps *.localhost internally and will work anyway; Firefox and curl will not."
     warn "If you need them, add (one sudo, once):"
-    warn "    127.0.0.1  identity.${RP_ID} cockpit.${RP_ID} bff.${RP_ID}"
+    warn "    127.0.0.1  identity.${RP_ID} api.${RP_ID} bff.${RP_ID}"
 }
 
 # ensure_certificate issues the wildcard pair, creating the local CA if this

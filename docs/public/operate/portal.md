@@ -32,7 +32,7 @@ Three options were considered:
 
 Derive-from-origin costs nothing (no registry, no schema, no CRUD surface, no
 sync problem) and matches how an operator thinks about a web console: the
-console at `cockpit.prod.example.com` *is* the production cluster's console.
+console at `api.prod.example.com` *is* the production cluster's console.
 It also makes one class of mistake impossible -- because the page and the
 stream share an origin, the bundle cannot read cluster A while carrying a token
 minted for cluster B.
@@ -199,7 +199,7 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    ```
    MEMQL_IDENTITY_REGISTERED_CLIENTS=[
      {"clientId":"portal",
-      "redirectURIs":["https://cockpit.example.com/portal/auth/callback"]},
+      "redirectURIs":["https://api.example.com/portal/auth/callback"]},
      ...
    ]
    ```
@@ -211,7 +211,7 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    below.
 
    ```
-   MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS=https://cockpit.example.com,...
+   MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS=https://api.example.com,...
    ```
 
    `*` is **refused** here (memql#3716). Identity's CORS middleware emits

@@ -876,7 +876,7 @@ jobs:
         run: go test -tags identity -timeout=300s ./app/
       - name: go test -tags edge (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
-        run: go test -tags edge -timeout=300s ./app/
+        run: go test -tags edge -timeout=300s ./app/ ./component/server/
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the

@@ -364,7 +364,7 @@ variables:
     component: campaigns
     scope: global
     optional: true
-    description: "Public origin the unsubscribe link points at, e.g. https://cockpit.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail. VALIDATED, not just checked for presence (memql#3481): must be an absolute https origin (http is accepted only for a loopback host, so the local cluster still runs), with no query string or fragment -- RFC 8058 section 3.1 requires an HTTPS URI and providers silently ignore one-click on anything else. A trailing path is allowed and preserved, for deployments served under SERVER_PUBLIC_PATH. A value that is set and invalid refuses the send at campaignStartSend and warns once at worker boot; it is not fatal to the node, because a node that never sends campaigns does not need this set at all."
+    description: "Public origin the unsubscribe link points at, e.g. https://api.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail. VALIDATED, not just checked for presence (memql#3481): must be an absolute https origin (http is accepted only for a loopback host, so the local cluster still runs), with no query string or fragment -- RFC 8058 section 3.1 requires an HTTPS URI and providers silently ignore one-click on anything else. A trailing path is allowed and preserved, for deployments served under SERVER_PUBLIC_PATH. A value that is set and invalid refuses the send at campaignStartSend and warns once at worker boot; it is not fatal to the node, because a node that never sends campaigns does not need this set at all."
 
   - name: MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE
     component: campaigns
@@ -764,6 +764,15 @@ variables:
     scope: node
     optional: true
     description: "Where the memQL Portal's browser sends its identity JSON calls -- POST /oauth/token, /auth/refresh, /auth/logout (memql#3315). Set to the literal 'self' when the front door proxies those paths to identity on the portal's own origin, which is the topology docs/public/operate/auth/identity-service.md prescribes (it sidesteps a Safari HTTP/2 coalescing bug that intermittently fails cross-origin credentialed XHR). Unset defaults to the identity origin, which additionally needs the portal's origin in MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS. Only affects XHR; the top-level /authorize navigation always goes to the identity origin."
+
+  # --- edge ---
+
+  - name: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS
+    component: edge
+    scope: node
+    optional: true
+    default: "30"
+    description: "How long the edge node caches a request Host -> v1:platform:site resolution (a miss is cached too) before re-querying the engine. Bounds staleness after a site row changes on another node -- the write lands wherever the portal/an admin surface writes it, and this cache lives on every edge replica -- until the change-feed invalidation (memql#3710 Task 9) lands as the primary mechanism."
 
   # --- cluster ---
 
@@ -1186,7 +1195,7 @@ variables:
     component: identity
     scope: node
     optional: true
-    description: "The gRPC dial address the cluster advertises in /.well-known/memql-config.json and hands to a redeeming worker -- the FRONT DOOR, cockpit.<domain>:443, declared in deploy/k8s/base/identity.yaml and patched per overlay. Published to the discovery document as a bare host:port (memql#3399); relayed to a paired worker with its transport stated, which a bare value cannot do -- write https:// if that listener is TLS on a non-standard port (memql#3437). Empty derives from MEMQL_IDENTITY_BASE_URL's host, which serves HTTP and no MemqlService, so set it. Its siblings MEMQL_DISCOVERY_CLIENT_ID and MEMQL_DISCOVERY_CLUSTER_NAME are read only through the handler's injected env accessor."
+    description: "The gRPC dial address the cluster advertises in /.well-known/memql-config.json and hands to a redeeming worker -- the FRONT DOOR, api.<domain>:443, declared in deploy/k8s/base/identity.yaml and patched per overlay. Published to the discovery document as a bare host:port (memql#3399); relayed to a paired worker with its transport stated, which a bare value cannot do -- write https:// if that listener is TLS on a non-standard port (memql#3437). Empty derives from MEMQL_IDENTITY_BASE_URL's host, which serves HTTP and no MemqlService, so set it. Its siblings MEMQL_DISCOVERY_CLIENT_ID and MEMQL_DISCOVERY_CLUSTER_NAME are read only through the handler's injected env accessor."
 
   - name: MEMQL_DOMAIN
     component: platform
@@ -1824,7 +1833,7 @@ variables:
     component: mcp
     scope: node
     optional: true
-    description: "Public URL of the MCP resource advertised in OAuth discovery metadata and the 401 WWW-Authenticate hint."
+    description: "Public URL of the MCP resource advertised in OAuth discovery metadata and the 401 WWW-Authenticate hint. Derived from MEMQL_DOMAIN (as https://mcp.<domain>) when unset, set-if-absent, same mechanism as the identity URLs; empty when neither is set."
 
   - name: MEMQL_MCP_ROLE
     component: mcp

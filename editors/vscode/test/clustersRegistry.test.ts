@@ -44,10 +44,10 @@ class FakeSecrets implements SecretStore {
 
 const SAMPLE = `clusters:
   - name: local
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     local: true
   - name: staging
-    endpoint: cockpit.staging.example.com:443
+    endpoint: api.staging.example.com:443
 selected_cluster: local
 `;
 
@@ -229,7 +229,7 @@ test("a rename moves the credentials with the entry", async () => {
   await saveClusterEdit(
     file,
     "local",
-    { name: "parity", endpoint: "cockpit.memql.localhost:443", local: true },
+    { name: "parity", endpoint: "api.memql.localhost:443", local: true },
     { secrets },
   );
 
@@ -257,7 +257,7 @@ test("the renamed cluster survives the next credential sweep", async () => {
   await saveClusterEdit(
     file,
     "local",
-    { name: "parity", endpoint: "cockpit.memql.localhost:443" },
+    { name: "parity", endpoint: "api.memql.localhost:443" },
     { secrets },
   );
   const live = (await readClustersFile(file)).clusters.map((c) => c.name);
@@ -278,7 +278,7 @@ test("an edit that does not rename leaves the credentials exactly where they are
   await saveClusterEdit(
     file,
     "local",
-    { name: "local", endpoint: "cockpit.elsewhere.example.com:443" },
+    { name: "local", endpoint: "api.elsewhere.example.com:443" },
     { secrets },
   );
 
@@ -286,7 +286,7 @@ test("an edit that does not rename leaves the credentials exactly where they are
   const parsed = await readClustersFile(file);
   assert.equal(
     parsed.clusters.find((c) => c.name === "local")?.endpoint,
-    "cockpit.elsewhere.example.com:443",
+    "api.elsewhere.example.com:443",
   );
 });
 

@@ -119,8 +119,14 @@ spec:
             # advertised in /.well-known/oauth-protected-resource + the 401
             # WWW-Authenticate resource_metadata hint. AuthServerURL falls back
             # to MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
-            # Deployment-specific placeholder; a product stack's overlay patches the real host.
-            - { name: MEMQL_MCP_PUBLIC_URL, value: "https://mcp.staging.example.com" }
+            #
+            # Not pinned here (memql#3704): component/genesis/domain.go derives
+            # it set-if-absent as "https://mcp." + MEMQL_DOMAIN, the same
+            # mechanism the identity URLs below rely on. A deployment that sets
+            # MEMQL_DOMAIN gets this for free; one that sets neither MEMQL_DOMAIN
+            # nor its own MEMQL_MCP_PUBLIC_URL runs with it unset -- registered
+            # optional: true, so empty is the honest failure rather than a
+            # placeholder host nothing resolves.
             # Capability tier (Gate A). authoring = named tools + session-scoped
             # define; role gate (Gate B) still applies on top. Owner-confirmed.
             - { name: MEMQL_MCP_MODE, value: "authoring" }

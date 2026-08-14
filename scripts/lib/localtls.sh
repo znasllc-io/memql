@@ -55,7 +55,7 @@ MEMQL_LOCAL_TLS_DEFAULT_KEY="${MEMQL_LOCAL_TLS_DIR}/dev.key"
 # tier, so a script resolves an env value and passes it as the default.
 MEMQL_LOCAL_DOMAIN="${MEMQL_LOCAL_DOMAIN:-memql.localhost}"
 
-# The names the certificate must carry. The wildcard covers cockpit. /
+# The names the certificate must carry. The wildcard covers api. /
 # identity. / anything else the local overlay adds; the apex is listed
 # separately because a wildcard label does not match it.
 MEMQL_LOCAL_TLS_HOSTNAMES="*.${MEMQL_LOCAL_DOMAIN},${MEMQL_LOCAL_DOMAIN}"

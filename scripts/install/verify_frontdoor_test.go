@@ -2,7 +2,7 @@
 // install.verifyFrontDoor, znasllc-io/memql#3365).
 //
 // The front door is the ONE connection path clients use in every environment
-// (env parity: ingress -> TLS -> gRPC -> bff, dialed as https://cockpit.<domain>).
+// (env parity: ingress -> TLS -> gRPC -> bff, dialed as https://api.<domain>).
 // Locally that means an /etc/hosts entry pointing the hostname at 127.0.0.1, a
 // mkcert-signed wildcard cert traefik serves on 443, and h2 on the wire because
 // gRPC cannot exist without it. Any one of those three can be broken while the
@@ -222,7 +222,7 @@ func fdHealthy(t *testing.T, hosts ...string) []string {
 }
 
 const (
-	fdCockpit  = "cockpit.memql.localhost"
+	fdAPI      = "api.memql.localhost"
 	fdIdentity = "identity.memql.localhost"
 )
 
@@ -263,13 +263,13 @@ func TestVerifyFrontDoorPrintSpec(t *testing.T) {
 // An installer verification that has to be told what to verify verifies
 // nothing by default.
 func TestVerifyFrontDoorDefaultsToTheLocalFrontDoor(t *testing.T) {
-	env := fdHealthy(t, fdCockpit, fdIdentity)
+	env := fdHealthy(t, fdAPI, fdIdentity)
 	stdout, stderr, code := fdRun(t, env)
 	if code != 0 {
 		t.Fatalf("exit %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
 	_, res := fdParse(t, stdout)
-	for _, h := range []string{fdCockpit, fdIdentity} {
+	for _, h := range []string{fdAPI, fdIdentity} {
 		fdFind(t, res, "dns", h)
 		fdFind(t, res, "tls", h)
 	}
@@ -279,8 +279,8 @@ func TestVerifyFrontDoorDefaultsToTheLocalFrontDoor(t *testing.T) {
 // assertion: every reported check carries a name, a host, and a non-empty
 // detail, and allPassed is the single boolean the graph verifies on.
 func TestVerifyFrontDoorAllPass(t *testing.T) {
-	env := fdHealthy(t, fdCockpit, fdIdentity)
-	stdout, stderr, code := fdRun(t, env, "--hosts="+fdCockpit+","+fdIdentity)
+	env := fdHealthy(t, fdAPI, fdIdentity)
+	stdout, stderr, code := fdRun(t, env, "--hosts="+fdAPI+","+fdIdentity)
 	if code != 0 {
 		t.Fatalf("exit %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
 	}
@@ -324,10 +324,10 @@ func TestVerifyFrontDoorAllPass(t *testing.T) {
 // address it actually saw.
 func TestVerifyFrontDoorDnsMustResolveToLoopback(t *testing.T) {
 	env := fdWorld(t,
-		map[string]string{fdCockpit: "10.0.0.5", fdIdentity: "127.0.0.1"},
-		map[string]string{fdCockpit: "0|2|200", fdIdentity: "0|2|200"},
+		map[string]string{fdAPI: "10.0.0.5", fdIdentity: "127.0.0.1"},
+		map[string]string{fdAPI: "0|2|200", fdIdentity: "0|2|200"},
 	)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit+","+fdIdentity)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI+","+fdIdentity)
 	if code != 5 {
 		t.Fatalf("exit %d, want 5 (strict by default)\nstdout: %s", code, stdout)
 	}
@@ -339,9 +339,9 @@ func TestVerifyFrontDoorDnsMustResolveToLoopback(t *testing.T) {
 		t.Error("allPassed=true while a host resolves off-loopback")
 	}
 
-	bad := fdFind(t, res, "dns", fdCockpit)
+	bad := fdFind(t, res, "dns", fdAPI)
 	if bad.Passed {
-		t.Errorf("dns/%s passed while resolving to 10.0.0.5", fdCockpit)
+		t.Errorf("dns/%s passed while resolving to 10.0.0.5", fdAPI)
 	}
 	if !strings.Contains(bad.Detail, "10.0.0.5") {
 		t.Errorf("dns detail must name the address actually seen; got %q", bad.Detail)
@@ -356,15 +356,15 @@ func TestVerifyFrontDoorDnsMustResolveToLoopback(t *testing.T) {
 
 func TestVerifyFrontDoorDnsNotResolvingFails(t *testing.T) {
 	env := fdWorld(t,
-		map[string]string{fdCockpit: ""}, // NXDOMAIN
-		map[string]string{fdCockpit: "0|2|200"},
+		map[string]string{fdAPI: ""}, // NXDOMAIN
+		map[string]string{fdAPI: "0|2|200"},
 	)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI)
 	if code != 5 {
 		t.Fatalf("exit %d, want 5\nstdout: %s", code, stdout)
 	}
 	_, res := fdParse(t, stdout)
-	c := fdFind(t, res, "dns", fdCockpit)
+	c := fdFind(t, res, "dns", fdAPI)
 	if c.Passed {
 		t.Error("dns check passed for a hostname that does not resolve")
 	}
@@ -379,18 +379,18 @@ func TestVerifyFrontDoorDnsNotResolvingFails(t *testing.T) {
 // editing /etc/hosts.
 func TestVerifyFrontDoorTlsFailureIsIsolated(t *testing.T) {
 	env := fdWorld(t,
-		map[string]string{fdCockpit: "127.0.0.1"},
-		map[string]string{fdCockpit: "60|0|000"}, // curl 60: certificate problem
+		map[string]string{fdAPI: "127.0.0.1"},
+		map[string]string{fdAPI: "60|0|000"}, // curl 60: certificate problem
 	)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI)
 	if code != 5 {
 		t.Fatalf("exit %d, want 5\nstdout: %s", code, stdout)
 	}
 	_, res := fdParse(t, stdout)
-	if dns := fdFind(t, res, "dns", fdCockpit); !dns.Passed {
+	if dns := fdFind(t, res, "dns", fdAPI); !dns.Passed {
 		t.Errorf("dns check should still pass when only TLS is broken: %s", dns.Detail)
 	}
-	tls := fdFind(t, res, "tls", fdCockpit)
+	tls := fdFind(t, res, "tls", fdAPI)
 	if tls.Passed {
 		t.Error("tls check passed against a certificate error")
 	}
@@ -404,15 +404,15 @@ func TestVerifyFrontDoorTlsFailureIsIsolated(t *testing.T) {
 // even though DNS and TLS are perfect.
 func TestVerifyFrontDoorGrpcProbeRequiresH2(t *testing.T) {
 	env := fdWorld(t,
-		map[string]string{fdCockpit: "127.0.0.1"},
-		map[string]string{fdCockpit: "0|1.1|200"},
+		map[string]string{fdAPI: "127.0.0.1"},
+		map[string]string{fdAPI: "0|1.1|200"},
 	)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI)
 	if code != 5 {
 		t.Fatalf("exit %d, want 5\nstdout: %s", code, stdout)
 	}
 	_, res := fdParse(t, stdout)
-	g := fdFind(t, res, "grpc", fdCockpit)
+	g := fdFind(t, res, "grpc", fdAPI)
 	if g.Passed {
 		t.Error("grpc reachability passed without HTTP/2")
 	}
@@ -420,7 +420,7 @@ func TestVerifyFrontDoorGrpcProbeRequiresH2(t *testing.T) {
 		t.Errorf("grpc detail should name the protocol actually negotiated; got %q", g.Detail)
 	}
 	// DNS and TLS were fine and must say so.
-	if c := fdFind(t, res, "tls", fdCockpit); !c.Passed {
+	if c := fdFind(t, res, "tls", fdAPI); !c.Passed {
 		t.Errorf("tls should pass; detail: %s", c.Detail)
 	}
 }
@@ -431,10 +431,10 @@ func TestVerifyFrontDoorGrpcProbeRequiresH2(t *testing.T) {
 
 func TestVerifyFrontDoorReportOnlyExitsZero(t *testing.T) {
 	env := fdWorld(t,
-		map[string]string{fdCockpit: "10.0.0.5"},
-		map[string]string{fdCockpit: "60|0|000"},
+		map[string]string{fdAPI: "10.0.0.5"},
+		map[string]string{fdAPI: "60|0|000"},
 	)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit, "--report-only")
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI, "--report-only")
 	if code != 0 {
 		t.Fatalf("--report-only exited %d, want 0\nstdout: %s", code, stdout)
 	}
@@ -457,8 +457,8 @@ func TestVerifyFrontDoorReportOnlyExitsZero(t *testing.T) {
 // different hostname be probed without editing the script.
 func TestVerifyFrontDoorGrpcHostIsParameterisable(t *testing.T) {
 	const custom = "app.memql.localhost"
-	env := fdHealthy(t, fdCockpit, custom)
-	stdout, _, code := fdRun(t, env, "--hosts="+fdCockpit, "--grpc-host="+custom)
+	env := fdHealthy(t, fdAPI, custom)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI, "--grpc-host="+custom)
 	if code != 0 {
 		t.Fatalf("exit %d, want 0\nstdout: %s", code, stdout)
 	}
@@ -468,7 +468,7 @@ func TestVerifyFrontDoorGrpcHostIsParameterisable(t *testing.T) {
 
 func TestVerifyFrontDoorMissingCurlIsPrerequisite(t *testing.T) {
 	dir := fdSanitizedBin(t, []string{"getent"})
-	stdout, _, code := fdRun(t, []string{"PATH=" + dir}, "--hosts="+fdCockpit)
+	stdout, _, code := fdRun(t, []string{"PATH=" + dir}, "--hosts="+fdAPI)
 	if code != 4 {
 		t.Fatalf("exit %d, want 4 (prerequisite missing)\nstdout: %s", code, stdout)
 	}

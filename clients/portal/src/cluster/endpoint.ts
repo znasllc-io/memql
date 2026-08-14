@@ -28,7 +28,7 @@
 //
 // CHOSEN: (1). It costs nothing -- there is no registry, no schema, no CRUD
 // surface, no sync problem -- and it matches how an operator actually thinks
-// about a web console: the console at cockpit.prod.example.com IS the
+// about a web console: the console at api.prod.example.com IS the
 // production cluster's console, the way an admin page is part of the system it
 // administers. It also makes a whole class of mistake impossible, because the
 // page and the stream share one origin: the bundle cannot end up reading

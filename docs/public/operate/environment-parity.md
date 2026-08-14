@@ -36,7 +36,7 @@ These are the same everywhere. Changing them for one environment is a bug.
   way to deploy.
 - **The client connection model** — every client (the Cockpit, SDKs, a product
   SPA) reaches the mesh through an **ingress → TLS-terminate → gRPC → bff**
-  front door at `https://cockpit.<domain>` (or the product's host). The client
+  front door at `https://api.<domain>` (or the product's host). The client
   dials `https://<host>` and the SDK does gRPC-over-TLS on 443 — the **same dial
   path** in every environment. There is no local-only endpoint, no port-forward
   in the connection path.
@@ -60,7 +60,7 @@ Everything in this table is a config cell. The topology above it is untouched.
 The ingress-controller row is the one place the *manifest* genuinely differs
 (k3d ships traefik, the cloud runs nginx) — that divergence is annotation-level,
 sits entirely below the connection abstraction, and is the same divergence
-accepted for every host (`identity.memql.localhost`, `cockpit.memql.localhost`).
+accepted for every host (`identity.memql.localhost`, `api.memql.localhost`).
 
 ## The connection model in practice
 
@@ -68,17 +68,17 @@ Local and cloud front the `bff` gRPC edge identically — a hostname-routed
 ingress terminating TLS on 443 and forwarding HTTP/2 to `svc/bff:50051`:
 
 ```
-client ──https://cockpit.<domain>──▶ [ingress :443, TLS] ──h2 gRPC──▶ svc/bff:50051
-   local:  cockpit.memql.localhost      traefik + mkcert wildcard        (h2c)
-   cloud:  cockpit.<env-domain>        nginx + cert-manager cert        (GRPC)
+client ──https://api.<domain>──▶ [ingress :443, TLS] ──h2 gRPC──▶ svc/bff:50051
+   local:  api.memql.localhost          traefik + mkcert wildcard    (h2c)
+   cloud:  api.<env-domain>             nginx + cert-manager cert    (GRPC)
 ```
 
 So the Cockpit connects the same way everywhere — it is just another cluster
-entry in `~/.memql/clusters.yaml` (`Domain` → `Endpoint = https://cockpit.<domain>`):
+entry in `~/.memql/clusters.yaml` (`Domain` → `Endpoint = https://api.<domain>`):
 
 ```bash
-memql-cockpit --cluster local      # https://cockpit.memql.localhost
-memql-cockpit --cluster staging    # https://cockpit.staging.<domain>
+memql-cockpit --cluster local      # https://api.memql.localhost
+memql-cockpit --cluster staging    # https://api.staging.<domain>
 ```
 
 Locally this needs the two config knobs the cloud gets from its provider: the

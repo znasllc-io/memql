@@ -62,7 +62,7 @@ function jwtExpiringIn(seconds: number): string {
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
   return {
     name: "local",
-    endpoint: "cockpit.memql.localhost:443",
+    endpoint: "api.memql.localhost:443",
     domain: "memql.localhost",
     ...overrides,
   };

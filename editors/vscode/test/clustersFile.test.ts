@@ -32,11 +32,11 @@ clusters:
   - name: local
     display_name: memql.localhost
     domain: memql.localhost
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
     domain: staging.example.com
-    endpoint: cockpit.staging.example.com:443
+    endpoint: api.staging.example.com:443
     issuer: https://identity.staging.example.com
     client_id: cockpit
 selected_cluster: local
@@ -49,7 +49,7 @@ test("reads clusters and the selected cluster", async () => {
   assert.equal(parsed.selectedCluster, "local");
   assert.equal(parsed.clusters[0]?.name, "local");
   assert.equal(parsed.clusters[0]?.displayName, "memql.localhost");
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(parsed.clusters[0]?.endpoint, "api.memql.localhost:443");
   assert.equal(parsed.clusters[0]?.token, "eyJhbGci.eyJzdWIi.sig");
   assert.equal(parsed.clusters[1]?.clientId, "cockpit");
 });
@@ -114,7 +114,7 @@ test("upsertCluster adds a new cluster", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "prod",
-    endpoint: "cockpit.prod.example.com:443",
+    endpoint: "api.prod.example.com:443",
     domain: "prod.example.com",
   });
   const parsed = await readClustersFile(f);
@@ -126,18 +126,18 @@ test("upsertCluster updates an existing cluster in place", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "staging",
-    endpoint: "cockpit.new.example.com:443",
+    endpoint: "api.new.example.com:443",
   });
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters.length, 2);
-  assert.equal(parsed.clusters[1]?.endpoint, "cockpit.new.example.com:443");
+  assert.equal(parsed.clusters[1]?.endpoint, "api.new.example.com:443");
 });
 
 test("upsertCluster preserves unknown keys on the updated cluster", async () => {
   const f = await tempFile(
     SAMPLE.replace("    client_id: cockpit\n", "    client_id: cockpit\n    future_field: keep-me\n"),
   );
-  await upsertCluster(f, { name: "staging", endpoint: "cockpit.new.example.com:443" });
+  await upsertCluster(f, { name: "staging", endpoint: "api.new.example.com:443" });
   assert.match(await fs.readFile(f, "utf8"), /future_field: keep-me/);
 });
 
@@ -151,7 +151,7 @@ test("upsertCluster renames a cluster in place rather than adding a second entry
   const f = await tempFile(SAMPLE);
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "cockpit.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
     "staging",
   );
   const parsed = await readClustersFile(f);
@@ -167,7 +167,7 @@ test("a rename carries selected_cluster with it", async () => {
   const f = await tempFile(SAMPLE); // selected_cluster: local
   await upsertCluster(
     f,
-    { name: "local-dev", endpoint: "cockpit.memql.localhost:443" },
+    { name: "local-dev", endpoint: "api.memql.localhost:443" },
     "local",
   );
   const parsed = await readClustersFile(f);
@@ -182,7 +182,7 @@ test("a rename leaves a selection pointing at a DIFFERENT cluster alone", async 
   const f = await tempFile(SAMPLE); // selected_cluster: local
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "cockpit.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
     "staging",
   );
   assert.equal((await readClustersFile(f)).selectedCluster, "local");
@@ -194,7 +194,7 @@ test("a rename preserves unknown keys and comments on the renamed node", async (
   );
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "cockpit.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
     "staging",
   );
   const raw = await fs.readFile(f, "utf8");
@@ -216,10 +216,10 @@ test("upsertCluster refuses a rename onto a name already in use", async () => {
 
 test("an edit that does not change the name still updates in place", async () => {
   const f = await tempFile(SAMPLE);
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.changed:443" }, "local");
+  await upsertCluster(f, { name: "local", endpoint: "api.changed:443" }, "local");
   const parsed = await readClustersFile(f);
   assert.equal(parsed.clusters.length, 2);
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.changed:443");
+  assert.equal(parsed.clusters[0]?.endpoint, "api.changed:443");
 });
 
 // --- Clearing a field ------------------------------------------------------
@@ -232,7 +232,7 @@ test("upsertCluster deletes a key the caller explicitly cleared", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "local",
-    endpoint: "cockpit.memql.localhost:443",
+    endpoint: "api.memql.localhost:443",
     token: "",
   });
   const parsed = await readClustersFile(f);
@@ -246,7 +246,7 @@ test("upsertCluster deletes a key the caller explicitly cleared", async () => {
 
 test("upsertCluster leaves an omitted key alone (undefined is not a clear)", async () => {
   const f = await tempFile(SAMPLE);
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" });
+  await upsertCluster(f, { name: "local", endpoint: "api.memql.localhost:443" });
   assert.equal(
     (await readClustersFile(f)).clusters[0]?.token,
     "eyJhbGci.eyJzdWIi.sig",
@@ -258,7 +258,7 @@ test("clearing one field does not disturb the others", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "local",
-    endpoint: "cockpit.memql.localhost:443",
+    endpoint: "api.memql.localhost:443",
     domain: "",
   });
   const parsed = await readClustersFile(f);
@@ -271,7 +271,7 @@ test("a cleared field on a NEW cluster is simply not written", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, {
     name: "prod",
-    endpoint: "cockpit.prod.example.com:443",
+    endpoint: "api.prod.example.com:443",
     domain: "",
     token: "",
   });
@@ -286,7 +286,7 @@ test("a rename and a clear applied together both take effect", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(
     f,
-    { name: "local-dev", endpoint: "cockpit.memql.localhost:443", token: "" },
+    { name: "local-dev", endpoint: "api.memql.localhost:443", token: "" },
     "local",
   );
   const parsed = await readClustersFile(f);
@@ -299,7 +299,7 @@ test("a rename and a clear applied together both take effect", async () => {
 test("writes create the file and its parent directory when absent", async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-clusters-"));
   const f = path.join(dir, "nested", "clusters.yaml");
-  await upsertCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" });
+  await upsertCluster(f, { name: "local", endpoint: "api.memql.localhost:443" });
   assert.equal((await readClustersFile(f)).clusters[0]?.name, "local");
 });
 
@@ -339,7 +339,7 @@ test("needsAuth is true without an endpoint", () => {
 test("upsertCluster refuses an empty name rather than deleting a node's identity", async () => {
   const f = await tempFile(SAMPLE);
   await assert.rejects(
-    () => upsertCluster(f, { name: "", endpoint: "cockpit.memql.localhost:443" }, "local"),
+    () => upsertCluster(f, { name: "", endpoint: "api.memql.localhost:443" }, "local"),
     /cluster name is required/,
   );
 });
@@ -350,7 +350,7 @@ test("a refused empty name leaves the target node completely intact", async () =
 
   const parsed = await readClustersFile(f);
   assert.deepEqual(parsed.clusters.map((c) => c.name), ["local", "staging"]);
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(parsed.clusters[0]?.endpoint, "api.memql.localhost:443");
   assert.equal(
     parsed.clusters[0]?.token,
     "eyJhbGci.eyJzdWIi.sig",
@@ -377,7 +377,7 @@ test("addCluster writes a new cluster", async () => {
   const f = await tempFile(SAMPLE);
   await addCluster(f, {
     name: "prod",
-    endpoint: "cockpit.prod.example.com:443",
+    endpoint: "api.prod.example.com:443",
     domain: "prod.example.com",
   });
   const parsed = await readClustersFile(f);
@@ -388,7 +388,7 @@ test("addCluster writes a new cluster", async () => {
 test("addCluster refuses a name that already exists", async () => {
   const f = await tempFile(SAMPLE);
   await assert.rejects(
-    () => addCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443" }),
+    () => addCluster(f, { name: "local", endpoint: "api.memql.localhost:443" }),
     /already exists/,
   );
 });
@@ -399,7 +399,7 @@ test("a refused add does not clear the existing cluster's PAT or domain", async 
   // name and leaves the optional inputs blank: empties, which upsertCluster
   // would have read as explicit clears.
   await assert.rejects(() =>
-    addCluster(f, { name: "local", endpoint: "cockpit.memql.localhost:443", domain: "", token: "" }),
+    addCluster(f, { name: "local", endpoint: "api.memql.localhost:443", domain: "", token: "" }),
   );
 
   const parsed = await readClustersFile(f);
@@ -449,7 +449,7 @@ test("a name-only update leaves every other field alone", async () => {
   const f = await tempFile(SAMPLE);
   await upsertCluster(f, { name: "local", token: "eyJ.fresh.sig" });
   const parsed = await readClustersFile(f);
-  assert.equal(parsed.clusters[0]?.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(parsed.clusters[0]?.endpoint, "api.memql.localhost:443");
   assert.equal(parsed.clusters[0]?.displayName, "memql.localhost");
   assert.equal(parsed.clusters[0]?.token, "eyJ.fresh.sig");
 });

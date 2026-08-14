@@ -21,18 +21,18 @@
   ],
   "cases": [
     {
-      "name": "the deployed local value: the cockpit front door, explicit 443",
-      "configured": "cockpit.local.znas.io:443",
+      "name": "the deployed local value: the api front door, explicit 443",
+      "configured": "api.local.znas.io:443",
       "identityUrl": "https://identity.local.znas.io",
-      "advertised": "cockpit.local.znas.io:443",
-      "webSocketUrl": "wss://cockpit.local.znas.io/memql/ws"
+      "advertised": "api.local.znas.io:443",
+      "webSocketUrl": "wss://api.local.znas.io/memql/ws"
     },
     {
       "name": "the deployed cloud value: base's placeholder front door, patched per overlay",
-      "configured": "cockpit.staging.example.com:443",
+      "configured": "api.staging.example.com:443",
       "identityUrl": "https://identity.staging.example.com",
-      "advertised": "cockpit.staging.example.com:443",
-      "webSocketUrl": "wss://cockpit.staging.example.com/memql/ws"
+      "advertised": "api.staging.example.com:443",
+      "webSocketUrl": "wss://api.staging.example.com/memql/ws"
     },
     {
       "name": "memql#3399 regression: a scheme-ful operator value is normalized, never republished as a URL",
@@ -43,10 +43,10 @@
     },
     {
       "name": "scheme plus an explicit non-default port keeps the port",
-      "configured": "https://cockpit.example.com:8443",
+      "configured": "https://api.example.com:8443",
       "identityUrl": "https://identity.example.com",
-      "advertised": "cockpit.example.com:8443",
-      "webSocketUrl": "wss://cockpit.example.com:8443/memql/ws"
+      "advertised": "api.example.com:8443",
+      "webSocketUrl": "wss://api.example.com:8443/memql/ws"
     },
     {
       "name": "a plaintext scheme survives as a plaintext dial address",
@@ -57,17 +57,17 @@
     },
     {
       "name": "a trailing path is not part of a dial address",
-      "configured": "https://cockpit.example.com/",
+      "configured": "https://api.example.com/",
       "identityUrl": "https://identity.example.com",
-      "advertised": "cockpit.example.com:443",
-      "webSocketUrl": "wss://cockpit.example.com/memql/ws"
+      "advertised": "api.example.com:443",
+      "webSocketUrl": "wss://api.example.com/memql/ws"
     },
     {
       "name": "a bare host gets the front door's port",
-      "configured": "cockpit.example.com",
+      "configured": "api.example.com",
       "identityUrl": "https://identity.example.com",
-      "advertised": "cockpit.example.com:443",
-      "webSocketUrl": "wss://cockpit.example.com/memql/ws"
+      "advertised": "api.example.com:443",
+      "webSocketUrl": "wss://api.example.com/memql/ws"
     },
     {
       "name": "a bare loopback host gets the plaintext dev port",
@@ -100,8 +100,8 @@
   ],
   "rejected": [
     "https://bff.local.znas.io",
-    "https://cockpit.local.znas.io:443",
+    "https://api.local.znas.io:443",
     "http://localhost:8081",
-    "grpc://cockpit.example.com:443"
+    "grpc://api.example.com:443"
   ]
 }

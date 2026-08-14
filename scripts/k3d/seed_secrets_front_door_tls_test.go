@@ -11,7 +11,7 @@ import (
 
 // seed_secrets_front_door_tls_test.go -- memql#3384.
 //
-// Both local front-door ingresses (cockpit-front-door / identity-front-door)
+// Both local front-door ingresses (api-front-door / identity-front-door)
 // name the `memql-front-door-tls` secret in their spec.tls. seed-secrets.sh used to
 // default to a dev.{crt,key} pair inside the repo's old `docker/` tree -- which
 // was deleted when the Compose local stack was retired -- and, finding nothing

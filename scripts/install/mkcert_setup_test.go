@@ -428,7 +428,7 @@ func TestMkcertIssuesTheFrontDoorWildcardPair(t *testing.T) {
 		}
 	}
 	log := e.stubLog(t)
-	// The wildcard covers cockpit./identity./anything else the overlay adds;
+	// The wildcard covers api./identity./anything else the overlay adds;
 	// the apex is listed too because a wildcard does not match it.
 	for _, want := range []string{"*.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(log, want) {

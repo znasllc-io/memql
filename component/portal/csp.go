@@ -67,7 +67,7 @@ func policyWith(r *http.Request, identityBaseURL string) string {
 	}
 	// The IDENTITY ORIGIN, for the OAuth token + refresh fetches (memql#3315).
 	// The portal is served by the bff while identity lives on its own host
-	// (identity.<domain> vs cockpit.<domain>), so POST /oauth/token and POST
+	// (identity.<domain> vs api.<domain>), so POST /oauth/token and POST
 	// /auth/refresh are cross-origin XHR -- which connect-src governs. Without
 	// this source the sign-in exchange is blocked in the browser, and it is
 	// blocked SILENTLY from the server's point of view: the request never

@@ -806,6 +806,10 @@ func PublicPaths() []string {
 	// The portal's static bundle (memql#3314). The bytes are public; the data
 	// the bundle reads is gated on the stream it dials -- see PortalPaths.
 	paths = append(paths, PortalPaths()...)
+	// The edge node's site-serving mount (memql#3710) -- "/", and ONLY on the
+	// edge binary (EdgePaths' return value is build-tag-scoped; see its doc
+	// comment for why an unconditional entry here would be unsafe).
+	paths = append(paths, EdgePaths()...)
 	return paths
 }
 
@@ -915,6 +919,62 @@ func SpaceAttachmentPaths() []string {
 // property to re-check before mounting anything else there.
 func PortalPaths() []string {
 	return pathsWithBase("/portal/")
+}
+
+// EdgePaths returns the edge node's site-serving mount (memql#3710) -- "/"
+// on the edge binary, nothing on every other binary. Unlike every other
+// function in this file, the value is not computed here: it is
+// edgeRootPaths, a package var selected per build tag by
+// edge_paths_edge.go / edge_paths_default.go. EdgePaths itself stays an
+// ordinary, unconditionally-compiled function (never build-tagged) so it
+// remains visible to a source scan over this package -- only its RETURN
+// VALUE is tag-scoped, not its declaration.
+//
+// Unlike every other function in this file, this is NOT composed with
+// pathsWithBase: the edge resolves a request by HOSTNAME, not by a shared
+// SERVER_PUBLIC_PATH prefix -- every hosted site owns the WHOLE path space
+// under its own hostname, so app/transport_edge.go registers the literal
+// pattern "/" (a.handleRoute("/", handler)) regardless of any configured
+// base path, and the declaration below has to name that exact pattern to be
+// found.
+//
+// # Why the contribution is scoped to the edge binary, not unconditional
+//
+// PublicPaths() has TWO consumers with DIFFERENT matching rules over the
+// same list, and that asymmetry is the whole reason this needed scoping
+// rather than a plain unconditional "/" entry:
+//
+//   - The boot check, AssertUnauthenticatedSurfaceDeclared ->
+//     surfaceDeclaredBy (unauthenticated_surface.go). This one is safe: it
+//     deliberately refuses to treat "/" as a PREFIX declaration (that would
+//     bless every route on every node from one entry and pass vacuously),
+//     but an EXACT "/" route still matches an EXACT "/" declaration --
+//     TestSurfaceDeclaredByRefusesRootAsPrefix pins both halves. It also
+//     only ever runs on a binary with NO verifier installed, so today that
+//     is the edge alone.
+//   - component/identity/verifier/middleware.go's shouldBypassAuth, which
+//     EVERY verifier-consuming node's HTTP auth middleware consults on
+//     EVERY request. Its exact-match branch --
+//     `if _, ok := publicPaths[path]; ok { return true }` -- runs BEFORE
+//     the prefix loop and has NO "/" guard at all; the `allowed == "/"`
+//     skip lives only in the prefix loop below it, and guards only
+//     PREFIX-blessing, not this exact-match branch. So an unconditional "/"
+//     in PublicPaths() would make a request to exactly "/" bypass
+//     authentication on the bff, identity, mcp, cognition -- every
+//     verifier-consuming node -- not just the edge.
+//
+// Today that second effect would be latent rather than live: nothing
+// besides the edge registers "/" (app/transport_edge.go:75 is the only
+// handleRoute("/") in the repo), so an exempted request just reaches a mux
+// with no handler and 404s. But it is exactly the failure shape
+// IdentityDiscoveryPaths' own comment warns about elsewhere in this file:
+// a later root handler on ANY other node type would inherit the bypass with
+// no decision made and nothing to flag it, because the boot check that
+// would have caught an undeclared route does not run at all on a node that
+// has a verifier. Scoping the contribution to the edge binary keeps that
+// decision from being made by accident.
+func EdgePaths() []string {
+	return append([]string(nil), edgeRootPaths...)
 }
 
 // InboundWebhookPaths returns the path prefix the inbound-delivery receiver

@@ -3,7 +3,7 @@
 # every client connects to. It carries NO product code and NO product DSL
 # bundle: it serves the engine's own surface (engine + cluster concepts), which
 # is exactly what a product-neutral client like the memQL Cockpit needs
-# (cockpit.<domain>). The bespoke cockpit-bff module (memql-cockpit#289) is
+# (api.<domain>). The bespoke cockpit-bff module (memql-cockpit#289) is
 # retired -- the Cockpit just connects to this bff.
 #
 # MULTIPLE BFFs PER CLUSTER: a product runs on the same mesh by adding its OWN

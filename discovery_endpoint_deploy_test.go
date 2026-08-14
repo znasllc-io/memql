@@ -39,7 +39,7 @@ var dialAddressRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-]*:[0-9]+$`)
 // gRPC to the bff. identity.<domain> serves HTTP only; bff.<domain> is not a
 // host any overlay creates. Pinning the prefix is what makes this test catch the
 // original defect rather than merely its spelling.
-const frontDoorPrefix = "cockpit."
+const frontDoorPrefix = "api."
 
 // inlineValueRE reads the flow spelling base uses: `{ name: X, value: "Y" }`.
 var inlineValueRE = regexp.MustCompile(

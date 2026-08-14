@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { clusterRowStatus } from "../src/clusters/status.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
-const CLUSTER = { name: "local", endpoint: "cockpit.memql.localhost:443", token: "eyJ.a.b" };
+const CLUSTER = { name: "local", endpoint: "api.memql.localhost:443", token: "eyJ.a.b" };
 
 function status(state: ConnectionState, cluster = CLUSTER) {
   return clusterRowStatus(cluster, state);
@@ -81,14 +81,14 @@ test("a dropped connection is a failure, not a credential problem", () => {
 });
 
 test("a row for a DIFFERENT cluster than the connected one shows its own resting state", () => {
-  const other = { name: "staging", endpoint: "cockpit.staging.example.com:443", token: "eyJ.a.b" };
+  const other = { name: "staging", endpoint: "api.staging.example.com:443", token: "eyJ.a.b" };
   const view = clusterRowStatus(other, {
     status: "connected",
     clusterName: "local",
     nodeId: "bff-0",
   });
   assert.equal(view.icon, "idle");
-  assert.equal(view.tooltip, "cockpit.staging.example.com:443");
+  assert.equal(view.tooltip, "api.staging.example.com:443");
 });
 
 test("a cluster with no endpoint is unconfigured, and says so", () => {
@@ -101,7 +101,7 @@ test("a cluster carrying a PAT is flagged BEFORE anyone tries to connect with it
   // memql#3383: an operator who follows the old field comment mints a PAT. The
   // tree can say so at rest, without a dial and without a round trip.
   const view = clusterRowStatus(
-    { name: "x", endpoint: "cockpit.memql.localhost:443", token: "mql_pat_abc" },
+    { name: "x", endpoint: "api.memql.localhost:443", token: "mql_pat_abc" },
     { status: "disconnected" },
   );
   assert.equal(view.icon, "credential");
@@ -110,7 +110,7 @@ test("a cluster carrying a PAT is flagged BEFORE anyone tries to connect with it
 
 test("a cluster with an endpoint and no token asks for a JWT, not for a PAT", () => {
   const view = clusterRowStatus(
-    { name: "x", endpoint: "cockpit.memql.localhost:443" },
+    { name: "x", endpoint: "api.memql.localhost:443" },
     { status: "disconnected" },
   );
   assert.equal(view.icon, "credential");

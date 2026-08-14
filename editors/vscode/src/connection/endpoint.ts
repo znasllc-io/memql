@@ -38,7 +38,7 @@ const FRONT_DOOR_PORT = "443";
  * Trailing dots are the reason this exists rather than a bare `.trim()`. A
  * fully-qualified `staging.example.com.` is a legitimate spelling that DNS
  * resolves identically, and an operator who types one composes
- * `cockpit.staging.example.com.:443` and `https://identity.staging.example.com.`
+ * `api.staging.example.com.:443` and `https://identity.staging.example.com.`
  * -- both of which work over the wire and neither of which matches the
  * cluster the same operator registered without the dot. Normalizing once, here,
  * is what keeps the two derivations agreeing about what a domain is.
@@ -48,7 +48,7 @@ export function normalizeDomain(domain: string): string {
 }
 
 /**
- * The gRPC endpoint a domain implies: `cockpit.<domain>:443`.
+ * The gRPC endpoint a domain implies: `api.<domain>:443`.
  *
  * THE CONVENTION HAS ONE SPELLING NOW. This composition was inlined in three
  * places -- the add/edit prompt that prefilled the endpoint box, the presence
@@ -59,18 +59,18 @@ export function normalizeDomain(domain: string): string {
  * the failure surfaces as a cluster that will not dial rather than as a
  * mismatch anyone can see.
  *
- * An EMPTY domain composes to an empty endpoint rather than to `cockpit.:443`.
+ * An EMPTY domain composes to an empty endpoint rather than to `api.:443`.
  * Every caller's next question is "did that name anything", so answering with
  * a hostname built around a hole would only move the check downstream.
  */
 export function composeEndpointFromDomain(domain: string): string {
   const normalized = normalizeDomain(domain);
-  return normalized === "" ? "" : `cockpit.${normalized}:${FRONT_DOOR_PORT}`;
+  return normalized === "" ? "" : `api.${normalized}:${FRONT_DOOR_PORT}`;
 }
 
 // identityBaseUrlFor names the identity service a refresh exchange must POST
 // to (memql#3385). It is a DIFFERENT host from the bff the stream dials --
-// `cockpit.<domain>` serves the gRPC/WS front door, `identity.<domain>` serves
+// `api.<domain>` serves the gRPC/WS front door, `identity.<domain>` serves
 // /oauth/token and the JWKS feed.
 //
 // Derived rather than stored as a fifth field, because clusters.yaml already
@@ -80,9 +80,9 @@ export function composeEndpointFromDomain(domain: string): string {
 //      document (component/identity/discovery.go). Authoritative when present;
 //      an operator whose identity service is not at identity.<domain> sets it.
 //   2. `domain` -- the single value the add/edit flow collects. The endpoint is
-//      already composed from it by convention (cockpit.<domain>:443), and this
+//      already composed from it by convention (api.<domain>:443), and this
 //      is the same convention's other half.
-//   3. Failing both, a `cockpit.<host>` endpoint implies its sibling.
+//   3. Failing both, an `api.<host>` endpoint implies its sibling.
 //
 // undefined when nothing names it. Guessing would mean POSTing a refresh token
 // -- a 30-day credential -- at a host nobody nominated, so the honest answer is
@@ -99,9 +99,9 @@ export function identityBaseUrlFor(cluster: ClusterConfig): string | undefined {
   if (domain !== "") return `https://identity.${domain}`;
 
   const host = hostOf(cluster.endpoint);
-  const COCKPIT = "cockpit.";
-  if (host !== undefined && host.startsWith(COCKPIT) && host.length > COCKPIT.length) {
-    return `https://identity.${host.slice(COCKPIT.length)}`;
+  const API = "api.";
+  if (host !== undefined && host.startsWith(API) && host.length > API.length) {
+    return `https://identity.${host.slice(API.length)}`;
   }
   return undefined;
 }
