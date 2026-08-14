@@ -43,18 +43,30 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    # PRECEDENCE IS DECLARED, NOT INHERITED (memql#3714). Traefik's default
-    # router priority is the LENGTH of the compiled rule string, and the
-    # wildcard's `HostRegexp(...) && PathPrefix(...)` rule is longer than most
-    # of this host's own rules -- so on default priority the wildcard could
-    # outrank api., and the entire API would be served by the site edge
-    # instead of the bff. 100 is comfortably above the wildcard's computed
-    # default (its longest rule is under 70 characters) and applies to EVERY
-    # router this Ingress generates, so path-length variance across the
-    # generated block below cannot change the outcome for any of them. See
-    # docs/public/operate/front-door.md's precedence section and the
-    # `precedence` check in scripts/install/verify-frontdoor.sh.
-    traefik.ingress.kubernetes.io/router.priority: "100"
+    # NO router.priority HERE, DELIBERATELY (memql#3810). Precedence over the
+    # `*.<domain>` wildcard is still declared -- it has to be, or the wildcard
+    # outranks api. and the whole API is served by the site edge -- but it is
+    # declared ON THE WILDCARD, in edge-front-door.yaml, which names itself
+    # lowest. Read the mechanism there before adding a priority back here.
+    #
+    # This Ingress carried `router.priority: "100"` and it broke the API. The
+    # annotation is Ingress-level, so one value applies to every router this
+    # Ingress generates -- and the generated block below declares 22 paths whose
+    # ordering depended entirely on traefik's default priority being the
+    # compiled rule LENGTH. That length is what made PathPrefix(/healthz)
+    # outrank PathPrefix(/). A single number erased it, so `/` -- the h2c gRPC
+    # catch-all on bff:50051 -- won over the 21 paths declared to bff-http:8085,
+    # and every HTTP path on this host answered `415 Unsupported Media Type`
+    # with `Content-Type: application/grpc`.
+    #
+    # The comment this replaces stated that flattening as a REASSURANCE: that
+    # one value "applies to EVERY router this Ingress generates, so path-length
+    # variance across the generated block below cannot change the outcome for
+    # any of them". That is the defect, described accurately and filed under the
+    # wrong heading -- erasing path-length variance is exactly what went wrong.
+    #
+    # ../render_priority_test.go now fails if any Ingress declaring more than
+    # one distinct path carries a uniform priority.
 spec:
   tls:
     - hosts: ["api.memql.localhost"]
