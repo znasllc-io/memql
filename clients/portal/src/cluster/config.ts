@@ -12,16 +12,17 @@
 //
 // component/portal/config.go used to be the other half of this contract --
 // it served this document directly, co-located with the bundle on the same
-// bff node. The portal is now site #1, served by component/edge (memql#3711),
-// which is a generic bundle server and must not carry portal-specific
-// identity-config logic (TestPortalHasNoSpecialCaseInTheServingPath forbids
-// exactly that). KNOWN GAP as of memql#3711: nothing yet serves this document
-// at the portal's new origin. The candidate path is the site's own
-// apiProxy=true / `/_memql/*` proxy to the bff (memql#3712), with the bff
-// answering GET /runtime-config.json as a generic (not portal-only)
-// capability -- but that endpoint does not exist yet either. Until it does,
-// the fetch below 404s (or, worse, gets index.html back under the SPA
-// fallback) and the portal cannot discover its identity service.
+// bff node, keyed on nothing but "this is the portal". The portal is now
+// site #1, served by component/edge (memql#3711), which is a generic bundle
+// server and must not carry portal-specific identity-config logic
+// (TestPortalHasNoSpecialCaseInTheServingPath forbids exactly that) -- so
+// component/edge/runtimeconfig.go answers this document for EVERY hosted
+// site alike, ahead of the bundle lookup, deriving identityUrl /
+// identityApiBaseUrl / authEnabled from the cluster's own domain-derived
+// config and oauthClientId from a lookup of the SITE'S OWN hostname against
+// MEMQL_IDENTITY_REGISTERED_CLIENTS -- data, not a name it recognises. A
+// site whose hostname is not registered with identity still gets a 200,
+// just with an empty oauthClientId.
 //
 // Additive-only shape. A cached index.html can outlive a node restart, so an
 // older bundle has to keep working against a newer node: read fields
@@ -29,11 +30,14 @@
 
 const CONFIG_FILE = "runtime-config.json";
 
-// runtimeConfigPathFor derives the document's path from the portal's mount,
-// exactly as bridgePathFor derives the WebSocket path. Same reasoning: the
-// mount point is decided once (vite.config.ts `base`, matched by the Go
-// handler) and everything else is derived, so a deployment that carries a
-// SERVER_PUBLIC_PATH prefix needs no second piece of configuration.
+// runtimeConfigPathFor derives the document's path from the mount, exactly
+// as bridgePathFor derives the WebSocket path. Same reasoning: the mount
+// point is decided once (vite.config.ts `base`) and everything else is
+// derived. Since memql#3711 that mount is "/" (the portal is site #1,
+// served at its own origin's root), so this now lands on
+// component/edge/runtimeconfig.go's runtimeConfigPath ("/runtime-config.json")
+// with no code change here -- the function was already general enough for a
+// root mount, only its production INPUT changed.
 export function runtimeConfigPathFor(baseUrl: string): string {
   const mount = baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
   return mount + CONFIG_FILE;

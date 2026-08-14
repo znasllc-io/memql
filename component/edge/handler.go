@@ -68,6 +68,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cluster-wide identity discovery, ahead of the bundle lookup and for
+	// every site alike -- see runtimeconfig.go. Not a new entry in
+	// component/server.EdgePaths(): the edge's declared surface is exactly
+	// "/", and this path lives under it.
+	if r.URL.Path == runtimeConfigPath {
+		h.serveRuntimeConfig(w, r, site)
+		return
+	}
+
 	if strings.HasPrefix(r.URL.Path, apiPrefix) {
 		h.serveAPI(w, r, site)
 		return
