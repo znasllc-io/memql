@@ -37,3 +37,26 @@ func (fileOpener) Open(ref string) (fs.FS, error) {
 }
 
 func fsReadFile(fsys fs.FS, name string) ([]byte, error) { return fs.ReadFile(fsys, name) }
+
+type muxOpener struct{ openers map[string]BundleOpener }
+
+// NewMuxOpener dispatches a bundleRef to the opener for its scheme. An
+// unknown scheme is an ERROR, never a fallback to a local path: a bundleRef
+// the edge cannot honour must surface as a broken site, because the
+// alternative is confidently serving the wrong bytes from somewhere
+// plausible.
+func NewMuxOpener(openers map[string]BundleOpener) BundleOpener {
+	return muxOpener{openers: openers}
+}
+
+func (m muxOpener) Open(ref string) (fs.FS, error) {
+	i := strings.Index(ref, "://")
+	if i < 0 {
+		return nil, fmt.Errorf("edge: bundleRef %q has no scheme", ref)
+	}
+	o, ok := m.openers[ref[:i]]
+	if !ok {
+		return nil, fmt.Errorf("edge: bundleRef %q uses unsupported scheme %q", ref, ref[:i])
+	}
+	return o.Open(ref)
+}
