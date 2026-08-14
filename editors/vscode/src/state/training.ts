@@ -1,0 +1,328 @@
+// Per-construct training state, and what the editor makes of it.
+//
+// SAVING IS NOT PROMOTING. That is the single idea this whole surface exists to
+// convey, and everything below is in service of it: a file may hold trained,
+// untrained and drifted constructs at once, and writing it to disk changes none
+// of them. Nothing here takes a "dirty" or "saved" input, so that property holds
+// by construction rather than by a test somebody could delete.
+//
+// THE LANGUAGE SERVER OWNS THE STATE, exactly as it owns which constructs are
+// runnable. Drift is "does this construct's source hash match what was
+// promoted", the hash is defined once and pinned by a parity test (design §3),
+// and a client re-deriving it would be a second opinion about drift -- the one
+// question this surface exists to answer. So this file decodes and renders; it
+// never computes a state.
+//
+// THE WIRE SHAPE IS #3759's, MIRRORED FROM `memql/runnableConstructs` field for
+// field, because that issue says the state is exposed "the way
+// memql/runnableConstructs already is". It is declared here before the server
+// implements it (announced on #3761 / #3759 so ENGINE can correct it), which is
+// safe in exactly one direction: an unrecognised reply degrades to `unknown`
+// and `unknown` renders as nothing, so a wrong guess shows a developer no
+// training UI rather than a wrong one.
+//
+// Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
+//
+// Refs: #3761 #3745
+
+import type { LspRange } from "../constructs/runnable.js";
+
+// -----------------------------------------------------------------------------
+// The wire contract
+// -----------------------------------------------------------------------------
+
+/**
+ * The five states, from design §2.
+ *
+ * `seeded` is distinct from `trained` and the distinction is the point: a
+ * seeded construct was loaded from disk at boot, so the cluster HAS it but it
+ * was never promoted -- and it cannot be, short of a rollout. Collapsing the
+ * two would offer a Demote on something there is nothing to demote.
+ */
+export const TRAINING_STATES = ["untrained", "drifted", "trained", "seeded", "unknown"] as const;
+export type TrainingState = (typeof TRAINING_STATES)[number];
+
+/**
+ * The server capability key and method.
+ *
+ * Feature-detected on the capability rather than called blind, for the same
+ * reason `memqlRunnableConstructs` is: an older `memql-lsp` on the PATH is an
+ * ordinary situation, not an error worth a popup. Before #3759 lands, EVERY
+ * server is that older build -- so this surface is simply absent until it does,
+ * which is the correct behaviour and not a degraded one.
+ */
+export const TRAINING_STATE_CAPABILITY = "memqlTrainingState";
+export const TRAINING_STATE_METHOD = "memql/trainingState";
+
+export interface TrainingConstruct {
+  /**
+   * The catalog's spelling, carried through and never narrowed.
+   *
+   * Nothing in this surface dispatches on kind -- a drifted query and a drifted
+   * tool get the same gutter and the same lens -- so narrowing it would be a
+   * closed vocabulary this file has no use for and could only get wrong.
+   */
+  kind: string;
+  name: string;
+  /** Signature only: keyword through declared name. What a lens anchors to. */
+  signatureRange: LspRange;
+  state: TrainingState;
+}
+
+// -----------------------------------------------------------------------------
+// Defensive decoding
+// -----------------------------------------------------------------------------
+
+/**
+ * Narrow the raw JSON-RPC result.
+ *
+ * Same rules as `parseRunnableConstructs`, and for the same reason: the server
+ * is a separate process, possibly an older build than this extension, so its
+ * reply is untrusted input in the ordinary sense.
+ *
+ * ONE DIFFERENCE, and it is deliberate. An unrecognised `state` does not drop
+ * the construct -- it becomes `unknown`, which renders as nothing. Dropping and
+ * degrading look identical here (both show no training UI), so degrading is
+ * chosen because it keeps the construct in the list for anything that counts
+ * entries, and because "a state this build does not know" is genuinely closer
+ * to "unknown" than to "absent".
+ */
+export function parseTrainingConstructs(raw: unknown): TrainingConstruct[] {
+  if (raw === null || typeof raw !== "object") return [];
+  const constructs = (raw as { constructs?: unknown }).constructs;
+  if (!Array.isArray(constructs)) return [];
+  const out: TrainingConstruct[] = [];
+  for (const entry of constructs) {
+    const parsed = parseOne(entry);
+    if (parsed !== undefined) out.push(parsed);
+  }
+  return out;
+}
+
+function parseOne(raw: unknown): TrainingConstruct | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const name = r.name;
+  if (typeof name !== "string" || name === "") return undefined;
+  const signatureRange = parseRange(r.signatureRange);
+  if (signatureRange === undefined) return undefined;
+  return {
+    kind: typeof r.kind === "string" ? r.kind : "",
+    name,
+    signatureRange,
+    state: isTrainingState(r.state) ? r.state : "unknown",
+  };
+}
+
+function isTrainingState(value: unknown): value is TrainingState {
+  return typeof value === "string" && (TRAINING_STATES as readonly string[]).includes(value);
+}
+
+function parseRange(raw: unknown): LspRange | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const r = raw as { start?: unknown; end?: unknown };
+  const start = parsePosition(r.start);
+  const end = parsePosition(r.end);
+  if (start === undefined || end === undefined) return undefined;
+  return { start, end };
+}
+
+function parsePosition(raw: unknown): { line: number; character: number } | undefined {
+  if (raw === null || typeof raw !== "object") return undefined;
+  const r = raw as { line?: unknown; character?: unknown };
+  if (typeof r.line !== "number" || typeof r.character !== "number") return undefined;
+  return { line: r.line, character: r.character };
+}
+
+// -----------------------------------------------------------------------------
+// The gutter's three answers
+// -----------------------------------------------------------------------------
+
+/**
+ * What the gutter distinguishes. THREE, not five.
+ *
+ * The gutter answers one question -- *does what I am looking at match what
+ * runs?* -- and that question has three answers. `trained` and `seeded` are the
+ * same answer to it (yes), and differ only in how the cluster came to have the
+ * construct, which is a question about ACTIONS and belongs on the lens. Giving
+ * them separate near-identical icons would spend the gutter's very limited
+ * legibility on a distinction the gutter is not being asked about.
+ *
+ * `unknown` is absent from this type on purpose: it has no mark at all.
+ */
+export type GutterMark = "untrained" | "drifted" | "live";
+
+/** The mark for a state, or undefined when the state gets no mark. */
+export function gutterMarkFor(state: TrainingState): GutterMark | undefined {
+  switch (state) {
+    case "untrained":
+      return "untrained";
+    case "drifted":
+      return "drifted";
+    case "trained":
+    case "seeded":
+      return "live";
+    case "unknown":
+      // NOTHING. Not a grey icon, not a question mark. A disconnection must not
+      // look like a problem with the file -- and a mark that means "we do not
+      // know" is indistinguishable at 16 pixels from one that means "something
+      // is wrong here".
+      return undefined;
+  }
+}
+
+// -----------------------------------------------------------------------------
+// The lens
+// -----------------------------------------------------------------------------
+
+export const COMMAND_DRY_RUN = "memql.training.dryRun";
+export const COMMAND_TRY_IN_SESSION = "memql.training.tryInSession";
+export const COMMAND_PROMOTE = "memql.training.promote";
+export const COMMAND_DEMOTE = "memql.training.demote";
+
+export interface TrainingAction {
+  title: string;
+  command: string;
+}
+
+export interface TrainingLensPlan {
+  construct: TrainingConstruct;
+  /** The leading label: the state, in the developer's words. */
+  label: string;
+  /** A sentence for the lens tooltip, or "" when the label says enough. */
+  detail: string;
+  actions: TrainingAction[];
+}
+
+export interface TrainingLensOptions {
+  /**
+   * Emit the action lenses. OFF by default, and not because the actions are
+   * optional: they are #3763's, which registers the four commands. A lens that
+   * posts to an unregistered command fails with "command not found", and a
+   * click that does nothing teaches a developer the extension is broken.
+   * #3763 turns this on in the same change that makes it work.
+   *
+   * The STATE label renders either way, because that half works standalone and
+   * is the half this issue exists for.
+   */
+  offerActions?: boolean;
+}
+
+/**
+ * The lens plan for each construct, in document order.
+ *
+ * An `unknown` construct produces NO PLAN -- not an empty one. The caller
+ * renders what it gets, so absence here is absence on screen.
+ */
+export function trainingLensPlans(
+  constructs: readonly TrainingConstruct[],
+  options: TrainingLensOptions = {},
+): TrainingLensPlan[] {
+  const out: TrainingLensPlan[] = [];
+  for (const construct of constructs) {
+    if (construct.state === "unknown") continue;
+    out.push({
+      construct,
+      label: construct.state,
+      detail: detailFor(construct.state),
+      actions: options.offerActions === true ? actionsFor(construct.state) : [],
+    });
+  }
+  return out;
+}
+
+/** The sentence behind the one-word label, for the states where it is not obvious. */
+function detailFor(state: TrainingState): string {
+  switch (state) {
+    case "untrained":
+      return "This cluster has no record of this construct. Saving the file does not change that.";
+    case "drifted":
+      return "This cluster knows this construct, but not this version of it. Promoting updates the trained version.";
+    case "trained":
+      return "Promoted, persisted, and live on this cluster.";
+    case "seeded":
+      // The one state whose whole content is why there is nothing to do.
+      return "Loaded from disk when the cluster booted, rather than promoted -- so there is nothing here to demote, and changing it needs a rollout.";
+    case "unknown":
+      return "";
+  }
+}
+
+function actionsFor(state: TrainingState): TrainingAction[] {
+  switch (state) {
+    case "untrained":
+      return [
+        { title: "Dry-run", command: COMMAND_DRY_RUN },
+        { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
+        { title: "Promote", command: COMMAND_PROMOTE },
+      ];
+    case "drifted":
+      return [
+        { title: "Dry-run", command: COMMAND_DRY_RUN },
+        { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
+        // Named, because promoting over an existing definition is a different
+        // act from promoting a new one and the lens is where that is noticed.
+        { title: "Promote (updates the trained version)", command: COMMAND_PROMOTE },
+      ];
+    case "trained":
+      return [{ title: "Demote", command: COMMAND_DEMOTE }];
+    case "seeded":
+    case "unknown":
+      // NO ACTION, and rendered as the absence of one rather than as a disabled
+      // control -- the same choice the Constructs page makes for a view-only
+      // kind. A seeded construct needs a rollout, which is not something this
+      // editor can offer.
+      return [];
+  }
+}
+
+// -----------------------------------------------------------------------------
+// The status bar
+// -----------------------------------------------------------------------------
+
+export interface TrainingCounts {
+  untrained: number;
+  drifted: number;
+  trained: number;
+  seeded: number;
+}
+
+export function countStates(constructs: readonly TrainingConstruct[]): TrainingCounts {
+  const counts: TrainingCounts = { untrained: 0, drifted: 0, trained: 0, seeded: 0 };
+  for (const c of constructs) {
+    if (c.state !== "unknown") counts[c.state] += 1;
+  }
+  return counts;
+}
+
+/**
+ * The status-bar text, or "" when there is nothing to say.
+ *
+ * REPORTS ONLY WHAT NEEDS ATTENTION -- untrained and drifted. A file whose
+ * constructs are all trained gets an empty status bar, which is the correct
+ * report: the item exists to make "I saved but did not promote" impossible to
+ * miss, and an item that is always present saying "12 trained" is one a
+ * developer stops reading, taking the warning with it.
+ *
+ * Zero counts are omitted rather than shown as `0 drifted`, for the same
+ * reason.
+ */
+export function statusBarText(counts: TrainingCounts): string {
+  const parts: string[] = [];
+  if (counts.untrained > 0) parts.push(`${counts.untrained} untrained`);
+  if (counts.drifted > 0) parts.push(`${counts.drifted} drifted`);
+  return parts.join(" · ");
+}
+
+/** The hover, which is where "saving is not promoting" is said in words. */
+export function statusBarTooltip(counts: TrainingCounts): string {
+  if (statusBarText(counts) === "") return "";
+  const lines = ["Saving this file does not promote anything to the cluster."];
+  if (counts.untrained > 0) {
+    lines.push(`${counts.untrained} construct(s) this cluster has no record of.`);
+  }
+  if (counts.drifted > 0) {
+    lines.push(`${counts.drifted} construct(s) the cluster knows in an older version.`);
+  }
+  return lines.join("\n");
+}

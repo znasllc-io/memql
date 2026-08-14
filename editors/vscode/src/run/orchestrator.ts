@@ -314,7 +314,15 @@ export class RunOrchestrator {
         target,
         rows: result.rows,
         raw: result.raw,
-        ranDeployedDefinition: false,
+        // AN EMPTY BUNDLE MEANS THERE WAS NOTHING OF OURS TO DEFINE, so what
+        // ran is whatever the cluster already had (memql#3753). Until the
+        // Constructs catalog there was always a file, so this was the literal
+        // `false` -- and a catalog run then reported itself as "previously
+        // session-defined from this buffer", with no buffer and nothing ever
+        // defined. The flag is what the Result view's sentence is chosen from,
+        // so a wrong value here is a confidently false claim about what just
+        // executed.
+        ranDeployedDefinition: bundle.sources.length === 0,
         injected,
       };
     } catch (err) {
