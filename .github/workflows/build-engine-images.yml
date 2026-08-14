@@ -44,10 +44,11 @@ on:
         default: false
         type: boolean
 
+# Read-only at the top level (Scorecard Token-Permissions); the writes the
+# build needs -- the OIDC token for azure/login and the GHCR push -- are
+# granted on the one job below, never workflow-wide.
 permissions:
-  id-token: write # mint the OIDC token for azure/login
   contents: read
-  packages: write # push the same images to GHCR (memql#3572)
 
 env:
   ACR_NAME: acrmemql
@@ -66,6 +67,10 @@ jobs:
   build:
     name: build memql-${{ matrix.node }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write # mint the OIDC token for azure/login
+      contents: read # checkout
+      packages: write # push the same images to GHCR (memql#3572)
     strategy:
       fail-fast: false
       matrix:
