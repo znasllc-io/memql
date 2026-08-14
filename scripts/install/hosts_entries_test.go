@@ -228,7 +228,7 @@ func TestHostsEntriesAddRemoveRoundTripIsByteExact(t *testing.T) {
 			if added == f.content {
 				t.Fatalf("add did not modify the file")
 			}
-			if !strings.Contains(added, "cockpit.memql.localhost") {
+			if !strings.Contains(added, "api.memql.localhost") {
 				t.Errorf("added file is missing the front-door hostname:\n%q", added)
 			}
 			if n := strings.Count(added, "# BEGIN memql"); n != 1 {
@@ -283,7 +283,7 @@ func TestHostsEntriesRoundTripWithContentAfterTheBlock(t *testing.T) {
 	if !strings.HasSuffix(updated, afterBlock) {
 		t.Errorf("operator's trailing content was not preserved at the end:\n%q", updated)
 	}
-	if strings.Contains(updated, "cockpit.memql.localhost") {
+	if strings.Contains(updated, "api.memql.localhost") {
 		t.Errorf("stale hostname survived the rewrite:\n%q", updated)
 	}
 	if n := strings.Count(updated, "# BEGIN memql"); n != 1 {
@@ -458,7 +458,7 @@ func TestHostsEntriesUnwritableFileIsExitFour(t *testing.T) {
 // A hand-corrupted block (BEGIN with no END) must fail loudly rather than
 // silently swallowing the rest of the operator's file.
 func TestHostsEntriesUnterminatedBlockIsExitFive(t *testing.T) {
-	original := "127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 cockpit.memql.localhost\n"
+	original := "127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 api.memql.localhost\n"
 	path := hostsFixture(t, original)
 
 	env, code, out := hostsRun(t, "--action=remove", "--hosts-file="+path, "--confirm="+hostsConfirmRemove)
@@ -486,7 +486,7 @@ func TestHostsEntriesDefaultHostnamesAreTheFrontDoor(t *testing.T) {
 		t.Fatalf("add failed (exit %d): %s", code, out)
 	}
 	got := hostsRead(t, path)
-	for _, h := range []string{"cockpit.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
+	for _, h := range []string{"api.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(got, "127.0.0.1 "+h+"\n") {
 			t.Errorf("front-door hostname %q missing from:\n%q", h, got)
 		}
@@ -518,7 +518,7 @@ func TestHostsEntriesCustomIPAndHostnames(t *testing.T) {
 			t.Errorf("missing entry %q in:\n%q", want, got)
 		}
 	}
-	if strings.Contains(got, "cockpit.memql.localhost") {
+	if strings.Contains(got, "api.memql.localhost") {
 		t.Errorf("default hostnames leaked into a custom run:\n%q", got)
 	}
 }
@@ -598,7 +598,7 @@ exec "$@"
 	if !strings.Contains(calls, "tee "+path) {
 		t.Errorf("expected the write to go through `sudo -A tee %s`:\n%s", path, calls)
 	}
-	if got := hostsRead(t, path); !strings.Contains(got, "cockpit.memql.localhost") {
+	if got := hostsRead(t, path); !strings.Contains(got, "api.memql.localhost") {
 		t.Errorf("the elevated write did not land:\n%q", got)
 	}
 }

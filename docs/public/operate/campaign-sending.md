@@ -63,7 +63,7 @@ Minimum to send anything:
 |---|---|
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET` | Signs the one-click unsubscribe link. **Required** — a send is refused without it. Rotating it needs the variable below; see [Rotating the unsubscribe signing key](#rotating-the-unsubscribe-signing-key). |
 | `MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET_PREVIOUS` | The previous signing key: **verified against, never signed with**. Optional, and unset only on a deployment that has never rotated. |
-| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://cockpit.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. |
+| `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` | Public origin the link points at, e.g. `https://api.example.com`. **Required.** Must be externally reachable: the recipient's mail client POSTs to it. |
 | An email sender | `MEMQL_EMAIL_AZURE_*` + `MEMQL_EMAIL_SENDER` (Microsoft Graph), or `SMTP_*`. With neither, the node runs the `LogSender` and a send is refused. |
 
 Tuning (all optional, all documented in [env-vars.md](env-vars.md)):
@@ -216,7 +216,7 @@ in the recipient's mailbox.
 Every campaign message carries both halves:
 
 ```
-List-Unsubscribe: <https://cockpit.example.com/unsubscribe?token=...>
+List-Unsubscribe: <https://api.example.com/unsubscribe?token=...>
 List-Unsubscribe-Post: List-Unsubscribe=One-Click
 ```
 

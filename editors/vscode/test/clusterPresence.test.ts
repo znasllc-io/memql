@@ -58,7 +58,7 @@ function clustersWith(clusters: ClusterConfig[]): () => Promise<ReadClustersResu
 const NO_CLUSTERS = clustersWith([]);
 const LOCAL_ENTRY: ClusterConfig = {
   name: "local",
-  endpoint: "cockpit.memql.localhost:443",
+  endpoint: "api.memql.localhost:443",
   local: true,
 };
 
@@ -125,7 +125,7 @@ const TABLE: Row[] = [
     receipt: null,
     // No `local` flag at all -- the shape of every cluster registered before
     // that field existed, and of every staging/production cluster since.
-    clusters: [{ name: "staging", endpoint: "cockpit.staging.example.com:443" }],
+    clusters: [{ name: "staging", endpoint: "api.staging.example.com:443" }],
     probe: fixedProbe(true),
     want: "absent",
     wantEvidence: { receipt: false, registry: false },
@@ -369,7 +369,7 @@ test("the endpoint comes from the registry, then the receipt's domain, then the 
   assert.equal(probeEndpointFor(LOCAL_ENTRY, installedReceipt()), LOCAL_ENTRY.endpoint);
   assert.equal(
     probeEndpointFor(undefined, installedReceipt([entry({ params: { domain: "memql.localhost" } })])),
-    "cockpit.memql.localhost:443"
+    "api.memql.localhost:443"
   );
   assert.equal(probeEndpointFor(undefined, installedReceipt()), DEFAULT_LOCAL_ENDPOINT);
   assert.equal(probeEndpointFor(undefined, null), DEFAULT_LOCAL_ENDPOINT);

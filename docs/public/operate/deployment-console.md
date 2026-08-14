@@ -29,7 +29,7 @@ here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **memQL portal -- Deployments** | `https://cockpit.<env>.example.com/portal/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). |
+| **memQL portal -- Deployments** | `https://api.<env>.example.com/portal/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
 > **How the portal reaches the deploy surface.** `DeployControlService` runs

@@ -236,7 +236,7 @@ function run_migration() {
 
 # "Every Deployment is Available" is not the whole of "the cluster is up": the
 # CLIENT-FACING edge is the traefik front door, and both local ingresses
-# (cockpit-front-door / identity-front-door) name the memql-front-door-tls secret in
+# (api-front-door / identity-front-door) name the memql-front-door-tls secret in
 # their spec.tls. When that secret is absent traefik does not fail -- it
 # silently serves its own "TRAEFIK DEFAULT CERT" for both hosts, so browsers
 # warn and Node clients (the VS Code extension host among them) refuse the
@@ -347,7 +347,7 @@ function main() {
     cap_result_set_raw healthy "$HEALTHY"
     cap_result_set_raw frontDoorTls "$FRONT_DOOR_TLS"
     if [[ "$FRONT_DOOR_TLS" != "true" ]]; then
-        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://cockpit.memql.localhost and https://identity.memql.localhost are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
+        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://api.memql.localhost and https://identity.memql.localhost are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
     fi
     cap_ok
 }

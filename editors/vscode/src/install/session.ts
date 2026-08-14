@@ -232,21 +232,36 @@ export interface FrontDoor {
   probeHosts: string[];
 }
 
-/** The subdomains memQL puts on a front door. Kept as data, used three times. */
-const FRONT_DOOR_SUBDOMAINS = ["cockpit", "identity"] as const;
+// The subdomains memQL puts on a front door. Kept as data, and TWO lists
+// because the hosts block and the probe answer different questions.
+//
+// The HOSTS BLOCK must name everything something will type, which includes
+// `portal.` -- the origin the portal's bundle moves to in memql#3711. The
+// wildcard certificate already covers it and identity already allows it as a
+// CORS origin (component/genesis/domain.go), so the hosts entry is the one
+// remaining piece, and it is cheap to place ahead of the Ingress: a name
+// resolving to 127.0.0.1 with nothing serving it fails visibly, whereas a name
+// that does not resolve fails in the resolver, before any request is made.
+//
+// The PROBE dials only the hosts that carry an Ingress rule today, which is why
+// `portal.` is absent from it. A probe against a name with no rule behind it
+// reports a broken front door for a cluster that is fine, which is the failure
+// the whole function exists to prevent. PROBE_SUBDOMAINS must stay a subset of
+// HOSTS_BLOCK_SUBDOMAINS -- asserted in installSession.test.ts.
+const HOSTS_BLOCK_SUBDOMAINS = ["api", "identity", "portal"] as const;
+const PROBE_SUBDOMAINS = ["api", "identity"] as const;
 
 export function frontDoorFor(domain: string): FrontDoor | undefined {
   const apex = domain.trim().replace(/^\.+|\.+$/g, "");
   if (apex === "") return undefined;
-  const subdomains = FRONT_DOOR_SUBDOMAINS.map((s) => `${s}.${apex}`);
   return {
     // The apex last, matching the block hosts-entries.sh documents.
-    hostnames: [...subdomains, apex],
-    // The WILDCARD, not the two subdomains: it is what the local overlay's
-    // `local-znas-tls` secret carries, so a cluster whose ingress adds a third
-    // host does not need a reissued certificate.
+    hostnames: [...HOSTS_BLOCK_SUBDOMAINS.map((s) => `${s}.${apex}`), apex],
+    // The WILDCARD, not the subdomains: it is what the local overlay's
+    // `memql-front-door-tls` secret carries, so a cluster whose ingress adds
+    // another host does not need a reissued certificate.
     certNames: [`*.${apex}`, apex],
-    probeHosts: subdomains,
+    probeHosts: PROBE_SUBDOMAINS.map((s) => `${s}.${apex}`),
   };
 }
 

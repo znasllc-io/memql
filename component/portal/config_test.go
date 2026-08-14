@@ -159,7 +159,7 @@ func TestRuntimeConfigIs404WithoutABundle(t *testing.T) {
 // request never leaves the page.
 func TestCSPNamesTheIdentityOriginForTheTokenExchange(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Host = "cockpit.example.com"
+	r.Host = "api.example.com"
 	policy := policyWith(r, "https://identity.example.com")
 	if !strings.Contains(policy, "https://identity.example.com") {
 		t.Fatalf("connect-src omits the identity origin; the OAuth token exchange "+
@@ -172,7 +172,7 @@ func TestCSPNamesTheIdentityOriginForTheTokenExchange(t *testing.T) {
 
 func TestCSPDropsAHostileIdentityURL(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Host = "cockpit.example.com"
+	r.Host = "api.example.com"
 	for _, raw := range []string{
 		"https://evil.example.com\r\nX-Injected: 1",
 		"https://evil.example.com foo",
@@ -193,18 +193,18 @@ func TestCSPDropsAHostileIdentityURL(t *testing.T) {
 // single-binary build) must not get a redundant duplicate source.
 func TestCSPOmitsTheIdentityOriginWhenItIsAlreadySelf(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Host = "cockpit.example.com"
+	r.Host = "api.example.com"
 
-	sameOrigin := policyWith(r, "http://cockpit.example.com")
-	if strings.Count(sameOrigin, "cockpit.example.com") != 1 {
+	sameOrigin := policyWith(r, "http://api.example.com")
+	if strings.Count(sameOrigin, "api.example.com") != 1 {
 		// The one occurrence is the ws:// source; 'self' already covers the
 		// http origin.
 		t.Fatalf("expected no duplicate http source for the portal's own origin:\n%s", sameOrigin)
 	}
 
 	proxied := policyWith(r, "")
-	if !strings.Contains(proxied, "connect-src 'self' ws://cockpit.example.com;") &&
-		!strings.HasSuffix(proxied, "connect-src 'self' ws://cockpit.example.com") {
+	if !strings.Contains(proxied, "connect-src 'self' ws://api.example.com;") &&
+		!strings.HasSuffix(proxied, "connect-src 'self' ws://api.example.com") {
 		t.Fatalf("proxied (empty identity API base) policy should stop at 'self' + ws:\n%s", proxied)
 	}
 }

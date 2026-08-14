@@ -63,7 +63,7 @@ Everything else, without asking beyond one password prompt:
 | k3d, kubectl, mkcert | `~/.memql/bin/` | Only if you tick it -- general tools |
 | The NSS tools (`certutil`) | your package manager | **No** -- see below |
 | A local certificate authority | mkcert's `CAROOT` | Only if you tick it, and only if memQL created it |
-| `cockpit.memql.localhost` etc. in `/etc/hosts` | a marked block | Yes, always -- memQL put it there |
+| `api.memql.localhost` etc. in `/etc/hosts` | a marked block | Yes, always -- memQL put it there |
 | The memQL checkout | `~/.memql/src/` | Yes, always |
 | The k3d cluster | Docker | Yes, always |
 

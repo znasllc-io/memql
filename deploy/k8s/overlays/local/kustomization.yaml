@@ -52,8 +52,7 @@ namespace: memql
 
 resources:
   - front-door.yaml
-  - cockpit-front-door.yaml
-  - identity-external.yaml
+  - api-front-door.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
   - postgres.yaml
@@ -77,7 +76,7 @@ patches:
         annotations:
           traefik.ingress.kubernetes.io/service.serversscheme: https
           traefik.ingress.kubernetes.io/service.serverstransport: memql-internal-ca-skip-verify@kubernetescrd
-  # Cockpit front door backend: the bff serves PLAINTEXT gRPC (:50051), so
+  # API front door backend: the bff serves PLAINTEXT gRPC (:50051), so
   # traefik must forward HTTP/2 cleartext (h2c) -- the local analog of the cloud
   # nginx `backend-protocol: GRPC`. LOCAL only (cloud fronts bff with nginx).
   - target: { kind: Service, name: bff }

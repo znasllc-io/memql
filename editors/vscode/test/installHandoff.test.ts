@@ -53,7 +53,7 @@ test("the entry is marked local, which is what earns it the uninstall action", (
 
 test("the endpoint follows the same convention the rest of the extension composes", () => {
   const entry = installedClusterEntry({ domain: "memql.localhost" });
-  assert.equal(entry.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(entry.endpoint, "api.memql.localhost:443");
   assert.equal(entry.domain, "memql.localhost");
 });
 
@@ -82,7 +82,7 @@ test("a supplied name wins over the derived one", () => {
 
 test("surrounding dots and whitespace in a domain do not reach the endpoint", () => {
   const entry = installedClusterEntry({ domain: "  .memql.localhost.  " });
-  assert.equal(entry.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(entry.endpoint, "api.memql.localhost:443");
 });
 
 // -----------------------------------------------------------------------------
@@ -144,7 +144,7 @@ test("a failed registry write still says where the cluster answers", async () =>
 
   assert.equal(result.ok, false);
   if (!result.ok) {
-    assert.equal(result.reachableAt, "cockpit.memql.localhost:443");
+    assert.equal(result.reachableAt, "api.memql.localhost:443");
     // Compared against the result's OWN field, not a literal address.
     //
     // Two rewrites got here. A regex over the hostname was

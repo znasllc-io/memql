@@ -131,7 +131,7 @@ func TestNoNodeCarriesAPlaceholderDomain(t *testing.T) {
 func TestFrontDoorHostsUseTheCommittedDefault(t *testing.T) {
 	rendered := render(t)
 
-	for _, host := range []string{"cockpit.memql.localhost", "identity.memql.localhost"} {
+	for _, host := range []string{"api.memql.localhost", "identity.memql.localhost"} {
 		if !strings.Contains(rendered, "host: "+host) {
 			t.Errorf("the rendered overlay does not serve %s", host)
 		}

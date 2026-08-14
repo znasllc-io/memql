@@ -8,7 +8,7 @@ import "testing"
 // domain-free knob instead, appended to whatever the derived-or-explicit set is
 // (memql#3593).
 func TestCORSExtraOriginsAppend(t *testing.T) {
-	t.Setenv("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS", "https://cockpit.memql.localhost")
+	t.Setenv("MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS", "https://api.memql.localhost")
 	t.Setenv("MEMQL_IDENTITY_CORS_EXTRA_ORIGINS", "http://localhost:8080,http://localhost:3000")
 
 	cfg, err := LoadConfigFromEnv()
@@ -17,7 +17,7 @@ func TestCORSExtraOriginsAppend(t *testing.T) {
 	}
 
 	want := []string{
-		"https://cockpit.memql.localhost",
+		"https://api.memql.localhost",
 		"http://localhost:8080",
 		"http://localhost:3000",
 	}
@@ -36,7 +36,7 @@ func TestCORSExtraOriginsAppend(t *testing.T) {
 // list order, which is how a redirect URI silently stops being accepted.
 func TestExtraRegisteredClientsMergeById(t *testing.T) {
 	t.Setenv("MEMQL_IDENTITY_REGISTERED_CLIENTS",
-		`[{"clientId":"portal","redirectURIs":["https://cockpit.memql.localhost/portal/auth/callback"]}]`)
+		`[{"clientId":"portal","redirectURIs":["https://api.memql.localhost/portal/auth/callback"]}]`)
 	t.Setenv("MEMQL_IDENTITY_EXTRA_REGISTERED_CLIENTS",
 		`[{"clientId":"portal","redirectURIs":["http://localhost:3000/auth/callback"]},`+
 			`{"clientId":"devtool","redirectURIs":["http://localhost:9999/cb"]}]`)
@@ -56,7 +56,7 @@ func TestExtraRegisteredClientsMergeById(t *testing.T) {
 	if !cfg.AllowsRedirectURI("portal", "http://localhost:3000/auth/callback") {
 		t.Error("the extra redirect URI is not accepted")
 	}
-	if !cfg.AllowsRedirectURI("portal", "https://cockpit.memql.localhost/portal/auth/callback") {
+	if !cfg.AllowsRedirectURI("portal", "https://api.memql.localhost/portal/auth/callback") {
 		t.Error("the original redirect URI stopped being accepted")
 	}
 

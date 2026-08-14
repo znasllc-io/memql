@@ -23,20 +23,20 @@ func TestRequireUnsubscribeValidatesBaseURL(t *testing.T) {
 		// to be told which variable to fix.
 		wantSubstr string
 	}{
-		{name: "https origin", baseURL: "https://cockpit.example.com"},
-		{name: "https origin with trailing slash", baseURL: "https://cockpit.example.com/"},
+		{name: "https origin", baseURL: "https://api.example.com"},
+		{name: "https origin with trailing slash", baseURL: "https://api.example.com/"},
 		{
 			// SERVER_PUBLIC_PATH deployments legitimately serve under a path,
 			// and unsubscribeURL preserves it.
 			name:    "https origin with base path",
-			baseURL: "https://cockpit.example.com/app",
+			baseURL: "https://api.example.com/app",
 		},
 		{name: "loopback http by name", baseURL: "http://localhost:8080"},
 		{name: "loopback http by v4 literal", baseURL: "http://127.0.0.1:8080"},
 		{name: "loopback http by v6 literal", baseURL: "http://[::1]:8080"},
 		{
 			name:       "plain http on a real host",
-			baseURL:    "http://cockpit.example.com",
+			baseURL:    "http://api.example.com",
 			refused:    true,
 			wantSubstr: "MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL",
 		},
@@ -44,7 +44,7 @@ func TestRequireUnsubscribeValidatesBaseURL(t *testing.T) {
 			// The trap the issue names: url.Parse accepts this, puts it all in
 			// Path, and it would concatenate into a relative URI.
 			name:       "no scheme at all",
-			baseURL:    "cockpit.example.com",
+			baseURL:    "api.example.com",
 			refused:    true,
 			wantSubstr: "absolute origin",
 		},
@@ -56,26 +56,26 @@ func TestRequireUnsubscribeValidatesBaseURL(t *testing.T) {
 		},
 		{
 			name:       "non-http scheme",
-			baseURL:    "ftp://cockpit.example.com",
+			baseURL:    "ftp://api.example.com",
 			refused:    true,
 			wantSubstr: "https",
 		},
 		{
 			// unsubscribeURL appends ?token=, so this would produce two.
 			name:       "carries a query string",
-			baseURL:    "https://cockpit.example.com?utm=1",
+			baseURL:    "https://api.example.com?utm=1",
 			refused:    true,
 			wantSubstr: "query string or fragment",
 		},
 		{
 			name:       "carries a fragment",
-			baseURL:    "https://cockpit.example.com#x",
+			baseURL:    "https://api.example.com#x",
 			refused:    true,
 			wantSubstr: "query string or fragment",
 		},
 		{
 			name:       "unparseable",
-			baseURL:    "https://cockpit.example.com/%zz",
+			baseURL:    "https://api.example.com/%zz",
 			refused:    true,
 			wantSubstr: "MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL",
 		},
@@ -114,7 +114,7 @@ func TestRequireUnsubscribeValidatesBaseURL(t *testing.T) {
 // running first (a bad URL is no reason to stop reporting an unset key).
 func TestRequireUnsubscribeAbsentValueMessagesUnchanged(t *testing.T) {
 	t.Run("no secret", func(t *testing.T) {
-		cfg := Config{UnsubscribeBaseURL: "https://cockpit.example.com"}
+		cfg := Config{UnsubscribeBaseURL: "https://api.example.com"}
 		reason := cfg.RequireUnsubscribe()
 		if !strings.Contains(reason, "MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET is not set") {
 			t.Fatalf("want the unset-secret message, got: %q", reason)
@@ -130,7 +130,7 @@ func TestRequireUnsubscribeAbsentValueMessagesUnchanged(t *testing.T) {
 	})
 
 	t.Run("secret is reported before an invalid url", func(t *testing.T) {
-		cfg := Config{UnsubscribeBaseURL: "http://cockpit.example.com"}
+		cfg := Config{UnsubscribeBaseURL: "http://api.example.com"}
 		reason := cfg.RequireUnsubscribe()
 		if !strings.Contains(reason, "MEMQL_CAMPAIGNS_UNSUBSCRIBE_SECRET is not set") {
 			t.Fatalf("want the unset-secret message to win, got: %q", reason)

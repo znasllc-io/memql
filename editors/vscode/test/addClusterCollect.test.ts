@@ -32,9 +32,10 @@ const ALL_FIELDS = Object.keys(DEFAULT_INPUTS) as InputField[];
 
 test("the form opens pre-filled with the installer's own domain default", () => {
   // Not invented here: scripts/install/hosts-entries.sh writes
-  // cockpit.memql.localhost,identity.memql.localhost,memql.localhost when given no
-  // --hostnames, and verify-frontdoor.sh checks the same hosts. A different
-  // value would make the form disagree with the scripts it is about to run.
+  // api.memql.localhost, identity.memql.localhost, portal.memql.localhost and
+  // the apex when given no --hostnames, and verify-frontdoor.sh probes the
+  // first two. A different value would make the form disagree with the scripts
+  // it is about to run.
   const state = new AddClusterState();
   assert.equal(state.inputs.domain, "memql.localhost");
   assert.equal(DEFAULT_INPUTS.domain, "memql.localhost");

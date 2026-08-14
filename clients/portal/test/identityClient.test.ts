@@ -45,7 +45,7 @@ describe("authorizeUrl", () => {
   it("builds an OAuth 2.1 code request with mandatory S256 PKCE", () => {
     const url = new URL(
       authorizeUrl(CROSS_ORIGIN, {
-        redirectUri: "https://cockpit.example.com/portal/auth/callback",
+        redirectUri: "https://api.example.com/portal/auth/callback",
         state: "STATE-VALUE",
         codeChallenge: "CHALLENGE-VALUE",
       }),
@@ -54,7 +54,7 @@ describe("authorizeUrl", () => {
     expect(url.searchParams.get("response_type")).toBe("code");
     expect(url.searchParams.get("client_id")).toBe("portal");
     expect(url.searchParams.get("redirect_uri")).toBe(
-      "https://cockpit.example.com/portal/auth/callback",
+      "https://api.example.com/portal/auth/callback",
     );
     expect(url.searchParams.get("state")).toBe("STATE-VALUE");
     expect(url.searchParams.get("code_challenge")).toBe("CHALLENGE-VALUE");
@@ -65,7 +65,7 @@ describe("authorizeUrl", () => {
 
   it("carries no verifier, no token, no secret", () => {
     const url = authorizeUrl(CROSS_ORIGIN, {
-      redirectUri: "https://cockpit.example.com/portal/auth/callback",
+      redirectUri: "https://api.example.com/portal/auth/callback",
       state: "STATE-VALUE",
       codeChallenge: "CHALLENGE-VALUE",
     });
@@ -113,7 +113,7 @@ describe("the token endpoints", () => {
     await exchangeAuthorizationCode(fetchImpl, CROSS_ORIGIN, {
       code: "AUTH-CODE",
       codeVerifier: "THE-VERIFIER",
-      redirectUri: "https://cockpit.example.com/portal/auth/callback",
+      redirectUri: "https://api.example.com/portal/auth/callback",
     });
 
     expect(new URL(seenUrl).search).toBe("");

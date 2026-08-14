@@ -16,22 +16,22 @@ import {
 
 test("derives a wss URL from a host:port endpoint", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:443" }),
-    "wss://cockpit.memql.localhost/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "api.memql.localhost:443" }),
+    "wss://api.memql.localhost/memql/ws",
   );
 });
 
 test("preserves a non-standard port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:8443" }),
-    "wss://cockpit.memql.localhost:8443/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "api.memql.localhost:8443" }),
+    "wss://api.memql.localhost:8443/memql/ws",
   );
 });
 
 test("handles an endpoint with no port", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "cockpit.memql.localhost" }),
-    "wss://cockpit.memql.localhost/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "api.memql.localhost" }),
+    "wss://api.memql.localhost/memql/ws",
   );
 });
 
@@ -51,15 +51,15 @@ test("uses ws for a 127.0.0.1 endpoint", () => {
 
 test("passes an explicit wss URL through unchanged", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "wss://cockpit.example.com/memql/ws" }),
-    "wss://cockpit.example.com/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "wss://api.example.com/memql/ws" }),
+    "wss://api.example.com/memql/ws",
   );
 });
 
 test("appends the bridge path to an explicit scheme without one", () => {
   assert.equal(
-    webSocketUrlFor({ name: "l", endpoint: "wss://cockpit.example.com" }),
-    "wss://cockpit.example.com/memql/ws",
+    webSocketUrlFor({ name: "l", endpoint: "wss://api.example.com" }),
+    "wss://api.example.com/memql/ws",
   );
 });
 
@@ -69,7 +69,7 @@ test("throws on an empty endpoint rather than dialing nowhere", () => {
 
 test("rejects a non-websocket scheme with a clear message rather than mangling it", () => {
   assert.throws(
-    () => webSocketUrlFor({ name: "l", endpoint: "https://cockpit.example.com" }),
+    () => webSocketUrlFor({ name: "l", endpoint: "https://api.example.com" }),
     /endpoint scheme must be ws:\/\/ or wss:\/\//,
   );
 });
@@ -106,7 +106,7 @@ test("identityBaseUrlFor prefers an explicit issuer, trimming its trailing slash
   assert.equal(
     identityBaseUrlFor({
       name: "l",
-      endpoint: "cockpit.memql.localhost:443",
+      endpoint: "api.memql.localhost:443",
       domain: "memql.localhost",
       issuer: "https://auth.example.com/",
     }),
@@ -116,14 +116,14 @@ test("identityBaseUrlFor prefers an explicit issuer, trimming its trailing slash
 
 test("identityBaseUrlFor falls back to the identity.<domain> convention", () => {
   assert.equal(
-    identityBaseUrlFor({ name: "l", endpoint: "cockpit.memql.localhost:443", domain: "memql.localhost" }),
+    identityBaseUrlFor({ name: "l", endpoint: "api.memql.localhost:443", domain: "memql.localhost" }),
     "https://identity.memql.localhost",
   );
 });
 
-test("identityBaseUrlFor derives from a cockpit.<domain> endpoint when no domain is stored", () => {
+test("identityBaseUrlFor derives from an api.<domain> endpoint when no domain is stored", () => {
   assert.equal(
-    identityBaseUrlFor({ name: "l", endpoint: "cockpit.staging.example.com:443" }),
+    identityBaseUrlFor({ name: "l", endpoint: "api.staging.example.com:443" }),
     "https://identity.staging.example.com",
   );
 });
@@ -139,8 +139,8 @@ test("identityBaseUrlFor returns undefined when nothing names the identity servi
 // the composer (memql#3475)
 // -----------------------------------------------------------------------------
 
-test("composeEndpointFromDomain applies the cockpit.<domain>:443 convention", () => {
-  assert.equal(composeEndpointFromDomain("staging.example.com"), "cockpit.staging.example.com:443");
+test("composeEndpointFromDomain applies the api.<domain>:443 convention", () => {
+  assert.equal(composeEndpointFromDomain("staging.example.com"), "api.staging.example.com:443");
 });
 
 test("composeEndpointFromDomain normalizes what an operator actually types", () => {
@@ -149,12 +149,12 @@ test("composeEndpointFromDomain normalizes what an operator actually types", () 
   // the endpoint the same operator composes without them, so they are
   // normalized in ONE place rather than at each of the three call sites.
   for (const typed of ["  memql.localhost  ", "memql.localhost.", ".memql.localhost"]) {
-    assert.equal(composeEndpointFromDomain(typed), "cockpit.memql.localhost:443", typed);
+    assert.equal(composeEndpointFromDomain(typed), "api.memql.localhost:443", typed);
   }
 });
 
 test("composeEndpointFromDomain answers empty for a domain that names nothing", () => {
-  // Not `cockpit.:443`. Every caller's next question is "did that name
+  // Not `api.:443`. Every caller's next question is "did that name
   // anything", and a hostname built around a hole only moves the check
   // downstream.
   assert.equal(composeEndpointFromDomain(""), "");
@@ -167,7 +167,7 @@ test("the composed endpoint is one the dialer accepts, and identity's sibling ag
   // leans on, so what one produces the other must accept -- and the endpoint
   // must still name the identity service the sign-in flow POSTs to.
   const endpoint = composeEndpointFromDomain("staging.example.com");
-  assert.equal(webSocketUrlFor({ name: "s", endpoint }), "wss://cockpit.staging.example.com/memql/ws");
+  assert.equal(webSocketUrlFor({ name: "s", endpoint }), "wss://api.staging.example.com/memql/ws");
   assert.equal(
     identityBaseUrlFor({ name: "s", endpoint }),
     "https://identity.staging.example.com",

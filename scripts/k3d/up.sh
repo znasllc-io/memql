@@ -20,10 +20,10 @@
 # to GitHub first; then run `make up`.  Subsequent iteration uses
 # `make dev` (E0.4): rebuild → k3d image import → argo sync.
 #
-# Port-forwards exposed by the cluster:
-#   8085  -> identity
-#   7880  -> livekit
-#   5432  -> postgres (optional debug access)
+# Ports exposed by the cluster:
+#   443   -> the front door (traefik; TLS terminated here, routed by hostname)
+#   80    -> the front door (redirects)
+#   5432  -> postgres (debug access only, never a connection path)
 #
 # The engine repo runs the engine mesh only -- product frontends belong to their
 # own repos, which reuse this script with their own
@@ -34,7 +34,7 @@
 #
 # The memQL Portal -- the Cockpit's graphical sibling -- is served BY the bff
 # and reached through the same front door, at
-# https://cockpit.memql.localhost/portal/ (memql#3314). Its bundle is baked into
+# https://api.memql.localhost/portal/ (memql#3314). Its bundle is baked into
 # the bff image by the Dockerfile's portal stage, so `make dev NODE=bff`
 # rebuilds it like any other change to that node.
 #
@@ -225,23 +225,23 @@ function create_cluster() {
 
     info "Creating cluster with ${K3D_SERVERS} server(s) and ${K3D_AGENTS} agent(s)..."
 
-    # Port-forward table (engine mesh only; #2204):
-    #   8085:8085  identity HTTP
-    #   7880:7880  livekit WebSocket
-    #   5432:5432  postgres (debug)
-    # The bff client edge (:50051) is reached on demand via
-    # `kubectl port-forward -n memql svc/bff 50051:50051` (mcp also serves :50051).
+    # Host-port mappings -- NOT port-forwards, which is the distinction the
+    # rest of this comment turns on. The FRONT DOOR is the connection path:
+    # traefik terminates TLS on 443 and routes by hostname, exactly as the
+    # cloud ingress does. 80 is kept for redirects.
+    #
+    # 5432 is DEBUG ONLY and is not a connection path -- see
+    # docs/public/operate/environment-parity.md. The identity (8085) and
+    # livekit (7880) mappings were deleted: 8085 was a second entrance to a
+    # service the front door already serves, and 7880 pointed at a Deployment
+    # this overlay removes (local voice uses LiveKit Cloud).
+    #
     # Downstream stacks add their own LoadBalancer mappings (e.g. a product
     # gRPC head or frontend) via --extra-ports=host:container,... -- k3d LB
     # ports are fixed at cluster-create time, so they must be declared here.
     local port_args=(
-        # Front door: the in-cluster ingress (traefik, bundled with k3s)
-        # terminates TLS on 443 and routes by hostname -- same shape as the
-        # cloud ingress. 80 is kept for redirects.
         --port "443:443@loadbalancer"
         --port "80:80@loadbalancer"
-        --port "8085:8085@loadbalancer"
-        --port "7880:7880@loadbalancer"
         --port "5432:5432@loadbalancer"
     )
     if [ -n "${EXTRA_PORTS}" ]; then
@@ -555,14 +555,14 @@ function kustomize_host_overrides() {
       patches:
         - target:
             kind: Ingress
-            name: cockpit-front-door
+            name: api-front-door
           patch: |-
             - op: replace
               path: /spec/rules/0/host
-              value: cockpit.${DOMAIN}
+              value: api.${DOMAIN}
             - op: replace
               path: /spec/tls/0/hosts/0
-              value: cockpit.${DOMAIN}
+              value: api.${DOMAIN}
         - target:
             kind: Ingress
             name: identity-front-door
@@ -713,10 +713,9 @@ function print_summary() {
         echo "  Namespace:      ${NAMESPACE}"
         echo ""
         echo "  Entry points (front door on 443; *.memql.localhost resolves to 127.0.0.1):"
-        echo "    https://identity.memql.localhost          identity (web UI + JWKS)"
-        echo "    https://cockpit.memql.localhost/portal/   memQL Portal (graphical ops console)"
-        echo "    ws://localhost:7880                     livekit"
-        echo "    localhost:5432                          postgres (debug)"
+        echo "    https://identity.memql.localhost         identity (web UI + JWKS)"
+        echo "    https://api.memql.localhost/portal/      memQL Portal (graphical ops console)"
+        echo "    localhost:5432                           postgres (debug)"
         echo ""
         echo "  Client edge (Cockpit / SDKs), on demand:"
         echo "    kubectl port-forward -n ${NAMESPACE} svc/bff 50051:50051"

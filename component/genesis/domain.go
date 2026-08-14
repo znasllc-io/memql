@@ -53,23 +53,37 @@ func DomainDerivations(domain string) map[string]string {
 	}
 
 	identity := "https://identity." + d
-	cockpit := "https://cockpit." + d
+	api := "https://api." + d
 	app := "https://app." + d
 
-	// The cockpit client is loopback BY DESIGN (RFC 8252 native-client
-	// redirect), so it carries no domain and is spelled out here unchanged.
+	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
+	// redirect), so it carries no domain and is spelled out unchanged. Note
+	// that the client is still called "cockpit" -- what was renamed is the
+	// HOST it dials, not the OAuth client id.
+	//
+	// THE PORTAL'S REDIRECT URI IS A FUNCTION OF WHERE ITS BUNDLE IS SERVED,
+	// not of the front door's name. The page composes it as
+	// `location.origin + import.meta.env.BASE_URL + "auth/callback"`
+	// (clients/portal/src/auth/AuthProvider.tsx defaultRedirectUri, via
+	// portalRedirectPath), and identity matches redirect_uri by EXACT string --
+	// so a URI registered for an origin the bundle is not served from is a 400
+	// at /authorize with nothing in the portal's own logs. The bundle is served
+	// at /portal/ on the bff, so `api.<d>/portal/auth/callback` is the value
+	// until memql#3711 gives the portal its own origin, and it moves then.
+	// The `portal.<d>` CORS origin below is deliberate and separate: memql#3714
+	// needs it, and an unused allowed origin is inert.
 	clients := fmt.Sprintf(
 		`[{"clientId":"app","redirectURIs":["%s/auth/callback"]},`+
 			`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},`+
 			`{"clientId":"portal","redirectURIs":["%s/portal/auth/callback"]}]`,
-		app, cockpit)
+		app, api)
 
 	return map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 identity,
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
-		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "cockpit." + d + ":443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     cockpit + "," + app,
+		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api." + d + ":443",
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + ",https://portal." + d,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
 	}
 }

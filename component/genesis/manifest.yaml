@@ -364,7 +364,7 @@ variables:
     component: campaigns
     scope: global
     optional: true
-    description: "Public origin the unsubscribe link points at, e.g. https://cockpit.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail. VALIDATED, not just checked for presence (memql#3481): must be an absolute https origin (http is accepted only for a loopback host, so the local cluster still runs), with no query string or fragment -- RFC 8058 section 3.1 requires an HTTPS URI and providers silently ignore one-click on anything else. A trailing path is allowed and preserved, for deployments served under SERVER_PUBLIC_PATH. A value that is set and invalid refuses the send at campaignStartSend and warns once at worker boot; it is not fatal to the node, because a node that never sends campaigns does not need this set at all."
+    description: "Public origin the unsubscribe link points at, e.g. https://api.example.com. REQUIRED to send. Must be the externally reachable bff origin -- the recipient's mail client POSTs to it, so an internal address makes one-click silently fail. VALIDATED, not just checked for presence (memql#3481): must be an absolute https origin (http is accepted only for a loopback host, so the local cluster still runs), with no query string or fragment -- RFC 8058 section 3.1 requires an HTTPS URI and providers silently ignore one-click on anything else. A trailing path is allowed and preserved, for deployments served under SERVER_PUBLIC_PATH. A value that is set and invalid refuses the send at campaignStartSend and warns once at worker boot; it is not fatal to the node, because a node that never sends campaigns does not need this set at all."
 
   - name: MEMQL_CAMPAIGNS_SEND_RATE_PER_MINUTE
     component: campaigns
@@ -1186,7 +1186,7 @@ variables:
     component: identity
     scope: node
     optional: true
-    description: "The gRPC dial address the cluster advertises in /.well-known/memql-config.json and hands to a redeeming worker -- the FRONT DOOR, cockpit.<domain>:443, declared in deploy/k8s/base/identity.yaml and patched per overlay. Published to the discovery document as a bare host:port (memql#3399); relayed to a paired worker with its transport stated, which a bare value cannot do -- write https:// if that listener is TLS on a non-standard port (memql#3437). Empty derives from MEMQL_IDENTITY_BASE_URL's host, which serves HTTP and no MemqlService, so set it. Its siblings MEMQL_DISCOVERY_CLIENT_ID and MEMQL_DISCOVERY_CLUSTER_NAME are read only through the handler's injected env accessor."
+    description: "The gRPC dial address the cluster advertises in /.well-known/memql-config.json and hands to a redeeming worker -- the FRONT DOOR, api.<domain>:443, declared in deploy/k8s/base/identity.yaml and patched per overlay. Published to the discovery document as a bare host:port (memql#3399); relayed to a paired worker with its transport stated, which a bare value cannot do -- write https:// if that listener is TLS on a non-standard port (memql#3437). Empty derives from MEMQL_IDENTITY_BASE_URL's host, which serves HTTP and no MemqlService, so set it. Its siblings MEMQL_DISCOVERY_CLIENT_ID and MEMQL_DISCOVERY_CLUSTER_NAME are read only through the handler's injected env accessor."
 
   - name: MEMQL_DOMAIN
     component: platform

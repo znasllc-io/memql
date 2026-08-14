@@ -503,7 +503,7 @@ smoke("sign-in and sign-out are reachable from the palette and the Clusters view
 // or rejects here and nowhere in the fast lane.
 //
 // The fixture cluster deliberately names NO identity service (no `issuer`, no
-// `domain`, and an endpoint with no `cockpit.` prefix to imply one), so the
+// `domain`, and an endpoint with no `api.` prefix to imply one), so the
 // flow refuses with kind `misconfigured` before a port is bound or a browser is
 // opened. That is what makes this case safe to run unattended: no network, no
 // browser, and nothing persisted.

@@ -27,7 +27,7 @@ const CONFIG: PortalRuntimeConfig = {
   authEnabled: true,
 };
 
-const REDIRECT_URI = "https://cockpit.example.com/portal/auth/callback";
+const REDIRECT_URI = "https://api.example.com/portal/auth/callback";
 const DEEP_LINK = "/concepts/v1:cluster:node";
 
 function memoryStorage(): StorageLike & { map: Map<string, string> } {

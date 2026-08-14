@@ -117,7 +117,7 @@ function parse_arguments() {
     done
 
     IDENTITY_HOST="identity.${DOMAIN}"
-    COCKPIT_HOST="cockpit.${DOMAIN}"
+    API_HOST="api.${DOMAIN}"
 }
 
 #=============================================================================
@@ -291,15 +291,15 @@ function bring_up_cluster() {
 function verify_tls() {
     section "Verifying the front door's certificate"
     local issuer
-    issuer="$(echo | openssl s_client -connect "${COCKPIT_HOST}:443" -servername "${COCKPIT_HOST}" 2>/dev/null \
+    issuer="$(echo | openssl s_client -connect "${API_HOST}:443" -servername "${API_HOST}" 2>/dev/null \
         | openssl x509 -noout -issuer 2>/dev/null || true)"
 
     if [[ -z "$issuer" ]]; then
-        die 5 "nothing answered TLS on ${COCKPIT_HOST}:443 -- is the cluster up, and does /etc/hosts point ${COCKPIT_HOST} at 127.0.0.1?"
+        die 5 "nothing answered TLS on ${API_HOST}:443 -- is the cluster up, and does /etc/hosts point ${API_HOST} at 127.0.0.1?"
     fi
     if grep -qi "TRAEFIK DEFAULT CERT" <<<"$issuer"; then
         error "the front door is serving Traefik's default certificate, not the mkcert wildcard."
-        error "the 'local-znas-tls' secret is missing. Run: make secrets"
+        error "the 'memql-front-door-tls' secret is missing. Run: make secrets"
         die 5 "front door is on the default certificate"
     fi
     info "issuer: ${issuer#issuer=}"

@@ -176,9 +176,10 @@ No file under `deploy/` names a domain.
 
 The installer points the front-door hostnames at 127.0.0.1 -- unless they
 already resolve there. If your own DNS answers 127.0.0.1 for
-`cockpit.<domain>`, `identity.<domain>` and the apex, the hosts block is
-skipped entirely and no elevation prompt appears. A hostname resolving to some
-OTHER address is refused rather than shadowed, naming the address it answered.
+`api.<domain>`, `identity.<domain>`, `portal.<domain>` and the apex, the hosts
+block is skipped entirely and no elevation prompt appears. A hostname resolving
+to some OTHER address is refused rather than shadowed, naming the address it
+answered.
 
 Note that a resolver honouring RFC 6761 -- systemd-resolved does -- already
 answers every `*.localhost` name on loopback, so on those machines the default
@@ -202,22 +203,27 @@ back to the base manifests' staging placeholder issuer, boot, form a mesh, and
 reject every token with an error naming neither the domain nor the ConfigMap --
 so refusing to start is the honest failure.
 
-## Port-forward reference
+## Port reference
 
-After `make up`, these local ports are forwarded from the k3d cluster:
+After `make up`, these host ports are mapped to the k3d cluster:
 
 | Port | Service |
 |------|---------|
-| `8085` | identity service (direct) |
-| `7880` | livekit (WebSocket) |
-| `5432` | Postgres (direct) |
+| `443` | the front door (traefik: TLS terminated here, routed by hostname) |
+| `80` | the front door (redirects) |
+| `5432` | Postgres -- debug only, never a connection path |
+
+The identity (`8085`) and livekit (`7880`) mappings are gone: 8085 was a second
+entrance to a service the front door already serves, which is what
+[environment-parity.md](environment-parity.md) forbids, and 7880 pointed at a
+livekit Deployment this overlay removes (local voice uses LiveKit Cloud).
 
 The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
 plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
 the engine repo's local overlay (#2204); they are wired from the product's own
 overlay (the client image + the `dsl-bundle` component). Clients (the Cockpit,
 SDKs) connect to the product-neutral `bff` node **exactly as in staging/prod** --
-through the `cockpit.memql.localhost` traefik front door (TLS on 443, mkcert
+through the `api.memql.localhost` traefik front door (TLS on 443, mkcert
 `*.memql.localhost` wildcard, h2c gRPC to `svc/bff:50051`); no port-forward is in
 the connection path (see [environment-parity.md](environment-parity.md)). For
 low-level gRPC debugging only, a raw port-forward is still available:
@@ -228,9 +234,9 @@ kubectl port-forward -n memql svc/bff 50051:50051   # debug only; not the connec
 
 Access identity: `https://identity.memql.localhost` (front-door TLS -- needs a
 `*.memql.localhost` hosts entry; the cert is issued and seeded by `make up` /
-`make secrets`, see [Front-door TLS](#front-door-tls)). `http://localhost:8085`
-reaches identity directly, for low-level debugging only -- it is not the
-connection path.
+`make secrets`, see [Front-door TLS](#front-door-tls)). The front door is the
+ONLY entrance; for low-level debugging a raw
+`kubectl port-forward -n memql svc/identity 8085:8085` still works.
 Access the engine gRPC head: `localhost:50051` (after the port-forward above)
 
 ## Inner-loop dev

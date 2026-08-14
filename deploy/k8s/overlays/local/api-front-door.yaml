@@ -1,0 +1,82 @@
+# The API front door. One host, two backends -- the constraint that shapes
+# this file is that an ingress controller's backend protocol is a per-SERVICE
+# setting, which is why `bff` and `bff-http` exist as two Services over one
+# Deployment (see deploy/k8s/components/engine-bff/bff.yaml).
+#
+# THE HTTP PATH LIST IS GENERATED, NOT AUTHORED. `make frontdoor-paths` emits
+# it from server.PublicPaths() + HandlerAuthorizedPaths() +
+# SelfAuthenticatedPaths(); `make frontdoor-paths-check` fails CI when the two
+# disagree. Hand-editing the block below will be reverted by the generator.
+# The reason is memql's own history: /inbound/{source} and /unsubscribe are
+# documented public HTTP exceptions that third parties dial, and NO overlay in
+# this repo routed either one -- a missing rule does not 404, it hands an
+# HTTP/1.1 request to an h2c backend.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
+# choosing another domain overrides it through the ArgoCD Application's
+# spec.source.kustomize.patches, emitted by scripts/k3d/up.sh. The default is
+# committed so that a plain `kubectl apply -k` still produces a working front
+# door, and so that the common case carries no generated YAML at all.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["api.memql.localhost"]
+      secretName: memql-front-door-tls
+  rules:
+    - host: api.memql.localhost
+      http:
+        paths:
+          # BEGIN generated bff HTTP paths -- make frontdoor-paths
+          # END generated bff HTTP paths
+          #
+          # TEMPORARY, AND NOT HAND-EDITS OF THE BLOCK ABOVE. The generator owns
+          # the space BETWEEN the markers; these three sit outside it and are
+          # superseded wholesale by memql#3703, which emits the full HTTP path
+          # list and deletes them.
+          #
+          # They exist because a missing rule here does not 404 -- it hands an
+          # HTTP/1.1 request to an h2c backend, which is the defect this file's
+          # header describes. /portal and /memql/ws are INHERITED from the
+          # cockpit-front-door.yaml this file replaces, and dropping them for
+          # even one commit would break the bundle and the bridge every browser
+          # client dials. /healthz is NOT inherited: no overlay ever routed it,
+          # so it is a latent defect rather than a regression -- but
+          # `curl https://api.<domain>/healthz` is documented acceptance for the
+          # front door, and an acceptance command that cannot pass is worse than
+          # a third temporary rule.
+          - path: /portal
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          # HTTP/1.1 with an Upgrade, NOT gRPC -- it must reach the plain-HTTP
+          # backend even though it tunnels to MemqlService.Stream beyond it.
+          - path: /memql/ws
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: bff-http
+                port:
+                  number: 8085
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bff
+                port:
+                  number: 50051

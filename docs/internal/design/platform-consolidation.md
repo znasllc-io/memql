@@ -137,7 +137,7 @@ loses the build-tag binary-size wins.
 ### 5. Cockpit → ops-console variant; drop the module
 The cockpit is a thick Go TUI and is product-neutral (reads only engine/cluster
 concepts). Its "BFF" is just a plain engine `bff` image deployed as its edge
-(`cockpit.<domain>`), no product DSL bundle. The bespoke `cockpit-bff` module
+(`api.<domain>`), no product DSL bundle. The bespoke `cockpit-bff` module
 ([memql-cockpit#289](https://github.com/znasllc-io/memql-cockpit/issues/289)) —
 a workaround for the engine not shipping a `bff` image (#2204) — is **deleted**
 once the engine ships a product-neutral `bff` again. The connection flip (#291)

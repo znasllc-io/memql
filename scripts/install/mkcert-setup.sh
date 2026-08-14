@@ -7,7 +7,7 @@
 # door's wildcard certificate.
 #
 # The local cluster is reached exactly as staging is: over TLS, at
-# https://cockpit.memql.localhost and https://identity.memql.localhost (env
+# https://api.memql.localhost and https://identity.memql.localhost (env
 # parity -- docs/public/operate/environment-parity.md). Traefik terminates
 # that with the browser-trusted `*.memql.localhost` pair which
 # scripts/k3d/seed-secrets.sh loads into the cluster as the memql-front-door-tls
