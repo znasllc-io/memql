@@ -310,6 +310,8 @@ frontend coordination.
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
+| **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in `api-front-door.yaml` from `component/server`'s path declarations. Run after adding an HTTP route |
+| **Front-door path gate** | `make frontdoor-paths-check` | Fail when that block is stale. The drift it catches is an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703) |
 
 ---
 
@@ -608,6 +610,43 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
 | **Portal SPA assets** | `GET /portal/*` (bff only) | A browser cannot fetch its own bundle over gRPC -- the request that loads the application is made before any application code exists to speak a protocol. Same category as the `/memql/ws` upgrade and identity's web UI (memql#3314). Static bytes only, identical for every visitor: declared in `server.PublicPaths()` via `PortalPaths()`, while the DATA the portal reads stays gated on the `/memql/ws` stream it then dials. Served by `component/portal` from `MEMQL_PORTAL_DIST` |
+
+### How an HTTP path reaches the front door (GENERATED, memql#3703)
+
+Every HTTP path above needs its own Ingress rule, and **that rule list is
+generated, not authored**. An ingress controller's backend protocol is a
+per-**Service** setting, so the bff's gRPC edge (`bff`, :50051, h2c) and its HTTP
+edge (`bff-http`, :8085) are two Services over one Deployment -- and a path with
+no rule falls through to the `/` h2c catch-all. **That is not a 404: it is an
+HTTP/1.1 request handed to an h2c backend, which fails with a protocol error
+naming nothing.** Hand-maintaining the list left `/inbound/{source}` and
+`GET+POST /unsubscribe` -- two of the exceptions in the table above, both dialled
+by third parties -- routed by no overlay in this repository at all.
+
+`cmd/frontdoorpaths` emits the block between the markers in
+`deploy/k8s/overlays/local/api-front-door.yaml`. Two things about the derivation
+are load-bearing:
+
+- **It is per-ROUTE, not per-authentication-tier.** `server.PublicPaths()` +
+  `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` answer *who may reach
+  this without a bearer*. An **authenticated** HTTP route appears in none of
+  them, which is how `/spaces/` (attachment upload), `/polyphon/room-token` and
+  `/polyphon/status` came to be served by the bff and routed by nothing. The
+  generator unions the aggregates **and** every per-route declaration a
+  bff-tagged build mounts.
+- **It over-approximates deliberately.** Paths only the identity node serves
+  (`JWKSPaths()`, `IdentityDiscoveryPaths()`) are kept: over-approximating a
+  routing rule costs a 404, under-approximating costs a protocol error naming
+  nothing. When in doubt, include.
+
+Two gates make it non-recurring. `TestFrontDoorPathsAreNotStale` fails when the
+checked-in block is not what the generator produces
+(`make frontdoor-paths-check`), and `TestEveryServerPathDeclarationIsClassified`
+AST-scans `component/server` for every `func …Paths() []string` and fails when
+one is classified by none of the generator's three maps. **So a new HTTP path
+either reaches the front door or breaks the build.** Do not hand-edit the block
+and do not "simplify" the generator back to the three aggregates -- its package
+comment says why, at length, because both changes look like cleanups.
 
 ### gRPC-Only Endpoints (HTTP Retired)
 
