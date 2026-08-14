@@ -287,3 +287,91 @@ func lcsAuthoredPairs(a, b []string) []authoredPair {
 	}
 	return pairs
 }
+
+// constructAnchor is the fallback position for a failure that IS attributable
+// to one named construct but carries no parser position of its own
+// (memql#3801).
+//
+// THE PROBLEM IT SOLVES. resolveAuthoredPosition above needs a
+// languageParser.ParseError to map. A CONCEPT-RESOLUTION failure has none: it
+// is raised before the per-construct parse that would produce one. So every
+// such diagnostic emitted zero, the client honestly rendered that as "no
+// position", and nine failures in one bundle stacked nine underlines on line 1
+// -- with the failing construct identifiable only by reading constructName out
+// of the message text.
+//
+// WHY THIS DOES NOT WEAKEN THE #2375 CONTRACT. That contract is "never emit a
+// WRONG line" -- zero means absent, and a guess is worse than nothing. This is
+// not a guess. The failure is already attributed to this construct by name, and
+// BundleLine is the bundle line where the splitter found this construct's body
+// VERBATIM (strings.Index, not a heuristic). Pointing at the construct that
+// failed is the coarsest TRUE position, not the finest false one.
+//
+// The rule the contract actually encodes is: do not report a position you
+// cannot establish. It was being read as: do not report a position you cannot
+// establish PRECISELY. Those differ, and the difference is nine underlines on
+// line 1.
+//
+// A failure attributable to NO construct still gets nothing, because there is
+// no construct to anchor to -- BundleLine is zero and this returns zero, which
+// is the same path a body the splitter could not locate verbatim takes.
+func constructAnchor(c SandboxConstruct) authoredPosition {
+	if c.BundleLine <= 0 {
+		return authoredPosition{}
+	}
+	line := c.BundleLine + signatureLineOffset(c)
+	return authoredPosition{Line: line, Column: 1, EndLine: line}
+}
+
+// signatureLineOffset finds the construct's SIGNATURE line within its own body,
+// as an offset from the body's first line.
+//
+// The body begins at whatever the slicer captured, which for most kinds is the
+// `@`-annotation preamble -- so anchoring at the body's first line would
+// underline `@description("...")` rather than `query allPlans {`. The signature
+// is what the author is looking for.
+//
+// Scanning rather than parsing, because this runs on the failure path of a
+// construct that by definition did not compile. It looks for the first line
+// whose first token is the kind's own keyword, and returns 0 -- the body's
+// first line -- when it finds none. BOTH answers are inside the construct's own
+// span, so the fallback is coarser rather than wrong.
+func signatureLineOffset(c SandboxConstruct) int {
+	keywords := signatureKeywords(c.Kind)
+	if len(keywords) == 0 {
+		return 0
+	}
+	body := c.Source
+	// The prepended import preamble is not part of the authored body; skip it
+	// so the offset is relative to the same line BundleLine names.
+	for i := 0; i < c.BundlePreambleLines; i++ {
+		nl := strings.Index(body, "\n")
+		if nl < 0 {
+			return 0
+		}
+		body = body[nl+1:]
+	}
+	for i, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		for _, kw := range keywords {
+			if line == kw || strings.HasPrefix(line, kw+" ") {
+				return i
+			}
+		}
+	}
+	return 0
+}
+
+// signatureKeywords maps a construct kind to the keyword(s) its signature line
+// can begin with. "mutation" is declared with `mutate`, which is the one place
+// the kind name and the keyword differ.
+func signatureKeywords(kind string) []string {
+	switch kind {
+	case "mutation":
+		return []string{"mutate"}
+	case "query", "logic", "concept", "shape", "spec", "trait", "automation", "action", "capability", "seed":
+		return []string{kind}
+	default:
+		return nil
+	}
+}

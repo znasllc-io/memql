@@ -21,16 +21,16 @@
 # One cluster now carries two environments in two namespaces, so "which
 # Deployments" is no longer answerable without saying which environment:
 #
-#     prod     -> memql-prod        the default; `make scale N=2` means prod
+#     local    -> memql             the default; the k3d cluster `make up` brings up
 #     staging  -> memql-staging     `make scale N=0 ENV=staging` parks it
-#     local    -> memql             the k3d cluster `make up` brings up
+#     prod     -> memql-prod        `make scale N=2 ENV=prod`
 #
-# --env DEFAULTS TO prod, which means `make scale N=2` on a developer laptop no
-# longer scales the local cluster -- it asks for a `memql-prod` namespace that
-# is not there and fails with exit 4 naming both. That is the intended shape:
-# the default names the environment an operator on the cloud cluster means, and
-# the local loop says so explicitly (`make scale N=2 ENV=local`). It fails
-# closed either way; the two can never be confused silently.
+# --env DEFAULTS TO local -- see the CONFIGURATION block below for why the
+# direction of that default is the safety property rather than a convenience.
+# Naming a REMOTE environment is explicit (`ENV=staging` / `ENV=prod`), and an
+# environment absent from the current kubectl context fails with exit 4 naming
+# both the environment and the namespace, so the two can never be confused
+# silently.
 #
 # --namespace still overrides, for a cluster whose namespaces are named
 # something else. MEMQL_K3D_NAMESPACE is honoured for `local` ONLY, because it

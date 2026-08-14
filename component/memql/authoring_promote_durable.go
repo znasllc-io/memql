@@ -5,10 +5,10 @@ package memql
 // (memql#1557, approach (b)).
 //
 // PromoteAuthoredConstruct (authoring_session.go) makes a validated session
-// construct durable for the PROCESS: it upserts the compiled *Function / *Spec
-// into the shared e.functions / e.specs (core-first, never-shadow) so every
-// session can call it. But that registration is in-memory only -- a restart
-// loses it.
+// construct durable for the PROCESS: it upserts the compiled *Function / *Spec /
+// *Concept into the shared e.functions / e.specs / e.concepts (core-first,
+// never-shadow) so every session can call it. But that registration is in-memory
+// only -- a restart loses it.
 //
 // This file adds the DB-persisted counterpart WITHOUT routing a plain construct
 // through the automation-only Gate-2 / ActivateApprovedBundle pipeline (that
@@ -17,7 +17,8 @@ package memql
 // construct callable-by-all). Instead it:
 //
 //	a. relies on the Gate-1 compile/bind already performed by AuthorSessionBundle
-//	   (the construct arrives already compiled -- *Function or *Spec on .Compiled);
+//	   (the construct arrives already compiled -- *Function, *Spec or *Concept on
+//	   .Compiled);
 //	b. persists a v1:authoring:bundle + v1:authoring:construct row pair via the
 //	   EXISTING #954 mutations (createAuthoringBundle /
 //	   createAuthoringConstruct) -- NO new DSL -- capturing source + kind
@@ -102,8 +103,8 @@ type PromoteBundleResult struct {
 }
 
 // PromoteBundleDurable validates a `.memql` bundle through the Gate-1 sandbox,
-// then durably promotes every PLAIN construct (query / mutation / logic / spec /
-// trait) it defines into the shared engine registry (issue
+// then durably promotes every PLAIN construct (concept / query / mutation /
+// logic / spec / trait) it defines into the shared engine registry (issue
 // znasllc-io/memql-cockpit#232). It is the bundle-level entry point the
 // owner-gated gRPC durable-promote handler drives, reusing the exact validate +
 // compile path AuthorSessionBundle uses (so a construct arrives compiled) and
@@ -143,11 +144,11 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 		return result, err
 	}
 
-	// Promote each PLAIN construct (the function family + spec/trait) into the
-	// shared registry. The other recognized kinds are NOT durably promoted by
-	// THIS path, by deliberate design (E1 #2372):
+	// Promote each PLAIN construct (concept + the function family + spec/trait)
+	// into the shared registry. The other recognized kinds are NOT durably
+	// promoted by THIS path, by deliberate design (E1 #2372):
 	//
-	//   - concept / shape register as session metadata only;
+	//   - shape registers as session metadata only;
 	//   - automation / action / capability are the world-touching deployment
 	//     kinds. Their LIVE activation (an automation's scheduler trigger
 	//     registration + boot re-arm) is the separate owner-gated Gate-3 path
@@ -204,7 +205,7 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 		return fmt.Errorf("authoring: durable promote requires an authenticated owner")
 	}
 	if !isDurablePromotableKind(c.Kind) {
-		return fmt.Errorf("authoring: durable promotion of %s constructs is not supported (function-family + spec only)", c.Kind)
+		return fmt.Errorf("authoring: durable promotion of %s constructs is not supported (concept + function-family + spec only)", c.Kind)
 	}
 	// Gate 1 was already run by AuthorSessionBundle when the construct was
 	// defined (it arrives compiled). Confirm the compiled form is present so we
@@ -279,11 +280,22 @@ func (e *MemQLEngine) publishAuthoringPromote(bundleId, owner string) {
 }
 
 // isDurablePromotableKind reports whether a construct kind can be durably
-// promoted into the shared registry (the function family + spec/trait), matching
-// PromoteAuthoredConstruct's supported set.
+// promoted into the shared registry -- concept, the function family, and
+// spec/trait -- matching PromoteAuthoredConstruct's supported set.
+//
+// `concept` is the memql#3746 addition and the anchor of the training epic: a
+// customer's domain arrives as nouns first, and every other kind binds to one.
+//
+// The DEMOTE path shares this predicate, and for `concept` the two now differ:
+// promotable, not yet demotable. That asymmetry is deliberate rather than an
+// oversight -- withdrawing a concept would strand rows already written under it,
+// so its semantics are their own decision (memql#3756). The predicate is left
+// shared because the refusal it lets through is the RIGHT one: a demote of a
+// concept reaches DemoteAuthoredConstruct's explicit concept branch, which names
+// the reason, instead of dying against a generic "unsupported kind" here.
 func isDurablePromotableKind(kind string) bool {
 	switch kind {
-	case "query", "mutation", "logic", "spec", "trait":
+	case "concept", "query", "mutation", "logic", "spec", "trait":
 		return true
 	default:
 		return false
@@ -485,11 +497,18 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 	}
 	switch row.Kind {
 	case "query", "mutation", "logic":
-		// Bind against the live concept registry clone (core + nothing else --
-		// a promoted construct's concept deps are core; bundle-defined concepts
-		// are not durably promoted by this path).
-		_, concepts := compileBundle([]SandboxConstruct{sc})
-		fn, err := compileAuthoredFunction(sc, concepts)
+		// Bind against a clone of THIS ENGINE's live concept registry.
+		//
+		// This used to clone the package-level default, justified by "a promoted
+		// construct's concept deps are core; bundle-defined concepts are not
+		// durably promoted by this path". That was true until memql#3746 made
+		// concepts promotable, and is now exactly backwards: the first thing
+		// anyone promotes a concept FOR is a query or mutation bound to it, and
+		// a promoted concept lives in whichever registry THIS engine holds. In
+		// production the two are the same object so nothing changes; on an
+		// engine bound to a clone (BuildOfflineSense, tests) it is the
+		// difference between the binding resolving and not.
+		fn, err := compileAuthoredFunction(sc, e.conceptBindingRegistry())
 		if err != nil {
 			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
 		}
@@ -538,6 +557,22 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 			return errRehydrateSkippedDisabled
 		}
 		c.Compiled = spec
+	case "concept":
+		// memql#3746. The stored source is re-compiled through the same
+		// buildCandidateConcept the session define and Gate 1 use, so a
+		// re-hydrated concept is subject to every check a freshly-promoted one
+		// is -- including the reserved-property refusal, which no separate
+		// re-hydration-side guard therefore has to restate.
+		//
+		// The persisted row's Name is the DECLARATION name; the canonical id is
+		// re-derived from the source's @namespace, exactly as at promote time.
+		// That keeps the id a property of the source rather than of the row, so
+		// there is no second place for it to be stored wrong.
+		concept, err := compileAuthoredConcept(sc)
+		if err != nil {
+			return explainStaleGrammarStamp(row, fmt.Errorf("recompile %s %q: %w", row.Kind, row.Name, err))
+		}
+		c.Compiled = concept
 	default:
 		return fmt.Errorf("re-hydration of %s constructs is not supported", row.Kind)
 	}

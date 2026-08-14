@@ -154,10 +154,12 @@ func compileBundle(constructs []SandboxConstruct) (SandboxReport, *memoryNodes.M
 		return total[key] > 1 && seenSoFar[key] > 1
 	}
 	dupDiag := func(c SandboxConstruct) SandboxDiagnostic {
-		return SandboxDiagnostic{
-			Name: c.Name, Kind: c.Kind, OK: false,
-			Error: fmt.Sprintf("duplicate construct: %s %q is declared %d times in the bundle", c.Kind, c.Name, total[c.Kind+"/"+c.Name]),
-		}
+		// Anchored like every other construct-attributable failure
+		// (memql#3801). A duplicate especially wants a position: the whole
+		// message is "this is declared N times", and the reader's next question
+		// is WHERE -- which line 1 does not answer for any of the N.
+		return failAt(SandboxDiagnostic{Name: c.Name, Kind: c.Kind}, c,
+			fmt.Sprintf("duplicate construct: %s %q is declared %d times in the bundle", c.Kind, c.Name, total[c.Kind+"/"+c.Name]))
 	}
 
 	// First pass: concepts. Parse + build each candidate concept and overlay
@@ -207,11 +209,41 @@ func compileBundle(constructs []SandboxConstruct) (SandboxReport, *memoryNodes.M
 // against it. The global default registry is never touched.
 func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegistry) SandboxDiagnostic {
 	d := SandboxDiagnostic{Name: c.Name, Kind: c.Kind, OK: true}
+
+	id, concept, err := buildCandidateConcept(c)
+	if err != nil {
+		// failAt, not fail: main anchored these diagnostics to the construct's
+		// position while this refactor was in flight. buildCandidateConcept is
+		// shared with the durable promote path, which has no diagnostic to
+		// anchor, so it returns a plain error and the anchoring stays here --
+		// the one caller that HAS a SandboxDiagnostic to stamp.
+		return failAt(d, c, err.Error())
+	}
+
+	overlay.MergeAll(map[string]*memoryNodes.Concept{id: concept})
+	return d
+}
+
+// buildCandidateConcept is the single compile of a candidate `concept` source
+// into the (canonical id, *Concept) pair the engine registers -- shared by the
+// Gate-1 sandbox (which overlays it onto an isolated clone) and by the durable
+// concept promote (memql#3746, which merges it into the LIVE registry).
+//
+// One implementation on purpose. The promote path's whole safety argument is
+// that a promoted concept was built by exactly the compile Gate 1 already ran,
+// which is what makes the reserved-namespace / reserved-payload-field refusal
+// (BuildConceptFromDecl -> ensureReservedFieldsNotDeclared) cover it without a
+// second check being written anywhere. A separate promote-side build would be a
+// second place for that guarantee to drift out of.
+//
+// Errors are already origin-prefixed, so a caller can surface err.Error()
+// verbatim as a diagnostic.
+func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, error) {
 	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
 
 	decls := ExtractConceptDecls(c.Source)
 	if len(decls) == 0 {
-		return fail(d, fmt.Sprintf("%s: no concept declaration found in source", origin))
+		return "", nil, fmt.Errorf("%s: no concept declaration found in source", origin)
 	}
 	// Pick the decl matching the declared name when the source carries more
 	// than one; otherwise the sole decl.
@@ -226,7 +258,7 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 	// Name-mismatch: the construct row's declared name must equal the
 	// declaration name in its source.
 	if decl.Name != c.Name {
-		return fail(d, fmt.Sprintf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name))
+		return "", nil, fmt.Errorf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name)
 	}
 
 	// The concept's canonical id is assembled from @namespace + the
@@ -235,19 +267,25 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 	// it under a real id.
 	id, err := languageAst.AssembleConceptIdFromDecl(decl)
 	if err != nil {
-		return fail(d, fmt.Sprintf("%s: %v", origin, err))
+		return "", nil, fmt.Errorf("%s: %v", origin, err)
 	}
 	if id == "" {
-		return fail(d, fmt.Sprintf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name))
+		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name)
 	}
 
+	// BuildConceptFromDecl is where the reserved-property refusal lives
+	// (ensureReservedFieldsNotDeclared): a concept declaring `provenance` /
+	// `row` / `actor` / `args` / `now` / `config` / `trace` / `meta` -- or `id`
+	// / `createdAt` / `payload` and friends -- as a top-level payload property
+	// is refused here rather than registered with the field intact
+	// (memql#3613). Both the sandbox and the promote path inherit that by
+	// calling through this one function.
 	concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)
 	if buildErr != nil {
-		return fail(d, fmt.Sprintf("%s: %v", origin, buildErr))
+		return "", nil, fmt.Errorf("%s: %v", origin, buildErr)
 	}
 
-	overlay.MergeAll(map[string]*memoryNodes.Concept{id: concept})
-	return d
+	return id, concept, nil
 }
 
 // sandboxCompileOne routes a single construct to the matching per-construct
@@ -270,7 +308,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// here purely off the declared kind.
 		slices := ExtractFunctionSlices(c.Source)
 		if len(slices) == 0 {
-			return fail(d, fmt.Sprintf("%s: no %s declaration found in source", origin, c.Kind))
+			return failAt(d, c, fmt.Sprintf("%s: no %s declaration found in source", origin, c.Kind))
 		}
 		slice := slices[0]
 		for _, s := range slices {
@@ -296,7 +334,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		actualName = decl.Name
 		if _, err := specDeclToSpec(decl, origin); err != nil {
-			return fail(d, err.Error())
+			return failAt(d, c, err.Error())
 		}
 
 	case "shape":
@@ -306,7 +344,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		}
 		actualName = decl.Name
 		if _, err := shapeDeclToShapeDefinition(decl, origin); err != nil {
-			return fail(d, err.Error())
+			return failAt(d, c, err.Error())
 		}
 
 	case "automation":
@@ -335,7 +373,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// it at Gate 1 rather than shipping a dead automation.
 		if res.TriggerConcept != "" {
 			if _, gErr := concepts.Get(res.TriggerConcept); gErr != nil {
-				return fail(d, fmt.Sprintf("%s: @trigger references concept %q, which is not defined by the core registry or this bundle", origin, res.TriggerConcept))
+				return failAt(d, c, fmt.Sprintf("%s: @trigger references concept %q, which is not defined by the core registry or this bundle", origin, res.TriggerConcept))
 			}
 		}
 
@@ -352,7 +390,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			return attachPos(fail(d, fmt.Sprintf("%s: %v", origin, err)), c, err)
 		}
 		if len(acts) == 0 {
-			return fail(d, fmt.Sprintf("%s: no action declaration found in source", origin))
+			return failAt(d, c, fmt.Sprintf("%s: no action declaration found in source", origin))
 		}
 		actualName = acts[0].Name
 
@@ -374,9 +412,9 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 			// actual state -- the source plainly contains the declaration
 			// (memql#2643).
 			if decl, derr := languageParser.ParseCapabilityDecl(stripUseDeclarations(c.Source)); derr == nil && decl.IsDisabled() {
-				return fail(d, fmt.Sprintf("%s: capability %q is @disabled; remove @disabled to author it in a bundle (a disabled capability compiles to nothing)", origin, decl.Name))
+				return failAt(d, c, fmt.Sprintf("%s: capability %q is @disabled; remove @disabled to author it in a bundle (a disabled capability compiles to nothing)", origin, decl.Name))
 			}
-			return fail(d, fmt.Sprintf("%s: no capability declaration found in source", origin))
+			return failAt(d, c, fmt.Sprintf("%s: no capability declaration found in source", origin))
 		}
 		actualName = caps[0].Name
 
@@ -385,7 +423,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 		// authorable construct kind (SplitBundleSource fail-loud backstop, E1
 		// #2372). Hard failure -- NEVER a silent pass. c.Name carries the header
 		// line excerpt.
-		return fail(d, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
+		return failAt(d, c, fmt.Sprintf("%s: unrecognized construct %q -- the bundle splitter cannot classify this region into an authorable construct kind (concept / query / mutation / logic / spec / trait / shape / automation / action / capability); prompt / provider / tool / builtin / policy / seed authoring is not supported in a bundle", origin, c.Name))
 
 	default:
 		// A kind with no compile path in this pass (a stray prompt / policy /
@@ -402,7 +440,7 @@ func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) Sandbo
 	// its source (the planner stamps construct.name; the authored runtime
 	// registers under it, so a mismatch mis-registers).
 	if actualName != "" && actualName != c.Name {
-		return fail(d, fmt.Sprintf("%s: declared name %q does not match the %s name in source (%q)", origin, c.Name, c.Kind, actualName))
+		return failAt(d, c, fmt.Sprintf("%s: declared name %q does not match the %s name in source (%q)", origin, c.Name, c.Kind, actualName))
 	}
 
 	return d
@@ -422,6 +460,26 @@ func fail(d SandboxDiagnostic, msg string) SandboxDiagnostic {
 // it is safe to wrap every parse-error site unconditionally.
 func attachPos(d SandboxDiagnostic, c SandboxConstruct, err error) SandboxDiagnostic {
 	pos := resolveAuthoredPosition(c, err)
+	if pos.Line <= 0 {
+		// No parser position -- which is every failure raised BEFORE the
+		// per-construct parse, concept resolution chief among them. Anchor to
+		// the construct instead of emitting zero (memql#3801): the failure is
+		// already attributed to this construct by name, so its signature line
+		// is the coarsest TRUE position rather than the finest false one.
+		// constructAnchor returns zero when there is no verbatim bundle
+		// anchor, so a failure attributable to no construct is unchanged.
+		pos = constructAnchor(c)
+	}
+	d.Line, d.Column, d.EndLine, d.EndColumn = pos.Line, pos.Column, pos.EndLine, pos.EndColumn
+	return d
+}
+
+// failAt is fail() plus the construct anchor, for failure sites that carry no
+// error value to map (memql#3801). Same reasoning as attachPos's fallback: a
+// diagnostic naming a construct should point at it.
+func failAt(d SandboxDiagnostic, c SandboxConstruct, msg string) SandboxDiagnostic {
+	pos := constructAnchor(c)
+	d = fail(d, msg)
 	d.Line, d.Column, d.EndLine, d.EndColumn = pos.Line, pos.Column, pos.EndLine, pos.EndColumn
 	return d
 }
