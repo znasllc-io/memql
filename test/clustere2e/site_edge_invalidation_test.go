@@ -243,16 +243,38 @@ func TestSiteEdgeInvalidation_CrossReplica(t *testing.T) {
 	t.Logf("replica A = pod/%s (nodeId=%s); replica B = pod/%s (nodeId=%s)",
 		pfA.podName, pfA.nodeID, pfB.podName, pfB.nodeID)
 
+	hostname := fmt.Sprintf("clustere2e-inv-%s.example.com", id.NewShortId())
+	siteID := "v1:platform:site:" + id.NewShortId()
+
+	// PRIME A NEGATIVE CACHE ENTRY ON BOTH REPLICAS BEFORE THE SITE EXISTS.
+	// This is load-bearing, not decoration. Without it, a replica's FIRST
+	// request for hostname after createSite is an ordinary cold-cache miss
+	// that reads the database directly (resolve.go) -- which succeeds
+	// whether or not any cross-node event ever arrives, because there is no
+	// stale cache entry to invalidate. A test that resolves only AFTER
+	// creating the site cannot tell "the created event crossed" apart from
+	// "this replica had simply never been asked before" -- it passes
+	// vacuously either way, which is exactly the failure mode addition 8
+	// warns about applied to this test itself. Resolving the not-yet-real
+	// hostname first forces a genuine miss to be CACHED (resolve.go: "a
+	// miss is cached too") on each replica specifically, so the create that
+	// follows has something on that replica it must actually evict.
+	for _, pf := range []*podForward{pfA, pfB} {
+		if code := siteStatusCode(t, pf, hostname); code != http.StatusNotFound {
+			t.Fatalf("replica %s (pod/%s) returned %d for a hostname that does not exist yet, want 404 -- "+
+				"cannot prime a negative cache entry to test invalidation against", pf.nodeID, pf.podName, code)
+		}
+	}
+	t.Logf("primed a negative (404) cache entry for %s on both replicas", hostname)
+
 	conns := openConnections(ctx, t, tok, 1)
 	defer conns[0].Close()
 	qc := memqlclient.NewQueryClient(conns[0].Dispatcher())
 
-	hostname := fmt.Sprintf("clustere2e-inv-%s.example.com", id.NewShortId())
-	siteID := "v1:platform:site:" + id.NewShortId()
-
 	// CREATE. Bundle content is irrelevant to this probe path (see the file
 	// header), so a placeholder bundleRef is fine -- the assertions below
 	// never open it.
+	createdAt := time.Now()
 	if _, err := qc.CreateSite(ctx, memqlclient.CreateSiteArgs{
 		SiteId:    siteID,
 		Hostname:  hostname,
@@ -264,31 +286,52 @@ func TestSiteEdgeInvalidation_CrossReplica(t *testing.T) {
 		t.Fatalf("createSite (requires a CLUSTER OWNER token -- see the file header): %v", err)
 	}
 
-	// PRIME both replicas' caches with the pre-write value. Each edge
-	// replica must independently resolve a BRAND-NEW hostname -- proving the
-	// `created` forward reaches both, not just the replica that happened to
-	// serve the write's own connection.
-	for _, pf := range []*podForward{pfA, pfB} {
-		deadline := time.Now().Add(20 * time.Second)
+	// THE DISCRIMINATING ASSERTION. Each replica's negative cache entry has
+	// a 30s TTL; if it were left to expire on its own, "then serves 200"
+	// would prove nothing about invalidation. Assert well under that TTL, so
+	// only the graph.node.created.v1:platform:site forward -- not the
+	// backstop timer -- can explain a 200 here.
+	const assertWindow = 10 * time.Second
+	const ttlBackstop = 30 * time.Second
+	assertReflectsCreated := func(pf *podForward, label string) bool {
+		t.Helper()
+		deadline := time.Now().Add(assertWindow)
 		var lastCode int
 		for {
 			lastCode = siteStatusCode(t, pf, hostname)
 			if lastCode == http.StatusOK {
-				break
+				t.Logf("replica %s (pod/%s, nodeId=%s) resolved the new site %s after createSite "+
+					"-- well under the %s TTL backstop, so the created forward (not the TTL) explains it",
+					label, pf.podName, pf.nodeID, time.Since(createdAt).Round(time.Millisecond), ttlBackstop)
+				return true
 			}
 			if time.Now().After(deadline) {
-				t.Fatalf("replica %s (pod/%s) never resolved the newly-created site as live "+
-					"within 20s (last status %d) -- the graph.node.created.v1:platform:site "+
-					"forward did not reach this replica", pf.nodeID, pf.podName, lastCode)
+				t.Errorf("replica %s (pod/%s, nodeId=%s) never resolved the new site within %s of "+
+					"createSite (well under the %s TTL backstop) -- still serving %d against its PRIMED "+
+					"negative cache entry. The graph.node.created.v1:platform:site forward did not reach "+
+					"this replica.",
+					label, pf.podName, pf.nodeID, assertWindow, ttlBackstop, lastCode)
+				return false
 			}
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(200 * time.Millisecond)
 		}
 	}
-	t.Logf("both replicas resolved %s as live (status 200)", hostname)
+	createdCrossedB := assertReflectsCreated(pfB, "B")
+	createdCrossedA := assertReflectsCreated(pfA, "A")
+	if !createdCrossedA || !createdCrossedB {
+		t.Fatalf("the created event did not cross to at least one replica (A=%v B=%v) -- "+
+			"stopping before the update phase, which would be equally uninformative once "+
+			"the more basic create-time invalidation is already known to fail",
+			createdCrossedA, createdCrossedB)
+	}
 
 	// THE WRITE. Lands on whichever node this connection's mutation call
 	// executes against -- irrelevant to what follows. What matters is
 	// whether EDGE replica B, independently identified above, reflects it.
+	// Reached only when the create-time invalidation above already proved
+	// the mesh hop works for THIS hostname on THIS replica -- so a failure
+	// here isolates the update path specifically, rather than restating a
+	// mesh-wide problem the create-phase assertion already caught.
 	writeAt := time.Now()
 	if _, err := qc.UpdateSiteStatus(ctx, memqlclient.UpdateSiteStatusArgs{
 		SiteId: siteID,
@@ -301,8 +344,6 @@ func TestSiteEdgeInvalidation_CrossReplica(t *testing.T) {
 	// per handler.go's status gate) within a window far under the 30s TTL
 	// backstop, so a TTL-driven refresh cannot be what explains a pass --
 	// only the change-feed invalidation can.
-	const assertWindow = 10 * time.Second
-	const ttlBackstop = 30 * time.Second
 	assertReflectsDisabled := func(pf *podForward, label string) {
 		t.Helper()
 		deadline := time.Now().Add(assertWindow)
