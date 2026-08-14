@@ -181,6 +181,11 @@
         "icon": "$(add)"
       },
       {
+        "command": "memql.deployments.open",
+        "title": "memQL: Open Local Deployment",
+        "icon": "$(server)"
+      },
+      {
         "command": "memql.clusters.repair",
         "title": "memQL: Repair Local Cluster"
       },
@@ -264,6 +269,10 @@
         },
         {
           "command": "memql.deployments.createDeployment",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.open",
           "when": "isWorkspaceTrusted"
         },
         {

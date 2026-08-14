@@ -145,10 +145,17 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
     // absent local instance can only be created, an installed one can also be
     // repaired and uninstalled, and a remote one does neither.
     item.contextValue = instanceContextValue(instance);
-    // NO `item.command` yet, deliberately. The row opens the instance PAGE, and
-    // that page is #3739 (local) and #3740 (remote). A command wired here now
-    // would have nothing to open, and a click that does nothing is worse than a
-    // row that only selects -- it teaches the operator the view is broken.
+    // LOCAL ONLY, for now. The row opens the instance page, and the page that
+    // exists is the local one (#3739); the remote page is #3740. Wiring the
+    // command on a remote row would open the LOCAL instance's page from it,
+    // which is worse than a row that only selects.
+    if (instance.kind === "local") {
+      item.command = {
+        command: "memql.deployments.open",
+        title: "Open Instance",
+        arguments: [node],
+      };
+    }
     return item;
   }
 }
