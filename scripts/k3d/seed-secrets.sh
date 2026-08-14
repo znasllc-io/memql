@@ -8,7 +8,7 @@
 #
 #   identity-tls           -- identity server TLS cert (self-signed cluster CA)
 #   memql-ca               -- the cluster CA cert, mounted on every node
-#   local-znas-tls         -- front-door TLS (the mkcert *.memql.localhost pair)
+#   memql-front-door-tls   -- front-door TLS (the mkcert *.memql.localhost pair)
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
 #                             MEMQL_GENESIS_B64,
 #                             MEMQL_IDENTITY_SIGNING_KEY_B64,
@@ -30,7 +30,10 @@
 #     working key with a placeholder (memql#2958).
 #   - mkcert is installed AND has a root CA on this machine. The front-door
 #     pair is ISSUED here when absent (memql#3384) rather than skipped; see
-#     seed_front_door_tls below for why skipping was never survivable.
+#     seed_front_door_tls below for why skipping was never survivable. An
+#     existing pair is reused only when it COVERS the domain being served, and
+#     reissued when it demonstrably does not (memql#3730) -- that decision
+#     belongs to install.mkcert, and this script no longer pre-empts it.
 #   - MEMQL_IDENTITY_SIGNING_KEY_B64 (the shared Ed25519 signing seed every
 #     identity replica derives its key + kid + JWKS from) is GENERATED here
 #     when the cluster has none (memql#3400), and REUSED verbatim thereafter --
@@ -53,9 +56,10 @@
 #
 # Exit codes: 0 ok | 2 bad param
 #             | 4 prerequisite missing (kubectl/cluster/ns; mkcert or its CA)
-#             | 5 op failed (unreadable existing secret; cert issuance failed)
+#             | 5 op failed (unreadable existing secret; cert issuance failed;
+#                            an issuer envelope this script cannot read)
 #
-# Refs: #2061 #2221 #3384
+# Refs: #2061 #2221 #3384 #3730
 
 set -euo pipefail
 
@@ -68,10 +72,12 @@ source "${SCRIPT_DIR}/../lib/localtls.sh"
 cap_init "k3d.seedSecrets" "Seed the k8s Secrets that the local k3d overlay requires."
 cap_spec_param "gate-voice-lane-only" "only re-run the voice-lane gate (scale voice/voice-agent per LiveKit config)"
 cap_spec_param "namespace" "k8s namespace to seed into"
-cap_spec_param "domain"    "front-door apex; seeded as the memql-domain ConfigMap (default: memql.localhost)"
+cap_spec_param "domain"    "front-door apex; seeded as the memql-domain ConfigMap and derives the certificate SANs (default: the domain this cluster already serves, else memql.localhost)"
 cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
 cap_spec_param "tls-key"   "front-door TLS private key path (issued with mkcert when absent)"
 cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-door pair"
+cap_spec_param "allow-missing-certutil" "proceed without browser (NSS) trust on Linux, passed through to install.mkcert (flag)"
+cap_spec_param "mkcert-setup" "path to the install.mkcert capability that decides reuse vs reissue (default: alongside this script)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ from (default: this script's own repository)"
 #=============================================================================
 # CONFIGURATION
@@ -92,7 +98,20 @@ GENESIS_SOURCE="none"
 TLS_CERT=""
 TLS_KEY=""
 MKCERT_BIN=""
-TLS_CERT_SOURCE="none"   # existing | issued
+ALLOW_MISSING_CERTUTIL=""
+TLS_CERT_SOURCE="none"   # existing | issued | reissued
+# Did anything actually READ the resulting certificate's names? Reported by the
+# issuer, echoed in this envelope, and never assumed -- "we could not check" and
+# "we checked and it covers" are different facts (memql#3730).
+FRONT_DOOR_COVERAGE_VERIFIED="false"
+# The SANs the front-door pair must carry, derived in main() from the RESOLVED
+# domain (the same value seeded into the memql-domain ConfigMap). Seeded here
+# with the environment-resolved names so the variable is never unset.
+FRONT_DOOR_HOSTNAMES="$MEMQL_LOCAL_TLS_HOSTNAMES"
+# The install.mkcert capability that owns the reuse-vs-reissue decision.
+# Resolved in main(); a param purely so a test can hand this script a fabricated
+# result envelope (see the --mkcert-setup declaration).
+MKCERT_SETUP=""
 
 # Azurite well-known dev account + key (not secret; standard Azurite default).
 AZURITE_ACCOUNT="devstoreaccount1"
@@ -625,7 +644,7 @@ function resolve_node_bootstrap_token() {
 }
 
 #=============================================================================
-# FRONT-DOOR TLS (local-znas-tls -- browser-trusted wildcard for the ingress)
+# FRONT-DOOR TLS (memql-front-door-tls -- browser-trusted wildcard for the ingress)
 #=============================================================================
 
 # The local front door (traefik ingress on 443, see the local overlay's
@@ -636,7 +655,7 @@ function resolve_node_bootstrap_token() {
 #
 # WHY THIS ISSUES RATHER THAN SKIPS (memql#3384). This step used to warn and
 # return when the pair was absent. That was never a survivable degradation:
-# both front-door ingresses NAME local-znas-tls, and traefik answers a missing
+# both front-door ingresses NAME memql-front-door-tls, and traefik answers a missing
 # referenced secret by silently serving its own "TRAEFIK DEFAULT CERT" for both
 # hosts. Browsers show "Not secure" on the very link a first-time operator
 # clicks (the setup magic link), and Node clients -- including the VS Code
@@ -650,23 +669,38 @@ function resolve_node_bootstrap_token() {
 # owns the restraint that matters (it never touches a pre-existing per-machine
 # CA) and there must not be a second way to mint this pair.
 #
-# Idempotent: an existing pair is REUSED verbatim, never reissued -- `make
-# secrets` runs on every `make up`, and rotating the front-door certificate as
-# a side effect of a routine re-run would invalidate whatever already trusts
-# it. Deliberate reissue is `mkcert-setup.sh --force`.
+# AND NOT A SECOND WAY TO DECIDE WHETHER TO MINT, EITHER (memql#3730). The line
+# above was written about minting and this function then short-circuited on
+# `[ -s "$TLS_CERT" ]` -- existence alone -- and returned before install.mkcert
+# was ever invoked. That is the same defect one word over: the decision moved up
+# here while the knowledge stayed down there. install.mkcert's cert_mismatches()
+# already asked the question that matters (does this pair cover the names about
+# to be served?), already cited the domain rename that creates stale pairs, and
+# was UNREACHABLE from the only caller that runs on every `make up`. A machine
+# that ran the local stack before memql#3593 therefore served a valid mkcert
+# certificate for a domain that no longer exists, traefik fell back to its own
+# TRAEFIK DEFAULT CERT for a name it had no certificate for, and this script
+# reported ok:true / frontDoorTlsSource:existing over it.
+#
+# So the whole decision is delegated: install.mkcert without --force reuses a
+# pair that covers the hostnames and reissues one that demonstrably does not.
+# There is nothing to re-implement here -- re-implementing the SAN check in this
+# file is precisely the second way to decide that the paragraph above forbids.
+#
+# Idempotent: a pair that covers the hostnames is REUSED verbatim, never
+# reissued -- `make secrets` runs on every `make up`, and rotating the
+# front-door certificate as a side effect of a routine re-run would invalidate
+# whatever already trusts it. install.mkcert keeps that promise on the
+# can't-tell case too (no openssl, an unparseable file): it reuses, because a
+# capability that reissued whenever it was unsure would stop being idempotent.
+# Deliberate reissue of a MATCHING pair is `mkcert-setup.sh --force`.
 function ensure_front_door_pair() {
-    if [ -s "$TLS_CERT" ] && [ -s "$TLS_KEY" ]; then
-        info "front-door TLS pair present (${TLS_CERT}); reusing it."
-        TLS_CERT_SOURCE="existing"
-        return 0
-    fi
-
-    local gen="${REPO_ROOT}/scripts/install/mkcert-setup.sh"
+    local gen="$MKCERT_SETUP"
     if [ ! -f "$gen" ]; then
-        cap_fail 4 "front-door TLS pair is missing (${TLS_CERT}) and the issuer script is not at ${gen}. Issue the pair by hand with: mkcert -cert-file '${TLS_CERT}' -key-file '${TLS_KEY}' ${MEMQL_LOCAL_TLS_HOSTNAMES//,/ }"
+        cap_fail 4 "the front-door TLS issuer is not at ${gen}, so this run can neither check that ${TLS_CERT} covers ${FRONT_DOOR_HOSTNAMES} nor issue a pair that does. Issue it by hand with: mkcert -cert-file '${TLS_CERT}' -key-file '${TLS_KEY}' ${FRONT_DOOR_HOSTNAMES//,/ }"
     fi
 
-    info "front-door TLS pair missing; issuing it with mkcert (install.mkcert)..."
+    info "resolving the front-door TLS pair for ${FRONT_DOOR_HOSTNAMES} (install.mkcert decides reuse vs reissue)..."
     # stdin is closed and the stdin opt-in cleared so the child cannot block;
     # its human logs flow to our stderr, its JSON envelope is captured here so
     # exactly one envelope (ours) ever reaches stdout.
@@ -679,10 +713,11 @@ function ensure_front_door_pair() {
     # three (memql#3560).
     local rc=0 child=""
     child="$(CAP_PARAMS_STDIN= bash "$gen" \
-        --hostnames="$MEMQL_LOCAL_TLS_HOSTNAMES" \
+        --hostnames="$FRONT_DOOR_HOSTNAMES" \
         --cert-file="$TLS_CERT" \
         --key-file="$TLS_KEY" \
         --mkcert="$MKCERT_BIN" \
+        ${ALLOW_MISSING_CERTUTIL:+--allow-missing-certutil} \
         </dev/null)" || rc=$?
 
     if [ "$rc" -ne 0 ] && [ -n "$child" ]; then
@@ -691,16 +726,114 @@ function ensure_front_door_pair() {
 
     case "$rc" in
         0) ;;
-        4) cap_fail 4 "the front-door certificate could not be issued: install.mkcert is missing something it needs (its own message is above -- mkcert itself, certutil for browser trust, or a password it had no terminal to ask for). Run it directly to see and fix it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
+        # NAMES THE ESCAPE, because this refusal now reaches EVERY run rather
+        # than only the runs that had no pair (memql#3730) -- and telling the
+        # operator to run install.mkcert directly is advice that refuses again
+        # for the same reason and unblocks nothing. That is the shape of defect
+        # this issue was filed about ("run make secrets", which reused the stale
+        # cert); shipping a second one would be worse than the first.
+        4) cap_fail 4 "the front-door certificate could not be resolved: install.mkcert is missing something it needs (its own message is above -- mkcert itself, certutil for browser trust, or a password it had no terminal to ask for). Fix what it named, then re-run 'make secrets'. If it was certutil and this machine has no browser, waive browser trust and continue:  MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL=1 make secrets  (the cluster front door then works for curl and the SDKs, and stays untrusted in Firefox/Chrome)." ;;
+        # Reached whether or not a pair is on disk, and that is right: a
+        # certificate signed by a CA this machine no longer has is one nothing
+        # trusts, so seeding it would put an untrusted edge in front of the
+        # cluster exactly as a missing secret does.
         3) cap_fail 4 "no mkcert root CA exists on this machine yet. Creating one writes to the system trust store, so it is a deliberate one-time step -- run it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
-        *) cap_fail 5 "issuing the front-door certificate failed (install.mkcert exit ${rc}); see the log above." ;;
+        *) cap_fail 5 "resolving the front-door certificate failed (install.mkcert exit ${rc}); see the log above." ;;
     esac
 
     if [ ! -s "$TLS_CERT" ] || [ ! -s "$TLS_KEY" ]; then
         cap_fail 5 "install.mkcert reported success but ${TLS_CERT} / ${TLS_KEY} are missing or empty."
     fi
-    TLS_CERT_SOURCE="issued"
+
+    # WHAT HAPPENED IS THE CHILD'S TO REPORT, and this envelope must not guess
+    # it (memql#3730). The entire bug was frontDoorTlsSource saying `existing`
+    # while the front door served garbage, so an unreadable envelope is a
+    # FAILURE here rather than a default: "I could not tell" reported as
+    # "nothing changed" is the original defect wearing a new hat.
+    case "$child" in
+        *'"certIssued"'*) ;;
+        *) cap_fail 5 "install.mkcert exited 0 but its result envelope does not report certIssued, so this run cannot tell whether the front-door pair was reused or replaced -- and reporting 'existing' on a guess is the memql#3730 defect itself. Envelope: ${child:-<empty>}" ;;
+    esac
+
+    # Whether the names were CHECKED comes from the child's measurement and is
+    # never inferred here (memql#3730). install.mkcert deliberately reuses a pair
+    # whose names it could not read -- no openssl, a file that does not parse --
+    # which is right for idempotency and is NOT the same fact as "it covers the
+    # domain". Saying "already covers" on that branch would assert exactly the
+    # unverified coverage claim this change exists to stamp out, in a line this
+    # change added; and it was demonstrably false, since the reuse test's own
+    # fixture is not parseable X.509.
+    if child_reports_true "$child" coverageVerified; then
+        FRONT_DOOR_COVERAGE_VERIFIED="true"
+    fi
+
+    if ! child_reports_true "$child" certIssued; then
+        TLS_CERT_SOURCE="existing"
+        if [ "$FRONT_DOOR_COVERAGE_VERIFIED" = "true" ]; then
+            info "front-door TLS pair at ${TLS_CERT} covers ${FRONT_DOOR_HOSTNAMES}; reusing it."
+        else
+            info "front-door TLS pair at ${TLS_CERT} kept as-is; reusing it."
+            warn "  its names could NOT be read, so coverage of ${FRONT_DOOR_HOSTNAMES} is UNVERIFIED"
+            warn "  (openssl absent, or ${TLS_CERT} does not parse as a certificate). This is the one"
+            warn "  case a run cannot rule out serving the wrong certificate; install openssl to"
+            warn "  have it checked."
+        fi
+        return 0
+    fi
+
+    if child_reports_true "$child" reissued; then
+        # A THIRD source value, not folded into `issued`, because the two mean
+        # different things to whoever reads this envelope: `issued` created
+        # something that was absent, `reissued` REPLACED something that was
+        # present and wrong. An operator whose front-door certificate has just
+        # been overwritten is entitled to see that in the JSON.
+        TLS_CERT_SOURCE="reissued"
+        warn "the front-door TLS pair at ${TLS_CERT} did NOT cover ${FRONT_DOOR_HOSTNAMES} and was REISSUED."
+        warn "  A pair issued for a different domain leaves traefik serving a certificate for a"
+        warn "  name nobody dialed, which fails TLS against a hostname you typed yourself."
+        warn "  The old file is gone -- mkcert wrote the new pair over it in place."
+    else
+        TLS_CERT_SOURCE="issued"
+    fi
     cap_changed
+}
+
+# child_reports_true <envelope> <key> -- true when install.mkcert's result
+# envelope carries "<key>":true.
+#
+# NOT capability.sh's _cap_json_field, for two reasons. It reads a TOP-LEVEL
+# field (its jq tier answers `has($k)` against the outer object) and these keys
+# live one level down in `result`, so it would return empty for both. And it has
+# a jq tier and a grep tier: a verdict that could differ between a machine with
+# jq and a machine without it is not a verdict -- the same reasoning
+# verify-frontdoor.sh gives for keeping one reader of its own.
+#
+# A substring match is sound here because cap_result_set_raw emits a raw boolean
+# and both keys are unique within the envelope; nothing else in it can produce
+# `"certIssued":true`. The caller has already refused an envelope that does not
+# carry the key at all, so a false from this function means false, not absent.
+function child_reports_true() {
+    printf '%s' "$1" | grep -qE "\"$2\"[[:space:]]*:[[:space:]]*true"
+}
+
+# resolve_domain_default -- the default for --domain: what this cluster is
+# ALREADY serving, or the environment-resolved domain when it is serving nothing
+# yet (a first bring-up).
+#
+# Read from the memql-domain ConfigMap this script itself seeds, which is the
+# cluster's own statement of its domain (component/genesis/domain.go derives
+# every issuer, CORS origin and redirect URI from it). Unreadable or absent is
+# the ordinary first-boot case and falls through quietly -- this is a default,
+# not a guard, and nothing irreplaceable rests on it.
+function resolve_domain_default() {
+    local existing
+    existing="$(trim_space "$(kubectl get configmap memql-domain --namespace="$NAMESPACE" \
+        -o 'jsonpath={.data.MEMQL_DOMAIN}' 2>/dev/null || true)")"
+    if [ -n "$existing" ]; then
+        printf '%s' "$existing"
+        return 0
+    fi
+    printf '%s' "$MEMQL_LOCAL_DOMAIN"
 }
 
 # seed_domain_configmap -- the cluster's domain, as ONE key.
@@ -965,24 +1098,36 @@ function main() {
     cap_parse_flags "$@"
 
     NAMESPACE="$(cap_param namespace "$NAMESPACE")"
-    # The env tier is the FLAG'S DEFAULT (the capability contract gives
-    # cap_param no env tier of its own); localtls.sh resolves MEMQL_LOCAL_DOMAIN
-    # so the certificate SANs and this ConfigMap cannot name different domains.
-    DOMAIN="$(cap_param domain "$MEMQL_LOCAL_DOMAIN")"
     # The checkout deploy/k8s/base/tls/gen-internal-ca.sh is read from. Defaults
     # to the derived root so a run from a checkout is unchanged; the install
     # graph passes the cloned stack (memql#3491).
     #
-    # NOTE: only the deploy/ read moves. The mkcert-setup.sh read below stays on
-    # the derived root, because scripts/ IS staged at that relative position --
-    # repointing it would break the packaged path this change exists to fix.
+    # NOTE: only the deploy/ read moves. The install.mkcert path below is
+    # resolved from THIS SCRIPT'S OWN location, because scripts/ IS staged at
+    # that relative position -- repointing it would break the packaged path.
     REPO_ROOT="$(cap_param repo-root "$REPO_ROOT")"
+    # A PARAM ONLY SO THE SEAM IS TESTABLE (memql#3730). The fail-closed
+    # certIssued guard below is the single thing standing between a future
+    # refactor and a silent default back to reporting `existing`, and with the
+    # path hardcoded no test could hand this script a fabricated envelope to
+    # exercise it. This does NOT create a second decision point: whatever sits
+    # at this path owns the reuse-vs-reissue decision entirely, which is the
+    # property the whole fix rests on.
+    MKCERT_SETUP="$(cap_param mkcert-setup "${SCRIPT_DIR}/../install/mkcert-setup.sh")"
     cap_require namespace "$NAMESPACE"
 
     # Env feeds the DEFAULT slot; cap_param has no environment tier of its own.
     TLS_CERT="$(cap_param tls-cert "${MEMQL_LOCAL_TLS_CERT:-$MEMQL_LOCAL_TLS_DEFAULT_CERT}")"
     TLS_KEY="$(cap_param tls-key   "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
     MKCERT_BIN="$(cap_param mkcert "${MEMQL_MKCERT_BIN:-mkcert}")"
+    # Passed straight through to install.mkcert, which refuses (exit 4) on Linux
+    # without certutil because browsers read the NSS store and a front door no
+    # browser trusts is not a front door. That refusal now reaches every `make
+    # secrets` rather than only the runs that had no pair yet (memql#3730), so
+    # the waiver install.mkcert already documents has to be reachable from here
+    # too -- otherwise this change newly bricks `make secrets` on a headless
+    # machine with no way out short of editing a script.
+    ALLOW_MISSING_CERTUTIL="$(cap_param allow-missing-certutil "${MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL:-}")"
     cap_require tls-cert "$TLS_CERT"
     cap_require tls-key  "$TLS_KEY"
 
@@ -996,6 +1141,29 @@ function main() {
     fi
 
     check_prerequisites
+
+    # THE DOMAIN IS RESOLVED HERE, AFTER the cluster is reachable, because the
+    # cluster's own answer is the best default (memql#3730). Flag first, then
+    # what this cluster is ALREADY serving, then the environment default.
+    #
+    # WHY THE CLUSTER TIER EXISTS. Without it, `make secrets` with no DOMAIN on a
+    # cluster serving lab.example.com fell back to memql.localhost -- and now that
+    # the pair is checked against the resolved domain, that would REISSUE over the
+    # operator's lab.example.com certificate in place. The ConfigMap clobber was
+    # already happening before this change (the domain-change refusal lives in
+    # up.sh, not here); this makes the common case correct rather than merely
+    # refused. An explicit --domain that disagrees with the cluster is still
+    # up.sh's refuse_domain_change to reject -- one gate, where it already is.
+    DOMAIN="$(cap_param domain "$(resolve_domain_default)")"
+    # NOW TRUE: the certificate SANs and the memql-domain ConfigMap cannot name
+    # different domains. This comment used to claim so on the strength of both
+    # resolving MEMQL_LOCAL_DOMAIN -- but only the ConfigMap read the FLAG, and
+    # `make up DOMAIN=lab.example.com` passes the flag without exporting the
+    # variable. So the cluster was told one domain while the pair was issued for
+    # another: the same "certificate for a name nobody dialed" this issue is
+    # about, reached without any stale file at all. Both derive from the RESOLVED
+    # domain now, through the one derivation in scripts/lib/localtls.sh.
+    FRONT_DOOR_HOSTNAMES="$(localtls_hostnames_for "$DOMAIN")"
 
     # Resolve EVERYTHING that can be rejected before the first mutation.
     #
@@ -1043,10 +1211,24 @@ function main() {
     # need a restart before peer connections recover (memql#3784). The token
     # itself is never emitted; only where it came from.
     cap_result_set     nodeBootstrapTokenSource "$RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE"
-    # existing | issued -- so a caller can tell a routine re-run from the run
-    # that minted the front-door pair (memql#3384).
+    # existing | issued | reissued -- so a caller can tell a routine re-run from
+    # the run that minted the front-door pair (memql#3384), and either of those
+    # from the run that REPLACED a pair which did not cover the domain being
+    # served (memql#3730). This field claimed `existing` over a certificate for
+    # a domain that no longer existed anywhere in the project, so what it
+    # distinguishes is the whole point of it: `reissued` means something the
+    # operator had is gone.
     cap_result_set     frontDoorTlsSource "$TLS_CERT_SOURCE"
     cap_result_set     frontDoorTlsCert   "$TLS_CERT"
+    # The names the seeded certificate had to cover. Absent from this envelope
+    # until memql#3730, which is why nothing reading it could see that the cert
+    # at frontDoorTlsCert was for somebody else's domain.
+    cap_result_set     frontDoorTlsHostnames "$FRONT_DOOR_HOSTNAMES"
+    # Whether those names were CHECKED on the seeded certificate, as measured by
+    # install.mkcert -- not inferred from frontDoorTlsSource. `existing` with
+    # coverageVerified false is the one outcome that leaves a pair nobody could
+    # read, and a reader has to be able to see that rather than assume coverage.
+    cap_result_set_raw frontDoorTlsCoverageVerified "$FRONT_DOOR_COVERAGE_VERIFIED"
     cap_ok
 }
 
