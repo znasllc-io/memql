@@ -1767,6 +1767,45 @@ variables:
     optional: true
     description: "Gates the RFC 7591 dynamic client registration endpoint that lets unknown OAuth clients self-register. DEFAULTS OFF (memql#3719): POST /register is an unauthenticated write endpoint, and under one-cluster-per-customer most clusters route no mcp.<domain> and have no consumer for it. Set true on clusters exposing an MCP surface; the mcp node warns at boot when it serves the remote protocol head without this."
 
+  # ---------------------------------------------------------------------------
+  # THE TWO PLAINTEXT ESCAPE HATCHES (memql#3834)
+  #
+  # Neither is demanded by `make env-registry-check`, even after memql#3835
+  # taught envscan to resolve constant-indirected reads. Both are read as
+  #
+  #     identity.InsecureTransportEscapeEnabled(envAllowInsecureEnroll)
+  #
+  # -- a named constant passed to a NAME-TAKING HELPER, one hop beyond
+  # `os.Getenv(someConstant)`. The key never appears as an argument to a read at
+  # all, so the scanner sees no read and asks for no entry.
+  #
+  # They are here because the registry is the surface an operator reads to find
+  # out what switches EXIST -- and for these two that is not a documentation
+  # nicety. Each turns off an HTTPS requirement on a credential surface, and a
+  # switch nobody can discover is a switch nobody audits.
+  #
+  # DISCOVERABILITY, NOT ENFORCEMENT: nothing keeps these entries correct if the
+  # constants are renamed. Closing that is memql#3834 step 1 -- resolve the
+  # argument and attribute the read to the helper's parameter, which generalises
+  # to every SomeHelper(envSomeConstant) shape rather than special-casing two
+  # names. Said plainly here rather than left to be inferred, because half a fix
+  # labelled as half a fix is better than a half fix that reads as a whole one.
+  # ---------------------------------------------------------------------------
+
+  - name: MEMQL_IDENTITY_ALLOW_INSECURE_ENROLL
+    component: identity
+    scope: node
+    default: ""
+    optional: true
+    description: "DEV-ONLY ESCAPE HATCH. =1 admits a PLAINTEXT (non-HTTPS) request to GET /enroll. That page is the pre-credential surface: it arrives before the holder has any credential, and its single-use mql_enr_ token IS the authorization to register a passkey as the named user -- so plaintext exposes the one secret the flow has. Production must leave this UNSET; the runtime WARNs on every request that slips through. Deliberately separate from MEMQL_IDENTITY_ALLOW_INSECURE_PAIR so debugging worker pairing on a laptop does not also admit plaintext enrolment links (memql#3408, registry gap memql#3834)."
+
+  - name: MEMQL_IDENTITY_ALLOW_INSECURE_PAIR
+    component: identity
+    scope: node
+    default: ""
+    optional: true
+    description: "DEV-ONLY ESCAPE HATCH. =1 admits PLAINTEXT (non-HTTPS) requests to POST /pair/codes and POST /pair/redeem. A pair code is a bearer credential carried in the Authorization header AND returned in the JSON body (plainCode), so a plaintext hop here leaks it in both directions. Production must NEVER set this; the runtime WARNs on every request that slips through so an accidental toggle surfaces in a log shipper (registry gap memql#3834)."
+
   # NOTE: envscan cannot see this read. cmd/envscan/scan/scan.go matches
   # os.Getenv("LITERAL") by regex, and register.go reads it through the
   # envRegisterPerHour const -- so `make env-registry-check` neither requires
