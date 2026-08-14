@@ -215,6 +215,7 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"connection/endpoint.ts",
 		"connection/manager.ts",
 		"clusters/connectionView.ts",
+		"constructs/catalogTarget.ts",
 		"constructs/signature.ts",
 		"clusters/portalUrl.ts",
 		"deploy/actions.ts",

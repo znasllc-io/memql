@@ -410,7 +410,7 @@ export class ResultPanel {
     if (o.status === "ok") {
       // Always present, on every run: a banner that only ever appears on the
       // bad case is one the reader learns to skip.
-      bannerHtml = `<div class="${o.ranDeployedDefinition ? "warning" : "notice"}">${escapeHtml(resultBannerFor(o))}</div>`;
+      bannerHtml = `<div class="${o.ranDeployedDefinition ? "warning" : "notice"}">${escapeHtml(resultBannerFor({ ...o, kind: o.target.kind }))}</div>`;
       rawJson = safeJson(o.toolContent ?? o.raw);
       bodyHtml =
         o.toolContent !== undefined ? toolContentHtml(o.toolContent) : this.rowsHtml(o.rows);

@@ -102,13 +102,47 @@ export const BUFFER_RESULT_BANNER =
  * injected on this stream and had not changed, so no new session-define was
  * needed and the run still executed the buffer.
  */
+/**
+ * CATALOG_RESULT_BANNER covers the fourth case, which arrived with the
+ * Constructs view (memql#3753): the construct was run from the CATALOG, so
+ * there was no local source to assemble, nothing was session-defined, and what
+ * executed is the definition the cluster has loaded.
+ *
+ * It exists because the three banners above were each false for it. The one it
+ * would otherwise have been given -- REUSED_INJECTION_BANNER -- says "as
+ * previously session-defined from this buffer", and a catalog run has no
+ * buffer, was never session-defined, and for a PROMOTED construct has no file
+ * anywhere on the machine. A result view exists to say what executed; a
+ * confidently wrong sentence there is worse than none.
+ */
+export const CATALOG_RESULT_BANNER =
+  "This ran the definition this cluster has loaded. There is no local source for it in this workspace, so nothing was session-defined and nothing in your editor affected what ran.";
+
 export const REUSED_INJECTION_BANNER =
   "This ran the construct as previously session-defined from this buffer on the current connection. The buffer had not changed since, so it was not re-injected.";
 
 export function resultBannerFor(outcome: {
   ranDeployedDefinition: boolean;
   injected: boolean;
+  /**
+   * The construct's kind. REQUIRED, not optional, and that is deliberate: it
+   * is needed since memql#3753 to tell the two DEPLOYED cases apart -- a tool
+   * is deployed because a tool cannot be session-defined at all, anything else
+   * because there was no local source for it -- and an optional field with a
+   * default would have picked one of those two silently. It was optional for
+   * about ten minutes, during which the sole call site (which passes the whole
+   * outcome, whose kind lives at `target.kind`) would have flipped EVERY tool
+   * result onto the catalog sentence with nothing failing. Required means the
+   * compiler names the call site instead.
+   */
+  kind: string;
 }): string {
-  if (outcome.ranDeployedDefinition) return TOOL_RESULT_BANNER;
+  if (outcome.ranDeployedDefinition) {
+    // A TOOL IS DEPLOYED FOR A DIFFERENT REASON THAN A CATALOG RUN IS, and the
+    // two sentences say different things to a developer: one is about what a
+    // tool IS, the other about where this construct's source lives. Collapsing
+    // them would tell someone running a catalog query that they had run a tool.
+    return outcome.kind === "tool" ? TOOL_RESULT_BANNER : CATALOG_RESULT_BANNER;
+  }
   return outcome.injected ? BUFFER_RESULT_BANNER : REUSED_INJECTION_BANNER;
 }

@@ -107,6 +107,7 @@ import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js'
 import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
 import { DeploymentPanel } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
+import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
@@ -1297,6 +1298,15 @@ function buildRunEngine(conns: ConnectionManager): RunEngine | undefined {
 // as the walk reaches it, which is the same guarantee it had before: whatever
 // the editor holds at that moment.
 async function assembleForTarget(target: RunTarget, workspaceRoot: string | undefined) {
+  // A CATALOG TARGET HAS NOTHING TO ASSEMBLE (memql#3753). Its uri names the
+  // catalog rather than a file, and for a promoted construct there is no file
+  // anywhere on the machine. An empty bundle validates trivially, injects
+  // nothing, and leaves the run invoking the definition the cluster already
+  // has -- which is exactly what running from a catalog means. It is also what
+  // makes `ranDeployedDefinition` true, so the Result view says so.
+  if (isCatalogUri(target.uri)) {
+    return { sources: '', files: [] };
+  }
   const uri = Uri.parse(target.uri);
   const activePath = uri.fsPath;
   const open = workspace.textDocuments.find((d) => d.uri.toString() === target.uri);
