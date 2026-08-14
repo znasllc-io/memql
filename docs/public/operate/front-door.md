@@ -63,15 +63,39 @@ request `Host` header against a `v1:platform:site` row and serves that site's
 bundle. The apex is not a special case: for a customer's own cluster the bare
 domain **is** their main website, so it is a site row like every other one.
 
-> **INFO: the two edge hosts are not serving yet.** The `edge` node type exists
-> — build tag `edge`, `make edge`, documented in
-> [build-tags.md](../build/build-tags.md) — but `svc/edge` and the site-serving
-> path ship with the site-hosting work (memql#3714 and the rest of epic
-> memql#3700). Until that lands, treat the last two rows of the table as the
-> committed design rather than as something to curl. The site-hosting runbook
-> that covers deploying a site, rolling one back and the bundle contract is
-> forthcoming on the same work; this page deliberately says nothing more about
-> sites than the rule that routes them.
+The wildcard also matches `api.`, `identity.` and `mcp.`, and does not shadow
+them: the Ingress spec gives an **exact** host precedence over a wildcard, and
+both traefik and ingress-nginx implement that. So the four named hosts keep
+their own backends and only unclaimed names fall through to the edge. The
+five-host table rests on that precedence.
+
+> **INFO: the edge route is live; the edge backend is not deployed yet.** Two
+> separate things, worth keeping apart.
+>
+> **The route exists**: `deploy/k8s/overlays/local/edge-front-door.yaml`, both
+> rules, on `main`. **The backend does not**: there is no `svc/edge`, because the
+> edge Deployment and Service ship with **memql#3714**. The `edge` node type
+> itself exists — build tag `edge`, `make edge`, see
+> [build-tags.md](../build/build-tags.md) — so what is missing is a deployment
+> of it, not the code.
+>
+> **What that produces is a 404, not a 503.** Traefik drops the entire router
+> when its backend Service is absent, so the request matches no router at all
+> and gets traefik's own 404 — it never reaches a handler that could answer 503.
+> Traefik says so on every reconcile:
+
+```
+ERR Cannot create service error="service not found" ingress=edge-front-door serviceName=edge servicePort=8085
+```
+
+An operator seeing 404 on a hosted-site hostname will reasonably conclude the
+*rule* is missing. The rule is fine and the node is not deployed, and those are
+different fixes — so check `kubectl -n memql get svc edge` before touching
+anything under `deploy/`.
+
+The site-hosting runbook covering how to deploy a site, roll one back and what
+the bundle contract is arrives with the same work. This page deliberately says
+nothing more about sites than the rule that routes them.
 
 ## One constraint explains most of this page
 
@@ -132,13 +156,39 @@ overlay in this repository routed either one.**
 And here is the part worth memorising, because it is what makes a
 hand-maintained list of ingress paths a bad idea rather than merely a chore:
 
-> **WARNING: a missing rule does not 404. It hands an HTTP/1.1 request to an
-> h2c backend and fails with a protocol error naming nothing.**
+> **WARNING: a missing rule does not 404.** The HTTP/1.1 request falls through
+> to the catch-all `/` rule, reaches the gRPC backend, and comes back as an
+> HTTP `415` describing a content-type problem.
 
-There is no 404 in the access log pointing at the path, no handler to add a log
-line, and nothing on either side that names the cause. That is why the list
-became generated output with a CI gate: a new public HTTP path on the bff
-either reaches the front door or breaks the build.
+```
+HTTP/1.1 415 Unsupported Media Type
+Content-Type: application/grpc
+Grpc-Status: 3
+Grpc-Message: invalid gRPC request content-type ""
+Content-Length: 0
+```
+
+Measured on a live cluster against `api.memql.localhost`, on four paths that
+were not yet in the generated block at the time: `/unsubscribe`,
+`/inbound/shopify`, `/memql/query` and `/spaces/x/attachments`. All four
+answered exactly that, with an empty body.
+
+Read the trap carefully, because it is worse than an error that says nothing.
+The transport is fine — curl completes, TLS is fine, the door is up. The
+response **names a cause, and it is the wrong one**: it says the caller sent no
+gRPC content-type, when what actually happened is that a routing rule is
+missing and the request was handed to a server that only speaks gRPC. Nobody
+debugging a webhook that stopped arriving is going to read "invalid gRPC request
+content-type" and think "Ingress".
+
+What makes it findable is that `Grpc-Status: 3` on a path you expected to be
+plain HTTP is a specific, greppable signature. If you see it, check whether the
+path is in the generated block before you look at anything else.
+
+That is why the list became generated output with a CI gate: a new public HTTP
+path on the bff either reaches the front door or breaks the build. For contrast,
+on the same host the routed paths answer 200 — `/healthz` returns the bff's
+health JSON, `/portal/` returns the portal's `index.html`.
 
 See [inbound-delivery.md](inbound-delivery.md) and
 [campaign-sending.md](campaign-sending.md) for the two exceptions themselves.
@@ -227,16 +277,41 @@ Requires a running cluster, so it belongs on an operator machine or in CI.
 
 ```bash
 kubectl -n memql get ingress -o wide             # the Ingress objects and their hosts
-scripts/install/verify-frontdoor.sh              # dns + tls + h2, per host
+scripts/install/verify-frontdoor.sh              # dns + tls per host, h2 once
 curl -sS --http1.1 https://api.memql.localhost/healthz
 ```
 
-`verify-frontdoor.sh` records three checks per host: DNS resolution, TLS, and
-whether the door negotiates h2 — gRPC cannot exist over HTTP/1.1, so a door
-that answers but will not speak h2 is a broken door.
+`verify-frontdoor.sh` runs **five** checks against the default host set, not
+three per host: DNS and TLS for each of `api.` and `identity.`, plus **one**
+gRPC/h2 check, against the first host only.
+
+```
+allPassed: true, passedCount: 5, failedCount: 0
+PASS dns  api.memql.localhost: resolves to 127.0.0.1
+PASS tls  api.memql.localhost: TLS handshake ok against a trusted certificate (HTTP 415)
+PASS dns  identity.memql.localhost
+PASS tls  identity.memql.localhost: ... (HTTP 302)
+PASS grpc api.memql.localhost: negotiated HTTP/2 (HTTP 415) -- gRPC can ride this door
+```
+
+Two things in that output are deliberate and neither is obvious.
+
+**The status code is informational, not a pass criterion.** Note the `PASS`
+beside `HTTP 415`. The script measures *transport reachability* — does the name
+resolve to the expected address, does TLS handshake against a trusted
+certificate, does the door negotiate h2 — not application health. A 4xx passes
+because a door that answers 415 is a door that is up. (That 415 is the same one
+described above: the probe hits `/`, which is the gRPC backend.)
+
+**The probe set is smaller than the hosts block, on purpose.** `DEFAULT_HOSTS`
+is `api.` plus `identity.` only, while the managed block
+`scripts/install/hosts-entries.sh` writes carries five names. Those are
+different jobs: `/etc/hosts` has no wildcard semantics so it needs every name
+spelled out, whereas the probe set is only the doors we assert are up.
 
 > **WARNING: an h2 probe passes while an HTTP/1.1 path is broken.** That is
-> exactly how `/unsubscribe` stayed unrouted without anyone noticing. Extending
+> exactly how `/unsubscribe` stayed unrouted without anyone noticing — and note
+> the h2 check runs once, so it is not even asserting h2 on every host. Extending
 > the script with a plain HTTP/1.1 probe of one bff HTTP path is tracked on epic
 > memql#3700; until it lands, the `curl` line above is that check done by hand.
 > `--http1.1` is not decoration — curl prefers HTTP/2 over TLS by default, and
