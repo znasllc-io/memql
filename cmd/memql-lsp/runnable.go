@@ -105,6 +105,8 @@ func (h *customHandler) Handle(ctx *glsp.Context) (any, bool, bool, error) {
 		return decodeAndServe(h, ctx, h.srv.runnableConstructs)
 	case methodImports:
 		return decodeAndServe(h, ctx, h.srv.imports)
+	case methodTrainingState:
+		return decodeAndServe(h, ctx, h.srv.trainingState)
 	default:
 		return h.Handler.Handle(ctx)
 	}
