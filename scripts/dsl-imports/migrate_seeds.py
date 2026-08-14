@@ -49,7 +49,6 @@ Usage:
 """
 import argparse
 import re
-import sys
 from pathlib import Path
 
 USE_CLAUSE_RE = re.compile(

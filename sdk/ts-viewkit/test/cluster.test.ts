@@ -105,11 +105,15 @@ test("a tile with no secondary detail omits only that line", () => {
 });
 
 test("topology values are escaped", () => {
+  // MIXED CASE, and the assertion is case-insensitive (the valueView.test.ts
+  // pattern): HTML tag names are case-insensitive, so a leak spelled `<SCRIPT>`
+  // would pass a literal `/<script>/` check. What is being asserted is that no
+  // raw tag from the value survives escapeHtml, whatever its spelling.
   const html = renderToHtml(
-    renderTopologyGrid([node({ label: '<script>x</script>', orphan: true, orphanReason: '"quoted"' })]),
+    renderTopologyGrid([node({ label: '<ScRiPt>x</ScRiPt>', orphan: true, orphanReason: '"quoted"' })]),
   );
-  assert.doesNotMatch(html, /<script>/);
-  assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<\/?script/i);
+  assert.match(html, /&lt;ScRiPt&gt;/);
   assert.match(html, /title="&quot;quoted&quot;"/);
 });
 

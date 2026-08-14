@@ -38,7 +38,6 @@ import { MAP_ELEMENT, renderMap } from "../src/map.js";
 import {
   BAR_CHART_ELEMENT,
   LINE_CHART_ELEMENT,
-  PIE_CHART_ELEMENT,
   PROPORTION_BAR_ELEMENT,
   renderBarChart,
   renderLineChart,

@@ -244,7 +244,8 @@ def topo(dirs, dep_map):
 
 
 def update_go_work(modules):
-    lines = open(os.path.join(REPO, "go.work")).read().split("\n")
+    with open(os.path.join(REPO, "go.work")) as f:
+        lines = f.read().split("\n")
     head, i = [], 0
     while i < len(lines):
         head.append(lines[i])
@@ -258,7 +259,8 @@ def update_go_work(modules):
             break
         i += 1
     body = ["\t."] + [f"\t./{m}" for m in sorted(m for m in modules if m != ".")]
-    open(os.path.join(REPO, "go.work"), "w").write("\n".join(head + body + tail))
+    with open(os.path.join(REPO, "go.work"), "w") as f:
+        f.write("\n".join(head + body + tail))
 
 
 def update_dockerfiles(modules):
@@ -266,21 +268,25 @@ def update_dockerfiles(modules):
     marker = "# BuildKit cache mounts"
     for df, anchor in (("Dockerfile", marker), ("cmd/deploy-gate-check/Dockerfile", "RUN go mod download")):
         path = os.path.join(REPO, df)
-        text = open(path).read()
+        with open(path) as f:
+            text = f.read()
         block = "".join(f"COPY {m}/go.* ./{m}/\n" for m in nested)
         # Replace the existing contiguous COPY <mod>/go.mod block.
         text = re.sub(r"(?m)^COPY [^\n]*/go\.\* \./[^\n]*/\n(?:COPY [^\n]*/go\.\* \./[^\n]*/\n)*",
                       block, text, count=1)
-        open(path, "w").write(text)
+        with open(path, "w") as f:
+            f.write(text)
 
 
 def update_known_dirs(modules):
     path = os.path.join(REPO, "scripts/ci/db-gated-packages.sh")
-    text = open(path).read()
+    with open(path) as f:
+        text = f.read()
     entries = "\n".join(f'\t"{m}"' for m in sorted(m for m in modules if m != "."))
     new = f'readonly KNOWN_GO_MOD_DIRS=(\n\t"."\n{entries}\n)'
     text = re.sub(r"readonly KNOWN_GO_MOD_DIRS=\(\n(?:[^\n]*\n)*?\)", new, text, count=1)
-    open(path, "w").write(text)
+    with open(path, "w") as f:
+        f.write(text)
 
 
 def main():
@@ -363,7 +369,8 @@ def main():
     update_dockerfiles(modules)
     update_known_dirs(modules)
     print(f"total modules: {len(modules)}")
+    return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main() or 0)
+    sys.exit(main())
