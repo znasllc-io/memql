@@ -21,7 +21,7 @@ make down        # tear down
 
 # Multi-node mesh testing (2 replicas per Deployment -- staging parity):
 make up SERVERS=2 AGENTS=1
-make scale N=2   # ENV names the environment; it DEFAULTS TO prod
+make scale N=2   # ENV names the environment; it DEFAULTS TO local
 make status   # verify unique MEMQL_NODE_IDs + shared identity keyset
 
 # Run tests
@@ -196,7 +196,7 @@ make dev                      # rebuild + import + restart ALL app nodes
 make dev NODE=bff             # single node (faster)
 make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
-# Multi-node scaling (ENV names the environment; it defaults to prod):
+# Multi-node scaling (ENV names the environment; it defaults to local):
 make scale N=2      # 2 replicas per Deployment, local cluster
 make status                   # litmus: unique MEMQL_NODE_ID per pod +
                               #         one shared identity signing keyset
@@ -315,7 +315,7 @@ frontend coordination.
 | **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
 | **Clean slate (nuke + repave)** | `make up-refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
 | **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod, and that every identity replica publishes the same JWKS keyset (mesh parity check) |
-| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing. `ENV=` names the environment and defaults to `prod` (`memql-prod`); `staging` -> `memql-staging`; `local` -> `memql` (memql#3766) |
+| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing. `ENV=` names the environment and defaults to `local` (namespace `memql`); `staging` -> `memql-staging`; `prod` -> `memql-prod` (memql#3766) |
 | **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
 | **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
 | **Run tests** | `go test ./...` | Go tests |
