@@ -22,8 +22,8 @@ import (
 //
 // There is no `a.httpTransport()` helper in this codebase; the site-serving
 // handler mounts here, between transportBase and createHTTPServer, the way
-// transportBFF mounts its domain endpoints (mountPortalEndpoints,
-// mountInboundEndpoints, ...) between the same two calls.
+// transportBFF mounts its domain endpoints (mountInboundEndpoints,
+// mountAttachmentEndpoints, ...) between the same two calls.
 func (a *App) transportEdge() {
 	a.transportBase()
 	a.mountEdgeEndpoints()
@@ -40,11 +40,12 @@ const defaultSiteCacheTTL = 30 * time.Second
 
 // mountEdgeEndpoints resolves the request Host to a v1:platform:site row and
 // serves that site's bundle -- the edge's whole job. Mounted at the ROOT of
-// the node's HTTP server ("/", not a prefix like mountPortalEndpoints's
-// /portal/): every hosted site owns its own Host, and the path space beneath
-// it belongs to the SITE, not to memQL, except for the /_memql/* prefix the
+// the node's HTTP server ("/", not a shared prefix like the bff's mounts
+// use): every hosted site owns its own Host, and the path space beneath it
+// belongs to the SITE, not to memQL, except for the /_memql/* prefix the
 // handler itself reserves (D9; the reverse proxy that fills it in is Task 7,
-// #3712).
+// #3712). The portal is one of those hosted sites -- site #1, memql#3711 --
+// with no mount of its own to except.
 //
 // Constructs the pieces component/edge already ships and wires them through
 // NewHandler, per the Task 5 controller ruling: the engine-backed

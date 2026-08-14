@@ -3,16 +3,22 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
-// The portal is served from a SUB-PATH, not the origin root: component/portal
-// mounts it at `/portal/` on the bff's HTTP server, which already owns `/`,
-// `/memql/ws`, `/healthz`, `/spaces/...` and friends. `base` has to match, or
-// every hashed asset URL the bundle emits ("/assets/index-abc.js") resolves
-// against the origin root and 404s.
+// The portal is served from its OWN ORIGIN ROOT (memql#3711): it is site #1,
+// resolved by component/edge from its own hostname (portal.<domain>) and
+// served the same way as any other hosted site, not mounted at a `/portal/`
+// sub-path of the bff's HTTP server the way component/portal (retired) used
+// to. `base` has to match the root, or every hashed asset URL the bundle
+// emits ("/assets/index-abc.js") resolves against the wrong path and 404s.
 //
-// It is also what makes the SPA fallback coherent: the Go handler returns
-// index.html for unknown paths BENEATH /portal/, and index.html's own script
-// tag then points back inside that prefix.
-const BASE = "/portal/";
+// It is also what makes the SPA fallback coherent: the edge returns
+// index.html for any path it cannot resolve to a file (handler.go), and
+// index.html's own script tag then points back at the root.
+//
+// import.meta.env.BASE_URL derives from this everywhere it is read
+// (App.tsx's router basename, cluster/endpoint.ts's bridge + OAuth-callback
+// paths, cluster/config.ts's runtime-config path) -- ONE choke point, so
+// this is the only line that needed to change for the origin move.
+const BASE = "/";
 
 export default defineConfig({
   base: BASE,

@@ -1,11 +1,5 @@
-// Package edge serves this cluster's web surfaces: every hosted SPA and
-// website, and the memQL Portal, which is site #1 and takes no special path.
-//
-// It is component/portal generalized. That package serves exactly one bundle
-// from a directory named by an env var; this one resolves the request Host to
-// a v1:platform:site row and serves the bundle that row names. The portal
-// keeps working because its row's bundleRef is file:///app/portal -- the same
-// directory, reached through the general mechanism.
+// component/edge/resolve.go -- Host-to-Site resolution, cached. The package
+// doc comment (the "why" behind this package) lives in doc.go.
 package edge
 
 import (

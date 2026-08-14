@@ -8,7 +8,20 @@
 // local k3d cluster, staging, and a customer's install, each with a different
 // identity host. A build-time `VITE_MEMQL_IDENTITY_URL` would make the bundle
 // environment-specific, which is the exact property the image model exists to
-// avoid. component/portal/config.go is the other half of this contract.
+// avoid.
+//
+// component/portal/config.go used to be the other half of this contract --
+// it served this document directly, co-located with the bundle on the same
+// bff node. The portal is now site #1, served by component/edge (memql#3711),
+// which is a generic bundle server and must not carry portal-specific
+// identity-config logic (TestPortalHasNoSpecialCaseInTheServingPath forbids
+// exactly that). KNOWN GAP as of memql#3711: nothing yet serves this document
+// at the portal's new origin. The candidate path is the site's own
+// apiProxy=true / `/_memql/*` proxy to the bff (memql#3712), with the bff
+// answering GET /runtime-config.json as a generic (not portal-only)
+// capability -- but that endpoint does not exist yet either. Until it does,
+// the fetch below 404s (or, worse, gets index.html back under the SPA
+// fallback) and the portal cannot discover its identity service.
 //
 // Additive-only shape. A cached index.html can outlive a node restart, so an
 // older bundle has to keep working against a newer node: read fields

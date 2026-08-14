@@ -1,10 +1,11 @@
 # memQL Portal -- operator guide
 
 The memQL Portal is the platform's own graphical operations console: a static
-SPA served by the bff at `/portal/`, dialing the same `/memql/ws` gRPC bridge
-every other client uses. This page covers what an operator has to configure to
-make it usable, and records the two design decisions that shape that
-configuration.
+SPA served by the edge as site #1 (memql#3711) -- the same `v1:platform:site`
+resolution, bundle opener and headers as any customer site, at its own
+hostname -- dialing the same `/memql/ws` gRPC bridge every other client uses.
+This page covers what an operator has to configure to make it usable, and
+records the two design decisions that shape that configuration.
 
 Related: [identity-service.md](auth/identity-service.md),
 [access-model.md](auth/access-model.md),
@@ -61,10 +62,10 @@ any other browser client. **No PAT is ever involved, and no credential ever
 appears in a URL.**
 
 ```
-  browser                     bff (/portal/)              identity
+  browser                     edge (portal.<domain>)      identity
      |                              |                         |
-     |-- GET /portal/ -------------->|                        |
-     |-- GET /portal/runtime-config.json ->|                  |
+     |-- GET / --------------------->|                        |
+     |-- GET /runtime-config.json -->|  (*)                   |
      |<-- {identityUrl, oauthClientId, authEnabled} ----------|
      |                                                        |
      |== top-level navigation ================================>|
@@ -72,18 +73,28 @@ appears in a URL.**
      |       &redirect_uri=...&state=...&code_challenge=...    |
      |       &code_challenge_method=S256                       |
      |                                        magic-link email |
-     |<== 302 /portal/auth/callback?code=...&state=... ========|
+     |<== 302 /auth/callback?code=...&state=... ===============|
      |                                                        |
      |-- POST /oauth/token {code, code_verifier} ------------->|
      |<-- {access_token} + Set-Cookie: memql_refresh (HttpOnly)|
      |                                                        |
-     |== WebSocket /memql/ws, subprotocols ["bearer", <jwt>] ==>| (bff)
+     |== WebSocket /_memql/memql/ws, subprotocols ["bearer", <jwt>] ==>| (edge proxies to the bff, memql#3712)
      |                                                        |
      |   ...~70% of the token's TTL later...                   |
      |-- POST /auth/refresh (cookie) ------------------------->|
      |<-- {access_token}                                       |
-     |-- rotateAuth on the LIVE stream -----------------------> (bff)
+     |-- rotateAuth on the LIVE stream -----------------------> (bff, via the edge proxy)
 ```
+
+(*) The portal is site #1 (memql#3711), served by the generic `component/edge`
+-- which must not carry portal-specific config-serving logic
+(`TestPortalHasNoSpecialCaseInTheServingPath`). **As of this writing nothing
+serves `GET /runtime-config.json` at the portal's new origin**:
+`component/portal`, the only thing that ever did, is retired, and its
+replacement (the edge's `/_memql/*` proxy to the bff, opted into via this
+site's `apiProxy: true`) has no `runtime-config.json` handler on the bff side
+either. See `clients/portal/src/cluster/config.ts`'s file-level comment for
+the current state of this gap.
 
 ### Token storage, and the threat model
 
@@ -168,25 +179,22 @@ public clients have no secret -- that is why PKCE is mandatory), and whether
 this cluster enforces auth. The document is served unauthenticated, on the same
 public path as the bundle.
 
-### On the node serving the portal (the bff)
+### On the node serving the portal (the edge)
 
-| Variable | Default | Notes |
-|---|---|---|
-| `MEMQL_PORTAL_DIST` | `/app/portal` | Where the built bundle lives. |
-| `MEMQL_PORTAL_OAUTH_CLIENT_ID` | `portal` | Must match a registered client on identity. |
-| `MEMQL_PORTAL_IDENTITY_URL` | derived | Override only if the issuer is not the browser-facing URL. |
-| `MEMQL_PORTAL_IDENTITY_API_BASE_URL` | derived | Set to `self` when the front door proxies identity's JSON endpoints. |
+The portal is site #1 (memql#3711): its bundle location is the seeded site
+row's `bundleRef` (`dsl/platform/seeds.memql`), not an env var --
+`MEMQL_PORTAL_DIST` and its three `MEMQL_PORTAL_IDENTITY_*` /
+`MEMQL_PORTAL_OAUTH_CLIENT_ID` siblings are retired along with
+`component/portal`, which used to read them.
 
-`identityUrl` is **derived** and usually needs no configuration: it comes from
-`MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`, which every engine node already
-carries and which must equal identity's own `MEMQL_IDENTITY_BASE_URL`. An
-issuer is by construction the public origin operators reach identity at.
-
-> **Not `MEMQL_IDENTITY_VERIFIER_BASE_URL`.** That is the in-cluster address
-> (`https://identity:8085` in every `deploy/k8s` manifest). Handing it to a
-> browser produces a DNS failure on a name that resolves only inside the pod
-> network -- it would work on a laptop running everything on localhost and fail
-> on every real deployment.
+**Unresolved as of this writing**: those three identity-facing variables
+configured the `runtime-config.json` document a browser fetches before it can
+authenticate at all (`identityUrl`, `identityApiBaseUrl`, `oauthClientId`,
+`authEnabled` -- described below). Nothing currently serves that document at
+the portal's new origin; `component/edge` is a generic bundle server and must
+not carry portal-specific config logic, and the bff has no equivalent
+generic endpoint yet. See `clients/portal/src/cluster/config.ts`'s file-level
+comment for the current state.
 
 ### On the identity service
 
@@ -199,19 +207,23 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    ```
    MEMQL_IDENTITY_REGISTERED_CLIENTS=[
      {"clientId":"portal",
-      "redirectURIs":["https://api.example.com/portal/auth/callback"]},
+      "redirectURIs":["https://portal.example.com/auth/callback"]},
      ...
    ]
    ```
 
-   The callback path is `<portal mount>/auth/callback`, i.e. `/portal/auth/callback`
-   in the normal case (prefixed by `SERVER_PUBLIC_PATH` where one is set).
+   The callback path is the portal's own origin's `/auth/callback` -- the
+   portal is site #1, served at its own hostname rather than a `/portal/`
+   sub-path of another node's origin, so the redirect URI carries no mount
+   prefix. `component/genesis/domain.go` registers this automatically from
+   `MEMQL_DOMAIN`; a hand-rolled `MEMQL_IDENTITY_REGISTERED_CLIENTS` (a
+   non-standard domain, a bespoke install) must match it byte for byte.
 
 2. **Allow the portal's origin for CORS**, unless you take the proxy option
    below.
 
    ```
-   MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS=https://api.example.com,...
+   MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS=https://portal.example.com,...
    ```
 
    `*` is **refused** here (memql#3716). Identity's CORS middleware emits
@@ -227,27 +239,33 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
 
 ### Cross-origin XHR, or a same-origin proxy
 
-By default the portal calls `/oauth/token`, `/auth/refresh` and `/auth/logout`
-**cross-origin** on the identity host, which is why the CORS entry above is
-needed. This works, and it is the zero-infrastructure path.
+The portal used to default to calling `/oauth/token`, `/auth/refresh` and
+`/auth/logout` **cross-origin** on the identity host (the CORS entry above is
+still needed for that path). Since the portal became site #1 (memql#3711) that
+default is on weaker footing than the prose below describes: the portal's CSP
+now comes from `component/edge/csp.go`, which is generic across every hosted
+site and derives `connect-src` from the SITE's own origin plus its
+same-origin `/_memql/*` API surface -- it does **not** add an arbitrary
+identity origin to `connect-src` the way the retired `component/portal/csp.go`
+did. A cross-origin XHR to identity is therefore likely CSP-blocked before it
+leaves the page. `MEMQL_PORTAL_IDENTITY_API_BASE_URL`, the toggle that used to
+choose between this and the same-origin path below, is retired along with
+`component/portal` and has no replacement yet.
 
 [identity-service.md](auth/identity-service.md) prescribes the alternative and
-explains why: browsers should reach those endpoints **same-origin** through the
-front door, which proxies them to identity, because Safari has an HTTP/2
-connection-coalescing bug that intermittently fails cross-origin credentialed
-XHR to a sibling host sharing a wildcard certificate and IP. It surfaces as
-`TypeError: Load failed` with no server-side trace at all.
-
-To take that path: add `location =` rules on the portal's front door for
-`/oauth/token`, `/auth/refresh`, `/auth/logout` and
-`/.well-known/jwks.json`, then set `MEMQL_PORTAL_IDENTITY_API_BASE_URL=self`.
-The refresh cookie is then set on the portal's own origin and no CORS entry is
-required. Only the top-level `/authorize` navigation still goes to the identity
-host directly -- it is an HTML page and has no same-origin variant.
-
-The portal's CSP is generated to match whichever choice is in effect
-(`component/portal/csp.go` puts the XHR origin in `connect-src`), so the two
-cannot drift apart.
+explains why independent of the CSP question: browsers should reach those
+endpoints **same-origin** through the front door, because Safari has an
+HTTP/2 connection-coalescing bug that intermittently fails cross-origin
+credentialed XHR to a sibling host sharing a wildcard certificate and IP. It
+surfaces as `TypeError: Load failed` with no server-side trace at all. For the
+portal specifically, "same-origin through the front door" is the site's own
+`apiProxy: true` / `/_memql/*` surface (memql#3712) proxying to the bff --
+which is a proxy to the BFF, not to identity directly, so reaching identity's
+JSON endpoints through it depends on whatever the bff-side forwarding for
+those paths turns out to be. That wiring is not designed yet. Only the
+top-level `/authorize` navigation is settled either way -- it is an HTML page
+and has no same-origin variant, so it always goes to the identity host
+directly.
 
 ### Clusters with authentication disabled
 
@@ -399,11 +417,11 @@ waiting on a seam.
 
 | Symptom | Cause |
 |---|---|
-| `/portal/` 404s with a message naming `MEMQL_PORTAL_DIST` | No bundle on the node. `make portal-build` and point the variable at `clients/portal/dist`, or deploy an image whose portal stage built. |
-| Sign-in page says "not configured for portal sign-in" | The node published no `identityUrl` / `oauthClientId`. Check `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` on the bff. |
-| "Unknown client" on the identity page | `MEMQL_PORTAL_OAUTH_CLIENT_ID` is not in `MEMQL_IDENTITY_REGISTERED_CLIENTS`. |
-| "Invalid redirect URI" | The registered URI is not byte-identical to `<origin><mount>/auth/callback`. |
-| Sign-in button does nothing; console shows a CSP `connect-src` violation | The portal's origin is reaching an identity origin the node did not publish. Check `MEMQL_PORTAL_IDENTITY_API_BASE_URL`. |
+| The portal's hostname 404s asset-by-asset, or serves an empty bundle | No bundle at the site row's `bundleRef` on the edge pod's disk (`file:///app/portal` by default). `make portal-build`, then `updateSiteBundle` to point at the built directory, or deploy an image whose portal stage built. |
+| Sign-in page says "not configured for portal sign-in" | The node published no `identityUrl` / `oauthClientId` -- and, as of memql#3711, likely because nothing serves `runtime-config.json` at the portal's new origin at all (see the unresolved-gap note above). Check `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` on the bff once that gap has a fix. |
+| "Unknown client" on the identity page | The client id the portal presents is not in `MEMQL_IDENTITY_REGISTERED_CLIENTS`. |
+| "Invalid redirect URI" | The registered URI is not byte-identical to the portal's own origin's `/auth/callback` (no mount prefix -- the portal is site #1, not a `/portal/` sub-path of another node). |
+| Sign-in button does nothing; console shows a CSP `connect-src` violation | The portal's origin is reaching an identity origin the edge's site-generic CSP (`component/edge/csp.go`) does not allow -- see the cross-origin-XHR note above; this is now the LIKELY case rather than a misconfiguration. |
 | `TypeError: Load failed` on `/auth/refresh`, intermittently, Safari only | The known HTTP/2 coalescing bug. Take the same-origin proxy option above. |
 | Signed in, then signed out again ~15 minutes later | `/auth/refresh` is failing. Check the CORS allowlist and that the `memql_refresh` cookie's `SameSite` suits your topology (`MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE=none` when the portal and identity are on different registrable domains). |
 | Sign-in loops back to the sign-in page | Session storage is blocked for the origin. The portal reports this explicitly rather than redirecting. |

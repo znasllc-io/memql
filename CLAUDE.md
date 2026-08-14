@@ -78,7 +78,7 @@ memQL/
 │   │                  Dockerfile stage, deploy component)
 │   └── portal/        memQL Portal -- the platform's graphical operations
 │                      console, the Cockpit's browser sibling. React + TS +
-│                      Vite + Tailwind; served by component/portal
+│                      Vite + Tailwind; served by component/edge as site #1
 ├── component/         Core Go components
 │   ├── bus/           Channel-based inter-component communication (Go)
 │   ├── config/        Centralized env var loading (Go)
@@ -125,8 +125,7 @@ memQL/
 | `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps). Plural + first-class, the inward-facing mirror of `integrations/`. The engine carries one inhabitant -- the portal -- as the worked example downstream repos copy | TypeScript | [→](clients/README.md) |
-| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/portal` at `/portal/` on the bff | TypeScript | [→](clients/README.md) |
-| `component/portal/` | Serves the portal bundle from `MEMQL_PORTAL_DIST` (SPA fallback, asset caching, CSP). Not `go:embed` -- see its `doc.go` | Go | -- |
+| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/edge` as site #1 (its own hostname, `bundleRef: file:///app/portal`) | TypeScript | [→](clients/README.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
 | `component/config/` | Centralized configuration loading | Go | -- |
@@ -609,7 +608,6 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
-| **Portal SPA assets** | `GET /portal/*` (bff only) | A browser cannot fetch its own bundle over gRPC -- the request that loads the application is made before any application code exists to speak a protocol. Same category as the `/memql/ws` upgrade and identity's web UI (memql#3314). Static bytes only, identical for every visitor: declared in `server.PublicPaths()` via `PortalPaths()`, while the DATA the portal reads stays gated on the `/memql/ws` stream it then dials. Served by `component/portal` from `MEMQL_PORTAL_DIST` |
 
 ### How an HTTP path reaches the front door (GENERATED, memql#3703)
 

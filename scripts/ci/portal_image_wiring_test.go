@@ -1,26 +1,34 @@
-// Static guard: the memQL Portal bundle actually reaches the bff IMAGE
-// (znasllc-io/memql#3314).
+// Static guard: the memQL Portal bundle actually reaches the EDGE IMAGE
+// (znasllc-io/memql#3314, retargeted from the bff by #3711 -- the portal is
+// site #1, served by component/edge; component/portal, which used to serve
+// it from the bff, is retired).
 //
 // # The failure this exists to prevent
 //
 // The portal is served from a directory, not //go:embed'ed, so nothing in the
-// Go build knows whether the bundle is present. component/portal degrades
-// deliberately -- a missing directory logs one warning and answers 404 rather
-// than failing the node -- which is right for resilience and terrible for
-// detection: an image built without the portal stage boots green, passes
-// every probe, and serves a 404 page that only a human clicking /portal ever
-// sees.
+// Go build knows whether the bundle is present. component/edge degrades
+// deliberately -- a missing bundle 404s asset-by-asset rather than failing
+// the node -- which is right for resilience and terrible for detection: an
+// image built without the portal stage boots green, passes every probe, and
+// serves 404 for every request to a hostname that only a human ever visits.
 //
 // Three separate declarations have to agree for the bundle to be there, and
 // they live in three files with nothing tying them together:
 //
 //	Dockerfile                              -- the runtime COPYs from `portal-dist`
-//	scripts/lib/engine_build_args.sh        -- the LOCAL bff build selects portal-build
-//	.github/workflows/build-engine-images.yml -- the RELEASE bff build selects it too
+//	scripts/lib/engine_build_args.sh        -- the LOCAL edge build selects portal-build
+//	.github/workflows/build-engine-images.yml -- the RELEASE build, once it carries an
+//	                                            edge entry (memql#3711 lands only the
+//	                                            local path; the release matrix has no
+//	                                            `edge` node yet)
 //
-// Any one of them silently omits the bundle. The release one is the worst,
-// because it is the path staging and production actually run, and it is not
-// exercised by any pull-request lane.
+// Any one of them silently omits the bundle. The release one would be the
+// worst, because it is the path staging and production actually run and it
+// is not exercised by any pull-request lane -- which is exactly why this
+// guard also asserts the NEGATIVE today: nothing in the release matrix may
+// claim `portal-build` until an `edge` entry exists to receive it, because a
+// stray bff (or any other node) still carrying it would silently ship dead
+// weight for a bundle nothing serves.
 //
 // # Scope
 //
@@ -135,26 +143,45 @@ func TestEveryRuntimeStageCopiesThePortal(t *testing.T) {
 }
 
 // The LOCAL build path (make dev / the deploy.buildImage backend) must select
-// the real stage for the bff.
-func TestLocalBffBuildSelectsThePortalStage(t *testing.T) {
+// the real stage for the edge -- the node that serves the portal as site #1
+// (memql#3711).
+func TestLocalEdgeBuildSelectsThePortalStage(t *testing.T) {
 	body := readRepoFile(t, "scripts/lib/engine_build_args.sh")
 	if !strings.Contains(body, portalDistStageArg+"="+portalBuildStage) {
-		t.Errorf("scripts/lib/engine_build_args.sh never passes %s=%s. `make dev NODE=bff` "+
-			"would then build a bff image with no portal in it, and the local cluster "+
-			"would 404 at /portal while staging served it -- the environment divergence "+
-			"the parity standard exists to prevent.", portalDistStageArg, portalBuildStage)
+		t.Errorf("scripts/lib/engine_build_args.sh never passes %s=%s. `make dev NODE=edge` "+
+			"would then build an edge image with no portal in it, and the local cluster "+
+			"would 404 at portal.<domain> while staging served it -- the environment "+
+			"divergence the parity standard exists to prevent.", portalDistStageArg, portalBuildStage)
 	}
-	// ...and only for the bff. A blanket build-arg would put a Node stage in
-	// front of every node image for bytes seven of them never serve.
-	if !strings.Contains(body, `"$node" == "bff"`) && !strings.Contains(body, `"${node}" == "bff"`) {
-		t.Errorf("scripts/lib/engine_build_args.sh does not gate %s on the bff node type; "+
+	// ...and only for the edge. A blanket build-arg would put a Node stage in
+	// front of every node image for bytes eight of them never serve.
+	if !strings.Contains(body, `"$node" == "edge"`) && !strings.Contains(body, `"${node}" == "edge"`) {
+		t.Errorf("scripts/lib/engine_build_args.sh does not gate %s on the edge node type; "+
 			"every node image would build the SPA", portalDistStageArg)
+	}
+	// The bff must NOT still claim the stage -- it stopped serving the portal
+	// in the same change that made this test name the edge (memql#3711). A
+	// stray `"$node" == "bff"` left in the OR alongside edge would silently
+	// build a Node toolchain into an image nothing serves it from anymore.
+	if strings.Contains(body, `"$node" == "bff"`) || strings.Contains(body, `"${node}" == "bff"`) {
+		t.Errorf("scripts/lib/engine_build_args.sh still gates %s on the bff node type. "+
+			"The bff no longer serves the portal -- component/portal is retired -- so this "+
+			"just pulls an unused Node toolchain into the bff image.", portalDistStageArg)
 	}
 }
 
-// The RELEASE build path must do the same. This is the one no pull-request
-// lane exercises, so a static assertion is the only signal before staging.
-func TestReleaseBffBuildSelectsThePortalStage(t *testing.T) {
+// The RELEASE build path must agree with the local one -- once it carries an
+// `edge` entry. It does not yet (memql#3711 lands only the local build path
+// and the DSL/serving side; wiring the edge node type into the release image
+// matrix is a later task), so this asserts the invariant FORWARD-compatibly
+// rather than requiring infrastructure this change does not add: an `edge`
+// entry, if present, must select portal-build; every OTHER entry -- bff
+// included -- must select portal-skip. That still catches the two failure
+// modes that matter today: the bff silently keeping the stage it no longer
+// serves, and any node other than edge picking it up by accident. This is
+// the one no pull-request lane exercises, so a static assertion is the only
+// signal before staging.
+func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 	raw := readRepoFile(t, ".github/workflows/build-engine-images.yml")
 
 	var doc struct {
@@ -196,7 +223,6 @@ func TestReleaseBffBuildSelectsThePortalStage(t *testing.T) {
 			portalDistStageArg)
 	}
 
-	sawBFF := false
 	for _, entry := range job.Strategy.Matrix.Include {
 		node, portal := entry["node"], entry["portal"]
 		// An absent key renders as the empty string in `FROM ${VAR}`, which is
@@ -209,26 +235,27 @@ func TestReleaseBffBuildSelectsThePortalStage(t *testing.T) {
 				node, portalDistStageArg)
 			continue
 		}
-		if node == "bff" {
-			sawBFF = true
+		if node == "edge" {
 			if portal != portalBuildStage {
-				t.Errorf("the bff matrix entry selects portal stage %q, want %q. The bff is "+
-					"the node that serves the portal; any other value ships an image with "+
-					"no bundle to staging and production.", portal, portalBuildStage)
+				t.Errorf("the edge matrix entry selects portal stage %q, want %q. The edge is "+
+					"the node that serves the portal (site #1, memql#3711); any other value "+
+					"ships an image with no bundle to staging and production.",
+					portal, portalBuildStage)
 			}
 			continue
 		}
 		if portal != portalSkipStage {
-			t.Errorf("matrix entry %q selects portal stage %q. Only the bff serves the "+
-				"portal, so every other node type must take %q -- otherwise its image "+
-				"build pulls a Node toolchain and compiles an SPA it never serves.",
+			t.Errorf("matrix entry %q selects portal stage %q. Only the edge serves the "+
+				"portal, so every other node type -- the bff included, since "+
+				"component/portal is retired -- must take %q, otherwise its image build "+
+				"pulls a Node toolchain and compiles an SPA it never serves.",
 				node, portal, portalSkipStage)
 		}
 	}
-	if !sawBFF {
-		t.Error("the release matrix has no `bff` entry, so no image carries the portal " +
-			"bundle at all")
-	}
+	// No requirement that an `edge` entry exists: the release matrix does not
+	// carry one yet (a later task adds it alongside the rest of the edge
+	// node's deploy wiring). The negative assertion above -- nothing else may
+	// claim portal-build -- is what this guard can enforce today.
 }
 
 func keysOf(m map[string]bool) []string {

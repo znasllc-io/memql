@@ -210,14 +210,31 @@ func TestOwnedTierMutationStampsARealCaller(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // The seed materializer runs from a startup goroutine under a context with
-// claims + TokenInfo and NO AccessContext (systemActorContext, this package).
-// It stays legal because the mutations it drives take `ownerUserId` as an ARG
-// -- the materializer passes the target user explicitly for a @scope("perUser")
-// seed -- so none of them reads actor.userId.
+// claims + TokenInfo AND an AccessContext (systemActorContext, this package).
 //
-// That is a property of the corpus, not of the materializer, and nothing else
-// states it. Adding `ownerUserId: actor.userId` to any create<Concept> the
-// materializer drives would break the startup sweep at boot; this fails first.
+// UPDATED BY memql#3711 (the portal-is-site-1 seed). Until then no seed
+// target concept declared a row-authz tier, so the materializer's context
+// carried NO AccessContext at all -- it stayed legal purely because every
+// create<Concept> it drove took `ownerUserId` as an ARG (the materializer
+// passes the target user explicitly for a @scope("perUser") seed) and none of
+// them read actor.userId. v1:platform:site is @rowAuthz(clusterOwner)
+// (dsl/platform/seeds.memql), and the row-authz WRITE GUARD's cluster-owner
+// escape (guardRowAuthzWrite -> rowAuthzWriteEscape -> rowAuthzIsClusterOwner)
+// reads AccessContext only -- so RE-materializing an existing seed row (every
+// boot after the first) was refused unconditionally with no AccessContext to
+// grant the escape. systemActorContext now stamps one, with
+// UserId: seedMaterializerActor and Role: RoleOwner.
+//
+// THIS DOES NOT REOPEN memql#3620. That defect was an EMPTY-STRING owner
+// stamped SILENTLY (a nil-safe zero-value default standing in for "nobody").
+// The materializer's AccessContext carries a REAL, non-empty synthetic
+// identity ("system:seedMaterializer"), so a create<Concept> mutation that
+// reads actor.userId now stamps a TRUTHFUL provenance value instead of either
+// failing (the old behaviour) or silently writing "". createSite
+// (dsl/platform/mutations.memql) is the first shipped case: its stamp block
+// reads `createdBy: actor.userId`, and it must render -- with that value
+// resolving to the synthetic actor, not empty -- for the portal seed to
+// materialize at all.
 func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
@@ -229,9 +246,14 @@ func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 	eng := &MemQLEngine{}
 	ctx := systemActorContext(context.Background())
 
-	if _, ok := auth.AccessFromContext(ctx); ok {
-		t.Fatal("the materializer context is supposed to carry NO AccessContext -- " +
-			"this test measures nothing if it acquires one")
+	ac, ok := auth.AccessFromContext(ctx)
+	if !ok || ac == nil {
+		t.Fatal("the materializer context must carry an AccessContext (memql#3711) -- " +
+			"the row-authz write guard's cluster-owner escape reads nothing else")
+	}
+	if strings.TrimSpace(ac.UserId) == "" {
+		t.Fatal("the materializer's AccessContext carries an EMPTY UserId -- this is exactly " +
+			"the memql#3620 failure mode (a silently-empty owner) arriving by a new door")
 	}
 
 	cases := []struct {
@@ -248,16 +270,24 @@ func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 			"capabilityId": "cap-3620", "roleSlug": "probe",
 			"verb": "read", "resourceType": "data",
 		}},
+		{"createSite", map[string]any{
+			"siteId": "site-3620", "hostname": "site-3620.example.com",
+			"bundleRef": "file:///tmp/site-3620",
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.mutation, func(t *testing.T) {
 			fn, err := fnRegistry.Get(tc.mutation)
 			require.NoError(t, err)
 			require.NotNil(t, fn.MutationTemplate)
-			_, err = eng.renderMutationTemplate(ctx, fn.MutationTemplate, tc.args)
+			node, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, tc.args)
 			require.NoError(t, err,
-				"%s must still render under the seed materializer's system actor; "+
-					"if it now reads actor.userId, the startup seed sweep fails at boot", tc.mutation)
+				"%s must still render under the seed materializer's system actor", tc.mutation)
+			if tc.mutation == "createSite" {
+				require.Equal(t, seedMaterializerActor, payloadField(t, node, "createdBy"),
+					"createSite reads actor.userId for createdBy -- it must resolve to the "+
+						"materializer's own synthetic identity, not empty and not a stray caller")
+			}
 		})
 	}
 }

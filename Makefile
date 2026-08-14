@@ -518,8 +518,10 @@ portal-test:
 	bash scripts/portal/build.sh test
 
 ## Build the portal bundle into clients/portal/dist. This is what the
-## Dockerfile's portal stage runs, and what MEMQL_PORTAL_DIST points at when
-## serving a locally-built bundle from a `go run` binary.
+## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
+## site row's bundleRef at it (file:///abs/path/clients/portal/dist via
+## updateSiteBundle) -- the portal is site #1 (memql#3711), so there is no
+## longer an env var that repoints it.
 portal-build:
 	bash scripts/portal/build.sh build
 

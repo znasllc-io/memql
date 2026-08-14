@@ -56,11 +56,16 @@ func DomainDerivations(domain string) map[string]string {
 	identity := "https://identity." + d
 	api := "https://api." + d
 	app := "https://app." + d
+	// The portal is site #1 (memql#3711): its bundle is served at its OWN
+	// hostname, not a /portal/ sub-path of another node's origin, so its
+	// redirect URI is this origin's own /auth/callback.
+	portal := "https://portal." + d
 
 	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
 	// redirect), so it carries no domain and is spelled out unchanged. Note
-	// that the client is still called "cockpit" -- what was renamed is the
-	// HOST it dials, not the OAuth client id.
+	// that the client is still called "cockpit" -- what was renamed
+	// (memql#3704 / the api.<domain> rename) is the HOST identity itself is
+	// reached at, not the OAuth client id.
 	//
 	// THE PORTAL'S REDIRECT URI IS A FUNCTION OF WHERE ITS BUNDLE IS SERVED,
 	// not of the front door's name. The page composes it as
@@ -68,16 +73,22 @@ func DomainDerivations(domain string) map[string]string {
 	// (clients/portal/src/auth/AuthProvider.tsx defaultRedirectUri, via
 	// portalRedirectPath), and identity matches redirect_uri by EXACT string --
 	// so a URI registered for an origin the bundle is not served from is a 400
-	// at /authorize with nothing in the portal's own logs. The bundle is served
-	// at /portal/ on the bff, so `api.<d>/portal/auth/callback` is the value
-	// until memql#3711 gives the portal its own origin, and it moves then.
-	// The `portal.<d>` CORS origin below is deliberate and separate: memql#3714
-	// needs it, and an unused allowed origin is inert.
+	// at /authorize with nothing in the portal's own logs. It has moved twice:
+	// originally `cockpit.<d>/portal/auth/callback` (the bundle mounted on the
+	// cockpit-named front door), then briefly `api.<d>/portal/auth/callback`
+	// when that front door was renamed (memql#3704) but the bundle had not yet
+	// moved, and now `portal.<d>/auth/callback` (memql#3711 -- the portal is
+	// site #1, served at its own origin's root, no mount prefix). One URI, not
+	// several -- registering more than the one the bundle is actually served
+	// from is the accept-either pattern the pre-release no-shims rule forbids.
+	// The `portal.<d>` CORS origin below predates this move deliberately
+	// (memql#3714 needs it too, and an unused allowed origin is inert); this
+	// derivation is what makes it earn its keep.
 	clients := fmt.Sprintf(
 		`[{"clientId":"app","redirectURIs":["%s/auth/callback"]},`+
 			`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},`+
-			`{"clientId":"portal","redirectURIs":["%s/portal/auth/callback"]}]`,
-		app, api)
+			`{"clientId":"portal","redirectURIs":["%s/auth/callback"]}]`,
+		app, portal)
 
 	return map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 identity,

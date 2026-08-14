@@ -28,7 +28,7 @@ func TestDomainDerivations(t *testing.T) {
 		`"clientId":"cockpit"`,
 		`"clientId":"portal"`,
 		`"clientId":"app"`,
-		"https://api.memql.localhost/portal/auth/callback",
+		"https://portal.memql.localhost/auth/callback",
 		"https://app.memql.localhost/auth/callback",
 		"http://127.0.0.1/cockpit/callback",
 	} {
@@ -37,12 +37,16 @@ func TestDomainDerivations(t *testing.T) {
 		}
 	}
 
-	// ONE URI for the portal, not two. Registering both the served origin and a
-	// future one is the accept-either pattern the no-shims rule forbids, and it
-	// would hide the day the bundle's origin actually moves (memql#3711).
-	if strings.Contains(clients, "https://portal.memql.localhost/auth/callback") {
-		t.Errorf("registered clients carry a portal.<d> redirect URI, but the bundle "+
-			"is served at api.<d>/portal/ and composes its redirect from that origin: %q", clients)
+	// ONE URI for the portal, not two. Registering both the origin it is
+	// served from now AND the one it moved off of is the accept-either
+	// pattern the no-shims rule forbids. memql#3711 is the move -- the portal
+	// is site #1, served at its own origin's root -- so the pre-move
+	// api.<d>/portal/ shape (from the 7ec983a1 api.<domain> rename, back when
+	// the bundle was still mounted on that front door) must be gone, not
+	// merely superseded.
+	if strings.Contains(clients, "https://api.memql.localhost/portal/auth/callback") {
+		t.Errorf("registered clients still carry the pre-memql#3711 api.<d>/portal/ "+
+			"redirect URI alongside the new portal.<d> one: %q", clients)
 	}
 }
 

@@ -290,9 +290,12 @@ func TestEveryServerPathDeclarationIsClassified(t *testing.T) {
 
 // reachedThroughAggregate is a set of claims, so it is checked rather than
 // trusted: every path each named function returns must actually appear in the
-// emitted set. Without this the map is a comment, and the day PublicPaths()
-// stops appending PortalPaths() the front door silently stops routing the
-// portal bundle.
+// emitted set. Without this the map is a comment, and a claim that stops
+// being true (an aggregate that quietly stops appending a declaration) goes
+// unnoticed instead of failing here -- which is exactly what happened to the
+// portal's own entry: PortalPaths() is retired (memql#3711, the portal is
+// site #1 served by the edge, not the bff), and its map entry went with it
+// rather than becoming a stale claim about a function that no longer exists.
 func TestAggregateClaimsAreTrue(t *testing.T) {
 	emitted := collected(t)
 
