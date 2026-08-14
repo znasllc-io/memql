@@ -476,11 +476,54 @@ function healthz_probe() {
 # host with its first label removed. Empty when the result could not be a domain
 # (`example.com` would yield a bare TLD), because dialing a synthetic label
 # under a guessed apex is worse than admitting the apex is unknown.
+#
+# It answers for a SUBDOMAIN. Handed the apex itself it returns nothing, which is
+# correct for one host and wrong for a host SET -- see resolve_wildcard_apex.
 function wildcard_apex() {
     local host="$1" apex="${1#*.}"
     [[ "$apex" != "$host" ]] || return 0   # no label to strip
     [[ "$apex" == *.* ]]     || return 0   # would be a bare TLD
     printf '%s' "$apex"
+}
+
+# resolve_wildcard_apex <host>... -- the domain a `*.<domain>` rule covers for a
+# whole host set.
+#
+# THE APEX IS A PROPERTY OF THE SET, NOT OF host_list[0]. This existed as a bare
+# `wildcard_apex "${host_list[0]}"` and made the answer depend on ARGUMENT ORDER:
+# `--hosts=<apex>,api.<apex>` derived nothing (the apex has no label to strip), so
+# no probe host was built and EVERY host fell into the "cannot derive the wildcard
+# apex" branch -- including `api.` and `identity.`, which are perfectly testable.
+# Latent (no default host set names the apex, and frontDoorFor() lists it last on
+# purpose) and invisible from the call site, which is the argument for the apex
+# being resolved here rather than at one index.
+#
+# So every member gets a say: the first host that yields an apex wins. A set where
+# NO host yields one is a set of bare apexes -- `memql.localhost` alone is the
+# apex, not a subdomain of `localhost`, because no `*.localhost` front door exists
+# -- so the first host that could BE a domain is itself the answer.
+#
+# "Could be a domain" means it has a dot, and that condition is load-bearing
+# rather than defensive. A single-label `localhost` yields nothing here on
+# purpose: calling it the apex would assert a `*.localhost` wildcard the operator
+# never named, and the honest answer for a name with no parent domain is the
+# "cannot derive the wildcard apex" report plus the --wildcard-probe-host way out.
+# Recognising the apex must not become guessing at one.
+function resolve_wildcard_apex() {
+    local host derived
+    for host in "$@"; do
+        [[ -z "$host" ]] && continue
+        derived="$(wildcard_apex "$host")"
+        if [[ -n "$derived" ]]; then
+            printf '%s' "$derived"
+            return
+        fi
+    done
+    for host in "$@"; do
+        [[ -z "$host" || "$host" != *.* ]] && continue
+        printf '%s' "$host"
+        return
+    done
 }
 
 # check_precedence <probe-host-or-empty> <apex-or-empty> <port> <timeout> <pin-addr> <host>...
@@ -609,13 +652,15 @@ function main() {
     grpc_host="$(cap_param grpc-host "${host_list[0]}")"
 
     # The wildcard probe host (PROBE 4). --domain IS the apex when it was given;
-    # otherwise it is derived from the first probed host, which is the same
-    # relation the wildcard rule itself expresses -- `*.<apex>` covers
-    # api.<apex>, so stripping api. off gets back to the apex the wildcard
-    # claims. An explicit --wildcard-probe-host wins over both.
+    # otherwise it is resolved from the probed host SET -- not from one index, so
+    # the answer cannot depend on which host was typed first (see
+    # resolve_wildcard_apex). The relation is the one the wildcard rule itself
+    # expresses: `*.<apex>` covers api.<apex>, so stripping api. off gets back to
+    # the apex the wildcard claims. An explicit --wildcard-probe-host wins over
+    # both.
     local wildcard_probe_host apex
     apex="$domain"
-    [[ -n "$apex" ]] || apex="$(wildcard_apex "${host_list[0]}")"
+    [[ -n "$apex" ]] || apex="$(resolve_wildcard_apex "${host_list[@]}")"
     wildcard_probe_host="$(cap_param wildcard-probe-host "")"
     if [[ -z "$wildcard_probe_host" && -n "$apex" ]]; then
         wildcard_probe_host="${WILDCARD_PROBE_LABEL}.${apex}"

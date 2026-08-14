@@ -802,6 +802,14 @@ func TestVerifyFrontDoorPrecedenceApexIsEdgeServedByDesign(t *testing.T) {
 // the apex as the only probed host, the wildcard-liveness probe answers a
 // question nobody asked. Not dialling it is the difference between a check that
 // knows what it is for and one that just runs.
+//
+// IT ASSERTS THE REASON, NOT JUST THE STATUS, and that is the point of the
+// assertion rather than pedantry. `status == inconclusive` plus "nothing was
+// dialled" is ALSO true when the apex was never recognised and the run fell into
+// the older "cannot derive the wildcard apex" branch -- which is exactly what a
+// bug in the apex derivation produced while this test stayed green, claiming in
+// its own comment to demonstrate a mechanism it was not reaching. A test that
+// cannot tell which branch answered it proves nothing about either.
 func TestVerifyFrontDoorPrecedenceDialsNothingWhenThereIsNothingToEstablish(t *testing.T) {
 	const apex = "memql.localhost"
 	env := fdWorld(t,
@@ -816,14 +824,76 @@ func TestVerifyFrontDoorPrecedenceDialsNothingWhenThereIsNothingToEstablish(t *t
 		t.Fatalf("exit %d, want 0\nstdout: %s", code, stdout)
 	}
 	_, res := fdParse(t, stdout)
-	if c := fdFind(t, res, "precedence", apex); c.Status != "inconclusive" {
+	c := fdFind(t, res, "precedence", apex)
+	if c.Status != "inconclusive" {
 		t.Errorf("precedence/%s status = %q, want inconclusive", apex, c.Status)
+	}
+	if !strings.Contains(c.Detail, "BY DESIGN") {
+		t.Errorf("precedence/%s must be inconclusive BECAUSE it is the apex; got %q", apex, c.Detail)
+	}
+	if strings.Contains(c.Detail, "cannot derive the wildcard apex") {
+		t.Errorf("the apex was not recognised as the apex -- this answered from the "+
+			"derivation-failure branch, which happens to satisfy the status and "+
+			"not-dialled assertions while the mechanism under test never ran: %q", c.Detail)
 	}
 	for _, host := range fdDialled(t, env) {
 		if host == fdProbe {
 			t.Errorf("dialled %s with no host to establish precedence for; calls: %v", fdProbe, fdDialled(t, env))
 			break
 		}
+	}
+}
+
+// TestVerifyFrontDoorPrecedenceApexIsRecognisedInAnyPosition: the apex is a
+// property of the host SET, so which host was typed first must not decide
+// anything.
+//
+// Deriving it from host_list[0] alone made the apex-FIRST ordering yield no apex
+// at all (the apex has no label to strip), so no wildcard probe host was built
+// and every host in the list -- `api.` and `identity.` included, both fully
+// testable -- was reported "cannot derive the wildcard apex". A run that silently
+// establishes nothing for the two hosts the check exists to cover is the failure
+// mode; the ordering that triggers it is the one a human hits by pasting the
+// whole hosts-block list.
+func TestVerifyFrontDoorPrecedenceApexIsRecognisedInAnyPosition(t *testing.T) {
+	const apex = "memql.localhost"
+	world := func(t *testing.T) []string {
+		return fdWorld(t,
+			map[string]string{fdAPI: "127.0.0.1", fdIdentity: "127.0.0.1", apex: "127.0.0.1"},
+			map[string]string{
+				fdAPI:      "0|2|200|" + fdHealth("bff", "bff-1"),
+				fdIdentity: "0|2|200|" + fdHealth("identity", "identity-1"),
+				apex:       "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-1"),
+				fdProbe:    "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-2"),
+			},
+		)
+	}
+	for _, hosts := range []string{
+		apex + "," + fdAPI + "," + fdIdentity, // apex first -- the broken ordering
+		fdAPI + "," + apex + "," + fdIdentity, // apex in the middle
+		fdAPI + "," + fdIdentity + "," + apex, // apex last -- frontDoorFor()'s order
+	} {
+		t.Run(hosts, func(t *testing.T) {
+			env := world(t)
+			stdout, _, code := fdRun(t, env, "--hosts="+hosts)
+			if code != 0 {
+				t.Fatalf("exit %d, want 0\nstdout: %s", code, stdout)
+			}
+			_, res := fdParse(t, stdout)
+
+			ap := fdFind(t, res, "precedence", apex)
+			if !strings.Contains(ap.Detail, "BY DESIGN") {
+				t.Errorf("apex not recognised as the apex in this ordering: %q", ap.Detail)
+			}
+			// The load-bearing half: the testable hosts stay testable.
+			for _, h := range []string{fdAPI, fdIdentity} {
+				c := fdFind(t, res, "precedence", h)
+				if !c.Passed || c.Status != "passed" {
+					t.Errorf("precedence/%s is %q in this ordering -- a testable host was not tested: %s",
+						h, c.Status, c.Detail)
+				}
+			}
+		})
 	}
 }
 
