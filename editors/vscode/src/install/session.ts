@@ -228,7 +228,7 @@ export interface FrontDoor {
   hostnames: string[];
   /** What the certificate must cover: the wildcard and the apex. */
   certNames: string[];
-  /** What the front-door probe dials -- the hosts that carry ingress. */
+  /** What the front-door probe dials -- the hosts that carry their OWN exact rule, never a wildcard-served one. */
   probeHosts: string[];
 }
 
@@ -243,10 +243,18 @@ export interface FrontDoor {
 // resolving to 127.0.0.1 with nothing serving it fails visibly, whereas a name
 // that does not resolve fails in the resolver, before any request is made.
 //
-// The PROBE dials only the hosts that carry an Ingress rule today, which is why
-// `portal.` is absent from it. A probe against a name with no rule behind it
-// reports a broken front door for a cluster that is fine, which is the failure
-// the whole function exists to prevent. PROBE_SUBDOMAINS must stay a subset of
+// The PROBE dials only the hosts that carry their OWN EXACT Ingress rule --
+// NOT "an Ingress rule today", which every one of the five front-door hosts
+// now has: #3711 gives `portal.` a rule too, through the WILDCARD
+// (memql#3714's edge-front-door.yaml). That is precisely the case this list
+// must exclude: `check_precedence` (scripts/install/verify-frontdoor.sh)
+// treats every `--hosts` entry as a name that should be answered by a backend
+// OF ITS OWN, and a wildcard-served name fails that check with a message that
+// reads backwards -- "the wildcard rule swallowed this exact host instead of
+// yielding to it" -- when the wildcard serving it is the intended behaviour,
+// not a defect. So `portal.` stays out of PROBE_SUBDOMAINS not because it
+// lacks a rule, but because the rule it has is not its own. PROBE_SUBDOMAINS
+// must stay a subset of
 // HOSTS_BLOCK_SUBDOMAINS -- asserted in installSession.test.ts.
 const HOSTS_BLOCK_SUBDOMAINS = ["api", "identity", "portal"] as const;
 const PROBE_SUBDOMAINS = ["api", "identity"] as const;

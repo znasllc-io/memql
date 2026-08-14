@@ -63,35 +63,40 @@ request `Host` header against a `v1:platform:site` row and serves that site's
 bundle. The apex is not a special case: for a customer's own cluster the bare
 domain **is** their main website, so it is a site row like every other one.
 
-> **INFO: the edge route is live; the edge backend is not deployed yet.** Two
-> separate things, worth keeping apart.
+> **INFO: the edge route and the edge backend both ship as of memql#3714.**
+> `deploy/k8s/overlays/local/edge-front-door.yaml` carries both rules;
+> `deploy/k8s/base/edge.yaml` carries the Deployment, Service and
+> PodDisruptionBudget behind `svc/edge`. The `edge` node type itself — build
+> tag `edge`, `make edge`, see [build-tags.md](../build/build-tags.md) — is
+> now a normal member of the mesh like any other leaf node, and its release
+> image ships from `.github/workflows/build-engine-images.yml` alongside
+> every other node type (CLAUDE.md's build-server rule).
 >
-> **The route exists**: `deploy/k8s/overlays/local/edge-front-door.yaml`, both
-> rules, on `main`. **The backend does not**: there is no `svc/edge`, because the
-> edge Deployment and Service ship with **memql#3714**. The `edge` node type
-> itself exists — build tag `edge`, `make edge`, see
-> [build-tags.md](../build/build-tags.md) — so what is missing is a deployment
-> of it, not the code.
->
-> **What that produces is a 404, not a 503.** Traefik drops the entire router
-> when its backend Service is absent, so the request matches no router at all
-> and gets traefik's own 404 — it never reaches a handler that could answer 503.
-> Traefik says so on every reconcile:
+> **Before the backend existed, the absent-Service case produced a 404, not a
+> 503** — worth keeping in mind, because it is the same 404 an UNROUTED
+> hostname produces, and the two are not the same failure. Traefik drops the
+> entire router when its backend Service is absent, so the request matches no
+> router at all and gets traefik's own 404 — it never reaches a handler that
+> could answer 503. Traefik said so on every reconcile:
 
 ```
 ERR Cannot create service error="service not found" ingress=edge-front-door serviceName=edge servicePort=8085
 ```
 
-An operator seeing 404 on a hosted-site hostname will reasonably conclude the
-*rule* is missing. The rule is fine and the node is not deployed, and those are
-different fixes — so check `kubectl -n memql get svc edge` before touching
-anything under `deploy/`.
+> An operator seeing 404 on a hosted-site hostname could not tell a missing
+> *rule* apart from an undeployed *node* from the status code alone — both are
+> Go's byte-identical `http.NotFound`. `kubectl -n memql get svc edge` is the
+> discriminator, and now that the Service is a permanent fixture of the base
+> manifests, the case this warns about is a regression rather than the
+> expected state of `main`. A live edge still answers 404 for any hostname
+> with no matching `v1:platform:site` row, and 503 only for a row whose
+> `status` is `disabled` — that part of the contract does not change.
 
 The site-hosting runbook covering how to deploy a site, roll one back and what
 the bundle contract is arrives with the same work. This page deliberately says
 nothing more about sites than the rule that routes them.
 
-### Exact-versus-wildcard precedence is a real question, and it is not settled
+### Exact-versus-wildcard precedence is declared, not inherited
 
 `*.<domain>` also matches `api.<domain>`, `identity.<domain>` and
 `mcp.<domain>`. So whether the four named hosts keep their own backends is not a
@@ -115,39 +120,47 @@ HostRegexp(`^[a-zA-Z0-9-]+\.memql\.localhost$`) && PathPrefix(`/`)
 ```
 
 The wildcard's rule is the **longer** string, so by that default heuristic it
-outranks the exact one. (The precise regex traefik emits varies by version; the
-relative length is the part that carries the argument, and it is not close.) The
-consequence is not a narrow band of unusual hostnames — it is that
-`api.<domain>/` goes to the site server, so **the entire API would be served by
-the edge**: every SDK, the Cockpit, the VS Code extension and every worker dials
-that host. ingress-nginx ranks differently again — longest path, then oldest
-Ingress — so it would not even be the same wrong answer in both environments.
+would outrank the exact one. (The precise regex traefik emits varies by
+version; the relative length is the part that carries the argument, and it is
+not close.) Left undeclared, the consequence would not be a narrow band of
+unusual hostnames — it would be that `api.<domain>/` goes to the site server,
+so **the entire API would be served by the edge**: every SDK, the Cockpit, the
+VS Code extension and every worker dials that host. ingress-nginx ranks
+differently again — longest path, then oldest Ingress — so it would not even
+be the same wrong answer in both environments.
 
-**So precedence has to be declared, not inherited.** The fix is an explicit
-`traefik.ingress.kubernetes.io/router.priority` on the exact hosts, with the
-ingress-nginx equivalent worked out beside it so the two environments rank
-identically rather than coincidentally. **No file under
-`deploy/k8s/overlays/local/` sets a priority today**, and the declaration lands
-with the edge Deployment (memql#3714) — outstanding work, not something already
-handled.
+**So precedence is declared, not inherited (memql#3714).** `api-front-door.yaml`,
+`front-door.yaml` (identity) and `mcp-front-door.yaml` each carry an explicit
+`traefik.ingress.kubernetes.io/router.priority: "100"` — comfortably above the
+wildcard's computed default (its longest rule is under 70 characters) and
+identical across the three, so they rank above the wildcard the same way rather
+than coincidentally. `edge-front-door.yaml` (the wildcard and apex rules) carries
+no priority annotation of its own; it does not need one; the declaration on the
+other three is what the ranking depends on. The ingress-nginx side is not yet
+worked out here — this repository's overlays carry no staging/prod Ingress
+definitions at all (the product pack that runs on this engine owns those), so
+the equivalent declaration is that downstream repo's responsibility when it
+stands one up, following the same principle: declare the priority explicitly
+rather than trust either controller's default ranking heuristic, since the two
+controllers use different heuristics and neither is a spec guarantee.
 
-**Until then the property is unestablished — but no longer for want of anything
-looking.** `scripts/install/verify-frontdoor.sh` carries a `precedence` check,
-reported per host for `api.` and `identity.` (never `mcp.`, whose Ingress routes
-`:8090` while the `/healthz` the check reads is on `:8085`), and today it reports
-`inconclusive` rather than passed — so the gap is observable in a run instead of
-asserted on this page. A probe run today could not settle it either, for the
-reason the callout above gives — with `svc/edge` absent, traefik drops the
-wildcard router entirely, so there is nothing for an exact host to take
-precedence *over*. An
-exact host answering from its own backend under those conditions measures the
-absence of the wildcard router, not precedence. Reading that result as the
-latter is exactly how this assumption came to be written down as a fact.
+**Checked by `scripts/install/verify-frontdoor.sh`'s `precedence` check**,
+reported per host for `api.` and `identity.` only — never `mcp.`, whose Ingress
+routes `:8090` while the `/healthz` the check reads is on `:8085`, so it can
+report no better than inconclusive for that host. Before `svc/edge` existed, a
+run could not establish the property at all: with the backend Service absent,
+traefik drops the wildcard router entirely, so there was nothing for an exact
+host to take precedence *over*, and an exact host answering from its own
+backend under those conditions measured the absence of the wildcard router, not
+precedence. Reading that result as the latter is exactly how this assumption
+came to be written down as a fact the first time.
 
-Worth being clear about even once a check exists: a probe compares responses at
-the paths it probes, so it is evidence for the design rather than proof of it at
-every path. A **declared** priority holds at every path, which is why declaring
-it matters more than measuring it.
+Worth being clear about even with the check passing: a probe compares responses
+at the paths it dials, so a passing check is evidence for the design rather than
+proof of it at every path. The **declared** priority is what holds everywhere,
+including the paths and hosts nothing dials — which is why declaring it matters
+more than measuring it, and why the declaration above is not conditioned on the
+check passing.
 
 ## One constraint explains most of this page
 
