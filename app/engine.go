@@ -103,6 +103,13 @@ func (a *App) engineAndBus() {
 	a.engine.SetWiring(a.wiring)
 	a.engine.SetEventBus(a.eventBus)
 
+	// Audit sink for the authored-lifecycle acts the engine emits from INSIDE
+	// its own paths -- currently the breaking concept schema-change override
+	// (memql#3757), which is reached from the promote path and so has no
+	// AuthoredRuntimeDeps to carry a sink the way the activation path does. Same
+	// adapter, same identity audit logger, same v1:identity:auditEvent rows.
+	a.engine.SetAuthoredAuditSink(authoredAuditSink{logger: a.authoredAuditLogger()})
+
 	// Bridge codeProfile concept events into the observe runtime's
 	// per-FQN cache. Subscribes immediately; lifecycle is owned by
 	// the dependency chain so Stop() removes the subscription on
