@@ -1471,6 +1471,20 @@ variables:
     optional: true
     description: "Gates the RFC 7591 dynamic client registration endpoint that lets unknown OAuth clients self-register."
 
+  # NOTE: envscan cannot see this read. cmd/envscan/scan/scan.go matches
+  # os.Getenv("LITERAL") by regex, and register.go reads it through the
+  # envRegisterPerHour const -- so `make env-registry-check` neither requires
+  # this entry nor would notice its absence. It is here because the registry is
+  # the documented surface for operators, not because a gate demanded it. The
+  # same blind spot is why MEMQL_IDENTITY_BADGE_GRANT_PER_HOUR and
+  # MEMQL_IDENTITY_BADGE_GRANT_TTL_SECONDS are missing entirely (memql#3818).
+  - name: MEMQL_IDENTITY_REGISTER_PER_HOUR
+    component: identity
+    scope: node
+    default: "20"
+    optional: true
+    description: "Per-IP hourly budget for RFC 7591 dynamic client registration (POST /register), memql#3793. Deliberately low: a client registers ONCE per cluster, so a human exceeding this is retrying something broken. Over budget answers 429 rate_limited with Retry-After, persists nothing, and audits the refusal as oauth_client_registration_rate_limited."
+
   - name: MEMQL_IDENTITY_PRIVACY_OVERRIDE_PATH
     component: identity
     scope: node
