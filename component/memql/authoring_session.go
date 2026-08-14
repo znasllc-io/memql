@@ -510,7 +510,7 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		if err := e.functions.Upsert(fn); err != nil {
 			return err
 		}
-		e.promotedAuthored.Store(key, true)
+		e.promotedAuthored.Store(key, newPromotedMarker(c.Source))
 		return nil
 	case "spec", "trait":
 		spec, ok := c.Compiled.(*Spec)
@@ -545,7 +545,7 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		if err := e.specs.Upsert(spec.Name, spec); err != nil {
 			return err
 		}
-		e.promotedAuthored.Store(key, true)
+		e.promotedAuthored.Store(key, newPromotedMarker(c.Source))
 		return nil
 	default:
 		return fmt.Errorf("authoring: promotion of %s constructs is not supported (function-family + spec only)", c.Kind)

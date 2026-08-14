@@ -228,6 +228,13 @@ func (a *App) engineAndBus() {
 	// single-step Logic dispatch continues to work unchanged.
 	a.engine.SetLogicRunner(automations.NewLogicRunner(a.engine, a.stepRegistry, a.Logger))
 
+	// Automations are the one runnable construct kind the engine holds no
+	// registry for -- the scheduler owns them -- so the construct catalog
+	// (memql#3749) reads them back through this seam. A binary with no
+	// scheduler leaves it unwired and reports no automations, which for that
+	// node is the truth rather than a gap.
+	a.engine.SetAutomationCataloger(a.automationScheduler)
+
 	a.Dependencies = append(a.Dependencies, a.engine)
 	a.Dependencies = append(a.Dependencies, a.automationScheduler)
 

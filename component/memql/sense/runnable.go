@@ -145,6 +145,23 @@ var runnableKeywords = map[string]bool{
 //
 // The returned slice is always non-nil.
 func (s *Service) RunnableConstructs(source string) []RunnableConstruct {
+	return AnalyzeRunnable(source)
+}
+
+// AnalyzeRunnable is RunnableConstructs as a package function, for the callers
+// that have source text but no reason to hold a Service.
+//
+// The analysis never consulted the Service: everything it reports comes out of
+// the lexer and the per-construct parser run over `source` alone. The engine's
+// construct catalog (memql#3749) needs the argument schema of a construct it
+// already holds in a registry, and it must be THIS answer rather than a second
+// one derived from the registry's own ArgsSchema -- the whole point of §2.3 of
+// the constructs-view design is that one parser reports the argument form, so a
+// generated form cannot disagree with the compiler about what a construct
+// accepts.
+//
+// The method stays as the editor-facing spelling and delegates here.
+func AnalyzeRunnable(source string) []RunnableConstruct {
 	out := []RunnableConstruct{}
 	if strings.TrimSpace(source) == "" {
 		return out

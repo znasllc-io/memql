@@ -1619,6 +1619,9 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 		return s.handleListPackFiles(envelope, payload.ListPackFiles)
 	case *memqlv1.MemqlClientMessage_ReadPackFile:
 		return s.handleReadPackFile(envelope, payload.ReadPackFile)
+	// Construct catalog -- registry-grain "what have you loaded" (memql#3749)
+	case *memqlv1.MemqlClientMessage_ListConstructs:
+		return s.handleListConstructs(envelope, payload.ListConstructs)
 
 	// Authoring -- validate + session-define a user bundle (issue #2128 / C1)
 	case *memqlv1.MemqlClientMessage_AuthoringValidateBundle:
