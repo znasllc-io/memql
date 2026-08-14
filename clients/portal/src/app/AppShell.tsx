@@ -41,12 +41,14 @@ const EXPLORE: readonly NavItem[] = [
 ];
 
 // Administer is the cluster ITSELF rather than the data in it -- what is
-// plugged in (memql#3323) and how the cluster is configured and keyed
-// (memql#3324). Kept apart from Operate because an operator visits these
-// occasionally and deliberately, where Operate is where they live.
+// plugged in (memql#3323), how the cluster is configured and keyed
+// (memql#3324), and what it serves at which hostname (memql#3717). Kept
+// apart from Operate because an operator visits these occasionally and
+// deliberately, where Operate is where they live.
 const ADMINISTER: readonly NavItem[] = [
   { to: "/integrations", label: "Integrations" },
   { to: "/admin", label: "Administration" },
+  { to: "/sites", label: "Sites" },
 ];
 
 function navClass({ isActive }: { isActive: boolean }): string {

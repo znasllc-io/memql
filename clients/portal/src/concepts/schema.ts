@@ -59,6 +59,17 @@ export interface FieldDescriptor {
   // for a declared field, which is never counted -- the declaration is the
   // fact, and a count next to it would read as "declared but missing".
   presentIn: number;
+  // The field's declared `enum` values, in schema order. Empty for a
+  // non-enum field AND for an observed one (memql#3717) -- the allowed set is
+  // only knowable from the declared schema. Populated regardless of what
+  // `type` reads: the Go generator always stamps `type: "string"` alongside
+  // `enum` for a concept `enum(...)` field (component/database/memory-nodes/
+  // concept_parser.go propertyToJSONSchema, case "enum"), so `type` is never
+  // the bare literal "enum" for a concept field in practice and a caller
+  // that only checked `type === "enum"` would never see this population.
+  // Reading `enum` off the property directly, independent of `type`, is what
+  // makes this correct for every enum field rather than a subset.
+  enumValues: string[];
 }
 
 export interface ConceptSchemaView {
@@ -135,6 +146,16 @@ function customAnnotations(property: Record<string, unknown>): string[] {
   return out.sort();
 }
 
+// enumValuesOf reads a property's declared `enum` array, filtered to
+// strings. Every memQL `enum(...)` field's values ARE strings, but the
+// filter keeps this honest against a hand-authored JSON Schema document that
+// mixed types into the array.
+function enumValuesOf(property: Record<string, unknown>): string[] {
+  const raw = property["enum"];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((v): v is string => typeof v === "string");
+}
+
 function describeDeclared(document: Record<string, unknown>): FieldDescriptor[] {
   const properties = document["properties"];
   if (!isPlainObject(properties)) return [];
@@ -155,6 +176,7 @@ function describeDeclared(document: Record<string, unknown>): FieldDescriptor[] 
         description: typeof description === "string" ? description : "",
         annotations: customAnnotations(property),
         presentIn: 0,
+        enumValues: enumValuesOf(property),
       };
     })
     .sort(compareFields);
@@ -204,6 +226,7 @@ function describeObserved(rows: readonly Row[]): FieldDescriptor[] {
         description: "",
         annotations: [],
         presentIn,
+        enumValues: [],
       };
     })
     .sort(compareFields);
@@ -234,4 +257,18 @@ export function describeConceptSchema(rows: readonly Row[]): ConceptSchemaView {
   const fields = describeObserved(rows);
   if (fields.length === 0) return EMPTY_SCHEMA_VIEW;
   return { source: "observed", fields, document: null, sampleSize: rows.length };
+}
+
+// enumValuesForField is the convenience path for a caller that wants one
+// field's allowed values -- a selector control -- rather than the whole
+// schema table (memql#3717). Concept-agnostic like the rest of this module:
+// it takes the rows already on screen and a field name, never a concept id,
+// so a selector built on it works for any concept's enum field without a
+// renderer change. Empty when the schema has not loaded yet (findSchemaDocument
+// scans loaded rows, not a registry -- see its own header) or the field is
+// not a declared enum; the caller decides how to render that emptiness
+// rather than this module guessing at a fallback list.
+export function enumValuesForField(rows: readonly Row[], fieldName: string): string[] {
+  const view = describeConceptSchema(rows);
+  return view.fields.find((field) => field.name === fieldName)?.enumValues ?? [];
 }
