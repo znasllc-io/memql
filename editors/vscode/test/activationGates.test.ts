@@ -84,7 +84,7 @@ test('granting trust registers the runtime surface, exactly once', () => {
     'memqlClusters',
     'memqlDeployments',
     'memqlConstructs',
-    'memqlConcepts',
+    'memqlData',
     'memqlRuns',
   ]);
   assert.ok(recorded.commands.includes('memql.clusters.select'));

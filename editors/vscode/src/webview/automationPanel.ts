@@ -41,6 +41,7 @@ import {
   renderToHtml,
   viewKitStyles,
   type ConceptLike,
+  renderValueView,
 } from "@znasllc-io/memql-view-kit";
 
 import type { AutomationTarget } from "../constructs/runnable.js";
@@ -679,7 +680,7 @@ ${bannerHtml}
 ${whereHtml}
 ${outcomeHtml}
 <div class="pane">
-${this.showRaw ? `<pre>${escapeHtml(this.rawJson())}</pre>` : this.timelineHtml()}
+${this.showRaw ? renderToHtml(renderValueView(this.rawValue(), { copy: false })) : this.timelineHtml()}
 ${runIdHtml}
 </div>
 <div class="summary">${escapeHtml(this.summaryLine())}</div>
@@ -729,7 +730,11 @@ ${runIdHtml}
         const output =
           step.output === undefined
             ? ""
-            : `<pre>${escapeHtml(safeJson(step.output))}</pre>`;
+            // THE SAME RENDERER as every other value surface (memql#3754). A
+            // step's output is the one place in a trace a developer reads a
+            // structured value, and it was the last `<pre>` of stringified
+            // JSON left in the extension.
+            : renderToHtml(renderValueView(step.output, { copy: false, expandDepth: 1 }));
         return `<li class="${cls}">
   <div class="step-head">
     <span class="step-seq">${step.sequence}</span>
@@ -757,8 +762,15 @@ ${runIdHtml}
     return parts.join(" | ");
   }
 
-  private rawJson(): string {
-    return safeJson({
+  /**
+   * The whole trace as a value, for the raw pane.
+   *
+   * Returns the VALUE rather than a stringified copy (memql#3754): the value
+   * viewer collapses, badges and bounds it, and it can only do that with the
+   * thing itself.
+   */
+  private rawValue(): unknown {
+    return {
       runId: this.trace.runId,
       status: this.trace.status,
       accepted: this.trace.accepted ?? null,
@@ -766,7 +778,7 @@ ${runIdHtml}
       complete: this.trace.complete ?? null,
       refusal: this.trace.refusal ?? null,
       error: this.trace.error,
-    });
+    };
   }
 }
 
@@ -784,16 +796,6 @@ function statusLabel(trace: StepTraceModel): string {
       return "not run";
     default:
       return trace.status;
-  }
-}
-
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? "null";
-  } catch (err) {
-    // A cycle cannot come out of protojson, but the raw-JSON toggle must never
-    // be the thing that takes the panel down.
-    return `(not serialisable: ${err instanceof Error ? err.message : String(err)})`;
   }
 }
 

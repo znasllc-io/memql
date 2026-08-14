@@ -11,7 +11,7 @@
 // switches clusters while a `load()` against the OLD cluster is still in
 // flight, that stale request's continuation must not overwrite whatever a
 // fresher `load()` already wrote (or is about to write).
-// ConceptsTreeProvider owns one instance and adapts it to VS Code's
+// DataTreeProvider owns one instance and adapts it to VS Code's
 // TreeDataProvider surface; this module owns only the cache/error/staleness
 // state machine, with no rendering concerns.
 import { Latest, type LatestToken } from "../async/latest.js";
