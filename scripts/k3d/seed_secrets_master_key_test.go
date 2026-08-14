@@ -43,9 +43,13 @@ import (
 // scenario:
 //
 //	FAKE_SECRET_STATE  absent | present | error
-//	FAKE_MASTER_KEY_B64, FAKE_GENESIS_B64, FAKE_SIGNING_KEY_B64
+//	FAKE_MASTER_KEY_B64, FAKE_GENESIS_B64, FAKE_SIGNING_KEY_B64,
+//	FAKE_NODE_BOOTSTRAP_TOKEN_B64
 //	                   base64 payloads when present
 //	FAKE_JSONPATH_FAILS  non-empty -> the value reads fail while the secret exists
+//	FAKE_BOOTSTRAP_TOKEN_READ_FAILS  non-empty -> ONLY the bootstrap-token read
+//	                   fails, so the fail-closed branch can be exercised without
+//	                   taking the other three reads down with it
 const fakeKubectlTemplate = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 args="$*"
@@ -72,6 +76,10 @@ case "$args" in
   *"get secret memql-secrets"*jsonpath*MEMQL_IDENTITY_SIGNING_KEY_B64*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_SIGNING_KEY_B64"; exit 0 ;;
+  *"get secret memql-secrets"*jsonpath*MEMQL_NODE_BOOTSTRAP_TOKEN*)
+    [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
+    [ -n "$FAKE_BOOTSTRAP_TOKEN_READ_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
+    printf '%s' "$FAKE_NODE_BOOTSTRAP_TOKEN_B64"; exit 0 ;;
 esac
 
 # Internal CA already seeded -> generator skipped.
@@ -100,6 +108,8 @@ type seedResult struct {
 		SigningKeySource   string `json:"signingKeySource"`
 		Source             string `json:"source"`
 		FrontDoorTLSSource string `json:"frontDoorTlsSource"`
+		// memql#3784 -- generated | cluster | env.
+		NodeBootstrapTokenSource string `json:"nodeBootstrapTokenSource"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -116,6 +126,11 @@ type scenario struct {
 	clusterB64     string // plaintext genesis payload the "cluster" holds
 	clusterSigning string // plaintext signing seed the "cluster" holds
 	jsonpathFails  bool
+
+	// memql#3784.
+	envBootstrapToken       string // MEMQL_NODE_BOOTSTRAP_TOKEN; exported only when non-empty
+	clusterBootstrapToken   string // plaintext bootstrap token the "cluster" holds
+	bootstrapTokenReadFails bool   // only that one read fails
 }
 
 func repoRoot(t *testing.T) string {
@@ -185,6 +200,10 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	if sc.jsonpathFails {
 		jsonpathFails = "1"
 	}
+	bootstrapReadFails := ""
+	if sc.bootstrapTokenReadFails {
+		bootstrapReadFails = "1"
+	}
 
 	cmd := exec.Command("bash", script)
 	cmd.Dir = root
@@ -196,7 +215,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
 		"FAKE_GENESIS_B64=" + enc(sc.clusterB64),
 		"FAKE_SIGNING_KEY_B64=" + enc(sc.clusterSigning),
+		"FAKE_NODE_BOOTSTRAP_TOKEN_B64=" + enc(sc.clusterBootstrapToken),
 		"FAKE_JSONPATH_FAILS=" + jsonpathFails,
+		"FAKE_BOOTSTRAP_TOKEN_READ_FAILS=" + bootstrapReadFails,
 		"MEMQL_K3D_NAMESPACE=memql",
 	}
 	if sc.envMasterKey != "" {
@@ -204,6 +225,9 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	}
 	if sc.envSigningKey != "" {
 		env = append(env, "MEMQL_IDENTITY_SIGNING_KEY_B64="+sc.envSigningKey)
+	}
+	if sc.envBootstrapToken != "" {
+		env = append(env, "MEMQL_NODE_BOOTSTRAP_TOKEN="+sc.envBootstrapToken)
 	}
 	cmd.Env = env
 
