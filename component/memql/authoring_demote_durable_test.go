@@ -70,7 +70,7 @@ func seedPromotedSpec(t *testing.T, e *MemQLEngine, owner string) *fakeDemoteSto
 	reg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, reg, owner)
 	persist := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), persist, owner, c); err != nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), persist, nil, owner, c); err != nil {
 		t.Fatalf("seed durable promote: %v", err)
 	}
 	bundleId := persist.bundles[0].Id

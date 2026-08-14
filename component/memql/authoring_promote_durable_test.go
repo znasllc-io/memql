@@ -62,7 +62,7 @@ func TestPromoteConstructDurable_PersistsAndRegisters(t *testing.T) {
 	c := authorOneSpec(t, reg, "owner-1")
 
 	store := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), store, "owner-1", c); err != nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), store, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testi
 	c := &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "promotedDurableQuery", Status: AuthoredActive,
 		Source:   `query promotedDurableQuery { }`,
 		Compiled: &Function{Name: "promotedDurableQuery", FunctionKind: "query", Enabled: true}}
-	if err := e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", c); err != nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)
 	}
 
@@ -121,7 +121,7 @@ func TestPromoteConstructDurable_RejectsNonOwner(t *testing.T) {
 	c := authorOneSpec(t, reg, "owner-1")
 
 	store := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), store, "  ", c); err == nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), store, nil, "  ", c); err == nil {
 		t.Fatal("expected an error promoting with no authenticated owner")
 	}
 	if len(store.bundles) != 0 || len(store.constructs) != 0 {
@@ -145,7 +145,7 @@ func TestPromoteConstructDurable_DoesNotShadowCore(t *testing.T) {
 		Compiled: &Function{Name: "coreOwned", FunctionKind: "query", Enabled: true, ExprSource: "authored"}}
 
 	store := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), store, "owner-1", shadow); err == nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), store, nil, "owner-1", shadow); err == nil {
 		t.Fatal("durable promote must refuse to shadow a core construct")
 	}
 	if len(store.bundles) != 0 || len(store.constructs) != 0 {
@@ -183,7 +183,7 @@ func TestRehydratePromotedConstructs_RestoresCallabilityAfterRestart(t *testing.
 	authorReg := NewAuthoredRuntimeRegistry()
 	c := authorOneSpec(t, authorReg, "owner-1")
 	persist := &fakePromoteStore{}
-	if err := old.promoteConstructDurableWithStore(context.Background(), persist, "owner-1", c); err != nil {
+	if err := old.promoteConstructDurableWithStore(context.Background(), persist, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)
 	}
 
