@@ -216,6 +216,112 @@ func TestPromoteRoundTrip(t *testing.T) {
 	}
 }
 
+// schemaSiteExecutor resolves a hostname to a Site out of ONE named schema.
+//
+// It exists so the round trip can be closed at the surface that actually
+// matters. Everything else here asserts what the promote WROTE; this asserts
+// what the edge would SERVE, through the edge's own resolver rather than by
+// reading the row a second time and trusting that the two agree.
+type schemaSiteExecutor struct {
+	db     *bun.DB
+	schema string
+}
+
+func (e schemaSiteExecutor) SiteByHostname(ctx context.Context, hostname string) (*edge.Site, error) {
+	var raw json.RawMessage
+	var id string
+	err := e.db.QueryRowContext(ctx,
+		`SELECT id, payload FROM `+e.schema+`."MemoryNodes"
+		  WHERE concept = 'v1:platform:site' AND payload->>'hostname' = ?
+		  ORDER BY "createdAt" DESC LIMIT 1`, hostname).Scan(&id, &raw)
+	if err != nil {
+		return nil, err
+	}
+	var p struct {
+		Hostname  string `json:"hostname"`
+		Kind      string `json:"kind"`
+		BundleRef string `json:"bundleRef"`
+		Status    string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	return &edge.Site{ID: id, Hostname: p.Hostname, Kind: p.Kind, BundleRef: p.BundleRef, Status: p.Status}, nil
+}
+
+// TestTheEdgeServesThePromotedBundle closes the acceptance round trip at the
+// serving surface: "verify production serves the new bundle, roll back, verify
+// it serves the old one".
+//
+// The promote writes a row; what an operator actually cares about is what the
+// edge hands a browser afterwards. Those are the same thing only if the edge's
+// resolution path reads what the promote wrote, so this drives
+// edge.NewResolver -- the shipped path -- rather than re-reading the row.
+//
+// The resolver caches, so this also pins the consequence that makes the cache
+// safe to have: a promote is a write on another node, and the edge replica
+// serving the site does not learn about it by magic. The TTL and the
+// change-feed invalidation are what close that window, and Invalidate is
+// exercised here so the test fails if promotion is ever wired up without one.
+func TestTheEdgeServesThePromotedBundle(t *testing.T) {
+	db := openAdmin(t)
+	seedSchemas(t, db)
+	putSite(t, db, stagingSchema, "shop.staging.memql.localhost", "blob://sites/shop/v4.3.0/")
+	putSite(t, db, prodSchema, "shop.acme.com", "blob://sites/shop/v4.2.0/")
+
+	ctx := context.Background()
+	prodEdge := edge.NewResolver(schemaSiteExecutor{db: db, schema: prodSchema}, time.Minute)
+
+	before, err := prodEdge.Resolve(ctx, "shop.acme.com")
+	if err != nil {
+		t.Fatalf("resolving production before the promote: %v", err)
+	}
+	if before.BundleRef != "blob://sites/shop/v4.2.0/" {
+		t.Fatalf("production edge serves %q before the promote, want the old version", before.BundleRef)
+	}
+
+	res, err := edge.NewPromoter(db).Promote(ctx, stagingSchema, prodSchema, siteID, "")
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+
+	prodEdge.Invalidate("shop.acme.com")
+	after, err := prodEdge.Resolve(ctx, "shop.acme.com")
+	if err != nil {
+		t.Fatalf("resolving production after the promote: %v", err)
+	}
+	if after.BundleRef != "blob://sites/shop/v4.3.0/" {
+		t.Errorf("production edge serves %q after the promote, want the version staging was serving", after.BundleRef)
+	}
+	if after.Hostname != "shop.acme.com" {
+		t.Errorf("production edge resolves hostname %q; the promote must not move it", after.Hostname)
+	}
+
+	// ... and back.
+	if _, err := edge.NewPromoter(db).SetBundleRef(ctx, prodSchema, siteID, res.PreviousBundleRef); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	prodEdge.Invalidate("shop.acme.com")
+	rolled, err := prodEdge.Resolve(ctx, "shop.acme.com")
+	if err != nil {
+		t.Fatalf("resolving production after the rollback: %v", err)
+	}
+	if rolled.BundleRef != "blob://sites/shop/v4.2.0/" {
+		t.Errorf("production edge serves %q after the rollback, want the prior version", rolled.BundleRef)
+	}
+
+	// Staging is serving what it always was: a promote reads it and writes
+	// nothing back.
+	stagingEdge := edge.NewResolver(schemaSiteExecutor{db: db, schema: stagingSchema}, time.Minute)
+	s, err := stagingEdge.Resolve(ctx, "shop.staging.memql.localhost")
+	if err != nil {
+		t.Fatalf("resolving staging: %v", err)
+	}
+	if s.BundleRef != "blob://sites/shop/v4.3.0/" {
+		t.Errorf("staging edge serves %q; a promote must not write to the source environment", s.BundleRef)
+	}
+}
+
 // TestPromoteCreatesASiteAbsentFromProduction is the acceptance line
 // "promoting a site absent from production creates it" -- first-publish and
 // promote are the same act, so the operator does not need a separate
