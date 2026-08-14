@@ -187,6 +187,15 @@ var reachedThroughAggregate = map[string]declaration{
 		server.InboundWebhookPaths},
 	"UnsubscribePaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths()",
 		server.UnsubscribePaths},
+	"SitesBundlePaths": {"appended by HandlerAuthorizedPaths() (POST /sites/{id}/bundles, " +
+		"memql#3713). A documented HTTP exception, not an oversight: CLAUDE.md's " +
+		"endpoint-protocol table carries a row for it, on the same 'multipart maps poorly to " +
+		"gRPC' reasoning already recorded there for /spaces/{id}/attachments. It is in " +
+		"HandlerAuthorizedPaths(), not PublicPaths(), because the HANDLER is what authorizes " +
+		"it, which is what membership in that list means: SiteBundleHandler verifies a " +
+		"class=\"service_account\" credential itself before ever calling Publish, rejecting " +
+		"both an ordinary user JWT and a PAT -- not merely that the bff happens to mount the " +
+		"route.", server.SitesBundlePaths},
 	// The one declaration here that is not named `*Paths`, and the reason the
 	// scan accepts a `Routes` suffix too: it is the live list of what
 	// HandlerWithOptions actually registers, so a sixth contract route must not
