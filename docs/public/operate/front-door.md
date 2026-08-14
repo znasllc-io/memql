@@ -63,12 +63,6 @@ request `Host` header against a `v1:platform:site` row and serves that site's
 bundle. The apex is not a special case: for a customer's own cluster the bare
 domain **is** their main website, so it is a site row like every other one.
 
-The wildcard also matches `api.`, `identity.` and `mcp.`, and does not shadow
-them: the Ingress spec gives an **exact** host precedence over a wildcard, and
-both traefik and ingress-nginx implement that. So the four named hosts keep
-their own backends and only unclaimed names fall through to the edge. The
-five-host table rests on that precedence.
-
 > **INFO: the edge route is live; the edge backend is not deployed yet.** Two
 > separate things, worth keeping apart.
 >
@@ -96,6 +90,59 @@ anything under `deploy/`.
 The site-hosting runbook covering how to deploy a site, roll one back and what
 the bundle contract is arrives with the same work. This page deliberately says
 nothing more about sites than the rule that routes them.
+
+### Exact-versus-wildcard precedence is a real question, and it is not settled
+
+`*.<domain>` also matches `api.<domain>`, `identity.<domain>` and
+`mcp.<domain>`. So whether the four named hosts keep their own backends is not a
+detail — it is a **load-bearing assumption of the five-host design**, and it is
+worth knowing the state of it.
+
+**Precedence between an exact host and a wildcard host is
+implementation-defined.** The Ingress specification says what a wildcard host
+*matches* — exactly one DNS label, never the apex — and says nothing about which
+rule wins when an exact rule and a wildcard rule both match. There is no spec
+guarantee to lean on.
+
+**On traefik's defaults it probably points the wrong way.** Traefik's Kubernetes
+Ingress provider compiles a wildcard host into a `HostRegexp` matcher, and
+traefik's default router priority is **the length of the matcher rule**. In
+shape, the two rules are:
+
+```
+Host(`api.memql.localhost`) && PathPrefix(`/`)
+HostRegexp(`^[a-zA-Z0-9-]+\.memql\.localhost$`) && PathPrefix(`/`)
+```
+
+The wildcard's rule is the **longer** string, so by that default heuristic it
+outranks the exact one. (The precise regex traefik emits varies by version; the
+relative length is the part that carries the argument, and it is not close.) The
+consequence is not a narrow band of unusual hostnames — it is that
+`api.<domain>/` goes to the site server, so **the entire API would be served by
+the edge**: every SDK, the Cockpit, the VS Code extension and every worker dials
+that host. ingress-nginx ranks differently again — longest path, then oldest
+Ingress — so it would not even be the same wrong answer in both environments.
+
+**So precedence has to be declared, not inherited.** The fix is an explicit
+`traefik.ingress.kubernetes.io/router.priority` on the exact hosts, with the
+ingress-nginx equivalent worked out beside it so the two environments rank
+identically rather than coincidentally. **No file under
+`deploy/k8s/overlays/local/` sets a priority today**, and the declaration lands
+with the edge Deployment (memql#3714) — outstanding work, not something already
+handled.
+
+**Until then the property is unestablished: nothing in this repository verifies
+it.** A probe run today could not settle it either, for the reason the callout
+above gives — with `svc/edge` absent, traefik drops the wildcard router
+entirely, so there is nothing for an exact host to take precedence *over*. An
+exact host answering from its own backend under those conditions measures the
+absence of the wildcard router, not precedence. Reading that result as the
+latter is exactly how this assumption came to be written down as a fact.
+
+Worth being clear about even once a check exists: a probe compares responses at
+the paths it probes, so it is evidence for the design rather than proof of it at
+every path. A **declared** priority holds at every path, which is why declaring
+it matters more than measuring it.
 
 ## One constraint explains most of this page
 
@@ -205,9 +252,12 @@ ArgoCD reconcile per site — so adding the tenth website to a cluster adds a
 
 The `*.<domain>` rule is what makes that possible: one wildcard rule routes
 every present and future site name to the one node that knows how to look them
-up. The certificate is the matching SAN pair (`*.<domain>` and `<domain>`),
-issued once at install — by mkcert locally, cert-manager in the cloud — so a
-new site needs no reissue either.
+up — every name, that is, that the four exact hosts have not claimed, which is
+an assumption about rule ranking rather than a given
+([above](#exact-versus-wildcard-precedence-is-a-real-question-and-it-is-not-settled)).
+The certificate is the matching SAN pair (`*.<domain>` and `<domain>`), issued
+once at install — by mkcert locally, cert-manager in the cloud — so a new site
+needs no reissue either.
 
 This is not a hole in "ArgoCD is the only deploy path". That rule is about the
 shape of the system: the edge Deployment lives in git and is reconciled like
