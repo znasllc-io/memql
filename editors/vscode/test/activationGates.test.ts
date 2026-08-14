@@ -52,6 +52,7 @@ test('an untrusted workspace registers no runtime surface', () => {
   assert.deepEqual(recorded.treeViews, []);
   assert.deepEqual(recorded.commands, []);
   assert.deepEqual(recorded.watched, []);
+  assert.equal(recorded.fileDecorationProviders, 0);
 });
 
 test('an untrusted workspace still arms the one-shot trust listener', () => {
@@ -89,10 +90,17 @@ test('granting trust registers the runtime surface, exactly once', () => {
   ]);
   assert.ok(recorded.commands.includes('memql.clusters.select'));
 
+  // The read-only badge (memql#3762) comes up with the runtime surface and not
+  // before it. It reads the connected cluster's catalog, so registering it in a
+  // window that has not been trusted would mean an untrusted workspace could
+  // provoke the fetch that feeds it.
+  assert.equal(recorded.fileDecorationProviders, 1);
+
   // The listener disposes itself before calling in, and registerRuntimeSurface
   // guards as well. A second grant must be inert rather than a second tree.
   const registered = recorded.treeViews.length;
   grantWorkspaceTrust();
   assert.equal(recorded.treeViews.length, registered);
+  assert.equal(recorded.fileDecorationProviders, 1);
   assert.equal(isTrustListenerArmed(), false);
 });

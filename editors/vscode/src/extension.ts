@@ -112,6 +112,7 @@ import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
+import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
 import { ConstructPanel } from './webview/constructPanel.js';
 import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
 import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
@@ -494,6 +495,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // LOADED, read from the live registries -- so a promoted construct appears
   // the moment it is promoted. A different question from the pack browser's,
   // which answers "show me this file".
+  // The read-only marking (memql#3762) rides the SAME catalog fetch. It has to:
+  // it classifies a file by the origin the catalog reports, so a second fetch
+  // would be a second answer that can disagree with the tree about which files
+  // are core.
+  const readonlyMarker = new ReadonlyMarker(context.workspaceState);
+
   const constructsTree = new ConstructsTreeProvider({
     connections,
     load: async (): Promise<CatalogState> => {
@@ -501,20 +508,40 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (dispatcher === undefined) {
         // NOT AN EMPTY CATALOG. An empty list reads as "this cluster has no
         // constructs", which is the one wrong answer available here.
+        //
+        // Undefined for the marker too, and for the same reason spelled the
+        // other way round: no cluster is not an answer, so nothing is marked
+        // rather than everything.
+        await readonlyMarker.update(undefined, undefined);
         return { kind: 'notConnected' };
       }
       try {
         const result = await new ConstructsClient(dispatcher).listConstructs();
+        // `currentRunCluster` deliberately, not a second read of clusters.yaml:
+        // it is what the run path's write confirmation consults, so "may I edit
+        // this file" and "will this write ask first" cannot disagree about
+        // whether a cluster is local.
+        await readonlyMarker.update(
+          result.constructs,
+          connections === undefined ? undefined : currentRunCluster(clustersPath, connections)
+        );
         return catalogFrom(result.constructs);
       } catch (err) {
         // A cluster predating the message answers with an envelope the client
         // does not recognise, which throws -- rendered as a stated version
         // mismatch naming ListConstructs, never as a blank view.
+        //
+        // A FAILED FETCH CLEARS THE MARKING as surely as a disconnection does.
+        // Keeping the last cluster's answer would leave a developer's checkout
+        // marked read-only on the authority of a call that just failed.
+        await readonlyMarker.update(undefined, undefined);
         return classifyCatalogFailure(err);
       }
     },
   });
   context.subscriptions.push(
+    readonlyMarker,
+    window.registerFileDecorationProvider(readonlyMarker),
     window.registerTreeDataProvider('memqlConstructs', constructsTree),
     commands.registerCommand('memql.constructs.refresh', () => constructsTree.refresh()),
     // Not palette-invokable ("when": "false"): it needs the construct the tree
