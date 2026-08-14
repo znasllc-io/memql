@@ -24,6 +24,19 @@ import (
 // MemQLEngine is the default implementation of the MemQLEngine interface.
 type MemQLEngine struct {
 	*component.Component
+	// relationships + schemaIdx are DERIVED from concepts (see
+	// deriveConceptRegistryState) and are guarded by conceptStateMu. Read them
+	// through relationshipDefinitionsForConcept / schemaIndex and write them
+	// through setConceptRelationships / setSchemaIndex -- never directly, except
+	// in a test that has not started any goroutines.
+	//
+	// The lock exists because these stopped being boot-only state. Init wrote
+	// them once, before the node served anything; since memql#3746 a concept
+	// promote rewrites them on a RUNNING engine -- from the gRPC handler
+	// goroutine that owns the promote, and from the authoring-promote bus
+	// subscriber when a peer node broadcasts one -- while request goroutines are
+	// reading them.
+	conceptStateMu   sync.RWMutex
 	relationships    relationshipRegistry
 	concepts         concept.Registry
 	specs            *SpecRegistry
@@ -1186,7 +1199,7 @@ func (e *MemQLEngine) resolvePlanSpecs(plan *QueryPlan, inline map[string]*Spec)
 	if e.specs != nil {
 		globalSpecs = e.specs.Snapshot()
 	}
-	validator := newSpecValidator(e.schemaIdx, globalSpecs, inline)
+	validator := newSpecValidator(e.schemaIndex(), globalSpecs, inline)
 
 	if inlineCount > 0 {
 		for name := range inline {
@@ -1326,14 +1339,38 @@ func normalizeRelationshipDefinition(def RelationshipDefinition) (RelationshipDe
 		return RelationshipDefinition{}, fmt.Errorf("field is required")
 	}
 
-	if strings.TrimSpace(def.FieldSource) != "" {
-		return RelationshipDefinition{}, fmt.Errorf("fieldSource is no longer supported; remove it from concept metadata")
-	}
-
 	fieldSource, err := deriveRelationshipFieldSource(field)
 	if err != nil {
 		return RelationshipDefinition{}, err
 	}
+
+	// `fieldSource` is DERIVED from `field` and is never an input. The refusal
+	// below therefore only fires on a value that CONTRADICTS the derivation --
+	// which is the only value that was ever dangerous, since one that agrees
+	// cannot change the outcome.
+	//
+	// It used to refuse ANY non-empty fieldSource, and that made this function
+	// non-idempotent: the caller writes the normalized definition back onto
+	// Concept.Relationships (so `concepts()` metadata reports canonical values),
+	// which means a SECOND normalization of the same definition is handed the
+	// fieldSource this function itself derived, and refused for it. Nothing
+	// noticed while the derivation ran exactly once, at Init. It no longer does:
+	// memql#3746 lets a concept be promoted into a running engine, and that
+	// re-derives the whole registry. Every core concept with a relationship
+	// failed on the second pass.
+	//
+	// Residual, stated rather than papered over: an author who writes
+	// `fieldSource="payload"` on a payload field is no longer told the
+	// annotation is redundant, because the engine cannot distinguish that from
+	// its own prior output. Nothing in the corpus does, no client reads the
+	// field, and the value they wrote is the value that gets used. "Remove the
+	// redundant annotation" is a house-style lint, not a load-time refusal.
+	if existing := strings.TrimSpace(def.FieldSource); existing != "" && existing != fieldSource {
+		return RelationshipDefinition{}, fmt.Errorf(
+			"fieldSource is no longer supported and %q contradicts the %q derived from field %q; remove it from concept metadata",
+			existing, fieldSource, field)
+	}
+
 	if fieldSource == concept.FieldSourceTable && relType != relationshipTypeCreatedBy {
 		return RelationshipDefinition{}, fmt.Errorf("relationship type %q does not support metadata field %q", def.Type, field)
 	}

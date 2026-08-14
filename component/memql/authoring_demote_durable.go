@@ -96,6 +96,19 @@ func (e *MemQLEngine) DemoteBundleDurable(ctx context.Context, owner, bundleSour
 // demoteBundleDurableWithStore is the store-driven core of DemoteBundleDurable,
 // split out so it is unit testable with a fake demoteStore (no live DB), exactly
 // like promoteBundleDurableWithStore.
+//
+// A bundle that declares a CONCEPT cannot be demoted at all, and refuses as a
+// whole rather than demoting its other members (memql#3746). Concepts became
+// promotable without becoming demotable -- withdrawing one would strand rows
+// already written under it, so retire-vs-remove is memql#3756's decision -- and
+// the shared isDurablePromotableKind filter is what routes the concept to
+// DemoteAuthoredConstruct's explicit refusal instead of skipping it.
+//
+// Skipping is the alternative and it is worse. The common shape of a promoted
+// bundle is a noun plus the verbs bound to it, so silently demoting the verbs
+// would leave the concept live with nothing that reads or writes it, and report
+// success. Refusing says plainly that this bundle cannot be withdrawn yet; a
+// single construct can still be demoted by name via DemoteConstructDurable.
 func (e *MemQLEngine) demoteBundleDurableWithStore(ctx context.Context, store demoteStore, owner, bundleSource string) (DemoteBundleResult, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {

@@ -210,12 +210,29 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource strin
 				return res, fmt.Errorf("authoring: compile %s %q: %w", c.Kind, c.Name, err)
 			}
 			compiled = spec
+		case "concept":
+			// A candidate concept has ALWAYS compiled at Gate 1
+			// (sandboxCompileConcept builds a real *Concept and merges it into
+			// the ISOLATED clone) -- what it never did was carry that build
+			// forward onto .Compiled, so the promote path had nothing to
+			// register and refused the kind outright. It does now (memql#3746).
+			//
+			// Session scope is unchanged: the compiled concept is METADATA on
+			// the session entry, not a registration. Nothing merges it into any
+			// live registry until the owner-gated promote runs, so defining a
+			// concept on a stream still validates it without touching the
+			// shared cluster.
+			concept, err := compileAuthoredConcept(c)
+			if err != nil {
+				return res, fmt.Errorf("authoring: compile %s %q: %w", c.Kind, c.Name, err)
+			}
+			compiled = concept
 		default:
-			// concept / shape / automation / action / capability register as
-			// resolvable session METADATA only (Compiled=nil). The function
-			// family is executable-by-name and authored specs/traits are
-			// resolvable inside authored query filters via the session spec
-			// overlay (#1559).
+			// shape / automation / action / capability register as resolvable
+			// session METADATA only (Compiled=nil). The function family is
+			// executable-by-name and authored specs/traits are resolvable
+			// inside authored query filters via the session spec overlay
+			// (#1559).
 			//
 			// The world-touching kinds are deliberately INERT in session scope
 			// (E1 #2372): a session-defined automation gets NO scheduler trigger
@@ -547,8 +564,21 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		}
 		e.promotedAuthored.Store(key, newPromotedMarker(c.Source))
 		return nil
+	case "concept":
+		// The anchor of the training epic (memql#3746). Unlike the two branches
+		// above, merging a concept is not just a registry upsert: the engine
+		// DERIVES relationship + node-type state from the concept registry at
+		// Init, and a concept merged after Init is absent from all of it. The
+		// whole of that -- including the core-first never-shadow check, which
+		// keys on the CANONICAL ID rather than the declaration name -- lives in
+		// promoteConceptIntoLiveRegistry (authoring_promote_concept.go).
+		built, ok := c.Compiled.(*memoryNodes.Concept)
+		if !ok || built == nil {
+			return fmt.Errorf("authoring: promote %s %q: construct is not compiled", c.Kind, c.Name)
+		}
+		return e.promoteConceptIntoLiveRegistry(c, built)
 	default:
-		return fmt.Errorf("authoring: promotion of %s constructs is not supported (function-family + spec only)", c.Kind)
+		return fmt.Errorf("authoring: promotion of %s constructs is not supported (concept + function-family + spec only)", c.Kind)
 	}
 }
 
@@ -604,6 +634,20 @@ func (e *MemQLEngine) DemoteAuthoredConstruct(ctx context.Context, kind, name st
 		e.specs.UnmarkDisabled(name)
 		e.promotedAuthored.Delete(key)
 		return nil
+	case "concept":
+		// Deliberately refused, and named separately from the default branch so
+		// the message says WHY rather than "unsupported kind" (memql#3746).
+		//
+		// A concept became PROMOTABLE without becoming demotable, which is a
+		// coherent intermediate state rather than an oversight. Withdrawing a
+		// function makes it uncallable and that is the whole story; withdrawing
+		// a concept would strand every row already written under it, so the
+		// semantics are their own decision -- retire (keep the name claimed, the
+		// rows readable, refuse new writes) when rows exist, remove outright only
+		// when there are none. That is memql#3756. Until it lands, teaching a
+		// cluster a concept is one-way, which loses nothing that was previously
+		// possible.
+		return fmt.Errorf("authoring: demotion of concept %q is not supported yet -- a concept's rows outlive its definition, so withdrawal is retire-vs-remove rather than an unregister (memql#3756)", name)
 	default:
 		return fmt.Errorf("authoring: demotion of %s constructs is not supported (function-family + spec only)", kind)
 	}
