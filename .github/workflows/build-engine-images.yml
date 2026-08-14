@@ -70,9 +70,13 @@ jobs:
       fail-fast: false
       matrix:
         # `portal` names the Dockerfile stage the runtime copies the memQL
-        # Portal bundle from (memql#3314). ONLY the bff serves the portal, so
-        # only the bff builds it -- every other entry takes `portal-skip`, an
-        # empty directory, and never pulls the Node image. Set on every entry
+        # Portal bundle from (memql#3314). The portal is site #1, served by
+        # the edge (component/edge, memql#3711) -- component/portal, which
+        # used to serve it from the bff, is retired. Every entry here takes
+        # `portal-skip`, an empty directory, and never pulls the Node image,
+        # EXCEPT `edge` below, which takes `portal-build` -- it is the only
+        # node type that serves the bundle, so it is the only one that pays
+        # for the Node stage that builds it (memql#3714). Set on every entry
         # rather than defaulted, because `FROM ${PORTAL_DIST_STAGE}` cannot
         # take an empty string and a missing matrix key renders as one.
         include:
@@ -98,13 +102,13 @@ jobs:
           # nodes no longer need to be carrier-built. CGO-free, default runtime
           # stage -- same shape as identity/mcp.
           #
-          # bff is the one node that carries the portal bundle: it is the
-          # client edge every browser connects to, and the portal deliberately
-          # dials the origin that served it.
+          # bff no longer carries the portal bundle (memql#3711) -- the portal
+          # is site #1, served by the edge at its own hostname, not a /portal/
+          # sub-path of the bff.
           - node: bff
             cgo: "0"
             target: ""
-            portal: portal-build
+            portal: portal-skip
           - node: cognition
             cgo: "0"
             target: ""
@@ -121,6 +125,14 @@ jobs:
             cgo: "0"
             target: ""
             portal: portal-skip
+          # edge: serves every hosted site, including the portal (site #1,
+          # memql#3711) -- the only node type that takes portal-build, so
+          # staging/prod carry the same bundle the local build path already
+          # does (memql#3714).
+          - node: edge
+            cgo: "0"
+            target: ""
+            portal: portal-build
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -75,7 +75,17 @@ type MemQLEngine struct {
 	// shared registries via PromoteAuthoredConstruct, so re-promotion replaces
 	// the prior promotion while a name a SEALED core construct owns is still
 	// refused (core-first). Zero-value sync.Map is ready to use.
+	//
+	// Values are promotedMarker. Presence of the key is the promotion fact --
+	// every core-first check reads only that -- and the marker carries the
+	// promoted source's hash so the construct catalog can report one for a
+	// construct that lives in no file (memql#3749).
 	promotedAuthored sync.Map
+	// automationCataloger supplies the automations this node loaded to the
+	// construct catalog. Automations are the one runnable kind the engine holds
+	// no registry for; component/automations wires itself in here at bootstrap.
+	// Nil on a binary with no scheduler, which then reports no automations.
+	automationCataloger AutomationCataloger
 	// loadReport is the structured account of the DSL load pass built by
 	// Init (epic #2351 / S2, memql#2357): every unified loader's skipped
 	// constructs + the S5 uniqueness-gate duplicates. Init refuses to boot

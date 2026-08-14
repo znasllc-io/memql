@@ -409,28 +409,40 @@ mutate inboundRequest updateInboundRequestStatus {
 /// Create a site. Defaults are applied with ?? because a concept-field @default is never applied
 /// on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to
 /// serve a row whose status it cannot read.
-@actor
+///
+/// status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created
+/// site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql,
+/// memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must
+/// not be deletable by an operator who does not realize it is how sites get managed at all.
+///
+/// `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields
+/// (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` /
+/// the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this
+/// mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field
+/// guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently,
+/// because nothing exercised this mutation against a live boot until memql#3714's edge verification
+/// found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
 @description("Create a site")
 mutate site createSite {
   args {
-    siteId    string!
-    hostname  string!
-    kind      enum("spa", "static")
-    bundleRef string!
-    apiProxy  boolean
-    title     string
+    siteId       string!
+    hostname     string!
+    kind         enum("spa", "static")
+    bundleRef    string!
+    status       enum("draft", "live", "disabled")
+    apiProxy     boolean
+    systemOwned  boolean
+    title        string
   }
   insert {
     accept { hostname, bundleRef }
     stamp {
       id:          args.siteId
       kind:        args.kind ?? "spa"
-      status:      "draft"
+      status:      args.status ?? "draft"
       apiProxy:    args.apiProxy ?? false
-      systemOwned: false
+      systemOwned: args.systemOwned ?? false
       title:       args.title ?? args.hostname
-      createdAt:   now
-      createdBy:   actor.userId
     }
   }
 }
@@ -460,5 +472,22 @@ mutate site updateSiteStatus {
   update {
     id:     args.siteId
     status: args.status
+  }
+}
+
+/// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
+/// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
+/// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row
+/// (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express
+/// that conditional, so the block is a Go write guard wired beside executeWrite (see
+/// component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+@description("Soft-delete a site")
+mutate site deleteSite {
+  args {
+    siteId  string!
+  }
+  update {
+    id:      args.siteId
+    deleted: true
   }
 }

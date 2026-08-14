@@ -227,14 +227,16 @@ test("INSTALL IS NEVER OFFERED once either source says a cluster is here", () =>
   // existing cluster rebuilds a k3d stack, a hosts block and a trust-store CA
   // underneath a working one.
   for (const verdict of ["installed-healthy", "installed-unreachable"] as const) {
-    const actions = addClusterMenu(verdict).map((c) => c.action);
+    const actions = addClusterMenu(verdict, true).map((c) => c.action);
     assert.ok(!actions.includes("install"), `${verdict} offered an install: ${actions.join(", ")}`);
   }
 });
 
 test("the menu matches the table in the issue", () => {
+  // `registered: true` is the table's own case -- a machine whose local cluster
+  // is already in the list. The reconnect card is the other one, below.
   assert.deepEqual(
-    addClusterMenu("absent").map((c) => c.action),
+    addClusterMenu("absent", true).map((c) => c.action),
     // Install first: it is the recommended action for a machine with no
     // cluster, and the page renders the first card as the primary one.
     // Guided is its own entry rather than a mode toggle inside the run, because
@@ -243,13 +245,54 @@ test("the menu matches the table in the issue", () => {
     ["install", "installGuided", "connect"]
   );
   assert.deepEqual(
-    addClusterMenu("installed-healthy").map((c) => c.action),
+    addClusterMenu("installed-healthy", true).map((c) => c.action),
     ["connect", "uninstall"]
   );
   assert.deepEqual(
-    addClusterMenu("installed-unreachable").map((c) => c.action),
+    addClusterMenu("installed-unreachable", true).map((c) => c.action),
     ["repair", "uninstall", "connect"]
   );
+});
+
+test("a cluster that is here but not in the list is offered a way back", () => {
+  // memql#3741. `memql.clusters.remove` takes the ROW, not the cluster, and
+  // until this card the only way back was the add-a-cluster form -- four boxes
+  // about a cluster this editor installed itself.
+  assert.deepEqual(
+    addClusterMenu("installed-healthy", false).map((c) => c.action),
+    // FIRST: a healthy cluster missing from the list is a row the operator
+    // removed, and putting it back is the only reason they opened this menu.
+    ["reconnect", "connect", "uninstall"]
+  );
+  // Offered for the unreachable verdict too. A cluster on the machine that is
+  // not answering is still one the operator wants listed -- that is where
+  // repair lives -- but repair still leads, because they came to fix it.
+  assert.deepEqual(
+    addClusterMenu("installed-unreachable", false).map((c) => c.action),
+    ["repair", "reconnect", "uninstall", "connect"]
+  );
+});
+
+test("reconnect is never offered when there is nothing to reconnect to", () => {
+  // Nothing installed: there is no cluster to compose an entry for, and the
+  // card would register a row pointing at an address nothing serves.
+  assert.equal(
+    addClusterMenu("absent", false)
+      .map((c) => c.action)
+      .includes("reconnect"),
+    false,
+  );
+  // Already registered: the row is there. A second card that quietly rewrote
+  // an entry the operator may have edited by hand is worse than no card.
+  for (const verdict of ["installed-healthy", "installed-unreachable"] as const) {
+    assert.equal(
+      addClusterMenu(verdict, true)
+        .map((c) => c.action)
+        .includes("reconnect"),
+      false,
+      verdict,
+    );
+  }
 });
 
 test("uninstall is offered exactly when a cluster is here to uninstall", () => {
@@ -258,14 +301,14 @@ test("uninstall is offered exactly when a cluster is here to uninstall", () => {
   // all. The substrate has had `cli.js uninstall` since #3357; nothing in the
   // editor could reach it.
   assert.ok(
-    !addClusterMenu("absent")
+    !addClusterMenu("absent", true)
       .map((c) => c.action)
       .includes("uninstall"),
     "nothing is installed, so there is nothing to uninstall",
   );
   for (const verdict of ["installed-healthy", "installed-unreachable"] as const) {
     assert.ok(
-      addClusterMenu(verdict)
+      addClusterMenu(verdict, true)
         .map((c) => c.action)
         .includes("uninstall"),
       `${verdict} must offer an uninstall`,
@@ -277,14 +320,18 @@ test("repair leads on the verdict that describes a broken cluster", () => {
   // An operator whose cluster is installed and not answering came to the "+"
   // to fix that, not to register a second cluster. Ordering is the only
   // recommendation a card list can make.
-  assert.equal(addClusterMenu("installed-unreachable")[0]?.action, "repair");
+  assert.equal(addClusterMenu("installed-unreachable", true)[0]?.action, "repair");
+  // ...and still leads when the reconnect card is offered beside it.
+  assert.equal(addClusterMenu("installed-unreachable", false)[0]?.action, "repair");
 });
 
 test("every menu item carries a label and a detail", () => {
   for (const verdict of ["absent", "installed-healthy", "installed-unreachable"] as const) {
-    for (const choice of addClusterMenu(verdict)) {
+    for (const registered of [true, false]) {
+    for (const choice of addClusterMenu(verdict, registered)) {
       assert.notEqual(choice.label.trim(), "", `${verdict}/${choice.action} has no label`);
       assert.notEqual(choice.detail.trim(), "", `${verdict}/${choice.action} has no detail`);
+    }
     }
   }
 });

@@ -120,8 +120,18 @@
     "views": {
       "memql": [
         {
+          "id": "memqlDeployments",
+          "name": "Deployments",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "id": "memqlClusters",
           "name": "Clusters",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "id": "memqlConstructs",
+          "name": "Constructs",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -166,6 +176,30 @@
         "title": "memQL: Uninstall Local Cluster..."
       },
       {
+        "command": "memql.constructs.refresh",
+        "title": "memQL: Refresh Constructs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.constructs.open",
+        "title": "memQL: Open Construct"
+      },
+      {
+        "command": "memql.deployments.refresh",
+        "title": "memQL: Refresh Deployments",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.deployments.createDeployment",
+        "title": "memQL: Create Deployment...",
+        "icon": "$(add)"
+      },
+      {
+        "command": "memql.deployments.open",
+        "title": "memQL: Open Local Deployment",
+        "icon": "$(server)"
+      },
+      {
         "command": "memql.clusters.repair",
         "title": "memQL: Repair Local Cluster"
       },
@@ -187,9 +221,14 @@
         "title": "memQL: Sign In With a Device Code"
       },
       {
-        "command": "memql.cluster.open",
-        "title": "memQL: Open Cluster Topology and Deployments",
-        "icon": "$(server)"
+        "command": "memql.clusters.connection",
+        "title": "memQL: Open Cluster Connection",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "memql.clusters.openPortal",
+        "title": "memQL: Open Portal",
+        "icon": "$(link-external)"
       },
       {
         "command": "memql.concepts.refresh",
@@ -244,6 +283,26 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "command": "memql.constructs.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.constructs.open",
+          "when": "false"
+        },
+        {
+          "command": "memql.deployments.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.createDeployment",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.deployments.open",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "command": "memql.clusters.add",
           "when": "isWorkspaceTrusted"
         },
@@ -280,7 +339,11 @@
           "when": "isWorkspaceTrusted"
         },
         {
-          "command": "memql.cluster.open",
+          "command": "memql.clusters.connection",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.openPortal",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -322,6 +385,11 @@
       ],
       "view/title": [
         {
+          "command": "memql.deployments.refresh",
+          "when": "view == memqlDeployments",
+          "group": "navigation@1"
+        },
+        {
           "command": "memql.clusters.add",
           "when": "view == memqlClusters",
           "group": "navigation@1"
@@ -330,6 +398,11 @@
           "command": "memql.clusters.refresh",
           "when": "view == memqlClusters",
           "group": "navigation@2"
+        },
+        {
+          "command": "memql.constructs.refresh",
+          "when": "view == memqlConstructs",
+          "group": "navigation@1"
         },
         {
           "command": "memql.concepts.refresh",
@@ -349,19 +422,24 @@
       ],
       "view/item/context": [
         {
-          "command": "memql.cluster.open",
+          "command": "memql.clusters.connection",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@1"
         },
         {
-          "command": "memql.clusters.edit",
+          "command": "memql.clusters.openPortal",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@2"
         },
         {
-          "command": "memql.clusters.remove",
+          "command": "memql.clusters.edit",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "inline@3"
+        },
+        {
+          "command": "memql.clusters.remove",
+          "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
+          "group": "inline@4"
         },
         {
           "command": "memql.clusters.signIn",
@@ -373,10 +451,21 @@
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@2"
         },
+
+        {
+          "command": "memql.deployments.createDeployment",
+          "when": "view == memqlDeployments && viewItem == memqlLocalInstanceAbsent",
+          "group": "inline@1"
+        },
+        {
+          "command": "memql.clusters.repair",
+          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
+          "group": "lifecycle@1"
+        },
         {
           "command": "memql.clusters.uninstall",
-          "when": "view == memqlClusters && viewItem == memqlLocalCluster",
-          "group": "lifecycle@1"
+          "when": "view == memqlDeployments && viewItem == memqlLocalInstance",
+          "group": "lifecycle@2"
         },
         {
           "command": "memql.runs.execute",

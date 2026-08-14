@@ -6,18 +6,17 @@
 #
 # WHY A STAGE SELECTOR RATHER THAN AN UNCONDITIONAL COPY
 #
-# Only the bff and the edge serve the portal (app/transport_portal.go; the
-# edge's own serving path lands in a later change, but its image carries the
-# bundle from the start since the portal is site #1 and its bundleRef is
-# file:///app/portal). A Dockerfile has no conditional COPY, so the
-# alternatives were: build the SPA in every node image (a Node toolchain +
-# npm install + vite build on all nine, for bytes seven of them never serve),
-# or add a second runtime target and duplicate the runtime stage. Naming the
-# SOURCE stage instead costs one indirection and leaves both runtime stages
-# identical for every node type.
+# Only the edge serves the portal (component/edge; the portal is site #1 and
+# its bundleRef is file:///app/portal, memql#3711 -- component/portal, which
+# used to serve it from the bff, is retired). A Dockerfile has no conditional
+# COPY, so the alternatives were: build the SPA in every node image (a Node
+# toolchain + npm install + vite build on all nine, for bytes eight of them
+# never serve), or add a second runtime target and duplicate the runtime
+# stage. Naming the SOURCE stage instead costs one indirection and leaves
+# both runtime stages identical for every node type.
 #
 # BuildKit only builds stages that are actually referenced, so the default --
-# portal-skip, an empty directory -- means a non-bff build never pulls the
+# portal-skip, an empty directory -- means a non-edge build never pulls the
 # Node image and never runs npm. Its cost is one `mkdir` on a stage that was
 # already built.
 #
@@ -42,7 +41,7 @@ FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edf
 #   docker build --build-arg BUILD_TAGS=agent .       # agent
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
 #   docker build --build-arg BUILD_TAGS=voice .       # voice (CGO + libopus)
-#   docker build --build-arg BUILD_TAGS=edge --build-arg PORTAL_DIST_STAGE=portal-build .   # edge (serves hosted sites + the portal)
+#   docker build --build-arg BUILD_TAGS=edge --build-arg PORTAL_DIST_STAGE=portal-build .   # edge (serves hosted sites, including the portal, site #1)
 ARG BUILD_TAGS=""
 
 # CGO_ENABLED selects the build mode. The default node types build CGO-free
@@ -203,7 +202,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # A Node stage, entirely separate from the Go builder: nothing here touches
 # the Go toolchain and nothing in the Go stages touches Node. That separation
 # is the whole reason the bundle is served from a directory instead of being
-# //go:embed'ed (component/portal/doc.go) -- every Go lane in CI, and every
+# //go:embed'ed (component/edge/doc.go) -- every Go lane in CI, and every
 # `go build ./...` on a developer machine, stays Node-free.
 #
 # bookworm-slim rather than alpine: scripts/portal/build.sh is a bash script
@@ -260,10 +259,11 @@ COPY --from=builder /app/VERSION ./VERSION
 #
 # The memQL Portal bundle is the opposite: NEVER embedded, always a directory,
 # because embedding it would put a Node build in front of every Go build (see
-# component/portal/doc.go). /app/portal is component/portal.DefaultDistDir;
-# MEMQL_PORTAL_DIST overrides it. Empty for every node type except the bff and
-# the edge (the portal is site #1; its bundleRef is file:///app/portal) --
-# the handler answers 404 with an actionable message rather than failing boot.
+# component/edge/doc.go). /app/portal is the directory the site #1 seed's
+# bundleRef names (file:///app/portal, dsl/platform/seeds.memql, memql#3711).
+# Empty for every node type except the edge -- a site whose bundle directory
+# is missing on disk 404s asset-by-asset rather than failing boot
+# (component/edge/handler.go resolves against whatever os.DirFS finds there).
 COPY --from=portal-dist /portal-dist ./portal
 
 EXPOSE 8085 50051

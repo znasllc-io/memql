@@ -524,7 +524,11 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 					// re-enables the name, demoting it retires it. Without
 					// the marker the name would be permanently dead -- no
 					// API path lifts a core reservation.
-					e.promotedAuthored.Store("spec:"+row.Name, true)
+					// A RESERVATION, not a registration: nothing is in the
+					// registry under this name, so the marker carries no
+					// source hash. The catalog never reads it -- it looks the
+					// marker up only for names it found in a registry.
+					e.promotedAuthored.Store("spec:"+row.Name, promotedMarker{})
 				}
 			}
 			if e.Component != nil && e.Logger != nil {

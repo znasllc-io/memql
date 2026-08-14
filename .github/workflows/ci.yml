@@ -422,12 +422,21 @@ jobs:
             #
             # scripts/portal/** is the install/build cycle every portal command
             # goes through, so a change there breaks the lane's own recipe.
+            #
+            # component/portal/** WAS here too: the Go code that served the
+            # bundle, on the theory that a bug there could break the portal in
+            # the same sense a bad build.sh could. It is retired (memql#3711
+            # -- the portal is site #1, served by the GENERIC component/edge,
+            # not portal-specific Go). component/edge/** is NOT added in its
+            # place: the edge serves every hosted site, not only the portal,
+            # so folding it into this npm-only lane's trigger set would make
+            # an unrelated customer-site change re-run portal-checks for no
+            # reason. component/edge's own Go test suite covers it instead.
             portal:
               - 'clients/**'
               - 'sdk/ts/**'
               - 'sdk/ts-viewkit/**'
               - 'scripts/portal/**'
-              - 'component/portal/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
@@ -877,6 +886,13 @@ jobs:
       - name: go test -tags edge (build-tagged suites)
         if: ${{ env.RUN_GO == 'true' }}
         run: go test -tags edge -timeout=300s ./app/ ./component/server/
+      # POST /sites/{id}/bundles (memql#3713): app/transport_sites_test.go is
+      # //go:build bff and would otherwise never execute -- the exact defect
+      # this audit exists to catch, caught against this PR before merge
+      # rather than after.
+      - name: go test -tags bff (build-tagged suites)
+        if: ${{ env.RUN_GO == 'true' }}
+        run: go test -tags bff -timeout=300s ./app/ ./component/server/
 
   # Voice node CGO build lane -- kept SEPARATE from go-checks because it needs
   # the libopus/opusfile/soxr C deps + CGO_ENABLED=1 and builds under the
@@ -1277,11 +1293,11 @@ jobs:
           start=$SECONDS
           go test -count=1 -timeout=600s ./component/memql/...
           echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
-      - name: db-gated -- the fast five (tight budget)
+      - name: db-gated -- the fast six (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
-          echo "headroom: the fast five used $((SECONDS - start))s of their 180s budget"
+          go test -count=1 -timeout=180s ./component/automations/... ./component/database/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+          echo "headroom: the fast six used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary

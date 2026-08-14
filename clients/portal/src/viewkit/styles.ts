@@ -8,7 +8,9 @@
 // <style> element.
 //
 // THIS IS WHY THE PORTAL'S CSP CARRIES `style-src 'self' 'unsafe-inline'`
-// (component/portal/csp.go). A <style> element created at runtime counts as
+// (component/edge/csp.go, generic across every hosted site since memql#3711
+// -- the portal is site #1, not a special case). A <style> element created
+// at runtime counts as
 // an inline style block, so a bare `style-src 'self'` drops the sheet and the
 // row list renders unstyled. `script-src` stays strict -- there is no inline
 // script anywhere in the portal, which is the property that actually matters.

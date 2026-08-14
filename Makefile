@@ -423,6 +423,26 @@ arch-model:
 arch-model-check:
 	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
 
+## Regenerate the bff HTTP path entries in the api front door from
+## component/server's own path declarations.
+##
+## An ingress controller's backend protocol is a per-SERVICE setting, so the
+## bff's gRPC edge (:50051, h2c) and its HTTP edge (:8085) are two Services --
+## and every HTTP path needs its own Ingress rule. Hand-maintaining that list
+## left /inbound/{source} and /unsubscribe routed by no overlay at all.
+frontdoor-paths:
+	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/local/api-front-door.yaml
+
+## CI gate: fail when the front door's generated path block is stale. The
+## drift this catches is a new public HTTP path that nothing routes -- which
+## does not 404, it hands HTTP/1.1 to an h2c backend. Pair with
+## `make frontdoor-paths` locally to fix.
+##
+## Also enforced by TestFrontDoorPathsAreNotStale so it runs in the ordinary
+## `go test ./...` lane, which needs no workflow change.
+frontdoor-paths-check:
+	$(GO) test -count=1 -run TestFrontDoorPathsAreNotStale ./deploy/k8s/overlays/local/
+
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
 ## parse / import / build diagnostics. Mirrors the CI gate so authors
@@ -498,8 +518,10 @@ portal-test:
 	bash scripts/portal/build.sh test
 
 ## Build the portal bundle into clients/portal/dist. This is what the
-## Dockerfile's portal stage runs, and what MEMQL_PORTAL_DIST points at when
-## serving a locally-built bundle from a `go run` binary.
+## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
+## site row's bundleRef at it (file:///abs/path/clients/portal/dist via
+## updateSiteBundle) -- the portal is site #1 (memql#3711), so there is no
+## longer an env var that repoints it.
 portal-build:
 	bash scripts/portal/build.sh build
 
@@ -541,7 +563,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor-paths frontdoor-paths-check
 
 ## Run go vet on all packages
 vet:

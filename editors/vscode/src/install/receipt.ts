@@ -505,3 +505,23 @@ export function recordedStackTag(receipt: Receipt | null): string {
   const tag = entry?.params?.tag;
   return typeof tag === "string" ? tag.trim() : "";
 }
+
+/**
+ * The DOMAIN a previous run installed under (memql#3736).
+ *
+ * Scanned across every entry rather than read off one named step, because the
+ * graph pins `--domain` on several of them and which one is present depends on
+ * how far the run got. The same scan clusters/presence.ts already makes to
+ * choose a probe endpoint -- the difference is only that this returns the
+ * domain itself, which is what a surface naming the instance wants.
+ *
+ * Empty means the receipt records no domain, so the caller's own default
+ * applies (`stackPin.DEFAULT_LOCAL_DOMAIN` for a run that took every default).
+ */
+export function recordedDomain(receipt: Receipt | null): string {
+  for (const entry of receipt?.entries ?? []) {
+    const domain = entry.params.domain;
+    if (typeof domain === "string" && domain.trim() !== "") return domain.trim();
+  }
+  return "";
+}

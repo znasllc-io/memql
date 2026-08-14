@@ -112,7 +112,19 @@ shape oauthClient oauthClientFull {
   responseTypes
   tokenEndpointAuthMethod
   registeredAt
+  corsOriginsJSON
   row.createdAt
+}
+
+/// The credentialed-CORS allowance alone (memql#3716) -- the client id and the granted origins,
+/// nothing else. Narrower than oauthClientFull on purpose: the origin decision is made on an
+/// unauthenticated preflight, and a projection that also carried redirectURIsJSON would put the
+/// registration metadata of every granted client on a code path that needs neither.
+@row
+shape oauthClient oauthClientCORSGrant {
+  row.id
+  clientId
+  corsOriginsJSON
 }
 
 /// Full projection of v1:identity:authSession including revocation state.

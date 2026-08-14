@@ -79,6 +79,17 @@ type WhenContext = Record<string, string | boolean>;
 
 const REMOTE_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlCluster" };
 const LOCAL_ROW: WhenContext = { view: "memqlClusters", viewItem: "memqlLocalCluster" };
+// The row uninstall MOVED TO (memql#3742). Taking a cluster off the machine is
+// a Deployments action; the Clusters view is connections, and its rows now
+// offer nothing that changes the machine.
+const LOCAL_INSTANCE_ROW: WhenContext = {
+  view: "memqlDeployments",
+  viewItem: "memqlLocalInstance",
+};
+const ABSENT_INSTANCE_ROW: WhenContext = {
+  view: "memqlDeployments",
+  viewItem: "memqlLocalInstanceAbsent",
+};
 
 // A recursive-descent evaluator over the fragment of the when-clause grammar
 // this manifest uses: `&&`, `||`, `!`, parentheses, and `==` / `!=` against a
@@ -207,24 +218,85 @@ test("the when-clause evaluator answers the shapes this manifest uses", () => {
   );
 });
 
-test("uninstall is offered on a local row", () => {
+test("uninstall is offered on the Deployments local-instance row", () => {
   const entries = entriesFor("memql.clusters.uninstall");
   assert.equal(entries.length, 1, "expected exactly one uninstall entry in view/item/context");
   assert.ok(
-    matches(entries[0], LOCAL_ROW),
-    `uninstall does not reach a memqlLocalCluster row: when = ${String(entries[0].when)}`
+    matches(entries[0], LOCAL_INSTANCE_ROW),
+    `uninstall does not reach a memqlLocalInstance row: when = ${String(entries[0].when)}`
   );
 });
 
-test("uninstall is NOT offered on a remote row", () => {
-  const offered = entriesFor("memql.clusters.uninstall").filter((entry) =>
-    matches(entry, REMOTE_ROW)
-  );
+test("uninstall is NOT offered on any Clusters row", () => {
+  // THE MOVE, asserted from the side it left (memql#3742). Clusters is
+  // connections: removing a row there takes the connection and leaves the
+  // cluster running, and an uninstall beside it is the one action whose
+  // presence makes that distinction unreadable.
+  for (const row of [LOCAL_ROW, REMOTE_ROW]) {
+    assert.deepEqual(
+      entriesFor("memql.clusters.uninstall").filter((entry) => matches(entry, row)),
+      [],
+      `uninstall reached ${String(row["viewItem"])}`
+    );
+  }
+});
+
+test("uninstall is NOT offered on a machine with nothing installed", () => {
   assert.deepEqual(
-    offered,
+    entriesFor("memql.clusters.uninstall").filter((entry) => matches(entry, ABSENT_INSTANCE_ROW)),
     [],
-    "uninstall reached a memqlCluster row -- there is nothing on this machine to reverse for a cluster this editor never installed"
+    "uninstall reached the absent-instance row -- there is nothing to remove"
   );
+});
+
+test("repair moved with it, and to the same row", () => {
+  const entries = entriesFor("memql.clusters.repair");
+  assert.equal(entries.length, 1, "expected exactly one repair entry in view/item/context");
+  assert.ok(matches(entries[0], LOCAL_INSTANCE_ROW));
+  for (const row of [LOCAL_ROW, REMOTE_ROW, ABSENT_INSTANCE_ROW]) {
+    assert.equal(matches(entries[0], row), false, String(row["viewItem"]));
+  }
+});
+
+// -----------------------------------------------------------------------------
+// The deletion guards (memql#3742). A deletion nothing guards grows back.
+// -----------------------------------------------------------------------------
+
+test("the topology view is gone from the manifest, command and menus alike", () => {
+  // `memql.cluster.open` opened an 894-line webview drawing a pod grid, orphan
+  // verdicts and under-replica alarms -- cluster state, which the portal owns
+  // and already draws. Two surfaces answering one question diverge on the day
+  // the second one ships.
+  assert.equal(
+    manifest.contributes.commands.some((c) => c.command === "memql.cluster.open"),
+    false,
+    "memql.cluster.open is contributed again"
+  );
+  for (const [menu, entries] of Object.entries(manifest.contributes.menus)) {
+    assert.deepEqual(
+      entries.filter((e) => e.command === "memql.cluster.open"),
+      [],
+      `memql.cluster.open reappeared in ${menu}`
+    );
+  }
+});
+
+test("the Clusters context menu changes nothing on the machine", () => {
+  // Clusters is CONNECTIONS. Anything that installs, repairs or removes an
+  // artifact from this machine belongs to Deployments, and the whole point of
+  // the split is that a row in one view cannot do the other's work.
+  const machineActions = [
+    "memql.clusters.uninstall",
+    "memql.clusters.repair",
+    "memql.deployments.createDeployment",
+  ];
+  for (const row of [LOCAL_ROW, REMOTE_ROW]) {
+    const offered = itemMenu
+      .filter((entry) => machineActions.includes(entry.command))
+      .filter((entry) => matches(entry, row))
+      .map((entry) => entry.command);
+    assert.deepEqual(offered, [], `${String(row["viewItem"])} offers ${offered.join(", ")}`);
+  }
 });
 
 test("remove is offered on both row kinds", () => {
@@ -256,7 +328,13 @@ test("remove is the inline action and uninstall is not", () => {
 
 test("both commands the menu names are declared", () => {
   const declared = new Set(manifest.contributes.commands.map((entry) => entry.command));
-  for (const command of ["memql.clusters.remove", "memql.clusters.uninstall"]) {
+  for (const command of [
+    "memql.clusters.remove",
+    "memql.clusters.uninstall",
+    "memql.clusters.repair",
+    "memql.clusters.connection",
+    "memql.clusters.openPortal",
+  ]) {
     assert.ok(declared.has(command), `${command} appears in a menu but is not a contributed command`);
   }
 });

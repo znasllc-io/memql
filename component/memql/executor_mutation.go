@@ -61,6 +61,11 @@ type writeMeta struct {
 	// blast-radius validation guard only gates the valid false->true ACCEPT
 	// transition, not a re-write of an already-accepted override (memql#2143).
 	priorHealingValid bool
+	// priorSystemOwned is the prior row's `systemOwned` flag (false when
+	// absent), captured before the delta overwrites it so the site
+	// systemOwned-delete guard cannot be bypassed by a write that flips
+	// systemOwned to false in the same delta as deleted:true (memql#3717).
+	priorSystemOwned bool
 }
 
 // executeUpdate runs the update() form: read the latest existing row by
@@ -561,6 +566,11 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// blast-radius validation guard only gates the valid false->true
 			// ACCEPT transition, not a re-write of an already-accepted override.
 			meta.priorHealingValid = boolFromAny(priorPayload["valid"])
+			// Capture the PRIOR systemOwned flag (memql#3717) so the site
+			// systemOwned-delete guard sees the persisted value even when the
+			// delta tries to flip it to false in the same write that sets
+			// deleted:true.
+			meta.priorSystemOwned = boolFromAny(priorPayload["systemOwned"])
 			// @createOnly fields are written on create only (fylo#63): drop
 			// them from the delta BEFORE the merge so the stored value wins.
 			// A deterministic-id re-stage of a row another writer owns after
@@ -869,6 +879,20 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// See forge_request_validation.go.
 	if conceptMeta.Name == conceptForgeRequest {
 		if err := e.validateForgeRequestTransition(ctx, payload, mutation.ID, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+	// Site systemOwned-delete guard (memql#3717): a systemOwned
+	// v1:platform:site row (the portal's own row, re-seeded at boot) must
+	// never be deletable by a non-system actor -- a UI-only block is not a
+	// block, since anything holding the gRPC surface could otherwise
+	// soft-delete the row over the raw mutation surface and lose cluster
+	// management until the next boot re-seed. The prior-row systemOwned flag
+	// (captured in the read-merge above) gates the write even if the delta
+	// tries to flip systemOwned to false in the same write. See
+	// platform_site_delete_guard.go.
+	if conceptMeta.Name == conceptPlatformSite {
+		if err := e.validateSiteSystemOwnedDelete(ctx, payload, meta.priorSystemOwned, actor); err != nil {
 			return nil, meta, err
 		}
 	}

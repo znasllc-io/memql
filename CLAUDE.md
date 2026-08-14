@@ -78,7 +78,7 @@ memQL/
 │   │                  Dockerfile stage, deploy component)
 │   └── portal/        memQL Portal -- the platform's graphical operations
 │                      console, the Cockpit's browser sibling. React + TS +
-│                      Vite + Tailwind; served by component/portal
+│                      Vite + Tailwind; served by component/edge as site #1
 ├── component/         Core Go components
 │   ├── bus/           Channel-based inter-component communication (Go)
 │   ├── config/        Centralized env var loading (Go)
@@ -125,8 +125,7 @@ memQL/
 | `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps). Plural + first-class, the inward-facing mirror of `integrations/`. The engine carries one inhabitant -- the portal -- as the worked example downstream repos copy | TypeScript | [→](clients/README.md) |
-| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/portal` at `/portal/` on the bff | TypeScript | [→](clients/README.md) |
-| `component/portal/` | Serves the portal bundle from `MEMQL_PORTAL_DIST` (SPA fallback, asset caching, CSP). Not `go:embed` -- see its `doc.go` | Go | -- |
+| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/edge` as site #1 (its own hostname, `bundleRef: file:///app/portal`) | TypeScript | [→](clients/README.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
 | `component/config/` | Centralized configuration loading | Go | -- |
@@ -310,6 +309,8 @@ frontend coordination.
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
+| **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in `api-front-door.yaml` from `component/server`'s path declarations. Run after adding an HTTP route |
+| **Front-door path gate** | `make frontdoor-paths-check` | Fail when that block is stale. The drift it catches is an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703) |
 
 ---
 
@@ -605,9 +606,63 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
+| **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | The reasoning already recorded above for `/spaces/{id}/attachments`: multipart bundles map poorly to gRPC (memql#3713, explicit owner approval on the issue). A CI job publishing a built site hands over an arbitrary, variable-shaped tree of files -- unknown paths, unknown count, mixed binary content types -- which is exactly the shape multipart form-data exists to carry and exactly the shape a fixed protobuf message schema does not. Every CI toolchain already knows how to POST a multipart body; none carries a memQL gRPC client. `component/edge.Publisher` is what makes the deploy atomic once the bytes arrive: the whole bundle lands under a new content-addressed version prefix and only then does the site row's `bundleRef` flip, so a failed upload never leaves a half-published site reachable, and rollback is one more row write to bytes that are still there. Authorization is a `class="service_account"` identity-issued JWT (memql#691) the handler verifies itself; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`, for the same reason the inbound receiver is below: that list is consulted by the verifier middleware on every verifier-consuming node, so listing it there would make the route unauthenticated for every bearer instead of pinned to the service-account credential specifically. Served by the bff, never the edge node -- the edge is wildcard-routed by site hostname, so a site-agnostic publish endpoint has no coherent address there |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
-| **Portal SPA assets** | `GET /portal/*` (bff only) | A browser cannot fetch its own bundle over gRPC -- the request that loads the application is made before any application code exists to speak a protocol. Same category as the `/memql/ws` upgrade and identity's web UI (memql#3314). Static bytes only, identical for every visitor: declared in `server.PublicPaths()` via `PortalPaths()`, while the DATA the portal reads stays gated on the `/memql/ws` stream it then dials. Served by `component/portal` from `MEMQL_PORTAL_DIST` |
+
+### How an HTTP path reaches the front door (GENERATED, memql#3703)
+
+Every HTTP path above needs its own Ingress rule, and **that rule list is
+generated, not authored**. An ingress controller's backend protocol is a
+per-**Service** setting, so the bff's gRPC edge (`bff`, :50051, h2c) and its HTTP
+edge (`bff-http`, :8085) are two Services over one Deployment -- and a path with
+no rule falls through to the `/` h2c catch-all. **That is not a 404: it is an
+HTTP/1.1 request handed to an h2c backend, which fails with a protocol error
+naming nothing.** Hand-maintaining the list left `/inbound/{source}` and
+`GET+POST /unsubscribe` -- two of the exceptions in the table above, both dialled
+by third parties -- routed by no overlay in this repository at all.
+
+`cmd/frontdoorpaths` emits the block between the markers in
+`deploy/k8s/overlays/local/api-front-door.yaml`. Three things about the
+derivation are load-bearing:
+
+- **It is per-ROUTE, not per-authentication-tier.** `server.PublicPaths()` +
+  `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` answer *who may reach
+  this without a bearer*. An **authenticated** HTTP route appears in none of
+  them, which is how `/spaces/` (attachment upload), `/polyphon/room-token` and
+  `/polyphon/status` came to be served by the bff and routed by nothing. The
+  generator unions the aggregates **and** every per-route declaration a
+  bff-tagged build mounts.
+- **It over-approximates for a path the bff does NOT serve.** Paths only the
+  identity node serves (`JWKSPaths()`, `IdentityDiscoveryPaths()`) are kept:
+  adding a rule for a path this backend does not serve costs a 404, while
+  omitting one for a path it does costs a protocol error naming nothing.
+- **That pricing INVERTS for a path the bff does serve, and this is the trap.**
+  There, adding a rule does not cost a 404 -- it makes the endpoint externally
+  reachable, and for anything in `PublicPaths()` (which the verifier bypasses)
+  that means exposure. `/metrics` is the case: it is unauthenticated *because* it
+  is in-cluster-only, and it is mounted on every node type. So there is a fourth
+  classification, `servedButNotExternallyRouted`, for "the bff serves it and it
+  must stay off the public ingress" -- `/metrics` and `/api/concepts*` are in it.
+  **"When in doubt, include" applies only to the previous bullet.**
+
+Two gates make it non-recurring. `TestFrontDoorPathsAreNotStale` fails when the
+checked-in block is not what the generator produces
+(`make frontdoor-paths-check`), and `TestEveryServerPathDeclarationIsClassified`
+AST-scans `component/server` for every `func …Paths() []string` /
+`…Routes() []string` and fails when one is classified by none of the generator's
+four maps. **So a new HTTP path DECLARATION either reaches the front door or
+breaks the build.**
+
+Note the word *declaration*, because the stronger claim is false on the bff: a
+route mounted through `handleRoute` with an inline path literal and no `*Paths()`
+declaration of its own is invisible to the generator, and the boot check that
+would otherwise catch it (`AssertUnauthenticatedSurface`) runs only when the node
+installs **no** verifier (`app/transport.go:265`) -- which the bff does. Declare
+new HTTP routes with a `*Paths()` function; that is what puts them inside the
+gate. Do not hand-edit the block, and do not "simplify" the generator back to the
+three aggregates -- its package comment says why, at length, because both changes
+look like cleanups.
 
 ### gRPC-Only Endpoints (HTTP Retired)
 

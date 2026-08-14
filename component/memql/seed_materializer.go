@@ -56,13 +56,52 @@ const seedMaterializerActor = "system:seedMaterializer"
 // materializer's synthetic system actor. Every Execute call the
 // materializer makes goes through this so mutations see a non-empty
 // actor and don't fail with "no actor found in context".
+//
+// It ALSO stamps an AccessContext with Role: RoleOwner (memql#3711). This
+// is an ADDITION, not a replacement -- TokenInfo/claims are unchanged, so
+// isSystemActor's actor-string-prefix check ("system:seedMaterializer")
+// keeps gating every rbac/agent-role/healing validator exactly as before.
+//
+// Why it is needed now, having not been for years: createdBy and a DSL
+// body's `actor.X` expression read TWO DIFFERENT context surfaces
+// (memql#2989) -- TokenInfo/claims for the engine-intrinsic createdBy
+// stamp, AccessContext for everything else, INCLUDING the row-authz WRITE
+// guard's cluster-owner escape (rowAuthzIsClusterOwner reads AccessContext
+// only; see rowauthz_enforce.go). Every seed target concept until now was
+// UNDECLARED tier, so guardRowAuthzWrite's `decl == nil` branch let every
+// seed write through regardless of actor and the gap was invisible.
+// v1:platform:site is @rowAuthz(clusterOwner) (the portal seed,
+// dsl/platform/seeds.memql), and RE-materializing it -- every boot after
+// the first, since the id already has a row -- walks the SAME
+// read-merge-then-guard path update/delete take (executor_mutation.go's
+// comment: "regardless of whether the mutation was authored as update{}
+// or insert{}"). Without this stamp that write was refused every time:
+// rowAuthzIsClusterOwner(ctx) reads auth.AccessFromContext(ctx), which was
+// never set here, so it denied unconditionally. Only the FIRST-ever
+// materialization (no prior row -> guardRowAuthzWrite has nothing to
+// enforce) happened to work, which is exactly the kind of gap a
+// re-seed-after-delete test (systemOwned's whole justification) would have
+// caught and a first-boot-only test would not.
+//
+// Role must be RoleOwner specifically, not RoleWriter --
+// AccessContext.IsClusterOwner() reads Role == RoleOwner and nothing else,
+// which is why auth.ContextWithUserActor is NOT a substitute (it hardcodes
+// RoleWriter). The AccessContext half mirrors component/edge/edge.go's
+// systemActorContext and component/campaigns/worker.go's systemCampaignsActor
+// precedent exactly, including the reasoning -- but NOT the whole envelope:
+// both of those set claims/TokenInfo `"role": "owner"` too, and this
+// deliberately keeps `"role": "system"` (see above) rather than following
+// them there, precisely so isSystemActor's other callers see no change.
+// That is a considered divergence from the precedent, not an oversight.
 func systemActorContext(ctx context.Context) context.Context {
-	return auth.ContextWithToken(ctx, &auth.TokenInfo{
+	claims := map[string]any{"sub": seedMaterializerActor, "role": "system"}
+	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{
 		Subject: seedMaterializerActor,
-		Claims: map[string]any{
-			"sub":  seedMaterializerActor,
-			"role": "system",
-		},
+		Claims:  claims,
+	})
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: seedMaterializerActor,
+		Role:   auth.RoleOwner,
 	})
 }
 

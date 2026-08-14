@@ -13,9 +13,30 @@ package memql
 
 import (
 	"regexp"
+	"sync"
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
+
+// keywordHeaderCache memoizes the per-keyword header pattern. The pattern
+// depends on nothing but the keyword, and there are a dozen keywords in the
+// language, so compiling one per call is pure waste -- which stopped being
+// theoretical once the construct catalog (memql#3749) began slicing every file
+// in the tree for every kind on a single request.
+var keywordHeaderCache sync.Map // keyword string -> *regexp.Regexp
+
+// keywordHeaderRegexp returns the compiled header pattern for one keyword.
+func keywordHeaderRegexp(keyword string) *regexp.Regexp {
+	if cached, ok := keywordHeaderCache.Load(keyword); ok {
+		return cached.(*regexp.Regexp)
+	}
+	re := regexp.MustCompile(
+		`(?m)^[ \t]*` + regexp.QuoteMeta(keyword) +
+			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
+	)
+	keywordHeaderCache.Store(keyword, re)
+	return re
+}
 
 // KeywordSlice is one extracted declaration of a given keyword
 // (shape / provider / prompt / tool / builtin / policy).
@@ -44,10 +65,7 @@ type KeywordSlice struct {
 // up from the header, through the matching close-brace below it.
 // String + line-comment aware brace balancing.
 func ExtractKeywordSlices(source, keyword string) []KeywordSlice {
-	headerRe := regexp.MustCompile(
-		`(?m)^[ \t]*` + regexp.QuoteMeta(keyword) +
-			`[ \t]+(?:[A-Za-z_][A-Za-z0-9_]*[ \t]+)?([A-Za-z_][A-Za-z0-9_-]*)[ \t]*\{`,
-	)
+	headerRe := keywordHeaderRegexp(keyword)
 	// Detect headers and balance braces on a comment-BLANKED view, so a
 	// declaration existing only inside a `/* ... */` block is never extracted as
 	// a live construct (memql#2868). Offsets are preserved, so the emitted slice

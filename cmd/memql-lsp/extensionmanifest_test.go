@@ -757,11 +757,15 @@ var trustGatedCommands = []string{
 	// puts it squarely on the runtime side of the boundary.
 	"memql.clusters.remove",
 	"memql.clusters.disconnect",
-	// memql#3312's Cluster tab. Palette-invokable unlike the other
-	// argument-taking commands: with no tree node it falls back to the
-	// currently selected cluster, so it is genuinely usable from the palette
-	// and therefore needs the trust clause rather than "when": "false".
-	"memql.cluster.open",
+	// The CONNECTION page and Open Portal (memql#3742), which replaced
+	// memql#3312's Cluster tab -- topology is cluster state and belongs to the
+	// portal, while what this editor dials and as whom belongs here. Both are
+	// palette-invokable unlike the other argument-taking commands: with no tree
+	// node they fall back to the currently selected cluster, so both are
+	// genuinely usable from the palette and therefore need the trust clause
+	// rather than "when": "false".
+	"memql.clusters.connection",
+	"memql.clusters.openPortal",
 	"memql.concepts.refresh",
 	// memql#3309's run surface, plus memql#3310's automation run. The three
 	// run commands themselves (memql.run.construct / .constructWith /

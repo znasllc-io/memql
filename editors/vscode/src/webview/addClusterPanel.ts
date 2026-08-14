@@ -47,6 +47,7 @@ import {
 import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
+import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -83,6 +84,23 @@ import {
   type InputField,
 } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
+// EVERY LOCAL RUN WRITES A RECORD (memql#3739). The Deployments tree reads the
+// run log as one history, so the wizard's install, repair and uninstall have to
+// appear in it beside the deployments the instance page drives -- a history
+// missing three of its five verbs is not a history.
+import { RunRecorder } from "../state/runRecorder.js";
+import { LOCAL_INSTANCE_NAME } from "../state/deployments.js";
+import { defaultRunsDir } from "../state/runLog.js";
+// The install-run screens, shared with Deployments (memql#3738). INPUT_FIELDS
+// comes back with them because the message handler validates an incoming
+// field name against the same list the form rendered from -- two lists would
+// be two answers to "which fields exist".
+import {
+  INPUT_FIELDS,
+  renderCollectScreen,
+  renderFailedScreen,
+  renderRunningScreen,
+} from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
@@ -91,41 +109,10 @@ const CHOICE_ACTIONS: readonly AddClusterAction[] = [
   "install",
   "installGuided",
   "connect",
+  "reconnect",
   "repair",
   "uninstall",
 ];
-
-const INPUT_FIELDS: readonly InputField[] = [
-  "domain",
-  "ownerFirstName",
-  "ownerLastName",
-  "ownerEmail",
-  "provider",
-  "providerKeyFile",
-];
-
-/**
- * The fields rendered as a CHOICE rather than as a text box.
- *
- * `provider` is one because the set is closed and the script refuses anything
- * outside it with exit 2 -- whose guidance says "a fault in memQL rather than
- * in your machine or your answers", which would be a lie about a value the
- * operator typed. A control that cannot express the wrong answer is the fix;
- * `problemWith` is the second wall, for a message this page did not render.
- */
-const CHOICE_FIELDS: Partial<Record<InputField, readonly string[]>> = {
-  provider: SUPPORTED_PROVIDERS,
-};
-
-/** The label each collected field carries. */
-const FIELD_LABELS: Record<InputField, string> = {
-  domain: "Domain",
-  ownerFirstName: "First name",
-  ownerLastName: "Last name",
-  ownerEmail: "Email address",
-  provider: "AI provider",
-  providerKeyFile: "AI provider key file",
-};
 
 /**
  * The registration form's fields, and its actions -- each a literal list of
@@ -196,18 +183,6 @@ const CONNECT_SECRET_FIELDS: readonly ConnectField[] = ["token"];
  * about what "stuck" means.
  */
 const STEP_TIMEOUT_MS = 600_000;
-
-/** What each field is for, in one line. */
-const FIELD_HINTS: Record<InputField, string> = {
-  domain: "The cluster answers at api.<domain>. Defaults are fine if you have no preference.",
-  ownerFirstName: "The cluster owner -- you.",
-  ownerLastName: "",
-  provider:
-    "Which vendor the key below belongs to. The installer makes one authenticated call to check it before anything on this machine changes.",
-  ownerEmail: "Used to create the owner account. A local cluster sends no mail.",
-  providerKeyFile:
-    "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
-};
 
 /**
  * What this page needs from the extension host to register a cluster.
@@ -287,6 +262,11 @@ export interface AddClusterDeps {
    * either would be a second opinion about state activation owns.
    */
   removeRegistryEntry: (name: string) => Promise<unknown>;
+  /**
+   * Where the run log lives. Optional, defaulting to ~/.memql/runs, so a test
+   * can point a run at a temp directory without a real HOME.
+   */
+  runsDir?: string;
 }
 
 export class AddClusterPanel {
@@ -296,6 +276,15 @@ export class AddClusterPanel {
   private readonly state = new AddClusterState();
   private readonly disposables: vscode.Disposable[] = [];
   private verdict: PresenceVerdict = "installed-unreachable";
+  /**
+   * Whether a `local: true` entry is already in the registry.
+   *
+   * Defaults TRUE, which withholds the reconnect card until the presence read
+   * says otherwise. The safe direction: offering to compose an entry for a
+   * cluster that already has one would quietly rewrite a row the operator may
+   * have edited by hand.
+   */
+  private localRegistered = true;
   private disposed = false;
   private saving = false;
   /** Non-undefined exactly while a run is in flight; also the cancel handle. */
@@ -417,9 +406,15 @@ export class AddClusterPanel {
    */
   private async refreshVerdict(): Promise<void> {
     try {
-      this.verdict = (await this.presence.get()).verdict;
+      const presence = await this.presence.get();
+      this.verdict = presence.verdict;
+      // `clusterName` is set exactly when a `local: true` entry was found, so
+      // it IS the registration fact -- read from the same pass rather than
+      // from a second read of clusters.yaml that could disagree with it.
+      this.localRegistered = presence.clusterName !== undefined;
     } catch {
       this.verdict = "installed-unreachable";
+      this.localRegistered = true;
     }
     this.render();
   }
@@ -439,6 +434,14 @@ export class AddClusterPanel {
     if (type === "choose" && typeof value === "string") {
       const action = CHOICE_ACTIONS.find((known) => known === value);
       if (action === undefined) return;
+      // RECONNECT IS GATED ON THE VERDICT, not merely on the id. The
+      // postMessage channel is untrusted, and this action WRITES a registry
+      // entry pointing at a front door -- on a machine with no cluster that is
+      // a row for an address nothing serves, and on one already registered it
+      // would quietly rewrite an entry the operator may have edited by hand.
+      // The other cards ask for confirmation or collect fields before they
+      // change anything; this one does not, so the check is here.
+      if (action === "reconnect" && !offersReconnect(this.verdict, this.localRegistered)) return;
       this.state.chooseAction(action);
       // The duplicate-name check needs a registry to check against, and this
       // is the moment it becomes worth reading one. Nothing waits on it: the
@@ -454,6 +457,11 @@ export class AddClusterPanel {
       // branch opens rather than behind a further click: there is nothing on
       // this screen for the operator to do until it is on screen.
       if (action === "uninstall") void this.loadUninstallPreview();
+      // NOTHING TO ASK. The domain comes off the receipt (or the installer's
+      // default), the entry is composed from it, and the hand-off screen the
+      // action lands on is the same one a finished install reaches -- so the
+      // operator's next click is "Sign in as owner" either way (memql#3741).
+      if (action === "reconnect") void this.reconnectLocal();
       this.render();
       return;
     }
@@ -811,6 +819,19 @@ export class AddClusterPanel {
     const controller = new AbortController();
     this.runAbort = controller;
 
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: LOCAL_INSTANCE_NAME,
+      kind: action === "repair" ? "repair" : "install",
+      // A repair returns the cluster to the tag its receipt names, so that tag
+      // is both where it came from and where it is going. An install has
+      // neither: nothing was here.
+      ...(action === "repair" && recordedStackTag(priorReceipt) !== ""
+        ? { fromVersion: recordedStackTag(priorReceipt), toVersion: recordedStackTag(priorReceipt) }
+        : {}),
+    });
+    this.deps.refreshTree();
+
     let report: ExecutionReport | undefined;
     let failure: string | undefined;
     try {
@@ -849,6 +870,7 @@ export class AddClusterPanel {
         this.hooks({
           onEvent: (event) => {
             this.state.apply(event);
+            void recorder.apply(event);
             this.render();
           },
           signal: controller.signal,
@@ -866,6 +888,15 @@ export class AddClusterPanel {
       // The run is over either way; the password has no further use.
       await this.releaseSudoAgent();
     }
+
+    await recorder.finish(
+      controller.signal.aborted
+        ? "cancelled"
+        : failure !== undefined || report?.ok !== true
+          ? "failed"
+          : "succeeded",
+    );
+    this.deps.refreshTree();
 
     if (this.disposed) return;
 
@@ -1206,12 +1237,27 @@ export class AddClusterPanel {
     this.uninstall.begin();
     this.render();
 
+    // Read BEFORE the removal, for the same reason localClusterName is: the
+    // receipt is one of the things about to go.
+    const uninstalledVersion = recordedStackTag(
+      await readReceipt(this.deps.receiptFile).catch(() => null),
+    );
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: LOCAL_INSTANCE_NAME,
+      kind: "uninstall",
+      // What it removed, not where it went: there is no version afterwards.
+      ...(uninstalledVersion !== "" ? { fromVersion: uninstalledVersion } : {}),
+    });
+    this.deps.refreshTree();
+
     try {
       const report = await runUninstall(
         this.uninstallOptions(),
         this.hooks({
           onEvent: (event) => {
             this.uninstall.apply(event);
+            void recorder.apply(event);
             this.render();
           },
           signal: controller.signal,
@@ -1233,6 +1279,12 @@ export class AddClusterPanel {
     } finally {
       this.uninstalling = false;
       this.uninstallAbort = undefined;
+      // `preserved` reaches the record UNTRANSLATED, which is the point: it
+      // says the uninstall KEPT something the operator already had, and a
+      // history that rounded it to "ok" would report an artifact as gone while
+      // it is still on the machine.
+      await recorder.finish(controller.signal.aborted ? "cancelled" : undefined);
+      this.deps.refreshTree();
       this.render();
     }
   }
@@ -1416,142 +1468,26 @@ ${this.bodyHtml()}
     }
   }
 
-  /**
-   * The run in progress.
-   *
-   * The step list is view-kit's `renderInstallSteps`, fed by a projection that
-   * lives in state/installProgress.ts -- this method adds no judgement of its
-   * own, which is what lets what an operator sees be asserted in the unit lane
-   * despite this file importing `vscode`.
-   *
-   * REPAIR IS THE SAME RUN WITH DIFFERENT WORDING. Every step verifies first
-   * and skips when satisfied, so re-running the graph IS the repair; only the
-   * heading and the lede differ, and there is no second code path below them.
-   */
+  /** The run in progress. Lifted to webview/installScreens.ts (memql#3738). */
   private runHtml(): string {
-    const steps = this.state.steps;
-    const settled = runIsSettled(steps);
-    const repair = this.state.action === "repair";
-
-    // An empty list now means the run is starting for real -- `startRun()` is
-    // in flight and the first `stepStarted` has not arrived. That claim was
-    // false while the invocation was unwired (memql#3487), which is why this
-    // text is tied to `runAbort` rather than asserted unconditionally: if no
-    // run is in flight and no step has reported, nothing is happening and the
-    // screen says so.
-    const body =
-      steps.length > 0
-        ? renderToHtml(renderInstallSteps(toStepViews(steps)))
-        : this.runAbort !== undefined
-          ? `<p class="lede">Starting. The first step will appear here as it begins.</p>`
-          : `<p class="lede">Nothing has been run.</p>`;
-
-    // Cancel is offered for exactly as long as there is something to stop.
-    // A cancelled run leaves a valid receipt -- what ran, ran, and an uninstall
-    // can still take it back -- so this is safe at any point.
-    const actions = settled
-      ? `<button class="secondary" type="button" data-act="back">Back</button>`
-      : `<button class="secondary" type="button" data-act="cancel">Cancel</button>`;
-
-    return `<h1>${escapeHtml(repair ? "Repairing the local cluster" : "Installing a local cluster")}</h1>
-<p class="lede">${escapeHtml(
-      repair
-        ? "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs."
-        : "Each step proves itself before the next one starts.",
-    )}</p>
-${body}
-<div class="actions">${actions}</div>`;
+    return renderRunningScreen({
+      steps: this.state.steps,
+      mode: this.state.action === "repair" ? "repair" : "install",
+      // `runAbort` is set for exactly as long as a run is in flight, which is
+      // what distinguishes "starting, no step has reported yet" from "nothing
+      // has been run".
+      running: this.runAbort !== undefined,
+    });
   }
 
-  /**
-   * A step failed, and what that means -- for EVERY step that failed.
-   *
-   * ONE BLOCK PER FAILURE (memql#3474). A wave runs under `Promise.all` and the
-   * executor deliberately lets independent branches finish, so a run can arrive
-   * here with several failures. This screen used to render guidance for
-   * whichever one resolved last, which is a scheduling accident: the exit codes
-   * genuinely differ, and a refusal (3) asks for something entirely different
-   * from a missing prerequisite (4). Showing one of N is confident advice about
-   * a step the operator may not even be looking at.
-   *
-   * BOTH RECOVERIES ARE ALWAYS OFFERED. `failureGuidance().retryable` says
-   * whether an UNCHANGED retry could plausibly differ -- it does not gate the
-   * button, because the operator may have fixed the cause in another window
-   * while this panel sat here, and we cannot know that.
-   */
+  /** A step failed. Lifted to webview/installScreens.ts (memql#3738). */
   private failedHtml(): string {
-    const failures = this.state.failures;
-    if (failures.length === 0) return this.runHtml();
-
-    const many = failures.length > 1;
-    const heading = many
-      ? `${failures.length} steps failed`
-      : `${failures[0]!.description === "" ? failures[0]!.id : failures[0]!.description} failed`;
-
-    // Each failure keeps its own name above its own guidance. With one failure
-    // the name is already the heading, so repeating it would be noise.
-    const blocks = failures
-      .map((failure) => {
-        const guidance = failureGuidance(failure.exitCode, failure.remedy);
-        const name = failure.description === "" ? failure.id : failure.description;
-        // WHAT THE STEP ITSELF SAID, above the generic advice for its exit code.
-        // The guidance is keyed on a number and so can only ever be about a
-        // CLASS of failure; the capability's own sentence is about this one.
-        const said =
-          failure.reason === "" ? "" : `<p class="said">${escapeHtml(failure.reason)}</p>`;
-        return `${many ? `<h2>${escapeHtml(name)}</h2>` : ""}
-${said}
-<p class="lede">${escapeHtml(guidance.headline)}</p>
-<p>${escapeHtml(guidance.advice)}</p>
-${this.remedyHtml(failure)}`;
-      })
-      .join("");
-
-    // The labels count. "Retry this step" in front of three failures names one
-    // thing and does another -- the recovery re-runs the graph, and every failed
-    // step goes back into it.
-    return `<h1>${escapeHtml(heading)}</h1>
-${blocks}
-${renderToHtml(renderInstallSteps(toStepViews(this.state.steps)))}
-<div class="actions">
-  <button class="primary" type="button" data-act="retry">${
-    many ? "Retry these steps" : "Retry this step"
-  }</button>
-  <button class="secondary" type="button" data-act="guided">${
-    many ? "Switch these steps to guided" : "Switch this step to guided"
-  }</button>
-  <button class="secondary" type="button" data-act="cancel">Cancel</button>
-</div>`;
-  }
-
-  /**
-   * The one command that fixes this failure, and a button that runs it
-   * (memql#3551).
-   *
-   * WHY THIS EXISTS AT ALL. The runner spawns every capability UNPRIVILEGED,
-   * with no sudo, pkexec or askpass anywhere in the extension -- and two steps
-   * in the install graph need root: `hostsBlock` edits /etc/hosts, and the
-   * docker gate's remedy adds the operator to a group. Without a handoff, the
-   * wizard's only honest move on those is to print a command and stop, which is
-   * where it had quietly arrived: the uninstall preview even promises "[sudo]
-   * needs your password", a promise nothing in the code fulfilled.
-   *
-   * THE COMMAND IS NOT TYPED FOR THE OPERATOR TO WATCH IT RUN. `sendText(cmd,
-   * false)` puts it in the terminal WITHOUT a newline, so nothing executes
-   * until a person reads it and presses Enter. A privileged command that ran
-   * itself the instant a button was clicked would be a worse thing than the
-   * problem it solves, and the operator's own shell is where their sudo prompt
-   * and their password belong -- memQL never sees either.
-   */
-  private remedyHtml(failure: { id: string; remedy: string }): string {
-    if (failure.remedy === "") return "";
-    return `<p>Run this to fix it:</p>
-<pre class="remedy">${escapeHtml(failure.remedy)}</pre>
-<div class="actions">
-  <button class="secondary" type="button" data-remedy="${escapeHtml(failure.id)}">
-    Open a terminal with this command
-  </button>
-</div>`;
+    return renderFailedScreen({
+      failures: this.state.failures,
+      steps: this.state.steps,
+      mode: this.state.action === "repair" ? "repair" : "install",
+      running: this.runAbort !== undefined,
+    });
   }
 
   /**
@@ -1576,7 +1512,9 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.state.steps)))}
 
   /** The cards, straight from addClusterMenu. */
   private landingHtml(): string {
-    const choices = addClusterMenu(this.verdict);
+    // `registered` is what decides whether the reconnect card appears at all:
+    // a cluster already in the list has nothing to compose (memql#3741).
+    const choices = addClusterMenu(this.verdict, this.localRegistered);
     const cards = choices.map((choice) => this.cardHtml(choice)).join("");
     return `<h1>Add a memQL cluster</h1>
 <p class="lede">${escapeHtml(VERDICT_LEDE[this.verdict])}</p>
@@ -1600,62 +1538,11 @@ ${cards}`;
   private collectHtml(): string {
     const action = this.state.action;
     if (action === undefined) return this.landingHtml();
-    const required = new Set(requiredFields(action));
-    const values = this.state.inputs;
-    const errors = this.state.errors;
-
-    const fields = INPUT_FIELDS.filter((field) => required.has(field))
-      .map((field) => {
-        const error = errors.find((e) => e.field === field);
-        const hint = FIELD_HINTS[field];
-        const choices = CHOICE_FIELDS[field];
-        // THE ONE FIELD THAT NAMES A FILE GETS A FILE PICKER (memql#3547).
-        //
-        // Typing a path is the error-prone way to name a file, and this is the
-        // path an operator is least able to check: it holds a secret, so
-        // nothing on this page can echo its contents back as confirmation. The
-        // picker removes the whole class -- what it returns exists, is a file,
-        // and is spelled the way the filesystem spells it.
-        //
-        // Typing still works, and both routes end in the same validation. The
-        // dialog is the extension host's (`vscode.window.showOpenDialog`);
-        // a webview cannot open one itself, which is why this is a button that
-        // posts a message rather than an `<input type="file">` -- and an
-        // `<input type="file">` would hand back a File object with no path,
-        // which is not what a `--key-file` flag can be given.
-        const browse =
-          field === "providerKeyFile"
-            ? `<button class="secondary browse" type="button" data-act="browseKeyFile">Browse...</button>`
-            : "";
-        const control =
-          choices === undefined
-            ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
-                values[field],
-              )}">${browse}</div>`
-            : `<select id="f-${field}" data-field="${field}">${choices
-                .map(
-                  (choice) =>
-                    `<option value="${escapeHtml(choice)}"${
-                      choice === values[field] ? " selected" : ""
-                    }>${escapeHtml(choice)}</option>`,
-                )
-                .join("")}</select>`;
-        return `<div class="field" data-invalid="${error !== undefined}">
-  <label for="f-${field}">${escapeHtml(FIELD_LABELS[field])}</label>
-  ${control}
-  ${hint === "" ? "" : `<div class="hint">${escapeHtml(hint)}</div>`}
-  ${error === undefined ? "" : `<div class="error">${escapeHtml(error.message)}</div>`}
-</div>`;
-      })
-      .join("");
-
-    return `<h1>${escapeHtml(COLLECT_TITLE[action] ?? "Install a local cluster")}</h1>
-<p class="lede">Everything is collected before any work starts, so the long part runs unattended.</p>
-${fields}
-<div class="actions">
-  <button class="primary" type="button" data-act="begin">Start</button>
-  <button class="secondary" type="button" data-act="back">Back</button>
-</div>`;
+    return renderCollectScreen({
+      action,
+      values: this.state.inputs,
+      errors: this.state.errors,
+    });
   }
 
   /**
@@ -2059,6 +1946,26 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   }
 
   /**
+   * Registers the local cluster that is already on this machine.
+   *
+   * THE SAME HAND-OFF AN INSTALL USES, deliberately: write, invalidate the
+   * presence memo, refresh, select, and report whether sign-in can be offered.
+   * A cluster reconnected to is registered IDENTICALLY to one just built --
+   * `local: true` and all -- because two spellings of that entry would be two
+   * answers to what a local cluster's row looks like.
+   *
+   * The only thing this adds is where the domain comes from, and the whole
+   * point of the action is that it comes from the machine rather than from the
+   * operator. See clusters/reconnect.ts.
+   */
+  private async reconnectLocal(): Promise<void> {
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    if (this.disposed) return;
+    const plan = planLocalReconnect(receipt);
+    await this.handOffAfterInstall(plan.domain);
+  }
+
+  /**
    * Opens the passkey enrolment link the install minted (memql#3408).
    *
    * The link never enters the webview -- the button carries no href, and the
@@ -2206,12 +2113,6 @@ const VERDICT_LEDE: Record<PresenceVerdict, string> = {
   absent: "No local cluster was found on this machine.",
   "installed-healthy": "A local cluster is installed here and is answering.",
   "installed-unreachable": "A local cluster is installed here, but it is not answering.",
-};
-
-const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
-  install: "Install a local cluster",
-  installGuided: "Install a local cluster -- guided",
-  repair: "Repair the local cluster",
 };
 
 /**

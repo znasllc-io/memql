@@ -18,6 +18,10 @@
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js"
     },
+    "./constructs": {
+      "types": "./dist/constructs/index.d.ts",
+      "import": "./dist/constructs/index.js"
+    },
     "./client": {
       "types": "./dist/client/index.d.ts",
       "import": "./dist/client/index.js"

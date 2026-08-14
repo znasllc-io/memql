@@ -14,18 +14,19 @@ import {
 } from "../src/cluster/config";
 
 describe("runtimeConfigPathFor", () => {
-  it("derives the path from the portal's mount", () => {
-    expect(runtimeConfigPathFor("/portal/")).toBe("/portal/runtime-config.json");
+  // The production value since memql#3711: the portal is site #1, served at
+  // its own origin's root by component/edge/runtimeconfig.go, which answers
+  // exactly this path ("/runtime-config.json") for every hosted site.
+  it("derives the path from a root mount", () => {
+    expect(runtimeConfigPathFor("/")).toBe("/runtime-config.json");
   });
 
-  it("tolerates the mount without a trailing slash", () => {
-    expect(runtimeConfigPathFor("/portal")).toBe("/portal/runtime-config.json");
-  });
-
-  it("preserves a deployment base path", () => {
-    // SERVER_PUBLIC_PATH=/memql registers /memql/portal/, so the document
-    // lives beneath it too.
-    expect(runtimeConfigPathFor("/memql/portal/")).toBe("/memql/portal/runtime-config.json");
+  // The function stays general -- worth pinning even though the edge itself
+  // resolves by hostname rather than a shared path prefix (component/server
+  // .EdgePaths' own doc comment), so no *edge-served* site is actually
+  // mounted below the root in production today.
+  it("tolerates a mount without a trailing slash", () => {
+    expect(runtimeConfigPathFor("/preview")).toBe("/preview/runtime-config.json");
   });
 });
 
@@ -82,7 +83,7 @@ describe("loadRuntimeConfig", () => {
         json: async () => ({ identityUrl: "https://identity.example.com", authEnabled: true }),
       } as unknown as Response;
     });
-    const cfg = await loadRuntimeConfig(fetchImpl, "/portal/runtime-config.json");
+    const cfg = await loadRuntimeConfig(fetchImpl, "/runtime-config.json");
     expect(cfg.identityUrl).toBe("https://identity.example.com");
   });
 
@@ -90,7 +91,7 @@ describe("loadRuntimeConfig", () => {
     const fetchImpl = vi.fn(
       async () => ({ ok: false, status: 404, json: async () => ({}) }) as unknown as Response,
     );
-    await expect(loadRuntimeConfig(fetchImpl, "/portal/runtime-config.json")).rejects.toThrow(
+    await expect(loadRuntimeConfig(fetchImpl, "/runtime-config.json")).rejects.toThrow(
       /runtime-config\.json responded 404/,
     );
   });

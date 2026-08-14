@@ -149,6 +149,164 @@ boots it in **dev no-auth mode**: the synthetic `local-dev` admin
 identity is stamped on every request. Never enable this in
 production.
 
+## Cross-origin access (CORS)
+
+Identity's auth endpoints carry the refresh-token cookie, and the CORS
+middleware sets `Access-Control-Allow-Credentials: true` on **every** matched
+origin. So an origin on this allowlist can make cookie-bearing requests to
+`/oauth/token`, `/auth/refresh`, `/auth/logout` and the rest **and read the
+responses**. Treat a change here as a change to what can reach a session, not as
+a header tweak.
+
+The allowlist has two sources, and they are resolved **per request** rather than
+snapshotted at boot:
+
+| Source | Set by | Takes effect | For |
+|---|---|---|---|
+| `MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS` (plus `MEMQL_IDENTITY_CORS_EXTRA_ORIGINS`) | env, on the identity Deployment | on restart | The **bootstrap** set every deployment has: identity itself, the portal, the app. Derived from `MEMQL_DOMAIN` where the overlay does not set it explicitly |
+| `corsOriginsJSON` on a `v1:identity:oauthClient` row | an **owner or admin**, over `IdentityAdminMsg` | **no restart** -- within 10 seconds | Any further origin: a customer's existing website calling this cluster with the memQL SDK |
+
+The env list is checked first, in memory. Only a miss consults the graph, so the
+origins a cluster needs in order to serve its own login page never depend on the
+database being reachable.
+
+### There is a THIRD layer, and it is not covered by the admin gate
+
+Identity's routes are mounted on the BaseRouter, so they also pass through
+`component/server`'s own generic CORS middleware, configured by
+**`SERVER_ALLOWED_ORIGINS`**. That layer knows nothing about the two sources
+above.
+
+Today it is `"*"` on identity (`deploy/k8s/base/identity.yaml`), and under a
+wildcard it deliberately emits `Access-Control-Allow-Origin` **without**
+`Access-Control-Allow-Credentials` -- so it exposes nothing, and a granted origin
+still gets its credentials header from identity's own middleware. One consequence
+worth knowing: a *refused* origin may still see an echoed `ACAO` from this layer,
+which it can do nothing with.
+
+**Do not narrow `SERVER_ALLOWED_ORIGINS` to an explicit list on identity without
+understanding this.** The moment it stops being `"*"`, that middleware starts
+emitting `Access-Control-Allow-Credentials: true` for every origin on its list --
+granting credentialed cross-origin access entirely outside the owner/admin gate,
+outside the audit trail, and outside the `*` refusal described below. If you need
+per-origin control on identity, it belongs in the two sources above.
+
+### Registering an OAuth client grants nothing
+
+`POST /register` is RFC 7591 dynamic client registration. It is **deliberately
+unauthenticated** -- the endpoint exists so that clients nobody pre-configured
+(claude.ai's "add custom connector", say) can self-register -- and it is enabled
+by default (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`).
+
+A row created that way carries **no** CORS allowance and cannot give itself one.
+Granting is a separate, explicitly authorized act on the same row, and the reason
+is worth stating: if the allowlist were derived from a client's registered
+`redirect_uris`, one anonymous POST carrying
+`redirect_uris: ["https://evil.example/cb"]` would buy credentialed read access
+to the auth surface. Registration stays open; the trust decision is gated.
+
+For the same reason the allowance names **origins explicitly** rather than being
+a per-client boolean that derives them from the redirect URI: loopback redirects
+(`http://127.0.0.1:PORT/cb`) are normal on this concept -- identity implements
+the RFC 8252 loopback-any-port exception for them -- so a derivation would
+silently admit `http://127.0.0.1` and hand every local process on somebody's
+machine cookie-bearing read access. Naming the origins also lets an allowance
+differ legitimately from the redirect's origin, which it does when a SPA
+redirects to `https://app.example.com/cb` while also running at
+`https://www.example.com`.
+
+### Granting and revoking
+
+`SetOAuthClientCorsOriginsRequest` on `IdentityAdminMsg`
+(`MemqlService.Stream`), gated owner-or-admin in
+`component/identity/adminops` -- the same gate, refusal shape and audit trail as
+every other identity-admin write. The underlying mutation is `@serverOnly`, so
+there is no client-reachable seam around the gate.
+
+- `origins` is the **complete** allowance, not an addition to it. An **empty
+  list revokes.**
+- Each entry is a scheme (`http` or `https`), a host and an optional port. A
+  path, query, fragment, trailing slash, userinfo, wildcard host or `*` is
+  refused with the offending entry named -- validated on the way in, where a
+  person is holding the error message.
+- The host must be a DNS name, an IPv4 address, or a bracketed IPv6 address. An
+  **internationalised domain must be given in its punycode (`xn--`) form**,
+  because that is what the browser puts in the `Origin` header; the raw unicode
+  spelling is refused rather than stored as an entry that would match nothing.
+  An underscore in a host is accepted -- RFC 1123 forbids it and real internal
+  hostnames use it.
+- A port must be in `1-65535`. Entries are canonicalised to the form a browser
+  actually sends -- scheme and host lowercased, an IPv6 literal reduced to its
+  canonical spelling (`[0:0:0:0:0:0:0:1]` becomes `[::1]`), and the scheme's
+  **default port dropped** (`https://x.example:443` is stored as
+  `https://x.example`) -- then de-duplicated. Matching is case-insensitive.
+- A statically configured client (`MEMQL_IDENTITY_REGISTERED_CLIENTS`) has no
+  row, so its origins belong in the env list. Naming one here returns
+  `NOT_FOUND`; a read that *fails* returns `INTERNAL` and changes nothing, so
+  "the client is missing" and "the database is unhappy" are never the same
+  answer.
+- Audited as `oauth_client_cors_granted` / `oauth_client_cors_revoked` under
+  `category=configuration`, recording who acted, the origins granted, and the
+  allowance that was replaced.
+
+### Who can READ the granted list
+
+The write is owner/admin only. The **read is not**: `oAuthClientCORSGrants` is on
+the ordinary query surface, so **any authenticated caller can list every granted
+origin together with the `client_id` that holds it** -- which also means listing
+the registered clients that carry allowances.
+
+That is a deliberate trade, and it is a disclosure rather than an escalation. An
+origin is not a secret: identity hands it back to whichever browser asks, so an
+unauthenticated prober can already confirm a guessed origin one at a time through
+the `Access-Control-Allow-Origin` echo. What the query adds is enumeration of the
+whole set at once, to callers who already hold a credential on this cluster. The
+projection is narrowed to the client id and the allowance, so no redirect URIs or
+other registration metadata ride along.
+
+The alternative was to mark the read `@serverOnly`, which would require stamping
+an internal call origin onto a context derived from an anonymous browser
+preflight. `component/auth`'s call-origin allowlist admits this package as
+*server-initiated*, and a preflight is not that -- an allowlist entry with a
+wrong stated reason is worse than none. If the enumeration matters for your
+deployment, the fix is a role predicate on the query, not an origin stamp.
+
+### Propagation and failure behaviour
+
+The middleware reads the granted set **live** and holds it for at most 10
+seconds (a fixed constant, deliberately not a knob). That window is a rate bound,
+not the correctness mechanism: `cors()` wraps ~15 routes including every
+unauthenticated `OPTIONS` preflight, so without it a flood of unknown origins
+would be one database query per request.
+
+It is a live read rather than a cache invalidated on the concept's change feed
+because **the grant may be executed on a different node than the middleware.**
+The `IdentityAdminMsg` bridge is wired on every node with an engine, so an admin
+can grant from a `bff` while the CORS decision runs on `identity`; and the
+identity node is filtered out of every mesh broadcast target list, so an
+invalidation event could not reach it. A cache would pass a single-node test and
+silently fail in the 2-replica mesh.
+
+Each read is bounded at **3 seconds**, also a fixed constant. That deadline is
+about the lock rather than the query: the read runs holding a mutex so a window
+boundary cannot become a query stampede, and `sync.Mutex` waiters are not
+cancellable by their own clients -- so an unbounded read would park preflights
+indefinitely on an unauthenticated surface during a database outage. Three seconds
+sits under bun's pgdriver socket deadline (10s), which is where that bound
+previously lived by accident.
+
+If the graph read fails, the granted half **fails closed**: no granted origin is
+allowed until a read succeeds, and the env list keeps working untouched. That is
+the deliberate direction -- refusing is recoverable on the next preflight,
+whereas serving a stale copy would let a database outage outlive a revoke.
+
+One caveat on **revoke latency, and it is the browser's rather than ours**: the
+preflight response carries `Access-Control-Max-Age: 600`, so a browser that
+already completed a successful preflight may keep using it for up to ten minutes
+after the revoke lands. A failed preflight is not cached, so a *grant* is visible
+on the very next attempt. If a revoke has to be immediate for a specific browser,
+revoke the client's sessions as well rather than relying on CORS to stop it.
+
 ## Optional anti-abuse knobs
 
 | Variable                                          | Default | Effect                                                  |

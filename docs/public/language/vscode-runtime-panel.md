@@ -114,15 +114,21 @@ supply rather than having a host guessed for it.
 
 ## Cluster lifecycle
 
-Four verbs, reached from the Clusters view. Two of them sound alike and are
-deliberately kept apart.
+Four verbs, and they live in **two views** since memql#3733. Deployments owns
+what changes this machine; Clusters owns which clusters you can reach. Two of
+the four sound alike and are deliberately kept apart.
 
 | Action | Where it lives | What it touches |
 |---|---|---|
-| **Add** | the **+** in the view title | Opens the Add a cluster page: install a local cluster, or register one that already exists elsewhere. |
-| **Repair** | the same page, and the cluster panel's primary control when the cluster is not answering | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one. |
-| **Remove** | the trash can beside a row, inline | Drops the registry entry, the stored credential, and the live connection. Nothing on the machine is touched. |
-| **Uninstall** | the row's context menu, on local clusters only | Reverses the install receipt: the k3d cluster, the hosts-file block, the mkcert CA, the pinned tools. |
+| **Create deployment** | Deployments, on the instance row | On a machine with nothing installed, the full install graph. On one that has a cluster, a move to another release tag. |
+| **Repair** | Deployments, on the local instance row | Re-runs the install. Every step verifies before it acts and skips what is already satisfied, so a repair is the install graph and not a second one -- and so is a deployment to another tag. |
+| **Remove** | Clusters, the trash can beside a row, inline | Drops the registry entry, the stored credential, and the live connection. Nothing on the machine is touched, and for a local cluster the confirmation says so and names Deployments as where to uninstall it. |
+| **Uninstall** | Deployments, on the local instance row | Reverses the install receipt: the k3d cluster, the hosts-file block, the mkcert CA, the pinned tools. |
+
+**Registering a cluster** is the remaining job of the Clusters **+**: a remote
+one through its form, and a local one that is already on the machine through
+*Connect to the local cluster*, which composes the entry from what the install
+recorded and asks for nothing.
 
 **Remove and Uninstall are different commands on purpose.** Remove is a
 routine, reversible act of editing a list: the cluster keeps running, its
@@ -135,9 +141,9 @@ separate commands with separate labels, separate menus and separate
 confirmations. Remove confirms with a modal whose second line says what is
 *not* happening; Uninstall confirms against an itemised dry run.
 
-Uninstall is contributed only on rows the editor installed (`local: true`
-with a receipt to reverse), and never as an inline icon. Aiming at the trash
-can cannot land on it.
+Uninstall is contributed only on the Deployments local-instance row, and never
+as an inline icon. It is not on any Clusters row at all, so aiming at the trash
+can beside a cluster cannot land on it -- they are in different views.
 
 **The uninstall preview is the confirmation.** Before anything is removed
 the page lists every artifact the receipt names, what will happen to it, and
@@ -150,8 +156,13 @@ locally-trusted certificate on it.
 
 ## Installing a local cluster
 
-**The Add a cluster page is the supported path.** Press **+** in the Clusters
-view and choose *Install a local cluster*. The page collects what an install
+**The Deployments view is the supported path.** Open **Deployments** and press
+**Create deployment** on the `local` row -- which is there whether or not
+anything is installed, reading `not installed` when nothing is. (Before
+memql#3733 this was filed under the Clusters **+**, as a branch of "add a
+cluster". Installing memQL on a machine and registering a connection to one are
+different acts with different failure modes, and filing the first under the
+second made the destructive one an incidental branch of the benign one.) The page collects what an install
 needs before any work starts -- the domain, who owns the cluster, and which AI
 provider the key belongs to plus where that key is -- because a wizard that
 stops to ask a question nine minutes in is a wizard people abandon. The
@@ -227,8 +238,11 @@ declared.
 ## Beyond browsing
 
 Executing constructs from a CodeLens, running automations with a step
-trace, and driving deployments from the Cluster tab have since landed
-alongside the views above. Each has its own section in the
+trace, and driving deployments from the **Deployments** view have since
+landed alongside the views above. (Deployments replaced the Cluster tab in
+memql#3733: topology is cluster state and belongs to the portal, while what
+you operate and what you can reach belong here. The extension's README states
+that boundary and the table it produces.) Each has its own section in the
 [manual verification checklist](vscode-runtime-panel-verification.md),
 which is where the behaviour is written down in the detail a reader
 checking one of them needs.

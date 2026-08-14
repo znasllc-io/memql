@@ -30,6 +30,20 @@
 # A STRATEGIC MERGE keyed on the container and variable NAMES, not a JSON 6902
 # index: the flag sits at a different position in every node's env list, so an
 # index would be right for one file and quietly wrong for the next.
+#
+# THE LIST BELOW IS HAND-ENUMERATED AND IS NOW CHECKED (memql#3797). A strategic
+# merge names ONE resource per document, so adding a node type means adding a
+# document here -- and `edge` arrived (epic #3700) without one. It was added to
+# the OTHER patch in this directory, whose target is a name regex, so nothing
+# about the omission looked wrong: edge alone ran with autoload ON, reading the
+# operator's ~/.memql/genesis.znas for any value not already an explicit key on
+# memql-secrets, while every other node did not.
+#
+# ../render_autoload_test.go now renders this overlay and fails when any
+# Deployment mounting memql-secrets does not end up with the flag off. So a new
+# node type breaks the build until it is listed here, rather than diverging
+# quietly. Do not "simplify" that check into a list of names -- deriving the set
+# from the render is the whole point, because the list is what nobody updates.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -153,6 +167,20 @@ spec:
     spec:
       containers:
         - name: bff
+          env:
+            - name: MEMQL_GENESIS_AUTOLOAD
+              value: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: memql
+  name: edge
+spec:
+  template:
+    spec:
+      containers:
+        - name: edge
           env:
             - name: MEMQL_GENESIS_AUTOLOAD
               value: "false"

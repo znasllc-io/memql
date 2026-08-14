@@ -4,7 +4,7 @@
 // intrinsics (id / concept / type / createdAt / createdBy / schema). A
 // @displayCard hint names payload fields DIRECTLY ("name", "status"), so the
 // list needs the merge. Detail rendering deliberately does not flatten --
-// renderDetail shows the nesting, which is what an operator came to read.
+// renderValueView shows the nesting, which is what an operator came to read.
 //
 // ROW INTRINSICS WIN over a payload field of the same name. memQL concepts
 // routinely carry a payload `id`, `createdAt` or `type`, and view-kit sources

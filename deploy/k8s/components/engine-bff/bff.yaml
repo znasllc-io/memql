@@ -95,15 +95,6 @@ spec:
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
-            # memQL Portal SPA bundle (GET /portal/*, memql#3314). The engine
-            # bff image's portal stage copies the built bundle here; stated
-            # explicitly rather than left to the binary's default so the
-            # deployment records WHERE the UI comes from, and so an overlay can
-            # repoint it (an emptyDir + init-container, a different bundle)
-            # without a code change -- the same shape MEMQL_DSL_PATH uses for
-            # product DSL. A missing directory logs one warning and answers
-            # 404; it never fails the node.
-            - { name: MEMQL_PORTAL_DIST, value: "/app/portal" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
           startupProbe:

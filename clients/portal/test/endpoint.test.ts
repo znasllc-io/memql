@@ -28,6 +28,12 @@ describe("bridgePathFor", () => {
   it("stays relative -- it must resolve against the serving origin", () => {
     expect(bridgePathFor("/portal/").startsWith("/")).toBe(true);
   });
+
+  // The production value since memql#3711: the portal is site #1, served at
+  // its own origin's root, not a /portal/ sub-path of the bff.
+  it("derives the bridge path from a root mount", () => {
+    expect(bridgePathFor("/")).toBe("/memql/ws");
+  });
 });
 
 describe("portalRedirectPathFor", () => {
@@ -45,6 +51,13 @@ describe("portalRedirectPathFor", () => {
 
   it("preserves a deployment base path", () => {
     expect(portalRedirectPathFor("/memql/portal/")).toBe("/memql/portal/auth/callback");
+  });
+
+  // The production value since memql#3711 -- see bridgePathFor's root-mount
+  // case above. This is the exact string component/genesis/domain.go now
+  // registers as the portal client's redirect_uri (https://portal.<d>/auth/callback).
+  it("derives the callback path from a root mount", () => {
+    expect(portalRedirectPathFor("/")).toBe("/auth/callback");
   });
 });
 

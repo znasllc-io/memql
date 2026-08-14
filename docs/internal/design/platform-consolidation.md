@@ -184,3 +184,96 @@ The centerpiece of the per-client-BFF epic
 ([memql-cockpit#288](https://github.com/znasllc-io/memql-cockpit/issues/288)):
 the `cockpit-bff` module (#289) is deleted under Decision 5. The connection flip
 (#291) and deploy-controls rewire (#292) stand.
+
+---
+
+## Amendment (memql#3721): the per-customer cluster
+
+**Added 2026-08-13.** This ADR settles how a *product* relates to the engine. It
+says nothing about how a *customer* does, and the front-door design
+([memql#3700](https://github.com/znasllc-io/memql/issues/3700)) had to decide
+that. Two decisions came out of it. Both are applications of the target
+architecture above rather than changes to it, so they are recorded here rather
+than in a new ADR.
+
+The decisions and their rejected alternatives live in
+`docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`, D1 and D12.
+This section records what they mean for the repo topology this ADR governs, and
+does not restate their arguments.
+
+### Isolation is the cluster: one memQL cluster per customer
+
+A customer gets their own cluster, one domain, and as many sites, apps and
+products as they want inside it. Not a shared cluster with account-scoped rows.
+
+D1 argues this from two places. The measured half is
+[`account-isolation-model.md`](account-isolation-model.md) (ACCEPTED,
+memql#3321): §5.2 records that `actor.*` carries **no tenancy dimension**, so
+every account-scoped filter can only compare a payload field against a
+caller-supplied arg, and §6(b) — a resolved account set on `AccessContext` — is
+named the load-bearing item and is not built.
+
+The decisive half is independent of all of that: **you can hand over a cluster;
+you cannot hand over a tenant.** "We build it, then give it to them if they want
+to run it themselves" is a product promise no shared-tenancy design can keep,
+and no amount of §6(b) work changes that.
+
+`v1:identity:account` is therefore **parked, not removed** (D12). Leaving it is
+safe as a measured property rather than a hope: §3.4 of that document records
+that the credential *"authorizes nothing today, and that is a checked property
+rather than an aspiration"* — no verifier resolves the `mql_acct_` prefix, no
+interceptor admits it, `dsl/identity` declares no by-`keyHash` lookup for the
+family, and both absences are pinned by tests in
+`component/identity/accounttoken`. Removal is a separate decision available
+later at no penalty, precisely because the thing is inert.
+
+> D12 cites that passage as §3.3, which is "Why an account has no login". The
+> sentence is in §3.4, "What an 'account token' therefore is". Same document,
+> same claim, one section along.
+
+The accepted cost is fleet-management complexity across many clusters instead of
+tenancy-isolation complexity inside one. Deliberate, and named in D1 as a real
+cost rather than a free win.
+
+### A customer repo does not fork the engine
+
+`memql-<customer>` holds the DSL bundle, the SPAs, the websites and the deploy
+overlay, and consumes the engine as **pinned images**. One repo per customer,
+everything of theirs inside it, fully handoverable.
+
+**What it must not be is a copy of the platform.** That is the carrier model
+this ADR already supersedes, and the Context section above records what it cost:
+~9 images per release, a 5-way build matrix, three build workflows across three
+repos that must run at a coordinated version, an `assemble-lockfile` step
+reconciling 9 digests with a `builtAgainstEngine` coherence check, ~79
+hand-tracked release lockfiles, and a strict engine → carrier → SPA three-repo
+landing order for any wire change.
+
+Per customer that is strictly worse than it was per product, and it acquires a
+failure mode the per-product version did not have: **a CVE in the engine means
+patching N forks.** Every one of them diverges from the day it is cut, which is
+the point at which "patch them all" stops being a batch operation.
+
+The line worth writing down:
+
+> **The repo holds the cluster's definition, not the cluster's code.**
+
+A release stays `{engine version, bundle digest, client digest}` pinned in one
+overlay in one repo — the same release shape Decision 4 establishes. A customer
+repo adds websites and possibly several SPAs to what it pins; it does not add
+node images.
+
+### Why this needed recording
+
+"A monorepo per customer that is a copy of the platform" is the natural thing to
+reach for, and it was reached for during the front-door design conversation. The
+Context and Target-architecture sections above supersede it *in the abstract*,
+but neither mentions the per-customer case — so a reader can arrive at the fork
+honestly, from this document, and be wrong. That is what this amendment is for,
+and it is why it is an amendment rather than an ADR of its own: nothing above it
+changes.
+
+**Out of scope here:** the `memql-project` template lives outside this
+repository and needs its own update to stamp a customer-shaped repo (the DSL
+bundle plus one or more clients plus the deploy overlay, and no engine fork).
+That is tracked with the template, not here.

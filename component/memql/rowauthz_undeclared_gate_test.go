@@ -292,6 +292,35 @@ const undeclared3409SignInRoutesReason = "memql#3409 -- self-scoped sign-in-rout
 // auth.CallOrigin.
 const undeclared3591ClaimedOwnerReason = "memql#3591 -- pre-actor owner-claim check at identity boot; v1:identity:identity cannot carry a tier (measured, see the concept header)"
 
+// undeclared3716CORSGrantsReason covers oAuthClientCORSGrants, the read
+// memql#3716 added so identity's CORS allowlist stops being a boot-time env
+// snapshot.
+//
+// It postdates the seed and names its own issue rather than carrying the
+// grandfather marker, for the same reason the entries above do.
+//
+// A tier could not simply be declared, and this is a property of the concept
+// rather than a deferral. `v1:identity:oauthClient` has NO OWNING USER: a row is
+// minted by an unauthenticated stranger at POST /register (RFC 7591 dynamic
+// client registration), so there is no field an owner tier could name -- and
+// `enforceRowAuthzOnPlan` has no read-side escape, so a wrong tier here fails
+// every OAuth flow on the cluster rather than leaking. The other read over this
+// concept, `oAuthClientByClientId`, sits on the unauthenticated /oauth/token
+// path for the same reason and was grandfathered.
+//
+// This read is pre-actor in the strongest sense on the list: it runs inside the
+// CORS middleware on an OPTIONS PREFLIGHT, which is unauthenticated by
+// definition -- the browser sends it before it is willing to send the
+// credentialed request. There is no actor.userId in existence at that moment for
+// a tier to compare against.
+//
+// What bounds it instead is its projection: `oauthClientCORSGrant` is the row id,
+// the client id and the granted origin list, and nothing else. No redirect URIs,
+// no registration metadata. An origin on that list is not a secret -- the CORS
+// response header hands it back to the browser that asked -- which is why the
+// read stays on the wire while the WRITE that sets it is @serverOnly.
+const undeclared3716CORSGrantsReason = "memql#3716 -- the admin-granted CORS allowlist, read on an unauthenticated preflight; v1:identity:oauthClient has no owning user to tier against (rows are minted by strangers at /register)"
+
 // undeclaredEntry is the map's value type, spelled as an alias so the
 // literal below reads exactly as memql#3135 specified it while the
 // classifier can still name the type in a signature.
@@ -511,6 +540,7 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:identity:oauthClient
 	"oAuthClientByClientId": {"v1:identity:oauthClient", undeclaredGrandfatherReason},
+	"oAuthClientCORSGrants": {"v1:identity:oauthClient", undeclared3716CORSGrantsReason},
 
 	// v1:identity:user
 	"activeUsers":               {"v1:identity:user", undeclaredGrandfatherReason},

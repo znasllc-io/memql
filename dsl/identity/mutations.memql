@@ -639,6 +639,52 @@ mutate oauthClient createOAuthClient {
   }
 }
 
+// ---- mutations/v1/identity/setOAuthClientCORSOrigins.memql ----
+
+// setOAuthClientCORSOrigins
+// =========================
+//
+// Writes the credentialed-CORS allowance an owner/admin grants a
+// registered OAuth client (memql#3716). The complete set every time:
+// corsOriginsJSON is the whole allowance rather than an addition to it,
+// so an empty JSON array is how a grant is REVOKED and there is no
+// second verb that can fall out of step with this one.
+//
+// A partial update of an existing row, never an insert. The row is
+// created by createOAuthClient above, at /register, with no allowance --
+// which is the security property the whole issue rests on, since that
+// endpoint is unauthenticated.
+//
+// Arguments:
+//   clientId         (string) - the row id (the public client_id)
+//   corsOriginsJSON  (string) - JSON array of origins; "[]" revokes
+//
+
+/// Set (or revoke) the credentialed-CORS origins an owner/admin has granted a registered OAuth
+/// client. Called only by component/identity/adminops, downstream of its owner-or-admin gate.
+/// It is server-origin-only because actor.userId scoping is not merely hard here, it names
+/// nobody: an oauthClient row has no owning user at all -- minted by an unauthenticated stranger at
+/// /register -- so there is no field for actor.userId to be compared against and a self-scoped
+/// filter would match zero rows for every caller including the admin the surface is for. Meanwhile
+/// the write is the shape memql#2991 found on updateUser: a caller-supplied target id plus a
+/// caller-supplied value, on a field that grants credentialed cross-origin read access to
+/// identity's cookie-bearing endpoints. Client-reachable, it would let any authenticated writer
+/// grant their own origin and make the owner/admin gate in adminops decorative. The boundary
+/// therefore sits where the authorization already lives.
+@serverOnly
+mutate oauthClient setOAuthClientCORSOrigins {
+  args {
+    clientId         string!
+    corsOriginsJSON  string!
+  }
+  update {
+    accept { corsOriginsJSON }
+    stamp {
+      id: args.clientId
+    }
+  }
+}
+
 // ---- mutations/v1/identity/createAuthSession.memql ----
 
 // createAuthSession

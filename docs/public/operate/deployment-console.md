@@ -29,16 +29,20 @@ here.
 
 | Surface | Where | Use it when |
 |---------|-------|-------------|
-| **memQL portal -- Deployments** | `https://api.<env>.example.com/portal/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). |
+| **memQL portal -- Deployments** | `https://portal.<env>.example.com/views/deployments` | The designed operator view, and the one that acts: the live release beside the last gate's legs, the image digests in force, the whole deployment history, and every control (memql#3319 + memql#3380). The portal is site #1 (memql#3711), served at its own hostname rather than a `/portal/` sub-path of another node's origin. |
 | **Cockpit Topology** | memQL Cockpit, cluster/Topology view | You are already in the terminal-native ops console watching node health + observability overlays and want deployment state and controls inline. |
 
 > **How the portal reaches the deploy surface.** `DeployControlService` runs
 > shell scripts against an on-disk overlay checkout, so it exists only on the
-> **identity** node, while the portal is served by the bff and dials the origin
-> that served it (a deliberate property -- see [portal.md](portal.md)). Until
-> memql#3380 that mismatch was the whole story: history rendered (it is ordinary
-> `v1:cluster:deployment` concept rows on the normal query surface) and live
-> state plus every control came back `UNIMPLEMENTED`.
+> **identity** node. The portal is served by the edge as site #1 (memql#3711)
+> and dials the origin that served it (a deliberate property -- see
+> [portal.md](portal.md)) -- but "the origin that served it" names where the
+> BUNDLE came from, not where its gRPC/WS stream terminates: that stream still
+> reaches a bff (through the edge's own `/_memql/*` proxy, memql#3712), the
+> same node type it always did. Until memql#3380 that mismatch was the whole
+> story: history rendered (it is ordinary `v1:cluster:deployment` concept rows
+> on the normal query surface) and live state plus every control came back
+> `UNIMPLEMENTED`.
 >
 > A bff now **forwards** the deploy RPCs to the identity node over
 > `NodeService.Stream`, the way the AI surfaces forward to their workers. The
@@ -289,7 +293,7 @@ error page or an empty one:
 
 Concept rows go through the normal query surface and never touch the
 deploy-control gate; the status block and the version preview do. So a
-developer opening the VS Code Cluster tab or the portal's Deployments
+developer opening the VS Code Deployments view or the portal's Deployments
 view gets topology, history and per-tier composition as usual, with the
 status block replaced by an explanation naming the role required. That
 explanation is the designed behaviour of the surface, not a failure of
@@ -355,16 +359,18 @@ Notes that hold on both surfaces:
 
 ### Portal
 
-`/portal/views/deployments` -> select the env -> use the action controls
+`/views/deployments` -> select the env -> use the action controls
 on the Overview panel (deploy / promote), next to the version
 (rollback), and in the Rollouts table (per-rollout promote / abort).
 Destructive actions render an inline type-to-confirm field.
 
-The portal is served by the bff, so each of these crosses to the
-identity node over the mesh forward. A refusal you see here is the
-identity node's own `PermissionDenied`, carried back verbatim; a
-`UNAVAILABLE` means the bff could not reach an identity peer, which is a
-cluster problem rather than a permissions one.
+The portal's own bundle is served by the edge (site #1, memql#3711), but
+the RPC itself still crosses to a bff -- through the edge's `/_memql/*`
+proxy -- and from there to the identity node over the mesh forward, same
+as before. A refusal you see here is the identity node's own
+`PermissionDenied`, carried back verbatim; a `UNAVAILABLE` means the bff
+could not reach an identity peer, which is a cluster problem rather than
+a permissions one.
 
 ### Cockpit
 

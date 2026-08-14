@@ -16,65 +16,159 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
   kind-filtered in-body invocation completion.
 - Hover documentation and signature help.
 
-## Runtime panel
+## The four views, and which question each answers
 
-An activity-bar panel connects the extension to a running cluster: pick a
-cluster from `~/.memql/clusters.yaml` (the same file the memQL Cockpit
-uses), browse every registered concept grouped by domain, and inspect rows
--- paged, with live detail -- without leaving the editor. It requires a
-trusted workspace, since it reads credentials and opens a network
-connection. See [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
+An activity-bar panel connects the extension to a running cluster. It requires
+a trusted workspace, since it reads credentials and opens a network connection.
 
-## Cluster lifecycle
+| View | Answers |
+|---|---|
+| **Deployments** | What do I operate, at what version, and what changed it |
+| **Clusters** | Which clusters can I reach, as whom |
+| **Concepts** | What rows exist |
+| **Runs** | What have I run against a cluster |
 
-A cluster's whole life is reachable from the Clusters view: add it, repair
-it, remove it from the editor, or take it off the machine.
+### The boundary
 
-**Add.** The **+** in the view title opens the **Add a cluster** page. What
-it offers depends on what is already here -- it looks for an install receipt,
-a `local: true` entry, and whether that cluster answers -- so a machine with
-nothing on it is offered an install, and a machine that already has a local
-cluster is offered a repair or an uninstall instead. Registering a cluster
-that runs somewhere else is one of the choices on the same page. Nothing in
-this surface hands you a command to paste into a terminal.
+One rule decides where every surface in this extension goes, including ones
+nobody has proposed yet:
 
-**Repair.** The install graph, run again. Every step verifies before it acts
-and skips whatever is already satisfied, which is what makes re-running an
-install a repair rather than a second install: there is one graph and one run
-path, and only the wording differs. Reachable from the page, and from the
-cluster panel's primary control when the cluster is registered but not
-answering.
+> **The plugin owns what is on your machine and what you can reach.
+> The portal owns what is inside a cluster.**
 
-**Remove.** The trash can beside a cluster row. It drops the registry entry
-from `~/.memql/clusters.yaml`, deletes the credential this editor stored for
-that cluster, and closes the connection if it was the live one. **Nothing on
-the machine is touched**: the cluster keeps running, its data is untouched,
-and you can add it back at any time.
+| Question | Surface |
+|---|---|
+| What instances do I operate, at what version? | plugin -- Deployments |
+| Install / upgrade / repair / uninstall / roll out | plugin -- Deployments |
+| Which clusters can I reach, as whom? | plugin -- Clusters |
+| Which pods run, which are orphaned, which tier is under-replicated | **portal** |
+| Integrations, identity, sites, accounts | **portal** |
+| What does this construct do, what rows exist | plugin -- Concepts / Runs |
 
-**Uninstall.** The row's context menu, on local clusters only. It reverses
-the install receipt -- the k3d cluster, the hosts-file entries, the mkcert
-CA, the pinned tools -- and there is no undo, because a deleted k3d cluster
-takes its database with it.
+**Topology used to be here and is not any more.** A pod grid, orphan verdicts
+and under-replica alarms are cluster state, the portal already draws them, and
+two surfaces answering one question diverge on the day the second one ships.
+That is the rule, not a preference about which UI is nicer -- so a pod grid
+proposed for this extension has its answer before anyone writes it. Every
+cluster's portal is one click away: **Open Portal**, on the Clusters row and on
+the connection page.
 
-Remove and Uninstall are separate commands with separate labels, menus and
-confirmations, and that separation is deliberate. One is a routine edit to a
-list and the other is irreversible; a single action that asked which you
-meant would put the irreversible one a click away from the routine one.
-Uninstall is contributed only on rows this editor installed and never as an
-inline icon, so aiming at the trash can cannot land on it. It confirms
-against an itemised dry run rather than a yes/no prompt: every artifact the
-receipt names, what will happen to it, and which steps will ask for
-elevation. Anything the install *found* rather than created -- an mkcert CA
-that was already on the machine -- is listed as preserved and left alone.
+Full rationale: [the Deployments surface design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-deployments-surface-design.md).
+
+## Deployments
+
+Instances at the top, runs beneath, newest first.
+
+```
+DEPLOYMENTS
+|- local     healthy - v0.17.0
+|  |- upgrade   v0.16.1 -> v0.17.0   succeeded   2d ago
+|  \- install                        succeeded   9d ago
+\- staging   healthy - v0.9.2
+   |- rollout v0.9.2   succeeded     1d ago
+   \- rollout v0.9.1   rolled_back   3d ago
+```
+
+**An instance** is a memQL you operate. It is derived rather than declared:
+`local` is whatever is on this machine (an install receipt, a `local: true`
+registry row, and whether the front door answers), and every other
+`clusters.yaml` entry is a remote one. A machine with no local cluster still
+shows the `local` row, as `not installed`, carrying **Create deployment** as its
+only action -- that row is where an operator with nothing installed starts.
+
+**A run** is something that changed an instance's deployed state. Local runs are
+recorded in `~/.memql/runs/`, one file per run, rewritten after every step, so a
+run killed half-way leaves a record naming exactly the steps that completed.
+Remote runs are not recorded locally at all: they are `v1:cluster:deployment`
+rows and the cluster is their record.
+
+The two are not the same granularity, and the page says so: a local run's items
+are install steps, and a remote run's are **node types** -- the per-tier version,
+replicas and image digest a deployment declared.
+
+### What an instance offers
+
+| Action | local, nothing installed | local, installed | remote |
+|---|---|---|---|
+| Create deployment | the full install graph | move to another release tag | deploy |
+| Repair | -- | re-run the graph | -- |
+| Uninstall | -- | the uninstall graph, behind its preview | -- |
+| Cut version / Promote / Rollout / Roll back | -- | -- | by role |
+
+**Re-running the install graph is the repair, and it is also the upgrade.**
+Every step verifies before it acts and skips whatever is already satisfied, so
+one graph serves all three: an install does everything, a repair does whatever
+is missing, and a deployment to another tag moves the checkout and reconciles.
+Before it starts, the page shows which steps will actually change something --
+usually two of fifteen -- because a run reporting fifteen steps looks like a
+reinstall to whoever is watching it.
+
+**Choosing a version never happens by itself.** The tag list comes from the
+checkout's origin, newest first, and nothing is pre-selected: a version somebody
+picked off a list is a fact they can be held to, and one the plugin picked
+silently is not. With no network there is a text box, and the reason the list is
+missing is printed beside it.
+
+### Remote instances, and the three states a deploy pipeline can be in
+
+The page probes the cluster's deployment status when it opens and renders
+exactly one of:
+
+- **the actions**, when the pipeline answered;
+- **no deploy pipeline is configured**, in the engine's own words. This is the
+  ordinary state of an engine-only cluster -- the orchestration lives in a
+  product repository, and local clusters are operated with `make up` rather than
+  the deploy console;
+- **status is not visible at your role**, because that read is owner/admin
+  gated. Deployment history is ordinary rows and is unaffected.
+
+None of the three is an error. A row of buttons that turned out to be refused
+would be the error; naming the state is not. What the extension hides is hidden
+as a **courtesy** -- the engine decides, and a refusal names the role required.
+
+## Clusters
+
+Connections, and nothing else: which clusters this editor can reach, and as
+whom. Selecting a row opens the connection page -- the endpoint, the issuer,
+whether it answered, who you are signed in as, and when the access token expires
+(it renews itself; the countdown is not a countdown to being logged out).
+
+That page is the one to open when a cluster will not come up. Nothing on it
+overlaps the portal, which knows nothing about `clusters.yaml` or VS Code's
+secret storage.
+
+**Remove takes the row, not the cluster.** It drops the entry from
+`~/.memql/clusters.yaml`, deletes the credential this editor stored, and closes
+the connection if it was the live one. **Nothing on the machine is touched**:
+the cluster keeps running and its data is untouched. For a local cluster the
+confirmation says so, and says where to go instead -- uninstalling is a
+Deployments action.
+
+**And there is a way back with nothing to re-type.** When a local cluster is on
+the machine but not in the list, the **+** offers *Connect to the local cluster*:
+it composes the entry from what the install recorded, or from the installer's
+own default domain when the receipt is gone, and signs you in. No form at any
+point.
+
+**Uninstall** is a Deployments action, on the local instance row. It reverses
+the install receipt -- the k3d cluster, the hosts-file entries, the mkcert CA,
+the pinned tools -- and there is no undo, because a deleted k3d cluster takes
+its database with it. It confirms against an itemised dry run rather than a
+yes/no prompt: every artifact the receipt names, what will happen to it, and
+which steps will ask for elevation. Anything the install *found* rather than
+created is listed as **preserved** and left alone.
+
+Remove and Uninstall are separate commands, in separate views, with separate
+confirmations, and that separation is the point: one is a routine edit to a
+list and the other is irreversible.
 
 The same install runs from a terminal for scripted and CI use, and is not
-deprecated: `npm run install-cli -- install` and `... -- uninstall`. It is
-not a second implementation. `src/install/session.ts` holds the
-orchestration and both the page and `src/install/cli.ts` are callers of it,
-so there is no second run path to drift out of step.
+deprecated: `npm run install-cli -- install` and `... -- uninstall`. It is not
+a second implementation -- `src/install/session.ts` holds the orchestration and
+both the page and `src/install/cli.ts` are callers of it, so there is no second
+run path to drift out of step.
 
-Operator-facing detail, including what the page collects before it starts:
-[VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
+Operator-facing detail: [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
 
 ## Install / update the extension locally
 

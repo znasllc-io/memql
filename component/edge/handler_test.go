@@ -167,6 +167,75 @@ func TestDisabledSiteIs503(t *testing.T) {
 	}
 }
 
+// The status switch in ServeHTTP runs BEFORE the apiPrefix dispatch, so a
+// draft or disabled site must never reach the API even when it opted in via
+// APIProxy and a real, live APITarget is configured. Both use an upstream
+// that answers 200 if it is ever reached, and both assert on the hit flag
+// directly rather than only on the status code -- so the test fails on a
+// reordering of the two checks rather than passing because the target
+// happened to be empty (TestAPIPrefixIsRefusedWithNoAPITarget below already
+// covers the empty-target case; these are the complementary "target is
+// configured and reachable" ones a status-switch reorder would slip past).
+func TestDraftSiteWithAPIProxyStillRefusesTheAPIPath(t *testing.T) {
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "draft", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if hit {
+		t.Fatal("a draft site reached the API")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("draft site GET /_memql/ws = %d, want 404", rec.Code)
+	}
+}
+
+// A deliberately paused site is supposed to be off, not off-for-static-and-
+// on-for-the-API.
+func TestDisabledSiteWithAPIProxyStillRefusesTheAPIPath(t *testing.T) {
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "disabled", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if hit {
+		t.Fatal("a disabled site reached the API")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("disabled site GET /_memql/ws = %d, want 503", rec.Code)
+	}
+}
+
 // serveAPI must refuse the /_memql/* prefix outright when no APITarget is
 // configured -- exactly how this task wires the handler (Options.APITarget
 // is left unset in app/transport_edge.go; the reverse proxy that consumes it
@@ -186,9 +255,8 @@ func TestAPIPrefixIsRefusedWithNoAPITarget(t *testing.T) {
 	}
 }
 
-// The CSP names the SITE's own origin, not the identity base URL the portal
-// handler uses today. A shared policy across every hosted site would be
-// either uselessly permissive or wrong for most of them.
+// The CSP names the SITE's own origin. A shared policy across every hosted
+// site naming every site everywhere would be uselessly permissive.
 func TestCSPNamesTheSiteOrigin(t *testing.T) {
 	rec := serve(t,
 		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
@@ -199,6 +267,52 @@ func TestCSPNamesTheSiteOrigin(t *testing.T) {
 	}
 	if !containsOrigin(csp, "https://shop.example.com") {
 		t.Errorf("CSP does not name the site origin: %q", csp)
+	}
+}
+
+// The CSP ALSO names the cluster's identity origin -- fix round 2
+// (memql#3711): the original per-site policy accounted for data through
+// /_memql/* and forgot authentication. An ordinary site with no special
+// configuration (no APIProxy, nothing portal-specific about it at all)
+// still gets the identity origin in connect-src, because ANY site with
+// signed-in users performs the OAuth token exchange with fetch() directly
+// against identity, and that is a different origin from the site's own.
+func TestCSPNamesTheIdentityOrigin(t *testing.T) {
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER", "https://identity.example.com")
+
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
+		map[string]string{"index.html": "ROOT"}, "/")
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("no Content-Security-Policy header")
+	}
+	if !containsOrigin(csp, "https://identity.example.com") {
+		t.Errorf("CSP does not name the identity origin: %q", csp)
+	}
+	// Still the site's own origin too -- this is additive, not a swap.
+	if !containsOrigin(csp, "https://shop.example.com") {
+		t.Errorf("CSP dropped the site origin when adding the identity one: %q", csp)
+	}
+}
+
+// No identity origin configured (a cluster with no MEMQL_DOMAIN / no
+// verifier env set -- e.g. a bare test harness) must not inject an empty or
+// malformed token into the header. connect-src still gets ONE token per
+// origin, never a stray trailing space parsed as a new (empty) source.
+func TestCSPOmitsTheIdentityOriginWhenUnconfigured(t *testing.T) {
+	// Explicit empties, not just an unset var: guards against the ambient
+	// process environment (a developer's shell, a CI runner) leaking a real
+	// value into what this test means as "unconfigured".
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER", "")
+	t.Setenv("MEMQL_IDENTITY_BASE_URL", "")
+
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
+		map[string]string{"index.html": "ROOT"}, "/")
+	csp := rec.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "  ") {
+		t.Errorf("CSP has a double space where the omitted identity origin should have left none: %q", csp)
 	}
 }
 

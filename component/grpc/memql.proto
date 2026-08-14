@@ -328,6 +328,14 @@ message MemqlClientMessage {
     // write live in one place (component/identityadmin) rather than once
     // per operation. See IdentityAdminMsg.
     IdentityAdminMsg identity_admin = 105;
+
+    // Construct catalog (memql#3749). "What has this cluster actually
+    // LOADED", at REGISTRY grain -- alongside the pack browser above
+    // rather than replacing it. The pack browser answers "show me this
+    // file"; this answers "what do you have", which a file walk
+    // structurally cannot: a PROMOTED construct lives in
+    // v1:authoring:construct and in no file. See ListConstructsMsg.
+    ListConstructsMsg list_constructs = 106;
   }
 }
 
@@ -482,6 +490,9 @@ message MemqlServerMessage {
 
     // Identity-administration reply (see IdentityAdminMsg, memql#3324).
     IdentityAdminResult identity_admin_result = 127;
+
+    // Construct-catalog reply (see ListConstructsMsg, memql#3749).
+    ListConstructsResult list_constructs_result = 128;
   }
 }
 
@@ -1301,6 +1312,140 @@ message ReadPackFileResult {
   string source = 4;   // file source (UTF-8)
   string origin = 5;   // "embedded" | "pack:<domain>" | "disk:<path>"
   bool found = 6;      // false when the file does not exist
+}
+
+// -----------------------------------------------------------------------------
+// Construct catalog -- the registry-grain read (memql#3749)
+// -----------------------------------------------------------------------------
+//
+// "What has this cluster actually loaded." It reads the engine's LIVE
+// REGISTRIES, not the file tree, and that is the whole point in both
+// directions: a PROMOTED construct lives in v1:authoring:construct and in no
+// file, so a file walk cannot see it; a construct the loader SKIPPED
+// (@disabled, or one that failed to parse) sits in a file and not in the
+// engine, so a file walk would report a construct the cluster cannot run.
+//
+// Read-only. Nothing here mutates a construct -- editing happens in a .memql
+// file, and promotion has its own owner-gated message
+// (DurablePromoteBundleMsg).
+//
+// Authorization is the pack browser's tier -- no additional gate. A construct's
+// DEFINITION is not data, and gating it more tightly than the source file it
+// came from would be incoherent.
+
+// ListConstructsMsg asks for the whole catalog. No filters: the surface that
+// consumes it groups by kind and namespace client-side and needs all of it, and
+// a filter parameter would be a second place for the kind vocabulary to live.
+message ListConstructsMsg {
+  string request_id = 1;
+}
+
+message ListConstructsResult {
+  string request_id = 1;
+  repeated ConstructInfo constructs = 2;
+}
+
+// ConstructInfo is one construct the engine has loaded.
+message ConstructInfo {
+  // name is the registry key: a concept's canonical id
+  // ("v1:cognition:space"), or the declared name for every other kind.
+  string name = 1;
+
+  // kind is one of: concept, query, mutation, logic, tool, automation, spec,
+  // trait, shape, prompt, provider, builtin, policy, seed.
+  //
+  // NOTE it is the KIND, not the authored keyword: a mutation is authored
+  // `mutate` and reported here as "mutation". Do not re-derive `runnable` from
+  // this field -- read `runnable`, which the server derives.
+  string kind = 2;
+
+  // namespace is the DSL domain the construct was authored in. Empty for a
+  // promoted construct, which has no file and whose target namespace the
+  // shared registries do not carry.
+  string namespace = 3;
+
+  // origin is "core" | "bundle" | "promoted", DERIVED SERVER-SIDE in one
+  // place: core when the construct's file resolves inside the embedded tree,
+  // bundle when it resolves under a runtime-mounted product domain (what
+  // MEMQL_DSL_PATH registers), promoted when the engine holds an
+  // authored-promotion marker for it. No client re-derives this.
+  string origin = 4;
+
+  // origin_path is the construct's file relative to the DSL tree root
+  // ("cognition/queries.memql"). EMPTY for a promoted construct -- it has no
+  // file, and that absence is the honest rendering -- and for the handful of
+  // constructs the engine registers from Go rather than from the tree.
+  string origin_path = 5;
+
+  // description is resolved server-side, from whichever channel the kind uses
+  // (the `///` doc comment, or @description for the kinds that keep it).
+  string description = 6;
+
+  // runnable reports membership of the five-kind runnable set: query,
+  // mutation, logic, tool, automation. It is NOT a new judgement -- it is the
+  // set the runtime-panel design already fixed, with the other kinds deferred
+  // because each needs an execution semantic decided (which row does a spec
+  // evaluate against; who pays for a prompt's provider call).
+  bool runnable = 7;
+
+  // args is the declared input schema, in authored order, in the SAME shape
+  // the language server reports for `memql/runnableConstructs`. It comes from
+  // the same analysis, over the same source, for the reason the LSP contract
+  // states: one parser reports the argument form, so a generated form cannot
+  // disagree with the compiler about what a construct accepts.
+  //
+  // Empty for every view-only kind: an argument form implies a run.
+  repeated ConstructArg args = 8;
+
+  // bound_concept is the signature binding for the kinds that have one --
+  // query / mutation / shape / spec / seed.
+  string bound_concept = 9;
+
+  // source_hash is the canonical content hash of the construct's authored
+  // source (sense.ConstructSourceHash: comments outside `///` stripped,
+  // insignificant whitespace collapsed, SHA-256, lowercase hex). Drift
+  // detection is "does this file's construct hash match the cluster's".
+  //
+  // EMPTY means "not available", never "hashes to nothing" -- a construct
+  // registered from Go has no authored source to hash.
+  string source_hash = 10;
+
+  // source is the construct's authored text, populated ONLY when
+  // `origin_path` is empty -- which is to say, only when there is no file to
+  // read it out of.
+  //
+  // A PROMOTED construct is that case, and it is the whole reason this field
+  // exists: its detail page has to render a source and its "open the .memql
+  // file" affordance has to become a read-only untitled document, and no
+  // other message can serve either. For a file-backed construct this stays
+  // empty on purpose -- the pack browser already serves that file, and the
+  // editor wants to OPEN it at the signature rather than render a detached
+  // copy, so shipping ~900 construct bodies on every catalog read would buy
+  // nothing and cost megabytes.
+  //
+  // Empty with a non-empty `origin_path` therefore means "read the file";
+  // empty with BOTH empty means the source is genuinely unavailable (a
+  // construct registered from Go).
+  string source = 11;
+}
+
+// ConstructArg is one declared input. Field-for-field the language server's
+// RunnableArg; the two are pinned to each other by a parity test.
+message ConstructArg {
+  string name = 1;
+  // type is one of string / number / boolean / object / array / any. A DSL
+  // type with no form-level equivalent degrades to "any" rather than failing,
+  // so an arg the editor cannot type still gets a JSON entry box.
+  string type = 2;
+  bool required = 3;
+  // enum_values is the closed value set from @enum("a", "b") or the
+  // first-class enum("a", "b") type; empty when unconstrained. Named with the
+  // suffix because `enum` is a reserved word in the proto language.
+  repeated string enum_values = 4;
+  string description = 5;
+  // auto_injected marks a tool field the engine stamps server-side, DROPPING
+  // whatever the caller sent. Only a tool field can carry it.
+  bool auto_injected = 6;
 }
 
 // -----------------------------------------------------------------------------
@@ -3006,6 +3151,7 @@ message IdentityAdminMsg {
     UpdateClusterSettingsRequest update_cluster_settings = 15;
     IssueEnrolmentLinkRequest issue_enrolment_link = 16;
     RevokeEnrolmentLinkRequest revoke_enrolment_link = 17;
+    SetOAuthClientCorsOriginsRequest set_oauth_client_cors_origins = 18;
   }
 }
 
@@ -3157,4 +3303,37 @@ message IssueEnrolmentLinkRequest {
 message RevokeEnrolmentLinkRequest {
   // The v1:identity:enrolmentToken row id.
   string enrolment_token_id = 1;
+}
+
+// SetOAuthClientCorsOriginsRequest grants or revokes CREDENTIALED cross-origin
+// access for one registered OAuth client (memql#3716) -- what makes a
+// customer's own website able to call this cluster without an env change and an
+// identity restart.
+//
+// It is on THIS envelope for the reason IssueEnrolmentLinkRequest is: it is a
+// trust decision about somebody else, behind the same owner/admin gate, the same
+// audit trail and the same refusal shape as the operations above. And it has to
+// be an explicit operation rather than a derivation, because the row it writes
+// is created at POST /register -- RFC 7591 dynamic client registration, which is
+// deliberately UNAUTHENTICATED and enabled by default. An allowlist derived from
+// that row's redirect_uris would let one anonymous POST buy cookie-bearing read
+// access to the auth endpoints.
+message SetOAuthClientCorsOriginsRequest {
+  // The v1:identity:oauthClient row id -- the public client_id issued at
+  // registration. A statically configured client (MEMQL_IDENTITY_REGISTERED_CLIENTS)
+  // has no row, and its origins belong in MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS.
+  string client_id = 1;
+
+  // The COMPLETE allowance, sent in full every time -- not an addition to what
+  // is already there, so an EMPTY list is how a grant is revoked and there is no
+  // second verb to fall out of step with this one.
+  //
+  // Each entry is a scheme, a host and an optional port, and nothing else: a
+  // path, query, fragment, trailing slash, userinfo or wildcard is refused with
+  // the offending entry named. Explicit origins rather than a "cors_allowed"
+  // boolean deriving them from redirect_uris, because RFC 8252 loopback
+  // redirects are NORMAL on this concept -- deriving would silently admit
+  // http://127.0.0.1 and hand every local process on somebody's machine
+  // cookie-bearing read access to identity.
+  repeated string origins = 2;
 }

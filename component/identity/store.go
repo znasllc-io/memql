@@ -67,7 +67,12 @@ type OAuthClientRow struct {
 	GrantTypes              string
 	ResponseTypes           string
 	TokenEndpointAuthMethod string
-	CreatedAt               time.Time
+	// CORSOrigins is the credentialed-CORS allowance an owner/admin granted
+	// this client (memql#3716). Empty for every client as registered -- the
+	// allowance is a separate admin act, because /register is unauthenticated.
+	// Never derived from RedirectURIs; see the concept's field description.
+	CORSOrigins []string
+	CreatedAt   time.Time
 }
 
 // UserRow projects a v1:identity:user row.
@@ -358,6 +363,12 @@ func (s *Store) LookupOAuthClientByClientId(ctx context.Context, clientId string
 			return nil, fmt.Errorf("identity.store: unmarshal redirect_uris for client %q: %w", clientId, err)
 		}
 	}
+	// The dropped entries are deliberately discarded here. This row projection
+	// answers "what allowance is IN EFFECT", which is what the admin surface
+	// reports as the previous value on a revoke -- an entry the middleware would
+	// refuse was never in effect, so naming it would overstate what was removed.
+	// The read that the middleware itself drives (GrantedCORSOrigins) logs them.
+	corsOrigins, _ := ParseCORSOriginsJSON(g.str("corsOriginsJSON"))
 	return &OAuthClientRow{
 		ClientId:                firstNonEmpty(g.str("clientId"), node.GetId()),
 		ClientName:              g.str("clientName"),
@@ -365,8 +376,89 @@ func (s *Store) LookupOAuthClientByClientId(ctx context.Context, clientId string
 		GrantTypes:              g.str("grantTypes"),
 		ResponseTypes:           g.str("responseTypes"),
 		TokenEndpointAuthMethod: g.str("tokenEndpointAuthMethod"),
+		CORSOrigins:             corsOrigins,
 		CreatedAt:               g.time("registeredAt"),
 	}, nil
+}
+
+// SetOAuthClientCORSOrigins writes the credentialed-CORS allowance an
+// owner/admin granted a registered OAuth client (memql#3716). origins is the
+// COMPLETE allowance; nil or empty revokes.
+//
+// It writes what the caller hands it and validates nothing. That is not an
+// oversight: the only caller is component/identity/adminops, which validates
+// against identity.ValidateCORSOrigins so the operator gets a message naming
+// the bad entry, and duplicating the check here would put the authoritative
+// grammar in two places. The write itself is refused from the wire --
+// setOAuthClientCORSOrigins is @serverOnly -- so this method's exposure is
+// exactly its Go callers.
+func (s *Store) SetOAuthClientCORSOrigins(ctx context.Context, clientId string, origins []string) error {
+	encoded, err := MarshalCORSOrigins(origins)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.WriteString(`mutation setOAuthClientCORSOrigins(`)
+	writeKVString(&b, "clientId", clientId, true)
+	writeKVString(&b, "corsOriginsJSON", encoded, false)
+	b.WriteString(`)`)
+	// The internal-origin stamp is load-bearing rather than decorative: the
+	// mutation is @serverOnly, so without it this call is refused at runtime by
+	// the function validator. Its safety argument is that every caller is
+	// downstream of the owner/admin gate in adminops, in the same function.
+	if _, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), b.String()); err != nil {
+		return fmt.Errorf("identity.store: set oauth client cors origins: %w", err)
+	}
+	return nil
+}
+
+// GrantedCORSOrigins returns every origin an owner/admin has granted
+// credentialed CORS access, unioned across every registered OAuth client.
+//
+// This is the graph half of identity's CORS allowlist, and it is read LIVE on
+// the middleware's miss path rather than snapshotted at boot -- which is the
+// entire point of memql#3716: a grant has to take effect without an identity
+// restart, and the grant may have been executed on a different node.
+//
+// NOT stamped with an internal origin, unlike its neighbour
+// SetOAuthClientCORSOrigins above. oAuthClientCORSGrants is an ordinary read and
+// the request context already carries the synthetic actor that
+// identity.SystemActorHandlerFunc stamps -- it wraps every route cors() sits
+// inside, outermost -- which is the same footing LookupOAuthClientByClientId
+// reads on from the same middleware chain. Stamping internal origin here would
+// widen what that stamp means: component/auth's call-origin allowlist admits
+// component/identity as "server-initiated", and a browser preflight is not that.
+//
+// Unparseable entries are dropped with a warning rather than failing the read;
+// see ParseCORSOriginsJSON for why the read path is lenient where the write path
+// is strict.
+func (s *Store) GrantedCORSOrigins(ctx context.Context) ([]string, error) {
+	nodes, err := s.executeAndExtract(ctx, `query oAuthClientCORSGrants()`)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: granted cors origins: %w", err)
+	}
+	var out []string
+	seen := map[string]bool{}
+	for _, node := range nodes {
+		if node == nil {
+			continue
+		}
+		g := newFieldGetter(node)
+		origins, dropped := ParseCORSOriginsJSON(g.str("corsOriginsJSON"))
+		if len(dropped) > 0 && s.Logger != nil {
+			s.Logger.Warn("identity.store: dropped unusable granted CORS origin(s)",
+				slog.String("clientId", firstNonEmpty(g.str("clientId"), node.GetId())),
+				slog.Int("dropped", len(dropped)))
+		}
+		for _, origin := range origins {
+			if seen[origin] {
+				continue
+			}
+			seen[origin] = true
+			out = append(out, origin)
+		}
+	}
+	return out, nil
 }
 
 // ---------------------------------------------------------------------------

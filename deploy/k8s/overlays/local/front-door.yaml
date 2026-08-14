@@ -28,6 +28,17 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # PRECEDENCE IS DECLARED, NOT INHERITED (memql#3714). Traefik's default
+    # router priority is the LENGTH of the compiled rule string, and the
+    # wildcard's `HostRegexp(...) && PathPrefix(...)` rule is longer than this
+    # host's own `Host(...) && PathPrefix(...)` rule -- so on default priority
+    # the wildcard could outrank identity., and sign-in would be served by the
+    # site edge instead of the identity service. 100 matches the priority
+    # declared on api-front-door.yaml and mcp-front-door.yaml so all three
+    # exact hosts rank identically above the wildcard rather than
+    # coincidentally. See docs/public/operate/front-door.md's precedence
+    # section and the `precedence` check in scripts/install/verify-frontdoor.sh.
+    traefik.ingress.kubernetes.io/router.priority: "100"
 spec:
   tls:
     - hosts: ["identity.memql.localhost"]

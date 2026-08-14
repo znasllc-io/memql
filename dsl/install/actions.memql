@@ -97,8 +97,9 @@ action verifyProviderKey {
 }
 
 // Backend: scripts/install/verify-frontdoor.sh.
-/// Probe DNS resolution, TLS and gRPC reachability on every front-door hostname, so a broken
-/// install is reported as broken rather than discovered later by a client.
+/// Probe DNS resolution, TLS and gRPC reachability on every front-door hostname, plus that an
+/// exact host is not swallowed by the wildcard rule beside it, so a broken install is reported
+/// as broken rather than discovered later by a client.
 action verifyFrontDoor {
   args {
     hosts      string

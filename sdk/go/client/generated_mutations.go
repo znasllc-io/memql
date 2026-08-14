@@ -5582,17 +5582,23 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 }
 
 // CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
+// status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
+// `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
 	SiteId   string
 	Hostname string
 	// Enum: spa | static
-	Kind        string
-	BundleRef   string
-	ApiProxy    bool
-	ApiProxySet bool // set true to send apiProxy; required because zero-value bool is ambiguous
-	Title       string
+	Kind      string
+	BundleRef string
+	// Enum: draft | live | disabled
+	Status         string
+	ApiProxy       bool
+	ApiProxySet    bool // set true to send apiProxy; required because zero-value bool is ambiguous
+	SystemOwned    bool
+	SystemOwnedSet bool // set true to send systemOwned; required because zero-value bool is ambiguous
+	Title          string
 }
 
 // CreateSite calls the engine mutation createSite.
@@ -5623,12 +5629,26 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	}
 	b.WriteString("bundleRef: ")
 	b.WriteString(quoteMemQL(args.BundleRef))
+	if args.Status != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	if args.ApiProxySet {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("apiProxy: ")
 		b.WriteString(fmt.Sprintf("%v", args.ApiProxy))
+	}
+	if args.SystemOwnedSet {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("systemOwned: ")
+		b.WriteString(fmt.Sprintf("%v", args.SystemOwned))
 	}
 	if args.Title != "" {
 		if b.Len() > 20 {
@@ -6889,6 +6909,28 @@ func DeleteRecordBuild(args DeleteRecordArgs) string {
 	b.WriteString("mutation deleteRecord(")
 	b.WriteString("recordId: ")
 	b.WriteString(quoteMemQL(args.RecordId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// DeleteSite -- Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deleteSite"] in generated_concepts.go).
+type DeleteSiteArgs struct {
+	SiteId string
+}
+
+// DeleteSite calls the engine mutation deleteSite.
+func (qc *QueryClient) DeleteSite(ctx context.Context, args DeleteSiteArgs) (*Result, error) {
+	call := DeleteSiteBuild(args)
+	return qc.executeNamed(ctx, "deleteSite", call)
+}
+
+func DeleteSiteBuild(args DeleteSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation deleteSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
 }

@@ -1,8 +1,10 @@
 // Where the portal dials -- AND the portal's answer to "which clusters exist".
 //
-// The portal is served BY the bff (component/portal mounts it at /portal/ on
-// the bff's HTTP server), so the cluster it talks to is always the origin it
-// was loaded from. That is a deliberate property, not a convenience: it means
+// The portal is served BY the edge, as site #1 at its own hostname
+// (component/edge resolves the request Host to a v1:platform:site row and
+// serves that row's bundle, memql#3711 -- the same mechanism any customer
+// site uses), so the cluster it talks to is always the origin it was loaded
+// from. That is a deliberate property, not a convenience: it means
 // there is no endpoint to configure, no CORS to arrange, and no way for the
 // bundle to end up pointed at a different cluster than the one that served
 // it. `/memql/ws` stays RELATIVE so the SDK resolves it against
@@ -48,23 +50,27 @@
 // THE SEAM FOR (2). If multi-cluster is revisited, THIS MODULE is where it
 // lands and the only place that changes. A server-side registry would surface
 // as a `clusters: [...]` field on the runtime-config document (src/cluster/
-// config.ts and component/portal/config.go -- already the one thing the bundle
-// reads before it has a connection to read anything else from), and this
-// module would gain a resolver that picks an entry and returns its absolute
-// bridge URL instead of a relative path. Everything downstream goes through
-// `portalBridgePath`, so nothing else moves. Do NOT spread endpoint knowledge
+// config.ts and component/edge/runtimeconfig.go -- already the one thing the
+// bundle reads before it has a connection to read anything else from), and
+// this module would gain a resolver that picks an entry and returns its
+// absolute bridge URL instead of a relative path. Everything downstream goes
+// through `portalBridgePath`, so nothing else moves. Do NOT spread endpoint knowledge
 // outward in anticipation: the single choke point is what makes that change
 // cheap.
 
 const BRIDGE_PATH = "/memql/ws";
 
-// A deployment may serve the whole memQL HTTP surface under a base path
-// (SERVER_PUBLIC_PATH on the Go side registers `/{prefix}/memql/ws` and
-// `/{prefix}/portal/` together). The portal knows its own prefix from Vite's
-// `base`, so it can derive the bridge path instead of being told twice.
+// Derived from Vite's `base` rather than hardcoded, the same reasoning as
+// portalRedirectPathFor below.
+//
+// The portal now serves at its own origin's ROOT (memql#3711), so
+// baseUrl is "/" in production and the /portal/-stripping below is a no-op
+// (the trailing-slash trim after it already reduces "/" to ""). It is left
+// general rather than hardcoded to "" because the SAME function still has
+// to handle a SERVER_PUBLIC_PATH-prefixed deployment or a `vite dev` base
+// override, and because how /memql/ws itself is reached through the edge's
+// same-origin API surface is Task 7's concern (memql#3712), not this one's.
 export function bridgePathFor(baseUrl: string): string {
-  // BASE_URL is always "<prefix>/portal/" -- strip the mount segment to get
-  // whatever deployment prefix sits in front of it ("" in the normal case).
   const prefix = baseUrl.replace(/\/portal\/?$/, "").replace(/\/+$/, "");
   return prefix + BRIDGE_PATH;
 }

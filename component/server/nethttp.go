@@ -771,10 +771,24 @@ func withBasePath(paths ...string) []string {
 
 // MetricsPaths returns the public Prometheus scrape endpoint(s). The
 // /metrics endpoint carries no user data and is only reachable on the
-// in-cluster pod network (the public ingress routes specific paths
-// only), so it is unauthenticated like the health probes -- a
-// ServiceMonitor/Prometheus scrape can't present a bearer token.
-// memql#1523.
+// in-cluster pod network, so it is unauthenticated like the health
+// probes -- a ServiceMonitor/Prometheus scrape can't present a bearer
+// token. memql#1523.
+//
+// THE SECOND CLAUSE IS A LOAD-BEARING DEPLOYMENT FACT, and it is now checked
+// rather than asserted (memql#3703). It used to end "(the public ingress routes
+// specific paths only)", which was true while the front door's path list was
+// hand-written and stopped being self-evident the moment that list became
+// GENERATED from these declarations: the generator reads PublicPaths(), which
+// appends this function, so the naive derivation would have published an
+// unauthenticated Prometheus scrape at api.<domain> -- and being in PublicPaths()
+// is what makes that serious, since the verifier bypasses these paths, so
+// external reachability is the whole of the exposure.
+//
+// This declaration is therefore classified servedButNotExternallyRouted in
+// cmd/frontdoorpaths, and TestWithheldPathsAreAbsentFromTheEmittedSet fails if
+// /metrics ever appears in the emitted block. Wanting metrics externally
+// reachable is a decision to make there, and it needs authentication first.
 func MetricsPaths() []string {
 	base := sanitizeBaseURLFromEnv()
 	metricsPath := "/metrics"
@@ -803,9 +817,6 @@ func PublicPaths() []string {
 	paths = append(paths, AIHTTPPaths()...)
 	// Concept metadata endpoint (public, no auth required)
 	paths = append(paths, ConceptAPIPaths()...)
-	// The portal's static bundle (memql#3314). The bytes are public; the data
-	// the bundle reads is gated on the stream it dials -- see PortalPaths.
-	paths = append(paths, PortalPaths()...)
 	// The edge node's site-serving mount (memql#3710) -- "/", and ONLY on the
 	// edge binary (EdgePaths' return value is build-tag-scoped; see its doc
 	// comment for why an unconditional entry here would be unsafe).
@@ -894,31 +905,6 @@ func AIHTTPPaths() []string {
 // attachment upload handler (POST /spaces/{partitionId}/attachments).
 func SpaceAttachmentPaths() []string {
 	return pathsWithBase("/spaces/")
-}
-
-// PortalPaths returns the mount prefix for the memQL Portal SPA bundle
-// (GET /portal/*, memql#3314). Served by the bff via component/portal.
-//
-// HTTP rather than gRPC because a browser cannot fetch its own bundle over
-// gRPC: the request that loads the application is made before any application
-// code exists to speak a protocol. Same category as the /memql/ws upgrade and
-// identity's web UI, and recorded in CLAUDE.md's Allowed HTTP Exceptions table.
-//
-// PUBLIC, deliberately, and the distinction is worth stating precisely. What
-// is public is the BUNDLE: the same bytes for every visitor, granting nothing
-// on its own. The DATA the portal displays is gated where all memQL data is
-// gated -- on the gRPC/WebSocket stream the bundle then dials, behind the
-// identity verifier. Requiring a bearer to fetch the JavaScript would also
-// make the sign-in flow impossible, since the code that performs sign-in is
-// in the bundle.
-//
-// The trailing slash makes this a PREFIX declaration, which is what an SPA
-// needs: every hashed asset lives beneath it, and so does every client-side
-// route the fallback answers with index.html. Nothing else is mounted under
-// /portal/, so the prefix blesses exactly the static bundle -- but that is a
-// property to re-check before mounting anything else there.
-func PortalPaths() []string {
-	return pathsWithBase("/portal/")
 }
 
 // EdgePaths returns the edge node's site-serving mount (memql#3710) -- "/"
@@ -1011,6 +997,31 @@ func InboundWebhookPaths() []string {
 // unsubscribe, which the same providers now require of bulk senders.
 func UnsubscribePaths() []string {
 	return pathsWithBase("/unsubscribe")
+}
+
+// SitesBundlePaths returns the path prefix the atomic bundle-publish
+// endpoint mounts under (POST /sites/{id}/bundles, memql#3713), served by
+// SiteBundleHandler on the bff.
+//
+// A PREFIX, matching SpaceAttachmentPaths' shape rather than
+// UnsubscribePaths' exact form: the id is a path segment, not a query
+// parameter, so the handler parses it out of the full path itself
+// (parseSiteBundlePublishPath, site_bundle_handler.go) the same way
+// AttachmentHandler parses {partitionId} out of the /spaces/ prefix.
+//
+// HTTP rather than gRPC for the reasoning CLAUDE.md's endpoint-protocol
+// exception table records for this route: a CI job hands over an arbitrary,
+// variable-shaped tree of files, which is exactly the shape multipart
+// form-data exists to carry and a fixed protobuf schema does not -- the
+// same reasoning already recorded for SpaceAttachmentPaths.
+//
+// Declared in HandlerAuthorizedPaths(), NOT PublicPaths(): SiteBundleHandler
+// verifies a class="service_account" credential itself before doing
+// anything else, so admitting every bearer here (what PublicPaths()
+// membership would do on every verifier-consuming node) would be strictly
+// weaker than what the handler already enforces.
+func SitesBundlePaths() []string {
+	return pathsWithBase("/sites/")
 }
 
 func normalizeOrigins(origins []string) []string {

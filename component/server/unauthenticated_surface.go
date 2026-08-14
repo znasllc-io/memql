@@ -124,7 +124,44 @@ func HandlerAuthorizedPaths() []string {
 	// token, or with one whose tag does not verify, renders the
 	// "not valid" page and performs no write. There is no unauthenticated
 	// path through the handler that reaches a mutation.
-	return append(paths, UnsubscribePaths()...)
+	paths = append(paths, UnsubscribePaths()...)
+	// POST /sites/{id}/bundles -- the atomic bundle-publish endpoint
+	// (memql#3713). Appended rather than written inline for the same
+	// reason as the two entries above: the prefix has to agree with what
+	// the mount uses, base path included, and SitesBundlePaths() is the
+	// one place that is decided -- see its doc comment (nethttp.go) for
+	// what the route is and why it is HTTP at all. SiteBundleHandler
+	// verifies a class="service_account" identity-issued JWT itself
+	// before calling Publish -- that is what HandlerAuthorizedPaths
+	// membership means here, so this deliberately does NOT go in
+	// PublicPaths() (which would admit every bearer, not just a
+	// service-account one) and NOT in SelfAuthenticatedPaths() either
+	// (the credential IS a memQL identity, just a narrower class of one,
+	// so there is no third-party-HMAC reason to make the bearer verifier
+	// step aside).
+	//
+	// The matching rule this entry relies on is worth being explicit
+	// about, because it is EASY to reach for the wrong one by analogy to
+	// /inbound/: verifier.isSelfAuthenticated's "exact match, or exactly
+	// one further segment under a mount" rule governs
+	// SelfAuthenticatedPaths() ONLY, and this route is not on that list.
+	// surfaceDeclaredBy (below) is what actually matches
+	// HandlerAuthorizedPaths() entries, and it treats a trailing-slash
+	// entry as an OPEN prefix with NO depth limit -- so "/sites/" covers
+	// the full two-segment "{id}/bundles" tail the same way
+	// "/automations/" already covers the two-segment "{name}/trigger"
+	// tail above. That distinction ends up mattering less than it might:
+	// HandlerAuthorizedPaths() has NO runtime bypass effect on a
+	// verifier-consuming node at all (HTTPMiddleware only ever reads
+	// PublicPaths / SelfAuthenticatedPaths); this list only feeds the
+	// boot-time completeness check AssertUnauthenticatedSurfaceDeclared
+	// runs. So on the bff the ordinary bearer verifier still runs ahead
+	// of the handler and requires SOME valid identity regardless of this
+	// entry's shape; the handler's own class check is what narrows that
+	// down to the service-account credential specifically, and it must
+	// reject a request with no claims at all -- the same fail-closed bar
+	// the two /automations/ entries above meet.
+	return append(paths, SitesBundlePaths()...)
 }
 
 // SelfAuthenticatedPaths returns routes that must remain reachable on a

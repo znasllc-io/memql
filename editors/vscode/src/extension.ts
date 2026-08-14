@@ -48,6 +48,7 @@ import {
   type SignInTokenStore,
 } from './auth/signin.js';
 import {
+  ClusterCredentialStore,
   persistSignIn,
   reconcileClusterCredentials,
   signOut as signOutCredentials,
@@ -71,6 +72,11 @@ import {
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { defaultReceiptPath } from './install/receipt.js';
+import { defaultRunsDir } from './state/runLog.js';
+import {
+  DEPLOYMENT_CONCEPT,
+  DEPLOYMENT_NODE_SPEC_CONCEPT,
+} from './state/deploymentHistory.js';
 import { resolveInstallRoot } from './install/root.js';
 import {
   AutomationRunner,
@@ -98,10 +104,19 @@ import {
   type RunConfig,
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
+import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
+import { DeploymentPanel } from './webview/deploymentPanel.js';
+import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
+import { roleVisibility } from './deploy/actions.js';
+import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
+import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
+import { ConstructPanel } from './webview/constructPanel.js';
+import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
+import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
-import { ClusterPanel } from './webview/clusterPanel.js';
+import { ConnectionPanel } from './webview/connectionPanel.js';
 import { ConceptPanel } from './webview/conceptPanel.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
 
@@ -309,6 +324,208 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   watcher.onDidCreate(() => clustersRegistryChanged(clustersTree));
   watcher.onDidDelete(() => clustersRegistryChanged(clustersTree));
   context.subscriptions.push(watcher);
+
+
+  // The Deployments tree (memql#3737). Above Clusters in the container, because
+  // it answers the question an operator arrives with -- "what do I run, and at
+  // what version" -- while Clusters answers "what can I reach".
+  //
+  // Every collaborator is passed as a THUNK rather than a value: the connection
+  // and its query client both change without this view being told, and a
+  // captured `undefined` from activation time would leave the connected
+  // cluster's history permanently unreadable.
+  const deploymentsTree = new DeploymentsTreeProvider({
+    clustersPath,
+    receiptPath: defaultReceiptPath(),
+    presence: () => presence.get(),
+    connection: () => {
+      const state = connections?.state;
+      if (state === undefined || state.status === 'disconnected') return undefined;
+      return { clusterName: state.clusterName, connected: state.status === 'connected' };
+    },
+    // Deployment history is ORDINARY CONCEPT ROWS, read through the same
+    // browseConceptPage the concept browser uses -- no deploy-control bridge
+    // involved (memql#3311 records that decision). Issued as one pair so the
+    // records and their per-tier specs describe one instant.
+    readDeployments: () => {
+      const query = connections?.query;
+      if (query === undefined) return undefined;
+      return async () => {
+        const [deployments, specs] = await Promise.all([
+          browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
+          browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
+        ]);
+        return { deployments: deployments.rows, specs: specs.rows };
+      };
+    },
+  });
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlDeployments', deploymentsTree),
+    commands.registerCommand('memql.deployments.refresh', () => deploymentsTree.refresh()),
+    // Create deployment on a machine with NO local cluster is the install
+    // graph, which is the same run the "+" opened -- re-parented, not
+    // rewritten. Contributed on the absent row only; moving an INSTALLED
+    // instance to another tag is a different flow and lands with the instance
+    // page (#3739).
+    commands.registerCommand('memql.deployments.createDeployment', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'install');
+    }),
+    // The instance page (memql#3739). It takes the catalog inputs rather than a
+    // resolved instance, because the page re-reads the machine every time it is
+    // revealed -- a receipt written by a run the page itself started is the
+    // ordinary case, and a page holding a snapshot from when it opened would
+    // report the version it replaced.
+    commands.registerCommand('memql.deployments.open', (node?: DeploymentNode) => {
+      DeploymentPanel.show(context, {
+        catalog: {
+          clustersPath,
+          receiptPath: defaultReceiptPath(),
+          presence: () => presence.get(),
+        },
+        // The same two thunks the tree takes, for the same reason: a remote
+        // instance's version AND its history are the connected cluster's rows,
+        // and the connection changes without this page being told.
+        connection: () => {
+          const state = connections?.state;
+          if (state === undefined || state.status === 'disconnected') return undefined;
+          return { clusterName: state.clusterName, connected: state.status === 'connected' };
+        },
+        readDeployments: () => {
+          const query = connections?.query;
+          if (query === undefined) return undefined;
+          return async () => {
+            const [deployments, specs] = await Promise.all([
+              browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
+              browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
+            ]);
+            return { deployments: deployments.rows, specs: specs.rows };
+          };
+        },
+        // Rebuilt per call from the LIVE dispatcher rather than cached: the
+        // ConnectionManager drops it the moment the socket dies, and a cached
+        // client would go on writing into a dead stream.
+        deployPort: () => {
+          const dispatcher = connections?.dispatcher;
+          return dispatcher === undefined ? undefined : new DeployControlClient(dispatcher);
+        },
+        readRole: async () => {
+          const query = connections?.query;
+          if (query === undefined) return roleVisibility(undefined);
+          const access = await query.getMyAccess().catch(() => null);
+          return roleVisibility(access?.clusterRole);
+        },
+        // The deploy console scopes to an ENVIRONMENT, and the registry entry's
+        // name is the only thing this editor knows about a remote cluster. They
+        // coincide for the conventional `staging` / `production` entries and a
+        // cluster named otherwise is answered by the engine, which refuses an
+        // environment it does not have -- and that refusal is one of the three
+        // states the page renders.
+        deployEnv: (name) => name,
+        confirm: (prompt, phrase) =>
+          Promise.resolve(
+            window.showInputBox({
+              title: 'memQL: confirm',
+              prompt,
+              placeHolder: phrase,
+              ignoreFocusOut: true,
+            }),
+          ),
+        installRoot: installRootFor(context),
+        receiptFile: defaultReceiptPath(),
+        refreshTree: () => {
+          // The presence memo is invalidated too: a deployment that succeeded
+          // is one of the two events that change the verdict deterministically,
+          // and waiting out the TTL would show the operator the machine as it
+          // was before their run.
+          presence.invalidate();
+          deploymentsTree.refresh();
+          clustersTree.refresh();
+        },
+        // THE RE-PARENTING SEAM. Installing, repairing and uninstalling are the
+        // wizard's flows, opened from the instance page rather than reimplemented
+        // behind it (design section 5.2: re-parented, not rewritten).
+        openInstallFlow: (action) => {
+          AddClusterPanel.show(context, presence, addClusterDeps(), action);
+        },
+      },
+      // From a tree row, the instance it names; from the palette, where no row
+      // exists, the local one -- which is the only instance a machine always
+      // has.
+      node?.kind === 'instance' ? node.instance.name : '');
+    }),
+  );
+  // The connection decides a remote instance's version and its history, so a
+  // connect or a drop changes what this tree can say.
+  connections.onDidChangeState(() => deploymentsTree.refresh());
+  // The Deployments tree reads three files that change underneath it, all in
+  // ~/.memql and all outside any workspace -- so each needs a RelativePattern
+  // over an existing base directory, for the two reasons the clusters watcher
+  // above documents at length.
+  //
+  //   clusters.yaml       the instance list (the same file, a second reader)
+  //   install-receipt.json the local instance's version and domain
+  //   runs/               the local run log: one file per run, rewritten per
+  //                       step, so a run in flight repaints the tree as it goes
+  const runsDir = defaultRunsDir();
+  try {
+    fs.mkdirSync(runsDir, { recursive: true });
+  } catch {
+    // Same call as the clusters directory above: a home we cannot write is not
+    // worth failing activation over, and the tree still reads what is there.
+  }
+  const deploymentsWatchers = [
+    workspace.createFileSystemWatcher(
+      new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))
+    ),
+    workspace.createFileSystemWatcher(
+      new RelativePattern(Uri.file(clustersDir), path.basename(defaultReceiptPath()))
+    ),
+    workspace.createFileSystemWatcher(new RelativePattern(Uri.file(runsDir), '*.json')),
+  ];
+  for (const w of deploymentsWatchers) {
+    w.onDidChange(() => deploymentsTree.refresh());
+    w.onDidCreate(() => deploymentsTree.refresh());
+    w.onDidDelete(() => deploymentsTree.refresh());
+    context.subscriptions.push(w);
+  }
+
+  // The Constructs tree (memql#3752): every construct the connected cluster has
+  // LOADED, read from the live registries -- so a promoted construct appears
+  // the moment it is promoted. A different question from the pack browser's,
+  // which answers "show me this file".
+  const constructsTree = new ConstructsTreeProvider({
+    connections,
+    load: async (): Promise<CatalogState> => {
+      const dispatcher = connections?.dispatcher;
+      if (dispatcher === undefined) {
+        // NOT AN EMPTY CATALOG. An empty list reads as "this cluster has no
+        // constructs", which is the one wrong answer available here.
+        return { kind: 'notConnected' };
+      }
+      try {
+        const result = await new ConstructsClient(dispatcher).listConstructs();
+        return catalogFrom(result.constructs);
+      } catch (err) {
+        // A cluster predating the message answers with an envelope the client
+        // does not recognise, which throws -- rendered as a stated version
+        // mismatch naming ListConstructs, never as a blank view.
+        return classifyCatalogFailure(err);
+      }
+    },
+  });
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlConstructs', constructsTree),
+    commands.registerCommand('memql.constructs.refresh', () => constructsTree.refresh()),
+    // Not palette-invokable ("when": "false"): it needs the construct the tree
+    // row carries, which the palette cannot supply. Guarded anyway, so a
+    // future caller with no argument cannot throw inside the panel.
+    commands.registerCommand('memql.constructs.open', (node?: ConstructNode) => {
+      if (node?.kind !== 'construct') {
+        return;
+      }
+      ConstructPanel.open(context, node.construct);
+    })
+  );
 
   const conceptsTree = new ConceptsTreeProvider(connections);
   context.subscriptions.push(
@@ -548,14 +765,26 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // this surface is an operator reading "remove" as "uninstall", so the
       // confirmation spends its second line ruling that out rather than asking
       // a generic "are you sure?".
+      //
+      // A LOCAL CLUSTER GETS ITS OWN SENTENCE (memql#3742). For a remote one
+      // "nothing is uninstalled" is nearly tautological -- this editor could
+      // not uninstall it if it tried. For the local one it is the whole point:
+      // the k3d cluster, the hosts block and the CA are all still there, and
+      // the sentence names where the operator goes to change that. It belongs
+      // in the dialog rather than in documentation, because the dialog is
+      // where the question is being asked.
       const confirmed = await window.showWarningMessage(
         `Remove "${name}" from the cluster list?`,
         {
           modal: true,
           detail:
-            'This editor forgets the cluster and deletes the credential it stored for it. ' +
-            'Nothing is uninstalled, and no data on the cluster is touched. ' +
-            'You can add it back at any time.',
+            target.cluster.local === true
+              ? 'This removes the connection only. The cluster keeps running -- uninstall it ' +
+                'from Deployments. This editor forgets it and deletes the credential it stored, ' +
+                'and you can connect to it again from the "+" menu without re-typing anything.'
+              : 'This editor forgets the cluster and deletes the credential it stored for it. ' +
+                'Nothing is uninstalled, and no data on the cluster is touched. ' +
+                'You can add it back at any time.',
         },
         'Remove'
       );
@@ -611,13 +840,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         saveClusterEdit(clustersPath, originalName, edited, { secrets: context.secrets })
       );
     }),
-    // The Cluster tab (memql#3312): topology, deployment history, and the
-    // deploy actions. Reached from the Clusters tree's inline action, which
-    // supplies the node -- and from the palette, which cannot, so it falls
-    // back to the selected cluster rather than doing nothing. That fallback
-    // is why this command carries the trust clause instead of
-    // "when": "false" like the other argument-taking commands.
-    commands.registerCommand('memql.cluster.open', async (node?: ClusterNode) => {
+    // The CONNECTION page (memql#3742), which replaces the Cluster tab. What
+    // went with that tab was cluster state -- a pod grid, orphan verdicts,
+    // under-replica alarms -- which the portal owns and already draws. What
+    // arrives is the question nothing answered: what this editor dials, as
+    // whom, and what happened.
+    //
+    // Reached from the Clusters tree's inline action, which supplies the node
+    // -- and from the palette, which cannot, so it falls back to the selected
+    // cluster rather than doing nothing. That fallback is why this command
+    // carries the trust clause instead of "when": "false".
+    commands.registerCommand('memql.clusters.connection', async (node?: ClusterNode) => {
       if (connections === undefined) {
         return;
       }
@@ -625,7 +858,45 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      ClusterPanel.open(context, connections, target.cluster.name);
+      ConnectionPanel.open(
+        context,
+        {
+          clustersPath,
+          connections,
+          // Straight off SecretStorage through the same store every other
+          // credential path uses -- one place decides how a credential is
+          // kept, so there is one place this can read it from.
+          readExpiry: (name) =>
+            new ClusterCredentialStore(context.secrets).readExpiry(name),
+        },
+        target.cluster.name,
+      );
+    }),
+    // Open Portal, as an inline action on the tree as well as a button on the
+    // page. The cluster's OWN site row when there is a connection to read it
+    // over, and the composed `api.<domain>/portal/` when there is not --
+    // reading the row is what keeps this correct when memql#3711 moves the
+    // portal to its own origin.
+    commands.registerCommand('memql.clusters.openPortal', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      const query = connections?.query;
+      const state = connections?.state;
+      const connected =
+        query !== undefined && state?.status === 'connected' && state.clusterName === target.cluster.name;
+      const page = connected
+        ? await browseConceptPage(query, SITE_CONCEPT, { pageSize: 50 }).catch(() => null)
+        : null;
+      const url = portalTarget(target.cluster, page?.rows ?? []).url;
+      if (url === '') {
+        void window.showErrorMessage(
+          'memQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+        );
+        return;
+      }
+      await env.openExternal(Uri.parse(url));
     })
   );
 

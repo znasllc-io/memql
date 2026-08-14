@@ -321,6 +321,12 @@ export function requiredFields(action: AddClusterAction): InputField[] {
     case "uninstall":
     case "connect":
       return [];
+    case "reconnect":
+      // NOTHING IS COLLECTED, which is the entire point of the action
+      // (memql#3741): the domain comes off the install receipt, or off the
+      // installer's own default when the receipt is gone. A field here would
+      // be the form this exists to remove.
+      return [];
   }
 }
 
@@ -340,6 +346,11 @@ function screenFor(action: AddClusterAction): Screen {
       return "uninstallPreview";
     case "connect":
       return "connect";
+    case "reconnect":
+      // Straight to the hand-off screen: there is nothing to collect and
+      // nothing to run, so the next thing the operator sees is the cluster in
+      // their list with sign-in offered (memql#3741).
+      return "done";
     default:
       return "collect";
   }

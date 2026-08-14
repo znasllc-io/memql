@@ -5,8 +5,36 @@
 **Surface:** VS Code extension (`editors/vscode`)
 **Supersedes:** §4.5 of `2026-08-08-local-cluster-install-wizard-design.md` on the choice of renderer (see D4)
 **Delivers:** Epic 2 of that design, plus the Clusters-tree gaps it never covered
+**Superseded in part by:** `2026-08-14-vscode-deployments-surface-design.md` (epic memql#3733)
 
 ---
+
+> **SUPERSEDED IN PART, and left standing rather than edited into agreement.**
+>
+> This is a record of a decision, and rewriting the record loses why the
+> decision changed. What follows was correct when it was written and three of
+> its conclusions are no longer the shape of the product:
+>
+> 1. **Install, repair and uninstall are no longer Clusters actions.** They
+>    moved to the **Deployments** view. Filing "install memQL on this machine"
+>    under "add a cluster" made the destructive act an incidental branch of the
+>    benign one -- the problem §1 of the newer spec opens with, observed in the
+>    tree rather than assumed.
+> 2. **The Cluster tab is gone.** `memql.cluster.open` and its topology view are
+>    deleted. Topology is cluster state, the portal owns it and already draws
+>    it, and two surfaces answering one question diverge on the day the second
+>    one ships. What replaced it is a CONNECTION page, which answers the
+>    question the topology view never did: what does this editor dial, and as
+>    whom.
+> 3. **Removing a cluster now has a way back.** The verdict this spec's
+>    presence pass computes is finally consumed: a cluster on the machine but
+>    not in the list is offered *Connect to the local cluster*, which asks for
+>    nothing.
+>
+> Everything else here -- the presence pass itself, the enablement model, the
+> add-a-cluster page's collect-then-run shape, the uninstall preview and the
+> Remove/Uninstall separation -- is still live, and the newer spec builds on it
+> rather than replacing it.
 
 ## 1. Problem
 

@@ -114,3 +114,65 @@ func TestServerOnlyMutationRefusesClientOrigin(t *testing.T) {
 		}
 	})
 }
+
+// TestServerOnlyCORSGrantMutationRefusesClientOrigin is the same gate over the
+// tree's second @serverOnly mutation, `setOAuthClientCORSOrigins` (memql#3716).
+//
+// It gets its own test rather than a row in the loop above because the STAKES
+// are a different sentence, and the sentence is the reason the annotation is
+// there: the field this mutation writes decides which browser origins may make
+// cookie-bearing requests to identity's auth endpoints and read the responses.
+// The row it writes to is created by an UNAUTHENTICATED stranger at POST
+// /register. So if a wire caller reaches this mutation, the owner/admin gate in
+// component/identity/adminops is decorative and any authenticated writer can
+// grant their own origin credentialed access.
+//
+// The annotation being present in the parsed tree is asserted by
+// test/dslconformance/server_only_parsed_test.go, and the one production caller
+// stamping internal origin by
+// component/identity/adminops/cors_test.go. Neither of those is this: an
+// annotation the loader reads but the dispatch path ignores is not a gate.
+func TestServerOnlyCORSGrantMutationRefusesClientOrigin(t *testing.T) {
+	fns, _ := loadRealTree(t)
+	e := &MemQLEngine{}
+
+	const name = "setOAuthClientCORSOrigins"
+	if fn, err := fns.Get(name); err != nil || fn == nil {
+		t.Fatalf("construct %q is not in the loaded tree (%v) -- a renamed construct returns "+
+			"`function not found`, which does not contain \"server-only\", so the internal-origin "+
+			"subtest below would pass while guarding nothing", name, err)
+	}
+
+	call := &FunctionCallExpression{
+		Name: name,
+		Args: map[string]any{
+			"clientId":        "mcp_selfregistered",
+			"corsOriginsJSON": `["https://evil.example"]`,
+		},
+	}
+	serverOnly := func(err error) bool {
+		return err != nil && strings.Contains(err.Error(), "server-only")
+	}
+
+	t.Run("client origin is refused", func(t *testing.T) {
+		_, err := e.executeMutationFunctionCall(context.Background(), call, fns)
+		if !serverOnly(err) {
+			t.Errorf("%s was NOT refused at client origin (err=%v).\n"+
+				"This mutation takes a caller-supplied client id AND a caller-supplied origin "+
+				"list, and v1:identity:oauthClient declares no @rowAuthz tier and has no owning "+
+				"user to scope against. Origin is the only boundary there is.", name, err)
+		}
+	})
+
+	t.Run("internal origin passes the gate", func(t *testing.T) {
+		ctx := auth.ContextWithInternalOrigin(context.Background())
+		_, err := e.executeMutationFunctionCall(ctx, call, fns)
+		if serverOnly(err) {
+			t.Errorf("%s was refused at INTERNAL origin: %v\n"+
+				"This is the half that breaks the feature rather than securing it: "+
+				"component/identity/adminops is the one production caller and it stamps an "+
+				"internal origin, downstream of its owner/admin gate, precisely so this call "+
+				"keeps working.", name, err)
+		}
+	})
+}

@@ -3233,6 +3233,23 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	return b.String()
 }
 
+// OAuthClientCORSGrants -- Returns every registered OAuth client carrying a non-empty granted CORS origin list.
+//
+// Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["oAuthClientCORSGrants"] in generated_concepts.go).
+type OAuthClientCORSGrantsArgs struct {
+}
+
+// OAuthClientCORSGrants calls the engine query oAuthClientCORSGrants.
+func (qc *QueryClient) OAuthClientCORSGrants(ctx context.Context, args OAuthClientCORSGrantsArgs) (*Result, error) {
+	call := OAuthClientCORSGrantsBuild(args)
+	return qc.executeNamed(ctx, "oAuthClientCORSGrants", call)
+}
+
+func OAuthClientCORSGrantsBuild(args OAuthClientCORSGrantsArgs) string {
+	_ = args
+	return "query oAuthClientCORSGrants()"
+}
+
 // OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.go).
@@ -4130,6 +4147,28 @@ func SiteByHostnameBuild(args SiteByHostnameArgs) string {
 	b.WriteString("query siteByHostname(")
 	b.WriteString("hostname: ")
 	b.WriteString(quoteMemQL(args.Hostname))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SiteById -- Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per v1:platform:site's declared tier.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteById"] in generated_concepts.go).
+type SiteByIdArgs struct {
+	SiteId string
+}
+
+// SiteById calls the engine query siteById.
+func (qc *QueryClient) SiteById(ctx context.Context, args SiteByIdArgs) (*Result, error) {
+	call := SiteByIdBuild(args)
+	return qc.executeNamed(ctx, "siteById", call)
+}
+
+func SiteByIdBuild(args SiteByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query siteById(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
 	b.WriteString(")")
 	return b.String()
 }

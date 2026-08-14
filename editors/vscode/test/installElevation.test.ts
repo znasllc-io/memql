@@ -190,6 +190,9 @@ function openPanel(options: {
     clustersPath: path.join(dir, "clusters.yaml"),
     receiptFile: path.join(dir, "install-receipt.json"),
     installRoot: REPO_ROOT,
+    // Kept out of the developer's own ~/.memql/runs: every run writes a record
+    // now (memql#3739), and the default is the real one.
+    runsDir: path.join(dir, "runs"),
     refreshTree: () => undefined,
     removeRegistryEntry: async () => undefined,
     runScript: options.runner.run,

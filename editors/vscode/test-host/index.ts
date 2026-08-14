@@ -42,14 +42,17 @@ import * as vscode from "vscode";
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { defaultClustersPath } from "../src/clusters/file.js";
+import { defaultRunsDir } from "../src/state/runLog.js";
 import { ClusterPresence, defaultEndpointProbe } from "../src/clusters/presence.js";
 import { ConnectionManager } from "../src/connection/manager.js";
 import type { AutomationTarget, RunTarget } from "../src/constructs/runnable.js";
 import { StepTraceModel } from "../src/state/stepTrace.js";
 import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPanel.js";
 import type { AutomationPanelHost } from "../src/webview/automationPanel.js";
-import { ClusterPanel } from "../src/webview/clusterPanel.js";
+import { ConnectionPanel } from "../src/webview/connectionPanel.js";
+import { ConstructPanel } from "../src/webview/constructPanel.js";
 import { ConceptPanel } from "../src/webview/conceptPanel.js";
+import { DeploymentPanel } from "../src/webview/deploymentPanel.js";
 import { ResultPanel, RunPanel } from "../src/webview/runPanel.js";
 import type { RunPanelHost } from "../src/webview/runPanel.js";
 
@@ -342,6 +345,58 @@ smoke("a watcher fires for a path outside the workspace", async () => {
   }
 });
 
+smoke("the run-log directory is watched, so a run in flight repaints the tree", async () => {
+  await extension().activate();
+
+  // The Deployments tree's third refresh trigger, and the one most exposed to
+  // the B1 bug class above: unlike clusters.yaml and the receipt, ~/.memql/runs
+  // is a DIRECTORY that has never existed on a machine that has never run an
+  // install -- which is every machine the first time. A non-recursive watch of
+  // a missing directory cannot be established and, on the declared 1.91 floor,
+  // never recovers when the directory later appears. So activation has to
+  // create it, and only a real host can show whether it did.
+  const runsDir = defaultRunsDir();
+  assert.ok(
+    fs.existsSync(runsDir),
+    `${runsDir} does not exist after activation. The Deployments tree must create the watch base before calling createFileSystemWatcher, or a run in flight never repaints the tree -- and nothing throws when it does not.`
+  );
+
+  const runFile = path.join(runsDir, "20260814T120000Z-install-hostsmoke.json");
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(vscode.Uri.file(runsDir), "*.json")
+  );
+  let fired = false;
+  watcher.onDidCreate(() => {
+    fired = true;
+  });
+  watcher.onDidChange(() => {
+    fired = true;
+  });
+
+  try {
+    // Written repeatedly for the reason the case above documents: the watcher
+    // is not established when createFileSystemWatcher returns, and a run log
+    // is rewritten per step anyway -- so this is also what the real write
+    // pattern looks like.
+    await waitFor(
+      `a RelativePattern watcher on ${runsDir} to fire`,
+      () => {
+        fs.writeFileSync(
+          runFile,
+          `{"version":1,"run":{"id":"20260814T120000Z-install-hostsmoke","instance":"local","kind":"install","startedAt":"2026-08-14T12:00:00Z","status":"running","items":[]}}\n`,
+          "utf8"
+        );
+        return fired;
+      },
+      30_000,
+      500
+    );
+  } finally {
+    watcher.dispose();
+    fs.rmSync(runFile, { force: true });
+  }
+});
+
 // -----------------------------------------------------------------------------
 // Webview surfaces
 // -----------------------------------------------------------------------------
@@ -399,7 +454,15 @@ smoke("every webview surface opens without throwing", async () => {
   ConceptPanel.open(context, connections, concept);
   expected.push(`Concept: ${concept.entity}`);
 
-  ClusterPanel.open(context, connections, "smoke-cluster");
+  ConnectionPanel.open(
+    context,
+    {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
+      connections,
+      readExpiry: async () => undefined,
+    },
+    "smoke-cluster",
+  );
   expected.push("Cluster: smoke-cluster");
 
   RunPanel.open(context, runHost, runTarget);
@@ -419,6 +482,58 @@ smoke("every webview surface opens without throwing", async () => {
 
   StepTracePanel.show(context, automationTarget, new StepTraceModel());
 
+  // The construct detail page (memql#3752), opened on a PROMOTED construct --
+  // the case with no file at all, whose source has nowhere else to be shown
+  // and which is where a developer first meets the seeded-versus-trained
+  // distinction. It is also the case that would throw if the page assumed a
+  // file existed.
+  ConstructPanel.open(context, {
+    name: "trainedResponder",
+    kind: "logic",
+    namespace: "",
+    origin: "promoted",
+    originPath: "",
+    description: "host smoke fixture",
+    runnable: true,
+    runnableKind: "logic",
+    args: [{ name: "spaceId", type: "string", required: true }],
+    boundConcept: "",
+    sourceHash: "abc123",
+    source: "logic trainedResponder {\n  body { return 1 }\n}",
+  });
+  expected.push("Construct: trainedResponder");
+
+  // The instance page (memql#3739). Opened against a machine with NO local
+  // cluster, which is the state it has to render first and the one an operator
+  // on a fresh checkout sees: presence says `absent`, so the page offers
+  // Create deployment and nothing else. The title carries the instance name,
+  // which is how this case sees that the catalog read actually completed --
+  // the panel opens titled "memQL deployment" and renames itself once it has
+  // read the machine.
+  DeploymentPanel.show(context, {
+    catalog: {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
+      receiptPath: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+      runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+      presence: async () => ({
+        verdict: "absent" as const,
+        evidence: { receipt: false, registry: false },
+        endpoint: "",
+      }),
+    },
+    installRoot: os.tmpdir(),
+    receiptFile: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+    runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+    refreshTree: () => undefined,
+    // Rejecting rather than pretending, like the two hosts above: nothing here
+    // clicks a button, and a stub that resolved would let a page that reached
+    // for the wizard on OPEN sail through.
+    openInstallFlow: () => {
+      throw new Error("no install flow in the smoke lane");
+    },
+  });
+  expected.push("Deployment: local");
+
   try {
     // Tabs appear asynchronously -- createWebviewPanel returns before the
     // workbench has the tab in its model.
@@ -431,6 +546,73 @@ smoke("every webview surface opens without throwing", async () => {
       15_000
     );
     info(`open tabs: ${openTabLabels().join(", ")}`);
+  } finally {
+    await closeAllTabs();
+    for (const entry of context.subscriptions) {
+      entry.dispose();
+    }
+  }
+});
+
+smoke("the remote instance page renders all three pipeline states", async () => {
+  await closeAllTabs();
+  const context = fakeContext();
+
+  // Driven entirely through injected seams, because none of the three states
+  // needs a cluster to be true and two of them are FAILURES of a read -- the
+  // point of the design is that neither is an error, so neither should need a
+  // broken cluster to reach.
+  const base = {
+    catalog: {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-remote-clusters.yaml"),
+      receiptPath: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+      runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+      presence: async () => ({
+        verdict: "absent" as const,
+        evidence: { receipt: false, registry: false },
+        endpoint: "",
+      }),
+      readClusters: async () => ({
+        ok: true as const,
+        file: { clusters: [{ name: "staging", endpoint: "api.staging.example.com:443" }], selectedCluster: "staging" },
+      }),
+    },
+    installRoot: os.tmpdir(),
+    receiptFile: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+    runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+    refreshTree: () => undefined,
+    openInstallFlow: () => {
+      throw new Error("no install flow in the smoke lane");
+    },
+  };
+
+  try {
+    for (const [label, port] of [
+      // Not connected: the read never happened, which is its own sentence and
+      // not a claim that the cluster has no deploy console.
+      ["no connection", undefined],
+      // Refused by the role gate.
+      [
+        "role gate",
+        {
+          getDeploymentStatus: () => Promise.reject(new Error("PERMISSION_DENIED")),
+        } as never,
+      ],
+      // Answered.
+      ["answered", { getDeploymentStatus: () => Promise.resolve({ environment: "staging" }) } as never],
+    ] as const) {
+      DeploymentPanel.show(
+        context,
+        { ...base, ...(port === undefined ? {} : { deployPort: () => port }) },
+        "staging",
+      );
+      await waitFor(
+        `the remote page (${label}) to title itself (saw: ${openTabLabels().join(", ")})`,
+        () => openTabLabels().includes("Deployment: staging"),
+        15_000
+      );
+      info(`remote instance page rendered: ${label}`);
+    }
   } finally {
     await closeAllTabs();
     for (const entry of context.subscriptions) {

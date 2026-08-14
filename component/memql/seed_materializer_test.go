@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
@@ -478,4 +479,63 @@ func TestCanonicalSeedConceptID_1608(t *testing.T) {
 			t.Fatalf("query still contains malformed concept id: %s", q)
 		}
 	})
+}
+
+// TestSeedMaterializerActorCanReseedAClusterOwnerTierConcept guards the exact
+// regression systemActorContext's AccessContext addition (memql#3711) closes.
+//
+// Every seed target concept until the portal seed (dsl/platform/seeds.memql)
+// was UNDECLARED tier, so guardRowAuthzWrite's `decl == nil` branch let every
+// seed write through regardless of actor and this gap was invisible.
+// v1:platform:site is @rowAuthz(clusterOwner); RE-materializing an existing
+// seed row (every boot after the first) walks guardRowAuthzWrite with
+// existed=true -- the SAME path update/delete take, regardless of whether the
+// mutation was authored as insert{} or update{} (executor_mutation.go's
+// executeWrite). Before this fix that call was refused unconditionally: the
+// materializer's ctx carried a TokenInfo but no AccessContext, and
+// rowAuthzIsClusterOwner reads AccessContext only, so it denied every time.
+//
+// Uses the SAME declared-clusterOwner-tier fixture
+// (writeGuardClusterOwnerConcept, rowauthz_write_guard_test.go) rather than
+// standing up an engine to reach the real site concept, because the property
+// under test -- does the materializer's own actor context satisfy this guard
+// -- is concept-agnostic once a tier is declared.
+func TestSeedMaterializerActorCanReseedAClusterOwnerTierConcept(t *testing.T) {
+	// declFor forces LoadUnifiedConcepts and asserts the fixture really does
+	// declare clusterOwner -- without it this test would false-pass whenever
+	// run in isolation (rowAuthzDeclFor reads a registry no other test in
+	// this file happens to have populated first), which is exactly the kind
+	// of run-order-dependent false green this fix must not rest on.
+	declFor(t, writeGuardClusterOwnerConcept)
+
+	ctx := systemActorContext(context.Background())
+	err := guardRowAuthzWrite(ctx, writeGuardClusterOwnerConcept,
+		writeGuardClusterOwnerConcept+":a-call", map[string]any{"disposition": "completed"},
+		priorExists, isInsert)
+	if err != nil {
+		t.Fatalf("the seed materializer's own actor context was refused re-materializing "+
+			"an existing row of a clusterOwner-tier concept: %v\n"+
+			"This is exactly the property the portal seed depends on for its re-seed-at-boot "+
+			"guarantee: v1:platform:site is @rowAuthz(clusterOwner), and every boot after the "+
+			"first re-inserts the SAME site:portal id.", err)
+	}
+}
+
+// TestSeedMaterializerActorContextIsAdditive is the companion negative check:
+// the AccessContext stamp must not have REPLACED the TokenInfo/claims surface
+// isSystemActor and every validator built on it (rbac_role_immutable_validation.go,
+// agent_role_predefined_validation.go, ...) read to recognize the materializer
+// as trusted. Constructed with a zero-value auth.UserIdentity so the assertion
+// exercises ONLY the actor-string-prefix half of isSystemActor -- the half
+// this change did not touch.
+func TestSeedMaterializerActorContextIsAdditive(t *testing.T) {
+	if !isSystemActor(auth.UserIdentity{}, seedMaterializerActor) {
+		t.Fatal("seedMaterializerActor no longer satisfies isSystemActor's actor-string-prefix " +
+			"check -- the AccessContext addition to systemActorContext must be purely additive")
+	}
+
+	ctx := systemActorContext(context.Background())
+	if !rowAuthzIsClusterOwner(ctx) {
+		t.Fatal("systemActorContext did not stamp a cluster-owner AccessContext onto ctx")
+	}
 }
