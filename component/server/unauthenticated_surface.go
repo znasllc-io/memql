@@ -89,6 +89,46 @@ func HandlerAuthorizedPaths() []string {
 		// If identity's gRPC chain ever stops rejecting by default, this entry
 		// stops being true -- exactly as the /memql/ws entry says of itself.
 		"/memql/query",
+		// POST /sites/{id}/bundles -- the atomic bundle-publish endpoint
+		// (memql#3713). component/edge.Publisher holds the atomic
+		// upload-then-flip logic; per that epic's controller ruling the BFF
+		// mounts the HTTP handler over it, not the edge node -- the edge is
+		// wildcard-routed BY SITE HOSTNAME, so a site-agnostic publish
+		// endpoint has no coherent address there, and neither half of the
+		// work (writing to object storage, flipping one graph row) needs the
+		// edge node at all. Declared here so the boot-completeness check
+		// already accounts for the route the moment it is registered.
+		//
+		// The handler verifies a class="service_account" identity-issued JWT
+		// itself (memql#691) before calling Publish -- that is what
+		// HandlerAuthorizedPaths membership means here, so this deliberately
+		// does NOT go in PublicPaths(): that list is consulted by the
+		// verifier middleware on every verifier-consuming node, which would
+		// make the route unauthenticated for every bearer, not just a
+		// service-account one. It is also NOT in SelfAuthenticatedPaths():
+		// the credential IS a memQL identity, just a narrower class of one,
+		// so there is no reason to make the ordinary bearer verifier step
+		// aside the way it does for a third-party HMAC.
+		//
+		// Trailing slash, matching every other multi-segment route already in
+		// this list ("/automations/{name}/trigger" under "/automations/"):
+		// surfaceDeclaredBy (below) treats a trailing-slash entry as an OPEN
+		// prefix with no depth limit, so "/sites/" covers the full two-segment
+		// "{id}/bundles" tail with no extra work. That is a DIFFERENT, LOOSER
+		// rule than the one verifier.isSelfAuthenticated enforces for
+		// SelfAuthenticatedPaths() (exact match, or exactly one further
+		// segment under a mount) -- this route is not on that list, and
+		// HandlerAuthorizedPaths() has no runtime bypass effect on a
+		// verifier-consuming node at all (HTTPMiddleware only ever reads
+		// PublicPaths / SelfAuthenticatedPaths); this list only feeds the
+		// boot-time completeness check AssertUnauthenticatedSurfaceDeclared
+		// runs. So on the bff the ordinary bearer verifier still runs ahead
+		// of the handler and requires SOME valid identity; the handler's own
+		// class check is what narrows that down to the service-account
+		// credential specifically, and it must reject a request with no
+		// claims at all -- the same fail-closed bar the two /automations/
+		// entries above meet.
+		"/sites/",
 	}
 	// POST /inbound/{source} -- the inbound-delivery receiver (memql#2957).
 	// Appended rather than written inline because the prefix has to agree with
