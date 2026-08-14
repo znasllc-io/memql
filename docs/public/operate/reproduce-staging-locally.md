@@ -176,10 +176,10 @@ No file under `deploy/` names a domain.
 
 The installer points the front-door hostnames at 127.0.0.1 -- unless they
 already resolve there. If your own DNS answers 127.0.0.1 for
-`api.<domain>`, `identity.<domain>`, `portal.<domain>` and the apex, the hosts
-block is skipped entirely and no elevation prompt appears. A hostname resolving
-to some OTHER address is refused rather than shadowed, naming the address it
-answered.
+`api.<domain>`, `identity.<domain>`, `mcp.<domain>`, `portal.<domain>` and the
+apex, the hosts block is skipped entirely and no elevation prompt appears. A
+hostname resolving to some OTHER address is refused rather than shadowed,
+naming the address it answered.
 
 Note that a resolver honouring RFC 6761 -- systemd-resolved does -- already
 answers every `*.localhost` name on loopback, so on those machines the default

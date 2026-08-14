@@ -105,19 +105,12 @@ func TestEveryNodeReadsTheDomainConfigMap(t *testing.T) {
 // The assertion is therefore about the RENDERED VALUES, not about a list of
 // variable names: a name-keyed check would have to be extended by whoever adds
 // the seventh, which is exactly the discipline that failed here.
-//
-// MEMQL_MCP_PUBLIC_URL is exempt and separately tracked: the local overlay has
-// never patched it and there is no mcp Ingress locally, so it is a pre-existing
-// gap rather than part of this mechanism.
 func TestNoNodeCarriesAPlaceholderDomain(t *testing.T) {
 	rendered := render(t)
 
 	for i, line := range strings.Split(rendered, "\n") {
 		if !strings.Contains(line, "staging.example.com") {
 			continue
-		}
-		if strings.Contains(line, "mcp.staging.example.com") {
-			continue // MEMQL_MCP_PUBLIC_URL, see above
 		}
 		t.Errorf("line %d carries a placeholder domain, which beats the derivation "+
 			"for that variable and makes the node serve a host nothing resolves:\n  %s",

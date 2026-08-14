@@ -1,0 +1,34 @@
+# The MCP protocol head. Its own host rather than a path under api.<domain>
+# for the reason that shapes this whole directory: an ingress controller's
+# backend protocol is a per-SERVICE setting, and the mcp node is a different
+# Service on a different port (8090) speaking plain HTTP, not h2c.
+#
+# Not proxied through the edge either -- MCP clients configure a URL, they are
+# not browsers, and an extra hop on a tool-calling path buys nothing.
+#
+# FIRST REAL EXERCISE OF :8090. deploy/k8s/base/mcp.yaml has carried the port
+# and a comment saying a public ingress targets it, but no overlay in this
+# repository defined one. Protocol details (streamable HTTP vs SSE, timeouts)
+# may surface here that nothing has tested.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mcp-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts: ["mcp.memql.localhost"]
+      secretName: memql-front-door-tls
+  rules:
+    - host: mcp.memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: mcp
+                port:
+                  number: 8090

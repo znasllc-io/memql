@@ -1824,7 +1824,7 @@ variables:
     component: mcp
     scope: node
     optional: true
-    description: "Public URL of the MCP resource advertised in OAuth discovery metadata and the 401 WWW-Authenticate hint."
+    description: "Public URL of the MCP resource advertised in OAuth discovery metadata and the 401 WWW-Authenticate hint. Derived from MEMQL_DOMAIN (as https://mcp.<domain>) when unset, set-if-absent, same mechanism as the identity URLs; empty when neither is set."
 
   - name: MEMQL_MCP_ROLE
     component: mcp

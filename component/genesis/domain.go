@@ -11,8 +11,9 @@ import (
 
 // MEMQL_DOMAIN is the ONE input from which every domain-shaped env var is
 // derived. A deployment states its domain once; identity's base URL, the issuer
-// every node verifies against, the discovery endpoint, the CORS origins and the
-// OAuth redirect URIs all follow from it.
+// every node verifies against, the discovery endpoint, the CORS origins, the
+// OAuth redirect URIs, and the MCP protocol head's public URL all follow from
+// it.
 //
 // WHY DERIVE RATHER THAN CONFIGURE EACH. Those six values are one fact spelled
 // six ways, and the local overlay used to spell it six times plus twice more in
@@ -29,7 +30,7 @@ import (
 // is already bridged onto its new name) and BEFORE any component reads its
 // config.
 //
-// Refs: memql#3593 memql#3590 memql#3315
+// Refs: memql#3593 memql#3590 memql#3315 memql#3704
 
 // domainPattern is what a domain may look like: two or more lowercase labels,
 // no scheme, no port, no wildcard, no trailing dot. Deliberately strict --
@@ -85,6 +86,12 @@ func DomainDerivations(domain string) map[string]string {
 		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api." + d + ":443",
 		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + ",https://portal." + d,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
+		// The MCP protocol head's own front-door host (memql#3704) -- advertised
+		// in OAuth discovery metadata and the 401 WWW-Authenticate hint
+		// (app/transport_mcp.go). Not an identity value, but the same
+		// set-if-absent derivation applies: a deployment that pins its own
+		// MEMQL_MCP_PUBLIC_URL keeps it untouched.
+		"MEMQL_MCP_PUBLIC_URL": "https://mcp." + d,
 	}
 }
 

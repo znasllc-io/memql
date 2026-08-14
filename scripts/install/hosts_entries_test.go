@@ -486,7 +486,7 @@ func TestHostsEntriesDefaultHostnamesAreTheFrontDoor(t *testing.T) {
 		t.Fatalf("add failed (exit %d): %s", code, out)
 	}
 	got := hostsRead(t, path)
-	for _, h := range []string{"api.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
+	for _, h := range []string{"api.memql.localhost", "identity.memql.localhost", "mcp.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(got, "127.0.0.1 "+h+"\n") {
 			t.Errorf("front-door hostname %q missing from:\n%q", h, got)
 		}
