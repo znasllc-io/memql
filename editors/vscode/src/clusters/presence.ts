@@ -36,6 +36,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 
 import { composeEndpointFromDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
+import { offersReconnect } from "./reconnect.js";
 import { readClustersFileSafe } from "./file.js";
 import type { ClusterConfig } from "./model.js";
 
@@ -451,6 +452,7 @@ export type AddClusterAction =
   | "install"
   | "installGuided"
   | "connect"
+  | "reconnect"
   | "repair"
   | "uninstall";
 
@@ -459,6 +461,20 @@ export interface AddClusterChoice {
   label: string;
   detail: string;
 }
+
+/**
+ * The card that consumes the verdict (memql#3741).
+ *
+ * Distinct from CONNECT, which is the REMOTE registration form. This one asks
+ * nothing: the machine already knows the domain, either from the install
+ * receipt or from the installer's own default, and the entry is composed from
+ * it. See clusters/reconnect.ts.
+ */
+const RECONNECT: AddClusterChoice = {
+  action: "reconnect",
+  label: "Connect to the local cluster",
+  detail: "It is already on this machine. memQL uses what the install recorded -- nothing to type.",
+};
 
 const CONNECT: AddClusterChoice = {
   action: "connect",
@@ -491,7 +507,11 @@ const UNINSTALL: AddClusterChoice = {
  * the quick pick that needed it: `installed-healthy` now has two entries, and
  * the caller renders cards rather than a picker either way (memql#3472).
  */
-export function addClusterMenu(verdict: PresenceVerdict): AddClusterChoice[] {
+export function addClusterMenu(
+  verdict: PresenceVerdict,
+  registered: boolean,
+): AddClusterChoice[] {
+  const reconnect = offersReconnect(verdict, registered) ? [RECONNECT] : [];
   switch (verdict) {
     case "absent":
       return [
@@ -510,16 +530,22 @@ export function addClusterMenu(verdict: PresenceVerdict): AddClusterChoice[] {
         CONNECT,
       ];
     case "installed-unreachable":
+      // Repair first: an operator looking at a cluster that will not answer
+      // came to fix it. Reconnecting is what they do next, or instead.
       return [
         {
           action: "repair",
           label: "Repair the local cluster",
           detail: "A local cluster is installed but is not answering.",
         },
+        ...reconnect,
         UNINSTALL,
         CONNECT,
       ];
     case "installed-healthy":
-      return [CONNECT, UNINSTALL];
+      // Reconnect FIRST when it is offered at all: a healthy cluster that is
+      // not in the list is a cluster the operator removed the row for, and
+      // putting it back is the only reason they opened this menu.
+      return [...reconnect, CONNECT, UNINSTALL];
   }
 }

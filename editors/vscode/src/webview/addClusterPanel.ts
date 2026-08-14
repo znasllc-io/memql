@@ -47,6 +47,7 @@ import {
 import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
+import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -108,6 +109,7 @@ const CHOICE_ACTIONS: readonly AddClusterAction[] = [
   "install",
   "installGuided",
   "connect",
+  "reconnect",
   "repair",
   "uninstall",
 ];
@@ -274,6 +276,15 @@ export class AddClusterPanel {
   private readonly state = new AddClusterState();
   private readonly disposables: vscode.Disposable[] = [];
   private verdict: PresenceVerdict = "installed-unreachable";
+  /**
+   * Whether a `local: true` entry is already in the registry.
+   *
+   * Defaults TRUE, which withholds the reconnect card until the presence read
+   * says otherwise. The safe direction: offering to compose an entry for a
+   * cluster that already has one would quietly rewrite a row the operator may
+   * have edited by hand.
+   */
+  private localRegistered = true;
   private disposed = false;
   private saving = false;
   /** Non-undefined exactly while a run is in flight; also the cancel handle. */
@@ -395,9 +406,15 @@ export class AddClusterPanel {
    */
   private async refreshVerdict(): Promise<void> {
     try {
-      this.verdict = (await this.presence.get()).verdict;
+      const presence = await this.presence.get();
+      this.verdict = presence.verdict;
+      // `clusterName` is set exactly when a `local: true` entry was found, so
+      // it IS the registration fact -- read from the same pass rather than
+      // from a second read of clusters.yaml that could disagree with it.
+      this.localRegistered = presence.clusterName !== undefined;
     } catch {
       this.verdict = "installed-unreachable";
+      this.localRegistered = true;
     }
     this.render();
   }
@@ -417,6 +434,14 @@ export class AddClusterPanel {
     if (type === "choose" && typeof value === "string") {
       const action = CHOICE_ACTIONS.find((known) => known === value);
       if (action === undefined) return;
+      // RECONNECT IS GATED ON THE VERDICT, not merely on the id. The
+      // postMessage channel is untrusted, and this action WRITES a registry
+      // entry pointing at a front door -- on a machine with no cluster that is
+      // a row for an address nothing serves, and on one already registered it
+      // would quietly rewrite an entry the operator may have edited by hand.
+      // The other cards ask for confirmation or collect fields before they
+      // change anything; this one does not, so the check is here.
+      if (action === "reconnect" && !offersReconnect(this.verdict, this.localRegistered)) return;
       this.state.chooseAction(action);
       // The duplicate-name check needs a registry to check against, and this
       // is the moment it becomes worth reading one. Nothing waits on it: the
@@ -432,6 +457,11 @@ export class AddClusterPanel {
       // branch opens rather than behind a further click: there is nothing on
       // this screen for the operator to do until it is on screen.
       if (action === "uninstall") void this.loadUninstallPreview();
+      // NOTHING TO ASK. The domain comes off the receipt (or the installer's
+      // default), the entry is composed from it, and the hand-off screen the
+      // action lands on is the same one a finished install reaches -- so the
+      // operator's next click is "Sign in as owner" either way (memql#3741).
+      if (action === "reconnect") void this.reconnectLocal();
       this.render();
       return;
     }
@@ -1482,7 +1512,9 @@ ${this.bodyHtml()}
 
   /** The cards, straight from addClusterMenu. */
   private landingHtml(): string {
-    const choices = addClusterMenu(this.verdict);
+    // `registered` is what decides whether the reconnect card appears at all:
+    // a cluster already in the list has nothing to compose (memql#3741).
+    const choices = addClusterMenu(this.verdict, this.localRegistered);
     const cards = choices.map((choice) => this.cardHtml(choice)).join("");
     return `<h1>Add a memQL cluster</h1>
 <p class="lede">${escapeHtml(VERDICT_LEDE[this.verdict])}</p>
@@ -1911,6 +1943,26 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     );
     this.state.setHandoff(result);
     this.render();
+  }
+
+  /**
+   * Registers the local cluster that is already on this machine.
+   *
+   * THE SAME HAND-OFF AN INSTALL USES, deliberately: write, invalidate the
+   * presence memo, refresh, select, and report whether sign-in can be offered.
+   * A cluster reconnected to is registered IDENTICALLY to one just built --
+   * `local: true` and all -- because two spellings of that entry would be two
+   * answers to what a local cluster's row looks like.
+   *
+   * The only thing this adds is where the domain comes from, and the whole
+   * point of the action is that it comes from the machine rather than from the
+   * operator. See clusters/reconnect.ts.
+   */
+  private async reconnectLocal(): Promise<void> {
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    if (this.disposed) return;
+    const plan = planLocalReconnect(receipt);
+    await this.handOffAfterInstall(plan.domain);
   }
 
   /**

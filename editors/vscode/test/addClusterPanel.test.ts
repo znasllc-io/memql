@@ -200,25 +200,50 @@ function context(): ExtensionContext {
  * A presence probe that answers without touching the network or the operator's
  * files: the real `ClusterPresence`, over injected readers.
  */
-function presenceFor(verdict: "absent" | "installed-unreachable"): ClusterPresence {
+function presenceFor(
+  verdict: "absent" | "installed-healthy" | "installed-unreachable",
+): ClusterPresence {
   return new ClusterPresence({
     clustersPath: path.join(HOME, "clusters.yaml"),
     receiptPath: path.join(HOME, "no-such-receipt.json"),
+    // The entry carries a non-empty `receipt` because that is what
+    // `receiptEvidence` counts (memql#3544): an ARTIFACT, not an entry, so a
+    // failed run that recorded only its read-only steps is not read as an
+    // installed cluster. An empty entry list produced `absent` whatever this
+    // parameter said, which made the label here aspirational.
     readReceiptFile: async () =>
       verdict === "absent"
         ? null
-        : { version: 1, graph: "install", startedAt: "", updatedAt: "", entries: [] },
+        : {
+            version: 1,
+            graph: "install",
+            startedAt: "",
+            updatedAt: "",
+            entries: [
+              {
+                stepId: "toolK3d",
+                script: "install/tool.sh",
+                receipt: "binary",
+                preExisting: false,
+                params: {},
+                result: {},
+                changed: true,
+                recordedAt: "",
+              },
+            ],
+          },
     readClusters: async () => ({ ok: true as const, file: { selectedCluster: "", clusters: [] } }),
-    // Evidence without an answer IS `installed-unreachable`, which is the
-    // verdict the repair and uninstall cards hang off.
-    probe: async () => false,
+    // Evidence WITHOUT an answer is `installed-unreachable`; evidence WITH one
+    // is `installed-healthy`. Both are "something is here", which is what the
+    // repair, uninstall and reconnect cards hang off.
+    probe: async () => verdict === "installed-healthy",
   });
 }
 
 function open(options: {
   action?: AddClusterAction;
   runner?: FakeRunner;
-  verdict?: "absent" | "installed-unreachable";
+  verdict?: "absent" | "installed-healthy" | "installed-unreachable";
   /** Seeded before the panel opens, for the repair cases. */
   receipt?: unknown;
 }): Harness {
@@ -998,6 +1023,56 @@ test("no minted link means no button, and the magic link is primary again", asyn
       /class="primary" type="button" data-act="signInAsOwner"/,
       "with no passkey to offer, signing in is the primary route again",
     );
+  } finally {
+    h.close();
+  }
+});
+
+// -----------------------------------------------------------------------------
+// Reconnect: back in the list with nothing typed (memql#3741)
+// -----------------------------------------------------------------------------
+
+test("the reconnect card registers the cluster and never shows a form", async () => {
+  const h = open({
+    verdict: "installed-healthy",
+    receipt: {
+      version: 1,
+      graph: "install",
+      startedAt: "2026-08-01T00:00:00Z",
+      updatedAt: "2026-08-01T00:00:00Z",
+      entries: [
+        {
+          stepId: "seedBootstrap",
+          script: "install/seed-bootstrap.sh",
+          receipt: "",
+          preExisting: false,
+          params: { domain: "lab.example.com" },
+          result: {},
+          changed: true,
+          recordedAt: "2026-08-01T00:00:00Z",
+        },
+      ],
+    },
+  });
+  try {
+    // WAIT FOR THE CARD, which is also the honest sequence: the verdict is
+    // read asynchronously and the cards do not exist until it resolves, so an
+    // operator cannot click this before then either -- and the panel refuses
+    // the action until it can confirm the machine actually has a cluster.
+    await until(() => h.html().includes("Connect to the local cluster"), "the reconnect card");
+    h.post({ type: "choose", value: "reconnect" });
+    await until(() => h.html().includes("Sign in as owner"), "the hand-off screen");
+
+    // NOT ONE INPUT. The whole action is that the machine already knows the
+    // answers, so a screen with a box on it would be the form it replaces.
+    assert.doesNotMatch(h.html(), /<input/);
+    assert.doesNotMatch(h.html(), /<select/);
+
+    // And the entry it wrote is the install's own, at the receipt's domain.
+    const written = fs.readFileSync(h.clustersPath, "utf8");
+    assert.match(written, /name: lab/);
+    assert.match(written, /endpoint: api\.lab\.example\.com:443/);
+    assert.match(written, /local: true/);
   } finally {
     h.close();
   }
