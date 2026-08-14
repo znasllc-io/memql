@@ -34,5 +34,22 @@ data:
   # component/database/search_path.go and is not repeated here.
   MEMQL_DB_SEARCH_PATH: "memql_staging, public"
 
-  # The host prefix is not here yet -- see the prod twin. It arrives with the
-  # generator that consumes it (memql#3767).
+  # THE THIRD VALUE (memql#3767) -- see the prod twin for what reads it and why
+  # both consumers go through component/frontdoor. What this label does, here:
+  #
+  #   role hosts hyphenate   api-staging.<domain>      ONE label
+  #   site hosts nest        shop.staging.<domain>     TWO labels
+  #
+  # The hyphen is not a style choice. A TLS wildcard matches exactly one label,
+  # so `*.<domain>` covers `api-staging.<domain>` and does NOT cover
+  # `api.staging.<domain>` -- keeping the role hosts single-label means this
+  # environment needs no certificate of its own for them. Its SITES cannot do
+  # that, because a site's own name already occupies that label, so it requests
+  # ONE additional wildcard, `*.staging.<domain>`: one certificate for all of
+  # this environment's sites, not one per site.
+  #
+  # And a site here lives under the CLUSTER's domain. The host for
+  # shop.acme.com is shop.staging.<clusterdomain>, never shop.staging.acme.com:
+  # this is the operator's own testing surface and must not require DNS the
+  # operator may not control.
+  MEMQL_HOST_LABEL: "staging"

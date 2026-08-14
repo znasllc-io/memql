@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // MEMQL_DOMAIN is the ONE input from which every domain-shaped env var is
@@ -47,19 +49,43 @@ var numericTLD = regexp.MustCompile(`\.[0-9]+$`)
 // DomainDerivations returns the env values a domain implies. An empty map means
 // the domain was empty or malformed; callers derive nothing rather than
 // deriving something wrong.
-func DomainDerivations(domain string) map[string]string {
+//
+// hostLabel is the environment's front-door label (memql#3767) -- empty for the
+// unprefixed environment, which is every single-environment cluster and every
+// local one. It is threaded through component/frontdoor rather than
+// concatenated here, because the SAME rule decides the Ingress hosts the
+// generator writes: a role host hyphenates (api-staging.<d>) so the existing
+// wildcard certificate still covers it, and a SITE host nests
+// (portal.staging.<d>) because its own name already occupies that label. Two
+// copies of that rule would be two copies that can disagree, and a disagreement
+// here is an issuer nothing is served at -- which fails as "sign-in is broken"
+// with both manifests looking correct.
+//
+// An invalid label derives NOTHING, for the same reason an invalid domain does:
+// half a derivation is a cluster that boots and cannot be signed into.
+func DomainDerivations(domain, hostLabel string) map[string]string {
 	d := strings.TrimSpace(domain)
 	if !domainPattern.MatchString(d) || numericTLD.MatchString(d) {
 		return map[string]string{}
 	}
+	label := frontdoor.NormalizeLabel(hostLabel)
+	if err := frontdoor.ValidateLabel(label); err != nil {
+		return map[string]string{}
+	}
 
-	identity := "https://identity." + d
-	api := "https://api." + d
-	app := "https://app." + d
+	// role suffix hyphenates, site suffix nests -- see the package comment on
+	// component/frontdoor for why the two positions are not interchangeable.
+	role := frontdoor.DomainDerivationSuffix(label, d)
+	site := frontdoor.SiteSuffix(label, d)
+
+	identity := "https://identity" + role
+	api := "https://api" + role
+	app := "https://app" + site
 	// The portal is site #1 (memql#3711): its bundle is served at its OWN
 	// hostname, not a /portal/ sub-path of another node's origin, so its
-	// redirect URI is this origin's own /auth/callback.
-	portal := "https://portal." + d
+	// redirect URI is this origin's own /auth/callback. Being a site is also
+	// what puts it on the nesting suffix rather than the hyphenating one.
+	portal := "https://portal" + site
 
 	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
 	// redirect), so it carries no domain and is spelled out unchanged. Note
@@ -94,17 +120,32 @@ func DomainDerivations(domain string) map[string]string {
 		"MEMQL_IDENTITY_BASE_URL":                 identity,
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
-		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api." + d + ":443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + ",https://portal." + d,
+		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api" + role + ":443",
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + "," + portal,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
 		// The MCP protocol head's own front-door host (memql#3704) -- advertised
 		// in OAuth discovery metadata and the 401 WWW-Authenticate hint
 		// (app/transport_mcp.go). Not an identity value, but the same
 		// set-if-absent derivation applies: a deployment that pins its own
 		// MEMQL_MCP_PUBLIC_URL keeps it untouched.
-		"MEMQL_MCP_PUBLIC_URL": "https://mcp." + d,
+		"MEMQL_MCP_PUBLIC_URL": "https://mcp" + role,
 	}
 }
+
+// hostLabelEnv is the environment's front-door label, delivered on the
+// `memql-environment` ConfigMap beside MEMQL_ENVIRONMENT and
+// MEMQL_DB_SEARCH_PATH (deploy/k8s/overlays/<env>/environment.yaml).
+//
+// It is a VALUE and never a branch. The engine does not learn WHICH environment
+// it is from it -- only what its own hosts are called -- which is the
+// distinction TestNoEnvironmentBranchingInEngineCode exists to keep: staging
+// and production run the same images from the same base, so code able to tell
+// them apart would be a second way to deploy.
+//
+// Unset means the unprefixed environment. That is every single-environment
+// cluster, every local one, and the production namespace -- so the common path
+// through this file is byte-for-byte what it was before the label existed.
+const hostLabelEnv = "MEMQL_HOST_LABEL"
 
 // ApplyDomainDerivations paints the derived values onto the process
 // environment, set-if-absent. Idempotent: a second call finds every name
@@ -115,11 +156,12 @@ func ApplyDomainDerivations(logger *slog.Logger) {
 		return
 	}
 
-	derived := DomainDerivations(domain)
+	label := frontdoor.NormalizeLabel(os.Getenv(hostLabelEnv))
+	derived := DomainDerivations(domain, label)
 	if len(derived) == 0 {
 		if logger != nil {
-			logger.Warn("MEMQL_DOMAIN is not a usable domain; deriving nothing",
-				"domain", domain)
+			logger.Warn("MEMQL_DOMAIN and MEMQL_HOST_LABEL do not compose a usable host set; deriving nothing",
+				"domain", domain, "hostLabel", label)
 		}
 		return
 	}

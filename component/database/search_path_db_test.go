@@ -307,3 +307,111 @@ func TestMigrationsLandInTheEnvironmentSchema(t *testing.T) {
 			"is dropped from the path", env)
 	}
 }
+
+// TestPromotedConstructsDoNotCrossEnvironments is the assertion memql#3769 asks
+// for in the CODE rather than in an issue, because it is the behaviour people
+// will assume is a bug.
+//
+// # The wrong assumption, stated
+//
+// "I promoted the bundle to production, why is my promoted construct missing."
+//
+// Engine promotion pins production's image digests to the ones staging is
+// running, and a product's DSL bundle rides the same commit -- it is a
+// data-only image mounted at MEMQL_DSL_PATH, so promoting it IS pinning a
+// digest. Both of those are IMAGES. A promoted CONSTRUCT (memql#3746) is
+// neither: it is a `v1:authoring:construct` ROW, written by the durable-promote
+// path into whichever environment's schema the connection points at.
+//
+// So training does not travel with a promote, and training production is an
+// explicit act against production. That is deliberate -- a construct promoted
+// while exercising staging must not go live in production because somebody
+// shipped an unrelated engine version -- but it is not what the word "promote"
+// suggests on its own, which is why it is asserted here rather than explained
+// somewhere.
+//
+// # Why it is asserted against a real database
+//
+// The mechanism is the search path, and the failure mode of the mechanism is
+// silence: if the path were ever ignored the row WOULD be visible from the
+// other environment, and every test that mocks the database would still pass.
+// The complementary half -- that an engine promote performs no database write
+// at all, so nothing in it could carry a row across even in principle -- is
+// TestPromoteCarriesNoGraphState in component/deploycontrol, which asserts that
+// the promote's entire effect is digest lines in one git-tracked file.
+func TestPromotedConstructsDoNotCrossEnvironments(t *testing.T) {
+	const staging, prod = "memql_sp_construct_staging", "memql_sp_construct_prod"
+	const constructRow = "v1:authoring:construct:promoted-in-staging"
+
+	// The engine's node table, shaped as the initial migration creates it. Built
+	// directly rather than by migrating, because what is under test is where a
+	// ROW lands, and a full migration per schema would make this minutes long to
+	// assert the same thing.
+	admin := openOn(t, "")
+	ctx := context.Background()
+	for _, schema := range []string{staging, prod} {
+		for _, stmt := range []string{
+			`CREATE SCHEMA IF NOT EXISTS ` + schema,
+			`CREATE TABLE IF NOT EXISTS ` + schema + `."MemoryNodes" (
+				id TEXT NOT NULL, "createdAt" TIMESTAMPTZ NOT NULL, "createdBy" TEXT NOT NULL,
+				schema JSONB NOT NULL, payload JSONB NOT NULL, metadata JSONB NOT NULL DEFAULT '{}',
+				"type" TEXT NOT NULL DEFAULT 'object', concept TEXT NOT NULL,
+				PRIMARY KEY (id, "createdAt"))`,
+			`DELETE FROM ` + schema + `."MemoryNodes"`,
+		} {
+			if _, err := admin.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("seed %s: %v", schema, err)
+			}
+		}
+	}
+	t.Cleanup(func() {
+		for _, schema := range []string{staging, prod} {
+			_, _ = admin.ExecContext(context.Background(), `DROP SCHEMA IF EXISTS `+schema+` CASCADE`)
+		}
+	})
+
+	// Promote a construct while connected AS STAGING. No schema is named in the
+	// statement: the connection decides, which is the entire point.
+	stagingDB := openOn(t, staging+", public")
+	if _, err := stagingDB.ExecContext(ctx,
+		`INSERT INTO "MemoryNodes" (id, "createdAt", "createdBy", schema, payload, concept)
+		 VALUES (?, now(), 'v1:identity:user:tester', '{}', '{"status":"promoted"}', 'v1:authoring:construct')`,
+		constructRow); err != nil {
+		t.Fatalf("promoting a construct on the staging connection: %v", err)
+	}
+
+	var inStaging int
+	if err := stagingDB.QueryRowContext(ctx,
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:authoring:construct'`).Scan(&inStaging); err != nil {
+		t.Fatalf("reading constructs on the staging connection: %v", err)
+	}
+	if inStaging != 1 {
+		t.Fatalf("staging holds %d promoted constructs, want 1 -- the write did not land where this test assumes", inStaging)
+	}
+
+	// THE ASSERTION. An engine promote has happened in between (production is
+	// now running the image digests staging was running) and it changes nothing
+	// here: the construct is a row, rows are separated by the connection, and
+	// production's connection cannot see it.
+	prodDB := openOn(t, prod+", public")
+	var inProd int
+	if err := prodDB.QueryRowContext(ctx,
+		`SELECT count(*) FROM "MemoryNodes" WHERE concept = 'v1:authoring:construct'`).Scan(&inProd); err != nil {
+		t.Fatalf("reading constructs on the prod connection: %v", err)
+	}
+	if inProd != 0 {
+		t.Errorf("production can see %d construct(s) promoted in staging. Either the search-path boundary is not "+
+			"holding, or something started copying rows between environments -- neither is what an engine promote "+
+			"does, and both would make staging's authoring surface able to write production", inProd)
+	}
+
+	// And by id, so the count above cannot pass on a technicality.
+	var present bool
+	if err := prodDB.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM "MemoryNodes" WHERE id = ?)`, constructRow).Scan(&present); err != nil {
+		t.Fatalf("looking for the construct on the prod connection: %v", err)
+	}
+	if present {
+		t.Errorf("%s is visible from production", constructRow)
+	}
+}

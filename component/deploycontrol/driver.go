@@ -1,8 +1,12 @@
 // driver.go holds the provider allow-list + environment mapping that the
 // deploy-control actions (deploy.go) share.
 //
+// The environment SURFACE mapping -- which namespace, Application and overlay
+// each console env addresses -- lives next door in environment.go. This file
+// keeps the two mappings that are about which environments EXIST at all.
+//
 // The synchronous Go apply -- the deployDriver/azureDriver abstraction that
-// ran scripts/release/promote.sh inline and transitioned the record to its
+// ran the promote script inline and transitioned the record to its
 // terminal status -- was RETIRED in #2115 step 6. The deploy-as-a-pack
 // automations (examples/deploypack: driveDeploymentInProgress /
 // recordReconciledState) now own promote + the terminal transition off the
@@ -11,7 +15,7 @@
 // lifecycle (transition to in_progress); they never apply here.
 //
 // What remains is the provider allow-list (validateDeploymentProvider) and
-// the promote.sh env mapping (ConsoleEnvFor) -- both still needed: the
+// the console env mapping (ConsoleEnvFor) -- both still needed: the
 // kick-off validates the provider before transitioning, and the pack's
 // runPromote effect reuses ConsoleEnvFor so the env mapping lives in ONE
 // place. The Executor effect boundary (executor.go) + the proto/gRPC surface
@@ -39,12 +43,17 @@ func validateDeploymentProvider(provider string) error {
 }
 
 // ConsoleEnvFor maps a deployment record's environment enum (or an
-// already-console env) onto the promote.sh console env ("staging" |
-// "prod"). development / unknown envs map to "" -- they are not served by
+// already-console env) onto the console env ("staging" | "prod").
+// development / unknown envs map to "" -- they are not served by
 // the azure deploy target. Exported (Epic 2 / #2096) so the deploy PACK's
 // runPromote effect normalizes the deployment.environment enum the same way
 // the console does, keeping the env mapping in ONE place instead of
 // duplicating it in the DSL automation.
+//
+// UNCHANGED by memql#3769, deliberately. The console spelling is what
+// SurfaceFor (environment.go) is keyed on, so the two mappings compose --
+// enum -> console env -> namespace/Application/overlay -- and neither needs to
+// know the other's vocabulary.
 func ConsoleEnvFor(deploymentEnv string) string {
 	switch deploymentEnv {
 	case "production", "prod":
