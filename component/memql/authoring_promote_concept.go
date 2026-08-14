@@ -30,6 +30,7 @@ package memql
 // DIFF (memql#3757 -- additive lands, breaking is refused).
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -115,9 +116,17 @@ func (e *MemQLEngine) conceptBindingRegistry() memoryNodes.Registry {
 // specs, applied to the concept registry: a canonical id a CORE concept already
 // owns is refused. A re-promote of a previously promoted id is allowed and
 // replaces it -- the marker under "concept:<id>" is what tells the two apart.
-// (What a re-promote may CHANGE about the schema is memql#3757; this path
-// currently accepts whatever compiles.)
-func (e *MemQLEngine) promoteConceptIntoLiveRegistry(c *AuthoredConstruct, built *memoryNodes.Concept) error {
+//
+// # What a re-promote may CHANGE (memql#3757)
+//
+// Not "whatever compiles". A re-promote whose schema differs from the version
+// this cluster is running is classified: additive lands, breaking is refused
+// naming the field + a real row count + the real referencing constructs, and an
+// explicit override lands it anyway and is audited. The rules and the rendering
+// live in authoring_concept_diff.go; this path holds only the hook, and holds it
+// in the branch where a PRIOR version exists -- which is what makes a FIRST
+// promote structurally unable to reach the classifier.
+func (e *MemQLEngine) promoteConceptIntoLiveRegistry(ctx context.Context, gate *conceptPromoteGate, c *AuthoredConstruct, built *memoryNodes.Concept) error {
 	id := strings.TrimSpace(built.Name)
 	if id == "" {
 		return fmt.Errorf("authoring: promote concept %q: compiled concept carries no canonical id", c.Name)
@@ -137,6 +146,13 @@ func (e *MemQLEngine) promoteConceptIntoLiveRegistry(c *AuthoredConstruct, built
 	if existing, err := registry.Get(id); err == nil && existing != nil {
 		if _, promoted := e.promotedAuthored.Load(key); !promoted {
 			return fmt.Errorf("authoring: promote concept %q: a core concept already owns the id %q (promotion cannot redefine core)", c.Name, id)
+		}
+		// memql#3757: this is a RE-promote, and `existing` is the version this
+		// cluster is currently running. Classify the difference BEFORE anything
+		// is merged, persisted or broadcast -- a refusal must leave the live
+		// registry untouched and must never reach a peer.
+		if err := e.gateConceptSchemaChange(ctx, gate, c.OwnerUserId, existing, built); err != nil {
+			return fmt.Errorf("authoring: promote concept %q: %w", c.Name, err)
 		}
 	}
 

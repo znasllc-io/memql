@@ -1526,6 +1526,17 @@ message AuthoringSessionDefineBundleResult {
 message DurablePromoteBundleMsg {
   string request_id = 1;
   string sources = 2;  // .memql bundle source
+
+  // allow_breaking is the explicit operator override for a CONCEPT re-promote
+  // whose schema change would strand rows already written (memql#3757). Unset is
+  // the normal call: the engine classifies the difference against the version it
+  // is running, additive changes land, and a BREAKING one -- a removed field, a
+  // changed field type, a new required field, a narrowed enum -- is REFUSED with
+  // the classified diff on the reply. Set true to land it anyway; the engine
+  // audits the override on v1:identity:auditEvent naming the concept and the
+  // fields. It affects nothing else: every other refusal (core-first, a failed
+  // compile, a broken invariant) is unmoved by it.
+  bool allow_breaking = 3;
 }
 
 message DurablePromoteBundleResult {
@@ -1534,6 +1545,59 @@ message DurablePromoteBundleResult {
   repeated AuthoringConstruct promoted = 3;     // constructs durably promoted into the shared registry
   repeated AuthoringDiagnostic diagnostics = 4; // per-construct compile/bind diagnostics
   string error = 5;  // non-empty when the bundle was rejected (validation) or a promote failed
+
+  // concept_diffs carries the memql#3757 classification for every CONCEPT the
+  // bundle re-promotes over a version the cluster already runs -- on the refusal
+  // reply as well as the success one, because a refusal IS a diff. Empty for a
+  // first promote and for an unchanged re-promote.
+  //
+  // STRUCTURED on purpose: the SDK wraps this (memql#3760) and the editor
+  // renders it (memql#3763), and neither may have to parse a field name out of
+  // the prose in `error`.
+  repeated ConceptSchemaDiff concept_diffs = 6;
+}
+
+// ConceptSchemaDiff is the whole classification of one concept re-promote
+// (memql#3757). breaking is true when ANY change is breaking; overridden records
+// that a breaking change landed because allow_breaking was set. summary is the
+// rendered block the engine also puts in the refusal error, provided so a client
+// can show the engine's own wording without rebuilding it.
+message ConceptSchemaDiff {
+  string concept = 1;  // canonical concept id
+  bool breaking = 2;
+  bool overridden = 3;
+  repeated ConceptSchemaChange changes = 4;
+  string summary = 5;
+}
+
+// ConceptSchemaChange is ONE classified difference between the concept version
+// the cluster is running and the one being promoted over it.
+message ConceptSchemaChange {
+  string concept = 1;
+  // field is the payload field, dotted for a field inside a nested block
+  // ("preferences.theme"). Empty for a concept-level change (description, node
+  // type, a relationship).
+  string field = 2;
+  // kind is a closed set: field_added, field_removed, field_type_changed,
+  // field_required_added, field_required_dropped, enum_widened, enum_narrowed,
+  // description_changed, relationship_added, relationship_removed,
+  // node_type_changed.
+  string kind = 3;
+  bool breaking = 4;
+  // was / now render the two sides in the concept's own vocabulary
+  // ("string" -> "number", "a|b|c" -> "a|b"), not JSON Schema's.
+  string was = 5;
+  string now = 6;
+  // rows_affected is a REAL count taken against the live table, never an
+  // estimate. Meaningful only when row_count_known is true -- a node with no
+  // database cannot count, and zero would be a claim it is not entitled to make.
+  int64 rows_affected = 7;
+  bool row_count_known = 8;
+  // referenced_by names the loaded constructs the change reaches, as
+  // "kind:name" ("query:spaceParticipants"), read off the live registries.
+  repeated string referenced_by = 9;
+  // detail is the one-line reason, already carrying the counts.
+  string detail = 10;
 }
 
 // DurableDemoteBundleMsg requests the owner-gated DURABLE demotion of a

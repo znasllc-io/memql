@@ -505,7 +505,23 @@ func ensureAuthorEnvelope(ctx context.Context, owner string) context.Context {
 // path (so a durable schema change is git/PR-reviewable across restarts) is the
 // tracked follow-up; the owner gate + the call-by-name semantics are identical
 // either way.
+//
+// A CONCEPT re-promote whose schema differs from the running version is
+// classified (memql#3757) and a breaking change is REFUSED. This entry point
+// takes the strict posture -- no override, and the classified diff discarded --
+// which is the right default for every caller that does not say otherwise (the
+// MCP promote tool reaches the engine through here). The two callers that need
+// something else say so explicitly through promoteAuthoredConstructWithGate: the
+// durable wire promote, which can carry an operator's override, and the two
+// REPLAY paths, which must not re-decide a decision already taken.
 func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredConstruct) error {
+	return e.promoteAuthoredConstructWithGate(ctx, nil, c)
+}
+
+// promoteAuthoredConstructWithGate is PromoteAuthoredConstruct with the concept
+// schema-change posture made explicit. A nil gate is the strict default:
+// classify, refuse breaking, keep no diff.
+func (e *MemQLEngine) promoteAuthoredConstructWithGate(ctx context.Context, gate *conceptPromoteGate, c *AuthoredConstruct) error {
 	if c == nil {
 		return fmt.Errorf("authoring: promote requires a construct")
 	}
@@ -576,7 +592,7 @@ func (e *MemQLEngine) PromoteAuthoredConstruct(ctx context.Context, c *AuthoredC
 		if !ok || built == nil {
 			return fmt.Errorf("authoring: promote %s %q: construct is not compiled", c.Kind, c.Name)
 		}
-		if err := e.promoteConceptIntoLiveRegistry(c, built); err != nil {
+		if err := e.promoteConceptIntoLiveRegistry(ctx, gate, c, built); err != nil {
 			return err
 		}
 		// A PROMOTE IS THE UN-RETIRE PATH (memql#3756). A concept demoted while

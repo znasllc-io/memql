@@ -34,7 +34,6 @@ package memql
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
@@ -85,8 +84,13 @@ const AuditActionConstructPromoted = "authored_construct_promoted"
 // reviewable v1:authoring:bundle + construct rows. A persist failure surfaces as
 // an error (the in-process promotion is live but not yet durable -- the boot
 // re-hydration simply won't find it, consistent with "not durable").
+//
+// A CONCEPT re-promote goes through the memql#3757 classifier under the STRICT
+// posture: this entry point carries no override, so a breaking schema change is
+// refused. The bundle-level PromoteBundleDurable is where an operator's
+// `allow_breaking` arrives from the wire.
 func (e *MemQLEngine) PromoteConstructDurable(ctx context.Context, owner string, c *AuthoredConstruct) error {
-	return e.promoteConstructDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, c)
+	return e.promoteConstructDurableWithStore(ctx, &enginePromoteStore{engine: e}, nil, owner, c)
 }
 
 // PromoteBundleResult reports the outcome of a bundle-level durable promote
@@ -100,6 +104,17 @@ type PromoteBundleResult struct {
 	OK          bool                `json:"ok"`
 	Promoted    []DefinedConstruct  `json:"promoted,omitempty"`
 	Diagnostics []SandboxDiagnostic `json:"diagnostics,omitempty"`
+	// ConceptDiffs carries the memql#3757 classification of every CONCEPT the
+	// bundle re-promotes over a version this cluster already runs -- both the
+	// additive ones that landed and, on a refusal, the breaking one that did
+	// not. Empty for a first promote and for an unchanged re-promote, which is
+	// the honest answer in both cases: there was no prior version to diff, or no
+	// difference to report.
+	//
+	// STRUCTURED rather than folded into Error, because the two consumers of
+	// this (the SDK, memql#3760; the editor, memql#3763) must not have to parse
+	// prose out of an error string to find out which field is the problem.
+	ConceptDiffs []ConceptSchemaDiff `json:"conceptDiffs,omitempty"`
 }
 
 // PromoteBundleDurable validates a `.memql` bundle through the Gate-1 sandbox,
@@ -118,18 +133,31 @@ type PromoteBundleResult struct {
 // a non-nil error; a per-construct promote failure stops at that construct and
 // returns the error (the ones already promoted stay -- each is independently
 // durable + propagated).
-func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource string) (PromoteBundleResult, error) {
-	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource)
+//
+// allowBreaking is the memql#3757 override, and it is the operator's explicit
+// "yes, I mean it" for a CONCEPT re-promote whose schema change would strand
+// rows already written. False is the normal call: a breaking change is refused
+// with the classified diff on ConceptDiffs and named in the error. True lands it
+// and AUDITS it as an override. It affects nothing else -- every other refusal
+// this path can produce (core-first, a failed compile, a broken invariant) is
+// unmoved by it, because none of them is a judgement about data.
+func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource string, allowBreaking bool) (PromoteBundleResult, error) {
+	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource, allowBreaking)
 }
 
 // promoteBundleDurableWithStore is the store-driven core of PromoteBundleDurable,
 // split out so it is unit testable with a fake promoteStore (no live DB), exactly
 // like promoteConstructDurableWithStore.
-func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource string) (PromoteBundleResult, error) {
+func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource string, allowBreaking bool) (PromoteBundleResult, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return PromoteBundleResult{}, fmt.Errorf("authoring: durable promote requires an authenticated owner")
 	}
+
+	// ONE gate for the whole bundle: the operator's override applies to the
+	// promote they asked for, and the diffs from every concept in it collect in
+	// one place so the reply reports the bundle, not a construct.
+	gate := &conceptPromoteGate{allowBreaking: allowBreaking}
 
 	// Validate + compile via the SAME session-define path (Gate-1 sandbox, then
 	// compile each function-family/spec construct into its executable form). A
@@ -173,12 +201,18 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 			// the splitter surfaced but the compiler skipped); leave it out.
 			continue
 		}
-		if perr := e.promoteConstructDurableWithStore(ctx, store, owner, ac); perr != nil {
+		if perr := e.promoteConstructDurableWithStore(ctx, store, gate, owner, ac); perr != nil {
 			result.OK = false
+			// The diffs go out on the FAILURE reply too, and that is the whole
+			// point of collecting them structurally: a breaking refusal IS a
+			// diff, and a client that could only read the error string would
+			// have to regex a field name out of a rendered block.
+			result.ConceptDiffs = gate.collected()
 			return result, fmt.Errorf("authoring: durable promote %s %q: %w", c.Kind, c.Name, perr)
 		}
 		result.Promoted = append(result.Promoted, DefinedConstruct{Kind: c.Kind, Name: c.Name})
 	}
+	result.ConceptDiffs = gate.collected()
 	return result, nil
 }
 
@@ -196,7 +230,7 @@ type promoteStore interface {
 
 // promoteConstructDurableWithStore is the store-driven core, split out so it is
 // unit testable with a fake promoteStore (no live DB).
-func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, store promoteStore, owner string, c *AuthoredConstruct) error {
+func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, store promoteStore, gate *conceptPromoteGate, owner string, c *AuthoredConstruct) error {
 	if c == nil {
 		return fmt.Errorf("authoring: durable promote requires a construct")
 	}
@@ -217,7 +251,12 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 	// Register into the shared registry FIRST (core-first, never-shadow). This is
 	// the existing process-shared promote -- identical call-by-name semantics --
 	// and the authoritative gate, so a refused promotion never persists.
-	if err := e.PromoteAuthoredConstruct(ctx, c); err != nil {
+	//
+	// The memql#3757 concept schema classification runs INSIDE this call, which
+	// is what puts it ahead of everything below: a breaking change refused here
+	// writes no reviewable row and publishes no propagation broadcast, so a
+	// refusal on one node cannot leave a peer holding the schema it refused.
+	if err := e.promoteAuthoredConstructWithGate(ctx, gate, c); err != nil {
 		return err
 	}
 
@@ -606,7 +645,22 @@ func (e *MemQLEngine) recompileAndPromoteRow(ctx context.Context, row AuthoringC
 	default:
 		return fmt.Errorf("re-hydration of %s constructs is not supported", row.Kind)
 	}
-	return e.PromoteAuthoredConstruct(ctx, c)
+	// REPLAY, not a decision (memql#3757). This one function serves both paths
+	// that re-apply a promote somebody already took a decision about -- the boot
+	// walk over the durable bundles, and the live cross-node propagation
+	// subscriber -- and neither may re-run the concept schema classifier.
+	//
+	// Boot: a re-promote writes a NEW bundle row rather than editing the old
+	// one, so the walk replays the versions in sequence. Classifying v2 against
+	// v1 would let a breaking change an operator deliberately overrode refuse to
+	// come back after a restart -- the cluster would silently revert to the
+	// older concept.
+	//
+	// Propagation: the originating node already classified. A peer re-deciding
+	// could only ever disagree with it, and a peer that refuses what the origin
+	// accepted is a split registry, which is the exact failure the broadcast
+	// exists to prevent.
+	return e.promoteAuthoredConstructWithGate(ctx, conceptPromoteReplay(), c)
 }
 
 // quarantineRehydratedConstruct records a durable-bundle re-hydration
@@ -644,20 +698,57 @@ func (e *MemQLEngine) quarantineRehydratedConstruct(row AuthoringConstructRow, c
 // enginePromoteStore is the production promoteStore over a live engine. It runs
 // the #954 lifecycle mutations through the engine's normal Execute path, exactly
 // like engineActivationStore.
+//
+// # Call form: named args, not an object literal (memql#3757)
+//
+// The three writes below used to marshal their arguments to JSON and hand the
+// result over as `createAuthoringBundle({...})`. That form was REMOVED from the
+// language in #2335, and the parser now refuses it by name -- so every durable
+// promote against a real engine failed at `persist promote bundle` with a parse
+// error, after the construct had already been registered into the shared
+// registry. In-process promotion worked; nothing was ever persisted; nothing was
+// re-hydrated at the next boot.
+//
+// It survived because the only coverage this store had was a fake. Every test in
+// the durable-promote family substitutes fakePromoteStore, which takes the
+// arguments as Go values and never builds a call string at all, so the one line
+// that had to change when the grammar moved was the one line no test executed.
+// The neighbouring `activateAuthoringBundle` call was already in the named-arg
+// form and worked -- the two forms sat four lines apart.
+//
+// Found by the memql#3757 row-count test, which is the first thing in this
+// package to drive the real store against a real database.
 type enginePromoteStore struct {
 	engine *MemQLEngine
 }
 
-func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error {
-	args, err := json.Marshal(map[string]any{
-		"bundleId": bundleId,
-		"title":    title,
-		"summary":  summary,
-	})
-	if err != nil {
-		return err
+// mutationCall renders `mutation <name>(k: "v", ...)` -- the #2335 kind-prefixed
+// named-argument form -- with every value quoted through the parser's own
+// quoter, so a construct's SOURCE (which is arbitrary text full of quotes,
+// braces and newlines) can ride through as an argument.
+func mutationCall(name string, args ...[2]string) string {
+	var b strings.Builder
+	b.WriteString("mutation ")
+	b.WriteString(name)
+	b.WriteByte('(')
+	for i, kv := range args {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(kv[0])
+		b.WriteString(": ")
+		b.WriteString(languageParser.QuoteString(kv[1]))
 	}
-	if _, err := s.engine.Execute(ctx, "createAuthoringBundle("+string(args)+")"); err != nil {
+	b.WriteByte(')')
+	return b.String()
+}
+
+func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error {
+	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringBundle",
+		[2]string{"bundleId", bundleId},
+		[2]string{"title", title},
+		[2]string{"summary", summary},
+	)); err != nil {
 		return err
 	}
 	// createAuthoringBundle inserts status "draft"; transition it to
@@ -669,29 +760,24 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 }
 
 func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source string) error {
-	args, err := json.Marshal(map[string]any{
-		"constructId":     constructId,
-		"bundleId":        bundleId,
-		"kind":            kind,
-		"name":            name,
-		"targetNamespace": targetNamespace,
-		"source":          source,
+	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringConstruct",
+		[2]string{"constructId", constructId},
+		[2]string{"bundleId", bundleId},
+		[2]string{"kind", kind},
+		[2]string{"name", name},
+		[2]string{"targetNamespace", targetNamespace},
+		[2]string{"source", source},
 		// S6 (#2361): stamp the grammar epoch the source was authored
 		// under, so a future engine can tell a rotted row from a stale one.
-		"grammarVersion": languageParser.GrammarVersion,
-	})
-	if err != nil {
-		return err
-	}
-	if _, err := s.engine.Execute(ctx, "createAuthoringConstruct("+string(args)+")"); err != nil {
+		[2]string{"grammarVersion", languageParser.GrammarVersion},
+	)); err != nil {
 		return err
 	}
 	// Flip the construct to active so it reads as a live promoted record.
-	cargs, err := json.Marshal(map[string]string{"constructId": constructId, "status": "active"})
-	if err != nil {
-		return err
-	}
-	if _, err := s.engine.Execute(ctx, "setConstructStatus("+string(cargs)+")"); err != nil {
+	if _, err := s.engine.Execute(ctx, mutationCall("setConstructStatus",
+		[2]string{"constructId", constructId},
+		[2]string{"status", "active"},
+	)); err != nil {
 		return err
 	}
 	return nil

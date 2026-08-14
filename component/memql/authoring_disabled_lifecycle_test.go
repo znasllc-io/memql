@@ -78,7 +78,7 @@ func TestPromoteConstructDurable_DisabledSpec_NothingPersisted(t *testing.T) {
 	c, _ := reg.Lookup("owner-1", "spec", "mcpDisabledSpec")
 
 	store := &fakePromoteStore{}
-	err := e.promoteConstructDurableWithStore(context.Background(), store, "owner-1", c)
+	err := e.promoteConstructDurableWithStore(context.Background(), store, nil, "owner-1", c)
 	if err == nil || !strings.Contains(err.Error(), "@disabled") {
 		t.Fatalf("durable promote of a @disabled spec must be refused with the @disabled message, got: %v", err)
 	}

@@ -117,6 +117,15 @@ type MemQLEngine struct {
 	// no registry for; component/automations wires itself in here at bootstrap.
 	// Nil on a binary with no scheduler, which then reports no automations.
 	automationCataloger AutomationCataloger
+	// authoredAudit is the sink authored-lifecycle audit events emitted from
+	// INSIDE the engine reach v1:identity:auditEvent through -- currently the
+	// breaking concept schema-change override (memql#3757). Wired at bootstrap
+	// via SetAuthoredAuditSink; nil on a binary with no identity audit logger,
+	// which then leaves only the WARN log. The activation path takes the same
+	// sink type per-call on AuthoredRuntimeDeps because it is driven from the
+	// app; this one is reached from the engine's own promote path, which has no
+	// deps bundle to carry it.
+	authoredAudit AuthoredAuditSink
 	// loadReport is the structured account of the DSL load pass built by
 	// Init (epic #2351 / S2, memql#2357): every unified loader's skipped
 	// constructs + the S5 uniqueness-gate duplicates. Init refuses to boot
