@@ -28,17 +28,20 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    # PRECEDENCE IS DECLARED, NOT INHERITED (memql#3714). Traefik's default
-    # router priority is the LENGTH of the compiled rule string, and the
-    # wildcard's `HostRegexp(...) && PathPrefix(...)` rule is longer than this
-    # host's own `Host(...) && PathPrefix(...)` rule -- so on default priority
-    # the wildcard could outrank identity., and sign-in would be served by the
-    # site edge instead of the identity service. 100 matches the priority
-    # declared on api-front-door.yaml and mcp-front-door.yaml so all three
-    # exact hosts rank identically above the wildcard rather than
-    # coincidentally. See docs/public/operate/front-door.md's precedence
-    # section and the `precedence` check in scripts/install/verify-frontdoor.sh.
-    traefik.ingress.kubernetes.io/router.priority: "100"
+    # NO router.priority HERE, DELIBERATELY (memql#3810). Precedence over the
+    # `*.<domain>` wildcard is still declared -- without it the wildcard can
+    # outrank identity. and sign-in is served by the site edge -- but it is
+    # declared ON THE WILDCARD, in edge-front-door.yaml, which names itself
+    # lowest. That is one annotation for the whole ranking instead of one per
+    # exact host, and it leaves every host's own path ordering on traefik's
+    # length-based default.
+    #
+    # This host was never the one that broke: it declares a single path, so a
+    # uniform value cost it nothing, which is exactly why `precedence` kept
+    # PASSING for identity. while api. was serving gRPC errors on every HTTP
+    # path. The annotation is removed here anyway -- leaving it would re-create
+    # memql#3810 the moment this Ingress grows a second path, and having the
+    # ranking stated in one place is what makes it reviewable.
 spec:
   tls:
     - hosts: ["identity.memql.localhost"]

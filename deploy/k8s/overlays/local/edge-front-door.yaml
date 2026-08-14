@@ -21,12 +21,44 @@
 # points the wrong way: the wildcard's `HostRegexp(...)` rule is longer than
 # most of the three exact hosts' own rules, so on default priority the
 # wildcard could outrank them and the whole API would be served by the site
-# edge instead of the bff. So precedence is DECLARED here: api-front-door.yaml,
-# front-door.yaml (identity) and mcp-front-door.yaml each carry an explicit
-# `traefik.ingress.kubernetes.io/router.priority` above the wildcard's
-# computed default. This wildcard/apex Ingress carries no priority annotation
-# of its own -- it does not need one, since a declared priority elsewhere is
-# what the ranking depends on, not a value here.
+# edge instead of the bff. So precedence is DECLARED -- and it is declared HERE,
+# on this Ingress, as the wildcard naming itself LOWEST.
+#
+# IT USED TO BE DECLARED THE OTHER WAY ROUND, and that broke the API
+# (memql#3810). api-front-door.yaml, front-door.yaml and mcp-front-door.yaml
+# each carried `router.priority: "100"` to sit above the wildcard's computed
+# default. The intent was right and the annotation was RIGHT TO EXIST -- without
+# some declaration the wildcard genuinely does swallow the exact hosts, which
+# was measured, so nobody should "fix" a future problem here by deleting the
+# ranking outright. What was wrong was WHERE it went.
+#
+# THE MECHANISM, because the next person to reach for a uniform high priority
+# will reach for exactly the thing that broke: the annotation is INGRESS-LEVEL,
+# so one value applies to EVERY router that Ingress generates. api-front-door
+# declares twenty-two paths. Traefik's default priority is the compiled rule
+# LENGTH, and that length is what made `Host(api...) && PathPrefix(/healthz)`
+# outrank `Host(api...) && PathPrefix(/)`. A single number for all of them
+# erases that difference -- so `/`, the h2c gRPC catch-all pointed at
+# bff:50051, could win over the 21 specific paths pointed at bff-http:8085.
+# It did: `curl --http1.1 https://api.<domain>/healthz` answered
+# `415 Unsupported Media Type` with `Content-Type: application/grpc`. That is
+# memql#3703's failure -- an HTTP/1.1 request handed to an h2c backend, failing
+# with a protocol error that names nothing -- reached from the other side.
+# #3703 was a path with no rule; this was a path whose rule lost.
+#
+# Only api. broke, and the asymmetry is the tell: identity. and mcp. declare a
+# single path each, so a uniform value costs them nothing. It is also why
+# verify-frontdoor.sh's `precedence` passed for identity. and went INCONCLUSIVE
+# for api. rather than failing.
+#
+# So the ranking lives on THIS Ingress, whose two rules are the same shape (`/`
+# on the wildcard and on the apex) and therefore have no intra-host ordering for
+# a uniform value to destroy. Priority 1 loses to every rule-length default, so
+# every exact host outranks the wildcard while keeping its own paths ordered by
+# length. One annotation, one direction, nothing else disturbed.
+#
+# Gated by ../render_priority_test.go: no Ingress declaring more than one
+# distinct path may carry a uniform priority, and this one must carry it.
 #
 # This is checked by the `precedence` check in
 # scripts/install/verify-frontdoor.sh, for api. and identity. only -- never
@@ -54,6 +86,11 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # The wildcard declares itself LOWEST (memql#3810). 1 loses to every
+    # rule-length default, so api. / identity. / mcp. outrank it while keeping
+    # their own paths ordered by specificity. See the mechanism above before
+    # changing this, and do not move the ranking back onto the exact hosts.
+    traefik.ingress.kubernetes.io/router.priority: "1"
 spec:
   tls:
     - hosts:
