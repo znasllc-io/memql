@@ -39,6 +39,17 @@ type LoginData struct {
 	ClientName    string
 	ClientInitial string
 	ClientLogo    string
+	// ClientSelfRegistered is true when this client came from the DB-backed
+	// oauthClient store -- it created itself through the unauthenticated
+	// RFC 7591 POST /register -- rather than from an operator's
+	// MEMQL_IDENTITY_REGISTERED_CLIENTS (memql#3794).
+	//
+	// It changes what the consent block is allowed to imply. ClientName is
+	// ATTACKER-CHOSEN on this path, so the page must not present it as
+	// identification: no bundled logo (the handler withholds it), an explicit
+	// "not verified" marker, and the redirect URI shown as the thing that
+	// actually says where the credential goes.
+	ClientSelfRegistered bool
 	// PKCE challenge (RFC 7636). Carried through the form hidden fields
 	// from the /authorize endpoint so the magic-link the user receives
 	// mints a PKCE-bound auth code. The /authorize endpoint REQUIRES
@@ -119,9 +130,35 @@ templ loginFormEmail(data LoginData) {
 				<span aria-hidden="true" style="flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:9px;background:#4f46e5;color:#fff;font-weight:600;font-size:18px;line-height:1;">{ data.ClientInitial }</span>
 			}
 			<span>
-				<strong>{ data.ClientName }</strong> is requesting access to your { data.Layout.BrandName } account. Sign in to approve.
+				<strong>{ data.ClientName }</strong>
+				if data.ClientSelfRegistered {
+					<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#7c2d12;color:#fff;font-size:11px;font-weight:600;letter-spacing:.02em;vertical-align:middle;">NOT VERIFIED</span>
+				}
+				is requesting access to your { data.Layout.BrandName } account. Sign in to approve.
 			</span>
 		</div>
+		// WHERE THE CREDENTIAL ACTUALLY GOES (memql#3794).
+		//
+		// The name above is a label the client picked for itself, and on the
+		// self-registered path nobody checked it. The redirect URI is the only
+		// thing on this page that says where an approved credential is
+		// delivered, and it used to appear solely as a hidden form field --
+		// present in the POST, invisible to the person approving it.
+		//
+		// Rendered in a monospace block rather than inline prose so a
+		// lookalike host is legible: proportional text at body size is exactly
+		// where rn/m and l/I hide.
+		if data.RedirectURI != "" {
+			<div style="margin-top:-4px;margin-bottom:16px;text-align:left;">
+				<div style="font-size:12px;color:#6b7280;margin-bottom:4px;">Approving sends your sign-in to:</div>
+				<code style="display:block;padding:8px 10px;border-radius:6px;background:#f3f4f6;border:1px solid #e5e7eb;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;line-height:1.4;word-break:break-all;color:#111827;">{ data.RedirectURI }</code>
+				if data.ClientSelfRegistered {
+					<div style="font-size:12px;color:#7c2d12;margin-top:6px;">
+						This application registered itself and its name has not been verified by anyone. Approve it only if you recognise the address above.
+					</div>
+				}
+			</div>
+		}
 	}
 	<form method="POST" action="/login" data-submit-once>
 		<input type="hidden" name="form" value="email"/>

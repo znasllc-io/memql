@@ -44,6 +44,11 @@ import (
 type dcrFakeEngine struct {
 	clientId     string
 	redirectURIs string // JSON array string, e.g. `["https://..."]`
+	// clientName is the RFC 7591 client_name the caller chose for itself.
+	// Attacker-controlled on this path, which is the whole subject of
+	// consent_unverified_test.go (memql#3794). Empty leaves the payload
+	// field out, matching a registration that sent no name.
+	clientName string
 }
 
 func (f *dcrFakeEngine) Execute(_ context.Context, q string) (*memqlengine.ExecuteResult, error) {
@@ -53,6 +58,7 @@ func (f *dcrFakeEngine) Execute(_ context.Context, q string) (*memqlengine.Execu
 			Payload: &structpb.Struct{Fields: map[string]*structpb.Value{
 				"clientId":         structpb.NewStringValue(f.clientId),
 				"redirectURIsJSON": structpb.NewStringValue(f.redirectURIs),
+				"clientName":       structpb.NewStringValue(f.clientName),
 			}},
 		}
 		return &memqlengine.ExecuteResult{
