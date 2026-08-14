@@ -157,6 +157,50 @@ func (c *Client) SessionDefineBundle(ctx context.Context, sources string) (*Sess
 	}, nil
 }
 
+// ConceptSchemaChange is ONE classified difference between the version of a
+// concept the cluster is running and the version a promote is putting over it
+// (memql#3757).
+//
+// Breaking is the classification the engine made, not one to re-derive here: a
+// removed field, a changed field type, a new required field and a narrowed enum
+// are breaking; everything else lands. RowsAffected is a REAL count taken
+// against the live table, and is only meaningful when RowCountKnown is true --
+// zero from a node that could not count would be a claim it is not entitled to
+// make, so the two are separate fields rather than a sentinel.
+type ConceptSchemaChange struct {
+	Concept string
+	// Field is the payload field, dotted for one inside a nested block
+	// ("preferences.theme"). Empty for a concept-level change.
+	Field string
+	// Kind is a closed set: field_added, field_removed, field_type_changed,
+	// field_required_added, field_required_dropped, enum_widened, enum_narrowed,
+	// description_changed, relationship_added, relationship_removed,
+	// node_type_changed.
+	Kind          string
+	Breaking      bool
+	Was           string
+	Now           string
+	RowsAffected  int64
+	RowCountKnown bool
+	// ReferencedBy names the loaded constructs the change reaches, as
+	// "kind:name" ("query:spaceParticipants").
+	ReferencedBy []string
+	// Detail is the engine's one-line reason, already carrying the counts.
+	Detail string
+}
+
+// ConceptSchemaDiff is the whole classification of one concept re-promote.
+// Overridden records that a breaking change landed because AllowBreaking was
+// passed; Summary is the engine's own rendered block, provided so a caller can
+// show the engine's wording rather than rebuild it.
+type ConceptSchemaDiff struct {
+	Concept    string
+	Breaking   bool
+	Overridden bool
+	Changes    []ConceptSchemaChange
+	Summary    string
+}
+
 // PromoteResult is the response from DurablePromoteBundle. On success OK is true
 // and Promoted lists the constructs durably promoted into the shared registry
 // (persisted, restart-durable, and -- via the live broadcast -- callable on every
@@ -168,6 +212,35 @@ type PromoteResult struct {
 	Promoted    []Construct
 	Diagnostics []Diagnostic
 	Error       string
+	// ConceptDiffs carries the memql#3757 classification for every CONCEPT the
+	// bundle re-promotes over a version the cluster already runs -- on the
+	// refusal as well as on success, because a breaking refusal IS a diff.
+	// Empty for a first promote and for an unchanged re-promote.
+	//
+	// Read this rather than parsing Error: Error is prose for a human, and the
+	// field name, the row count and the referencing constructs are all here as
+	// values.
+	ConceptDiffs []ConceptSchemaDiff
+}
+
+// PromoteOption adjusts one DurablePromoteBundle call.
+type PromoteOption func(*memqlv1.DurablePromoteBundleMsg)
+
+// AllowBreaking lands a CONCEPT re-promote whose schema change would strand rows
+// already written -- a removed field, a changed field type, a new required
+// field, a narrowed enum (memql#3757).
+//
+// Without it such a promote is REFUSED, and the refusal names the field, the
+// number of rows it affects and the constructs that reference it. With it the
+// change lands and the engine AUDITS the override on v1:identity:auditEvent,
+// naming the concept and the fields -- so an override is a recorded decision
+// rather than a quieter call.
+//
+// It moves nothing else. Every other refusal a promote can produce (core-first,
+// a failed compile, a broken invariant) is unmoved by it, because none of them
+// is a judgement about data.
+func AllowBreaking() PromoteOption {
+	return func(msg *memqlv1.DurablePromoteBundleMsg) { msg.AllowBreaking = true }
 }
 
 // DurablePromoteBundle validates the bundle, then durably promotes every plain
@@ -180,10 +253,26 @@ type PromoteResult struct {
 // The Go error return is reserved for wire-level failures (dispatcher closed,
 // context cancelled, permission denied); a bundle the engine rejected on
 // validation comes back as OK=false with a populated Error + diagnostics.
-func (c *Client) DurablePromoteBundle(ctx context.Context, sources string) (*PromoteResult, error) {
+//
+// A CONCEPT the bundle re-promotes over a version the cluster already runs is
+// classified (memql#3757): additive changes land, a BREAKING one is refused, and
+// either way the classification comes back on PromoteResult.ConceptDiffs. Pass
+// AllowBreaking() to land a breaking change deliberately.
+//
+// The options are variadic rather than a second method or a bare bool, for two
+// reasons: `DurablePromoteBundle(ctx, src, true)` at a call site says nothing
+// about what is being allowed, and a parallel `DurablePromoteBundleAllowing`
+// would make the dangerous call the one with the shorter, more obvious name.
+func (c *Client) DurablePromoteBundle(ctx context.Context, sources string, opts ...PromoteOption) (*PromoteResult, error) {
+	body := &memqlv1.DurablePromoteBundleMsg{Sources: sources}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(body)
+		}
+	}
 	msg := &memqlv1.MemqlClientMessage{
 		Payload: &memqlv1.MemqlClientMessage_DurablePromoteBundle{
-			DurablePromoteBundle: &memqlv1.DurablePromoteBundleMsg{Sources: sources},
+			DurablePromoteBundle: body,
 		},
 	}
 	resp, err := c.dispatcher.SendAndWait(ctx, msg)
@@ -199,11 +288,49 @@ func (c *Client) DurablePromoteBundle(ctx context.Context, sources string) (*Pro
 		promoted = append(promoted, Construct{Kind: p.GetKind(), Name: p.GetName()})
 	}
 	return &PromoteResult{
-		OK:          result.GetOk(),
-		Promoted:    promoted,
-		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
-		Error:       result.GetError(),
+		OK:           result.GetOk(),
+		Promoted:     promoted,
+		Diagnostics:  protoDiagnostics(result.GetDiagnostics()),
+		Error:        result.GetError(),
+		ConceptDiffs: protoConceptDiffs(result.GetConceptDiffs()),
 	}, nil
+}
+
+// protoConceptDiffs adapts the wire classification into the SDK form. Lives here
+// (unexported) so no memqlv1 type leaks across the package boundary, exactly
+// like protoDiagnostics -- and it copies field for field, deriving nothing: the
+// engine already decided what is breaking and counted the rows, and an SDK that
+// recomputed either would be a second authority on the same question.
+func protoConceptDiffs(in []*memqlv1.ConceptSchemaDiff) []ConceptSchemaDiff {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ConceptSchemaDiff, 0, len(in))
+	for _, d := range in {
+		changes := make([]ConceptSchemaChange, 0, len(d.GetChanges()))
+		for _, c := range d.GetChanges() {
+			changes = append(changes, ConceptSchemaChange{
+				Concept:       c.GetConcept(),
+				Field:         c.GetField(),
+				Kind:          c.GetKind(),
+				Breaking:      c.GetBreaking(),
+				Was:           c.GetWas(),
+				Now:           c.GetNow(),
+				RowsAffected:  c.GetRowsAffected(),
+				RowCountKnown: c.GetRowCountKnown(),
+				ReferencedBy:  c.GetReferencedBy(),
+				Detail:        c.GetDetail(),
+			})
+		}
+		out = append(out, ConceptSchemaDiff{
+			Concept:    d.GetConcept(),
+			Breaking:   d.GetBreaking(),
+			Overridden: d.GetOverridden(),
+			Changes:    changes,
+			Summary:    d.GetSummary(),
+		})
+	}
+	return out
 }
 
 // DemoteResult is the response from DurableDemoteBundle, the inverse of
