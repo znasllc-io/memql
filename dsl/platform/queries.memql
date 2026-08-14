@@ -243,3 +243,25 @@ query inboundRequest inboundRequestByDedupeKey {
   filter  source==args.source && dedupeKey==args.dedupeKey
   shape   inboundRequestFull
 }
+
+/// Resolve a request Host to the site that answers it. The edge's hot path -- called once per
+/// cache miss, not once per request. Cluster-owner gated per v1:platform:site's declared tier; the
+/// edge integration calls this under a cluster-owner-equivalent credential, not a per-request user.
+@unbounded("site by hostname -- bounded to a single row (hostname is cluster-unique)")
+@actor
+query site siteByHostname {
+  args {
+    hostname  string!
+  }
+  filter  hostname==args.hostname && actor.isClusterOwner==true
+  shape   siteFull
+}
+
+/// Every site in the cluster. The portal's primary screen, and the read that would silently return
+/// a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
+@actor
+query site sitesAll {
+  filter  actor.isClusterOwner==true
+  shape   siteFull
+  sort    "hostname", "asc"
+}

@@ -94,3 +94,19 @@ shape inboundRequest inboundRequestFull {
   lastError
   row.createdAt
 }
+
+/// Full projection of v1:platform:site -- what the edge needs to serve a request and what the
+/// portal's site list renders.
+@row
+shape site siteFull {
+  row.id
+  hostname
+  kind
+  bundleRef
+  status
+  apiProxy
+  systemOwned
+  title
+  notes
+  row.createdAt
+}
