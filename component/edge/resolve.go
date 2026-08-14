@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 )
 
 // Site is the projection of v1:platform:site the edge needs to serve a request.
@@ -50,6 +52,16 @@ type resolver struct {
 
 	mu    sync.RWMutex
 	cache map[string]entry
+
+	// sf collapses concurrent cold-cache resolutions for the SAME hostname
+	// into one query, the same shape as integrations/cognition's cache-miss
+	// singleflight groups (e.g. recentUtterSF / spaceInfoSF in
+	// prompt_context_cache.go: "singleflight to avoid herd"). Without it, N
+	// concurrent first-requests for an uncached hostname each drive their
+	// own query before any of them can populate the cache -- a residual
+	// amplification window on top of miss-caching, and one a burst is
+	// exactly how someone would exercise.
+	sf singleflight.Group
 }
 
 // NewResolver returns a caching Resolver. The TTL bounds staleness after a
@@ -81,18 +93,31 @@ func (r *resolver) Resolve(ctx context.Context, hostname string) (*Site, error) 
 		return e.site, nil
 	}
 
-	site, err := r.exec.SiteByHostname(ctx, key)
+	// Slow path: the engine, singleflighted per hostname so concurrent
+	// misses for the same key collapse into one query instead of each
+	// driving their own.
+	anySite, err, _ := r.sf.Do(key, func() (any, error) {
+		site, err := r.exec.SiteByHostname(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+
+		// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
+		// drives one database query per request -- an amplifier pointed at the
+		// database, reachable by anyone who can resolve the wildcard.
+		r.mu.Lock()
+		r.cache[key] = entry{site: site, at: time.Now()}
+		r.mu.Unlock()
+
+		return site, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// A MISS IS CACHED TOO. Without this, a scanner walking random hostnames
-	// drives one database query per request -- an amplifier pointed at the
-	// database, reachable by anyone who can resolve the wildcard.
-	r.mu.Lock()
-	r.cache[key] = entry{site: site, at: time.Now()}
-	r.mu.Unlock()
-
+	// site may legitimately be a nil *Site (a cached miss); the type
+	// assertion still succeeds because singleflight boxes the concrete
+	// *Site the closure returned, nil or not.
+	site, _ := anySite.(*Site)
 	return site, nil
 }
 

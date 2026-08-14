@@ -1,3 +1,4 @@
+// component/edge/bundle.go
 package edge
 
 import (
