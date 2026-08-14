@@ -5,6 +5,7 @@ go 1.26.1
 toolchain go1.26.5
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0
 	github.com/a-h/templ v0.3.1020
 	github.com/lib/pq v1.12.3
 	github.com/stretchr/testify v1.11.1
@@ -18,13 +19,13 @@ require (
 	github.com/znasllc-io/memql/component/harness v0.0.0
 	github.com/znasllc-io/memql/component/observe v0.0.0-00010101000000-000000000000
 	github.com/znasllc-io/memql/component/polyphon v0.0.0
+	golang.org/x/sync v0.22.0
 	google.golang.org/grpc v1.83.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.62.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.2 // indirect
@@ -52,7 +53,6 @@ require (
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/node/gen v0.0.0 // indirect
 	golang.org/x/crypto v0.54.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	nhooyr.io/websocket v1.8.17 // indirect
 )
@@ -62,7 +62,7 @@ require (
 	buf.build/go/protovalidate v1.2.0 // indirect
 	buf.build/go/protoyaml v0.7.0 // indirect
 	cel.dev/expr v0.25.2 // indirect
-	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.22.0
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.12.0 // indirect
 	github.com/a-h/parse v0.0.0-20250122154542-74294addb73e // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect

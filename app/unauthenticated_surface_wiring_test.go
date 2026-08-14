@@ -175,3 +175,15 @@ func TestRouteRegisteredAfterTheAssertionIsRefused(t *testing.T) {
 			"is a one-spelling gate and the other spelling walks around it")
 	}
 }
+
+// The edge-specific mirror of this test, TestEdgeRootMountSurvivesTheUnauthenticatedSurfaceAssertion,
+// lives in transport_edge_test.go under //go:build edge. It cannot live
+// here: since component/server.EdgePaths()' contribution to PublicPaths()
+// is itself build-tag-scoped to the edge binary (memql#3710 fix round 2 --
+// PublicPaths() feeds verifier.shouldBypassAuth on every OTHER
+// verifier-consuming node too, and that consumer has no "/" guard on its
+// exact-match branch), asserting "the edge's root mount is declared public"
+// is only TRUE when compiled as part of the edge binary. Asserting it here,
+// in a file compiled into every binary, would fail under any other tag --
+// which is exactly what surfaced this file's version of the test failing
+// under `-tags identity` once EdgePaths() stopped being unconditional.
