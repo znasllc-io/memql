@@ -1,0 +1,38 @@
+# The staging environment, expressed as VALUES (epic memql#3748 / #3766).
+#
+# The twin of deploy/k8s/overlays/prod/environment.yaml. Diff the two: the only
+# differences are the two values below. That is the acceptance bar for this
+# whole change -- staging and production reconcile from ONE base and run the
+# SAME engine images, so anything that differs between them has to be a value
+# somebody can read off a line, not a manifest somebody has to maintain twice.
+#
+# See the prod twin for why these live in a ConfigMap rather than in
+# `memql-secrets`, and why the `optional: true` envFrom in base is load-bearing
+# for the local cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-environment
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-environment
+    app.kubernetes.io/part-of: memql
+data:
+  # Stamped onto v1:cluster:node.environment at registration (#1873); the
+  # concept's enum is development | staging | production.
+  MEMQL_ENVIRONMENT: staging
+
+  # THE BOUNDARY (memql#3765). Same database server, same DSN, different first
+  # schema -- which is what makes promoting a site one transaction rather than
+  # two connections and a copy through the application (design §4.2), and what
+  # makes a staging automation that fires and writes land in staging.
+  #
+  # `memql_staging` FIRST because the first schema is where every unqualified
+  # write goes; `public` on the path but EMPTY because the TimescaleDB
+  # extension's functions live there and nothing else may. Both properties were
+  # measured against a real database; the reasoning is in
+  # component/database/search_path.go and is not repeated here.
+  MEMQL_DB_SEARCH_PATH: "memql_staging, public"
+
+  # The host prefix is not here yet -- see the prod twin. It arrives with the
+  # generator that consumes it (memql#3767).

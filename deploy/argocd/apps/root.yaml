@@ -3,11 +3,17 @@
 # app to the cluster is a PR that drops a manifest here -- no manual `kubectl`.
 # Bootstrap applies this once; thereafter it self-manages (incl. itself).
 #
-# ENGINE-ONLY (decoupling P3): the product Applications (memql / memql-prod /
-# rollouts) moved to the downstream product pack's app-of-apps -- the pack owns
-# reconciling the bff/SPA/rollouts surface now. Only the engine AppProject
-# (project.yaml) + this root remain here; a future engine-only Application would
-# be added to the include list below.
+# ENGINE-ONLY (decoupling P3): the PRODUCT Applications (the product's own bff /
+# SPA / rollouts surface) live in the downstream product pack's app-of-apps --
+# the pack owns reconciling those. What is listed below is the ENGINE's own
+# estate: the AppProject, this root, and the two environment Applications added
+# by epic memql#3748 / #3766.
+#
+# THE INCLUDE GLOB IS THE REGISTRATION, and it is easy to miss. `directory.include`
+# is a hardcoded brace list, so a manifest dropped into this directory is simply
+# NOT RENDERED until its filename appears here -- the app does not fail, it
+# silently does not exist. Add the filename in the same commit that adds the
+# manifest.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -23,7 +29,7 @@ spec:
     path: deploy/argocd/apps
     directory:
       recurse: true
-      include: '{project.yaml,root.yaml}'
+      include: '{project.yaml,root.yaml,memql-prod.yaml,memql-staging.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
