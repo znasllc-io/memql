@@ -183,6 +183,21 @@ func preflight(t *testing.T, s *Server, origin string) *httptest.ResponseRecorde
 	return rec
 }
 
+// assertOriginRefused checks that neither CORS header came back.
+//
+// READ THE TWO HALVES DIFFERENTLY. The Access-Control-Allow-Credentials half is
+// load-bearing and true of the deployed chain: it is the header that lets the
+// calling page read a cookie-bearing response, and this middleware is the only
+// thing on these routes that ever emits it.
+//
+// The Access-Control-Allow-Origin half is true of THIS MIDDLEWARE IN ISOLATION
+// and not of the deployed chain. Identity's routes also pass through
+// component/server's generic corsMiddleware (SERVER_ALLOWED_ORIGINS), which is
+// "*" on identity today -- and under a wildcard that layer echoes ACAO for any
+// origin while deliberately withholding Credentials. So in production a refused
+// origin may still see an ACAO it cannot do anything with. Do not read a green
+// run here as "no ACAO reaches the browser"; read it as "this middleware did not
+// grant it".
 func assertOriginRefused(t *testing.T, s *Server, origin, why string) {
 	t.Helper()
 	rec := preflight(t, s, origin)
@@ -567,8 +582,78 @@ func TestGrantedOriginReadIsBoundedByTheTTLWindow(t *testing.T) {
 // TestNoStoreMeansEnvListOnly covers a binary wired without a graph handle at
 // all. It must serve the env list and not error, which is the pre-memql#3716
 // behaviour and correct for it.
+//
+// Both half-wired shapes are covered, and the second is the one that matters
+// (fix round 1, item 3): a Store whose Engine is nil. identity.Store's
+// executeAndExtract dereferences Engine unguarded, so before the guard this
+// panicked -- and these are UNAUTHENTICATED routes, so the panic needed no
+// credential to reach. Guarding only `Store == nil` was survivable while every
+// caller of the store was an authenticated handler; the CORS path is the first
+// that is not.
 func TestNoStoreMeansEnvListOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		store *identity.Store
+	}{
+		{"no store at all", nil},
+		{"a store with no engine", &identity.Store{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := &Server{
+				Cfg:   identity.Config{CORSAllowedOrigins: []string{"https://identity.example.test"}},
+				Store: tc.store,
+			}
+			assertOriginAllowed(t, srv, "https://identity.example.test", "the env list needs no graph")
+			assertOriginRefused(t, srv, "https://evil.example", "there is no graph to grant anything")
+		})
+	}
+}
+
+// TestGrantedOriginReadCarriesADeadline covers fix round 1, item 2.
+//
+// The read runs while `current` holds the mutex, and `sync.Mutex.Lock` is not
+// context-aware -- a waiter cannot be cancelled by its own client hanging up. So
+// the only thing that drains a queue of parked preflights is the holder
+// finishing, which makes an unbounded holder unbounded goroutine accumulation on
+// an unauthenticated surface during a database outage.
+//
+// Nothing else on the path supplies a deadline: `r.Context()` arrives without
+// one, component/server's timeouts are connection-level, and what terminated the
+// hang case before this was bun's pgdriver socket deadline -- a dependency's
+// default rather than anything this package states.
+func TestGrantedOriginReadCarriesADeadline(t *testing.T) {
+	var (
+		sawDeadline bool
+		remaining   time.Duration
+	)
 	srv := &Server{Cfg: identity.Config{CORSAllowedOrigins: []string{"https://identity.example.test"}}}
-	assertOriginAllowed(t, srv, "https://identity.example.test", "the env list needs no store")
-	assertOriginRefused(t, srv, "https://evil.example", "there is no graph to grant anything")
+	srv.corsGrants = &grantedOrigins{
+		read: func(ctx context.Context) ([]string, error) {
+			deadline, ok := ctx.Deadline()
+			sawDeadline = ok
+			if ok {
+				remaining = time.Until(deadline)
+			}
+			return nil, nil
+		},
+	}
+
+	// An origin the env list does NOT cover, so the graph read actually runs.
+	assertOriginRefused(t, srv, "https://unknown.example", "nothing grants it")
+
+	if !sawDeadline {
+		t.Fatal("the granted-origin read ran with NO deadline. It holds a mutex that waiters " +
+			"cannot be cancelled out of, so an unbounded read parks every queued preflight " +
+			"until the database answers -- on routes that need no credential to reach.")
+	}
+	if remaining <= 0 || remaining > grantedOriginReadTimeout {
+		t.Errorf("deadline leaves %v, want (0, %v] -- the bound must be this package's own, "+
+			"not inherited from something further out", remaining, grantedOriginReadTimeout)
+	}
+	if grantedOriginReadTimeout >= 10*time.Second {
+		t.Errorf("grantedOriginReadTimeout = %v, which is at or above bun's pgdriver ReadTimeout "+
+			"default (10s). Above that the socket deadline fires first and the bound is the "+
+			"dependency's again, which is the situation this constant exists to end.",
+			grantedOriginReadTimeout)
+	}
 }

@@ -100,18 +100,28 @@ func (s *Service) SetOAuthClientCORSOrigins(ctx context.Context, clientId string
 	internal := auth.ContextWithInternalOrigin(ctx)
 
 	row, err := store.LookupOAuthClientByClientId(internal, target)
-	if err != nil || row == nil {
+	// A read FAILURE and a missing client are different answers and must not
+	// share a message. Collapsed into one NOT_FOUND, a transient database error
+	// told an owner their client does not exist AND pointed them at
+	// MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS -- which is to say, at the one path
+	// that needs no gate and a restart. That is advice to route around the
+	// authorization this operation exists to apply, delivered exactly when the
+	// cluster is unhealthy. The audit event always carried the truth
+	// (reason = err.Error()); the operator-facing half was the wrong one.
+	if err != nil {
+		return fail(CodeInternal, s.emit(ctx, identity.AuditCategoryConfiguration, action,
+			act, "", "", detail, identity.AuditOutcomeFailure, err.Error()),
+			"identity admin: could not read the registered OAuth client "+target+
+				" -- the read failed rather than coming back empty, so nothing was changed. Retry.")
+	}
+	if row == nil {
 		// Refused rather than written blind. setOAuthClientCORSOrigins is a
 		// partial update keyed on the row id, so a mistyped clientId would
 		// otherwise leave an allowance attached to nothing -- an origin an
 		// operator believes is granted, sitting on no client, invisible on the
 		// list they would check.
-		reason := "oauth_client_not_found"
-		if err != nil {
-			reason = err.Error()
-		}
 		return fail(CodeNotFound, s.emit(ctx, identity.AuditCategoryConfiguration, action,
-			act, "", "", detail, identity.AuditOutcomeFailure, reason),
+			act, "", "", detail, identity.AuditOutcomeFailure, "oauth_client_not_found"),
 			"identity admin: no such registered OAuth client: "+target+
 				" (statically configured clients carry no row -- their origins belong in "+
 				"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS)")

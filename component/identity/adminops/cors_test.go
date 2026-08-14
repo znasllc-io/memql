@@ -180,6 +180,92 @@ func TestSetCORSOriginsCanonicalisesAndDeduplicates(t *testing.T) {
 	}
 }
 
+// TestSetCORSOriginsRevokeWritesEmptyNotAnEmptyArray pins the state collapse at
+// the wire level (fix round 1, item 6).
+//
+// `filter corsOriginsJSON != ""` already excludes the ABSENT field a
+// freshly-registered client carries, but it MATCHES "[]". A revoke written that
+// way would leave the row in oAuthClientCORSGrants's result set forever while
+// contributing no origins -- an @unbounded read that only ever grows, and a query
+// comment claiming more than it delivers. "" returns the row to the state it had
+// before it was ever granted.
+func TestSetCORSOriginsRevokeWritesEmptyNotAnEmptyArray(t *testing.T) {
+	svc, eng, _ := newCORSGrantService(t, "mcp_customer")
+
+	res := svc.SetOAuthClientCORSOrigins(ctxAs("owner"), "mcp_customer", nil)
+	if !res.OK {
+		t.Fatalf("revoke failed: code=%d %s", res.Code, res.ErrorMessage)
+	}
+
+	var written string
+	for _, call := range eng.calls {
+		if strings.Contains(call.query, "setOAuthClientCORSOrigins(") {
+			written = call.query
+		}
+	}
+	if written == "" {
+		t.Fatal("no setOAuthClientCORSOrigins call was made")
+	}
+	if strings.Contains(written, "[]") {
+		t.Errorf("a revoke wrote an empty JSON ARRAY: %s\n"+
+			"That is a third spelling of 'no allowance' -- absent and \"\" are the other two -- "+
+			"and it is the only one the query's `corsOriginsJSON != \"\"` filter matches.", written)
+	}
+	if !strings.Contains(written, `corsOriginsJSON: ""`) {
+		t.Errorf("a revoke did not write an empty corsOriginsJSON: %s", written)
+	}
+}
+
+// TestSetCORSOriginsReportsAReadFailureAsInternalNotNotFound pins the split added
+// in fix round 1, item 1.
+//
+// Collapsed into one NOT_FOUND, a transient database error told an owner their
+// client did not exist AND pointed them at MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS --
+// the one path that needs no gate and a restart. That is advice to route around
+// this operation's own authorization, delivered exactly when the cluster is
+// unhealthy.
+func TestSetCORSOriginsReportsAReadFailureAsInternalNotNotFound(t *testing.T) {
+	audit := &capturingAudit{}
+	// recordingEngine fails every Execute, which IS the read-failure case: the
+	// lookup errors rather than coming back empty.
+	eng := &recordingEngine{}
+	svc, err := New(&Service{Engine: eng, Audit: audit})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	res := svc.SetOAuthClientCORSOrigins(ctxAs("owner"), "mcp_customer",
+		[]string{"https://shop.customer.test"})
+
+	if res.OK {
+		t.Fatal("a failed read was reported as a successful grant")
+	}
+	if res.Code != CodeInternal {
+		t.Errorf("code = %d, want %d (INTERNAL) -- a read that FAILED is not a client that is "+
+			"missing, and the two call for different operator responses", res.Code, CodeInternal)
+	}
+	if strings.Contains(res.ErrorMessage, "MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS") {
+		t.Errorf("a database failure pointed the operator at the un-gated env list: %q\n"+
+			"That advice belongs only on the genuinely-missing-client path.", res.ErrorMessage)
+	}
+	if strings.Contains(res.ErrorMessage, "no such") {
+		t.Errorf("a database failure was described as a missing client: %q", res.ErrorMessage)
+	}
+	// The audit already carried the truth before this fix; assert it still does.
+	if len(audit.events) != 1 {
+		t.Fatalf("want one audit event, got %d", len(audit.events))
+	}
+	if reason := audit.events[0].FailureReason; !strings.Contains(reason, "test engine") {
+		t.Errorf("audit failure reason = %q, want the underlying engine error", reason)
+	}
+	// Nothing may be written after a read we could not complete.
+	for _, q := range eng.queries {
+		if strings.Contains(q, "setOAuthClientCORSOrigins(") {
+			t.Errorf("an allowance was written after the existence check failed: %s", q)
+		}
+	}
+}
+
 // TestSetCORSOriginsStampsInternalOrigin is the load-bearing half of making the
 // mutation @serverOnly.
 //

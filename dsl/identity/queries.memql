@@ -553,12 +553,21 @@ query oauthClient oAuthClientByClientId {
 // `corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
 // the field is absent (authoring rule 27), which is every client registered
 // before this field existed and every client registered since -- /register
-// writes no allowance. So the result set is exactly the rows a human granted.
+// writes no allowance.
+//
+// It also excludes a REVOKED row, and that is a property of the WRITER rather
+// than of this predicate: identity.MarshalCORSOrigins writes "" for an empty
+// allowance, not "[]". "[]" is non-empty, so it would MATCH here -- leaving every
+// revoked client in the result set forever, contributing no origins, growing an
+// @unbounded read monotonically. Writing "" puts the row back in the state it had
+// before it was ever granted, so this result set is exactly the clients whose
+// allowance is live right now.
 //
 // @unbounded rather than paged, and that is a correctness choice: truncating
 // this set silently un-allows a granted origin, which surfaces as a customer's
 // website breaking for no visible reason. The bound is human -- every row here
-// exists because an owner or admin performed one gated write.
+// exists because an owner or admin performed one gated write and has not undone
+// it.
 //
 // No caller scope -- the read runs on an UNAUTHENTICATED preflight, before any
 // caller exists to bind to (classifies as 'other' in the per-row-authz audit,

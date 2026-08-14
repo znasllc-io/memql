@@ -26,6 +26,27 @@ import (
 // for a value nobody has asked to tune.
 const grantedOriginTTL = 10 * time.Second
 
+// grantedOriginReadTimeout bounds ONE granted-origin read.
+//
+// It exists because of the mutex, not because of the query. `current` holds the
+// lock across the read (deliberately -- see there), and `sync.Mutex.Lock` is NOT
+// context-aware: a waiter cannot be cancelled by its own client hanging up. So
+// the only thing that drains a queue of parked preflights is the HOLDER
+// finishing, and on an unauthenticated surface an unbounded holder means
+// unbounded goroutine accumulation during a database outage.
+//
+// Nothing else on this path supplies a deadline. `r.Context()` arrives without
+// one: component/server's 15s read / 15s write / 60s idle are connection-level
+// and do not cancel a handler's context, and no http.TimeoutHandler wraps these
+// routes. What actually terminated the hang case before this constant existed
+// was bun's pgdriver socket deadline -- `ReadTimeout`, defaulted to 10s in
+// pgdriver/config.go -- which is a DEPENDENCY'S DEFAULT rather than anything this
+// package states. Three seconds sits well under it, so the bound is ours and
+// stays ours if that default changes. It is also far longer than a healthy read
+// of a table holding at most a handful of granted rows: a read that misses this
+// deadline is an outage, and the outage answer is the fail-closed one below.
+const grantedOriginReadTimeout = 3 * time.Second
+
 // grantedOrigins is the short window over the admin-granted half of identity's
 // CORS allowlist (memql#3716).
 //
@@ -86,6 +107,14 @@ type grantedOrigins struct {
 // in-flight preflight. That is the right trade on this surface: at most one
 // query is in flight, and the alternative (double-checked locking) turns an
 // expiry under load into N simultaneous reads.
+//
+// What makes that safe is the DEADLINE, and it is easy to remove by accident.
+// `sync.Mutex.Lock` is not context-aware, so a waiter parks until the holder
+// finishes no matter what its own client does -- the holder is therefore bounded
+// explicitly by grantedOriginReadTimeout rather than left to bun's pgdriver
+// socket deadline (`ReadTimeout`, 10s by default), which is where that bound
+// silently lived before. A later refactor narrowing the lock should know that is
+// what it is trading away.
 func (g *grantedOrigins) current(ctx context.Context) []string {
 	if g == nil || g.read == nil {
 		return nil
@@ -101,7 +130,12 @@ func (g *grantedOrigins) current(ctx context.Context) []string {
 		return g.cached
 	}
 
-	origins, err := g.read(ctx)
+	// Derived from the REQUEST context, so a client that hangs up still cancels
+	// the read it is holding -- the deadline is the backstop for the waiters
+	// behind it, not a replacement for cancellation.
+	readCtx, cancel := context.WithTimeout(ctx, grantedOriginReadTimeout)
+	defer cancel()
+	origins, err := g.read(readCtx)
 	if err != nil {
 		// FAIL CLOSED, and drop what we were holding rather than serving it.
 		//
@@ -149,10 +183,16 @@ func (s *Server) corsGrantReader() *grantedOrigins {
 // readGrantedCORSOrigins is the graph half of the allowlist: every origin an
 // owner/admin has granted on a v1:identity:oauthClient row.
 func (s *Server) readGrantedCORSOrigins(ctx context.Context) ([]string, error) {
-	if s == nil || s.Store == nil {
-		// No store means no graph to read. Not an error: the env list is the
-		// whole allowlist for such a binary, which is the pre-memql#3716
-		// behaviour and correct for it.
+	// Engine is checked as well as Store, and not as belt-and-braces: the store's
+	// executeAndExtract dereferences s.Engine unguarded, and the package's
+	// convention of half-guarding a Store was survivable while every caller was
+	// an authenticated handler. This is the first time the CORS path touches the
+	// store, so a nil engine would now panic on every OPTIONS preflight and on
+	// POST /register -- unauthenticated routes, no credential required to reach
+	// them.
+	if s == nil || s.Store == nil || s.Store.Engine == nil {
+		// No graph to read. Not an error: the env list is the whole allowlist for
+		// such a binary, which is the pre-memql#3716 behaviour and correct for it.
 		return nil, nil
 	}
 	return s.Store.GrantedCORSOrigins(ctx)
