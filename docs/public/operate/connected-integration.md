@@ -145,9 +145,13 @@ application's own logs.
 > grant itself one. This is deliberate: `POST /register` is unauthenticated by
 > design — it exists so strangers can call it — and deriving a credentialed-CORS
 > origin from a redirect URI anyone can self-register would be a session-theft
-> hole rather than a convenience. See
-> [memql#3716](https://github.com/znasllc-io/memql/issues/3716) for the full
-> reasoning.
+> hole rather than a convenience.
+>
+> The sharpest form of that argument is worth carrying: **RFC 8252 loopback
+> redirects are normal on this concept**, so a derivation would silently admit
+> `http://127.0.0.1` and hand every local process on somebody's machine
+> cookie-bearing read access to identity. See
+> [memql#3716](https://github.com/znasllc-io/memql/issues/3716).
 >
 > The symptom, if you assume otherwise, is a `client_id` that works, an
 > `/authorize` flow that completes, and a browser that refuses to read the
@@ -159,24 +163,36 @@ This is the step with no shortcut, and the one to do before writing any
 application code.
 
 **The mechanism is an owner-or-admin grant on the client's own row.** The
-allowance is a field on `v1:identity:oauthClient`, writable **only** through
-`IdentityAdminMsg` on `MemqlService.Stream`, onto
-`component/identity/adminops` — the package that already carries the
-owner-or-admin gate. A client cannot set its own. The effective allowlist is
-the boot list (the platform's own origins, derived from the cluster's domain)
-**union** the origins an admin has granted, cached and invalidated on the
-concept's change feed, **so a grant takes effect with no restart.** See
+allowance is `corsOriginsJSON` on `v1:identity:oauthClient` — a JSON array of
+origins, each scheme plus host plus optional port and nothing else. It is
+written **only** through `IdentityAdminMsg` on `MemqlService.Stream`, onto
+`adminops.SetOAuthClientCORSOrigins` (`component/identity/adminops/cors.go`),
+the package that already carries the owner-or-admin gate. The same call grants
+and revokes. A client cannot set its own, and the field is **never** derived
+from `redirectURIsJSON` — see the warning below. Design and rationale:
 [memql#3716](https://github.com/znasllc-io/memql/issues/3716).
+
+The effective allowlist is the boot list (`MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS`,
+carrying the platform's own origins derived from the cluster's domain) **union**
+the granted rows, which `component/identity/http/cors.go` reads live on a miss
+against the boot list. **So a grant takes effect with no restart** — within a
+10-second window rather than the same millisecond, because the middleware may
+reuse the set it last read for that long. That window is not a latency
+optimisation: `cors()` wraps around fifteen routes including every
+unauthenticated preflight, `POST /register` and the WebAuthn login pair, so
+without it an anonymous flood of unknown origins would be one database query per
+request against the auth surface.
 
 Two things about it that will otherwise cost an afternoon:
 
 > **WARNING: revoking a grant looks like it did not work, for up to ten
-> minutes.** The revoke is effective immediately server-side — no restart — but
-> identity's CORS middleware sets `Access-Control-Max-Age: 600`
-> (`component/identity/http/cors.go`), so the browser keeps using its cached
-> preflight. A hard reload does not clear it. Test a revoke in a fresh private
-> window, or wait out the ten minutes, rather than concluding the grant is
-> stuck.
+> minutes.** Two separate windows stack here and it is worth not conflating them.
+> Server-side the revoke lands within the 10 seconds above. The browser is the
+> slow half: identity's CORS middleware sets `Access-Control-Max-Age: 600`
+> (`component/identity/http/cors.go`), so a browser that has already been told
+> "yes" keeps reusing that cached preflight for ten minutes. A hard reload does
+> not clear it. Test a revoke in a fresh private window rather than concluding
+> the revoke is stuck.
 
 **And an origin has to be named in more than one place.** The grant covers
 identity's credentialed endpoints. It does not cover the two allowlists on the
@@ -184,7 +200,7 @@ bff, which a cross-origin client also crosses:
 
 | Surface | Where the origin is named | Notes |
 |---|---|---|
-| `/oauth/token`, `/auth/refresh`, `/auth/logout` on identity | the admin grant above | Credentialed. **Never `*`**: identity echoes the request's own `Origin` and sets `Access-Control-Allow-Credentials: true`, so a wildcard entry makes every origin a credentialed one rather than a harmless one |
+| `/oauth/token`, `/auth/refresh`, `/auth/logout` on identity | the admin grant above | Credentialed, so `*` buys you nothing: identity **refuses** a wildcard from either source — the boot list or a granted row — and skips it rather than failing loudly, so explicit entries beside it keep working. There is no shortcut to skip the grant with |
 | `wss://api.<domain>/memql/ws` | `MEMQL_WS_ORIGIN_PATTERNS` on the bff (`component/server/memqlws`) | **Not CORS.** A WebSocket handshake is not subject to CORS, so the server checks `Origin` itself. Unset falls back to a wildcard and logs a WARN on every upgrade — populate it in any real deployment |
 | HTTP exceptions on `api.<domain>` (for example a multipart attachment upload) | `SERVER_ALLOWED_ORIGINS` on the bff | Defaults to `*`, which here degrades to a credential-less posture rather than allowing credentialed reads. See [env-vars.md](env-vars.md) |
 
