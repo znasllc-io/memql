@@ -35,7 +35,7 @@ import { DeployControlClient } from "@znasllc-io/memql-sdk-core/deploy";
 import {
   escapeHtml,
   renderDeploymentHistory,
-  renderDetail,
+  renderValueView,
   renderTally,
   renderToHtml,
   renderTopologyGrid,
@@ -646,7 +646,7 @@ export class ClusterPanel {
 
     const statusHtml =
       state.status !== null
-        ? renderToHtml(renderDetail(state.status as unknown as Record<string, unknown>))
+        ? renderToHtml(renderValueView(state.status as unknown as Record<string, unknown>))
         : state.statusMessage === ""
           ? '<div class="placeholder">Loading deployment status...</div>'
           : `<div class="notice">${escapeHtml(state.statusMessage)}</div>`;
