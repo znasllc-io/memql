@@ -208,3 +208,70 @@ shape broken {
 			sliceNames(got))
 	}
 }
+
+// TestExtractTerseAutomationSlicesCutsTheAuthoredLine pins the one property the
+// construct source hash depends on: the slice is the text the AUTHOR wrote, not
+// the longhand the loader lowers it to (memql#3758). Hashing the lowered form
+// would make the engine and the language server disagree about every terse
+// automation in the tree, and would silently re-hash all ten of them the next
+// time the lowering's formatting changed.
+func TestExtractTerseAutomationSlicesCutsTheAuthoredLine(t *testing.T) {
+	const src = `
+/// Nightly consolidation.
+@enabled
+automation consolidateMemory @trigger(schedule="0 45 2 * * *") => logic consolidateMemory
+`
+	slices := ExtractTerseAutomationSlices(src)
+	if len(slices) != 1 {
+		t.Fatalf("got %d slices, want 1: %v", len(slices), sliceNames(slices))
+	}
+	s := slices[0]
+	if s.Name != "consolidateMemory" {
+		t.Errorf("Name = %q, want consolidateMemory", s.Name)
+	}
+	if !strings.Contains(s.Source, "=> logic consolidateMemory") {
+		t.Errorf("the slice was lowered to longhand rather than cut as authored: %q", s.Source)
+	}
+	if !strings.Contains(s.Source, "/// Nightly consolidation.") {
+		t.Errorf("the doc-comment preamble is part of the declaration and must be in the slice: %q", s.Source)
+	}
+	if !strings.Contains(s.Source, "@enabled") {
+		t.Errorf("the annotation preamble must be in the slice: %q", s.Source)
+	}
+	if src[s.Start:s.End] != s.Source {
+		t.Errorf("src[Start:End] != Source.\n  src[%d:%d] = %q\n  Source     = %q",
+			s.Start, s.End, src[s.Start:s.End], s.Source)
+	}
+}
+
+// TestExtractTerseAutomationSlicesIgnoresCommentedOut pins rule 1 of the file
+// comment for this extractor too: a declaration that exists only inside a
+// comment is not a declaration. Getting it wrong produces a construct the
+// catalog reports and the loader never registered.
+func TestExtractTerseAutomationSlicesIgnoresCommentedOut(t *testing.T) {
+	const src = `
+// automation retired @trigger(schedule="0 0 2 * * *") => logic retired
+/* automation alsoRetired @trigger(schedule="0 0 3 * * *") => logic alsoRetired */
+automation live @trigger(schedule="0 0 4 * * *") => logic live
+`
+	got := ExtractTerseAutomationSlices(src)
+	if len(got) != 1 || got[0].Name != "live" {
+		t.Fatalf("slices = %v, want exactly [live] -- a commented-out declaration is not a declaration",
+			sliceNames(got))
+	}
+}
+
+// TestExtractTerseAutomationSlicesSkipsNested pins that a terse form inside
+// another construct's braces is not a top-level declaration. The brace-depth
+// guard is shared with ExtractDeclarationSlices for exactly this.
+func TestExtractTerseAutomationSlicesSkipsNested(t *testing.T) {
+	const src = `
+shape wrapper {
+automation nested @trigger(schedule="0 0 2 * * *") => logic nested
+}
+`
+	if got := ExtractTerseAutomationSlices(src); len(got) != 0 {
+		t.Fatalf("slices = %v, want none -- a nested header is not a top-level declaration",
+			sliceNames(got))
+	}
+}

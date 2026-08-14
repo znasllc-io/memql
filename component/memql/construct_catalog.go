@@ -601,21 +601,36 @@ func buildConstructSourceIndex() constructSourceIndex {
 	files := baseloader.ReadAll(nil)
 	for _, f := range files {
 		domain := treeDomainOf(f.Path)
+		// record is first-wins. A duplicate declaration is the registry's
+		// problem, not this index's: whichever the loader kept is what the
+		// catalog reports, and pointing at the first file found is no more
+		// wrong than pointing at the last.
+		record := func(kind, name, source string) {
+			key := kind + "\x00" + name
+			if kind == ConstructKindConcept {
+				key = kind + "\x00" + domain + "/" + name
+			}
+			if _, exists := index.byKindName[key]; exists {
+				return
+			}
+			index.byKindName[key] = constructSource{path: f.Path, source: source}
+		}
+
 		for kind, keyword := range constructKeyword {
 			for _, slice := range languageParser.ExtractDeclarationSlices(f.Content, keywordHeaderRegexp(keyword)) {
-				key := kind + "\x00" + slice.Name
-				if kind == ConstructKindConcept {
-					key = kind + "\x00" + domain + "/" + slice.Name
-				}
-				if _, exists := index.byKindName[key]; exists {
-					// A duplicate declaration is the registry's problem, not
-					// this index's: whichever the loader kept is what the
-					// catalog reports, and pointing at the first file found is
-					// no more wrong than pointing at the last.
-					continue
-				}
-				index.byKindName[key] = constructSource{path: f.Path, source: slice.Source}
+				record(kind, slice.Name, slice.Source)
 			}
+		}
+
+		// The terse single-step automation form has no braces, so the header
+		// regexp above -- which is anchored on the declaration's opening `{` --
+		// cannot see it. Ten automations in the tree are authored that way, and
+		// without this they were catalogued with an EMPTY source hash while the
+		// language server computed a real one for the same line: a construct
+		// that reads as `drifted` forever, because no edit can make an empty
+		// hash match a real one (memql#3758, caught by the corpus parity gate).
+		for _, slice := range languageParser.ExtractTerseAutomationSlices(f.Content) {
+			record(ConstructKindAutomation, slice.Name, slice.Source)
 		}
 	}
 	return index

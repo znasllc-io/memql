@@ -37,7 +37,7 @@ import (
 //
 //	slice name="zzLive" source="builtin zzLive {\n  b string\n}"
 //
-// -- no @executor at all. The loader's preamble walk (preambleStartOf) climbs
+// -- no @executor at all. The loader's preamble walk (PreambleStartOf) climbs
 // only contiguous `@` and `//` lines, and the `*/` closing the comment is
 // neither, so the walk stops there and the annotation is left outside the
 // slice. The engine therefore registers zzLive with NO executor.
