@@ -64,7 +64,7 @@ const defaultSiteCacheTTL = 30 * time.Second
 // correct behaviour until the proxy lands.
 func (a *App) mountEdgeEndpoints() {
 	executor := edge.NewEngineExecutor(&EdgeEngineAdapter{Engine: a.engine})
-	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv())
+	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv(a.Logger))
 
 	handler := edge.NewHandler(edge.Options{
 		Resolver: resolver,
@@ -78,12 +78,33 @@ func (a *App) mountEdgeEndpoints() {
 // edgeSiteCacheTTLFromEnv resolves MEMQL_EDGE_SITE_CACHE_TTL_SECONDS,
 // defaulting to defaultSiteCacheTTL. Registered in
 // scripts/secrets/manifest.yaml (component: edge).
-func edgeSiteCacheTTLFromEnv() time.Duration {
+//
+// A present-but-malformed value is NOT silently swallowed: unlike
+// edgeBundleOpener's Azure opt-out (a whole optional subsystem this cluster
+// may legitimately not use at all), a present TTL var is an operator who
+// tried to set one, and a parse failure here means the node runs on
+// defaultSiteCacheTTL while the operator believes they configured something
+// else -- exactly the kind of drift that gets debugged for an hour rather
+// than found at boot. Logged as a WARNING, not a.fatal: a bad cache knob
+// degrades staleness bounds, not correctness, so it does not justify
+// refusing to boot the node the way a missing required var does.
+func edgeSiteCacheTTLFromEnv(logger *slog.Logger) time.Duration {
 	reader := env.NewEnvReader("MEMQL_EDGE")
-	if ptr, err := reader.OptionalInt("SITE_CACHE_TTL_SECONDS"); err == nil && ptr != nil && *ptr > 0 {
-		return time.Duration(*ptr) * time.Second
+	ptr, err := reader.OptionalInt("SITE_CACHE_TTL_SECONDS")
+	if err != nil {
+		logger.Warn("edge: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS is not a valid integer; using the default",
+			"component", "edge", "error", err, "default_seconds", int(defaultSiteCacheTTL/time.Second))
+		return defaultSiteCacheTTL
 	}
-	return defaultSiteCacheTTL
+	if ptr == nil {
+		return defaultSiteCacheTTL
+	}
+	if *ptr <= 0 {
+		logger.Warn("edge: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS must be a positive number of seconds; using the default",
+			"component", "edge", "value", *ptr, "default_seconds", int(defaultSiteCacheTTL/time.Second))
+		return defaultSiteCacheTTL
+	}
+	return time.Duration(*ptr) * time.Second
 }
 
 // edgeBundleOpener composes the file:// opener (always available) with

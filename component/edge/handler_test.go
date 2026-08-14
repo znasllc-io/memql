@@ -98,6 +98,34 @@ func TestResolutionOrder(t *testing.T) {
 	}
 }
 
+// TestResolutionOrder's fixture never has both <path>/index.html AND
+// <path>.html present for the SAME path -- about/ only carries the dir form,
+// products/shoe only carries the .html form -- so rung 2 winning over rung 3
+// is correct by inspection of resolveAsset's candidate order
+// ([]string{clean, path.Join(clean, "index.html"), clean + ".html"}) but was
+// not pinned by any test. Both forms existing for the same route is a
+// realistic collision, not a contrived one: a prerendering build can emit a
+// directory-style output for one route and a flat .html output for another,
+// and nothing stops the two colliding on the same logical path across
+// different build steps. Resolution has to pick the same rung deterministically
+// either way, which is what this pins.
+func TestDirectoryIndexWinsOverHTMLFileWhenBothExist(t *testing.T) {
+	files := map[string]string{
+		"catalog/index.html": "CATALOG-DIR",
+		"catalog.html":       "CATALOG-FILE-WOULD-BE-WRONG",
+	}
+	live := &Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"}
+
+	rec := serve(t, live, files, "/catalog")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /catalog = %d, want 200", rec.Code)
+	}
+	if rec.Body.String() != "CATALOG-DIR" {
+		t.Errorf("GET /catalog served %q, want %q -- the <path>/index.html rung must win over <path>.html",
+			rec.Body.String(), "CATALOG-DIR")
+	}
+}
+
 // A static site 404s an unknown path instead of falling back. A multi-page
 // site that silently renders its home page for every typo hides broken links
 // from the people who could fix them.
@@ -136,6 +164,25 @@ func TestDisabledSiteIs503(t *testing.T) {
 		map[string]string{"index.html": "ROOT"}, "/")
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("disabled site = %d, want 503", rec.Code)
+	}
+}
+
+// serveAPI must refuse the /_memql/* prefix outright when no APITarget is
+// configured -- exactly how this task wires the handler (Options.APITarget
+// is left unset in app/transport_edge.go; the reverse proxy that consumes it
+// is Task 7, #3712). Pinned here, by inspection alone, so that when Task 7
+// replaces serveAPI's body this test is a RED test to turn green rather than
+// a silent behaviour change nothing would have caught. APIProxy: true (the
+// site opted in) is the more interesting half of serveAPI's OR condition:
+// it proves the refusal holds even for a site that asked for the proxy, not
+// only for one that never opted in.
+func TestAPIPrefixIsRefusedWithNoAPITarget(t *testing.T) {
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa", APIProxy: true},
+		map[string]string{"index.html": "ROOT"},
+		"/_memql/whatever")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("/_memql/* with no APITarget = %d, want 404", rec.Code)
 	}
 }
 
