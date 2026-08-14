@@ -76,7 +76,16 @@ test('the workspace value is not used as the server path either', () => {
 test('granting trust registers the runtime surface, exactly once', () => {
   grantWorkspaceTrust();
 
-  assert.deepEqual(recorded.treeViews, ['memqlClusters', 'memqlConcepts', 'memqlRuns']);
+  // REGISTRATION order, which is not the display order: Deployments sits above
+  // Clusters in the panel, and that is decided by contributes.views in the
+  // manifest. Here it comes second because it is built from the presence memo,
+  // which activation resolves after the Clusters tree.
+  assert.deepEqual(recorded.treeViews, [
+    'memqlClusters',
+    'memqlDeployments',
+    'memqlConcepts',
+    'memqlRuns',
+  ]);
   assert.ok(recorded.commands.includes('memql.clusters.select'));
 
   // The listener disposes itself before calling in, and registerRuntimeSurface

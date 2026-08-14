@@ -57,9 +57,18 @@ workspace.isTrusted = true;
 activate(context);
 
 test('a missing memql-lsp does not take the runtime surface down with it', () => {
-  // The whole point of the issue: all three views get a data provider even
-  // though the language server never started.
-  assert.deepEqual(recorded.treeViews, ['memqlClusters', 'memqlConcepts', 'memqlRuns']);
+  // The whole point of the issue: every view gets a data provider even though
+  // the language server never started.
+  // REGISTRATION order, which is not the display order: Deployments sits above
+  // Clusters in the panel, and that is decided by contributes.views in the
+  // manifest. Here it comes second because it is built from the presence memo,
+  // which activation resolves after the Clusters tree.
+  assert.deepEqual(recorded.treeViews, [
+    'memqlClusters',
+    'memqlDeployments',
+    'memqlConcepts',
+    'memqlRuns',
+  ]);
 });
 
 test('the runtime commands are registered, so a cluster can be selected and connected', () => {
@@ -83,8 +92,18 @@ test('the runtime commands are registered, so a cluster can be selected and conn
   }
 });
 
-test('clusters.yaml is watched, so an external edit still refreshes the tree', () => {
-  assert.deepEqual(recorded.watched, [path.join(home, '.memql') + '/clusters.yaml']);
+test('every file the trees read is watched, so an external edit refreshes them', () => {
+  // clusters.yaml appears TWICE, and that is the design rather than a slip:
+  // the Clusters tree and the Deployments tree read the same registry and
+  // refresh independently, so each holds its own watcher. One shared watcher
+  // fanning out to both would make either view's lifetime decide the other's.
+  const memql = path.join(home, '.memql');
+  assert.deepEqual(recorded.watched, [
+    `${memql}/clusters.yaml`,
+    `${memql}/clusters.yaml`,
+    `${memql}/install-receipt.json`,
+    `${memql}/runs/*.json`,
+  ]);
 });
 
 test('the missing-binary message names the language features, not the extension', () => {
