@@ -155,9 +155,13 @@ misspelling owns that name on that cluster forever.
 
 A retired concept survives a restart still retired.
 
-The row count that decides between the two outcomes is read under an actor
-that can see every row. A per-user count would make the outcome depend on who
-asked, which is not a property an operation like this may have.
+The row count that decides between the two outcomes is taken **against
+storage, under no actor at all**. That is deliberate, not a shortcut: per-row
+authorization filters reads by the caller, so a count taken under the demoting
+owner would answer "how many rows can *I* see". An owner who wrote nothing but
+whose colleague wrote a thousand rows would get zero and remove the definition
+— the outcome would depend on who asked, which is not a property an operation
+like this may have.
 
 ### A changed schema is classified: additive lands, breaking is refused
 
