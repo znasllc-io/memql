@@ -501,12 +501,48 @@ type Config struct {
 	RegisteredClients []RegisteredClient
 
 	// OAuthDCREnabled gates the RFC 7591 dynamic client registration
-	// endpoint (POST /register). When true (the default), unknown OAuth
-	// clients -- e.g. claude.ai / Claude Desktop's "add custom connector"
-	// -- self-register a public client_id they then use at /authorize +
+	// endpoint (POST /register). When true, unknown OAuth clients --
+	// e.g. claude.ai / Claude Desktop's "add custom connector" --
+	// self-register a public client_id they then use at /authorize +
 	// /oauth/token. When false, POST /register returns 403
 	// registration_disabled and persists nothing.
-	// Env: MEMQL_IDENTITY_OAUTH_DCR_ENABLED (default true)
+	//
+	// DEFAULTS TO FALSE (memql#3719, owner decision). The capability is
+	// real and wanted where an MCP surface exists; the DEFAULT was wrong.
+	// Under one-cluster-per-customer (#3700 D1) most clusters never route
+	// mcp.<domain> and have no DCR consumer at all, so leaving it on means
+	// carrying a permanent UNAUTHENTICATED WRITE endpoint for nothing:
+	// unbounded v1:identity:oauthClient row creation by anyone who can
+	// reach identity, plus the classic OAuth phishing surface (an attacker
+	// registers a plausible client_name and the user approves the name they
+	// recognise rather than the destination).
+	//
+	// The durable argument is #3716, where an open registration endpoint
+	// became one half of a CORS escalation: rows nothing had authenticated
+	// quietly became an input to another trust decision. Every future such
+	// decision would have to remember these rows are untrusted. Fewer
+	// trusted-by-accident inputs is the fix.
+	//
+	// THERE IS NO MIDDLE PATH. The approval-gated form -- DCR creates the
+	// row, an admin blesses it before it grants anything, which is what
+	// #3716 does for CORS -- cannot work here: the entire point of DCR is
+	// completing the flow with NO HUMAN PRESENT. Approval-gated DCR is DCR
+	// that does not function. So it is binary per cluster.
+	//
+	// Nor can it be DERIVED. Defaulting it on iff the cluster routes an MCP
+	// host would be one fact in one place, the pattern MEMQL_DOMAIN
+	// established -- but MEMQL_MCP_PUBLIC_URL is itself derived from
+	// MEMQL_DOMAIN since #3704, so it is set on every cluster whether or
+	// not an ingress routes it, and cannot be the signal. Identity would
+	// have to see a routing fact it has no access to.
+	//
+	// Clusters that expose MCP turn it on explicitly. The mcp node warns
+	// loudly at boot when it is serving the protocol head with DCR
+	// disabled, because the failure mode of forgetting is "claude.ai cannot
+	// add the connector" -- a confusing symptom at exactly the moment
+	// someone is demonstrating something.
+	//
+	// Env: MEMQL_IDENTITY_OAUTH_DCR_ENABLED (default false)
 	OAuthDCREnabled bool
 
 	// CORSAllowedOrigins is the set of Origin values identity will
@@ -676,7 +712,7 @@ func LoadConfigFromEnv() (Config, error) {
 		DisposableEmailBlocklistEnabled: envBool("MEMQL_IDENTITY_DISPOSABLE_EMAIL_BLOCKLIST_ENABLED", true),
 		MXValidationEnabled:             envBool("MEMQL_IDENTITY_MX_VALIDATION_ENABLED", true),
 		NodeBootstrapToken:              strings.TrimSpace(os.Getenv("MEMQL_NODE_BOOTSTRAP_TOKEN")),
-		OAuthDCREnabled:                 envBool("MEMQL_IDENTITY_OAUTH_DCR_ENABLED", true),
+		OAuthDCREnabled:                 envBool("MEMQL_IDENTITY_OAUTH_DCR_ENABLED", false),
 	}
 
 	cfg.AccessTokenTTL = envDurationSeconds("MEMQL_IDENTITY_ACCESS_TOKEN_TTL_SECONDS", DefaultAccessTokenTTLSeconds)

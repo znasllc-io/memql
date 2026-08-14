@@ -129,8 +129,10 @@ Clients live in the graph, as `v1:identity:oauthClient` rows. There are two
 ways to get one:
 
 - **Dynamic registration** — `POST /register` on the identity host, RFC 7591,
-  enabled by default (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`). Returns a public
-  `client_id` with no secret, which is why PKCE is mandatory.
+  **disabled by default** (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`, memql#3719); set
+  it true on clusters that expose an MCP surface, and it answers
+  `403 registration_disabled` until you do. Returns a public `client_id` with no
+  secret, which is why PKCE is mandatory.
 - **Configured at boot** — `MEMQL_IDENTITY_REGISTERED_CLIENTS`, a JSON array of
   `{clientId, redirectURIs[]}`. This is how the platform's own clients (the
   portal, the Cockpit) are seeded.
