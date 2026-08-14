@@ -472,23 +472,18 @@ func extractAttachmentId(nodeJSON json.RawMessage) string {
 
 // extractPartitionIdFromAttachmentPath parses /spaces/{partitionId}/attachments.
 // Returns empty string if the path doesn't match.
+//
+// The parse is segmentBetween's (path_segment.go), not this function's own.
+// It used to be spelled out here, and the inline version PANICKED on
+// "/spaces/attachments" -- a path with no partition id satisfies both the
+// prefix and the suffix check at once, because the two matched regions overlap
+// (memql#3773).
 func extractPartitionIdFromAttachmentPath(path string) string {
-	const prefix = "/spaces/"
-	const suffix = "/attachments"
-
-	if !strings.HasPrefix(path, prefix) {
+	partitionId, ok := segmentBetween(path, "/spaces/", "/attachments")
+	if !ok {
 		return ""
 	}
-	if !strings.HasSuffix(path, suffix) {
-		return ""
-	}
-
-	middle := path[len(prefix) : len(path)-len(suffix)]
-	middle = strings.TrimSpace(middle)
-	if middle == "" || strings.Contains(middle, "/") {
-		return ""
-	}
-	return middle
+	return partitionId
 }
 
 // parseAttachmentDownloadPath parses /spaces/{partitionId}/attachments/{attachmentId}
