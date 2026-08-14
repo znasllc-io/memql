@@ -430,15 +430,17 @@ the local **parity cluster**, which is the topology every feature must be
 designed and tested against. Never reason about a feature as if it runs in a
 single process.
 
-> **Staging runs ONE replica per node type since memql#3766**, and scales to
-> zero when idle -- that is what makes a second environment cost storage rather
-> than compute. So staging is NOT where the cross-node class below gets caught,
-> and never really was: the blessed repro has always been the 2-replica local
-> parity cluster (`make up SERVERS=2` + `make scale N=2 ENV=local`), which is
-> the only topology a developer can iterate against. Do not read a green
-> staging as evidence about replica fan-out. Scale it up deliberately
-> (`make scale N=2 ENV=staging`) when you want staging to say something about
-> it.
+> **Staging matches prod's replica counts** (2 per mesh node) and spends most
+> of its life scaled to ZERO (`make scale N=0 ENV=staging`) -- the saving is the
+> idle time, not the width, which is what the design means by "cost storage
+> rather than compute" (§3.5). It was briefly specified as one replica while
+> memql#3766 landed; that would have made staging unable to catch the class
+> below, and the money it saved was the fraction of the time staging is up at
+> all.
+>
+> The local 2-replica parity cluster (`make up SERVERS=2` + `make scale N=2
+> ENV=local`) is still the blessed repro -- it is the only topology a developer
+> can iterate against. Staging is the second net, not the first.
 
 This has bitten us repeatedly -- a fix ships
 with green single-node tests and silently breaks in the mesh (e.g.

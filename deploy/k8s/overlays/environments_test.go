@@ -45,7 +45,7 @@ var environments = []struct {
 	},
 	{
 		dir: "staging", namespace: "memql-staging", label: "staging",
-		schema: "memql_staging", replicas: 1,
+		schema: "memql_staging", replicas: 2,
 		argoApp: "memql-staging", autoSynced: true,
 	},
 }

@@ -17,11 +17,22 @@
 # MUTATIONS, automations fire and agents write, and those land wherever the
 # connection points. The connection is the one place no code path can forget.
 #
-# COST SHAPE. Staging runs 1 replica per node type and is expected to spend most
-# of its life scaled to zero (`make scale N=0 ENV=staging`), which is what makes
-# a second environment cost storage rather than compute. ArgoCD ignores
-# /spec/replicas on this Application, so scaling to zero and back is a runtime
-# act selfHeal will not fight and no manual repair follows.
+# COST SHAPE, and why it is not fewer replicas. Staging matches prod's replica
+# counts and is expected to spend most of its life scaled to ZERO
+# (`make scale N=0 ENV=staging`). The saving is the idle time, not the width:
+# the design says as much -- "scales to zero when idle, which is what makes the
+# second environment cost storage rather than compute" (§3.5) -- so running one
+# replica while UP would trade the coverage for almost none of the money.
+#
+# The coverage is the point. CLAUDE.md's multi-node section is emphatic that a
+# green single-node result is a FALSE signal for anything crossing a node
+# boundary, and names three defects that shipped behind one (memql#1448 read
+# session state off the wrong node, #1412 had no routing rule, #1388 reaped
+# peers after a cutover). A staging that cannot fan out cannot catch that class,
+# and it is the last environment before production that could.
+#
+# ArgoCD ignores /spec/replicas on this Application, so scaling to zero and back
+# is a runtime act selfHeal will not fight and no manual repair follows.
 #
 # A product runs on this engine surface via a downstream product overlay that
 # adds the deploy/k8s/components/dsl-bundle component (a data-only DSL bundle
@@ -56,31 +67,31 @@ patches:
   # counts a reconcile returns to when you scale it back.
   - target: { kind: Deployment, name: identity }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: bff }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: cognition }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: agent }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: planner }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: workbench }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: mcp }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: voice }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   - target: { kind: Deployment, name: edge }
     patch: |
-      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/replicas, value: 2 }
   # voice-agent is a room DISPATCHER rather than a request-serving mesh node --
   # see the prod twin.
   - target: { kind: Deployment, name: voice-agent }
