@@ -322,34 +322,59 @@ function ensure_ca_trusted() {
 # THE CERTIFICATE
 #=============================================================================
 
-# cert_mismatches <cert-path> -- true ONLY when the certificate demonstrably
-# does not cover every name in HOSTNAMES.
-#
-# WHY THE QUESTION IS PHRASED NEGATIVELY. Existence alone is not enough to reuse
-# a pair (memql#3593): one on disk was issued for whatever domain the last run
-# used, and reusing it for a different one leaves traefik serving a certificate
-# for a name nobody dialed -- a TLS failure against a hostname the operator
-# typed themselves, which is the failure this issue was opened about.
-#
-# But "cannot tell" is not "does not cover". With no openssl, or a file that
-# does not parse as a certificate, this returns FALSE and the existing pair is
-# kept, because a capability that reissued whenever it was unsure would stop
-# being idempotent -- and a second identical run reporting changed=true is its
-# own contract violation. Only a certificate we could read, and whose SANs are
-# missing a name we need, is replaced.
-function cert_mismatches() {
-    local cert="$1" sans host
-    [[ -f "$cert" ]] || return 1
-    command -v openssl &>/dev/null || return 1
+# cert_sans_oneline <cert-path> -- the certificate's subjectAltName names on one
+# line, or empty when they cannot be read. Empty means "cannot tell", never
+# "carries nothing".
+function cert_sans_oneline() {
+    local cert="$1" sans
+    [[ -f "$cert" ]] || return 0
+    command -v openssl &>/dev/null || return 0
     sans="$(openssl x509 -in "$cert" -noout -ext subjectAltName 2>/dev/null || true)"
-    # Unreadable: cannot tell, so do not claim a mismatch.
-    [[ -n "$sans" ]] || return 1
+    [[ -n "$sans" ]] || return 0
+    printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
+}
+
+# cert_coverage <cert-path> -- THREE states, printed:
+#
+#   covers   the SANs were read and carry every name in HOSTNAMES
+#   missing  the SANs were read and at least one required name is absent
+#   unknown  they could not be read at all (no file, no openssl, not a
+#            certificate, no subjectAltName extension)
+#
+# WHY THREE AND NOT TWO. Existence alone is not enough to reuse a pair
+# (memql#3593): one on disk was issued for whatever domain the last run used, and
+# reusing it for a different one leaves traefik serving a certificate for a name
+# nobody dialed -- a TLS failure against a hostname the operator typed
+# themselves. But "cannot tell" is not "does not cover", and it is not "covers"
+# either. Collapsing it into either one produces a false statement: reissuing
+# whenever unsure destroys idempotency, and REPORTING coverage we never
+# established is the memql#3730 defect itself. So the third state is named and
+# travels into the result envelope as coverageVerified, where every caller can
+# see the difference instead of guessing at it.
+function cert_coverage() {
+    local cert="$1" sans host
+    sans="$(cert_sans_oneline "$cert")"
+    if [[ -z "$sans" ]]; then
+        printf 'unknown'
+        return 0
+    fi
     for host in "${HOSTNAMES[@]}"; do
         if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+            printf 'missing'
             return 0
         fi
     done
-    return 1
+    printf 'covers'
+}
+
+# cert_mismatches <cert-path> -- true ONLY when the certificate demonstrably
+# does not cover every name in HOSTNAMES. The reuse decision, phrased
+# negatively: "unknown" keeps the pair, because a capability that reissued
+# whenever it was unsure would stop being idempotent -- and a second identical
+# run reporting changed=true is its own contract violation. Only a certificate
+# we could read, and whose SANs are missing a name we need, is replaced.
+function cert_mismatches() {
+    [[ "$(cert_coverage "$1")" == "missing" ]]
 }
 
 function issue_cert() {
@@ -384,7 +409,9 @@ function main() {
         cap_fail 2 "--domain and --hostnames are two spellings of one answer; pass one"
     fi
     if [[ -n "$domain" ]]; then
-        hostnames_raw="*.${domain},${domain}"
+        # Through localtls.sh's one derivation, so --domain here and --domain in
+        # the seeder cannot produce different SAN lists (memql#3730).
+        hostnames_raw="$(localtls_hostnames_for "$domain")"
     elif [[ -z "$hostnames_raw" ]]; then
         hostnames_raw="$DEFAULT_HOSTNAMES"
     fi
@@ -468,17 +495,43 @@ function main() {
     fi
 
     local cert_issued=false reissued=false
-    if [[ -f "$cert" && -f "$key" && -z "$force" ]] && ! cert_mismatches "$cert"; then
-        cap_info "certificate already present at ${cert} -- pass --force to reissue."
+    # Read ONCE, before anything is written: after issue_cert the old names are
+    # gone (mkcert overwrites in place), and they are the useful half of the
+    # reissue message -- they name WHICH stale domain the operator had.
+    local coverage_before old_sans
+    coverage_before="$(cert_coverage "$cert")"
+    old_sans="$(cert_sans_oneline "$cert")"
+    if [[ -f "$cert" && -f "$key" && -z "$force" && "$coverage_before" != "missing" ]]; then
+        if [[ "$coverage_before" == "covers" ]]; then
+            cap_info "certificate already present at ${cert} and covers ${HOSTNAMES[*]} -- pass --force to reissue."
+        else
+            # Said, not implied. This is the branch that keeps a pair nothing
+            # checked, and a caller echoing "already covers" here would be
+            # asserting what it never established (memql#3730).
+            cap_info "certificate already present at ${cert} -- pass --force to reissue."
+            cap_warn "its names could NOT be read, so coverage of ${HOSTNAMES[*]} is unverified"
+            cap_warn "  (openssl absent, or ${cert} does not parse as a certificate)."
+        fi
     else
-        if [[ -f "$cert" && -z "$force" ]] && cert_mismatches "$cert"; then
+        if [[ -f "$cert" && -z "$force" && "$coverage_before" == "missing" ]]; then
             reissued=true
-            cap_warn "certificate at ${cert} does not cover ${HOSTNAMES[*]} -- reissuing."
+            # BOTH NAME SETS. "Does not cover X" alone leaves the operator
+            # guessing which domain they were serving; the old SANs are what
+            # identify the stale pair, and this is the last moment they exist.
+            cap_warn "certificate at ${cert} carries ${old_sans}"
+            cap_warn "  which does not cover ${HOSTNAMES[*]} -- reissuing."
         fi
         issue_cert "$bin" "$caroot" "$cert" "$key"
         cert_issued=true
         cap_changed
     fi
+
+    # coverageVerified describes THE PAIR THIS RUN LEAVES IN PLACE: true only
+    # when its SANs were read and carry every requested name. Re-read after
+    # issuance rather than assumed from it, so the field is a measurement in
+    # every branch -- which is the whole point of having it.
+    local coverage_verified=false
+    [[ "$(cert_coverage "$cert")" == "covers" ]] && coverage_verified=true
 
     local hostnames_json="" host first=1
     for host in "${HOSTNAMES[@]}"; do
@@ -494,6 +547,11 @@ function main() {
     cap_result_set     mkcertBin     "$bin"
     cap_result_set_raw hostnames     "[${hostnames_json}]"
     cap_result_set_raw reissued      "$reissued"
+    # Whether the names on the resulting certificate were actually CHECKED, as
+    # opposed to hoped for. A caller reporting "covers" off certIssued=false
+    # alone would be asserting an unverified claim (memql#3730), so the
+    # distinction is published rather than left for each caller to invent.
+    cap_result_set_raw coverageVerified "$coverage_verified"
     cap_result_set_raw caPreExisting "$ca_pre_existing"
     cap_result_set_raw caInstalled   "$ca_installed"
     # The field the graph verifies. Reaching here means `mkcert -install`

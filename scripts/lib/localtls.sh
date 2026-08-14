@@ -55,10 +55,23 @@ MEMQL_LOCAL_TLS_DEFAULT_KEY="${MEMQL_LOCAL_TLS_DIR}/dev.key"
 # tier, so a script resolves an env value and passes it as the default.
 MEMQL_LOCAL_DOMAIN="${MEMQL_LOCAL_DOMAIN:-memql.localhost}"
 
-# The names the certificate must carry. The wildcard covers api. /
-# identity. / anything else the local overlay adds; the apex is listed
-# separately because a wildcard label does not match it.
-MEMQL_LOCAL_TLS_HOSTNAMES="*.${MEMQL_LOCAL_DOMAIN},${MEMQL_LOCAL_DOMAIN}"
+# localtls_hostnames_for <apex> -- the names a front-door certificate must
+# carry for <apex>. The wildcard covers api. / identity. / anything else the
+# local overlay adds; the apex is listed separately because a wildcard label
+# does not match it.
+#
+# A FUNCTION, not just the constant below, because the apex is not always the
+# one in the environment: `make up DOMAIN=lab.example.com` passes the domain as
+# a FLAG, and a script that re-derived `*.$d,$d` for the flag's value would be
+# the third copy of this formula and free to disagree with the other two
+# (memql#3730). Same argument as the file header's: one copy is the fix.
+function localtls_hostnames_for() {
+    printf '*.%s,%s' "$1" "$1"
+}
+
+# The names for the environment-resolved domain -- the default every caller
+# starts from.
+MEMQL_LOCAL_TLS_HOSTNAMES="$(localtls_hostnames_for "$MEMQL_LOCAL_DOMAIN")"
 
 # The k8s Secret both local front-door ingresses name in their spec.tls.
 #

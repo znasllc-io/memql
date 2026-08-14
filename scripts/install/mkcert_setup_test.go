@@ -2,14 +2,21 @@ package install
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mkcert_setup_test.go -- znasllc-io/memql#3362.
@@ -493,6 +500,162 @@ func TestMkcertSecondRunIsUnchanged(t *testing.T) {
 	if string(got) != "issued-once\n" {
 		t.Errorf("an existing certificate was reissued without --force: %q", got)
 	}
+}
+
+// cert_mismatches(), and the `reissued` field it drives, had NO coverage until
+// memql#3730 -- the check was correct, cited the domain rename that creates
+// stale pairs, and nothing exercised it. That mattered when it turned out its
+// only production caller (scripts/k3d/seed-secrets.sh) short-circuited before
+// reaching it, and it matters now that the same caller READS `reissued` to
+// decide what to put in its own envelope.
+//
+// The fixture is a REAL certificate with the wrong names, because the failing
+// condition is a VALID certificate for a domain nobody is serving. Arbitrary
+// bytes take the deliberate cannot-tell branch (covered by
+// TestMkcertSecondRunIsUnchanged) and would prove nothing here.
+func TestMkcertReissuesAPairThatDoesNotCoverTheHostnames(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl not available: cert_mismatches would take its cannot-tell branch, " +
+			"so this test could only pass without establishing anything")
+	}
+	e := newMkcertEnv(t)
+	e.seedCA(t)
+	writeWrongDomainCert(t, e.certFile(), e.keyFile())
+
+	env, code, out := e.run(t, "--hostnames=*.memql.localhost,memql.localhost")
+	if code != 0 || !env.OK {
+		t.Fatalf("exit %d: %s", code, out)
+	}
+	if !mkcertBool(t, env, "certIssued") {
+		t.Fatalf("certIssued = false: a certificate for wrong.example.com cannot serve "+
+			"memql.localhost, so it must be replaced: %s", out)
+	}
+	// The field seed-secrets reads to report `reissued` rather than `issued`.
+	// Without it a caller cannot distinguish "there was nothing here" from "what
+	// was here was wrong and is now gone", and the operator whose certificate was
+	// just overwritten is entitled to that difference.
+	if !mkcertBool(t, env, "reissued") {
+		t.Errorf("reissued = false; a replaced wrong-domain pair must be reported as such: %s", out)
+	}
+	got, err := os.ReadFile(e.certFile())
+	if err != nil {
+		t.Fatalf("read cert: %v", err)
+	}
+	if strings.Contains(string(got), "BEGIN CERTIFICATE") {
+		t.Errorf("the wrong-domain certificate is still on disk")
+	}
+	if !strings.Contains(out, "does not cover") {
+		t.Errorf("the operator was not told why the pair was replaced: %s", out)
+	}
+	// BOTH NAME SETS, and the OLD one is the useful half -- it names which stale
+	// domain the operator was serving. It can only be reported from before the
+	// write: mkcert overwrites the file in place, so afterwards those names are
+	// gone. The runbook claims this message names both sets; this is what makes
+	// the claim true.
+	if !strings.Contains(out, "wrong.example.com") {
+		t.Errorf("the warning does not name what the OLD certificate carried, which is what "+
+			"identifies the stale pair: %s", out)
+	}
+	if !strings.Contains(out, "*.memql.localhost") {
+		t.Errorf("the warning does not name what the certificate had to cover: %s", out)
+	}
+}
+
+// coverageVerified is a MEASUREMENT of the pair this run leaves behind, never an
+// inference from what the run did. Callers report "covers" off it
+// (scripts/k3d/seed-secrets.sh), so a true here has to mean somebody actually
+// read the SANs -- otherwise every caller inherits the memql#3730 defect of
+// asserting coverage that was never established.
+func TestMkcertReportsWhetherCoverageWasActuallyChecked(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl not available: coverage cannot be established either way")
+	}
+
+	t.Run("a readable covering pair is verified", func(t *testing.T) {
+		e := newMkcertEnv(t)
+		e.seedCA(t)
+		writeCertWithNames(t, e.certFile(), e.keyFile(), "*.memql.localhost", "memql.localhost")
+
+		env, code, out := e.run(t, "--hostnames=*.memql.localhost,memql.localhost")
+		if code != 0 || !env.OK {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		if mkcertBool(t, env, "certIssued") {
+			t.Fatalf("a covering pair must be reused, not reissued: %s", out)
+		}
+		if !mkcertBool(t, env, "coverageVerified") {
+			t.Errorf("coverageVerified = false over a pair whose SANs were read and do cover: %s", out)
+		}
+		if !strings.Contains(out, "covers") {
+			t.Errorf("the log should say coverage was established: %s", out)
+		}
+	})
+
+	t.Run("an unreadable pair is kept but never claimed to cover", func(t *testing.T) {
+		e := newMkcertEnv(t)
+		e.seedCA(t)
+		// Not a certificate: cert_coverage answers `unknown`, which KEEPS the
+		// pair (idempotency) and must not be reported as coverage.
+		if err := os.WriteFile(e.certFile(), []byte("not-a-certificate\n"), 0o644); err != nil {
+			t.Fatalf("write cert: %v", err)
+		}
+		if err := os.WriteFile(e.keyFile(), []byte("not-a-key\n"), 0o600); err != nil {
+			t.Fatalf("write key: %v", err)
+		}
+
+		env, code, out := e.run(t)
+		if code != 0 || !env.OK {
+			t.Fatalf("exit %d: %s", code, out)
+		}
+		if mkcertBool(t, env, "certIssued") {
+			t.Fatalf("an unreadable pair must be KEPT -- reissuing when unsure breaks idempotency: %s", out)
+		}
+		if mkcertBool(t, env, "coverageVerified") {
+			t.Errorf("coverageVerified = true over a file that does not parse as a certificate: %s", out)
+		}
+		if !strings.Contains(out, "unverified") {
+			t.Errorf("the log must admit the names were not read: %s", out)
+		}
+	})
+}
+
+// writeCertWithNames plants a real, parseable certificate carrying exactly
+// `names`. Self-signed: cert_coverage reads subjectAltName and verifies no
+// chain, so signing it with the runner's own CA would add nothing and would
+// touch machine state this suite must not.
+func writeCertWithNames(t *testing.T, certPath, keyPath string, names ...string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	tmpl := x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: names[0]},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		DNSNames:     names,
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate: %v", err)
+	}
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+}
+
+// writeWrongDomainCert -- a real certificate for a domain the front door is not
+// served at.
+func writeWrongDomainCert(t *testing.T, certPath, keyPath string) {
+	t.Helper()
+	writeCertWithNames(t, certPath, keyPath, "*.wrong.example.com", "wrong.example.com")
 }
 
 func TestMkcertForceReissues(t *testing.T) {

@@ -66,6 +66,19 @@ cross-node mesh bugs reproduces locally instead of only on staging.
   which is why it is now a hard prerequisite (memql#3560). On macOS the system
   keychain covers Safari and Chrome; only Firefox needs NSS, so it is not
   required there.
+
+  Every `make secrets` checks for it, not only the first (memql#3730), because
+  every run now re-checks that the front-door pair covers the domain. On a
+  machine with **no browser at all** -- a headless box, a CI runner -- waive
+  browser trust instead of installing it:
+
+  ```bash
+  MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL=1 make secrets
+  ```
+
+  The front door then works for `curl`, the SDKs and the Cockpit, and stays
+  untrusted in Firefox and Chrome. `--allow-missing-certutil` is the same waiver
+  when calling `scripts/k3d/seed-secrets.sh` directly.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
 
@@ -93,14 +106,43 @@ refuses with exit 4 and the exact command to run instead.
 
 After that, `make up` / `make secrets` issue the `*.memql.localhost`
 pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
-present, and load it into the cluster as the `memql-front-door-tls` Secret that both
-front-door ingresses reference. Override the location with
-`MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or `--tls-cert` / `--tls-key`).
+present **and covers the domain being served**, and load it into the cluster as
+the `memql-front-door-tls` Secret that both front-door ingresses reference.
+Override the location with `MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or
+`--tls-cert` / `--tls-key`).
 
-The bring-up asserts that `memql-front-door-tls` exists and FAILS without it
-(memql#3384). It has to: traefik answers a missing referenced secret by
-silently serving its own `TRAEFIK DEFAULT CERT`, so every TLS client sees an
-untrusted edge while the whole mesh reports Available.
+A pair that does **not** cover the domain is REISSUED -- with a warning naming
+both the names it carried and the names it needed, and
+`frontDoorTlsSource: reissued` in the result envelope (memql#3730). Reuse was
+previously conditional on the file merely EXISTING, so a machine that ran the
+local stack before the domain rename (memql#3593) kept seeding a valid
+certificate for a domain that no longer exists: traefik had nothing matching the
+requested SNI, served its own default certificate instead, and `make secrets`
+reported `ok: true` over it -- permanently, because re-running it changed
+nothing. A reissue overwrites the pair in place, so a hand-made certificate you
+want kept belongs somewhere `MEMQL_LOCAL_TLS_CERT` points at, and must cover
+`*.<domain>` and `<domain>`. A re-run over a pair that already covers them never
+rotates it; deliberate reissue of a matching pair is `mkcert-setup.sh --force`.
+
+Which domain it is checked against is, in order: `--domain` / `make secrets
+DOMAIN=...`, then **the domain this cluster already serves** (the `memql-domain`
+ConfigMap), then `memql.localhost`. The cluster tier matters on a custom-domain
+cluster: without it, a plain `make secrets` would check the pair against
+`memql.localhost` and reissue over your `lab.example.com` certificate.
+
+`frontDoorTlsCoverageVerified` in the envelope says whether the names were
+actually read. Without openssl they cannot be, and the pair is then kept
+untouched and reported as **unverified** rather than as covering -- the one
+outcome where a run cannot rule out serving the wrong certificate.
+
+The bring-up asserts that `memql-front-door-tls` exists AND that the certificate
+inside it covers the front-door hostnames, and FAILS on either (memql#3384,
+memql#3730). It has to: traefik answers a missing referenced secret -- or one
+holding a certificate for names it was not asked for -- by silently serving its
+own `TRAEFIK DEFAULT CERT`, so every TLS client sees an untrusted edge while the
+whole mesh reports Available. Without openssl the certificate cannot be read;
+the check then says the names were not verified rather than claiming coverage it
+did not establish.
 
 Non-browser clients need the CA too. Node (the VS Code extension host, npm
 tooling) does **not** read the OS trust store: point it at mkcert's root with
