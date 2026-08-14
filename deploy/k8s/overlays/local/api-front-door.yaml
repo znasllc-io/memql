@@ -43,6 +43,18 @@ metadata:
   namespace: memql
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    # PRECEDENCE IS DECLARED, NOT INHERITED (memql#3714). Traefik's default
+    # router priority is the LENGTH of the compiled rule string, and the
+    # wildcard's `HostRegexp(...) && PathPrefix(...)` rule is longer than most
+    # of this host's own rules -- so on default priority the wildcard could
+    # outrank api., and the entire API would be served by the site edge
+    # instead of the bff. 100 is comfortably above the wildcard's computed
+    # default (its longest rule is under 70 characters) and applies to EVERY
+    # router this Ingress generates, so path-length variance across the
+    # generated block below cannot change the outcome for any of them. See
+    # docs/public/operate/front-door.md's precedence section and the
+    # `precedence` check in scripts/install/verify-frontdoor.sh.
+    traefik.ingress.kubernetes.io/router.priority: "100"
 spec:
   tls:
     - hosts: ["api.memql.localhost"]
