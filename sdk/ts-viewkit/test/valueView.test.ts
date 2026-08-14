@@ -327,9 +327,13 @@ test("escapes a path that reaches an attribute", () => {
 });
 
 test("escapes a script tag hiding in a truncated string", () => {
-  const out = html({ n: `<script>alert(1)</script>${"z".repeat(600)}` });
-  assert.doesNotMatch(out, /<script>/);
-  assert.match(out, /&lt;script&gt;/);
+  // MIXED CASE, and the assertion is case-insensitive. A `/<script>/` check is
+  // a weaker claim than it looks: HTML tag names are case-insensitive, so a
+  // leak spelled `<SCRIPT>` would pass it. What is actually being asserted is
+  // that no raw tag from the value survives, whatever its spelling.
+  const out = html({ n: `<ScRiPt>alert(1)</ScRiPt>${"z".repeat(600)}` });
+  assert.doesNotMatch(out, /<\/?script/i);
+  assert.match(out, /&lt;ScRiPt&gt;/);
 });
 
 // -----------------------------------------------------------------------------
