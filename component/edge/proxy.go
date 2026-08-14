@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"strings"
 )
 
@@ -24,6 +25,32 @@ import (
 func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	if !site.APIProxy || strings.TrimSpace(h.apiTarget) == "" {
 		http.NotFound(w, r)
+		return
+	}
+
+	// DEFENCE IN DEPTH, NOT THE PRIMARY CONTROL. The only reason
+	// "/_memql/../admin" cannot reach this function today is
+	// http.ServeMux.Handler(): it unconditionally 301-redirects any request
+	// whose path does not survive its own cleanPath (dot-segments, doubled
+	// slashes, a decoded %2e%2e) before ANY registered handler -- including
+	// this one -- ever runs. That is a property of the router this Handler
+	// happens to be mounted behind, not of this file. If the router is ever
+	// swapped, or this Handler is ever wired up some other way that skips
+	// ServeMux, that redirect disappears silently -- and Go's http.Client
+	// never cleans dot-segments when it writes the request line, so a path
+	// like "/memql/../admin" would go out to the bff VERBATIM: a path
+	// traversal into the cluster's API surface.
+	//
+	// So this refuses rather than trusts the mux, and refuses rather than
+	// sanitises: a request whose path needed repair was not a legitimate
+	// request. Same call resolveAsset makes in handler.go via fs.ValidPath,
+	// same reasoning ("there is no legitimate request outside the bundle to
+	// repair") -- true here even more sharply, since there is no legitimate
+	// /_memql/ request containing a dot-segment or a doubled slash at all.
+	if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
+		h.logger.Warn("edge: refusing a /_memql/* path that does not survive cleaning",
+			"component", "edge", "site", site.ID, "path", r.URL.Path)
+		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
 

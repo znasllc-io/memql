@@ -167,6 +167,75 @@ func TestDisabledSiteIs503(t *testing.T) {
 	}
 }
 
+// The status switch in ServeHTTP runs BEFORE the apiPrefix dispatch, so a
+// draft or disabled site must never reach the API even when it opted in via
+// APIProxy and a real, live APITarget is configured. Both use an upstream
+// that answers 200 if it is ever reached, and both assert on the hit flag
+// directly rather than only on the status code -- so the test fails on a
+// reordering of the two checks rather than passing because the target
+// happened to be empty (TestAPIPrefixIsRefusedWithNoAPITarget below already
+// covers the empty-target case; these are the complementary "target is
+// configured and reachable" ones a status-switch reorder would slip past).
+func TestDraftSiteWithAPIProxyStillRefusesTheAPIPath(t *testing.T) {
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "draft", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if hit {
+		t.Fatal("a draft site reached the API")
+	}
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("draft site GET /_memql/ws = %d, want 404", rec.Code)
+	}
+}
+
+// A deliberately paused site is supposed to be off, not off-for-static-and-
+// on-for-the-API.
+func TestDisabledSiteWithAPIProxyStillRefusesTheAPIPath(t *testing.T) {
+	hit := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "disabled", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if hit {
+		t.Fatal("a disabled site reached the API")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("disabled site GET /_memql/ws = %d, want 503", rec.Code)
+	}
+}
+
 // serveAPI must refuse the /_memql/* prefix outright when no APITarget is
 // configured -- exactly how this task wires the handler (Options.APITarget
 // is left unset in app/transport_edge.go; the reverse proxy that consumes it
