@@ -170,13 +170,38 @@ ${fields}
 // running
 // ---------------------------------------------------------------------------
 
+/**
+ * Which run this is, which is the only thing the wording turns on.
+ *
+ * Three words for ONE code path. Install, repair and deploy are the same graph
+ * with the same steps and the same verify-then-skip behaviour -- what differs
+ * is what the operator asked for, and a heading that said "Installing" over a
+ * deployment to another tag would describe a reinstall of their machine.
+ */
+export type RunMode = "install" | "repair" | "deploy";
+
 export interface RunningScreenInput {
   steps: readonly StepProgress[];
-  /** True when the wording should be the repair's rather than the install's. */
-  repair: boolean;
+  mode: RunMode;
   /** Whether a run is actually in flight -- see the comment on the empty list. */
   running: boolean;
 }
+
+const RUN_HEADING: Readonly<Record<RunMode, string>> = {
+  install: "Installing a local cluster",
+  repair: "Repairing the local cluster",
+  deploy: "Deploying to the local cluster",
+};
+
+const RUN_LEDE: Readonly<Record<RunMode, string>> = {
+  install: "Each step proves itself before the next one starts.",
+  repair:
+    "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs.",
+  // The same sentence as a repair, and the same fact: only the checkout and the
+  // reconcile have work to do when nothing but the tag has changed.
+  deploy:
+    "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs.",
+};
 
 /**
  * The run in progress.
@@ -190,7 +215,7 @@ export interface RunningScreenInput {
  * heading and the lede differ, and there is no second code path below them.
  */
 export function renderRunningScreen(input: RunningScreenInput): string {
-  const { steps, repair } = input;
+  const { steps } = input;
   const settled = runIsSettled(steps);
 
   // An empty list now means the run is starting for real -- `startRun()` is
@@ -213,12 +238,8 @@ export function renderRunningScreen(input: RunningScreenInput): string {
     ? `<button class="secondary" type="button" data-act="back">Back</button>`
     : `<button class="secondary" type="button" data-act="cancel">Cancel</button>`;
 
-  return `<h1>${escapeHtml(repair ? "Repairing the local cluster" : "Installing a local cluster")}</h1>
-<p class="lede">${escapeHtml(
-    repair
-      ? "Every step checks first and is skipped when it is already satisfied, so only what is actually missing runs."
-      : "Each step proves itself before the next one starts.",
-  )}</p>
+  return `<h1>${escapeHtml(RUN_HEADING[input.mode])}</h1>
+<p class="lede">${escapeHtml(RUN_LEDE[input.mode])}</p>
 ${body}
 <div class="actions">${actions}</div>`;
 }

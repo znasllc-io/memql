@@ -51,6 +51,7 @@ import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPan
 import type { AutomationPanelHost } from "../src/webview/automationPanel.js";
 import { ClusterPanel } from "../src/webview/clusterPanel.js";
 import { ConceptPanel } from "../src/webview/conceptPanel.js";
+import { DeploymentPanel } from "../src/webview/deploymentPanel.js";
 import { ResultPanel, RunPanel } from "../src/webview/runPanel.js";
 import type { RunPanelHost } from "../src/webview/runPanel.js";
 
@@ -471,6 +472,37 @@ smoke("every webview surface opens without throwing", async () => {
   expected.push(`Run automation: ${automationTarget.name}`);
 
   StepTracePanel.show(context, automationTarget, new StepTraceModel());
+
+  // The instance page (memql#3739). Opened against a machine with NO local
+  // cluster, which is the state it has to render first and the one an operator
+  // on a fresh checkout sees: presence says `absent`, so the page offers
+  // Create deployment and nothing else. The title carries the instance name,
+  // which is how this case sees that the catalog read actually completed --
+  // the panel opens titled "memQL deployment" and renames itself once it has
+  // read the machine.
+  DeploymentPanel.show(context, {
+    catalog: {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
+      receiptPath: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+      runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+      presence: async () => ({
+        verdict: "absent" as const,
+        evidence: { receipt: false, registry: false },
+        endpoint: "",
+      }),
+    },
+    installRoot: os.tmpdir(),
+    receiptFile: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+    runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+    refreshTree: () => undefined,
+    // Rejecting rather than pretending, like the two hosts above: nothing here
+    // clicks a button, and a stub that resolved would let a page that reached
+    // for the wizard on OPEN sail through.
+    openInstallFlow: () => {
+      throw new Error("no install flow in the smoke lane");
+    },
+  });
+  expected.push("Deployment: local");
 
   try {
     // Tabs appear asynchronously -- createWebviewPanel returns before the

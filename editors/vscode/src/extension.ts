@@ -104,6 +104,7 @@ import {
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { DeploymentsTreeProvider } from './views/deploymentsTree.js';
+import { DeploymentPanel } from './webview/deploymentPanel.js';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
@@ -360,6 +361,37 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // page (#3739).
     commands.registerCommand('memql.deployments.createDeployment', () => {
       AddClusterPanel.show(context, presence, addClusterDeps(), 'install');
+    }),
+    // The instance page (memql#3739). It takes the catalog inputs rather than a
+    // resolved instance, because the page re-reads the machine every time it is
+    // revealed -- a receipt written by a run the page itself started is the
+    // ordinary case, and a page holding a snapshot from when it opened would
+    // report the version it replaced.
+    commands.registerCommand('memql.deployments.open', () => {
+      DeploymentPanel.show(context, {
+        catalog: {
+          clustersPath,
+          receiptPath: defaultReceiptPath(),
+          presence: () => presence.get(),
+        },
+        installRoot: installRootFor(context),
+        receiptFile: defaultReceiptPath(),
+        refreshTree: () => {
+          // The presence memo is invalidated too: a deployment that succeeded
+          // is one of the two events that change the verdict deterministically,
+          // and waiting out the TTL would show the operator the machine as it
+          // was before their run.
+          presence.invalidate();
+          deploymentsTree.refresh();
+          clustersTree.refresh();
+        },
+        // THE RE-PARENTING SEAM. Installing, repairing and uninstalling are the
+        // wizard's flows, opened from the instance page rather than reimplemented
+        // behind it (design section 5.2: re-parented, not rewritten).
+        openInstallFlow: (action) => {
+          AddClusterPanel.show(context, presence, addClusterDeps(), action);
+        },
+      });
     }),
   );
   // The connection decides a remote instance's version and its history, so a

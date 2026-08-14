@@ -83,6 +83,13 @@ import {
   type InputField,
 } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
+// EVERY LOCAL RUN WRITES A RECORD (memql#3739). The Deployments tree reads the
+// run log as one history, so the wizard's install, repair and uninstall have to
+// appear in it beside the deployments the instance page drives -- a history
+// missing three of its five verbs is not a history.
+import { RunRecorder } from "../state/runRecorder.js";
+import { LOCAL_INSTANCE_NAME } from "../state/deployments.js";
+import { defaultRunsDir } from "../state/runLog.js";
 // The install-run screens, shared with Deployments (memql#3738). INPUT_FIELDS
 // comes back with them because the message handler validates an incoming
 // field name against the same list the form rendered from -- two lists would
@@ -253,6 +260,11 @@ export interface AddClusterDeps {
    * either would be a second opinion about state activation owns.
    */
   removeRegistryEntry: (name: string) => Promise<unknown>;
+  /**
+   * Where the run log lives. Optional, defaulting to ~/.memql/runs, so a test
+   * can point a run at a temp directory without a real HOME.
+   */
+  runsDir?: string;
 }
 
 export class AddClusterPanel {
@@ -777,6 +789,19 @@ export class AddClusterPanel {
     const controller = new AbortController();
     this.runAbort = controller;
 
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: LOCAL_INSTANCE_NAME,
+      kind: action === "repair" ? "repair" : "install",
+      // A repair returns the cluster to the tag its receipt names, so that tag
+      // is both where it came from and where it is going. An install has
+      // neither: nothing was here.
+      ...(action === "repair" && recordedStackTag(priorReceipt) !== ""
+        ? { fromVersion: recordedStackTag(priorReceipt), toVersion: recordedStackTag(priorReceipt) }
+        : {}),
+    });
+    this.deps.refreshTree();
+
     let report: ExecutionReport | undefined;
     let failure: string | undefined;
     try {
@@ -815,6 +840,7 @@ export class AddClusterPanel {
         this.hooks({
           onEvent: (event) => {
             this.state.apply(event);
+            void recorder.apply(event);
             this.render();
           },
           signal: controller.signal,
@@ -832,6 +858,15 @@ export class AddClusterPanel {
       // The run is over either way; the password has no further use.
       await this.releaseSudoAgent();
     }
+
+    await recorder.finish(
+      controller.signal.aborted
+        ? "cancelled"
+        : failure !== undefined || report?.ok !== true
+          ? "failed"
+          : "succeeded",
+    );
+    this.deps.refreshTree();
 
     if (this.disposed) return;
 
@@ -1172,12 +1207,27 @@ export class AddClusterPanel {
     this.uninstall.begin();
     this.render();
 
+    // Read BEFORE the removal, for the same reason localClusterName is: the
+    // receipt is one of the things about to go.
+    const uninstalledVersion = recordedStackTag(
+      await readReceipt(this.deps.receiptFile).catch(() => null),
+    );
+    const recorder = await RunRecorder.begin({
+      dir: this.deps.runsDir ?? defaultRunsDir(),
+      instance: LOCAL_INSTANCE_NAME,
+      kind: "uninstall",
+      // What it removed, not where it went: there is no version afterwards.
+      ...(uninstalledVersion !== "" ? { fromVersion: uninstalledVersion } : {}),
+    });
+    this.deps.refreshTree();
+
     try {
       const report = await runUninstall(
         this.uninstallOptions(),
         this.hooks({
           onEvent: (event) => {
             this.uninstall.apply(event);
+            void recorder.apply(event);
             this.render();
           },
           signal: controller.signal,
@@ -1199,6 +1249,12 @@ export class AddClusterPanel {
     } finally {
       this.uninstalling = false;
       this.uninstallAbort = undefined;
+      // `preserved` reaches the record UNTRANSLATED, which is the point: it
+      // says the uninstall KEPT something the operator already had, and a
+      // history that rounded it to "ok" would report an artifact as gone while
+      // it is still on the machine.
+      await recorder.finish(controller.signal.aborted ? "cancelled" : undefined);
+      this.deps.refreshTree();
       this.render();
     }
   }
@@ -1386,7 +1442,7 @@ ${this.bodyHtml()}
   private runHtml(): string {
     return renderRunningScreen({
       steps: this.state.steps,
-      repair: this.state.action === "repair",
+      mode: this.state.action === "repair" ? "repair" : "install",
       // `runAbort` is set for exactly as long as a run is in flight, which is
       // what distinguishes "starting, no step has reported yet" from "nothing
       // has been run".
@@ -1399,7 +1455,7 @@ ${this.bodyHtml()}
     return renderFailedScreen({
       failures: this.state.failures,
       steps: this.state.steps,
-      repair: this.state.action === "repair",
+      mode: this.state.action === "repair" ? "repair" : "install",
       running: this.runAbort !== undefined,
     });
   }

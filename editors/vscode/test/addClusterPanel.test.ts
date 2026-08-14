@@ -234,6 +234,10 @@ function open(options: {
     clustersPath,
     receiptFile,
     installRoot: REPO_ROOT,
+    // Every run now writes a record (memql#3739), and it defaults to
+    // ~/.memql/runs -- so without this the unit lane deposits a file in the
+    // developer's own run log, and in CI's, once per case that starts a run.
+    runsDir: path.join(dir, "runs"),
     refreshTree: () => undefined,
     removeRegistryEntry: async () => undefined,
     ...(options.runner ? { runScript: options.runner.run } : {}),

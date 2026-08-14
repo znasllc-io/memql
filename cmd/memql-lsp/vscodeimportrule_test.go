@@ -50,6 +50,7 @@ var vscodeImportAllowList = []string{
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
 	"webview/clusterPanel.ts",    // WebviewPanel adapter over deploy/clusterPanelState.ts + state/topology.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
+	"webview/deploymentPanel.ts", // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
 	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
 }
 
