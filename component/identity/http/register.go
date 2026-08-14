@@ -7,21 +7,59 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/identity"
+	"github.com/znasllc-io/memql/component/identity/abuse"
 )
 
 // maxRegisterBodyBytes caps the POST /register request body. The
 // endpoint is intentionally unauthenticated (public clients self-
 // register), so the read is bounded to keep the attack surface small.
 //
-// TODO(#1573 follow-up): add a per-IP rate limit on POST /register
-// (reuse the abuse.Middleware machinery). Deferred to avoid pulling new
-// infra into the DCR landing; the bounded body read + JSON-only + POST-
-// only gates are the minimal hardening for now.
+// The per-IP rate limit this file used to carry a TODO for landed in
+// memql#3793 -- see registerRateLimiter below.
 const maxRegisterBodyBytes = 16 << 10 // 16 KiB
+
+// envRegisterPerHour tunes the per-IP registration rate limit.
+const envRegisterPerHour = "MEMQL_IDENTITY_REGISTER_PER_HOUR"
+
+// defaultRegisterPerHour is deliberately LOW compared with the badge
+// limiter's 240/h, because the two bound different things.
+//
+// A badge tap is routine floor work repeated all shift by one person at
+// one terminal. Dynamic client registration happens ONCE per client per
+// cluster: an operator adds the connector in claude.ai, it registers, and
+// it never registers again. A human doing that even ten times in an hour
+// is retrying something broken, and 20 leaves generous room for exactly
+// that -- while still turning "unbounded row creation" into a trickle
+// somebody can notice in the audit trail.
+const defaultRegisterPerHour = 20
+
+// registerRateLimiter returns this Server's per-IP registration limiter,
+// built once on first use.
+//
+// Server-scoped rather than a package global, matching grantLimiter and
+// the passkey limiters, and the reason is worth repeating because it is
+// not about tidiness: a package-global bucket map makes tests
+// ORDER-DEPENDENT -- one test exhausting the bucket changes what the next
+// one observes, and the failure shows up as a flake in whichever test
+// happens to run second.
+func registerRateLimiter(s *Server) *abuse.IPRateLimiter {
+	s.registerLimiterOnce.Do(func() {
+		perHour := defaultRegisterPerHour
+		if v := strings.TrimSpace(os.Getenv(envRegisterPerHour)); v != "" {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				perHour = n
+			}
+		}
+		s.registerLimiter = abuse.NewIPRateLimiter(perHour, s.Logger)
+	})
+	return s.registerLimiter
+}
 
 // maxRegisterRedirectURIs caps how many redirect_uris a single dynamic
 // registration may carry.
@@ -55,8 +93,14 @@ type registerResponse struct {
 // client_id (no secret) it then uses at /authorize + /oauth/token.
 //
 // The endpoint is gated on Cfg.OAuthDCREnabled (env
-// MEMQL_IDENTITY_OAUTH_DCR_ENABLED, default true). When disabled it returns
+// MEMQL_IDENTITY_OAUTH_DCR_ENABLED). When disabled it returns
 // 403 registration_disabled and persists nothing.
+//
+// It is also per-IP RATE LIMITED (memql#3793). The limit is checked AFTER
+// the enabled gate and BEFORE the body is read: a cluster with DCR off
+// should answer registration_disabled to everyone whatever their rate, and
+// a caller past the limit should not get a 16 KiB read done on their
+// behalf first.
 //
 // Public clients only: token_endpoint_auth_method must be "none" (or
 // empty -> defaulted to none). Each redirect_uri must be https or a
@@ -65,6 +109,30 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if !s.Cfg.OAuthDCREnabled {
 		s.writeJSONError(w, http.StatusForbidden, "registration_disabled",
 			"dynamic client registration is disabled on this server")
+		return
+	}
+
+	sourceIP := clientIP(r)
+	if allowed, retryAfter := registerRateLimiter(s).Allow(sourceIP); !allowed {
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		// AUDITED, not just refused. A success here is already recorded as
+		// oauth_client_registered; a refused burst is at least as interesting
+		// to whoever is reading the trail, and it is the only trace a
+		// blocked attempt leaves -- no row is written, by definition.
+		// AuditCategoryIdentity, the same category the success uses, so a
+		// refusal and a registration sit next to each other in the trail
+		// rather than in two places an auditor has to join by hand.
+		s.audit(r, identity.AuditEvent{
+			Category:   identity.AuditCategoryIdentity,
+			Action:     "oauth_client_registration_rate_limited",
+			TargetType: "identity",
+			Outcome:    identity.AuditOutcomeFailure,
+			Detail: map[string]any{
+				"retry_after_seconds": retryAfter,
+			},
+		})
+		s.writeJSONError(w, http.StatusTooManyRequests, "rate_limited",
+			"too many registration attempts from this address")
 		return
 	}
 
