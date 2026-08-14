@@ -486,6 +486,12 @@ concept user {
   birthdate       string  @pii  @description("ISO-8601 date (YYYY-MM-DD), optional. Stored as a string rather than datetime because we never compute against it -- it's reference data the admin sets and the profile UI surfaces.")
   role            enum("owner", "admin", "developer", "writer", "reader")  @default("reader")  @description("Cluster-wide role. owner bypasses the partition ACL; admin sees all partitions but still needs a per-partition grant to mutate data; developer is engineering power (authoring + inline DSL + deploy/cut-version, but no user management); writer and reader need an explicit grant for every partition they operate in.")
   groupIds        []string  @description("Group memberships. Reserved for future cluster-side group-based partition-access derivation.")
+  // Every nested block rejects undeclared keys (memql#3641), and this is the
+  // block that made the case for it: `computerUseEnbaled` used to store
+  // happily beside `computerUseEnabled`, leaving the computer-use kill switch
+  // on its old value with nothing reporting anything (memql#3623). No
+  // annotation needed -- closed is the default; @open would be the opt-out and
+  // this block is the opposite of free-form.
   preferences {
     language             string  @description("Preferred language as a BCP 47 tag (e.g., en-US, es-MX).")
     notifications        bool    @default("true")  @description("Whether to receive notifications.")

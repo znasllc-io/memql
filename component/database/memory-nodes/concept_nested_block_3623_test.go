@@ -21,8 +21,8 @@ import (
 //     neither was `additionalProperties: false` -- so a nested block enforced
 //     nothing at all while the identical declaration one level up (and inside a
 //     @variant branch) enforced both. The `required` half is fixed here. The
-//     closed-object half is NOT, and TestNestedBlock_UndeclaredKeysStillAccepted
-//     is where that is recorded, measured, and left ready to flip.
+//     closed-object half followed in memql#3641, and
+//     TestNestedBlock_UndeclaredKeysAreRefused is where that is pinned.
 //  2. An annotation written after a nested / @variant block's closing brace was
 //     left unconsumed by parsePropertyDecl and re-read by parseConceptDecl as a
 //     PREFIX attribute of the next property -- exactly inverting @secret /
@@ -92,73 +92,77 @@ func TestNestedBlock_RequiredIsEnforced(t *testing.T) {
 	}
 }
 
-// Defect 1b, NOT FIXED, and this is the record of why.
+// Defect 1b, FIXED by memql#3641, and this is the record of the sequence.
 //
-// A nested block is still OPEN: an undeclared key inside one is accepted, while
-// the identical key at the top level is refused. That is the memql#3623
-// exposure verbatim -- a typo'd write to v1:identity:user.preferences lands
-// beside the real field and the computer-use kill switch keeps its old value.
+// A nested block used to be OPEN: an undeclared key inside one was accepted,
+// while the identical key at the top level was refused. That was the memql#3623
+// exposure verbatim -- a typo'd write to v1:identity:user.preferences landed
+// beside the real field and the computer-use kill switch kept its old value.
 //
-// Closing it is a one-line change to the emitter, and the tree does not survive
-// it. Measured before deciding, not assumed:
+// The one-line emitter change was never the hard part; the tree not surviving
+// it was. Each blocker, measured before the flip and resolved by it:
 //
-//   - [FIXED, memql#3641] dsl/agents/plannerAgent.memql and trainerAgent.memql
-//     seeded `capabilities.domains` and `capabilities.tools`, the pre-#158
-//     surface skillIds replaced. Both wrote empty arrays and nothing but the
-//     legacy-row migration consumes that shape, so the seeds were deleted.
-//   - [FIXED, memql#3641] v1:cognition:utterance.source took seven undeclared
-//     keys from live writers, one load-bearing: `transcriptOnly`, written by
-//     sendRealtimeTranscriptUtterance and read back by
+//   - dsl/agents/plannerAgent.memql and trainerAgent.memql seeded
+//     `capabilities.domains` / `capabilities.tools`, neither declared (the
+//     pre-#158 surface skillIds replaced). Both are @scope("perUser"), so
+//     closing the block would have broken USER PROVISIONING. Both wrote empty
+//     arrays and only the legacy-row migration consumes that shape, so the
+//     seeds were DELETED rather than the retired fields re-declared (#3690).
+//   - v1:cognition:utterance.source took seven undeclared keys from live
+//     writers, one load-bearing: `transcriptOnly`, read back by
 //     cognition_utterance_auth_validation.go and cognition_handler.go. All
-//     seven are now declared, and
-//     test/dslconformance/nested_block_writes_3641_test.go fails on the next
-//     undeclared key written into either block.
-//   - insertSystemActionUtterance merges an ARBITRARY caller-supplied map into
-//     the utterance source. Its keys are all declared today, but the writer is
-//     open by construction, so closing the block moves the next new key from a
-//     silent store to a failed insert on a path whose callers swallow the error.
+//     seven are DECLARED now, and a test enumerates the keys the Go writers
+//     pass, so the next one is a failing test rather than a refused insert on
+//     a path that swallows errors (#3690).
 //   - assistant_skill_reconcile.go and integrations/agents/factory.go read an
-//     agent's capabilities object out of the DB and write it back wholesale, so
-//     every EXISTING row carrying a legacy key fails on write-back. A data
-//     migration, not an edit.
-//   - and it does not stop at this repo: product bundles mount their own nested
-//     blocks at runtime through MEMQL_DSL_PATH, and mutations such as
-//     addAgentToSpace / updateSessionDevices / updateParticipantPresence splat a
-//     client-supplied `object` into one. Closing is a wire-contract change for
-//     every bundle and every client.
+//     agent's capabilities out of the DB and write it back wholesale, so a row
+//     carrying a legacy key would fail on write-back. Both now FILTER the
+//     object down to declared fields before writing -- reading the concept,
+//     not a hardcoded list -- so a legacy row heals when touched and no
+//     migration gates the flip.
+//   - product bundles mount their own nested blocks through MEMQL_DSL_PATH,
+//     and addAgentToSpace / updateSessionDevices / updateParticipantPresence /
+//     createUser splat a client-supplied `object` into one. Those now refuse an
+//     undeclared key instead of storing it. That is a wire-contract change and
+//     it is the point: the stored key was never readable by anything, because
+//     nothing that reads the row knows it is there.
 //
-// So this test asserts the CURRENT behaviour deliberately. When the writers
-// above are fixed, emit `additionalProperties: false` next to the `required`
-// this issue did ship and invert this test -- it is the flip's checklist, not a
-// claim that open is correct.
-//
-// Note what the three remaining blockers have in common: each is a block a
-// CALLER or a STORED ROW populates, and none of them is `preferences` -- the
-// block memql#3623 named as the risk, whose writers are all in-repo. That is
-// the argument for a per-concept flip landing before a tree-wide one.
-func TestNestedBlock_UndeclaredKeysStillAccepted(t *testing.T) {
+// @open is the per-block escape, for a block whose keys are data rather than
+// schema; concept_open_block_3641_test.go covers it. This test is about the
+// DEFAULT, which is now closed and matches the top level.
+func TestNestedBlock_UndeclaredKeysAreRefused(t *testing.T) {
 	c := nestedRequiredConcept(t)
 
-	// The top level is closed, which is the asymmetry that makes the nested
-	// case surprising rather than merely permissive.
+	// The top level, which has always been closed. Kept as the oracle: the
+	// nested case is expected to behave the same way now, so a change breaking
+	// BOTH would otherwise look like agreement.
 	if err := c.validate("definition", map[string]any{
 		"topMustHave": "x",
 		"typoAtTop":   "x",
 		"outer":       map[string]any{"mustHave": "x"},
 	}); err == nil {
-		t.Fatal("an undeclared TOP-LEVEL key was accepted -- the asymmetry this test " +
-			"documents has changed and its reasoning no longer holds")
+		t.Fatal("an undeclared TOP-LEVEL key was accepted")
 	}
 
+	// The nested case, spelled as the defect memql#3623 named: a near-miss of
+	// the computer-use kill switch.
 	if err := c.validate("definition", map[string]any{
 		"topMustHave": "x",
 		"outer":       map[string]any{"mustHave": "x", "computerUseEnabld": true},
+	}); err == nil {
+		t.Fatal("an undeclared key inside a nested block was ACCEPTED. It stores beside the real " +
+			"field, nothing reads it, and the value the author meant to set keeps its old one -- " +
+			"which for `preferences.computerUseEnabled` is a kill switch that stays as it was " +
+			"(memql#3623 / memql#3641)")
+	}
+
+	// And the fully-declared shape still validates, so the refusal above is the
+	// closure rather than the block having stopped working.
+	if err := c.validate("definition", map[string]any{
+		"topMustHave": "x",
+		"outer":       map[string]any{"mustHave": "x", "optional": "y"},
 	}); err != nil {
-		t.Fatalf("an undeclared key inside a nested block is now REFUSED: %v\n\n"+
-			"If that was deliberate, this test is the checklist to work through first: the "+
-			"perUser agent seeds, utterance.source's seven undeclared keys, the two "+
-			"read-modify-write paths over existing rows, and the out-of-repo bundles and "+
-			"clients that splat client-supplied objects into a nested block.", err)
+		t.Fatalf("a fully-declared nested block was rejected: %v", err)
 	}
 }
 

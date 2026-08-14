@@ -360,6 +360,21 @@ type parsedProperty struct {
 	// mutation's caller args (it must be stamped) but MAY be projected.
 	// Surfaces as the x-serverSet custom JSON-Schema keyword.
 	serverSet bool
+	// open marks a NESTED BLOCK as ACCEPTING undeclared keys -- it suppresses
+	// the `additionalProperties: false` every nested block emits by default
+	// (memql#3641).
+	//
+	// The default is closed, and it matches the top level, which has always
+	// been closed. A nested block that took undeclared keys was the memql#3623
+	// exposure: a typo'd `computerUseEnbaled` stored beside the real
+	// `computerUseEnabled` and the kill switch kept its old value, with
+	// nothing reporting anything at either end.
+	//
+	// @open is for a block that is free-form BY DESIGN -- one whose keys are
+	// data rather than schema. It is a claim about the block, so it is
+	// declared per block rather than inferred, and a block that merely has an
+	// undeclared key today wants the key DECLARED instead.
+	open bool
 	// Phase 3 discriminated-union variants
 	variantDiscriminator string
 	variants             []parsedPropertyVariant
@@ -557,6 +572,7 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 		elem.minimum, out.minimum = out.minimum, nil
 		elem.maximum, out.maximum = out.maximum, nil
 		elem.nested, out.nested = out.nested, nil
+		elem.open, out.open = out.open, false
 		elem.variants, out.variants = out.variants, nil
 		elem.variantDiscriminator, out.variantDiscriminator = out.variantDiscriminator, ""
 
@@ -580,8 +596,49 @@ func propertyDeclToParsed(prop *parser.PropertyDecl) (parsedProperty, error) {
 	if err := checkConstraintsCarried(target, prop); err != nil {
 		return parsedProperty{}, err
 	}
+	if err := checkOpenIsMeaningful(target, prop); err != nil {
+		return parsedProperty{}, err
+	}
 
 	return out, nil
+}
+
+// checkOpenIsMeaningful refuses the two @open declarations that would not mean
+// what they say (memql#3641). Both are the declaration-theatre shape the v1
+// hardening pass keeps finding: an annotation that parses, is stored, and then
+// does something other than what was written.
+//
+//   - @open on an object with NO nested block declares a block free-form that
+//     had no schema to relax: a bare `object` field already accepts any shape,
+//     so the annotation claims a decision nobody made. Say it with the field's
+//     type, not with an annotation on top of it.
+//   - @open beside @variant is a contradiction the emitter cannot express. A
+//     variant's arms are a oneOf whose branches enumerate their own fields;
+//     "accept keys no branch declares" is not a relaxation of that, it is the
+//     union giving up. Drop the union or drop @open.
+//
+// The "not an object at all" case is handled with the rest of its family in
+// checkConstraintsCarried.
+func checkOpenIsMeaningful(target *parsedProperty, prop *parser.PropertyDecl) error {
+	if target == nil || !target.open {
+		return nil
+	}
+	if len(target.variants) > 0 {
+		return fmt.Errorf(
+			"@open cannot be combined with @variant on `%s`: a variant's fields live in its own oneOf "+
+				"branch, and \"accept keys no branch declares\" is not a relaxation of a discriminated "+
+				"union -- it is the union giving up. Drop @open, or drop the union (memql#3641)",
+			prop.Name)
+	}
+	if target.typeName == "object" && len(target.nested) == 0 {
+		return fmt.Errorf(
+			"@open on `%s` has no block to relax: the field declares no sub-fields, so it is a bare "+
+				"`object` and already accepts any shape. The annotation claims a decision nobody "+
+				"made -- drop it, or declare the sub-fields it is meant to be an escape from "+
+				"(memql#3641)",
+			prop.Name)
+	}
+	return nil
 }
 
 // carriesStringConstraints reports whether a property type EMITS a JSON Schema
@@ -669,6 +726,9 @@ func checkConstraintsCarried(target *parsedProperty, prop *parser.PropertyDecl) 
 		}
 		if len(target.nested) > 0 {
 			offenders = append(offenders, "a nested block")
+		}
+		if target.open {
+			offenders = append(offenders, "@open")
 		}
 	}
 	if len(offenders) == 0 {
@@ -776,6 +836,9 @@ func valueAnnotationNames(prop *parsedProperty) []string {
 	}
 	if len(prop.nested) > 0 {
 		names = append(names, "a nested block")
+	}
+	if prop.open {
+		names = append(names, "@open")
 	}
 	return names
 }
@@ -1094,6 +1157,8 @@ func applyPropertyAttribute(prop *parsedProperty, attr *parser.Attribute) error 
 		prop.internal = true
 	case "serverSet":
 		prop.serverSet = true
+	case "open":
+		prop.open = true
 	case "variant":
 		// @variant(discriminator="field") is handled structurally
 		// in propertyDeclToParsed (it triggers variant-branch
@@ -1599,62 +1664,53 @@ func propertyToJSONSchema(prop parsedProperty) (map[string]any, error) {
 			if len(nestedRequired) > 0 {
 				schema["required"] = nestedRequired
 			}
-			// `additionalProperties: false` is the OTHER half of memql#3623 and
-			// is deliberately NOT emitted here yet. The tree does not survive it
-			// today; measured, not assumed.
+			// CLOSED BY DEFAULT (memql#3641). An undeclared key inside a
+			// nested block used to be ACCEPTED, while the identical key at the
+			// top level was refused -- an asymmetry with no rule behind it,
+			// only the fact that this line had never been written.
 			//
-			// Step 1 of memql#3641's sequence has SHIPPED -- the two
-			// declaration blockers below are closed, and
-			// test/dslconformance/nested_block_writes_3641_test.go now fails on
-			// any new undeclared key written into either block:
+			// What it cost is memql#3623's exposure: a typo'd
+			// `computerUseEnbaled` stored beside the real
+			// `computerUseEnabled` in v1:identity:user.preferences, the write
+			// succeeded, and the computer-use kill switch kept its old value
+			// with nothing reporting anything at either end. The block holding
+			// a kill switch accepted a near-miss spelling of it.
 			//
-			//   - [FIXED] dsl/agents/plannerAgent.memql + trainerAgent.memql
-			//     seeded `capabilities.domains` / `capabilities.tools`, the
-			//     pre-#158 surface skillIds replaced. Both wrote empty arrays,
-			//     and skill_migration.go is the only remaining consumer of that
-			//     shape (it reads legacy ROWS), so the seeds were deleted rather
-			//     than the retired fields re-declared.
-			//   - [FIXED] v1:cognition:utterance.source took seven undeclared
-			//     keys from live writers; all seven are now declared on the
-			//     concept, including the load-bearing `transcriptOnly` that
-			//     cognition_handler.go and cognition_utterance_auth_validation.go
-			//     read back.
+			// This closes EVERY nested block, in the embedded tree and in a
+			// product bundle mounted at MEMQL_DSL_PATH alike. One rule, no
+			// carve-out by where the tree came from: a bundle's blocks are
+			// written by that bundle's own mutations, so its author holds both
+			// halves and needs the same protection.
 			//
-			// What still blocks the flip:
+			// @open is the per-block escape, for a block that is free-form BY
+			// DESIGN -- keys as data rather than schema. A block that merely
+			// has an undeclared key today wants the key DECLARED; @open is a
+			// claim that the key set is not knowable, and the sweep that
+			// landed this flip declares far more than it opens.
 			//
-			//   - insertSystemActionUtterance (integrations/cognition/ai_responder.go)
-			//     merges an ARBITRARY caller-supplied map[string]string into the
-			//     source. Every key it passes today is declared, but the writer
-			//     is open by construction, so closing the block turns the next
-			//     un-declared key from a silent store into a failed insert on a
-			//     path whose callers treat the error as non-fatal.
+			// The three things that blocked this, and what each got:
+			//
+			//   - insertSystemActionUtterance merges an arbitrary caller map
+			//     into v1:cognition:utterance.source. Every key its callers
+			//     pass is declared, and a test now enumerates them, so the
+			//     next new key is a failing test rather than a refused insert
+			//     on a path that swallows errors.
 			//   - assistant_skill_reconcile.go and integrations/agents/factory.go
-			//     (extendAgent) read an agent's capabilities object out of the
-			//     DB and write it back wholesale, so any EXISTING row still
-			//     carrying a legacy key fails on write-back. That one is a data
-			//     migration, not an edit.
-			//   - the blast radius does not stop at this repo. Product DSL
-			//     bundles arrive at runtime via MEMQL_DSL_PATH with nested blocks
-			//     of their own, and mutations like addAgentToSpace /
-			//     updateSessionDevices / updateParticipantPresence splat a
-			//     client-supplied `object` straight into one. Closing them is a
-			//     wire-contract change for every bundle and every client, which
-			//     is its own issue with its own migration -- not a side effect of
-			//     this one.
-			//
-			// So the exposure memql#3623 names is still open: an undeclared key
-			// inside a nested block is accepted, and a typo'd write to
-			// v1:identity:user.preferences lands beside the real field while the
-			// computer-use kill switch keeps its old value.
-			// concept_nested_block_3623_test.go characterises the open state and
-			// is where the flip gets pinned.
-			//
-			// The three remaining blockers are all about blocks a CALLER or a
-			// STORED ROW populates, and none of them is about `preferences`
-			// itself -- which is the block memql#3623 named as the risk. That
-			// asymmetry is why the next step is per-concept rather than
-			// tree-wide: closing one block whose writers are all in-repo does
-			// not wait on a data migration for another.
+			//     read an agent's capabilities out of the database and write it
+			//     back wholesale, so a row carrying a pre-#158 legacy key would
+			//     fail on write-back. Both now filter the object down to
+			//     DECLARED fields before writing -- reading the concept, not a
+			//     hardcoded list -- so a legacy row heals the first time it is
+			//     touched and no migration gates the flip.
+			//   - the caller-splat mutations (addAgentToSpace,
+			//     updateSessionDevices, updateParticipantPresence, createUser)
+			//     now refuse an undeclared key from a client instead of storing
+			//     it. That is a wire-contract change and it is the point: the
+			//     stored key was never readable by anything, because nothing
+			//     that reads the row knows it is there.
+			if !prop.open {
+				schema["additionalProperties"] = false
+			}
 
 			// A @variant nested one level down is tied to a discriminator
 			// sibling INSIDE this block, mirroring the root-level rule.

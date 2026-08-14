@@ -1922,6 +1922,17 @@ func (p *Parser) parseConceptDecl(attrs []*Attribute) (*ConceptDecl, error) {
 					decl.Relationships = append(decl.Relationships, rel)
 					continue
 				}
+				// An own-line annotation reaching HERE is unambiguous and
+				// keeps binding forward (memql#3692). This branch is only
+				// reachable when the previous property ended with a `}`, and a
+				// block-bodied property cannot take a trailing annotation at
+				// all -- parsePropertyDecl returns at the closing brace and
+				// refuseSameLineTrailingAttribute refuses the one spelling that
+				// could reach it. So prefix-of-the-next-property is the only
+				// reading available, which is what
+				// TestNestedBlock_PrefixAnnotationOnALaterLineStillBindsForward
+				// pins. What memql#3692 refuses is the other position, where
+				// the property ABOVE can claim the same token.
 				prefix = append(prefix, attr)
 			}
 			if p.check(TokenBraceClose) || p.check(TokenEOF) {
@@ -2557,6 +2568,10 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 		return nil, newParseErrorf(&p.current, "expected property name, got %q", p.current.Literal)
 	}
 	prop := &PropertyDecl{Name: p.current.Literal}
+	// The line the property is DECLARED on. Every annotation that belongs to
+	// it has to sit on this line (memql#3692) -- see
+	// refuseOwnLinePropertyAttribute.
+	declLine := p.current.Line
 	p.advance()
 
 	// Nested-object block: `name { ... }` (no explicit type keyword).
@@ -2605,6 +2620,9 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 		if p.peekAhead(1).Type == TokenIdentifier && p.peekAhead(1).Literal == "relationship" {
 			break
 		}
+		if err := p.refuseOwnLinePropertyAttribute(prop.Name, declLine); err != nil {
+			return nil, err
+		}
 		attr, err := p.parseAttribute()
 		if err != nil {
 			return nil, err
@@ -2628,6 +2646,42 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 	//     api_key { keyHash string @required }
 	//   }
 	//
+	// Annotated nested block:
+	//
+	//   metadata object @open {
+	//     knownKey  string
+	//   }
+	//
+	// The bare `name { ... }` form takes no annotation at all -- it returns at
+	// the closing brace, and a trailing one is refused as ambiguous
+	// (refuseSameLineTrailingAttribute). The PREFIX spelling does not reach it
+	// either: the lexer strips newlines, so an annotation on the line above a
+	// property is consumed by the trailing-annotation loop of the property
+	// BEFORE it -- so it silently annotates the WRONG field, which is its own
+	// finding (memql#3692). An annotation describing the block itself therefore
+	// needs the typed spelling, which is the same shape @variant already uses.
+	//
+	// Gated on @open rather than on `object` generally, to widen the grammar by
+	// exactly one accepted declaration instead of by a class of them.
+	if hasOpenAttribute(prop.Attributes) && !hasVariantAttribute(prop.Attributes) && p.check(TokenBraceOpen) {
+		p.advance()
+		for !p.check(TokenBraceClose) && !p.check(TokenEOF) {
+			nested, err := p.parsePropertyDecl()
+			if err != nil {
+				return nil, err
+			}
+			prop.Nested = append(prop.Nested, nested)
+		}
+		closeLine := p.current.Line
+		if err := p.expect(TokenBraceClose); err != nil {
+			return nil, err
+		}
+		if err := p.refuseSameLineTrailingAttribute(prop.Name, "@open", closeLine); err != nil {
+			return nil, err
+		}
+		return prop, nil
+	}
+
 	// Only applies when the annotation set included @variant.
 	if hasVariantAttribute(prop.Attributes) && p.check(TokenBraceOpen) {
 		p.advance()
@@ -2647,6 +2701,70 @@ func (p *Parser) parsePropertyDecl() (*PropertyDecl, error) {
 		}
 	}
 	return prop, nil
+}
+
+// refuseOwnLinePropertyAttribute rejects a property annotation that does not sit
+// on the property's own declaration line (memql#3692).
+//
+// The lexer strips newlines, so this token stream:
+//
+//	a  string
+//	@pii
+//	b  string
+//
+// is byte-for-byte the stream of `a string @pii` followed by `b string`. The
+// trailing-annotation loop therefore consumed the @pii as an annotation of `a`
+// -- the field ABOVE the one the author wrote it over. With @pii / @secret /
+// @internal that leaves the field the author marked exposed and marks a
+// different one, silently, in the direction that fails open.
+//
+// REFUSED here rather than bound forward, for the reason memql#3623 gave when
+// it refused the mirror spelling (an annotation on a block's closing-brace
+// line): the two readings are the same token stream, so choosing either one
+// makes a REFLOW load-bearing. Binding forward would fix `@pii`-above-`b` and
+// break the wrapped-continuation spelling
+//
+//	someField  string
+//	  @description("…")
+//
+// by moving that annotation onto the next field -- the same silent
+// misattribution pointing the other way.
+//
+// The refusal is scoped to THIS position, where the property above can claim
+// the token. Where it cannot, the own-line form keeps binding forward and is
+// untouched:
+//
+//   - after a NESTED BLOCK. A block-bodied property takes no trailing
+//     annotation at all (parsePropertyDecl returns at the closing brace), so
+//     prefix-of-the-next-property is the only reading available. memql#3623
+//     pinned that on purpose; parseConceptDecl's prefix branch is where it
+//     lands.
+//   - @relationship, which is body-level wherever it appears (the caller breaks
+//     out of the attribute loop for it, and parseConceptDecl hoists it), so its
+//     position carries no ambiguity to resolve.
+//
+// An annotation describing a BLOCK itself takes the typed spelling
+// `name object @variant(discriminator="…") { … }`, which is the shape that
+// carries an annotation and a block body in one declaration.
+//
+// Corpus impact when this landed: zero. No `concept` body in dsl/ carried an
+// own-line property annotation, which is why the misattribution had never been
+// noticed.
+func (p *Parser) refuseOwnLinePropertyAttribute(propName string, declLine int) error {
+	if p.current.Line == declLine {
+		return nil
+	}
+	return newParseErrorf(&p.current,
+		"property %q: annotation @%s is on its own line, which is ambiguous and is refused. "+
+			"The lexer strips newlines, so this is the SAME token stream as writing it at the end "+
+			"of %q's declaration -- which is how it would bind, marking the field ABOVE the one it "+
+			"reads as belonging to. If it belongs to %q, put it on %q's line "+
+			"(`%s string @%s`); if it belongs to the property below, put it on THAT property's "+
+			"line -- after a nested block that spelling is unambiguous and already binds forward. "+
+			"An annotation describing a BLOCK takes the typed spelling (`%s object @%s(…) { … }`). "+
+			"See memql#3692.",
+		propName, p.peekAhead(1).Literal, propName, propName, propName,
+		propName, p.peekAhead(1).Literal, propName, p.peekAhead(1).Literal)
 }
 
 // refuseSameLineTrailingAttribute rejects an annotation sitting on the same
@@ -2721,6 +2839,18 @@ func (p *Parser) parseVariantBranch() (*PropertyVariant, error) {
 // hasVariantAttribute reports whether the attribute list contains an
 // @variant annotation -- used to decide whether to expect a variant
 // body block after the property's primary declaration.
+// hasOpenAttribute reports whether the attribute list contains @open -- used to
+// decide whether to expect a nested block body after a typed `object`
+// declaration (memql#3641).
+func hasOpenAttribute(attrs []*Attribute) bool {
+	for _, a := range attrs {
+		if a != nil && a.Name == "open" {
+			return true
+		}
+	}
+	return false
+}
+
 func hasVariantAttribute(attrs []*Attribute) bool {
 	for _, a := range attrs {
 		if a != nil && a.Name == "variant" {
