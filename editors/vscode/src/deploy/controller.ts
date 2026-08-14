@@ -149,6 +149,16 @@ export async function previewNextVersion(
   }
 }
 
+/** Why a status read produced no status. */
+export type StatusReadReason = "ok" | "permissionDenied" | "unavailable";
+
+export interface StatusRead {
+  status: Awaited<ReturnType<DeployControlPort["getDeploymentStatus"]>> | null;
+  /** The engine's own words, or "" on success. */
+  message: string;
+  reason: StatusReadReason;
+}
+
 /**
  * Read the per-env deployment status.
  *
@@ -162,11 +172,24 @@ export async function previewNextVersion(
 export async function readDeploymentStatus(
   port: DeployControlPort,
   env: string,
-): Promise<{ status: Awaited<ReturnType<DeployControlPort["getDeploymentStatus"]>> | null; message: string }> {
+): Promise<StatusRead> {
   try {
-    return { status: await port.getDeploymentStatus(env), message: "" };
+    return { status: await port.getDeploymentStatus(env), message: "", reason: "ok" };
   } catch (err) {
-    return { status: null, message: describeReadFailure("deployment status", err) };
+    return {
+      status: null,
+      message: describeReadFailure("deployment status", err),
+      // TYPED, not inferred from the sentence (memql#3740). The Deployments
+      // page renders one of three states, and two of them are failures of THIS
+      // read -- "your role cannot see this" and "this cluster has no deploy
+      // pipeline" -- which ask completely different things of the operator.
+      // Telling them apart by matching on prose would break the first time the
+      // wording is improved.
+      reason:
+        err instanceof DeployControlError && err.isPermissionDenied
+          ? "permissionDenied"
+          : "unavailable",
+    };
   }
 }
 

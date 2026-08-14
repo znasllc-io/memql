@@ -37,7 +37,24 @@ import * as vscode from "vscode";
 
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
+import {
+  DEPLOY_ACTIONS,
+  confirmationMatches,
+  confirmationPhrase,
+  roleVisibility,
+  rolloutRequiresConfirmation,
+  type DeployActionId,
+  type RoleVisibility,
+} from "../deploy/actions.js";
+import {
+  readDeploymentStatus,
+  runDeployAction,
+  type DeployActionRequest,
+  type DeployControlPort,
+  type StatusRead,
+} from "../deploy/controller.js";
 import { instanceActions, type InstanceActionId } from "../deploy/instanceActions.js";
+import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { installSessionOptions, runInstall, type SessionHooks } from "../install/session.js";
 import { listReleaseTags, tagProblem, type TagListing } from "../install/tags.js";
@@ -54,7 +71,7 @@ import { defaultRunsDir } from "../state/runLog.js";
 import { isSameVersion, upgradePlan, upgradeSummary, type PlannedStepView } from "../state/upgradePlan.js";
 import { graphDocumentPath, loadGraphFile, type Graph } from "../install/graph.js";
 import { DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
-import { renderChooseTag, renderInstanceOverview } from "./deploymentScreens.js";
+import { renderChooseTag, renderInstanceOverview, renderRemoteInstance } from "./deploymentScreens.js";
 import { renderFailedScreen, renderRunningScreen } from "./installScreens.js";
 
 /** The same ceiling the wizard gives a step. */
@@ -84,6 +101,38 @@ export interface DeploymentPanelDeps {
   runScript?: SessionHooks["run"];
   /** Injected by tests; the real `git ls-remote` when absent. */
   listTags?: (cwd: string) => Promise<TagListing>;
+
+  // --- the remote half (memql#3740) ---
+
+  /**
+   * The live connection and the deployment read, as thunks.
+   *
+   * Same shape the Deployments tree takes and for the same reason: both change
+   * without this page being told, and a value captured when the panel opened
+   * would leave the connected cluster's history permanently unreadable.
+   */
+  connection?: () => CatalogInputs["connection"];
+  readDeployments?: () => CatalogInputs["readDeployments"];
+
+  /**
+   * The bridged deploy-control client for the CONNECTED cluster, or undefined
+   * when nothing is connected.
+   *
+   * A thunk rather than a value, and rebuilt per call rather than cached, for
+   * the reason clusterPanel.ts records: the ConnectionManager drops its
+   * dispatcher the moment the socket dies, so a cached client would go on
+   * writing into a dead stream.
+   */
+  deployPort?: () => DeployControlPort | undefined;
+  /** The caller's cluster role, for deciding which actions to DRAW. */
+  readRole?: () => Promise<RoleVisibility>;
+  /** The deploy-console environment this instance maps to. */
+  deployEnv?: (instanceName: string) => string;
+  /**
+   * Asks the operator to type a phrase back. Injected because a modal is the
+   * extension host's, and because a test cannot click one.
+   */
+  confirm?: (prompt: string, phrase: string) => Promise<string | undefined>;
 }
 
 export class DeploymentPanel {
@@ -102,7 +151,11 @@ export class DeploymentPanel {
   private readonly state = new AddClusterState();
 
   private screen: Screen = "overview";
+  /** Which instance this page is about. Empty means the local one. */
+  private instanceName = "";
   private instance: Instance | undefined;
+  private pipeline: PipelineState | undefined;
+  private outcome = "";
   private runs: readonly Run[] = [];
   private listing: TagListing = { tags: [], error: "" };
   private target = "";
@@ -115,17 +168,42 @@ export class DeploymentPanel {
   /** Non-undefined exactly while a run is in flight; also the cancel handle. */
   private runAbort: AbortController | undefined;
 
-  static show(context: vscode.ExtensionContext, deps: DeploymentPanelDeps): DeploymentPanel {
+  /**
+   * Opens the page for an instance, or re-points the one already open.
+   *
+   * ONE PANEL for every instance rather than one per instance: the page is a
+   * console for whichever deployment the operator is looking at, and a tab per
+   * cluster would leave several of them showing states that stopped being true
+   * the moment a run finished somewhere else.
+   */
+  static show(
+    context: vscode.ExtensionContext,
+    deps: DeploymentPanelDeps,
+    instanceName = "",
+  ): DeploymentPanel {
     const existing = DeploymentPanel.open_;
     if (existing !== undefined && !existing.disposed) {
       existing.panel.reveal(vscode.ViewColumn.Beside);
-      void existing.load();
+      existing.pointAt(instanceName);
       return existing;
     }
     const panel = new DeploymentPanel(context, deps);
     DeploymentPanel.open_ = panel;
-    void panel.load();
+    panel.pointAt(instanceName);
     return panel;
+  }
+
+  private pointAt(instanceName: string): void {
+    if (instanceName !== this.instanceName) {
+      // A different instance is a different page: nothing carried over from the
+      // last one is true about this one.
+      this.instanceName = instanceName;
+      this.screen = "overview";
+      this.pipeline = undefined;
+      this.outcome = "";
+      this.error = "";
+    }
+    void this.load();
   }
 
   private constructor(
@@ -157,11 +235,53 @@ export class DeploymentPanel {
 
   /** Re-reads the instance and its runs. */
   private async load(): Promise<void> {
-    const catalog = await buildCatalog(this.deps.catalog);
+    const catalog = await buildCatalog({
+      ...this.deps.catalog,
+      ...(this.deps.connection !== undefined ? { connection: this.deps.connection() } : {}),
+      ...(this.deps.readDeployments !== undefined
+        ? { readDeployments: this.deps.readDeployments() }
+        : {}),
+    });
     if (this.disposed) return;
-    this.instance = catalog.instances.find((i) => i.kind === "local");
+    this.instance =
+      this.instanceName === ""
+        ? catalog.instances.find((i) => i.kind === "local")
+        : catalog.instances.find((i) => i.name === this.instanceName);
     this.runs = this.instance === undefined ? [] : (catalog.runs.get(this.instance.name) ?? []);
     if (catalog.error !== undefined) this.error = catalog.error;
+    this.render();
+    if (this.instance?.kind === "remote") await this.loadPipeline(this.instance.name);
+  }
+
+  /**
+   * Which of the three states this cluster's deploy pipeline is in.
+   *
+   * Read on every load rather than once: a cluster that gains a deploy pack, or
+   * an operator whose role changes, are both things this page would otherwise
+   * go on being wrong about for as long as the tab stays open.
+   */
+  private async loadPipeline(name: string): Promise<void> {
+    const port = this.deps.deployPort?.();
+    const visibility = (await this.deps.readRole?.()) ?? roleVisibility(undefined);
+    if (this.disposed) return;
+    if (port === undefined) {
+      // NOT CONNECTED IS NOT "NO PIPELINE". The read never happened, so the
+      // page says which of the two it is rather than reporting the cluster has
+      // no deploy console on the strength of a socket this editor never opened.
+      const read: StatusRead = {
+        status: null,
+        message:
+          "This editor is not connected to this cluster, so its deployment status was not read. " +
+          "Connect to it from the Clusters view.",
+        reason: "unavailable",
+      };
+      this.pipeline = pipelineState(read, visibility);
+      this.render();
+      return;
+    }
+    const read = await readDeploymentStatus(port, this.deps.deployEnv?.(name) ?? name);
+    if (this.disposed) return;
+    this.pipeline = pipelineState(read, visibility);
     this.render();
   }
 
@@ -176,6 +296,10 @@ export class DeploymentPanel {
 
     if (type === "choose" && typeof value === "string") {
       await this.choose(value as InstanceActionId);
+      return;
+    }
+    if (type === "deploy" && typeof value === "string") {
+      await this.runDeploy(value);
       return;
     }
     if (type === "pickTag" && typeof value === "string") {
@@ -414,6 +538,116 @@ export class DeploymentPanel {
     else this.render();
   }
 
+  /**
+   * Run one deploy-control action against the connected cluster.
+   *
+   * THE GATE IS NEVER THIS METHOD. The id is narrowed against the catalog
+   * because the postMessage channel is untrusted and an unrecognised id must be
+   * dropped rather than reaching `actionById` and throwing -- but whether the
+   * caller MAY run it is the engine's decision, taken again on the far side of
+   * the same gate the unary path runs. What comes back on a refusal names the
+   * role required, and it is rendered verbatim.
+   */
+  private async runDeploy(rawId: string): Promise<void> {
+    const spec = DEPLOY_ACTIONS.find((a) => a.id === rawId);
+    if (spec === undefined || this.instance === undefined) return;
+    const port = this.deps.deployPort?.();
+    if (port === undefined) {
+      this.outcome = "ERROR: not connected to this cluster.";
+      this.render();
+      return;
+    }
+    const env = this.deps.deployEnv?.(this.instance.name) ?? this.instance.name;
+
+    const request = await this.deployRequest(spec.id, env);
+    if (request === undefined) return;
+
+    const outcome = await runDeployAction(port, request);
+    if (this.disposed) return;
+    // The engine's own line, including the audit id and -- on a refusal -- the
+    // role that would have worked. Surfaced rather than reworded: a paraphrase
+    // is one more thing that can be wrong, and the operator may need to match
+    // it against a log line.
+    this.outcome = outcome.line;
+    await this.load();
+  }
+
+  /**
+   * The parameters an action needs, and the confirmation the destructive ones
+   * demand.
+   *
+   * THE PHRASE IS THE TARGET, never the word "yes": re-typing the version being
+   * promoted, or the deployment being rolled back to, forces the operator to
+   * look at what they selected. Undefined means "do not run" -- a cancelled
+   * prompt and a mismatched phrase are the same answer.
+   */
+  private async deployRequest(
+    id: DeployActionId,
+    env: string,
+  ): Promise<DeployActionRequest | undefined> {
+    const ask = this.deps.confirm ?? (async () => undefined);
+    const current = this.runs[0];
+    switch (id) {
+      case "cutVersion":
+        return { id, env, bump: "patch", version: "" };
+      case "deploy": {
+        const target = current?.id ?? "";
+        if (target === "") {
+          this.outcome = "ERROR: there is no deployment record to ship.";
+          this.render();
+          return undefined;
+        }
+        return { id, deploymentId: target };
+      }
+      case "promote": {
+        const version = current?.toVersion ?? "";
+        if (!(await this.confirmed(ask, id, version))) return undefined;
+        return { id, version };
+      }
+      case "rollback": {
+        // The newest run that actually LANDED, which is what a rollback target
+        // has to be -- rolling back to a record that failed would redeploy a
+        // digest that never worked.
+        const landed = this.runs.find((r) => r.status === "succeeded");
+        const target = landed?.id ?? "";
+        if (!(await this.confirmed(ask, id, target))) return undefined;
+        return { id, toDeploymentId: target };
+      }
+      case "rolloutAction": {
+        const subAction = "promote";
+        if (rolloutRequiresConfirmation(subAction) && !(await this.confirmed(ask, id, env))) {
+          return undefined;
+        }
+        return { id, env, rollout: "", subAction };
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  private async confirmed(
+    ask: (prompt: string, phrase: string) => Promise<string | undefined>,
+    id: DeployActionId,
+    target: string,
+  ): Promise<boolean> {
+    const phrase = confirmationPhrase(id, target);
+    if (phrase === "") {
+      // An action with nothing identifiable to re-type must not proceed
+      // unchallenged -- see confirmationPhrase.
+      this.outcome = `ERROR: nothing to confirm against, so ${id} was not run.`;
+      this.render();
+      return false;
+    }
+    const typed = await ask(`Type ${phrase} to confirm.`, phrase);
+    if (typed === undefined) return false;
+    if (!confirmationMatches(phrase, typed)) {
+      this.outcome = `ERROR: that did not match ${phrase}, so ${id} was not run.`;
+      this.render();
+      return false;
+    }
+    return true;
+  }
+
   // -------------------------------------------------------------------------
   // rendering
   // -------------------------------------------------------------------------
@@ -443,6 +677,24 @@ export class DeploymentPanel {
           failures: this.state.failures,
         });
       case "overview":
+        if (instance.kind === "remote") {
+          return renderRemoteInstance({
+            instance,
+            runs: this.runs,
+            // Undefined only in the instant between the page opening and the
+            // status read returning. Rendering it as "not configured" would be
+            // a claim about the cluster made before anything asked it.
+            pipeline: this.pipeline ?? {
+              kind: "present",
+              title: "Deploy",
+              detail: "Reading this cluster's deployment status...",
+              actions: [],
+            },
+            nowMs: Date.now(),
+            outcome: this.outcome,
+            error: this.error,
+          });
+        }
         return renderInstanceOverview({
           instance,
           runs: this.runs,
@@ -502,6 +754,11 @@ ${viewKitStyles}
   .run-kind, .plan-id { flex: none; min-width: 10em; }
   .run-detail, .plan-detail { color: var(--vscode-descriptionForeground); }
   .plan-mark { flex: none; width: 2em; color: var(--vscode-descriptionForeground); }
+  /* "Node types", never "Steps": a remote run's items are per-tier specs, not
+     script executions, and the label is what stops one being read as the other. */
+  .items-label { color: var(--vscode-descriptionForeground); margin: 2px 0 0 1em; }
+  .run-block { margin-bottom: 10px; }
+  .run-block .runs { margin-left: 1em; }
   /* The steps that will actually change something read at full strength; the
      ones expected to skip are quiet, because the question the forecast answers
      is "what is this going to touch". */
@@ -542,6 +799,8 @@ ${this.bodyHtml()}
   document.addEventListener('click', (e) => {
     const choose = e.target.closest('[data-choose]');
     if (choose) { vscode.postMessage({ type: 'choose', value: choose.dataset.choose }); return; }
+    const deploy = e.target.closest('[data-deploy]');
+    if (deploy) { vscode.postMessage({ type: 'deploy', value: deploy.dataset.deploy }); return; }
     const act = e.target.closest('[data-act]');
     if (act && act.tagName !== 'SELECT') vscode.postMessage({ type: act.dataset.act });
   });
