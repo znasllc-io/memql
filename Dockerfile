@@ -29,7 +29,7 @@
 # scripts/ci/portal_image_wiring_test.go.
 ARG PORTAL_DIST_STAGE=portal-skip
 
-FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edff595aa0479 AS builder
+FROM golang:1.26.6@sha256:640a234f4bea3e399c056b7b8f9c667c4939befae8db2f14e9785e16eccd4205 AS builder
 
 # BUILD_TAGS controls which node type binary is compiled.
 # Defaults to empty (BFF -- the default node type).

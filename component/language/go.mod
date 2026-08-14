@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/language
 
 go 1.26.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0

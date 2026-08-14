@@ -9,6 +9,6 @@ module github.com/znasllc-io/memql/component/bus/gen
 
 go 1.26.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require google.golang.org/protobuf v1.36.11
