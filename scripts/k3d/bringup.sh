@@ -45,8 +45,12 @@
 # Contract: docs/internal/design/capability-script-contract.md
 #
 # Exit codes: 0 ok | 2 bad param
+#             | 5 op failed -- the front door has no usable TLS certificate:
+#                  either the Secret is missing, or the certificate in it does
+#                  not cover the names this cluster is served at (memql#3384,
+#                  memql#3730). Both leave traefik serving its own default cert.
 #
-# Refs: #2206 #2061 #2221
+# Refs: #2206 #2061 #2221 #3730
 
 set -euo pipefail
 
@@ -96,6 +100,11 @@ CARRIER_NODES=""
 CARRIER_CONTEXT=""
 HEALTHY=false
 FRONT_DOOR_TLS=false
+# Why FRONT_DOOR_TLS is false, in one line. There are two distinct failures now
+# (no Secret / a Secret whose certificate names the wrong domain) and they need
+# different fixes, so the envelope and the refusal message carry which one it was
+# rather than a single boolean the reader has to interpret (memql#3730).
+FRONT_DOOR_TLS_DETAIL=""
 
 # Step labels, set in main() once --clean is known (6 steps clean, 5 fresh).
 STEP_UP=""
@@ -247,17 +256,136 @@ function run_migration() {
 # check, and its absence FAILS the bring-up rather than scrolling past as a
 # WARN. It is a deterministic condition, not a slow-start one -- there is
 # nothing to wait for and nothing to re-check.
+#
+# AND THE CERTIFICATE'S NAMES ARE ASSERTED TOO (memql#3730). Presence was a
+# strictly weaker claim than the failure message made: the message said "the
+# local front door is serving traefik's default self-signed certificate", the
+# condition said "no Secret object". Those come apart exactly when a Secret
+# holds a VALID certificate for the wrong domain -- traefik then has no cert
+# matching the requested SNI and falls back to TRAEFIK DEFAULT CERT, which is
+# the symptom the message describes and the one the check could not see. It
+# shipped that way; the secret existed, the check passed, and every https client
+# failed. So the check now reads the certificate and asserts SAN coverage of the
+# names this cluster is served at -- no network probe, no new dependency beyond
+# openssl, and it is the check that would have caught it.
+#
+# "COULD NOT TELL" IS NOT "BROKEN", the same distinction install.mkcert's
+# cert_mismatches() draws: with no openssl, or a tls.crt that does not parse,
+# this reports the secret present and says plainly that the names were not
+# verified. Failing a bring-up because openssl is absent would trade one false
+# verdict for another.
 function verify_front_door_tls() {
-    if kubectl get secret "${MEMQL_LOCAL_TLS_SECRET}" -n "${NAMESPACE}" &>/dev/null; then
-        info "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' present in '${NAMESPACE}'."
-        FRONT_DOOR_TLS=true
+    FRONT_DOOR_TLS=false
+    FRONT_DOOR_TLS_DETAIL=""
+
+    if ! kubectl get secret "${MEMQL_LOCAL_TLS_SECRET}" -n "${NAMESPACE}" &>/dev/null; then
+        FRONT_DOOR_TLS_DETAIL="the '${MEMQL_LOCAL_TLS_SECRET}' Secret does not exist in namespace '${NAMESPACE}'"
+        error "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is MISSING in '${NAMESPACE}'."
+        error "  Both front-door ingresses reference it; without it traefik serves its own"
+        error "  self-signed cert and every TLS client sees an untrusted edge."
+        error "  Re-seed it with:  make secrets    (it issues the pair with mkcert)"
         return 0
     fi
-    FRONT_DOOR_TLS=false
-    error "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is MISSING in '${NAMESPACE}'."
-    error "  Both front-door ingresses reference it; without it traefik serves its own"
-    error "  self-signed cert and every TLS client sees an untrusted edge."
-    error "  Re-seed it with:  make secrets    (it issues the pair with mkcert)"
+
+    local wanted sans missing="" host
+    local -a want_hosts=()
+    wanted="$(front_door_hostnames)"
+    sans="$(front_door_secret_sans)"
+
+    if [[ -z "$sans" ]]; then
+        FRONT_DOOR_TLS=true
+        FRONT_DOOR_TLS_DETAIL="secret present; its certificate names were NOT verified (no openssl, or tls.crt did not parse)"
+        info "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' present in '${NAMESPACE}'."
+        warn "  Its certificate could not be read, so coverage of ${wanted} is UNVERIFIED"
+        warn "  (openssl absent, or the secret's tls.crt is not a parseable certificate)."
+        return 0
+    fi
+
+    # `read -ra`, not an unquoted ${wanted//,/ }: the first name is
+    # `*.<domain>`, and an unquoted expansion is GLOB-expanded -- a file matching
+    # it in whatever directory `make up` was run from would silently replace the
+    # name being checked. Splitting on IFS with read does no globbing.
+    IFS=',' read -ra want_hosts <<<"$wanted"
+    for host in "${want_hosts[@]}"; do
+        if ! printf '%s' "$sans" | grep -Fq "DNS:${host}"; then
+            missing+="${host} "
+        fi
+    done
+
+    if [[ -n "$missing" ]]; then
+        FRONT_DOOR_TLS_DETAIL="the certificate in '${MEMQL_LOCAL_TLS_SECRET}' does not cover ${missing% }; it carries ${sans}"
+        error "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' holds a certificate for the WRONG NAMES."
+        error "  needs to cover: ${wanted}"
+        error "  actually covers: ${sans}"
+        error "  Traefik has no certificate matching the requested SNI, so it serves its own"
+        error "  TRAEFIK DEFAULT CERT and every TLS client sees an untrusted edge."
+        error "  Re-seed it with:  make secrets    (it reissues a pair that does not cover"
+        error "  the domain -- memql#3730; before that fix this advice did not work)"
+        return 0
+    fi
+
+    FRONT_DOOR_TLS=true
+    FRONT_DOOR_TLS_DETAIL="secret present and its certificate covers ${wanted}"
+    info "Front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' present in '${NAMESPACE}' and covers ${wanted}."
+    return 0
+}
+
+# front_door_apex -- the domain this cluster is served at: what was asked for,
+# else what the cluster says it is already serving, else the environment default.
+#
+# ${DOMAIN:-} rather than $DOMAIN: an empty --domain means "let up.sh apply its
+# own default" (see main), and this function is also reached by a test harness
+# that sources this file without running main at all.
+#
+# THE CLUSTER TIER IS NOT REDUNDANT, and asserting SAN coverage is what made it
+# load-bearing (memql#3730). up.sh refuses a --domain that disagrees with the
+# cluster (refuse_domain_change), so ordinarily DOMAIN and the cluster agree by
+# the time this runs -- but that refusal sits inside the secret-seeding branch,
+# so `make up --no-secrets` on a cluster serving lab.example.com skips it
+# entirely. Without this tier the check would then demand *.memql.localhost of a
+# perfectly good lab.example.com certificate and fail the bring-up over its own
+# wrong premise: the same defect this issue is about, pointed the other way.
+function front_door_apex() {
+    if [[ -n "${DOMAIN:-}" ]]; then
+        printf '%s' "$DOMAIN"
+        return 0
+    fi
+    local existing
+    existing="$(kubectl get configmap memql-domain -n "${NAMESPACE}" \
+        -o 'jsonpath={.data.MEMQL_DOMAIN}' 2>/dev/null || true)"
+    if [[ -n "$existing" ]]; then
+        printf '%s' "$existing"
+        return 0
+    fi
+    printf '%s' "$MEMQL_LOCAL_DOMAIN"
+}
+
+# front_door_hostnames -- the names the front door's certificate must carry.
+# Derived through scripts/lib/localtls.sh so this check cannot demand a different
+# name set than the seeder issues for (memql#3730).
+function front_door_hostnames() {
+    localtls_hostnames_for "$(front_door_apex)"
+}
+
+# front_door_secret_sans -- the subjectAltName line of the certificate in the
+# front-door Secret, whitespace-collapsed onto one line; EMPTY when it cannot be
+# read, which the caller treats as "could not tell" rather than as a failure.
+#
+# `openssl base64 -d -A` rather than base64(1): GNU spells decode -d and BSD/
+# macOS spells it -D, macOS is this project's stated dev platform, and openssl
+# is already required by the line below it. -A is needed because kubectl emits
+# the value as one unwrapped line.
+function front_door_secret_sans() {
+    command -v openssl &>/dev/null || return 0
+    local b64 pem sans
+    b64="$(kubectl get secret "${MEMQL_LOCAL_TLS_SECRET}" -n "${NAMESPACE}" \
+             -o 'jsonpath={.data.tls\.crt}' 2>/dev/null)" || return 0
+    [[ -n "$b64" ]] || return 0
+    pem="$(printf '%s' "$b64" | openssl base64 -d -A 2>/dev/null)" || return 0
+    [[ -n "$pem" ]] || return 0
+    sans="$(printf '%s' "$pem" | openssl x509 -noout -ext subjectAltName 2>/dev/null || true)"
+    [[ -n "$sans" ]] || return 0
+    printf '%s' "$sans" | tr '\n' ' ' | tr -s ' '
 }
 
 function wait_for_healthy() {
@@ -346,8 +474,14 @@ function main() {
     cap_result_set_raw rebuilt true
     cap_result_set_raw healthy "$HEALTHY"
     cap_result_set_raw frontDoorTls "$FRONT_DOOR_TLS"
+    cap_result_set     frontDoorTlsDetail "$FRONT_DOOR_TLS_DETAIL"
     if [[ "$FRONT_DOOR_TLS" != "true" ]]; then
-        cap_fail 5 "front-door TLS secret '${MEMQL_LOCAL_TLS_SECRET}' is missing in namespace '${NAMESPACE}' -- the local front door is serving traefik's default self-signed certificate, so https://api.memql.localhost and https://identity.memql.localhost are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
+        # The message now says only what the check established -- which of the
+        # two front-door TLS failures this is (memql#3730). It used to assert
+        # traefik's default certificate was being served while testing only that
+        # a Secret object existed, and the case where those disagree is the one
+        # that shipped.
+        cap_fail 5 "the local front door has no usable TLS certificate: ${FRONT_DOOR_TLS_DETAIL}. Traefik answers with its own default self-signed certificate instead, so https://api.$(front_door_apex) and https://identity.$(front_door_apex) are untrusted. Run 'make secrets' to issue and seed the mkcert pair."
     fi
     cap_ok
 }
