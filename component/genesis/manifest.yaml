@@ -774,6 +774,12 @@ variables:
     default: "30"
     description: "How long the edge node caches a request Host -> v1:platform:site resolution (a miss is cached too) before re-querying the engine. Bounds staleness after a site row changes on another node -- the write lands wherever the portal/an admin surface writes it, and this cache lives on every edge replica -- until the change-feed invalidation (memql#3710 Task 9) lands as the primary mechanism."
 
+  - name: MEMQL_EDGE_API_TARGET
+    component: edge
+    scope: node
+    optional: true
+    description: "The bff's plain-HTTP address (e.g. http://bff-http:8085) that the edge's /_memql/* reverse proxy forwards to, so a hosted site reaches its API same-origin -- never the bff's gRPC address, since POST /memql/query is served by HTTP middleware, not the gRPC listener. Unset refuses /_memql/* for every site regardless of a site's apiProxy setting, and the edge warns once at boot when it is unset."
+
   # --- cluster ---
 
   - name: MEMQL_CLUSTER_ID
