@@ -294,26 +294,30 @@ was even attempted. The only signal is a CSP violation in the customer's own
 browser console, so that is where the diagnosis is.
 
 None of this is theoretical, and memQL has already been on the receiving end of
-it. `component/portal/csp.go:68-75` carries the identity origin in the portal's
-own policy for exactly this reason (memql#3315), and says so in those terms —
-without that source the sign-in exchange is *"blocked SILENTLY from the server's
-point of view: the request never leaves the page, so identity's access log is
-empty and an operator debugging 'login does nothing' has nothing to correlate."*
-A Connected site has the same defect available to it, with the difference that
-no code of ours can prevent it.
+it. `component/edge/csp.go` names the cluster's identity origin in
+`connect-src` for exactly this reason (memql#3711 fix round 2) — and, because
+the edge serves every hosted site rather than one bundle on one origin, it
+does this for every site alike, not as a portal-specific carve-out
+(`TestPortalHasNoSpecialCaseInTheServingPath`). Without that origin, the OAuth
+token exchange is refused by the browser's own CSP before it reaches the
+network, while the top-level `/authorize` redirect still works — it is a
+navigation, and `connect-src` does not govern navigations — so, in that
+file's own words, *"sign-in appears to proceed and then fails silently at the
+callback."* A Connected site has the same defect available to it, with the
+difference that no code of ours can prevent it.
 
-Two practical notes from that same file:
+Two practical notes carried over from that file's reasoning:
 
-- **Name the `wss:` form explicitly** rather than trusting the `https:` entry to
-  cover the WebSocket. The portal's own case is the same-origin one — CSP3 says
-  `'self'` matches `ws:`/`wss:` on the same origin, Chrome and Firefox implement
-  it, and Safari's support has been inconsistent long enough that the portal
-  names its WebSocket origin outright (`component/portal/csp.go:16-21`); the
-  symptom of relying on it was "the portal does not connect on Safari", found by
-  a user. A cross-origin `wss://api.<domain>` is not that exact measurement, but
-  it is the same scheme-matching family, and spelling it out costs one token.
-- **Emit the origin, never a path.** The portal deliberately puts only the
-  identity *origin* in its policy, so the value survives an endpoint path
+- **Name the `wss:` form explicitly** rather than trusting the `https:` entry
+  to cover the WebSocket. CSP3 says `connect-src 'self'` matches `ws:`/`wss:`
+  on the same origin, and Chrome/Firefox implement that, but Safari's support
+  has been inconsistent for long enough that `component/edge/csp.go` names
+  the same-origin WebSocket origin explicitly (`wsOriginOf`) rather than
+  relying on it. A cross-origin `wss://api.<domain>` is not the same-origin
+  case that guards against, but it is the same scheme-matching family, and
+  spelling it out costs one token.
+- **Emit the origin, never a path.** The edge's policy deliberately carries
+  only the identity *origin*, so the value survives an endpoint path
   changing. Do the same.
 
 For contrast, memQL *does* generate the policy for pages it serves itself, from
