@@ -21,7 +21,7 @@ import {
   readServerPayload,
   type ToolResultContentWire,
 } from "../client/wire.js";
-import { contentFromWire, type ToolResultContent } from "./outbound.js";
+import type { ToolResultContent } from "./outbound.js";
 
 export interface ClientToolCall {
   callId: string;

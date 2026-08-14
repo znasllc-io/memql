@@ -98,7 +98,6 @@ import type { MappedDiagnostic } from './run/diagnostics.js';
 import { groupByFile } from './run/diagnostics.js';
 import { RunOrchestrator, type RunCluster, type RunEngine } from './run/orchestrator.js';
 import {
-  readRunConfigs,
   runConfigPath,
   upsertRunConfig,
   removeRunConfig,
@@ -2036,12 +2035,13 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
 export function deactivate(): Thenable<void> | undefined {
   // On a host deactivate/reload without a full process exit, an open
   // ConnectionManager WebSocket would otherwise outlive the extension.
-  const stopClient = client?.stop();
-  const disconnectConnections = connections?.disconnect();
-  if (stopClient === undefined && disconnectConnections === undefined) {
+  // Guard on the sources, not on the promises their calls return: comparing a
+  // promise with undefined is the js/missing-await trap, and the host only
+  // awaits what this function RETURNS.
+  if (client === undefined && connections === undefined) {
     return undefined;
   }
-  return Promise.all([stopClient, disconnectConnections]).then(() => undefined);
+  return Promise.all([client?.stop(), connections?.disconnect()]).then(() => undefined);
 }
 
 // resolveServerPath picks the memql-lsp binary in priority order:

@@ -7941,6 +7941,13 @@ func (p *Parser) reconstructTokens(start, end int) string {
 // `int(n)` after a range check tripped a false positive against
 // the int64-source taint flow even with the bound predicate in
 // place.
+//
+// The float64 lane narrows through an int64 intermediate with its
+// own integer-typed range check: the float64 comparisons are what
+// keep the int64 conversion well-defined (an out-of-range float to
+// int conversion is implementation-defined in Go), but only an
+// integer-typed bound check counts as guarding the int32 narrowing
+// -- the float-guarded `int32(n)` form is what CodeQL flagged.
 func numericAsInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int64:
@@ -7952,7 +7959,11 @@ func numericAsInt(v any) (int, bool) {
 		if n < math.MinInt32 || n > math.MaxInt32 {
 			return 0, false
 		}
-		return int(int32(n)), true
+		i := int64(n) // in int32 range per the guard above
+		if i < math.MinInt32 || i > math.MaxInt32 {
+			return 0, false
+		}
+		return int(int32(i)), true
 	}
 	return 0, false
 }

@@ -208,7 +208,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 # bookworm-slim rather than alpine: scripts/portal/build.sh is a bash script
 # (per the Makefile+shell convention in CLAUDE.md) and alpine ships no bash.
 # Builder-only, so image size is irrelevant.
-FROM node:22-bookworm-slim AS portal-build
+FROM node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436 AS portal-build
 
 WORKDIR /src
 
@@ -241,7 +241,7 @@ RUN mkdir -p /portal-dist
 FROM ${PORTAL_DIST_STAGE} AS portal-dist
 
 # --- Runtime: CGO-free node types (default) use distroless. ---------------
-FROM gcr.io/distroless/base-debian12 AS runtime
+FROM gcr.io/distroless/base-debian12@sha256:76b3162a31477bca4a245b836c624f4c4a1a3705e99b9003907d992bec2c4bca AS runtime
 
 # Environment variables are injected by Cloud Run via service.yaml
 # No ENV block needed here - Cloud Run overrides at the service level
@@ -275,7 +275,7 @@ ENTRYPOINT ["./memql"]
 # (no libc package manager, no shared libs) cannot run it. This stage uses
 # debian-slim with the runtime shared libraries installed. Select it with
 # `--target voice-runtime` (the voice compose service does so).
-FROM debian:12-slim AS voice-runtime
+FROM debian:12-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241 AS voice-runtime
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
 	"sync"
 
@@ -606,8 +607,20 @@ func agentDefinitionFromRow(row map[string]any) (*AgentDefinition, bool) {
 				def.LLMTempSet = true
 			}
 			if v, ok := llm["maxTokens"].(float64); ok {
-				def.LLMMaxTokens = int(v)
-				def.LLMMaxTokSet = true
+				// Bounds-checked narrow (go/incorrect-integer-conversion):
+				// the float64 guard keeps the int64 conversion well-defined,
+				// and the integer-typed guard on i is the bound the narrowing
+				// to int is checked against -- int is 32 bits on 32-bit
+				// builds, so the ceiling is int32's (the numericAsInt
+				// rationale in component/language/parser). An out-of-range
+				// maxTokens is skipped like any other malformed field.
+				if v >= math.MinInt32 && v <= math.MaxInt32 {
+					i := int64(v)
+					if i >= math.MinInt32 && i <= math.MaxInt32 {
+						def.LLMMaxTokens = int(int32(i))
+						def.LLMMaxTokSet = true
+					}
+				}
 			}
 		}
 	}

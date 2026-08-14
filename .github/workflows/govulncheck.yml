@@ -38,7 +38,11 @@ jobs:
           go-version: '1.26.6'
           cache: true
       - name: install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        # Pinned to a release rather than @latest (Scorecard
+        # Pinned-Dependencies): a floating install lets an upstream release
+        # change the scanner under this lane without review. Bump
+        # deliberately; tags: gh api repos/golang/vuln/tags --jq '.[].name'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       # Module pattern, not `./...` (memql#3165): once a second `go.mod` exists
       # beneath the root, `./...` scans only the module owning the working
       # directory and reports "no vulnerabilities" over the packages it never
