@@ -9,7 +9,7 @@ import (
 
 func TestOAuthServerMetadataHandler(t *testing.T) {
 	const base = "https://identity.example.com"
-	h := OAuthServerMetadataHandler(Config{BaseURL: base})
+	h := OAuthServerMetadataHandler(Config{BaseURL: base, OAuthDCREnabled: true})
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
 	rec := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestOAuthServerMetadataHandler(t *testing.T) {
 // TestOAuthServerMetadataHandler_TrailingSlash asserts a BaseURL with a
 // trailing slash does not produce double slashes in the derived absolute URLs.
 func TestOAuthServerMetadataHandler_TrailingSlash(t *testing.T) {
-	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.example.com/"})
+	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.example.com/", OAuthDCREnabled: true})
 
 	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
 	rec := httptest.NewRecorder()
@@ -81,6 +81,62 @@ func TestOAuthServerMetadataHandler_TrailingSlash(t *testing.T) {
 	}
 	if doc.TokenEndpoint != wantBase+"/oauth/token" {
 		t.Errorf("token_endpoint = %q, want %q", doc.TokenEndpoint, wantBase+"/oauth/token")
+	}
+}
+
+// TestOAuthServerMetadataHandler_RegistrationEndpointOmittedWhenDCRDisabled
+// pins RFC 8414 §2's OPTIONAL semantics for registration_endpoint: a
+// DCR-disabled cluster must OMIT the field from the discovery document
+// rather than advertise a /register that then answers 403
+// registration_disabled. Decodes into map[string]any and asserts KEY
+// ABSENCE -- asserting on the Go struct field being its zero value would
+// pass even without `omitempty` on the json tag (it would just serialize
+// as `"registration_endpoint":""`), which is the exact defect this guards.
+func TestOAuthServerMetadataHandler_RegistrationEndpointOmittedWhenDCRDisabled(t *testing.T) {
+	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.example.com", OAuthDCREnabled: false})
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("body not JSON: %v; body=%s", err, rec.Body.String())
+	}
+	if v, present := raw["registration_endpoint"]; present {
+		t.Errorf("registration_endpoint key present (value %v) with DCR disabled; want the key omitted entirely. body=%s", v, rec.Body.String())
+	}
+
+	// Sanity: the gate is scoped to this one field -- the rest of the
+	// document is unaffected.
+	if raw["authorization_endpoint"] != "https://identity.example.com/authorize" {
+		t.Errorf("authorization_endpoint = %v, unexpectedly changed by the DCR gate", raw["authorization_endpoint"])
+	}
+	if raw["issuer"] != "https://identity.example.com" {
+		t.Errorf("issuer = %v, unexpectedly changed by the DCR gate", raw["issuer"])
+	}
+}
+
+// TestOAuthServerMetadataHandler_RegistrationEndpointPresentWhenDCREnabled is
+// the positive counterpart: with DCR on, the key must be present (not just a
+// non-empty Go field) and carry the /register URL.
+func TestOAuthServerMetadataHandler_RegistrationEndpointPresentWhenDCREnabled(t *testing.T) {
+	h := OAuthServerMetadataHandler(Config{BaseURL: "https://identity.example.com", OAuthDCREnabled: true})
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var raw map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("body not JSON: %v; body=%s", err, rec.Body.String())
+	}
+	got, present := raw["registration_endpoint"]
+	if !present {
+		t.Fatalf("registration_endpoint key missing with DCR enabled; body=%s", rec.Body.String())
+	}
+	if got != "https://identity.example.com/register" {
+		t.Errorf("registration_endpoint = %v, want https://identity.example.com/register", got)
 	}
 }
 
