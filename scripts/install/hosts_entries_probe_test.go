@@ -34,6 +34,7 @@ func TestHostsEntriesSkipsWhenAlreadyResolving(t *testing.T) {
 	stub := hostsStub(t, map[string]string{
 		"api.lab.example.com":      "127.0.0.1\n",
 		"identity.lab.example.com": "127.0.0.1\n",
+		"mcp.lab.example.com":      "127.0.0.1\n",
 		"portal.lab.example.com":   "127.0.0.1\n",
 		"lab.example.com":          "127.0.0.1\n",
 	})
