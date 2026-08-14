@@ -795,6 +795,28 @@ function seed_db_creds() {
 function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
+    # WHY THE LOCAL CLUSTER TURNS DCR ON (memql#3719 / memql#3793).
+    #
+    # MEMQL_IDENTITY_OAUTH_DCR_ENABLED now defaults to FALSE: RFC 7591 dynamic
+    # client registration is an unauthenticated write endpoint, and most
+    # clusters route no mcp.<domain> and have no consumer for it.
+    #
+    # This cluster HAS one, and it is not a deployment -- it is in this
+    # repository. editors/vscode/src/auth/register.ts's ensureClientId() POSTs
+    # <issuer>/register the first time the extension signs in against a cluster
+    # it has no stored client_id for. With DCR off that is a 403 and the
+    # extension cannot complete a first sign-in at all.
+    #
+    # That consumer is invisible to both places memql#3719's prerequisite check
+    # says to look: there is no v1:identity:oauthClient row until the extension
+    # registers, and no overlay routes an MCP host. A consumer living in the
+    # source tree rather than in a deployment is a third place, and it is the
+    # one that caught this.
+    #
+    # Seeded into memql-secrets rather than onto identity's Deployment because
+    # every node envFroms this Secret -- which is also what makes the mcp node's
+    # boot warning (app/transport_mcp.go) correct rather than permanently
+    # noisy: it reads this same variable from its own environment.
     local genesis_b64 master_key signing_key signing_key_created_at db_dsn db_direct_dsn
     local node_bootstrap_token
     genesis_b64="$RESOLVED_GENESIS_B64"
@@ -817,6 +839,7 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT=$signing_key_created_at" \
         --from-literal="MEMQL_NODE_BOOTSTRAP_TOKEN=$node_bootstrap_token" \
+        --from-literal="MEMQL_IDENTITY_OAUTH_DCR_ENABLED=true" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
