@@ -185,7 +185,7 @@ describe("the row detail renders any concept through one component", () => {
     // Read the KEY cells specifically: "concept" is both a key here and the
     // value of the `type` intrinsic, and an unscoped text query cannot tell
     // those apart -- which is itself the distinction the pane exists to keep.
-    const keys = [...container.querySelectorAll(".vk-key")].map((el) => el.textContent);
+    const keys = [...container.querySelectorAll(".vk-vv-key")].map((el) => el.textContent);
     for (const key of ["id", "concept", "type", "createdBy", "createdAt", "payload", "provenance"]) {
       expect(keys).toContain(key);
     }
@@ -193,8 +193,12 @@ describe("the row detail renders any concept through one component", () => {
     expect(screen.getByText("goal")).toBeTruthy();
     expect(screen.getByText("ship it")).toBeTruthy();
     // Arrays keep their indices; nulls are shown as null rather than blank.
-    expect(screen.getByText("[0]")).toBeTruthy();
-    expect(screen.getByText("null")).toBeTruthy();
+    expect(keys).toContain("[0]");
+    // Scoped to the VALUE cell, not an unscoped text query: the viewer also
+    // prints "null" as this field's TYPE BADGE, and the two say different
+    // things -- the badge is what the field is, the value is what it holds.
+    const nulls = [...container.querySelectorAll(".vk-vv-null")].map((el) => el.textContent);
+    expect(nulls).toContain("null");
   });
 
   it("renders a structurally different row with no change of component", () => {

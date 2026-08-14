@@ -31,7 +31,7 @@ import { randomBytes } from "node:crypto";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import { browseConceptPage, getRowByConceptAndId } from "@znasllc-io/memql-sdk-core/client";
 import {
-  renderDetail,
+  renderValueView,
   renderRowList,
   renderToHtml,
   escapeHtml,
@@ -390,7 +390,7 @@ export class ConceptPanel {
           ? this.state.error === ""
             ? '<div class="placeholder">Row not found.</div>'
             : '<div class="placeholder">Failed to load row.</div>'
-          : renderToHtml(renderDetail(this.state.detail));
+          : renderToHtml(renderValueView(this.state.detail));
 
     const errorHtml =
       this.state.error === ""

@@ -11,7 +11,7 @@
 // by how much of a concept's shape an element actually engaged with.
 
 import { renderRowList } from "./rowList.js";
-import { renderDetail } from "./detail.js";
+import { renderValueView } from "./valueView.js";
 import { TABLE_ELEMENT } from "./table.js";
 import { CALENDAR_ELEMENT } from "./calendar.js";
 import { CHECKLIST_ELEMENT } from "./checklist.js";
@@ -52,7 +52,7 @@ export const DETAIL_ELEMENT: ElementSpec = {
     const row = selected ?? rows[0];
     return row === undefined
       ? h("div", { class: "vk-empty" }, [text("No row selected.")])
-      : renderDetail(row);
+      : renderValueView(row);
   },
 };
 

@@ -1,6 +1,17 @@
 export { h, text, renderToHtml, escapeHtml, type VNode } from "./vnode.js";
 export { renderRowList, rowDisplayId } from "./rowList.js";
-export { renderDetail } from "./detail.js";
+export {
+  renderValueView,
+  valueTypeName,
+  joinPath,
+  VALUE_VIEW_ATTRS,
+  DEFAULT_EXPAND_DEPTH,
+  DEFAULT_MAX_STRING_LENGTH,
+  DEFAULT_NODE_BUDGET,
+  DEFAULT_PAGE_SIZE,
+  type ValueTypeName,
+  type ValueViewOptions,
+} from "./valueView.js";
 export {
   inferDisplayCard,
   resolveDisplayCard,
