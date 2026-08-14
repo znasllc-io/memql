@@ -93,7 +93,25 @@ type MemQLEngine struct {
 	// every core-first check reads only that -- and the marker carries the
 	// promoted source's hash so the construct catalog can report one for a
 	// construct that lives in no file (memql#3749).
+	//
+	// It also carries the concept RETIRED state, under the reserved
+	// "conceptRetired:<canonicalId>" key namespace (memql#3756) -- see
+	// authoring_concept_retire.go for why that fact belongs beside the promotion
+	// marker rather than in a map of its own.
 	promotedAuthored sync.Map
+	// conceptRowCount counts the rows stored under a concept, which is what
+	// chooses between the two outcomes of a concept DEMOTE (memql#3756): rows
+	// exist -> retire (still registered, rows readable, new writes refused);
+	// zero rows -> remove (name freed). Nil means the production count --
+	// countConceptRows, a direct storage read under no actor, for the reasons
+	// set out at length in authoring_concept_retire.go.
+	//
+	// A seam, not a configuration knob: nothing sets it outside a test. It
+	// exists because the retire-vs-remove DECISION is pure logic that has to be
+	// exercised on every path reaching it (session demote, durable demote,
+	// cross-node demote propagation) without each of those tests standing up a
+	// database and writing rows into it to be counted.
+	conceptRowCount conceptRowCounter
 	// automationCataloger supplies the automations this node loaded to the
 	// construct catalog. Automations are the one runnable kind the engine holds
 	// no registry for; component/automations wires itself in here at bootstrap.

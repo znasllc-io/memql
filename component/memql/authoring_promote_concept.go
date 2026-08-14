@@ -22,11 +22,12 @@ package memql
 // promoteConceptIntoLiveRegistry for that; it is the whole substance of this
 // file.
 //
-// Not here, and settled elsewhere: DEMOTE semantics (memql#3756 -- retire always,
-// remove only when zero rows exist) and the re-promote SCHEMA DIFF (memql#3757 --
-// additive lands, breaking is refused). DemoteAuthoredConstruct therefore refuses
-// `concept` today, which is a coherent intermediate state: a concept can be
-// taught and cannot yet be un-taught.
+// Not here, and settled elsewhere: DEMOTE semantics, which landed as memql#3756
+// in authoring_concept_retire.go -- a demote RETIRES a concept with rows under it
+// (registered, readable, closed to new writes) and REMOVES one with none. Promote
+// is that decision's un-retire path, which is the single line at the end of
+// PromoteAuthoredConstruct's concept branch. Still open: the re-promote SCHEMA
+// DIFF (memql#3757 -- additive lands, breaking is refused).
 
 import (
 	"context"
@@ -91,10 +92,13 @@ func (e *MemQLEngine) conceptBindingRegistry() memoryNodes.Registry {
 // deriveConceptRegistryState runs over a CANDIDATE set -- the live registry's
 // concepts plus this one -- before anything is merged. A candidate that fails
 // any invariant therefore leaves the live registry exactly as it was, with no
-// rollback to write (MemoryRegistry has no remove, so a merge-then-validate
-// ordering would have had nothing to roll back WITH). The derivation normalizes
-// in place and is idempotent, so re-walking the already-derived core concepts
-// costs nothing and changes nothing.
+// rollback to write. (MemoryRegistry.Remove exists since memql#3756, so a
+// merge-then-validate ordering could now technically undo itself -- but it would
+// still have published an invalid concept to every reader in between, and the
+// derivation would have run over it. Derive-first has no such window, which is
+// why the demote path mirrors this ordering rather than the reverse.) The
+// derivation normalizes in place and is idempotent, so re-walking the
+// already-derived core concepts costs nothing and changes nothing.
 //
 // # Which registry
 //

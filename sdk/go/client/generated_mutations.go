@@ -10376,6 +10376,28 @@ func RetireAuthoringBundleBuild(args RetireAuthoringBundleArgs) string {
 	return b.String()
 }
 
+// RetireConstructConcept -- Mark a promoted CONCEPT construct row retired-in-place (memql#3756): the concept keeps its registry entry -- name still claimed, existing rows still readable -- and new writes to it are refused. status is deliberately left alone: flipping it to "retired" is what the OTHER demote outcome does (zero rows -> withdraw the definition entirely), and a status-retired row is SKIPPED by the boot re-hydration, which for a concept with rows under it would strand every one of them. There is no inverse mutation: a re-promote writes a NEW construct row carrying conceptRetired=false, and the re-hydration resolves a concept as live whenever any un-stamped row for it survives.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["retireConstructConcept"] in generated_concepts.go).
+type RetireConstructConceptArgs struct {
+	ConstructId string
+}
+
+// RetireConstructConcept calls the engine mutation retireConstructConcept.
+func (qc *QueryClient) RetireConstructConcept(ctx context.Context, args RetireConstructConceptArgs) (*Result, error) {
+	call := RetireConstructConceptBuild(args)
+	return qc.executeNamed(ctx, "retireConstructConcept", call)
+}
+
+func RetireConstructConceptBuild(args RetireConstructConceptArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation retireConstructConcept(")
+	b.WriteString("constructId: ")
+	b.WriteString(quoteMemQL(args.ConstructId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevertRecord -- Revert a data record to a previous validation state with counter reset
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["revertRecord"] in generated_concepts.go).
