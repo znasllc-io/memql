@@ -16,16 +16,23 @@ require (
 require (
 	github.com/anthropics/anthropic-sdk-go v1.62.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dgraph-io/ristretto v0.2.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/lib/pq v1.12.3 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/prometheus/client_golang v1.24.1 // indirect
+	github.com/prometheus/client_model v0.6.2 // indirect
+	github.com/prometheus/common v0.70.1 // indirect
+	github.com/prometheus/procfs v0.21.1 // indirect
 	github.com/puzpuzpuz/xsync/v3 v3.5.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1 // indirect
@@ -52,10 +59,12 @@ require (
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/identity v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/ast v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/dslclause v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/memql v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/metrics v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/provenance v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/safety v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/secret v0.0.0 // indirect

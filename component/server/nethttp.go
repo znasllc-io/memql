@@ -999,6 +999,31 @@ func UnsubscribePaths() []string {
 	return pathsWithBase("/unsubscribe")
 }
 
+// SitesBundlePaths returns the path prefix the atomic bundle-publish
+// endpoint mounts under (POST /sites/{id}/bundles, memql#3713), served by
+// SiteBundleHandler on the bff.
+//
+// A PREFIX, matching SpaceAttachmentPaths' shape rather than
+// UnsubscribePaths' exact form: the id is a path segment, not a query
+// parameter, so the handler parses it out of the full path itself
+// (parseSiteBundlePublishPath, site_bundle_handler.go) the same way
+// AttachmentHandler parses {partitionId} out of the /spaces/ prefix.
+//
+// HTTP rather than gRPC for the reasoning CLAUDE.md's endpoint-protocol
+// exception table records for this route: a CI job hands over an arbitrary,
+// variable-shaped tree of files, which is exactly the shape multipart
+// form-data exists to carry and a fixed protobuf schema does not -- the
+// same reasoning already recorded for SpaceAttachmentPaths.
+//
+// Declared in HandlerAuthorizedPaths(), NOT PublicPaths(): SiteBundleHandler
+// verifies a class="service_account" credential itself before doing
+// anything else, so admitting every bearer here (what PublicPaths()
+// membership would do on every verifier-consuming node) would be strictly
+// weaker than what the handler already enforces.
+func SitesBundlePaths() []string {
+	return pathsWithBase("/sites/")
+}
+
 func normalizeOrigins(origins []string) []string {
 	if len(origins) == 0 {
 		return []string{"*"}

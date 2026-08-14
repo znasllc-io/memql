@@ -23,7 +23,16 @@ func (a *App) transportBFF() {
 	// the Vite dev proxy point `/spaces/...` at the bff), so the handler must
 	// live here, not only on the agent. Shared with the agent build in
 	// transport_attachments.go. (memql#888)
-	a.mountAttachmentEndpoints()
+	//
+	// Captured (not discarded) because the atomic bundle-publish endpoint
+	// below reuses the same Azure Blob client rather than constructing a
+	// second one against the same account (transport_sites.go).
+	uploader, container := a.mountAttachmentEndpoints()
+	// Atomic bundle-publish endpoint (POST /sites/{id}/bundles, memql#3713).
+	// Bff-only per the epic's controller ruling: component/edge is a
+	// library here, not a node-mounted endpoint, and the edge node itself
+	// has no coherent address for a site-agnostic publish route.
+	a.mountSiteBundleEndpoints(uploader, container)
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP
 	// on the frontend-facing node. Deny-by-default -- with no
