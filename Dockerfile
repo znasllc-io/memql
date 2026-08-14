@@ -6,12 +6,15 @@
 #
 # WHY A STAGE SELECTOR RATHER THAN AN UNCONDITIONAL COPY
 #
-# Only the bff serves the portal (app/transport_portal.go). A Dockerfile has
-# no conditional COPY, so the alternatives were: build the SPA in every node
-# image (a Node toolchain + npm install + vite build on all eight, for bytes
-# seven of them never serve), or add a second runtime target and duplicate the
-# runtime stage. Naming the SOURCE stage instead costs one indirection and
-# leaves both runtime stages identical for every node type.
+# Only the bff and the edge serve the portal (app/transport_portal.go; the
+# edge's own serving path lands in a later change, but its image carries the
+# bundle from the start since the portal is site #1 and its bundleRef is
+# file:///app/portal). A Dockerfile has no conditional COPY, so the
+# alternatives were: build the SPA in every node image (a Node toolchain +
+# npm install + vite build on all nine, for bytes seven of them never serve),
+# or add a second runtime target and duplicate the runtime stage. Naming the
+# SOURCE stage instead costs one indirection and leaves both runtime stages
+# identical for every node type.
 #
 # BuildKit only builds stages that are actually referenced, so the default --
 # portal-skip, an empty directory -- means a non-bff build never pulls the
@@ -39,6 +42,7 @@ FROM golang:1.26.4@sha256:68cb6d68bed024785b69195b89af7ac7a444f27791435f98647edf
 #   docker build --build-arg BUILD_TAGS=agent .       # agent
 #   docker build --build-arg BUILD_TAGS=planner .     # planner
 #   docker build --build-arg BUILD_TAGS=voice .       # voice (CGO + libopus)
+#   docker build --build-arg BUILD_TAGS=edge --build-arg PORTAL_DIST_STAGE=portal-build .   # edge (serves hosted sites + the portal)
 ARG BUILD_TAGS=""
 
 # CGO_ENABLED selects the build mode. The default node types build CGO-free
@@ -257,7 +261,8 @@ COPY --from=builder /app/VERSION ./VERSION
 # The memQL Portal bundle is the opposite: NEVER embedded, always a directory,
 # because embedding it would put a Node build in front of every Go build (see
 # component/portal/doc.go). /app/portal is component/portal.DefaultDistDir;
-# MEMQL_PORTAL_DIST overrides it. Empty for every node type except the bff --
+# MEMQL_PORTAL_DIST overrides it. Empty for every node type except the bff and
+# the edge (the portal is site #1; its bundleRef is file:///app/portal) --
 # the handler answers 404 with an actionable message rather than failing boot.
 COPY --from=portal-dist /portal-dist ./portal
 

@@ -43,7 +43,7 @@ ALL_PKGS    := $(MODULE)/...
 
 ##@ Build
 ##> Staging/prod images are built on the GitHub build server, not here (see CLAUDE.md).
-.PHONY: all build build-all bff voice cognition agent planner workbench mcp identity identity-templ identity-tailwind identity-assets identity-build healthcheck
+.PHONY: all build build-all bff voice cognition agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
 all: build healthcheck
@@ -87,6 +87,10 @@ workbench:
 ## Build mcp node binary (Model Context Protocol server, epic memql#1529)
 mcp:
 	$(GO) build $(GOFLAGS) -tags mcp -o $(BIN_DIR)/memql-mcp .
+
+## Build edge node binary (serves hosted sites + the portal)
+edge:
+	$(GO) build $(GOFLAGS) -tags edge -o $(BIN_DIR)/memql-edge .
 
 ##@ VS Code / LSP
 ##> `make vscode-install` builds+installs the extension for THIS host; then reload the editor window.
