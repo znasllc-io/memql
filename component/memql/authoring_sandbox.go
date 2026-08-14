@@ -209,11 +209,41 @@ func compileBundle(constructs []SandboxConstruct) (SandboxReport, *memoryNodes.M
 // against it. The global default registry is never touched.
 func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegistry) SandboxDiagnostic {
 	d := SandboxDiagnostic{Name: c.Name, Kind: c.Kind, OK: true}
+
+	id, concept, err := buildCandidateConcept(c)
+	if err != nil {
+		// failAt, not fail: main anchored these diagnostics to the construct's
+		// position while this refactor was in flight. buildCandidateConcept is
+		// shared with the durable promote path, which has no diagnostic to
+		// anchor, so it returns a plain error and the anchoring stays here --
+		// the one caller that HAS a SandboxDiagnostic to stamp.
+		return failAt(d, c, err.Error())
+	}
+
+	overlay.MergeAll(map[string]*memoryNodes.Concept{id: concept})
+	return d
+}
+
+// buildCandidateConcept is the single compile of a candidate `concept` source
+// into the (canonical id, *Concept) pair the engine registers -- shared by the
+// Gate-1 sandbox (which overlays it onto an isolated clone) and by the durable
+// concept promote (memql#3746, which merges it into the LIVE registry).
+//
+// One implementation on purpose. The promote path's whole safety argument is
+// that a promoted concept was built by exactly the compile Gate 1 already ran,
+// which is what makes the reserved-namespace / reserved-payload-field refusal
+// (BuildConceptFromDecl -> ensureReservedFieldsNotDeclared) cover it without a
+// second check being written anywhere. A separate promote-side build would be a
+// second place for that guarantee to drift out of.
+//
+// Errors are already origin-prefixed, so a caller can surface err.Error()
+// verbatim as a diagnostic.
+func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, error) {
 	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
 
 	decls := ExtractConceptDecls(c.Source)
 	if len(decls) == 0 {
-		return failAt(d, c, fmt.Sprintf("%s: no concept declaration found in source", origin))
+		return "", nil, fmt.Errorf("%s: no concept declaration found in source", origin)
 	}
 	// Pick the decl matching the declared name when the source carries more
 	// than one; otherwise the sole decl.
@@ -228,7 +258,7 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 	// Name-mismatch: the construct row's declared name must equal the
 	// declaration name in its source.
 	if decl.Name != c.Name {
-		return failAt(d, c, fmt.Sprintf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name))
+		return "", nil, fmt.Errorf("%s: declared name %q does not match the concept name in source (%q)", origin, c.Name, decl.Name)
 	}
 
 	// The concept's canonical id is assembled from @namespace + the
@@ -237,19 +267,25 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 	// it under a real id.
 	id, err := languageAst.AssembleConceptIdFromDecl(decl)
 	if err != nil {
-		return failAt(d, c, fmt.Sprintf("%s: %v", origin, err))
+		return "", nil, fmt.Errorf("%s: %v", origin, err)
 	}
 	if id == "" {
-		return failAt(d, c, fmt.Sprintf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name))
+		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name)
 	}
 
+	// BuildConceptFromDecl is where the reserved-property refusal lives
+	// (ensureReservedFieldsNotDeclared): a concept declaring `provenance` /
+	// `row` / `actor` / `args` / `now` / `config` / `trace` / `meta` -- or `id`
+	// / `createdAt` / `payload` and friends -- as a top-level payload property
+	// is refused here rather than registered with the field intact
+	// (memql#3613). Both the sandbox and the promote path inherit that by
+	// calling through this one function.
 	concept, buildErr := memoryNodes.BuildConceptFromDecl(decl, id)
 	if buildErr != nil {
-		return failAt(d, c, fmt.Sprintf("%s: %v", origin, buildErr))
+		return "", nil, fmt.Errorf("%s: %v", origin, buildErr)
 	}
 
-	overlay.MergeAll(map[string]*memoryNodes.Concept{id: concept})
-	return d
+	return id, concept, nil
 }
 
 // sandboxCompileOne routes a single construct to the matching per-construct

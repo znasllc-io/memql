@@ -34,15 +34,15 @@ mutate bundle createAuthoringBundle {
   }
 }
 
-/// Create an authored construct (the .memql source for one automation / logic / shape / spec /
-/// trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from
-/// actor.userId; status starts draft and follows the bundle.
+/// Create an authored construct (the .memql source for one concept / automation / logic / shape /
+/// spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped
+/// from actor.userId; status starts draft and follows the bundle.
 @actor
 mutate construct createAuthoringConstruct {
   args {
     constructId      string!
     bundleId         string!
-    kind             enum("automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")!
+    kind             enum("concept", "automation", "logic", "shape", "spec", "trait", "policy", "mutation", "query", "prompt")!
     name             string!
     targetNamespace  string!
     source           string!
