@@ -29,6 +29,20 @@
 #               api. and identity. are answered by the site edge and every
 #               symptom is a 404 from a server nobody meant to dial.
 #
+#               WHAT THIS ESTABLISHES, AND FOR WHICH HOSTS -- api. and
+#               identity., NOT all three exact names, and NOT a
+#               wildcard-served name. The check identifies the answering node
+#               from its /healthz body, so it can only establish the property
+#               for a host that answers /healthz through the front door.
+#               `mcp.`'s Ingress routes :8090, the MCP protocol port, while
+#               /healthz is on :8085 (deploy/k8s/base/mcp.yaml), so probing
+#               `mcp.` reports INCONCLUSIVE, never passed. And `--hosts` means
+#               the hosts that carry their OWN exact rule: `portal.` and the
+#               apex are served by the edge BY DESIGN, so there is no
+#               precedence to establish for them (PROBE 4 says what happens if
+#               they are passed anyway). Anything citing this check should
+#               claim those two hosts and no more.
+#
 # Each check reports ITSELF -- name, host, passed, status, detail -- because
 # "the front door is broken" is not actionable and "dns for
 # identity.memql.localhost resolves to 10.0.0.5" is. The rollup `allPassed` is
@@ -298,9 +312,18 @@ function check_grpc() {
 # api. / identity. / mcp. names, plus `*.<domain>` and the apex, which both
 # reach the site edge. The wildcard MATCHES the three exact names too, so every
 # one of those doors depends on the Ingress rule that an exact host outranks a
-# wildcard (decision D3). Both traefik and ingress-nginx implement it. Neither
-# this repository nor anything else was checking it, which is what this probe is
-# for -- the manifest header claimed it was probed before it was.
+# wildcard (decision D3). Neither this repository nor anything else was checking
+# it, which is what this probe is for -- the manifest header claimed it was
+# probed before it was.
+#
+# AND IT IS NOT OBVIOUSLY TRUE, WHICH IS THE POINT. traefik orders routers by
+# RULE LENGTH unless a priority is set explicitly, and the wildcard's rule
+# string -- `HostRegexp(...) && PathPrefix("/")` -- is LONGER than
+# `Host("api.<domain>") && PathPrefix("/healthz")`. So the heuristic that
+# actually decides this does not obviously favour the design the five-host
+# table depends on. An assurance that "both controllers implement it" is what
+# stood in for a measurement here before, and it is why the measurement was
+# missing.
 #
 # WHY A NAIVE PROBE IS WORSE THAN NO PROBE. `svc/edge` need not exist yet, and
 # an ingress controller DROPS A ROUTER WHOSE BACKEND SERVICE IS ABSENT rather
@@ -315,17 +338,26 @@ function check_grpc() {
 # the probe ESTABLISHES A COMPETING ROUTE FIRST and reports inconclusive when it
 # cannot (see record_check_status for what that costs and does not cost).
 #
-# THE DISCRIMINATOR: /healthz names the node that answered. Nothing weaker
-# distinguishes the site edge from the ingress controller's own default backend:
+# THE DISCRIMINATOR: /healthz names the node that answered. The check DOES read
+# a response body -- the health body, in both steps. What it cannot read is a
+# 404, and the LIVENESS GATE is where that bites, because the two answers it has
+# to tell apart are the ingress controller's 404 for a name no router matches and
+# THE EDGE'S OWN 404 for a hostname it has no site row for
+# (component/edge/handler.go, `site == nil` -> http.NotFound):
 #
-#   - not the status code. The controller's no-router-matched answer and the
-#     edge's unknown-hostname answer are both 404.
-#   - not those bodies either. Both are Go's http.NotFound, so both are the
-#     same 19 bytes ("404 page not found"); traefik is itself a Go server.
+#   - not the status code. Both are 404.
+#   - not the body of those two. Both are Go's http.NotFound, so both are the
+#     same 19 bytes ("404 page not found"); traefik is itself a Go server. (A
+#     404 against a 200 health body on a DIFFERENT host does discriminate --
+#     that is the by-hand measurement -- but it is not the comparison the gate
+#     has to make.)
 #   - not TLS. The wildcard certificate is loaded from an Ingress's `tls` block
 #     independently of whether the router referencing it survives backend
 #     resolution, and the other front-door Ingresses load the same secret, so
 #     the handshake succeeds against a trusted cert either way.
+#
+# So the gate cannot ask "did something answer" or "what did it say" -- only
+# "did a memQL node name itself".
 #
 # GET /healthz is positive identification instead of inference: the node that
 # served the request NAMES ITSELF (`{"status":"ok","nodeId":...,"nodeType":...}`),
@@ -355,6 +387,27 @@ function check_grpc() {
 # what the five-host design turns on and is the one this catches; a per-path
 # split cannot be caught by a second probe of `/`, because the only response
 # that names its author on this front door is the health body.
+#
+# WHICH HOSTS BELONG IN `--hosts`: THE ONES THAT CARRY THEIR OWN EXACT RULE.
+# This check's question -- "is a node other than the wildcard's answering?" --
+# is only meaningful for such a host. `portal.<domain>` and the apex are served
+# by the edge BY DESIGN (the apex has its own rule pointing at the same Service
+# the wildcard does), so "the edge answered" is the correct outcome for them,
+# not a defect. The apex is detected here and reported inconclusive with that
+# reason, because it is cheap and exact -- a host equal to the wildcard's apex
+# cannot be anything else.
+#
+# `portal.` and any future wildcard-served label are NOT detected, because
+# deciding that from a name would mean keeping a list of which labels are exact,
+# and that list would be wrong in one direction or the other on the day it
+# changed -- memql#3711 gives `portal.` a rule THROUGH THE WILDCARD, which is
+# precisely the case a name list would misread. So it is stated rather than
+# guessed: a wildcard-served name passed in `--hosts` will be reported FAILED
+# with a detail that is backwards, and the fix is to not pass it.
+# editors/vscode/src/install/session.ts's PROBE_SUBDOMAINS is the live example
+# of the right set (api. + identity.); its sibling HOSTS_BLOCK_SUBDOMAINS
+# carries `portal.` and the apex because a hosts file has no wildcard, and those
+# two lists are deliberately not the same list.
 
 # json_string_field <json> <key> -- shallow read of a top-level string field.
 #
@@ -430,15 +483,38 @@ function wildcard_apex() {
     printf '%s' "$apex"
 }
 
-# check_precedence <probe-host-or-empty> <port> <timeout> <pin-addr> <host>...
+# check_precedence <probe-host-or-empty> <apex-or-empty> <port> <timeout> <pin-addr> <host>...
+#
+# <apex> is the domain the wildcard covers, and it is passed for ONE reason: a
+# host equal to it is the apex, which is edge-served by design and therefore has
+# no precedence to establish. See "WHICH HOSTS BELONG IN --hosts" above for why
+# that is the only such name detected here rather than a list of labels.
 function check_precedence() {
-    local probe_host="$1" port="$2" timeout="$3" addr="$4"
-    shift 4
+    local probe_host="$1" apex="$2" port="$3" timeout="$4" addr="$5"
+    shift 5
     local host
 
+    # The apex is answered by the edge BY DESIGN, so it is settled before
+    # anything is dialled: no liveness gate can make "the edge answered" wrong
+    # for this host, and the reason it carries is permanent rather than a fact
+    # about today's cluster.
+    local -a testable=()
+    for host in "$@"; do
+        [[ -z "$host" ]] && continue
+        if [[ -n "$apex" && "$host" == "$apex" ]]; then
+            record_check_status precedence "$host" inconclusive \
+                "this is the front door's apex, which the edge serves BY DESIGN (its own rule pointing at the same Service the wildcard rule does), so there is no exact-versus-wildcard precedence to establish for it -- --hosts is for hosts that carry their own exact rule to a backend of their own"
+            continue
+        fi
+        testable+=("$host")
+    done
+    if [[ ${#testable[@]} -eq 0 ]]; then
+        # Nothing left to establish precedence FOR, so nothing is dialled.
+        return
+    fi
+
     if [[ -z "$probe_host" ]]; then
-        for host in "$@"; do
-            [[ -z "$host" ]] && continue
+        for host in "${testable[@]}"; do
             record_check_status precedence "$host" inconclusive \
                 "cannot derive the wildcard apex from the probed hostnames; pass --wildcard-probe-host=<a name no exact rule matches> to make exact-versus-wildcard precedence testable"
         done
@@ -458,8 +534,7 @@ function check_precedence() {
         why="the unclaimed wildcard name ${probe_host} answered HTTP ${_FD_HZ_CODE} without naming a memQL node -- which is what the ingress controller's own default backend returns when no router matches -- so the wildcard router is not loaded (an absent backend Service drops the whole router) and there is nothing for an exact host to take precedence over"
     fi
     if [[ -n "$why" ]]; then
-        for host in "$@"; do
-            [[ -z "$host" ]] && continue
+        for host in "${testable[@]}"; do
             record_check_status precedence "$host" inconclusive "$why"
         done
         return
@@ -470,8 +545,7 @@ function check_precedence() {
 
     # STEP 2 -- with a competing route proven live, every exact host must be
     # answered by something OTHER than whatever serves the wildcard.
-    for host in "$@"; do
-        [[ -z "$host" ]] && continue
+    for host in "${testable[@]}"; do
         healthz_probe "$host" "$port" "$timeout" ""
         local who=""
         [[ -n "$_FD_HZ_NODEID" ]] && who=" (${_FD_HZ_NODEID})"
@@ -482,8 +556,16 @@ function check_precedence() {
             record_check_status precedence "$host" inconclusive \
                 "the wildcard router is live (nodeType=${wildcard_type}) but ${host} answered HTTP ${_FD_HZ_CODE} without naming a memQL node, so which backend serves it cannot be established"
         elif [[ "$_FD_HZ_NODETYPE" == "$wildcard_type" ]]; then
+            # The remedy belongs in the detail, the way curl_tls_hint puts
+            # `mkcert -install` there. BOTH branches are named because this
+            # check cannot tell them apart: "the edge answered" is a defect for
+            # a host with its own backend and the intended behaviour for a
+            # wildcard-served name, and the response is identical either way.
+            # Naming only the first would send an operator to add a priority
+            # annotation for `portal.` -- a repair for a problem they do not
+            # have.
             record_check_status precedence "$host" failed \
-                "/healthz answered by nodeType=${_FD_HZ_NODETYPE}${who} -- the same node type that serves the wildcard name ${probe_host}, so the wildcard rule swallowed this exact host instead of yielding to it"
+                "/healthz answered by nodeType=${_FD_HZ_NODETYPE}${who} -- the same node type that serves the wildcard name ${probe_host}, so this host is not getting a backend of its own. If it is SUPPOSED to have one, the wildcard rule outranked its exact rule: pin the exact router above the wildcard with traefik.ingress.kubernetes.io/router.priority (traefik orders routers by rule length unless told otherwise). If it is a wildcard-served name (portal., the apex), it does not belong in --hosts"
         else
             record_check_status precedence "$host" passed \
                 "/healthz answered by nodeType=${_FD_HZ_NODETYPE}${who}, not by the wildcard's nodeType=${wildcard_type} -- the exact host rule takes precedence"
@@ -550,7 +632,7 @@ function main() {
     done
     cap_step "checking gRPC reachability on ${grpc_host}"
     check_grpc "$grpc_host" "$port" "$timeout"
-    check_precedence "$wildcard_probe_host" "$port" "$timeout" "$expect" "${host_list[@]}"
+    check_precedence "$wildcard_probe_host" "$apex" "$port" "$timeout" "$expect" "${host_list[@]}"
 
     # allPassed is "no check FAILED". An inconclusive check is deliberately not
     # in either counter -- see record_check_status.

@@ -207,6 +207,11 @@ for a in "$@"; do
   prev="$a"
 done
 host="${url#*://}"; host="${host%%/*}"; host="${host%%:*}"
+# Every dialled host is recorded, which is the only way a test can assert what
+# was NOT dialled -- a host needing no probe must not get one. Guarded so a
+# hand-built world without the log variable fails in fdDialled (which says so)
+# rather than here as an ambiguous redirect.
+[[ -n "${STUB_CALL_LOG:-}" ]] && printf '%s\n' "$host" >> "$STUB_CALL_LOG"
 # Resolution, the way curl does it: --resolve pins an address and skips the
 # resolver; without it a name absent from the hosts map cannot be dialled.
 if [[ "${pinned%%:*}" != "$host" ]]; then
@@ -239,7 +244,31 @@ printf '%s' "$out"
 		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"STUB_DNS_MAP=" + dnsMap,
 		"STUB_HTTP_MAP=" + httpMap,
+		"STUB_CALL_LOG=" + filepath.Join(maps, "calls"),
 	}
+}
+
+// fdDialled returns every hostname the stub curl was asked for, in order. Used
+// to assert a NEGATIVE -- that a host with nothing to establish was not dialled.
+func fdDialled(t *testing.T, env []string) []string {
+	t.Helper()
+	var path string
+	for _, kv := range env {
+		if strings.HasPrefix(kv, "STUB_CALL_LOG=") {
+			path = strings.TrimPrefix(kv, "STUB_CALL_LOG=")
+		}
+	}
+	if path == "" {
+		t.Fatal("this world has no call log")
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // nothing was dialled at all
+		}
+		t.Fatalf("read call log: %v", err)
+	}
+	return strings.Fields(string(body))
 }
 
 // fdHealth is the /healthz body a memQL node returns. It is the discriminator
@@ -683,6 +712,117 @@ func TestVerifyFrontDoorPrecedencePassesOnPositiveIdentification(t *testing.T) {
 		}
 		if !strings.Contains(c.Detail, fdEdgeNodeType) {
 			t.Errorf("precedence/%s should name what it was compared against; got %q", host, c.Detail)
+		}
+	}
+}
+
+// TestVerifyFrontDoorPrecedenceComparesTheMeasuredTypeNotALiteral: the check
+// must compare each host against WHAT IT MEASURED on the wildcard name, never
+// against a hardcoded "edge".
+//
+// The world is deliberately shaped so a literal cannot fake it: the wildcard is
+// served by nodeType "sites", and the swallowed host answers "sites" too. A
+// hardcoded `wildcard_type="edge"` would find "sites" != "edge" and report a
+// PASS -- which is why the swallowed host here must NOT be the type the rest of
+// the suite uses. A test where the swallow is "edge" cannot tell a measurement
+// from a literal, and would stay green through the regression.
+func TestVerifyFrontDoorPrecedenceComparesTheMeasuredTypeNotALiteral(t *testing.T) {
+	const renamed = "sites" // the edge node type, renamed by some later epic
+	env := fdWorld(t,
+		map[string]string{fdAPI: "127.0.0.1", fdIdentity: "127.0.0.1"},
+		map[string]string{
+			fdAPI:      "0|2|200|" + fdHealth(renamed, renamed+"-1"),
+			fdIdentity: "0|2|200|" + fdHealth("identity", "identity-1"),
+			fdProbe:    "0|2|200|" + fdHealth(renamed, renamed+"-2"),
+		},
+	)
+	stdout, _, code := fdRun(t, env)
+	if code != 5 {
+		t.Fatalf("exit %d, want 5 -- the swallowed host was not caught, so the comparison is against a literal rather than the measurement\nstdout: %s",
+			code, stdout)
+	}
+	_, res := fdParse(t, stdout)
+	bad := fdFind(t, res, "precedence", fdAPI)
+	if bad.Status != "failed" {
+		t.Errorf("precedence/%s status = %q, want failed: %s", fdAPI, bad.Status, bad.Detail)
+	}
+	if !strings.Contains(bad.Detail, renamed) {
+		t.Errorf("detail must name the measured node type %q; got %q", renamed, bad.Detail)
+	}
+	// The measured type still discriminates in the other direction.
+	if good := fdFind(t, res, "precedence", fdIdentity); !good.Passed {
+		t.Errorf("precedence/%s should pass: %s", fdIdentity, good.Detail)
+	}
+	// The remedy travels with the failure -- curl_tls_hint's precedent -- and
+	// BOTH branches are named, because the response cannot distinguish "the
+	// wildcard outranked an exact rule" from "this name is wildcard-served on
+	// purpose", and only one of those is repaired with a priority annotation.
+	for _, want := range []string{"router.priority", "does not belong in --hosts"} {
+		if !strings.Contains(bad.Detail, want) {
+			t.Errorf("the failure detail should carry %q so the operator is not sent to the wrong repair: %q", want, bad.Detail)
+		}
+	}
+}
+
+// TestVerifyFrontDoorPrecedenceApexIsEdgeServedByDesign: the apex is answered by
+// the edge on purpose -- its own rule points at the same Service the wildcard
+// does -- so there is no precedence to establish for it. Reporting it as FAILED
+// would be a detail that is exactly backwards ("the wildcard swallowed this
+// host"), and it is reachable: frontDoorFor().hostnames includes the apex, so a
+// human passing the whole hosts-block list hits it immediately.
+func TestVerifyFrontDoorPrecedenceApexIsEdgeServedByDesign(t *testing.T) {
+	const apex = "memql.localhost"
+	env := fdWorld(t,
+		map[string]string{fdAPI: "127.0.0.1", apex: "127.0.0.1"},
+		map[string]string{
+			fdAPI:   "0|2|200|" + fdHealth("bff", "bff-1"),
+			apex:    "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-1"),
+			fdProbe: "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-1"),
+		},
+	)
+	stdout, _, code := fdRun(t, env, "--hosts="+fdAPI+","+apex)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0 -- the apex being edge-served is the design, not a defect\nstdout: %s", code, stdout)
+	}
+	_, res := fdParse(t, stdout)
+	c := fdFind(t, res, "precedence", apex)
+	if c.Passed || c.Status != "inconclusive" {
+		t.Errorf("precedence/%s status = %q, want inconclusive: %s", apex, c.Status, c.Detail)
+	}
+	if !strings.Contains(c.Detail, "BY DESIGN") {
+		t.Errorf("the detail has to say the edge answering here is intended; got %q", c.Detail)
+	}
+	// The host that does carry its own rule is unaffected.
+	if good := fdFind(t, res, "precedence", fdAPI); !good.Passed {
+		t.Errorf("precedence/%s should still pass: %s", fdAPI, good.Detail)
+	}
+}
+
+// TestVerifyFrontDoorPrecedenceDialsNothingWhenThereIsNothingToEstablish: with
+// the apex as the only probed host, the wildcard-liveness probe answers a
+// question nobody asked. Not dialling it is the difference between a check that
+// knows what it is for and one that just runs.
+func TestVerifyFrontDoorPrecedenceDialsNothingWhenThereIsNothingToEstablish(t *testing.T) {
+	const apex = "memql.localhost"
+	env := fdWorld(t,
+		map[string]string{apex: "127.0.0.1"},
+		map[string]string{
+			apex:    "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-1"),
+			fdProbe: "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-1"),
+		},
+	)
+	stdout, _, code := fdRun(t, env, "--hosts="+apex)
+	if code != 0 {
+		t.Fatalf("exit %d, want 0\nstdout: %s", code, stdout)
+	}
+	_, res := fdParse(t, stdout)
+	if c := fdFind(t, res, "precedence", apex); c.Status != "inconclusive" {
+		t.Errorf("precedence/%s status = %q, want inconclusive", apex, c.Status)
+	}
+	for _, host := range fdDialled(t, env) {
+		if host == fdProbe {
+			t.Errorf("dialled %s with no host to establish precedence for; calls: %v", fdProbe, fdDialled(t, env))
+			break
 		}
 	}
 }

@@ -217,7 +217,7 @@
     {
       "id": "frontDoor",
       "script": "install.verifyFrontDoor",
-      "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname.",
+      "description": "Probe DNS, TLS and gRPC reachability on every front-door hostname, plus exact-versus-wildcard host precedence.",
       "dependsOn": [
         "seedBootstrap"
       ],
