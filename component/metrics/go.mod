@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/metrics
 
 go 1.26.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/prometheus/client_golang v1.24.1
