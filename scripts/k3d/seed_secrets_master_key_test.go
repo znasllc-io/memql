@@ -50,9 +50,18 @@ import (
 //	FAKE_BOOTSTRAP_TOKEN_READ_FAILS  non-empty -> ONLY the bootstrap-token read
 //	                   fails, so the fail-closed branch can be exercised without
 //	                   taking the other three reads down with it
+//	FAKE_CLUSTER_DOMAIN  the memql-domain ConfigMap's MEMQL_DOMAIN, or empty for
+//	                     a cluster that is not serving any domain yet
 const fakeKubectlTemplate = `#!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_KUBECTL_LOG"
 args="$*"
+
+# The domain this cluster already serves -- the default for --domain, so a run
+# with no --domain does not reissue the certificate for a different one.
+case "$args" in
+  *"get configmap memql-domain"*jsonpath*)
+    printf '%s' "$FAKE_CLUSTER_DOMAIN"; exit 0 ;;
+esac
 
 # Existence probe: 'get secret memql-secrets ... -o name'.
 case "$args" in
@@ -110,6 +119,13 @@ type seedResult struct {
 		FrontDoorTLSSource string `json:"frontDoorTlsSource"`
 		// memql#3784 -- generated | cluster | env.
 		NodeBootstrapTokenSource string `json:"nodeBootstrapTokenSource"`
+		// The names the seeded certificate had to cover. Absent from the
+		// envelope until memql#3730 -- which is why nothing reading it could
+		// see that the cert being seeded was for somebody else's domain.
+		FrontDoorTLSHostnames string `json:"frontDoorTlsHostnames"`
+		// Whether those names were CHECKED, as opposed to hoped for. `existing`
+		// with this false is the one outcome that keeps a pair nobody could read.
+		FrontDoorTLSCoverageVerified bool `json:"frontDoorTlsCoverageVerified"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -181,10 +197,37 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	}
 	// HOME is redirected to tmp below, so this IS the default front-door pair
 	// location (scripts/lib/localtls.sh). Planting it keeps these master-key
-	// tests hermetic: with a pair already on disk the script reuses it and
-	// never reaches for mkcert. The issuance path itself is covered in
+	// tests off the issuance path, which is covered in
 	// seed_secrets_front_door_tls_test.go.
 	writeFrontDoorPair(t, tmp)
+	// A PAIR ON DISK IS NO LONGER ENOUGH TO KEEP THIS HERMETIC (memql#3730).
+	// This block used to rest on "with a pair already on disk the script reuses
+	// it and never reaches for mkcert" -- which was true only because of the
+	// short-circuit that made the SAN check unreachable, the bug itself. The
+	// front-door step now delegates the reuse-vs-reissue decision to
+	// install.mkcert on every run, so these tests must supply the tooling it
+	// needs: a stub binary (never the runner's real mkcert, whose -install
+	// writes the machine's trust store), a CAROOT that already holds a CA (so
+	// nothing is created and no confirmation phrase is needed), and the certutil
+	// Linux browser-trust check looks for. The planted pair is unparseable, so
+	// cert_mismatches takes its cannot-tell branch and keeps it.
+	stubMkcert := filepath.Join(tmp, "bin", "mkcert")
+	if err := os.MkdirAll(filepath.Dir(stubMkcert), 0o755); err != nil {
+		t.Fatalf("mkdir bin: %v", err)
+	}
+	if err := os.WriteFile(stubMkcert, []byte(frontDoorStubMkcert), 0o755); err != nil {
+		t.Fatalf("write mkcert stub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "certutil"), []byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write certutil stub: %v", err)
+	}
+	stubCaroot := filepath.Join(tmp, "caroot")
+	if err := os.MkdirAll(stubCaroot, 0o755); err != nil {
+		t.Fatalf("mkdir caroot: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(stubCaroot, "rootCA.pem"), []byte("operator-ca\n"), 0o644); err != nil {
+		t.Fatalf("seed CA: %v", err)
+	}
 
 	state := sc.secretState
 	if state == "" {
@@ -205,7 +248,7 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		bootstrapReadFails = "1"
 	}
 
-	cmd := exec.Command("bash", script)
+	cmd := exec.Command("bash", script, "--mkcert="+stubMkcert)
 	cmd.Dir = root
 	env := []string{
 		"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -219,6 +262,8 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 		"FAKE_JSONPATH_FAILS=" + jsonpathFails,
 		"FAKE_BOOTSTRAP_TOKEN_READ_FAILS=" + bootstrapReadFails,
 		"MEMQL_K3D_NAMESPACE=memql",
+		"STUB_CAROOT=" + stubCaroot,
+		"STUB_LOG=" + filepath.Join(tmp, "mkcert-stub.log"),
 	}
 	if sc.envMasterKey != "" {
 		env = append(env, "MEMQL_MASTER_KEY="+sc.envMasterKey)
