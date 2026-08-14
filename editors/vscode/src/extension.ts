@@ -74,6 +74,7 @@ import {
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { TrainingCodeLensProvider } from './constructs/trainingLens.js';
 import { TrainingDecorations } from './constructs/decorations.js';
+import { ClusterCatalogPublisher } from './constructs/clusterCatalog.js';
 import { defaultReceiptPath } from './install/receipt.js';
 import { defaultRunsDir } from './state/runLog.js';
 import {
@@ -1132,6 +1133,8 @@ function registerRunSurface(
         token === undefined
           ? (client as LanguageClient).sendRequest(method, params)
           : (client as LanguageClient).sendRequest(method, params, token),
+      sendNotification: (method: string, params: unknown) =>
+        (client as LanguageClient).sendNotification(method, params),
       experimentalCapabilities: () =>
         (client as LanguageClient).initializeResult?.capabilities.experimental as
           | Record<string, unknown>
@@ -1145,11 +1148,46 @@ function registerRunSurface(
     // The training surface (memql#3761): state label above each signature, a
     // gutter mark, and the untrained/drifted count in the status bar.
     //
-    // BOTH FEATURE-DETECT on `memqlTrainingState`, so until #3759 ships every
-    // server answers "no" and this surface is simply ABSENT. That is the
-    // correct behaviour rather than a degraded one -- a training UI that
+    // ALL THREE FEATURE-DETECT on `memqlTrainingState`, so a server that
+    // predates memql#3759 answers "no" and this surface is simply ABSENT. That
+    // is the correct behaviour rather than a degraded one -- a training UI that
     // rendered `unknown` for everything would say a cluster has none of these
     // constructs, which is the one wrong answer available here.
+    //
+    // THE THIRD IS THE ONE THAT MAKES THE OTHER TWO SAY ANYTHING. The server
+    // holds the parser and no cluster connection, so what a cluster has loaded
+    // has to be handed to it; without the publisher every construct answers
+    // `unknown` and the gutter and the lens both render nothing at all.
+    //
+    // It carries ITS OWN catalog fetch, unlike the read-only marker, which
+    // rides the Constructs tree's. That marker MUST share a fetch because it
+    // writes `files.readonlyInclude` into workspace settings, where two answers
+    // disagreeing leaves a developer's checkout locked on the authority of the
+    // losing one. This is the opposite case on both counts: the training state
+    // is an ephemeral rendering re-asked on every keystroke, and the tree's
+    // fetch is LAZY -- it runs from getChildren, so a developer who never opens
+    // the Constructs view triggers none.
+    //
+    // setClient pushes, which is what covers the ordinary startup order: the
+    // connection is usually up before the language client finishes
+    // initializing, so the state change that would otherwise drive the first
+    // push has already happened by the time there is anywhere to push it.
+    const clusterCatalog = new ClusterCatalogPublisher(async () => {
+      const dispatcher = conns.dispatcher;
+      // UNDEFINED, NOT AN EMPTY LIST. `[]` says the cluster has loaded nothing,
+      // which decorates every construct in the file as untrained; `undefined`
+      // says there is no cluster, which renders nothing. This is the single
+      // most consequential line in the wiring.
+      if (dispatcher === undefined) return undefined;
+      return (await new ConstructsClient(dispatcher).listConstructs()).constructs;
+    });
+    clusterCatalog.setClient(lspBridge);
+    // onDidChangeState hands back a bare unsubscribe closure, not a Disposable.
+    const unsubscribeCatalog = conns.onDidChangeState(() => {
+      void clusterCatalog.refresh();
+    });
+    context.subscriptions.push(clusterCatalog, { dispose: unsubscribeCatalog });
+
     const trainingLens = new TrainingCodeLensProvider();
     trainingLens.setClient(lspBridge);
     const trainingDecorations = new TrainingDecorations();
