@@ -116,6 +116,13 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 		})
 	case *memqlv1.IdentityAdminMsg_RevokeEnrolmentLink:
 		res = svc.RevokeEnrolmentLink(ctx, req.RevokeEnrolmentLink.GetEnrolmentTokenId())
+	case *memqlv1.IdentityAdminMsg_SetOauthClientCorsOrigins:
+		p := req.SetOauthClientCorsOrigins
+		// The origin list is passed through verbatim. Validation lives in
+		// adminops (which quotes the offending entry back at the operator) for
+		// the same reason the role gate does: one copy of the rule, so a second
+		// transport cannot disagree with this one.
+		res = svc.SetOAuthClientCORSOrigins(ctx, p.GetClientId(), p.GetOrigins())
 	default:
 		out.ErrorCode = adminops.CodeInvalidArgument
 		out.ErrorMessage = "identity admin: identity_admin message carries no request"

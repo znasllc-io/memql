@@ -131,6 +131,23 @@ var operations = []struct {
 	{"revoke_enrolment_link", func(s *Service, ctx context.Context) Result {
 		return s.RevokeEnrolmentLink(ctx, "v1:identity:enrolmentToken:tok")
 	}},
+	// memql#3716. The reason this operation exists AT ALL is that the write it
+	// performs must not be reachable without the gate: an origin on identity's
+	// CORS allowlist can make cookie-bearing requests to the auth endpoints and
+	// read the responses, and the row it lands on is created by an
+	// UNAUTHENTICATED stranger at POST /register. So "a self-registered client
+	// cannot grant itself credentialed access" is exactly the refusal test
+	// below, driven with every role beneath the floor.
+	{"set_oauth_client_cors_origins", func(s *Service, ctx context.Context) Result {
+		return s.SetOAuthClientCORSOrigins(ctx, "mcp_selfregistered", []string{"https://evil.example"})
+	}},
+	// The revoke direction is the same method with an empty list, and it is on
+	// the table separately because it audits under a different action name -- so
+	// a gate that held for the grant and leaked on the revoke would be invisible
+	// here otherwise.
+	{"revoke_oauth_client_cors_origins", func(s *Service, ctx context.Context) Result {
+		return s.SetOAuthClientCORSOrigins(ctx, "mcp_selfregistered", nil)
+	}},
 }
 
 // Every role below owner/admin is refused, at every operation, with

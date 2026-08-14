@@ -119,6 +119,20 @@ type Server struct {
 	// badgeGrantLimiter is server-scoped rather than a package global.
 	deviceCodeLimiterVal  *abuse.IPRateLimiter
 	deviceCodeLimiterOnce sync.Once
+
+	// corsGrants is the short window over the ADMIN-GRANTED half of the CORS
+	// allowlist (memql#3716): the origins an owner/admin put on a
+	// v1:identity:oauthClient row, as opposed to the boot-time
+	// MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS list on Cfg. Read live so a grant
+	// takes effect without an identity restart -- and read live rather than
+	// invalidated on a change feed because the grant may be executed on a
+	// different node entirely. See grantedOrigins in cors.go for the measured
+	// reasons.
+	//
+	// Lazily built per-Server on first use, for the same reason
+	// badgeGrantLimiter is server-scoped rather than a package global.
+	corsGrants     *grantedOrigins
+	corsGrantsOnce sync.Once
 }
 
 // effectiveTokenSettings returns the live TTL + cookie settings for
