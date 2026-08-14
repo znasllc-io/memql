@@ -249,13 +249,31 @@ func (h *SiteBundleHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Checked from the ALREADY-KNOWN header size before opening or
+		// reading anything: by the time this loop runs, ParseMultipartForm
+		// has already fully consumed this part off the wire (into memory or
+		// a temp file), so Size reflects bytes actually read, not a
+		// client-supplied claim -- trustworthy, and cheap to check first.
+		// Skips the wasted Open+ReadAll (and the possibly-large allocation
+		// it would produce) for the common oversized-file case, rather than
+		// reading the whole thing just to reject it.
+		if bundleFileTooLarge(headers[0].Size) {
+			http.Error(w, fmt.Sprintf("file %q too large: max %d bytes", name, maxBundleFileBytes), http.StatusRequestEntityTooLarge)
+			return
+		}
+
 		data, err := readBundlePart(headers[0])
 		if err != nil {
 			h.logger.Warn("site bundle publish: reading a file failed", "error", err, "siteId", siteID, "file", name)
 			http.Error(w, fmt.Sprintf("failed to read file %q: the upload may have been interrupted", name), http.StatusBadRequest)
 			return
 		}
-		if bundleFileTooLarge(len(data)) {
+		// Defensive backstop, not the primary gate: readBundlePart's own
+		// io.LimitReader caps at maxBundleFileBytes+1, so this only fires
+		// if the header Size ever lied -- which the comment above explains
+		// it structurally cannot, but a reader shouldn't have to trust that
+		// without something enforcing it.
+		if bundleFileTooLarge(int64(len(data))) {
 			http.Error(w, fmt.Sprintf("file %q too large: max %d bytes", name, maxBundleFileBytes), http.StatusRequestEntityTooLarge)
 			return
 		}
@@ -329,9 +347,12 @@ func bundleFileCountExceeded(n int) bool {
 
 // bundleFileTooLarge reports whether n bytes exceeds maxBundleFileBytes.
 // Extracted for the same reason as bundleFileCountExceeded: the boundary is
-// then testable as a plain integer comparison.
-func bundleFileTooLarge(n int) bool {
-	return int64(n) > maxBundleFileBytes
+// then testable as a plain integer comparison. Takes int64 rather than int
+// because its callers are a multipart.FileHeader.Size (already int64) and a
+// len(data) conversion -- both fold to the same comparison, but the header
+// check exists specifically to run before that byte slice is ever read.
+func bundleFileTooLarge(n int64) bool {
+	return n > maxBundleFileBytes
 }
 
 // callerCredentialClass returns the "class" claim of the request's already-
@@ -388,14 +409,27 @@ func parseSiteBundlePublishPath(path string) (siteID string, ok bool) {
 	// (len(path)-len(suffix) < len(prefix)). attachment_handler.go's
 	// extractPartitionIdFromAttachmentPath shares this exact shape and the
 	// same latent bug for its own "/spaces/attachments" (no id) case --
-	// out of scope to fix here (this file does not touch that one), but
-	// worth knowing this failure mode is not hypothetical: it is live in
-	// shipped code today.
+	// out of scope to fix here (this file does not touch that one), tracked
+	// as memql#3773 instead of just living on as this comment.
 	if len(path) < len(prefix)+len(suffix) {
 		return "", false
 	}
 	middle := strings.TrimSpace(path[len(prefix) : len(path)-len(suffix)])
 	if middle == "" || strings.Contains(middle, "/") {
+		return "", false
+	}
+	// THE SAME BOUNDARY the bundle file names get, two dozen lines away in
+	// ServeHTTP's per-file loop (fs.ValidPath): refuse rather than
+	// sanitise. Without this, "/sites/../bundles" -- the decoded form of
+	// "/sites/%2e%2e/bundles", which evades http.ServeMux's own path-clean
+	// redirect because that only fires when RawPath matches a canonical
+	// re-encoding of Path, and percent-encoding is precisely what makes it
+	// not match -- parses to siteID="..", landing at the blob key
+	// "sites/../vXXX/index.html". fs.ValidPath rejects ".." outright but
+	// admits the lone "." as its own documented special case ("." is
+	// valid even though otherwise not well-formed), which is wrong for a
+	// site id, so "." needs its own rejection here.
+	if middle == "." || !fs.ValidPath(middle) {
 		return "", false
 	}
 	return middle, true

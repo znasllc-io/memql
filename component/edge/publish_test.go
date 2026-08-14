@@ -51,10 +51,13 @@ func (f *fakeBlobStore) hasPrefix(ref string) bool {
 // fakeSiteStore is a SiteStore seeded with a starting bundleRef per site id.
 // writes counts every UpdateBundleRef call, which is how
 // TestSuccessfulPublishFlipsTheRowOnce proves the row is written exactly
-// once per Publish, not once per uploaded file.
+// once per Publish, not once per uploaded file. err, when set, makes
+// UpdateBundleRef fail without touching refs -- TestFailedRowFlip... uses
+// it to prove the orphaned-bytes half of Publish's atomicity contract.
 type fakeSiteStore struct {
 	refs   map[string]string
 	writes int
+	err    error
 }
 
 func newFakeSiteStore(seed map[string]string) *fakeSiteStore {
@@ -67,6 +70,9 @@ func newFakeSiteStore(seed map[string]string) *fakeSiteStore {
 
 func (f *fakeSiteStore) UpdateBundleRef(_ context.Context, siteID, bundleRef string) error {
 	f.writes++
+	if f.err != nil {
+		return f.err
+	}
 	f.refs[siteID] = bundleRef
 	return nil
 }
@@ -141,6 +147,36 @@ func TestRollbackPointsAtBytesThatStillExist(t *testing.T) {
 
 	if !store.hasPrefix(first.BundleRef) {
 		t.Error("the previous version's bytes were removed; rollback would 404")
+	}
+}
+
+// The row-flip failure is the OTHER half of the atomicity contract, and the
+// half a naive test would miss: Publish returns an error, the row still
+// names the PREVIOUS version, and -- what makes this "orphaned" rather than
+// "cleaned up" -- the bytes this call just uploaded are still sitting in
+// the blob store. That is the deliberate consequence of the ordering
+// (upload, then flip), not a bug: storage is cheap, and there is no
+// cleanup path to get wrong. See Publish's own doc comment.
+func TestFailedRowFlipOrphansTheUploadedBytesRatherThanRollingThemBack(t *testing.T) {
+	store := newFakeBlobStore()
+	sites := newFakeSiteStore(map[string]string{"s1": "blob://sites/s1/v1/"})
+	sites.err = errors.New("engine unavailable")
+	p := NewPublisher(store, sites)
+
+	b := bundleWith(3)
+	if _, err := p.Publish(t.Context(), "s1", b); err == nil {
+		t.Fatal("Publish succeeded despite a row-flip failure")
+	}
+	if got := sites.bundleRef("s1"); got != "blob://sites/s1/v1/" {
+		t.Errorf("bundleRef moved to %q after a failed row flip; it must still be v1", got)
+	}
+
+	// Publish returns a zero Result on this failure path, so recompute the
+	// version the same content-addressed way Publish itself does to know
+	// where the orphaned bytes should be.
+	wantRef := "blob://sites/s1/" + version(b) + "/"
+	if !store.hasPrefix(wantRef) {
+		t.Errorf("the uploaded bytes at %q are gone; a failed row flip must orphan them, not clean them up", wantRef)
 	}
 }
 

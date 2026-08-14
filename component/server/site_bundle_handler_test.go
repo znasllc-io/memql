@@ -182,6 +182,9 @@ func TestParseSiteBundlePublishPath(t *testing.T) {
 		{"/sites/s1/bundles/extra", "", false}, // trailing segment
 		{"/sites/s1", "", false},               // no /bundles suffix
 		{"/other/s1/bundles", "", false},       // wrong prefix
+		{"/sites/a/b/bundles", "", false},      // id contains a slash -- pinned, already handled
+		{"/sites/../bundles", "", false},       // ".." as id -- the decoded form of "/sites/%2e%2e/bundles"
+		{"/sites/./bundles", "", false},        // "." as id -- fs.ValidPath's own special-case exception
 	}
 	for _, c := range cases {
 		id, ok := parseSiteBundlePublishPath(c.path)
@@ -285,6 +288,32 @@ func TestSiteBundleHandler_PathTraversalIsRejected(t *testing.T) {
 				t.Fatalf("Publish was called despite a traversal filename %q", name)
 			}
 		})
+	}
+}
+
+// The reported vulnerability, reproduced end to end through REAL HTTP URL
+// parsing rather than by calling parseSiteBundlePublishPath with a literal
+// ".." string: httptest.NewRequest parses "/sites/%2e%2e/bundles" the same
+// way a real server would, decoding it to Path="/sites/../bundles" while
+// RawPath keeps the original escaped form -- the exact mismatch that lets
+// this evade http.ServeMux's own path-clean redirect (which only fires
+// when RawPath matches a canonical re-encoding of Path). Without
+// parseSiteBundlePublishPath's own fs.ValidPath rejection, this would
+// reach Publish with siteID="..".
+func TestSiteBundleHandler_PercentEncodedTraversalSiteIDIsRejected(t *testing.T) {
+	pub := &fakeBundlePublisher{}
+	h := testSiteBundleHandler(pub)
+
+	body, ct := buildMultipartBundle(t, []bundleFile{{"index.html", []byte("ok")}})
+	req := serviceAccountRequest(t, "/sites/%2e%2e/bundles", body, ct)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for a percent-encoded .. site id (body=%q)", rec.Code, rec.Body.String())
+	}
+	if pub.calls != 0 {
+		t.Fatalf("Publish was called despite a percent-encoded traversal site id")
 	}
 }
 
