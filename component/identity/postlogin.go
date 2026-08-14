@@ -46,7 +46,12 @@ const postLoginCookieMaxAge = 15 * 60
 // A dest that is not a safe same-origin path is dropped rather than
 // stored, so a caller cannot accidentally launder an attacker-supplied
 // value through this helper.
-func SetPostLoginRedirect(w http.ResponseWriter, dest string, secure bool) {
+//
+// The cookie is unconditionally Secure: the browser-facing scheme is
+// HTTPS in every environment (the TLS front door locally, TLS in
+// staging/prod), so there is no legitimate plain-HTTP flow to keep it
+// alive for. The trailing bool is ignored.
+func SetPostLoginRedirect(w http.ResponseWriter, dest string, _ bool) {
 	safe := SafeRelativeRedirect(dest)
 	if safe == "" {
 		return
@@ -57,7 +62,7 @@ func SetPostLoginRedirect(w http.ResponseWriter, dest string, secure bool) {
 		Path:     "/",
 		MaxAge:   postLoginCookieMaxAge,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -75,17 +80,16 @@ func TakePostLoginRedirect(w http.ResponseWriter, r *http.Request) string {
 	if err != nil || c == nil {
 		return ""
 	}
-	clearPostLoginCookie(w, r)
+	clearPostLoginCookie(w)
 	return SafeRelativeRedirect(c.Value)
 }
 
-func clearPostLoginCookie(w http.ResponseWriter, r *http.Request) {
+// clearPostLoginCookie is unconditionally Secure, matching the write
+// side: only a Secure cookie can have been stored, so only a Secure
+// clearing cookie is ever needed.
+func clearPostLoginCookie(w http.ResponseWriter) {
 	if w == nil {
 		return
-	}
-	secure := false
-	if r != nil && r.TLS != nil {
-		secure = true
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     PostLoginCookieName,
@@ -93,7 +97,7 @@ func clearPostLoginCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   secure,
+		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
 	})
 }
