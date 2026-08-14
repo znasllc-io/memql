@@ -193,3 +193,28 @@ concept inboundRequest {
   processedAt   datetime @description("When the product finished handling the row.")
   lastError     string  @description("Most recent product-side handling error, truncated to 4KB. Empty on success.")
 }
+
+/// A web surface this cluster serves at a hostname -- a single-page app, a static website, or the
+/// platform's own portal. A site is DATA, not infrastructure: deploying one is an upload plus a row
+/// write and rolling one back is a row write, so the number of Kubernetes objects does not grow with
+/// the number of sites. The graph's own row history IS the version list.
+///
+/// clusterOwner tier, deliberately, and NOT owner="ownerUserId". enforceRowAuthzOnPlan ANDs the
+/// owned predicate unconditionally with no cluster-owner escape on the read path, so on an
+/// owner-tier concept "list every site in this cluster" is not merely unimplemented -- it is not
+/// EXPRESSIBLE, and the caller silently gets a subset. That query is the portal's primary screen,
+/// and cluster-wide hostname uniqueness would be uncheckable for the same reason. The tier matches
+/// v1:campaigns:sendJob and :suppression for the same reason those carry it: one deployment, one
+/// front door, not any individual operator's rows.
+@rowAuthz(clusterOwner)
+@displayCard(primary="hostname", secondary="kind", tertiary="title", status="status")
+concept site {
+  hostname     string!  @description("Fully qualified host this site answers on, e.g. shop.example.com. Cluster-unique -- the uniqueness check is possible only because this concept is not owner-scoped.")
+  kind         enum("spa", "static")!  @description("Tail of the request-resolution order. 'spa' falls back to index.html so client-side routing works; 'static' answers 404 so a mistyped path in a multi-page site is visible rather than silently rendering the home page. Not a closed set: a third value, 'server' (planned, epic memql#3718), will have bundleRef name a container image instead of a bundle prefix, reconciled by a narrow controller into a Deployment + Service with the edge proxying to it rather than serving bytes -- additive when it lands, touching neither the five front-door host rules, the TLS model, the portal, the publish path, nor this concept.")
+  bundleRef    string!  @description("URI of the bundle to serve, one of three usages. 'file:///app/portal' -- the platform's own portal, baked into the image; deploy and rollback are an image rollout and an image rollback. 'file:///app/sites/<name>' -- a site a monorepo cluster bakes into the edge image at build time (or a working-tree path for the dev inner loop); deploy and rollback are the same image rollout/rollback. 'blob://sites/<id>/<version>/' -- an uploaded bundle in object storage; deploy is an upload plus a row flip in seconds, rollback is one row write. Bake what ships with the cluster; upload what changes on its own clock -- a typo fix on a landing page must not roll the node serving every other site, and marketing copy diverges from engine cadence immediately.")
+  status       enum("draft", "live", "disabled")!  @description("'draft' resolves for nobody (404); 'live' serves; 'disabled' answers 503 rather than 404 so a deliberately paused site is distinguishable from a typo'd hostname. NOTE: @default is never applied on insert (memql#2960) -- createSite fills this with ??.")
+  apiProxy     bool     @description("Mount /_memql/* on this origin, forwarded to the bff, so the site is same-origin with its own API. Removes CORS and the SameSite=Lax cookie problem entirely.")
+  systemOwned  bool     @description("Blocks deletion. The portal only: its row is re-seeded at boot, so an operator cannot brick cluster management by deleting it. Does NOT branch the serving path -- see TestPortalHasNoSpecialCase.")
+  title        string   @description("Operator-facing label shown in the portal's site list.")
+  notes        string   @description("Operator-facing notes.")
+}
