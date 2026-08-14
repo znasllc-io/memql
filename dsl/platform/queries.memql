@@ -273,6 +273,7 @@ query site sitesAll {
 /// unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs
 /// (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per
 /// v1:platform:site's declared tier.
+@unbounded("site by id -- bounded to a single row (id is the row's own primary key)")
 @actor
 query site siteById {
   args {
