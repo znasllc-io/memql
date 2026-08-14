@@ -103,13 +103,14 @@ func runBackupExport(args []string) int {
 	}
 
 	w := os.Stdout
+	var outFile *os.File
 	if *out != "-" {
 		f, err := os.OpenFile(*out, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "backup export: open --out: %v\n", err)
 			return 1
 		}
-		defer f.Close()
+		outFile = f
 		w = f
 	} else {
 		w = realStdout
@@ -124,6 +125,15 @@ func runBackupExport(args []string) int {
 		MasterKey:      os.Getenv("MEMQL_MASTER_KEY"),
 		IncludeSecrets: includeSecrets,
 	})
+	if outFile != nil {
+		// The close is where buffered writes surface their failure (ENOSPC,
+		// quota, a vanished mount); a backup whose tail was lost at close
+		// must not exit 0. When the export itself already failed, that
+		// error stays the reported one.
+		if cerr := outFile.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close --out: %w", cerr)
+		}
+	}
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "backup export: %v\n", err)
 		return 5

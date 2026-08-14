@@ -48,7 +48,6 @@ import {
   previewUninstall,
   runInstall,
   runUninstall,
-  uninstallPlan,
   type SessionOptions,
 } from "./session.js";
 

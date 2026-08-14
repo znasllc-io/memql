@@ -22,10 +22,12 @@
 # invoked from that directory. One script, called from one-line Makefile
 # targets, per the convention in root CLAUDE.md.
 #
-# The two packages install DIFFERENTLY and that is not an inconsistency to fix
-# here: sdk/ts does not commit a lockfile (so `npm ci` fails), sdk/ts-viewkit
-# does (so it gets the reproducible `npm ci`). Same split the vscode-deps
-# target makes, for the same reason.
+# Every install here is `npm ci` -- the reproducible, integrity-pinned path
+# (OSSF Scorecard PinnedDependenciesID). All three package directories commit a
+# package-lock.json; sdk/ts used `npm install` until its lockfile landed in
+# memql#3344, and scripts/vscode/deps.sh dropped the split then -- this script
+# was the straggler. A missing lockfile is a broken checkout, not a bootstrap
+# case, so it fails loudly instead of degrading to an unpinned `npm install`.
 #
 # Usage:
 #   scripts/portal/build.sh deps        # build the file: dependencies only
@@ -70,27 +72,28 @@ function check_node() {
 }
 
 # build_workspace_deps builds the two `file:` dependencies so their dist/
-# exists before anything resolves against it.
+# exists before anything resolves against it. Both commit a lockfile, so both
+# get the reproducible `npm ci` (same as scripts/vscode/deps.sh).
 function build_workspace_deps() {
     info "Building @znasllc-io/memql-sdk-core (sdk/ts)..."
-    ( cd "${SDK_CORE_DIR}" && npm install "${NPM_FLAGS[@]}" && npm run build )
+    ( cd "${SDK_CORE_DIR}" && npm ci "${NPM_FLAGS[@]}" && npm run build )
 
     info "Building @znasllc-io/memql-view-kit (sdk/ts-viewkit)..."
     ( cd "${VIEW_KIT_DIR}" && npm ci "${NPM_FLAGS[@]}" && npm run build )
 }
 
-# install_portal installs the portal's own dependencies. `npm ci` when the
-# lockfile is present (the committed, reproducible path) and `npm install`
-# otherwise, so a lockfile-less working tree still bootstraps rather than
-# failing with npm's "can only install with an existing package-lock.json".
+# install_portal installs the portal's own dependencies with `npm ci`, always.
+# The lockfile is committed, so a tree without it is missing a tracked file --
+# say so and stop rather than silently falling back to an unpinned
+# `npm install` that would resolve whatever the registry serves today.
 function install_portal() {
-    if [[ -f "${PORTAL_DIR}/package-lock.json" ]]; then
-        info "Installing portal dependencies (npm ci)..."
-        ( cd "${PORTAL_DIR}" && npm ci "${NPM_FLAGS[@]}" )
-    else
-        info "Installing portal dependencies (npm install -- no lockfile present)..."
-        ( cd "${PORTAL_DIR}" && npm install "${NPM_FLAGS[@]}" )
+    if [[ ! -f "${PORTAL_DIR}/package-lock.json" ]]; then
+        echo "ERROR: ${PORTAL_DIR}/package-lock.json not found." >&2
+        echo "       The portal lockfile is committed; restore it (git checkout -- clients/portal/package-lock.json)." >&2
+        exit 4
     fi
+    info "Installing portal dependencies (npm ci)..."
+    ( cd "${PORTAL_DIR}" && npm ci "${NPM_FLAGS[@]}" )
 }
 
 function run_install() {
