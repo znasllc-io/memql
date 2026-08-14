@@ -1,0 +1,67 @@
+# The last two front-door rules that will ever be added.
+#
+# Everything after this is a graph row. `*.memql.localhost` and the apex both
+# reach svc/edge, which resolves the request Host against v1:platform:site and
+# serves the bundle that row's bundleRef names -- so a new site is an upload
+# plus a row write, and the number of Kubernetes objects does not grow with the
+# number of sites. That is the whole of memql#3700's "a site is data, not
+# infrastructure": adding shop.<domain> touches nothing in this directory.
+#
+# THE APEX IS NOT A SPECIAL CASE. For a customer cluster the bare domain IS
+# their main website, so it is a site row like any other -- it just happens to
+# be the one whose hostname has no label in front of it. Both rules point at the
+# same Service and the edge cannot tell them apart.
+#
+# WILDCARD VERSUS EXACT. `*.memql.localhost` also matches api., identity. and
+# mcp.. The Ingress spec gives an exact host precedence over a wildcard and both
+# traefik and ingress-nginx implement that, so the four named hosts keep their
+# own backends and only unclaimed names fall through to the edge. This is the
+# rule the epic's five-host table depends on; it is probed explicitly during
+# front-door verification rather than assumed.
+#
+# THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
+# that chooses another domain overrides both hosts through the ArgoCD
+# Application's spec.source.kustomize.patches, emitted by scripts/k3d/up.sh --
+# the same seam every other front-door rule uses. The default is committed so a
+# plain `kubectl apply -k` still produces a working front door.
+#
+# The edge serves plain HTTP on :8085, so no backend-protocol annotation is
+# needed here -- unlike the api. host, which carries h2c for gRPC, and unlike
+# identity., which is https behind a ServersTransport that skips verification.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: edge-front-door
+  namespace: memql
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+spec:
+  tls:
+    - hosts:
+        - "*.memql.localhost"
+        - memql.localhost
+      secretName: memql-front-door-tls
+  rules:
+    # Every hosted site: the portal at portal.<domain>, and every customer SPA
+    # or website the operator creates a row for.
+    - host: "*.memql.localhost"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
+    # The apex. For a customer cluster this is their main website.
+    - host: memql.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
