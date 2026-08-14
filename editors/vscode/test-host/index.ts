@@ -50,6 +50,7 @@ import { StepTraceModel } from "../src/state/stepTrace.js";
 import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPanel.js";
 import type { AutomationPanelHost } from "../src/webview/automationPanel.js";
 import { ConnectionPanel } from "../src/webview/connectionPanel.js";
+import { ConstructPanel } from "../src/webview/constructPanel.js";
 import { ConceptPanel } from "../src/webview/conceptPanel.js";
 import { DeploymentPanel } from "../src/webview/deploymentPanel.js";
 import { ResultPanel, RunPanel } from "../src/webview/runPanel.js";
@@ -480,6 +481,27 @@ smoke("every webview surface opens without throwing", async () => {
   expected.push(`Run automation: ${automationTarget.name}`);
 
   StepTracePanel.show(context, automationTarget, new StepTraceModel());
+
+  // The construct detail page (memql#3752), opened on a PROMOTED construct --
+  // the case with no file at all, whose source has nowhere else to be shown
+  // and which is where a developer first meets the seeded-versus-trained
+  // distinction. It is also the case that would throw if the page assumed a
+  // file existed.
+  ConstructPanel.open(context, {
+    name: "trainedResponder",
+    kind: "logic",
+    namespace: "",
+    origin: "promoted",
+    originPath: "",
+    description: "host smoke fixture",
+    runnable: true,
+    runnableKind: "logic",
+    args: [{ name: "spaceId", type: "string", required: true }],
+    boundConcept: "",
+    sourceHash: "abc123",
+    source: "logic trainedResponder {\n  body { return 1 }\n}",
+  });
+  expected.push("Construct: trainedResponder");
 
   // The instance page (memql#3739). Opened against a machine with NO local
   // cluster, which is the state it has to render first and the one an operator

@@ -130,6 +130,11 @@
           "when": "isWorkspaceTrusted"
         },
         {
+          "id": "memqlConstructs",
+          "name": "Constructs",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "id": "memqlConcepts",
           "name": "Concepts",
           "when": "isWorkspaceTrusted"
@@ -169,6 +174,15 @@
       {
         "command": "memql.clusters.uninstall",
         "title": "memQL: Uninstall Local Cluster..."
+      },
+      {
+        "command": "memql.constructs.refresh",
+        "title": "memQL: Refresh Constructs",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "memql.constructs.open",
+        "title": "memQL: Open Construct"
       },
       {
         "command": "memql.deployments.refresh",
@@ -267,6 +281,14 @@
         {
           "command": "memql.clusters.select",
           "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.constructs.refresh",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.constructs.open",
+          "when": "false"
         },
         {
           "command": "memql.deployments.refresh",
@@ -376,6 +398,11 @@
           "command": "memql.clusters.refresh",
           "when": "view == memqlClusters",
           "group": "navigation@2"
+        },
+        {
+          "command": "memql.constructs.refresh",
+          "when": "view == memqlConstructs",
+          "group": "navigation@1"
         },
         {
           "command": "memql.concepts.refresh",
