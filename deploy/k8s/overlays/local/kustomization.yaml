@@ -303,6 +303,13 @@ patches:
       - op: replace
         path: /spec/replicas
         value: 1
+  - target:
+      kind: Deployment
+      name: edge
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
   # ---------------------------------------------------------------------------
   # imagePullPolicy: IfNotPresent for all ACR images
   # Locally-built images are imported via `k3d image import` -- they exist in
@@ -360,6 +367,13 @@ patches:
         value: IfNotPresent
   - target:
       kind: Deployment
+      name: edge
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+  - target:
+      kind: Deployment
       name: voice-agent
     patch: |
       - op: replace
@@ -393,7 +407,7 @@ patches:
   - path: patches/domain-envfrom.yaml
     target:
       kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent)$"
+      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
   - target: { kind: Deployment, name: identity }
     patch: |
       apiVersion: apps/v1
@@ -548,6 +562,21 @@ patches:
                 env:
                   - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
                     $patch: delete
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: edge
+        namespace: memql
+      spec:
+        template:
+          spec:
+            containers:
+              - name: edge
+                env:
+                  - name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER
+                    $patch: delete
   # identity-specific local overrides that carry NO domain: the vite dev-server
   # origins and running migrations on start.
   - path: patches/identity-local-config.yaml
@@ -564,7 +593,7 @@ patches:
   - path: patches/bootstrap-secret-envfrom.yaml
     target:
       kind: Deployment
-      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent)$"
+      name: "^(identity|bff|cognition|agent|planner|workbench|mcp|voice|voice-agent|edge)$"
   # Override the Postgres pool bounds (base is tuned for Tiger Cloud limits;
   # local in-cluster Postgres can handle larger pools).
   - path: patches/db-pool-local.yaml
@@ -602,6 +631,9 @@ images:
     newTag: local
   - name: acrmemql.azurecr.io/memql-mcp
     newName: memql-mcp
+    newTag: local
+  - name: acrmemql.azurecr.io/memql-edge
+    newName: memql-edge
     newTag: local
 
 components:

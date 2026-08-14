@@ -230,11 +230,24 @@ func TestOwnedTierMutationStampsARealCaller(t *testing.T) {
 // The materializer's AccessContext carries a REAL, non-empty synthetic
 // identity ("system:seedMaterializer"), so a create<Concept> mutation that
 // reads actor.userId now stamps a TRUTHFUL provenance value instead of either
-// failing (the old behaviour) or silently writing "". createSite
-// (dsl/platform/mutations.memql) is the first shipped case: its stamp block
-// reads `createdBy: actor.userId`, and it must render -- with that value
-// resolving to the synthetic actor, not empty -- for the portal seed to
-// materialize at all.
+// failing (the old behaviour) or silently writing "".
+//
+// createSite (dsl/platform/mutations.memql) was the first shipped case, and
+// for one boot cycle it also pinned a defect this test never caught: its
+// stamp{} block wrote `createdAt: now` / `createdBy: actor.userId` directly,
+// and BOTH are reserved payload fields the engine stamps intrinsically
+// (component/database/memory-nodes/constants.go); every real write refused
+// at the reserved-field guard (executor_mutation.go, ~line 497). This test
+// rendered the template and asserted the rendered `createdBy` equalled the
+// synthetic actor -- which passed, because rendering never runs the guard
+// that only the real write path applies. It asserted on the OUTCOME (a
+// payload was produced) rather than the REASON (a payload the engine would
+// actually accept), so it proved the materializer could render a payload
+// the engine would refuse, and called that success. Fixed in memql#3714b:
+// createSite no longer authors either field (the engine stamps both), and
+// the loop below now asserts the reserved-field property directly for every
+// case here, not just createSite, so a future mutation making the same
+// mistake fails THIS test instead of a live boot three tasks later.
 func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 	if _, err := LoadUnifiedConcepts(nil); err != nil {
 		t.Fatalf("LoadUnifiedConcepts: %v", err)
@@ -283,10 +296,23 @@ func TestSeedMaterializerSystemActorStillRendersItsMutations(t *testing.T) {
 			node, err := eng.renderMutationTemplate(ctx, fn.MutationTemplate, tc.args)
 			require.NoError(t, err,
 				"%s must still render under the seed materializer's system actor", tc.mutation)
-			if tc.mutation == "createSite" {
-				require.Equal(t, seedMaterializerActor, payloadField(t, node, "createdBy"),
-					"createSite reads actor.userId for createdBy -- it must resolve to the "+
-						"materializer's own synthetic identity, not empty and not a stray caller")
+
+			// The property that would have caught memql#3714b's createSite defect
+			// the day it was written: a rendered payload the real write path would
+			// ACCEPT, not merely one that rendered without error. renderMutationTemplate
+			// never runs executeWrite's reserved-field guard (it needs no DB, so it
+			// skips straight past it) -- so a mutation body that stamps `createdAt` /
+			// `createdBy` / `id` / etc. directly renders "successfully" here and is
+			// refused only later, on a real write. Applied to every case, not just
+			// createSite: the same mistake in any future mutation fails HERE.
+			var rendered map[string]any
+			require.NoError(t, json.Unmarshal([]byte(node.PayloadRaw), &rendered),
+				"%s: unmarshal rendered payload %q", tc.mutation, node.PayloadRaw)
+			for key := range rendered {
+				require.False(t, concept.IsReservedPayloadField(key),
+					"%s renders a payload declaring reserved field %q -- the real write path "+
+						"(executor_mutation.go's reserved-field guard) refuses this even though "+
+						"rendering alone does not catch it", tc.mutation, key)
 			}
 		})
 	}
