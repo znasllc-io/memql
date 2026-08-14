@@ -149,7 +149,7 @@ spec:
             - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
             # The dial address this cluster ADVERTISES to clients in
             # GET /.well-known/memql-config.json (memql#3399). It is the FRONT
-            # DOOR -- cockpit.<domain>:443, the one host whose ingress carries
+            # DOOR -- api.<domain>:443, the one host whose ingress carries
             # gRPC to the bff -- and emphatically not identity.<domain>, which
             # serves HTTP (JWKS, /oauth/token, the web UI) and no MemqlService.
             #
@@ -162,21 +162,21 @@ spec:
             # value in an operator's sealed envelope can no longer reach the
             # wire. Same placeholder convention as the URLs above: a
             # deployment's overlay patches the real host.
-            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "cockpit.staging.example.com:443" }
+            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "api.staging.example.com:443" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
             # The ops-edge host is listed alongside it because the memQL Portal
             # (memql#3315) is itself a browser client of this identity service:
             # it exchanges its authorization code cross-origin, and with the
             # origin absent that XHR dies in CORS with nothing in identity's
             # log to say why.
-            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com,https://cockpit.staging.example.com" }
+            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com,https://api.staging.example.com" }
             # Only product-neutral ENGINE clients live in base: the terminal
             # cockpit and the portal, which are the two halves of one ops edge.
             # The product SPA's OAuth client is registered per-environment via
             # the identity-product-config overlay patch (staging / prod). The
             # portal's redirect URI carries its mount point -- the bundle is
             # served at /portal/, so its callback route lives inside it.
-            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://cockpit.staging.example.com/portal/auth/callback"]}]' }
+            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://api.staging.example.com/portal/auth/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.

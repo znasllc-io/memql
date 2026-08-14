@@ -27,12 +27,12 @@ func resolveHarness(t *testing.T, stubDir, snippet string) string {
 
 func TestResolveStubReturnsAddresses(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "cockpit.memql.localhost"),
+	if err := os.WriteFile(filepath.Join(dir, "api.memql.localhost"),
 		[]byte("127.0.0.1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	got := strings.TrimSpace(resolveHarness(t, dir, `resolve_addresses cockpit.memql.localhost`))
+	got := strings.TrimSpace(resolveHarness(t, dir, `resolve_addresses api.memql.localhost`))
 	if got != "127.0.0.1" {
 		t.Errorf("resolve_addresses = %q, want 127.0.0.1", got)
 	}

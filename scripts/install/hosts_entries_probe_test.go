@@ -32,8 +32,10 @@ func hostsRunProbe(t *testing.T, stub string, args ...string) (hostsEnvelope, in
 // where it does something (memql#3593).
 func TestHostsEntriesSkipsWhenAlreadyResolving(t *testing.T) {
 	stub := hostsStub(t, map[string]string{
-		"cockpit.lab.example.com":  "127.0.0.1\n",
+		"api.lab.example.com":      "127.0.0.1\n",
 		"identity.lab.example.com": "127.0.0.1\n",
+		"mcp.lab.example.com":      "127.0.0.1\n",
+		"portal.lab.example.com":   "127.0.0.1\n",
 		"lab.example.com":          "127.0.0.1\n",
 	})
 	hostsFile := hostsFixture(t, "127.0.0.1 localhost\n")
@@ -65,7 +67,7 @@ func TestHostsEntriesSkipsWhenAlreadyResolving(t *testing.T) {
 // worse failure than one that does not resolve.
 func TestHostsEntriesRefusesConflictingResolution(t *testing.T) {
 	stub := hostsStub(t, map[string]string{
-		"cockpit.lab.example.com": "203.0.113.7\n",
+		"api.lab.example.com": "203.0.113.7\n",
 	})
 	hostsFile := hostsFixture(t, "127.0.0.1 localhost\n")
 
@@ -89,7 +91,7 @@ func TestHostsEntriesRefusesConflictingResolution(t *testing.T) {
 // file, which is two sources of truth for one front door.
 func TestHostsEntriesRefusesPartialResolution(t *testing.T) {
 	stub := hostsStub(t, map[string]string{
-		"cockpit.lab.example.com": "127.0.0.1\n",
+		"api.lab.example.com": "127.0.0.1\n",
 	})
 	hostsFile := hostsFixture(t, "127.0.0.1 localhost\n")
 
@@ -117,7 +119,7 @@ func TestHostsEntriesWritesWhenNothingResolves(t *testing.T) {
 		t.Errorf("result.skipped = %v, want false", env.Result["skipped"])
 	}
 	body := hostsRead(t, hostsFile)
-	for _, want := range []string{"cockpit.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
+	for _, want := range []string{"api.memql.localhost", "identity.memql.localhost", "memql.localhost"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("hosts file missing %q:\n%s", want, body)
 		}
@@ -142,10 +144,10 @@ func TestHostsEntriesRefusesBothDomainAndHostnames(t *testing.T) {
 // on what DNS currently says.
 func TestHostsEntriesRemoveIgnoresResolution(t *testing.T) {
 	stub := hostsStub(t, map[string]string{
-		"cockpit.memql.localhost": "203.0.113.7\n",
+		"api.memql.localhost": "203.0.113.7\n",
 	})
 	hostsFile := hostsFixture(t,
-		"127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 cockpit.memql.localhost\n# END memql\n")
+		"127.0.0.1 localhost\n# BEGIN memql\n127.0.0.1 api.memql.localhost\n# END memql\n")
 
 	_, code, out := hostsRunProbe(t, stub,
 		"--action=remove", "--hosts-file="+hostsFile, "--confirm=remove-memql-hosts")

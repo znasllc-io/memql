@@ -88,5 +88,5 @@ MEMQL_PORTAL_DIST=clients/portal/dist go run .   # then open /portal/ on the HTT
 ```
 
 In the local cluster the portal is already there, at the same front door
-everything else uses: **<https://cockpit.memql.localhost/portal/>** after
+everything else uses: **<https://api.memql.localhost/portal/>** after
 `make up`.

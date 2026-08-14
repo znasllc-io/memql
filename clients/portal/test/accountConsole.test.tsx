@@ -161,7 +161,7 @@ function renderConsole(opts: { mintFails?: boolean } = {}) {
         }}
         storage={null}
         navigate={() => {}}
-        redirectUri="https://cockpit.example.com/portal/auth/callback"
+        redirectUri="https://api.example.com/portal/auth/callback"
       >
         <ClusterProvider dial={dial}>
           <AccountConsole concept={ACCOUNT_CONCEPT} rows={ACCOUNT_ROWS} selectedRowId="acct-1" />
@@ -349,7 +349,7 @@ describe("the account console", () => {
           }}
           storage={null}
           navigate={() => {}}
-          redirectUri="https://cockpit.example.com/portal/auth/callback"
+          redirectUri="https://api.example.com/portal/auth/callback"
         >
           <ClusterProvider dial={dial}>
             <AccountConsole concept={ACCOUNT_CONCEPT} rows={ACCOUNT_ROWS} selectedRowId="" />

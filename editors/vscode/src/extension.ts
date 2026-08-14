@@ -1547,7 +1547,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   }
 
   const domain = await window.showInputBox({
-    prompt: 'Domain (e.g. memql.localhost). The endpoint is composed as cockpit.<domain>:443.',
+    prompt: 'Domain (e.g. memql.localhost). The endpoint is composed as api.<domain>:443.',
     value: existing?.domain ?? '',
     ignoreFocusOut: true,
   });
@@ -1557,7 +1557,7 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
 
   const endpoint = await window.showInputBox({
     prompt: 'gRPC endpoint (host:port)',
-    // composeEndpointFromDomain, not a fourth copy of `cockpit.<domain>:443`
+    // composeEndpointFromDomain, not a fourth copy of `api.<domain>:443`
     // (memql#3475). It answers "" for a blank domain, which is the same empty
     // box the ternary here used to construct by hand.
     value: existing?.endpoint ?? composeEndpointFromDomain(domain),

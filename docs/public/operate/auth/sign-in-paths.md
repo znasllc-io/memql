@@ -238,7 +238,7 @@ cluster in the Clusters view (`memql.clusters.signIn` / `memql.clusters.signOut`
 plus **memQL: Sign In With a Device Code** in the palette.
 
 The flow needs an **issuer**, which is a different fact from the endpoint the
-stream dials -- `identity.<domain>` versus `cockpit.<domain>`. A cluster naming
+stream dials -- `identity.<domain>` versus `api.<domain>`. A cluster naming
 neither an `issuer` nor a `domain` has nowhere to sign in to, which is why a dial
 that fails on the credential offers a **Sign in** button only when both
 `signInCanRecover` (the failure is one a fresh token fixes) and `canSignIn` (an

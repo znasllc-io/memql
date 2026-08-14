@@ -31,11 +31,11 @@ clusters:
   # the parity cluster
   - name: local
     display_name: memql.localhost
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     local: true
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
-    endpoint: cockpit.staging.example.com:443
+    endpoint: api.staging.example.com:443
     issuer: https://identity.staging.example.com
     future_cockpit_key: preserved
 selected_cluster: local
@@ -62,7 +62,7 @@ test("returns the entry it removed, so the caller can act on it", async () => {
   // that would race the cockpit.
   assert.equal(removed.name, "local");
   assert.equal(removed.local, true);
-  assert.equal(removed.endpoint, "cockpit.memql.localhost:443");
+  assert.equal(removed.endpoint, "api.memql.localhost:443");
 });
 
 test("clears selected_cluster when it pointed at the removed cluster", async () => {
@@ -107,7 +107,7 @@ test("preserves comments and unmodelled keys on the entries that remain", async 
 test("removing the only cluster leaves a readable file", async () => {
   const f = await tempFile(`clusters:
   - name: only
-    endpoint: cockpit.example.com:443
+    endpoint: api.example.com:443
 selected_cluster: only
 `);
   await removeCluster(f, "only");

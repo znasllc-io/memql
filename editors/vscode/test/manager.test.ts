@@ -24,7 +24,7 @@ function liveJwt(secondsFromNow = 3600): string {
 }
 
 function cluster(name: string, overrides: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name, endpoint: "cockpit.memql.localhost:443", token: liveJwt(), ...overrides };
+  return { name, endpoint: "api.memql.localhost:443", token: liveJwt(), ...overrides };
 }
 
 // A fake connection satisfying just what ConnectionManager touches

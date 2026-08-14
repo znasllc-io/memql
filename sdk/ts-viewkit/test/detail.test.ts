@@ -87,7 +87,7 @@ test("terminates on a self-referential payload instead of recursing forever", ()
 // would pass the cyclic test above while silently rendering "[circular]" for
 // the second, perfectly finite occurrence.
 test("a non-cyclic object reused by two siblings renders in full both times", () => {
-  const shared = { host: "cockpit.local.znas.io", port: 443 };
+  const shared = { host: "api.local.znas.io", port: 443 };
   const html = renderToHtml(renderDetail({ primary: shared, mirror: shared }));
 
   assert.doesNotMatch(
@@ -96,7 +96,7 @@ test("a non-cyclic object reused by two siblings renders in full both times", ()
     "a shared sibling is finite, not circular -- marking it would hide real data",
   );
   assert.equal(
-    html.match(/vk-value">cockpit\.local\.znas\.io</g)?.length,
+    html.match(/vk-value">api\.local\.znas\.io</g)?.length,
     2,
     "both occurrences must render their contents",
   );

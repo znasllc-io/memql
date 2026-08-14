@@ -12,7 +12,7 @@ import (
 // The defect: the resolver returned a bare `host:port`, and the consumer --
 // sdk/go/worker.ParseClusterURL, which the cockpit calls with exactly this
 // string (cmd/memql-cockpit/internal/worker/connect.go) -- documents a bare
-// value as useTLS=false. So a reply of "cockpit.local.znas.io:443" told the
+// value as useTLS=false. So a reply of "api.local.znas.io:443" told the
 // worker to dial a TLS port IN PLAINTEXT, putting its `mql_wkr_` bearer token
 // on the wire in the clear before the handshake failed.
 //
@@ -92,27 +92,27 @@ func TestResolveWorkerDialEndpoint_StatesTransportSecurity(t *testing.T) {
 		// Bare: the deployed value (deploy/k8s/base/identity.yaml), which
 		// memql#3399's deploy gate REQUIRES to be a bare dial address. Same
 		// ambiguity, same refusal to invent.
-		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "cockpit.local.znas.io:443")
-		if got, want := resolveWorkerDialEndpoint(""), "cockpit.local.znas.io:443"; got != want {
+		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "api.local.znas.io:443")
+		if got, want := resolveWorkerDialEndpoint(""), "api.local.znas.io:443"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint(\"\") = %q, want %q", got, want)
 		}
 
 		// Scheme-ful: an operator who states the transport is believed.
-		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "https://cockpit.local.znas.io")
-		if got, want := resolveWorkerDialEndpoint(""), "https://cockpit.local.znas.io:443"; got != want {
+		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "https://api.local.znas.io")
+		if got, want := resolveWorkerDialEndpoint(""), "https://api.local.znas.io:443"; got != want {
 			t.Errorf("resolveWorkerDialEndpoint(\"\") = %q, want %q", got, want)
 		}
 	})
 
 	t.Run("the dial target is unchanged -- only the silence about TLS is gone", func(t *testing.T) {
 		t.Setenv("MEMQL_WORKER_DIAL_ENDPOINT", "")
-		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "cockpit.local.znas.io:443")
+		t.Setenv("MEMQL_DISCOVERY_GRPC_ENDPOINT", "api.local.znas.io:443")
 
 		for _, tc := range []struct{ stored, wantBare string }{
 			{"https://app.local.znas.io", "app.local.znas.io:443"},
 			{"https://app.local.znas.io:8443/x", "app.local.znas.io:443"},
 			{"http://localhost:3000", "localhost:50050"},
-			{"", "cockpit.local.znas.io:443"},
+			{"", "api.local.znas.io:443"},
 		} {
 			got := resolveWorkerDialEndpoint(tc.stored)
 			if bare := stripDialScheme(got); bare != tc.wantBare {

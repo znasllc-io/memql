@@ -52,8 +52,8 @@ describe("clusterLabelFor", () => {
   // Under the derive-from-origin registry decision the cluster IS the origin,
   // so its host is its name -- and the name the operator already recognises.
   it("names the cluster by the host that served the page", () => {
-    expect(clusterLabelFor({ host: "cockpit.prod.example.com" })).toBe(
-      "cockpit.prod.example.com",
+    expect(clusterLabelFor({ host: "api.prod.example.com" })).toBe(
+      "api.prod.example.com",
     );
   });
 

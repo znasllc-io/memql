@@ -23,7 +23,7 @@ import "testing"
 // asserts separately that stripping the scheme reproduces exactly the bare
 // strings this test used to expect.
 func TestResolveWorkerDialEndpoint_Precedence(t *testing.T) {
-	const discovery = "cockpit.local.znas.io:443"
+	const discovery = "api.local.znas.io:443"
 
 	t.Run("stored URL wins over the cluster-wide discovery endpoint", func(t *testing.T) {
 		t.Setenv("MEMQL_WORKER_DIAL_ENDPOINT", "")

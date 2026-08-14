@@ -220,7 +220,7 @@ function renderBrowser(h: Harness, path: string) {
         }}
         storage={null}
         navigate={() => {}}
-        redirectUri="https://cockpit.example.com/portal/auth/callback"
+        redirectUri="https://api.example.com/portal/auth/callback"
       >
         <ClusterProvider dial={dial}>
           <AppRoutes />

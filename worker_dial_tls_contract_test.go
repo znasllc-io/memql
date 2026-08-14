@@ -21,7 +21,7 @@ import (
 // useTLS=false. Nothing in the build links the emitter to that parser, and
 // neither half was wrong on its own: the server produced a legitimate dial
 // address, and the parser applied its documented default. Together they
-// dialled cockpit.local.znas.io:443 in plaintext, putting an `mql_wkr_`
+// dialled api.local.znas.io:443 in plaintext, putting an `mql_wkr_`
 // bearer token on the wire before the handshake failed.
 //
 // These tests are the join. They live in the root package because it is the
@@ -53,8 +53,8 @@ func TestPairingReplyTellsTheWorkerToUseTLS(t *testing.T) {
 	}{
 		{
 			name:         "the local front door -- the exact value that dialled :443 in the clear",
-			storedOrigin: "https://cockpit.local.znas.io",
-			wantEndpoint: "cockpit.local.znas.io:443",
+			storedOrigin: "https://api.local.znas.io",
+			wantEndpoint: "api.local.znas.io:443",
 			wantTLS:      true,
 		},
 		{

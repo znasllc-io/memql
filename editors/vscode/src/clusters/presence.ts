@@ -108,7 +108,7 @@ export const PRESENCE_TTL_MS = 30_000;
  * ever reached for a receipt that recorded no `--domain`, i.e. an install that
  * took every default.
  */
-export const DEFAULT_LOCAL_ENDPOINT = "cockpit.memql.localhost:443";
+export const DEFAULT_LOCAL_ENDPOINT = "api.memql.localhost:443";
 
 /** The synthetic name the probe dials under; never written anywhere. */
 const PROBE_CLUSTER_NAME = "local";
@@ -192,7 +192,7 @@ async function registryEvidence(
  *      down is naming the front door they actually use;
  *   2. the domain the install recorded (`seedBootstrap` carries `--domain`),
  *      lifted to the front-door hostname by composeEndpointFromDomain -- the
- *      one spelling of the `cockpit.<domain>` convention (memql#3475), which
+ *      one spelling of the `api.<domain>` convention (memql#3475), which
  *      this function used to carry a private copy of;
  *   3. the installer's own default.
  */

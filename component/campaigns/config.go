@@ -509,10 +509,10 @@ func (c Config) RequireUnsubscribe() string {
 //     the local cluster the one environment where campaigns cannot be
 //     exercised. A loopback URL cannot reach a real mailbox provider, so
 //     permitting it costs nothing.
-//   - A non-empty host. This is what catches the bare `cockpit.example.com`
+//   - A non-empty host. This is what catches the bare `api.example.com`
 //     case: url.Parse accepts it, puts the whole value in Path, and leaves
 //     Scheme and Host empty -- so without this check it concatenates into
-//     `cockpit.example.com/unsubscribe`, a relative URI in a header that
+//     `api.example.com/unsubscribe`, a relative URI in a header that
 //     requires an absolute one.
 //   - No query or fragment. unsubscribeURL appends `?token=`, so a base that
 //     already carries one produces a URL with two.
@@ -532,7 +532,7 @@ func validateUnsubscribeBaseURL(raw string) string {
 	}
 
 	if parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Sprintf("%s must be an absolute origin such as https://cockpit.example.com, but is %q. "+
+		return fmt.Sprintf("%s must be an absolute origin such as https://api.example.com, but is %q. "+
 			"A value with no scheme is not a URL the recipient's mail client can POST to -- it would be "+
 			"concatenated into a relative path. A bulk send without a working RFC 8058 unsubscribe is "+
 			"refused rather than sent.", varName, trimmed)

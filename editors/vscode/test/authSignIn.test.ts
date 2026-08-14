@@ -24,7 +24,7 @@ import {
 import type { ClusterConfig } from "../src/clusters/model.js";
 
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name: "local", endpoint: "cockpit.memql.localhost:443", ...overrides };
+  return { name: "local", endpoint: "api.memql.localhost:443", ...overrides };
 }
 
 function tokens(overrides: Partial<AuthFlowTokens> = {}): AuthFlowTokens {
@@ -89,13 +89,13 @@ function recorder(
 test("canSignIn accepts a cluster whose identity service is derivable", () => {
   assert.equal(canSignIn(cluster({ issuer: "https://identity.example.com" })), true);
   assert.equal(canSignIn(cluster({ domain: "memql.localhost" })), true);
-  // The endpoint convention's other half: cockpit.<domain> implies its sibling.
+  // The endpoint convention's other half: api.<domain> implies its sibling.
   assert.equal(canSignIn(cluster()), true);
 });
 
 test("canSignIn refuses a cluster that names no identity service", () => {
   // Nothing names an issuer: no `issuer`, no `domain`, and an endpoint with no
-  // `cockpit.` prefix to imply one. Offering sign-in here would be a button
+  // `api.` prefix to imply one. Offering sign-in here would be a button
   // whose only outcome is a misconfigured error.
   assert.equal(canSignIn(cluster({ endpoint: "10.0.0.4:50051" })), false);
   assert.equal(canSignIn(cluster({ endpoint: "" })), false);

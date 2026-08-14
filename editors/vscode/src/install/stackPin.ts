@@ -194,7 +194,7 @@ export function installDomainProblem(domain: string): string | undefined {
     return "Enter a domain with no port. The front door is on 443 and memQL puts the cluster there itself.";
   }
   if (trimmed.startsWith("*.")) {
-    return "Enter the domain itself, not a wildcard. memQL derives `cockpit.` and `identity.` from it, and the certificate covers the wildcard for you.";
+    return "Enter the domain itself, not a wildcard. memQL derives `api.` and `identity.` from it, and the certificate covers the wildcard for you.";
   }
   if (!trimmed.includes(".")) {
     return `Enter a domain with at least two labels, such as ${DEFAULT_LOCAL_DOMAIN}. A single label cannot carry the front-door subdomains memQL needs.`;

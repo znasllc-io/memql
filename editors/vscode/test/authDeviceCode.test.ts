@@ -35,7 +35,7 @@ const NOW_MS = 1_800_000_000_000;
 function cluster(overrides: Partial<ClusterConfig> = {}): ClusterConfig {
   return {
     name: "local",
-    endpoint: "cockpit.memql.localhost:443",
+    endpoint: "api.memql.localhost:443",
     domain: "memql.localhost",
     clientId: "mcp_existing",
     ...overrides,

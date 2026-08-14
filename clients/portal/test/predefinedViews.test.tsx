@@ -235,7 +235,7 @@ function renderView({ role = "owner", deployFails, without }: Partial<Harness>, 
         }}
         storage={null}
         navigate={() => {}}
-        redirectUri="https://cockpit.example.com/portal/auth/callback"
+        redirectUri="https://api.example.com/portal/auth/callback"
       >
         <ClusterProvider dial={dial}>
           <AppRoutes />

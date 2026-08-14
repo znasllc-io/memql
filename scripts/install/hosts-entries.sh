@@ -7,7 +7,7 @@
 # hostnames in the system hosts file, inside a delimited managed block.
 #
 # The local stack is reached exactly as staging is: through the front door at
-# https://cockpit.memql.localhost and https://identity.memql.localhost (env parity
+# https://api.memql.localhost and https://identity.memql.localhost (env parity
 # -- see docs/public/operate/environment-parity.md). Those names have to
 # resolve to the loopback address, which on a developer machine means a hosts
 # file entry. This capability owns that edit, on install and on uninstall.
@@ -15,8 +15,10 @@
 # THE MANAGED BLOCK
 #
 #   # BEGIN memql
-#   127.0.0.1 cockpit.memql.localhost
+#   127.0.0.1 api.memql.localhost
 #   127.0.0.1 identity.memql.localhost
+#   127.0.0.1 mcp.memql.localhost
+#   127.0.0.1 portal.memql.localhost
 #   127.0.0.1 memql.localhost
 #   # END memql
 #
@@ -72,15 +74,15 @@ cap_init "install.hostsEntries" "Add or remove the memQL front-door hostnames in
 cap_spec_param_required "action"     "add | remove (required)"
 cap_spec_param "hosts-file" "hosts file to edit (default: /etc/hosts)"
 cap_spec_param "hostnames"  "comma/space separated hostnames (default: the memQL front door)"
-cap_spec_param "domain"     "front-door apex; derives cockpit.<d>, identity.<d>, <d> (mutually exclusive with --hostnames)"
+cap_spec_param "domain"     "front-door apex; derives api.<d>, identity.<d>, mcp.<d>, portal.<d>, <d> (mutually exclusive with --hostnames)"
 cap_spec_param "ip"         "address the hostnames resolve to (default: 127.0.0.1)"
 cap_spec_param "confirm"    "exact phrase: 'add-memql-hosts' or 'remove-memql-hosts'"
 
 readonly DEFAULT_HOSTS_FILE="/etc/hosts"
-# The local front door. Keep in step with deploy/k8s/overlays/local, whose two
+# The local front door. Keep in step with deploy/k8s/overlays/local, whose
 # Ingresses carry the same apex as their committed default (memql#3593).
 readonly DEFAULT_DOMAIN="memql.localhost"
-readonly DEFAULT_HOSTNAMES="cockpit.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN},${DEFAULT_DOMAIN}"
+readonly DEFAULT_HOSTNAMES="api.${DEFAULT_DOMAIN},identity.${DEFAULT_DOMAIN},mcp.${DEFAULT_DOMAIN},portal.${DEFAULT_DOMAIN},${DEFAULT_DOMAIN}"
 readonly DEFAULT_IP="127.0.0.1"
 
 readonly BLOCK_BEGIN="# BEGIN memql"
@@ -377,11 +379,13 @@ function offer_terminal_handoff() {
 # ENTRY POINT
 #=============================================================================
 
-# hostnames_for_domain <apex> -- the three names a front door puts on a domain,
-# apex last to match the block this script documents.
+# hostnames_for_domain <apex> -- the names a front door puts on a domain, apex
+# last to match the block this script documents. The wildcard *.<apex> cannot
+# go in a hosts file (no wildcard semantics), so each name is listed; sites
+# added later need their own entry, which the site-hosting runbook covers.
 function hostnames_for_domain() {
     local apex="$1"
-    printf 'cockpit.%s,identity.%s,%s' "$apex" "$apex" "$apex"
+    printf 'api.%s,identity.%s,mcp.%s,portal.%s,%s' "$apex" "$apex" "$apex" "$apex" "$apex"
 }
 
 # probe_hostnames -- decides whether the block is needed. Sets _PROBE_VERDICT to

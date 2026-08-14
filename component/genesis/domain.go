@@ -11,8 +11,9 @@ import (
 
 // MEMQL_DOMAIN is the ONE input from which every domain-shaped env var is
 // derived. A deployment states its domain once; identity's base URL, the issuer
-// every node verifies against, the discovery endpoint, the CORS origins and the
-// OAuth redirect URIs all follow from it.
+// every node verifies against, the discovery endpoint, the CORS origins, the
+// OAuth redirect URIs, and the MCP protocol head's public URL all follow from
+// it.
 //
 // WHY DERIVE RATHER THAN CONFIGURE EACH. Those six values are one fact spelled
 // six ways, and the local overlay used to spell it six times plus twice more in
@@ -29,7 +30,7 @@ import (
 // is already bridged onto its new name) and BEFORE any component reads its
 // config.
 //
-// Refs: memql#3593 memql#3590 memql#3315
+// Refs: memql#3593 memql#3590 memql#3315 memql#3704
 
 // domainPattern is what a domain may look like: two or more lowercase labels,
 // no scheme, no port, no wildcard, no trailing dot. Deliberately strict --
@@ -53,24 +54,44 @@ func DomainDerivations(domain string) map[string]string {
 	}
 
 	identity := "https://identity." + d
-	cockpit := "https://cockpit." + d
+	api := "https://api." + d
 	app := "https://app." + d
 
-	// The cockpit client is loopback BY DESIGN (RFC 8252 native-client
-	// redirect), so it carries no domain and is spelled out here unchanged.
+	// The cockpit CLIENT is loopback BY DESIGN (RFC 8252 native-client
+	// redirect), so it carries no domain and is spelled out unchanged. Note
+	// that the client is still called "cockpit" -- what was renamed is the
+	// HOST it dials, not the OAuth client id.
+	//
+	// THE PORTAL'S REDIRECT URI IS A FUNCTION OF WHERE ITS BUNDLE IS SERVED,
+	// not of the front door's name. The page composes it as
+	// `location.origin + import.meta.env.BASE_URL + "auth/callback"`
+	// (clients/portal/src/auth/AuthProvider.tsx defaultRedirectUri, via
+	// portalRedirectPath), and identity matches redirect_uri by EXACT string --
+	// so a URI registered for an origin the bundle is not served from is a 400
+	// at /authorize with nothing in the portal's own logs. The bundle is served
+	// at /portal/ on the bff, so `api.<d>/portal/auth/callback` is the value
+	// until memql#3711 gives the portal its own origin, and it moves then.
+	// The `portal.<d>` CORS origin below is deliberate and separate: memql#3714
+	// needs it, and an unused allowed origin is inert.
 	clients := fmt.Sprintf(
 		`[{"clientId":"app","redirectURIs":["%s/auth/callback"]},`+
 			`{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},`+
 			`{"clientId":"portal","redirectURIs":["%s/portal/auth/callback"]}]`,
-		app, cockpit)
+		app, api)
 
 	return map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 identity,
 		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": identity,
 		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN":         d,
-		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "cockpit." + d + ":443",
-		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     cockpit + "," + app,
+		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api." + d + ":443",
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS":     api + "," + app + ",https://portal." + d,
 		"MEMQL_IDENTITY_REGISTERED_CLIENTS":       clients,
+		// The MCP protocol head's own front-door host (memql#3704) -- advertised
+		// in OAuth discovery metadata and the 401 WWW-Authenticate hint
+		// (app/transport_mcp.go). Not an identity value, but the same
+		// set-if-absent derivation applies: a deployment that pins its own
+		// MEMQL_MCP_PUBLIC_URL keeps it untouched.
+		"MEMQL_MCP_PUBLIC_URL": "https://mcp." + d,
 	}
 }
 

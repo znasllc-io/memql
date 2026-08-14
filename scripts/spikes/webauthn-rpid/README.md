@@ -34,7 +34,7 @@ RP ID cannot fail this check for any hostname, `.localhost` included.
 
 **Case B - RP ID is a parent** (RP ID `memql.localhost` on origin
 `https://identity.memql.localhost`, which is the shape the epic actually wants,
-so one passkey covers `identity.`, `cockpit.` and `bff.`). Step 4 runs:
+so one passkey covers `identity.`, `api.` and `bff.`). Step 4 runs:
 
 | Sub-step | Evaluation | Result |
 |---|---|---|
@@ -228,7 +228,7 @@ touching a phone.
 1. `/etc/hosts` entries for the test domain:
 
    ```
-   127.0.0.1  identity.memql.localhost cockpit.memql.localhost bff.memql.localhost
+   127.0.0.1  identity.memql.localhost api.memql.localhost bff.memql.localhost
    ```
 
    **On macOS this is unnecessary** - verified on 26.5.1: the system resolver

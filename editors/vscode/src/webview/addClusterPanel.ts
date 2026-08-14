@@ -170,7 +170,7 @@ const CONNECT_HINTS: Record<ConnectField, string> = {
   domain:
     "Optional, e.g. staging.example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
   endpoint:
-    "The gRPC front door as host:port -- cockpit.<domain>:443 for a cluster behind the usual ingress.",
+    "The gRPC front door as host:port -- api.<domain>:443 for a cluster behind the usual ingress.",
   token:
     'Optional. The identity-issued JWT from POST <identity>/oauth/token. Leaving it empty and running "memQL: Sign In" is the ordinary path -- the editor mints its own credential through your browser. A PAT (mql_pat_...) cannot work here.',
 };
@@ -199,7 +199,7 @@ const STEP_TIMEOUT_MS = 600_000;
 
 /** What each field is for, in one line. */
 const FIELD_HINTS: Record<InputField, string> = {
-  domain: "The cluster answers at cockpit.<domain>. Defaults are fine if you have no preference.",
+  domain: "The cluster answers at api.<domain>. Defaults are fine if you have no preference.",
   ownerFirstName: "The cluster owner -- you.",
   ownerLastName: "",
   provider:

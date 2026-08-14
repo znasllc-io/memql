@@ -32,7 +32,7 @@ function read(rel: string): string {
 /**
  * Every front-door hostname a file mentions.
  *
- * Deliberately broad: any dotted name with a `cockpit.` / `identity.` prefix or a
+ * Deliberately broad: any dotted name with an `api.` / `identity.` prefix or a
  * `*.` wildcard. A narrower pattern would silently stop covering the artifact it
  * is supposed to be watching.
  */
@@ -48,7 +48,7 @@ function frontDoorNames(body: string): string[] {
     .split("\n")
     .filter((line) => !/^\s*#/.test(line))
     .join("\n");
-  for (const m of code.matchAll(/(?:\*|cockpit|identity)\.[a-z0-9.-]*[a-z]{2,}/gi)) {
+  for (const m of code.matchAll(/(?:\*|api|identity|portal)\.[a-z0-9.-]*[a-z]{2,}/gi)) {
     const name = m[0];
     // In-cluster service names are not front-door hostnames: `identity:8085` has
     // no dot, but `identity.memql.svc` does and is internal.
@@ -58,9 +58,9 @@ function frontDoorNames(body: string): string[] {
   return [...found];
 }
 
-/** The apex of a front-door name: `cockpit.memql.localhost` -> `memql.localhost`. */
+/** The apex of a front-door name: `api.memql.localhost` -> `memql.localhost`. */
 function apexOf(host: string): string {
-  return host.replace(/^(?:\*|cockpit|identity)\./i, "");
+  return host.replace(/^(?:\*|api|identity|portal)\./i, "");
 }
 
 // The artifacts that state the front door, and HOW each one states it.
@@ -84,7 +84,7 @@ const ARTIFACTS: readonly { rel: string; what: string; kind: "hosts" | "apex" | 
   { rel: "scripts/lib/localtls.sh", what: "the names the local certificate covers", kind: "apex" },
   { rel: "scripts/k3d/up.sh", what: "the default the Ingress patches are compared against", kind: "apex" },
   { rel: "scripts/install/verify-frontdoor.sh", what: "the hostnames the front-door check probes", kind: "derives" },
-  { rel: "deploy/k8s/overlays/local/cockpit-front-door.yaml", what: "the cockpit Ingress host", kind: "hosts" },
+  { rel: "deploy/k8s/overlays/local/api-front-door.yaml", what: "the API Ingress host", kind: "hosts" },
   { rel: "deploy/k8s/overlays/local/front-door.yaml", what: "the identity Ingress host", kind: "hosts" },
 ];
 

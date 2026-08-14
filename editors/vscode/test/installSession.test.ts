@@ -758,9 +758,9 @@ test("an explicit tag moves the images with it", async () => {
 // The page asks for a domain. It reached `seedBootstrap` and `enrolmentLink`, and
 // three steps that need it took their own defaults instead:
 //
-//   hostsBlock  wrote cockpit.memql.localhost / identity.memql.localhost / memql.localhost
+//   hostsBlock  wrote api.memql.localhost / identity.memql.localhost / memql.localhost
 //   localCA     issued for *.memql.localhost
-//   frontDoor   probed cockpit.memql.localhost / identity.memql.localhost
+//   frontDoor   probed api.memql.localhost / identity.memql.localhost
 //
 // while identity WAS bootstrapped for the typed domain -- so the cluster's issuer
 // named one domain and its hosts block, certificate and front-door probe named
@@ -797,7 +797,7 @@ test("every step that needs the domain is told the domain", () => {
 
   const hosts = paramsFor(plan, "hostsBlock", "install.hostsEntries");
   assert.ok(
-    (hosts["hostnames"] ?? "").includes("cockpit.memql.example.test"),
+    (hosts["hostnames"] ?? "").includes("api.memql.example.test"),
     `hostsBlock was given ${JSON.stringify(hosts["hostnames"])} -- without the typed domain it writes a\n` +
       `hosts block for names the operator never asked for, and nothing they DID ask for resolves`,
   );
@@ -811,7 +811,7 @@ test("every step that needs the domain is told the domain", () => {
 
   const door = paramsFor(plan, "frontDoor", "install.verifyFrontDoor");
   assert.ok(
-    (door["hosts"] ?? "").includes("cockpit.memql.example.test"),
+    (door["hosts"] ?? "").includes("api.memql.example.test"),
     `frontDoor was given ${JSON.stringify(door["hosts"])} -- probing the wrong hostnames reports a\n` +
       `broken installer for a cluster that is fine`,
   );

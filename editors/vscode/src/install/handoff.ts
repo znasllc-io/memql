@@ -16,7 +16,7 @@ import type { ClusterUpdate } from "../clusters/file.js";
 import type { ClusterConfig } from "../clusters/model.js";
 
 export interface InstalledCluster {
-  /** The domain the install was given. `cockpit.<domain>` is the front door. */
+  /** The domain the install was given. `api.<domain>` is the front door. */
   domain: string;
   /** The registry name. Derived from the domain when the caller has none. */
   name?: string;
@@ -60,7 +60,7 @@ export function installedClusterEntry(params: InstalledCluster): ClusterUpdate {
   return {
     name,
     domain,
-    endpoint: `cockpit.${domain}:443`,
+    endpoint: `api.${domain}:443`,
     local: true,
   };
 }

@@ -98,7 +98,7 @@ A cluster entry therefore looks like this:
 clusters:
   - name: local
     domain: memql.localhost
-    endpoint: cockpit.memql.localhost:443
+    endpoint: api.memql.localhost:443
     issuer: https://identity.memql.localhost   # optional; derived from domain
     client_id: cockpit                       # optional
     token: <the access_token from /oauth/token>   # REQUIRED. A JWT, not a PAT.
@@ -109,7 +109,7 @@ selected_cluster: local
 
 `issuer` is where the refresh exchange is POSTed. When it is absent the
 panel derives `https://identity.<domain>` (or the `identity.` sibling of a
-`cockpit.<host>` endpoint); a cluster with neither is told which field to
+`api.<host>` endpoint); a cluster with neither is told which field to
 supply rather than having a host guessed for it.
 
 ## Cluster lifecycle
