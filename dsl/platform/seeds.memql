@@ -1,0 +1,33 @@
+/// The memQL Portal, as site #1.
+///
+/// SEEDED, not special-cased. The portal is how sites are managed, so if it
+/// were an ordinary row the cluster would ship with an empty site table and no
+/// way to reach the screen that fills it. Seeding resolves that without a
+/// branch in the serving path -- and re-seeding at boot means an operator
+/// cannot brick cluster management by deleting the row.
+///
+/// bundleRef is file:///app/portal -- the directory the image already ships
+/// and that MEMQL_PORTAL_DIST used to point at (component/portal, retired,
+/// memql#3711). That is the whole of the difference between "in the image"
+/// and "in storage": a URI scheme.
+///
+/// status is "live" and systemOwned is true -- createSite's ordinary caller
+/// gets "draft" / false; the portal needs both flipped at materialization
+/// time, which is why createSite (dsl/platform/mutations.memql) accepts them
+/// as optional args instead of hardcoding the operator-created-site defaults.
+///
+/// The hostname is the ONE thing a customer site gets from the portal UI and
+/// the portal gets from the cluster install. It carries the committed default
+/// the same way the Ingress hosts do (memql#3593); an install on another
+/// domain overrides it through the same seam.
+@description("The memQL Portal as site #1")
+seed site portal {
+  id:          "portal"
+  hostname:    "portal.memql.localhost"
+  kind:        "spa"
+  bundleRef:   "file:///app/portal"
+  status:      "live"
+  apiProxy:    true
+  systemOwned: true
+  title:       "memQL Portal"
+}

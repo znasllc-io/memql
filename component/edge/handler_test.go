@@ -255,9 +255,8 @@ func TestAPIPrefixIsRefusedWithNoAPITarget(t *testing.T) {
 	}
 }
 
-// The CSP names the SITE's own origin, not the identity base URL the portal
-// handler uses today. A shared policy across every hosted site would be
-// either uselessly permissive or wrong for most of them.
+// The CSP names the SITE's own origin. A shared policy across every hosted
+// site naming every site everywhere would be uselessly permissive.
 func TestCSPNamesTheSiteOrigin(t *testing.T) {
 	rec := serve(t,
 		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
@@ -268,6 +267,52 @@ func TestCSPNamesTheSiteOrigin(t *testing.T) {
 	}
 	if !containsOrigin(csp, "https://shop.example.com") {
 		t.Errorf("CSP does not name the site origin: %q", csp)
+	}
+}
+
+// The CSP ALSO names the cluster's identity origin -- fix round 2
+// (memql#3711): the original per-site policy accounted for data through
+// /_memql/* and forgot authentication. An ordinary site with no special
+// configuration (no APIProxy, nothing portal-specific about it at all)
+// still gets the identity origin in connect-src, because ANY site with
+// signed-in users performs the OAuth token exchange with fetch() directly
+// against identity, and that is a different origin from the site's own.
+func TestCSPNamesTheIdentityOrigin(t *testing.T) {
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER", "https://identity.example.com")
+
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
+		map[string]string{"index.html": "ROOT"}, "/")
+	csp := rec.Header().Get("Content-Security-Policy")
+	if csp == "" {
+		t.Fatal("no Content-Security-Policy header")
+	}
+	if !containsOrigin(csp, "https://identity.example.com") {
+		t.Errorf("CSP does not name the identity origin: %q", csp)
+	}
+	// Still the site's own origin too -- this is additive, not a swap.
+	if !containsOrigin(csp, "https://shop.example.com") {
+		t.Errorf("CSP dropped the site origin when adding the identity one: %q", csp)
+	}
+}
+
+// No identity origin configured (a cluster with no MEMQL_DOMAIN / no
+// verifier env set -- e.g. a bare test harness) must not inject an empty or
+// malformed token into the header. connect-src still gets ONE token per
+// origin, never a stray trailing space parsed as a new (empty) source.
+func TestCSPOmitsTheIdentityOriginWhenUnconfigured(t *testing.T) {
+	// Explicit empties, not just an unset var: guards against the ambient
+	// process environment (a developer's shell, a CI runner) leaking a real
+	// value into what this test means as "unconfigured".
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER", "")
+	t.Setenv("MEMQL_IDENTITY_BASE_URL", "")
+
+	rec := serve(t,
+		&Site{ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa"},
+		map[string]string{"index.html": "ROOT"}, "/")
+	csp := rec.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "  ") {
+		t.Errorf("CSP has a double space where the omitted identity origin should have left none: %q", csp)
 	}
 }
 

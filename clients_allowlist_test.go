@@ -20,7 +20,7 @@ import (
 // for itself -- the same self-disabling shape this file's placement (see below)
 // exists to avoid.
 var allowedClients = map[string]string{
-	"portal": "the platform's own graphical operations console; served by component/portal (memql#3314)",
+	"portal": "the platform's own graphical operations console; served by component/edge as site #1, the same as any customer site (memql#3711)",
 }
 
 // TestClientsDirectoryIsAllowlisted is the structural half of engine product

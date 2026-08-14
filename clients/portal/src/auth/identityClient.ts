@@ -29,7 +29,9 @@
 // docs/public/operate/auth/identity-service.md prescribes -- it sidesteps a
 // Safari HTTP/2 connection-coalescing bug that intermittently fails
 // cross-origin credentialed XHR to a sibling host on the same wildcard cert.
-// See component/portal/config.go.
+// See component/edge/runtimeconfig.go, which derives both fields now (the
+// portal is site #1, memql#3711; component/portal/config.go, which used to
+// own this, is retired).
 
 import type { PortalRuntimeConfig } from "../cluster/config";
 

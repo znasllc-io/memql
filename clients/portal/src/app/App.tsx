@@ -12,11 +12,12 @@ import { ClusterProvider, type ClusterProviderProps } from "../cluster/ClusterPr
 // the session -- not the other way round. It sits inside <BrowserRouter>
 // because signing in has to remember the current route.
 //
-// The basename is derived from Vite's `base` rather than hardcoded. The mount
-// point (/portal/) is decided in exactly one place -- vite.config.ts -- and
-// the Go handler is configured to match; a second literal here is a second
-// thing to keep in step. The trailing slash is stripped because react-router
-// wants "/portal", not "/portal/".
+// The basename is derived from Vite's `base` rather than hardcoded. The
+// portal's origin (memql#3711: site #1, served at its own hostname's root)
+// is decided in exactly one place -- vite.config.ts -- and the edge serves
+// whatever bundleRef names to match; a second literal here is a second thing
+// to keep in step. The trailing slash is stripped because react-router wants
+// "" for a root mount, not "/".
 //
 // No props. Every seam the tests need (the identity fetch, storage, crypto,
 // navigation, the dial) is a prop on the provider that owns it, and the tests

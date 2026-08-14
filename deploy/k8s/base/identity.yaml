@@ -174,9 +174,12 @@ spec:
             # cockpit and the portal, which are the two halves of one ops edge.
             # The product SPA's OAuth client is registered per-environment via
             # the identity-product-config overlay patch (staging / prod). The
-            # portal's redirect URI carries its mount point -- the bundle is
-            # served at /portal/, so its callback route lives inside it.
-            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://api.staging.example.com/portal/auth/callback"]}]' }
+            # portal is site #1 (memql#3711): its bundle is served at its OWN
+            # hostname (the edge, not a /portal/ sub-path of the api front
+            # door, which is what it briefly was after the api.<domain>
+            # rename and before this), so its redirect URI is that origin's
+            # own /auth/callback.
+            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://portal.staging.example.com/auth/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.

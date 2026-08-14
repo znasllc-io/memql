@@ -6,10 +6,12 @@ package memql
 //
 // WHY THE HOP EXISTS. DeployControlService shells out against an on-disk
 // overlay checkout, so it is built `//go:build identity` and exists only on the
-// identity node. The memQL portal is served ONLY by the bff
-// (deploy/k8s/components/engine-bff/bff.yaml is the sole manifest that sets
-// MEMQL_PORTAL_DIST) and a SPA dials the origin that served it, so the portal's
-// stream always terminates on a bff. The result was a Deployments surface that
+// identity node. The memQL portal's BUNDLE is served by the edge, as site #1
+// (component/edge, memql#3711), but its gRPC/WS stream still terminates on a
+// bff -- the edge's /_memql/* reverse proxy (memql#3712) forwards it there
+// for any site with apiProxy=true, the portal included -- so the portal's
+// stream still always lands on a bff even though a different node now serves
+// its static bytes. The result was a Deployments surface that
 // rendered populated -- history is ordinary v1:cluster:deployment concept rows
 // read over the normal query path -- and answered UNIMPLEMENTED the moment a
 // button was pressed, because deploycontrol.Dispatch short-circuits when the

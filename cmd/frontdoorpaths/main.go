@@ -165,14 +165,20 @@ type declaration struct {
 //
 // These are CLAIMS, so they are checked rather than trusted --
 // TestAggregateClaimsAreTrue calls each one and asserts every path it returns is
-// in the emitted set. The day PublicPaths() stops appending PortalPaths(), that
-// test fails instead of the portal bundle silently losing its route.
+// in the emitted set.
+//
+// PortalPaths() used to be one of these -- component/portal mounted the
+// bundle on the bff at /portal/, so PublicPaths() appended it here. It is
+// retired (memql#3711: the portal is site #1, served by the edge node, not
+// the bff): the classification is gone along with the function, not left
+// behind as a stale claim about a route nobody decided about. EdgePaths(), in
+// notServedByTheBFF below, is what now says the bff does not serve the
+// portal's bundle.
 var reachedThroughAggregate = map[string]declaration{
 	"HealthzPaths": {"appended by PublicPaths()", server.HealthzPaths},
 	"ReadyzPaths":  {"appended by PublicPaths()", server.ReadyzPaths},
 	"LivezPaths":   {"appended by PublicPaths()", server.LivezPaths},
 	"AuthPaths":    {"appended by PublicPaths()", server.AuthPaths},
-	"PortalPaths":  {"appended by PublicPaths()", server.PortalPaths},
 	"JWKSPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
 		server.JWKSPaths},
 	"IdentityDiscoveryPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
@@ -259,8 +265,9 @@ var servedButNotExternallyRouted = map[string]declaration{
 		"sdk/ and editors/: every consumer of the concept registry reads it over gRPC via " +
 		"ConceptsListMsg (clients/portal/src/cluster/useConcepts.ts, sdk/go/client/queries.go, " +
 		"editors/vscode/src/views/conceptsTree.ts), which is where the endpoint-protocol " +
-		"policy puts this. The portal's /concepts is a client-side ROUTE under /portal/, not " +
-		"this endpoint. Publishing an unauthenticated schema feed nobody dials is cost " +
+		"policy puts this. The portal's /concepts is a client-side ROUTE (root-relative since " +
+		"memql#3711 -- the portal is site #1, no /portal/ mount prefix), not this endpoint. " +
+		"Publishing an unauthenticated schema feed nobody dials is cost " +
 		"without benefit; route it the day an HTTP caller exists.",
 		server.ConceptAPIPaths},
 }

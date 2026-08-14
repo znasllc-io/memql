@@ -28,10 +28,11 @@ in what the portal does:
 - **Its own npm package**, not a workspace member. `clients/portal/package.json`
   stands alone and consumes `sdk/ts` + `sdk/ts-viewkit` as `file:`
   dependencies.
-- **Served by a Go package** (`component/portal`) from a directory named by an
-  env var, mounted on a node's HTTP server at a sub-path. Not `go:embed` — see
-  `component/portal/doc.go` for why that choice is structural rather than
-  stylistic.
+- **Served as an ordinary hosted site** (`component/edge`, memql#3711): the
+  portal is site #1, resolved by hostname and served from a directory a
+  `v1:platform:site` row names (`bundleRef`), the same mechanism any other
+  hosted site uses. Not `go:embed` — see `component/edge/doc.go` for why that
+  choice is structural rather than stylistic.
 - **Its own CI lane** (`portal-checks`) and its own path-filter bucket, and the
   bucket lists its `file:` dependencies. A consumer's bucket that omits the
   packages it compiles against is a lane that silently stops running; the repo
@@ -83,13 +84,13 @@ The single script behind all five is `scripts/portal/build.sh`, and the
 Dockerfile's portal stage runs the same script — so an image bundle and a
 locally built one cannot diverge in how they were produced.
 
-To serve a locally built bundle from a binary you are running yourself:
+The portal is site #1 (memql#3711): its row's `bundleRef` names the directory
+the edge serves it from, the same mechanism any hosted site uses. There is no
+longer an env var that repoints it -- `MEMQL_PORTAL_DIST` retired along with
+`component/portal`. To serve a locally built bundle instead of the seeded
+`file:///app/portal`, call the `updateSiteBundle` mutation with
+`siteId: "portal"` and a `bundleRef` naming a `clients/portal/dist` the edge
+pod can read.
 
-```bash
-make portal-build
-MEMQL_PORTAL_DIST=clients/portal/dist go run .   # then open /portal/ on the HTTP port
-```
-
-In the local cluster the portal is already there, at the same front door
-everything else uses: **<https://api.memql.localhost/portal/>** after
-`make up`.
+In the local cluster the portal is already there, at its own front-door host:
+**<https://portal.memql.localhost/>** after `make up`.

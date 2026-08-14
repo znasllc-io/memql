@@ -409,25 +409,32 @@ mutate inboundRequest updateInboundRequestStatus {
 /// Create a site. Defaults are applied with ?? because a concept-field @default is never applied
 /// on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to
 /// serve a row whose status it cannot read.
+///
+/// status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created
+/// site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql,
+/// memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must
+/// not be deletable by an operator who does not realize it is how sites get managed at all.
 @actor
 @description("Create a site")
 mutate site createSite {
   args {
-    siteId    string!
-    hostname  string!
-    kind      enum("spa", "static")
-    bundleRef string!
-    apiProxy  boolean
-    title     string
+    siteId       string!
+    hostname     string!
+    kind         enum("spa", "static")
+    bundleRef    string!
+    status       enum("draft", "live", "disabled")
+    apiProxy     boolean
+    systemOwned  boolean
+    title        string
   }
   insert {
     accept { hostname, bundleRef }
     stamp {
       id:          args.siteId
       kind:        args.kind ?? "spa"
-      status:      "draft"
+      status:      args.status ?? "draft"
       apiProxy:    args.apiProxy ?? false
-      systemOwned: false
+      systemOwned: args.systemOwned ?? false
       title:       args.title ?? args.hostname
       createdAt:   now
       createdBy:   actor.userId

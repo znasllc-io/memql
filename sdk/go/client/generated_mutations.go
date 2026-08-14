@@ -5582,17 +5582,22 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 }
 
 // CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
+// status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
 	SiteId   string
 	Hostname string
 	// Enum: spa | static
-	Kind        string
-	BundleRef   string
-	ApiProxy    bool
-	ApiProxySet bool // set true to send apiProxy; required because zero-value bool is ambiguous
-	Title       string
+	Kind      string
+	BundleRef string
+	// Enum: draft | live | disabled
+	Status         string
+	ApiProxy       bool
+	ApiProxySet    bool // set true to send apiProxy; required because zero-value bool is ambiguous
+	SystemOwned    bool
+	SystemOwnedSet bool // set true to send systemOwned; required because zero-value bool is ambiguous
+	Title          string
 }
 
 // CreateSite calls the engine mutation createSite.
@@ -5623,12 +5628,26 @@ func CreateSiteBuild(args CreateSiteArgs) string {
 	}
 	b.WriteString("bundleRef: ")
 	b.WriteString(quoteMemQL(args.BundleRef))
+	if args.Status != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	if args.ApiProxySet {
 		if b.Len() > 20 {
 			b.WriteString(", ")
 		}
 		b.WriteString("apiProxy: ")
 		b.WriteString(fmt.Sprintf("%v", args.ApiProxy))
+	}
+	if args.SystemOwnedSet {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("systemOwned: ")
+		b.WriteString(fmt.Sprintf("%v", args.SystemOwned))
 	}
 	if args.Title != "" {
 		if b.Len() > 20 {

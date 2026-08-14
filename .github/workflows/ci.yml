@@ -422,12 +422,21 @@ jobs:
             #
             # scripts/portal/** is the install/build cycle every portal command
             # goes through, so a change there breaks the lane's own recipe.
+            #
+            # component/portal/** WAS here too: the Go code that served the
+            # bundle, on the theory that a bug there could break the portal in
+            # the same sense a bad build.sh could. It is retired (memql#3711
+            # -- the portal is site #1, served by the GENERIC component/edge,
+            # not portal-specific Go). component/edge/** is NOT added in its
+            # place: the edge serves every hosted site, not only the portal,
+            # so folding it into this npm-only lane's trigger set would make
+            # an unrelated customer-site change re-run portal-checks for no
+            # reason. component/edge's own Go test suite covers it instead.
             portal:
               - 'clients/**'
               - 'sdk/ts/**'
               - 'sdk/ts-viewkit/**'
               - 'scripts/portal/**'
-              - 'component/portal/**'
 
             # ---------------------------------------------------------------
             # TARGET-MODULE BUCKETS (memql#3163 / design D3)
