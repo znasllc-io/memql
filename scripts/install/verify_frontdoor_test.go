@@ -688,6 +688,36 @@ func TestVerifyFrontDoorPrecedenceFailsWhenTheWildcardSwallowsAnExactHost(t *tes
 	}
 }
 
+// TestVerifyFrontDoorPrecedenceFailsForAHostThatIsNotTheFirst: the failure path
+// must not depend on position either.
+//
+// Every other failure test swallows `api.`, which is `host_list[0]` -- so a
+// regression that only ever compared the first host would keep them all green.
+// That is not hypothetical in this file: resolving the apex from `host_list[0]`
+// alone is precisely the bug that made the apex short-circuit
+// position-dependent, and this is the same assumption one function over.
+func TestVerifyFrontDoorPrecedenceFailsForAHostThatIsNotTheFirst(t *testing.T) {
+	env := fdWorld(t,
+		map[string]string{fdAPI: "127.0.0.1", fdIdentity: "127.0.0.1"},
+		map[string]string{
+			fdAPI:      "0|2|200|" + fdHealth("bff", "bff-1"),
+			fdIdentity: "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-9"),
+			fdProbe:    "0|2|200|" + fdHealth(fdEdgeNodeType, "edge-2"),
+		},
+	)
+	stdout, _, code := fdRun(t, env)
+	if code != 5 {
+		t.Fatalf("exit %d, want 5 -- a swallowed SECOND host must fail the run\nstdout: %s", code, stdout)
+	}
+	_, res := fdParse(t, stdout)
+	if c := fdFind(t, res, "precedence", fdIdentity); c.Status != "failed" {
+		t.Errorf("precedence/%s status = %q, want failed: %s", fdIdentity, c.Status, c.Detail)
+	}
+	if c := fdFind(t, res, "precedence", fdAPI); !c.Passed {
+		t.Errorf("precedence/%s should still pass: %s", fdAPI, c.Detail)
+	}
+}
+
 // TestVerifyFrontDoorPrecedencePassesOnPositiveIdentification pins the shape of
 // a pass: the wildcard is live, and each exact host is answered by a DIFFERENT
 // node type, named in the detail. This is the by-hand measurement the epic
