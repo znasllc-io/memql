@@ -207,13 +207,26 @@ logic noAnchor {
 	t.Fatal("no diagnostic for noAnchor")
 }
 
-// TestBundleDiagnostic_OmittedForNonParseFailure covers the second omit path: a
-// failure with no recoverable parser position (here concept resolution against
-// a concept absent from both the core registry and the bundle) reports the error
-// text but ZERO position.
-func TestBundleDiagnostic_OmittedForNonParseFailure(t *testing.T) {
+// TestBundleDiagnostic_AnchoredForNonParseFailure covers a failure that carries
+// no parser position of its own -- here concept resolution against a concept
+// absent from both the core registry and the bundle. This USED TO BE the second
+// omit path and is no longer one (memql#3801): the diagnostic now anchors to the
+// erroring construct's signature line.
+//
+// The rule this looks like it bends is "never a guessed line", and it does not
+// bend it. A guessed line is one inferred from an error that could have come
+// from anywhere in the body. The signature line is KNOWN -- the splitter
+// recorded the construct's bundle offset, and `query doesNotExistConcept
+// queryDangling` is where the unresolvable name is literally written. Omitting
+// it sent the author to the top of a bundle to hunt for a construct the engine
+// could already name.
+//
+// The genuine omit path is unchanged and still covered by
+// TestBundleDiagnostic_OmittedWhenNoAnchor: a construct fed directly, with no
+// bundle offset, has no anchor to report and reports none.
+func TestBundleDiagnostic_AnchoredForNonParseFailure(t *testing.T) {
 	// Valid syntax; binds a signature concept that does not exist -> resolution
-	// error, which carries no ParseError position.
+	// error, which carries no ParseError position of its own.
 	bundle := `@description("dangling concept")
 query doesNotExistConcept queryDangling {
   args {
@@ -226,7 +239,11 @@ query doesNotExistConcept queryDangling {
 	if d.OK {
 		t.Fatal("expected queryDangling to fail concept resolution")
 	}
-	if d.Line != 0 || d.Column != 0 {
-		t.Errorf("expected omitted position for a non-parse failure, got line=%d col=%d (err=%q)", d.Line, d.Column, d.Error)
+	// Line 2 is the signature; line 1 is the @description that precedes it.
+	if d.Line != 2 || d.Column != 1 {
+		t.Errorf("expected the signature-line anchor (2:1), got line=%d col=%d (err=%q)", d.Line, d.Column, d.Error)
+	}
+	if d.Error == "" {
+		t.Error("expected the resolution error text to survive alongside the anchor")
 	}
 }

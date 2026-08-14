@@ -39,14 +39,14 @@ day it is declared, with no renderer update and no release.
 ```ts
 import {
   renderRowList,
-  renderDetail,
+  renderValueView,
   renderToHtml,
   escapeHtml,
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
 
 const listHtml = renderToHtml(renderRowList(rows, concept, selectedRowId));
-const detailHtml = renderToHtml(renderDetail(row));
+const detailHtml = renderToHtml(renderValueView(row));
 ```
 
 `concept` is a `ConceptLike` -- `{ id, entity, displayCard? }`, mirroring
@@ -57,10 +57,49 @@ SDK's wire types.
 
 Note the asymmetry between the two renderers, which is deliberate: the row LIST
 expects a flattened row (payload merged up, because a display card names
-payload fields directly), while the DETAIL view expects the raw nested wire
+payload fields directly), while the VALUE VIEW expects the raw nested wire
 shape -- flattening there would drop the intrinsics an operator came to read.
 The VS Code consumer does that flattening in
 `editors/vscode/src/state/rowProjection.ts`.
+
+## The value viewer
+
+`renderValueView` is **the** value surface. Not one of several: a row's detail,
+a run's result, an automation trace and its per-step output all render through
+it, and a consumer that reaches for `JSON.stringify` into a `<pre>` has
+reintroduced the problem it exists to solve.
+
+`renderDetail` was the earlier one and is **gone** (memql#3751). It walked a
+row and emitted every node, always expanded, with no types, no filter and no
+ceiling -- so a large payload produced a page nobody could read and a deeply
+nested one produced a page the webview struggled to draw. It has no deprecation
+shim and no alias; reaching for the name gets a compile error, which is the
+intent.
+
+What the replacement adds, and why each one is not a nicety:
+
+- **Collapsing.** Subtrees below `expandDepth` start closed, so the shape is
+  legible before the contents are.
+- **Type badges.** `"12"` and `12` render identically as text and mean
+  different things to the engine.
+- **A filter.** Case-insensitive, matched against keys *and* scalar values, so
+  finding a field in a wide row does not mean scrolling it.
+- **Bounds.** `maxStringLength` truncates a long scalar, `pageSize` pages a long
+  array, and `nodeBudget` is a hard ceiling on nodes emitted. A value large
+  enough to hang the host renders as much as the budget allows and says it
+  stopped -- rather than being drawn, or silently dropped.
+- **Cycle safety.** The ANCESTOR chain is tracked, not every object ever seen,
+  so a value that legitimately appears twice renders twice and only a real
+  cycle is cut.
+
+Copy affordances are **off** unless `copy: true`, because they do nothing until
+the host attaches the delegated listener described by `VALUE_VIEW_ATTRS` -- and
+a button that does nothing is worse than no button. Every node carries a
+copyable path (`joinPath`), rooted at whatever `path` the caller passes.
+
+The root's entries render directly rather than inside a disclosure of their
+own: the root IS the thing being looked at, and putting it behind a collapsed
+node would hide the whole view.
 
 ## Styling
 
@@ -92,10 +131,19 @@ ${viewKitStyles}
 
 ## API
 
+The core rendering surface. The package also exports the element library
+(table, calendar, timeline, kanban, charts, ...), the fitness and arrangement
+layers, and the display-card and value-formatting helpers -- `src/index.ts` is
+the full list.
+
 | Export | Purpose |
 | --- | --- |
 | `renderRowList(rows, concept, selectedRowId?)` | The row list, projected through the concept's display card. |
-| `renderDetail(row)` | Recursive walk of a row's full nested shape (payload / provenance / intrinsics stay distinct). |
+| `renderValueView(value, options?)` | **The** value surface: recursive, collapsing, type-badged, filterable and bounded. Keeps payload / provenance / intrinsics distinct. |
+| `valueTypeName(value)` | The type name a badge shows. |
+| `joinPath(segments)` | A node's copyable path. |
+| `VALUE_VIEW_ATTRS` | The data attributes a host's delegated listener reads. |
+| `DEFAULT_EXPAND_DEPTH` / `_PAGE_SIZE` / `_MAX_STRING_LENGTH` / `_NODE_BUDGET` | The defaults `ValueViewOptions` overrides. |
 | `rowDisplayId(row)` | The row's id as a display string; `""` when absent or not a string. |
 | `renderToHtml(node)` | Serialise a `VNode` tree to an HTML string. |
 | `h(tag, attrs, children?)` / `text(value)` | `VNode` constructors. |

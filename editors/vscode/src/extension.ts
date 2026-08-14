@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  CancellationToken,
   commands,
   Diagnostic,
   DiagnosticSeverity,
@@ -71,6 +72,8 @@ import {
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import { TrainingCodeLensProvider } from './constructs/trainingLens.js';
+import { TrainingDecorations } from './constructs/decorations.js';
 import { defaultReceiptPath } from './install/receipt.js';
 import { defaultRunsDir } from './state/runLog.js';
 import {
@@ -107,10 +110,12 @@ import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js'
 import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
 import { DeploymentPanel } from './webview/deploymentPanel.js';
 import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
+import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
-import { ConceptsTreeProvider } from './views/conceptsTree.js';
+import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
+import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
 import { ConstructPanel } from './webview/constructPanel.js';
 import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
 import { ConstructsClient } from '@znasllc-io/memql-sdk-core/constructs';
@@ -493,6 +498,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   // LOADED, read from the live registries -- so a promoted construct appears
   // the moment it is promoted. A different question from the pack browser's,
   // which answers "show me this file".
+  // The read-only marking (memql#3762) rides the SAME catalog fetch. It has to:
+  // it classifies a file by the origin the catalog reports, so a second fetch
+  // would be a second answer that can disagree with the tree about which files
+  // are core.
+  const readonlyMarker = new ReadonlyMarker(context.workspaceState);
+
   const constructsTree = new ConstructsTreeProvider({
     connections,
     load: async (): Promise<CatalogState> => {
@@ -500,20 +511,40 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (dispatcher === undefined) {
         // NOT AN EMPTY CATALOG. An empty list reads as "this cluster has no
         // constructs", which is the one wrong answer available here.
+        //
+        // Undefined for the marker too, and for the same reason spelled the
+        // other way round: no cluster is not an answer, so nothing is marked
+        // rather than everything.
+        await readonlyMarker.update(undefined, undefined);
         return { kind: 'notConnected' };
       }
       try {
         const result = await new ConstructsClient(dispatcher).listConstructs();
+        // `currentRunCluster` deliberately, not a second read of clusters.yaml:
+        // it is what the run path's write confirmation consults, so "may I edit
+        // this file" and "will this write ask first" cannot disagree about
+        // whether a cluster is local.
+        await readonlyMarker.update(
+          result.constructs,
+          connections === undefined ? undefined : currentRunCluster(clustersPath, connections)
+        );
         return catalogFrom(result.constructs);
       } catch (err) {
         // A cluster predating the message answers with an envelope the client
         // does not recognise, which throws -- rendered as a stated version
         // mismatch naming ListConstructs, never as a blank view.
+        //
+        // A FAILED FETCH CLEARS THE MARKING as surely as a disconnection does.
+        // Keeping the last cluster's answer would leave a developer's checkout
+        // marked read-only on the authority of a call that just failed.
+        await readonlyMarker.update(undefined, undefined);
         return classifyCatalogFailure(err);
       }
     },
   });
   context.subscriptions.push(
+    readonlyMarker,
+    window.registerFileDecorationProvider(readonlyMarker),
     window.registerTreeDataProvider('memqlConstructs', constructsTree),
     commands.registerCommand('memql.constructs.refresh', () => constructsTree.refresh()),
     // Not palette-invokable ("when": "false"): it needs the construct the tree
@@ -527,10 +558,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
-  const conceptsTree = new ConceptsTreeProvider(connections);
+  const conceptsTree = new DataTreeProvider(connections);
   context.subscriptions.push(
-    window.registerTreeDataProvider('memqlConcepts', conceptsTree),
-    commands.registerCommand('memql.concepts.refresh', () => conceptsTree.refresh())
+    window.registerTreeDataProvider('memqlData', conceptsTree),
+    commands.registerCommand('memql.data.refresh', () => conceptsTree.refresh())
   );
 
   context.subscriptions.push(
@@ -541,7 +572,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // (or a manifest edit that forgets the palette exclusion) invoking this
     // with no argument, which would otherwise throw inside ConceptPanel.open
     // on `concept.id`.
-    commands.registerCommand('memql.concepts.open', (concept?: Concept) => {
+    commands.registerCommand('memql.data.open', (concept?: Concept) => {
       if (connections === undefined || concept === undefined) {
         return;
       }
@@ -1097,8 +1128,8 @@ function registerRunSurface(
   // renders no Run affordance at all, so there is nothing to click and no
   // implication that there could be.
   if (client !== undefined) {
-    const lensProvider = new RunnableCodeLensProvider({
-      sendRequest: (method, params, token) =>
+    const lspBridge = {
+      sendRequest: (method: string, params: unknown, token?: CancellationToken) =>
         token === undefined
           ? (client as LanguageClient).sendRequest(method, params)
           : (client as LanguageClient).sendRequest(method, params, token),
@@ -1106,9 +1137,29 @@ function registerRunSurface(
         (client as LanguageClient).initializeResult?.capabilities.experimental as
           | Record<string, unknown>
           | undefined,
-    });
+    };
+    const lensProvider = new RunnableCodeLensProvider(lspBridge);
     context.subscriptions.push(
       languages.registerCodeLensProvider({ language: 'memql' }, lensProvider)
+    );
+
+    // The training surface (memql#3761): state label above each signature, a
+    // gutter mark, and the untrained/drifted count in the status bar.
+    //
+    // BOTH FEATURE-DETECT on `memqlTrainingState`, so until #3759 ships every
+    // server answers "no" and this surface is simply ABSENT. That is the
+    // correct behaviour rather than a degraded one -- a training UI that
+    // rendered `unknown` for everything would say a cluster has none of these
+    // constructs, which is the one wrong answer available here.
+    const trainingLens = new TrainingCodeLensProvider();
+    trainingLens.setClient(lspBridge);
+    const trainingDecorations = new TrainingDecorations();
+    trainingDecorations.setClient(lspBridge);
+    trainingDecorations.activate();
+    context.subscriptions.push(
+      trainingLens,
+      trainingDecorations,
+      languages.registerCodeLensProvider({ language: 'memql' }, trainingLens)
     );
   }
 
@@ -1297,6 +1348,15 @@ function buildRunEngine(conns: ConnectionManager): RunEngine | undefined {
 // as the walk reaches it, which is the same guarantee it had before: whatever
 // the editor holds at that moment.
 async function assembleForTarget(target: RunTarget, workspaceRoot: string | undefined) {
+  // A CATALOG TARGET HAS NOTHING TO ASSEMBLE (memql#3753). Its uri names the
+  // catalog rather than a file, and for a promoted construct there is no file
+  // anywhere on the machine. An empty bundle validates trivially, injects
+  // nothing, and leaves the run invoking the definition the cluster already
+  // has -- which is exactly what running from a catalog means. It is also what
+  // makes `ranDeployedDefinition` true, so the Result view says so.
+  if (isCatalogUri(target.uri)) {
+    return { sources: '', files: [] };
+  }
   const uri = Uri.parse(target.uri);
   const activePath = uri.fsPath;
   const open = workspace.textDocuments.find((d) => d.uri.toString() === target.uri);

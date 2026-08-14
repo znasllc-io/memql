@@ -2,7 +2,7 @@ module github.com/znasllc-io/memql
 
 go 1.26.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.8.0

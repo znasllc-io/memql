@@ -1,6 +1,7 @@
 package sense
 
 import (
+	"sort"
 	"strings"
 	"testing"
 )
@@ -71,26 +72,58 @@ func TestSignatureHelp_ActiveParameterTracksComma(t *testing.T) {
 	}
 }
 
+// TestSignatureHelp_Builtin sweeps every builtin carrying a signature, in
+// sorted order -- no randomness to flake on, and every builtin actually
+// checked, one named subtest each.
+//
+// It used to pick ONE builtin at random -- `for n, def := range
+// BuiltinFunctions { ... break }` over a map, which Go iterates in a
+// randomised order -- and assert that was the only signature offered. Two
+// things were wrong with that: the subject changed on every run, so a
+// failure never said which of the 34 builtins it was (or that the other 33
+// went untested that run); and the assertion itself is untrue for
+// `contains`, which is also a relationship-traversal wrapper and so offers
+// TWO readings (see TestSignatureHelpContainsOffersBothReadings) -- the
+// random pick surfaced that as a flake on roughly one run in 34 instead of a
+// reliable, attributable failure (memql#3735). The sibling handler test,
+// TestSignatureHelpHandler_Builtin in cmd/memql-lsp/signaturehelp_test.go,
+// hit the same bug and was fixed the same way in memql#3779 (commit
+// 884655f2); this mirrors that shape rather than inventing a second one.
+//
+// The property asserted is the one true of all 34: the builtin's own
+// reading is AMONG the signatures offered, rather than "is the only one",
+// which is exactly what `contains` breaks.
 func TestSignatureHelp_Builtin(t *testing.T) {
-	// Pick any builtin that has parameters, so the builtin branch is exercised.
-	var name string
-	for n, def := range BuiltinFunctions {
+	names := make([]string, 0, len(BuiltinFunctions))
+	for name, def := range BuiltinFunctions {
 		if def.Signature != "" {
-			name = n
-			break
+			names = append(names, name)
 		}
 	}
-	if name == "" {
-		t.Skip("no builtin with a signature available")
+	sort.Strings(names)
+	if len(names) == 0 {
+		t.Fatal("no builtin carries a signature; the projection from dslspec is empty")
 	}
+
 	s := New(&stubRegistry{})
-	src, line, col := funcCallSource(name)
-	res := s.SignatureHelp(src, line, col)
-	if res == nil || len(res.Signatures) != 1 {
-		t.Fatalf("expected a builtin signature for %q, got %+v", name, res)
-	}
-	if res.Signatures[0].Label != BuiltinFunctions[name].Signature {
-		t.Errorf("builtin signature label = %q; want %q", res.Signatures[0].Label, BuiltinFunctions[name].Signature)
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			src, line, col := funcCallSource(name)
+			res := s.SignatureHelp(src, line, col)
+			if res == nil || len(res.Signatures) == 0 {
+				t.Fatalf("no signature offered for builtin %q", name)
+			}
+
+			want := BuiltinFunctions[name].Signature
+			var labels []string
+			for _, sig := range res.Signatures {
+				if sig.Label == want {
+					return
+				}
+				labels = append(labels, sig.Label)
+			}
+			t.Errorf("the builtin's own reading %q is not among the signatures offered: %v", want, labels)
+		})
 	}
 }
 

@@ -21,7 +21,7 @@ export type ConceptTreeNode =
   // a row instead, matching the precedent in ClustersTreeProvider.
   | { kind: "error"; message: string };
 
-export class ConceptsTreeProvider implements vscode.TreeDataProvider<ConceptTreeNode> {
+export class DataTreeProvider implements vscode.TreeDataProvider<ConceptTreeNode> {
   private readonly changed = new vscode.EventEmitter<ConceptTreeNode | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
 
@@ -77,7 +77,7 @@ export class ConceptsTreeProvider implements vscode.TreeDataProvider<ConceptTree
         "Failed to load concepts",
         vscode.TreeItemCollapsibleState.None,
       );
-      item.contextValue = "memqlConceptsError";
+      item.contextValue = "memqlDataError";
       item.description = node.message;
       item.tooltip = `ERROR: ${node.message}`;
       item.iconPath = new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
@@ -103,7 +103,7 @@ export class ConceptsTreeProvider implements vscode.TreeDataProvider<ConceptTree
     item.tooltip = node.concept.description !== "" ? node.concept.description : node.concept.id;
     item.iconPath = new vscode.ThemeIcon("symbol-class");
     item.command = {
-      command: "memql.concepts.open",
+      command: "memql.data.open",
       title: "Open Concept",
       arguments: [node.concept],
     };

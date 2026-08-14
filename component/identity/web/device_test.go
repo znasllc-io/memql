@@ -128,11 +128,14 @@ func newDeviceWebServer(t *testing.T) (*Server, *fakeDeviceAdapter, string) {
 	srv.SetDeviceFlow(&DeviceFlow{
 		Adapter: adapter,
 		Issuer:  iss,
-		ClientName: func(_ context.Context, clientId string) string {
+		// Operator-configured (selfRegistered=false), which is what this
+		// harness's other assertions assume: no NOT VERIFIED badge.
+		// consent_device_unverified_test.go drives the self-registered side.
+		ClientDisplay: func(_ context.Context, clientId string) (string, bool) {
 			if clientId == "vscode-memql" {
-				return "memQL for VS Code"
+				return "memQL for VS Code", false
 			}
-			return ""
+			return "", false
 		},
 	})
 

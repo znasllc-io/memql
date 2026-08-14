@@ -96,6 +96,26 @@ low-level debugging, but it is **not** part of the connection path.
 - **Environment-specific commands or code branches.** No `make run-local`, no
   `if env == "local"` in application logic. The environment is *data* (the
   overlay + the registry), read the same way everywhere.
+
+  Since memql#3766 this half of the rule is **enforced by a test** rather than
+  by review, for the environments where it bites hardest.
+  `TestNoEnvironmentBranchingInEngineCode` (`environment_branching_test.go`)
+  fails the build when engine code so much as **names** `prod`, `production` or
+  `staging` — as a comparison, a `switch` case, or a map key, because those are
+  the same thing with different punctuation and a gate that looked only for
+  `==` would miss the map. `component/deploycontrol` is exempted, with its
+  reason recorded in the file: translating between the deployment record's enum
+  and the console's env is that component's entire subject.
+
+  `development` and `local` are deliberately **outside** the gate. They
+  distinguish deploy *targets* — a k3d cluster on a laptop versus AKS, which
+  really are different infrastructure reached by different machinery — and two
+  live sites depend on that distinction (`deploycontrol` refusing the retired
+  `docker-local` provider; `app/cluster.go` labelling a development cluster's
+  provider). Neither can tell staging from production, which is the boundary
+  that matters: those two run the **same images from the same base** in two
+  namespaces of one cluster, so any code able to tell them apart is the second
+  way to deploy this standard rejects.
 - **A second way to deploy.** Local uses the same base+overlay+ArgoCD path as
   the cloud. `make up` is that path on k3d, not a bespoke script.
 - **"It's just local, we'll do it differently."** The moment local diverges in
@@ -111,6 +131,23 @@ The base + overlay + component split is how the standard is enforced mechanicall
   replicas, the domain/cert/DNS wiring, the ingress-controller annotations.
 - **`deploy/k8s/components/*`** — opt-in capabilities (`engine-bff`,
   `dsl-bundle`) an overlay composes; they add topology without an env branch.
+
+Staging and production are the sharpest instance of that split (memql#3766):
+they are **two namespaces in one cluster**, reconciled by one ArgoCD from one
+base through `overlays/prod` and `overlays/staging`. Diff those two
+kustomizations and the only differences are the namespace, two ConfigMap
+entries, nine replica counts and the image digests —
+`TestBothEnvironmentsRenderTheSameSystem` keeps it that way by rendering both
+and comparing the resource inventories. Two overlay trees maintained in
+parallel were the drift risk this standard exists to prevent; one base with two
+value sets is the standard's own prescription.
+
+The boundary between the two environments' **data** follows the same rule: it
+is a configuration value, not a code path. Each namespace's pods get a
+different Postgres schema search path (`memql_prod, public` /
+`memql_staging, public`) applied to every connection the driver opens, so no
+query has to remember which environment it is in
+(`component/database/search_path.go`).
 
 When you add something new, ask: *is this the shape of the system, or a value?*
 Shape goes in base/components (everywhere); values go in the overlay (per env).

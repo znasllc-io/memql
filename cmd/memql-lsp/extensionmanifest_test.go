@@ -766,13 +766,13 @@ var trustGatedCommands = []string{
 	// rather than "when": "false".
 	"memql.clusters.connection",
 	"memql.clusters.openPortal",
-	"memql.concepts.refresh",
+	"memql.data.refresh",
 	// memql#3309's run surface, plus memql#3310's automation run. The three
 	// run commands themselves (memql.run.construct / .constructWith /
 	// .automation) and the two per-item Runs commands are NOT here: each takes
 	// an argument the palette cannot supply -- a RunTarget or an
 	// AutomationTarget from a CodeLens, a tree node from an inline action --
-	// so they carry "when": "false" like memql.concepts.open, which is a
+	// so they carry "when": "false" like memql.data.open, which is a
 	// stronger gate than the trust clause rather than a weaker one.
 	"memql.runs.refresh",
 	"memql.runs.open",
@@ -802,7 +802,7 @@ const workspaceTrustWhenClause = "isWorkspaceTrusted"
 //     gate for the container, and asserting them covers both.
 //   - COMMANDS do not take a `when`; palette visibility is contributed
 //     separately through menus.commandPalette. Each runtime command needs an
-//     entry there, and memql.concepts.open keeps its existing `"when": false`
+//     entry there, and memql.data.open keeps its existing `"when": false`
 //     (it takes a Concept argument the palette cannot supply).
 func TestRuntimeSurfaceIsTrustGated(t *testing.T) {
 	var contrib extensionContributions

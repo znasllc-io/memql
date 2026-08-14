@@ -95,6 +95,21 @@ type Server struct {
 	passkeyLoginLimiter     *abuse.IPRateLimiter
 	passkeyLoginLimiterOnce sync.Once
 
+	// registerLimiter is the per-IP token bucket for RFC 7591 dynamic
+	// client registration (memql#3793), lazily built per-Server for the
+	// same reason the three above are.
+	//
+	// POST /register is UNAUTHENTICATED by design -- the whole point is
+	// completing the flow with no human present -- and each success writes
+	// a v1:identity:oauthClient row. Nothing bounded how often. The cost is
+	// not only storage: those rows are an input OTHER trust decisions read
+	// (ClientAllowsRedirectURI consults them alongside the static list, and
+	// memql#3716 had to be designed so a registered row could not grant
+	// itself credentialed CORS), so unbounded growth makes the table harder
+	// to audit at exactly the moment an operator needs to.
+	registerLimiter     *abuse.IPRateLimiter
+	registerLimiterOnce sync.Once
+
 	// webauthnCeremonyValue is the relying party + challenge store the
 	// passkey routes use, derived once from Cfg.BaseURL. Built lazily
 	// rather than injected so the RP ID has exactly one source and cannot

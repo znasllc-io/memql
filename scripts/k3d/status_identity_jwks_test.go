@@ -50,9 +50,23 @@ args="$*"
 
 case "$args" in
   *"config use-context"*) exit 0 ;;
-  *"get namespace argocd"*) exit 1 ;;
+  *"get namespace argocd"*)
+    [ -n "$FAKE_ARGOCD" ] && exit 0
+    exit 1 ;;
   *"get namespace memql"*) exit 0 ;;
-  *"get application"*) exit 1 ;;
+esac
+
+# ArgoCD Application reads (memql#3817). Absent FAKE_ARGOCD the Application
+# does not exist, which is what every pre-existing test in this package
+# expects -- status.sh reports it and returns.
+case "$args" in
+  *"get application"*jsonpath*status.sync.status*)    printf '%s' "$FAKE_ARGOCD_SYNC"; exit 0 ;;
+  *"get application"*jsonpath*status.health.status*)  printf '%s' "$FAKE_ARGOCD_HEALTH"; exit 0 ;;
+  *"get application"*jsonpath*targetRevision*)        printf '%s' "$FAKE_ARGOCD_TARGET"; exit 0 ;;
+  *"get application"*jsonpath*conditions*)            printf '%s' "$FAKE_ARGOCD_CONDITIONS"; exit 0 ;;
+  *"get application"*)
+    [ -n "$FAKE_ARGOCD" ] && exit 0
+    exit 1 ;;
 esac
 
 # Identity replica listing (label selector).

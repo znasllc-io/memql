@@ -36,7 +36,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
-| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
+| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**, matching prod; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width (memql#3766) |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
@@ -66,6 +66,19 @@ cross-node mesh bugs reproduces locally instead of only on staging.
   which is why it is now a hard prerequisite (memql#3560). On macOS the system
   keychain covers Safari and Chrome; only Firefox needs NSS, so it is not
   required there.
+
+  Every `make secrets` checks for it, not only the first (memql#3730), because
+  every run now re-checks that the front-door pair covers the domain. On a
+  machine with **no browser at all** -- a headless box, a CI runner -- waive
+  browser trust instead of installing it:
+
+  ```bash
+  MEMQL_LOCAL_TLS_ALLOW_MISSING_CERTUTIL=1 make secrets
+  ```
+
+  The front door then works for `curl`, the SDKs and the Cockpit, and stays
+  untrusted in Firefox and Chrome. `--allow-missing-certutil` is the same waiver
+  when calling `scripts/k3d/seed-secrets.sh` directly.
 - **git** -- the cluster's ArgoCD Application points at the current git branch;
   you must push your branch before ArgoCD can sync it.
 
@@ -93,14 +106,43 @@ refuses with exit 4 and the exact command to run instead.
 
 After that, `make up` / `make secrets` issue the `*.memql.localhost`
 pair at `~/.memql/certs/dev.{crt,key}` when it is absent, reuse it when it is
-present, and load it into the cluster as the `memql-front-door-tls` Secret that both
-front-door ingresses reference. Override the location with
-`MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or `--tls-cert` / `--tls-key`).
+present **and covers the domain being served**, and load it into the cluster as
+the `memql-front-door-tls` Secret that both front-door ingresses reference.
+Override the location with `MEMQL_LOCAL_TLS_CERT` / `MEMQL_LOCAL_TLS_KEY` (or
+`--tls-cert` / `--tls-key`).
 
-The bring-up asserts that `memql-front-door-tls` exists and FAILS without it
-(memql#3384). It has to: traefik answers a missing referenced secret by
-silently serving its own `TRAEFIK DEFAULT CERT`, so every TLS client sees an
-untrusted edge while the whole mesh reports Available.
+A pair that does **not** cover the domain is REISSUED -- with a warning naming
+both the names it carried and the names it needed, and
+`frontDoorTlsSource: reissued` in the result envelope (memql#3730). Reuse was
+previously conditional on the file merely EXISTING, so a machine that ran the
+local stack before the domain rename (memql#3593) kept seeding a valid
+certificate for a domain that no longer exists: traefik had nothing matching the
+requested SNI, served its own default certificate instead, and `make secrets`
+reported `ok: true` over it -- permanently, because re-running it changed
+nothing. A reissue overwrites the pair in place, so a hand-made certificate you
+want kept belongs somewhere `MEMQL_LOCAL_TLS_CERT` points at, and must cover
+`*.<domain>` and `<domain>`. A re-run over a pair that already covers them never
+rotates it; deliberate reissue of a matching pair is `mkcert-setup.sh --force`.
+
+Which domain it is checked against is, in order: `--domain` / `make secrets
+DOMAIN=...`, then **the domain this cluster already serves** (the `memql-domain`
+ConfigMap), then `memql.localhost`. The cluster tier matters on a custom-domain
+cluster: without it, a plain `make secrets` would check the pair against
+`memql.localhost` and reissue over your `lab.example.com` certificate.
+
+`frontDoorTlsCoverageVerified` in the envelope says whether the names were
+actually read. Without openssl they cannot be, and the pair is then kept
+untouched and reported as **unverified** rather than as covering -- the one
+outcome where a run cannot rule out serving the wrong certificate.
+
+The bring-up asserts that `memql-front-door-tls` exists AND that the certificate
+inside it covers the front-door hostnames, and FAILS on either (memql#3384,
+memql#3730). It has to: traefik answers a missing referenced secret -- or one
+holding a certificate for names it was not asked for -- by silently serving its
+own `TRAEFIK DEFAULT CERT`, so every TLS client sees an untrusted edge while the
+whole mesh reports Available. Without openssl the certificate cannot be read;
+the check then says the names were not verified rather than claiming coverage it
+did not establish.
 
 Non-browser clients need the CA too. Node (the VS Code extension host, npm
 tooling) does **not** read the OS trust store: point it at mkcert's root with
@@ -350,7 +392,7 @@ with its justification.
 
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
-| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
+| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment, matching prod (0 when idle) | Resource-constrained laptops locally; cost in staging, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2` / `ENV=staging`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |

@@ -58,6 +58,8 @@ export const recorded = {
   infos: [] as string[],
   /** View ids passed to window.registerTreeDataProvider. */
   treeViews: [] as string[],
+  /** How many times window.registerFileDecorationProvider was called. */
+  fileDecorationProviders: 0,
   /** Command ids passed to commands.registerCommand. */
   commands: [] as string[],
   /** File-system watcher globs, as `<base>/<pattern>`. */
@@ -108,6 +110,7 @@ export function resetRecorded(): void {
   recorded.warnings.length = 0;
   recorded.infos.length = 0;
   recorded.treeViews.length = 0;
+  recorded.fileDecorationProviders = 0;
   recorded.commands.length = 0;
   recorded.watched.length = 0;
   recorded.executed.length = 0;
@@ -480,6 +483,15 @@ export const window = {
 
   registerTreeDataProvider(viewId: string, _provider: unknown): StubDisposable {
     recorded.treeViews.push(viewId);
+    return { dispose: () => undefined };
+  },
+
+  // The read-only badge (memql#3762). Recorded rather than ignored, because
+  // "activation registers it" is the only thing about it activation can assert
+  // -- what it DECIDES is unit-tested away from `vscode` in
+  // src/constructs/readonly.ts, which is the point of the split.
+  registerFileDecorationProvider(_provider: unknown): StubDisposable {
+    recorded.fileDecorationProviders += 1;
     return { dispose: () => undefined };
   },
 

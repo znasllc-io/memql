@@ -1,0 +1,64 @@
+# The production environment, expressed as VALUES (epic memql#3748 / #3766).
+#
+# This file and deploy/k8s/overlays/staging/environment.yaml are the same
+# ConfigMap with different contents, and that is the whole point: staging and
+# production reconcile from ONE base, run the SAME engine images, and differ
+# only in what arrives here, in the overlay's `namespace:`, in its replica
+# counts and in its image digests. There is no per-environment manifest tree to
+# drift, and no code path anywhere that can tell the two apart.
+#
+# WHY A ConfigMap AND NOT THE SECRET. The DSN is a secret and lives in
+# `memql-secrets`, created out-of-band. Neither of these two values is one --
+# an environment label and a schema name disclose nothing -- and putting them in
+# the Secret would mean the environment boundary could only be changed by
+# somebody holding the database password. They are configuration, so they are
+# committed, reviewable, and diffable against their staging twin.
+#
+# Mounted by every node through an `optional: true` envFrom declared once in
+# base. Optional is load-bearing: a single-environment cluster -- every local
+# one -- ships no such ConfigMap, and `make up` must behave exactly as it did
+# before this existed.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-environment
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-environment
+    app.kubernetes.io/part-of: memql
+data:
+  # Stamped onto v1:cluster:node.environment at registration (#1873). The
+  # concept's enum is development | staging | production, so this is
+  # "production" and not the console's shorter "prod" -- deploycontrol's
+  # ConsoleEnvFor owns translating between the two spellings, in one place.
+  MEMQL_ENVIRONMENT: production
+
+  # THE BOUNDARY (memql#3765). memQL has no tenancy dimension in the actor
+  # envelope, so isolation cannot be a filter -- there is nothing in `actor.*`
+  # to filter on, and one missed conjunct leaks production data. It is the
+  # CONNECTION instead, which is the one place no application code path can
+  # forget: every backend the driver opens is put on this path before it serves
+  # a query.
+  #
+  # TWO PROPERTIES OF THIS VALUE ARE MEASURED, NOT ASSUMED, and both are
+  # recorded at length in component/database/search_path.go:
+  #
+  #   - `memql_prod` comes FIRST and is where every unqualified write lands.
+  #     `public` may not hold that position -- parseSearchPath refuses it -- and
+  #     the reason is the failure mode: an unset or mistyped search path falls
+  #     back to `"$user", public`, so an environment living there is exactly
+  #     what a configuration slip silently resolves to. Naming production buys
+  #     the slip a loud failure instead.
+  #
+  #   - `public` STAYS on the path. The TimescaleDB extension's functions live
+  #     in it, and `SET search_path = memql_prod` alone fails the first
+  #     `create_hypertable` call with "function does not exist". Keep it on the
+  #     path and EMPTY of tables; the migrate job verifies reachability before
+  #     the first migration rather than trusting this comment.
+  MEMQL_DB_SEARCH_PATH: "memql_prod, public"
+
+  # The third value, the host prefix, is NOT here yet. Deriving `api.<domain>`
+  # versus `api-staging.<domain>` is a role x environment product the front door
+  # generates rather than authors (memql#3767); until that generator exists
+  # there is no consumer to read a prefix, and no file under deploy/ may name a
+  # domain at all (memql#3593). It joins this ConfigMap with its generator.

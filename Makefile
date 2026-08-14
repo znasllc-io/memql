@@ -347,14 +347,21 @@ status:
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"}
 
-## Scale all app Deployments to N replicas. Use N=2 for cross-node mesh
-## testing (E0.5); N=1 to reset to single-node default.
-## ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal won't revert.
-##   make scale N=2   # multi-node (2 replicas per Deployment)
-##   make scale N=1   # single-node (default)
+## Scale one environment's app Deployments to N replicas. ENV names the
+## environment and therefore the namespace (local -> memql, staging ->
+## memql-staging, prod -> memql-prod); it DEFAULTS TO local, so a REMOTE
+## environment must be named explicitly -- `make scale N=2` is the inner-loop
+## command typed from memory, and a prod default would point that habit at
+## production. ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal
+## won't revert any of these.
+##   make scale N=2                # local cross-node mesh testing (#2067)
+##   make scale N=0 ENV=staging    # park staging (costs storage, not compute)
+##   make scale N=2 ENV=staging    # bring it back to prod-matching width
+##   make scale N=2 ENV=prod       # prod, named deliberately
 scale:
 	@bash scripts/k3d/scale.sh \
-		--replicas=$${N:?usage: make scale N=<replicas>} \
+		--replicas=$${N:?usage: make scale N=<replicas> [ENV=prod|staging|local]} \
+		$${ENV:+--env=$${ENV}} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 

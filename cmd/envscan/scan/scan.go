@@ -11,12 +11,51 @@
 //   - reverse drift   -- a registered var that appears NOWHERE in the
 //     repo (code / k8s / .env / dsl). Stale registry entry.
 //
-// Reads are detected from direct, statically-resolvable access sites
-// only (os.Getenv / os.LookupEnv, the component/config env* helpers, and
-// DSL env("...") literals). Indirection through env.NewEnvReader
-// prefixes resolves to a full uppercase key elsewhere in the tree, so
-// those keys are still caught by the reverse-drift repo scan -- they are
-// just not *forced* by the forward check.
+// Reads are detected from statically-resolvable access sites only
+// (os.Getenv / os.LookupEnv, the component/config env* helpers, and DSL
+// env("...") literals). Go reads are found by parsing, so a key named
+// through a constant -- os.Getenv(envBadgeGrantPerHour) -- resolves like
+// a literal; see goast.go.
+//
+// What CANNOT be resolved is reported, never dropped: a site whose key is
+// a parameter or a loop variable lands in Outcome.Unresolvable with its
+// file:line, and every surface (-check, -list, -unresolvable, and the
+// drift test's log line) states the count. A scanner that folded
+// constants and then quietly omitted the remainder would rebuild the
+// defect it was written to fix -- a clean number that is clean only about
+// what the mechanism happened to see (memql#3818).
+//
+// A THIRD read class -- core/env.EnvReader -- is DETECTED AND COUNTED but
+// deliberately not resolved. reader.String("HOST") names a suffix; the full
+// key is that suffix under the prefix the reader's constructor was given,
+// and finding it means tracing a reader value across parameters, struct
+// fields and packages. So each site lands in Unresolvable with
+// Kind == KindReaderPrefix and a reason naming the mechanism. It used to be
+// detected as NOTHING, which made it the worst of the three: absent from
+// the read count AND absent from the residual, with the limitation
+// recorded only in this comment. See goast.go.
+//
+// # What this still does not see, stated so the total is not read as coverage
+//
+// A read through neither os.Getenv/os.LookupEnv, nor an env* helper, nor an
+// EnvReader is still detected AT ALL -- not as a read, not as a residual --
+// because nothing at the call site marks it as an env access. Two live
+// shapes:
+//
+//   - an injected getter func value, used for testability:
+//     get("MEMQL_VOICE_EXECUTOR", "realtime") in the voice-agent, where
+//     `get` is a plain func parameter and so is indistinguishable from any
+//     other two-argument call;
+//   - a name table, like integrations/email's Host: "SMTP_HOST", where the
+//     key is data rather than an argument.
+//
+// Registered keys in that class are still covered by the REVERSE direction
+// (their name appears in the corpus), so they cannot go stale silently --
+// they are simply not FORCED into the registry by the forward check.
+// Unregistered ones are invisible, which is this defect's shape again with
+// a different mechanism, and it is the honest remaining gap. Closing it
+// means deciding which callees count as env readers, so it is a separate
+// task rather than a widened match here.
 package scan
 
 import (
@@ -60,6 +99,44 @@ var external = map[string]bool{
 // toolchain rather than memQL.
 var externalPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}
 
+// ownedPreConvention lists keys that ARE memQL-owned configuration but do not
+// carry the MEMQL_ prefix. They are exempt from FORWARD drift and from nothing
+// else -- CheckDrift returns them separately and every report PRINTS them, so
+// the exemption is a line a reader can see rather than an absence.
+//
+// They are NOT in `external`, and that distinction is the point. `external`
+// means "not memQL's variable"; these are memQL's variables, read by
+// component/memql's engine config and component/server's HTTP router. Putting
+// them there would be false, and would also exempt them from the reverse
+// direction.
+//
+// Why they cannot simply be registered, which is what they need:
+// component/genesis's TestOwnedVarsArePrefixed (Epic 7.3 / memql#2106) fails on
+// any non-MEMQL_-prefixed registry entry that is not a legacy alias or an
+// external var. None of these six is an alias -- no shim copies them onto a
+// MEMQL_ name, and inventing one would make ApplyLegacyEnvAliases write to a
+// target that does not exist. So registering them reds that gate while omitting
+// them reds this one, and the resolution is a rename (new MEMQL_ names, these
+// six recorded as legacy aliases, the reading code updated) which is an
+// operator-visible change in component/ and its own task.
+//
+// Note what this list means about that gate: TestOwnedVarsArePrefixed passed
+// for as long as it did because the registry could not SEE these variables --
+// the same shape as the defect memql#3818 fixes, one layer down. Its premise
+// ("every owned var is prefixed or aliased") was never true; it was unfalsified.
+//
+// Do not add a name here to silence a drift failure. A newly-written env var
+// must be MEMQL_-prefixed and registered; this list is closed to the six that
+// predate the convention.
+var ownedPreConvention = map[string]bool{
+	"MEMORY_ENGINE_MAX_RESULTS":      true, // component/memql/config.go
+	"MEMORY_ENGINE_MAX_WINDOW":       true,
+	"MEMORY_ENGINE_DEFAULT_LIST_CAP": true,
+	"MEMORY_ENGINE_CACHE_MAX_ITEMS":  true,
+	"CACHE_MAX_TTL":                  true,
+	"SERVER_PUBLIC_PATH":             true, // component/server/nethttp.go
+}
+
 func isExternal(key string) bool {
 	if external[key] {
 		return true
@@ -72,16 +149,6 @@ func isExternal(key string) bool {
 	return false
 }
 
-// goReadPatterns match a direct, statically-resolvable env read in Go
-// source. The first capture group is the env key.
-var goReadPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`\bos\.Getenv\(\s*"([A-Z][A-Z0-9_]+)"`),
-	regexp.MustCompile(`\bos\.LookupEnv\(\s*"([A-Z][A-Z0-9_]+)"`),
-	// component/config env* helpers: envStr / envBool / envInt /
-	// envFloat / envStrDefault / ...
-	regexp.MustCompile(`\benv[A-Z][A-Za-z0-9]*\(\s*"([A-Z][A-Z0-9_]+)"`),
-}
-
 // memqlReadPatterns match a DSL provider-auth read. The bare env("...")
 // form is DSL-only -- in Go it appears solely in doc-comments, so it is
 // scoped to .memql files to avoid false positives.
@@ -89,17 +156,31 @@ var memqlReadPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\benv\(\s*"([A-Z][A-Z0-9_]+)"\)`),
 }
 
-// Read is a single statically-resolvable env access site.
+// Read is a single statically-resolved env access site.
 type Read struct {
 	Key  string
 	File string
 }
 
-// ScanReads walks the module for .go and .memql files and extracts
-// every direct env read.
-func ScanReads(root string) ([]Read, error) {
-	var reads []Read
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+// ScanReads walks the module and returns every resolved env read
+// together with every read-shaped site whose key could not be resolved.
+//
+// Go files are parsed (constants fold; see goast.go); .memql files keep
+// the regex scan, because the DSL env("...") form is literal-only by
+// construction.
+//
+// The name outlived a rename to `Scan` for a reason worth knowing: it is
+// a node in the committed architecture model, and
+// TestArchitectureModelIsNotStale reds on a symbol that disappears
+// (memql#3050). Renaming it means regenerating that model in the same
+// change.
+func ScanReads(root string) (Outcome, error) {
+	out, err := scanGo(root)
+	if err != nil {
+		return Outcome{}, err
+	}
+
+	err = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -109,7 +190,7 @@ func ScanReads(root string) ([]Read, error) {
 			}
 			return nil
 		}
-		if !scannable(path) {
+		if !strings.HasSuffix(path, ".memql") || !scannable(path) {
 			return nil
 		}
 		data, err := os.ReadFile(path)
@@ -117,22 +198,21 @@ func ScanReads(root string) ([]Read, error) {
 			return err
 		}
 		rel, _ := filepath.Rel(root, path)
-		patterns := goReadPatterns
-		if strings.HasSuffix(path, ".memql") {
-			patterns = memqlReadPatterns
-		}
-		for _, re := range patterns {
+		for _, re := range memqlReadPatterns {
 			for _, m := range re.FindAllStringSubmatch(string(data), -1) {
 				key := m[1]
 				if isExternal(key) {
 					continue
 				}
-				reads = append(reads, Read{Key: key, File: rel})
+				out.Reads = append(out.Reads, Read{Key: key, File: filepath.ToSlash(rel)})
 			}
 		}
 		return nil
 	})
-	return reads, err
+	if err != nil {
+		return Outcome{}, err
+	}
+	return out, nil
 }
 
 func skipDir(path string) bool {
@@ -196,6 +276,23 @@ func UniqueKeys(reads []Read) []string {
 	return out
 }
 
+// CountKind returns how many residual sites are of one kind.
+//
+// The split is reported alongside the total because the two kinds want
+// DIFFERENT fixes: an unresolved key is fixed at the CALL SITE (name the key
+// with a constant), while a reader-prefix site is fixed in THIS SCANNER (teach
+// it to trace a reader's constructor prefix). A single number hides which of
+// those a reader is looking at.
+func CountKind(sites []Unresolvable, kind UnresolvableKind) int {
+	n := 0
+	for _, u := range sites {
+		if u.Kind == kind {
+			n++
+		}
+	}
+	return n
+}
+
 // UnregisteredKeys returns the sorted reads that are missing from the
 // registry (forward-drift candidates).
 func UnregisteredKeys(reads []Read, registered map[string]bool) []string {
@@ -220,6 +317,21 @@ func PrintReads(w *strings.Builder, reads []Read) {
 	}
 }
 
+// PrintUnresolvable writes the residual -- every read-shaped site whose
+// key could not be resolved -- one per line, as
+// `file:line\tcall(arg)\treason`.
+//
+// This exists so the residual is legible rather than merely counted: the
+// reader can open the line and judge whether it is a genuinely dynamic
+// key (the inbound per-source knobs), a helper that only shares the env*
+// name shape (envSuffix, envOptionsToArgsFn), or a var that ought to be
+// read through a constant so the gate can see it.
+func PrintUnresolvable(w *strings.Builder, sites []Unresolvable) {
+	for _, u := range sites {
+		fmt.Fprintln(w, u.String())
+	}
+}
+
 func dedupe(xs []string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -234,13 +346,24 @@ func dedupe(xs []string) []string {
 }
 
 // Result is the outcome of a drift check: the forward-drift keys (read
-// but unregistered), the reverse-drift keys (registered but stale), and
-// summary counts.
+// but unregistered), the reverse-drift keys (registered but stale), the
+// residual the scan could not resolve, and summary counts.
 type Result struct {
 	Unregistered []string // forward drift
 	Stale        []string // reverse drift
-	ReadCount    int
-	RegistrySize int
+	// Unresolvable is the residual: read-shaped call sites whose key is
+	// a parameter, a loop variable, or a computed value. It is NOT drift
+	// and does not fail the check -- it is the part of the surface the
+	// mechanism cannot speak for, carried here so every report states it
+	// instead of implying coverage it does not have (memql#3818).
+	Unresolvable []Unresolvable
+	// ExemptUnprefixed is the ownedPreConvention set that this scan
+	// actually read: memQL-owned keys that a registry entry cannot yet
+	// name (see ownedPreConvention). Reported, not failed -- and reported
+	// precisely so the exemption cannot become the thing nobody sees.
+	ExemptUnprefixed []string
+	ReadCount        int
+	RegistrySize     int
 }
 
 // OK reports whether the check found no drift in either direction.
@@ -263,7 +386,7 @@ func CheckDrift(root string) (Result, error) {
 		return Result{}, fmt.Errorf("resolve root: %w", err)
 	}
 
-	reads, err := ScanReads(absRoot)
+	out, err := ScanReads(absRoot)
 	if err != nil {
 		return Result{}, fmt.Errorf("scan reads: %w", err)
 	}
@@ -275,9 +398,19 @@ func CheckDrift(root string) (Result, error) {
 	registered := RegisteredSet(manifest)
 
 	res := Result{
-		Unregistered: UnregisteredKeys(reads, registered),
-		ReadCount:    len(UniqueKeys(reads)),
+		Unresolvable: out.Unresolvable,
+		ReadCount:    len(UniqueKeys(out.Reads)),
 		RegistrySize: len(manifest.AllEntries()),
+	}
+	// Split the unregistered reads into real forward drift and the
+	// pre-convention exemption, so the exemption is a printed line rather
+	// than a name that quietly stopped counting.
+	for _, k := range UnregisteredKeys(out.Reads, registered) {
+		if ownedPreConvention[k] {
+			res.ExemptUnprefixed = append(res.ExemptUnprefixed, k)
+			continue
+		}
+		res.Unregistered = append(res.Unregistered, k)
 	}
 
 	corpus, excluded, err := repoCorpus(absRoot)

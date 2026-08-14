@@ -19,6 +19,7 @@ import type { ConceptLike } from "@znasllc-io/memql-view-kit";
 import {
   BUFFER_RESULT_BANNER,
   REUSED_INJECTION_BANNER,
+  CATALOG_RESULT_BANNER,
   TOOL_RESULT_BANNER,
   UNTYPED_GROUP_ID,
   groupRowsByConcept,
@@ -86,14 +87,14 @@ test("groupRowsByConcept -- an empty result is an empty group list", () => {
 // -----------------------------------------------------------------------------
 
 test("resultBannerFor -- a tool result says the DEPLOYED definition ran", () => {
-  const banner = resultBannerFor({ ranDeployedDefinition: true, injected: false });
+  const banner = resultBannerFor({ ranDeployedDefinition: true, injected: false, kind: "tool" });
   assert.equal(banner, TOOL_RESULT_BANNER);
   assert.match(banner, /DEPLOYED/);
   assert.match(banner, /not this buffer/);
 });
 
 test("resultBannerFor -- a freshly injected run says the buffer ran and nothing was saved", () => {
-  const banner = resultBannerFor({ ranDeployedDefinition: false, injected: true });
+  const banner = resultBannerFor({ ranDeployedDefinition: false, injected: true, kind: "query" });
   assert.equal(banner, BUFFER_RESULT_BANNER);
   assert.match(banner, /Nothing was saved or deployed/);
 });
@@ -101,7 +102,7 @@ test("resultBannerFor -- a freshly injected run says the buffer ran and nothing 
 test("resultBannerFor -- a reused injection still says the buffer ran", () => {
   // The distinction matters: "not re-injected" must not read as "not your
   // code". The bundle was unchanged, so what ran is still the buffer.
-  const banner = resultBannerFor({ ranDeployedDefinition: false, injected: false });
+  const banner = resultBannerFor({ ranDeployedDefinition: false, injected: false, kind: "query" });
   assert.equal(banner, REUSED_INJECTION_BANNER);
   assert.match(banner, /as previously session-defined/);
 });
@@ -109,4 +110,38 @@ test("resultBannerFor -- a reused injection still says the buffer ran", () => {
 test("the three banners are distinct", () => {
   const set = new Set([TOOL_RESULT_BANNER, BUFFER_RESULT_BANNER, REUSED_INJECTION_BANNER]);
   assert.equal(set.size, 3);
+});
+
+// -----------------------------------------------------------------------------
+// The fourth case: run from the catalog (memql#3753)
+// -----------------------------------------------------------------------------
+
+test("resultBannerFor -- a catalog run says the cluster's definition ran, not a buffer", () => {
+  // The case that made this a four-way choice. Before the Constructs view a
+  // deployed run was always a TOOL, so `ranDeployedDefinition` and "this is a
+  // tool" were the same fact. A catalog run is deployed for a completely
+  // different reason -- there is no local source -- and for a PROMOTED
+  // construct there is no file anywhere on the machine.
+  const banner = resultBannerFor({
+    ranDeployedDefinition: true,
+    injected: false,
+    kind: "query",
+  });
+  assert.equal(banner, CATALOG_RESULT_BANNER);
+  assert.match(banner, /no local source/i);
+  // And it must NOT claim a buffer was involved, which is what every one of
+  // the other three sentences would have done here.
+  assert.doesNotMatch(banner, /buffer/i);
+  assert.doesNotMatch(banner, /editor,/);
+});
+
+test("resultBannerFor -- a tool still gets the tool sentence, not the catalog one", () => {
+  // The regression the required `kind` exists to prevent: the sole call site
+  // passes the whole outcome, whose kind lives at `target.kind`, so an
+  // OPTIONAL field would have been undefined there and flipped every tool
+  // result onto the catalog sentence with nothing failing.
+  assert.equal(
+    resultBannerFor({ ranDeployedDefinition: true, injected: false, kind: "tool" }),
+    TOOL_RESULT_BANNER,
+  );
 });

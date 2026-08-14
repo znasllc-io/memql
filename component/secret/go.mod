@@ -4,7 +4,7 @@ module github.com/znasllc-io/memql/component/secret
 
 go 1.26.1
 
-toolchain go1.26.5
+toolchain go1.26.6
 
 require golang.org/x/crypto v0.54.0
 

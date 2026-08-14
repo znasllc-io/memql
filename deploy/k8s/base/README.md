@@ -14,10 +14,21 @@ only the 7 memQL node-types. Every node connects to Tiger via the
 ## Mesh = cluster DNS
 
 Each node's `Service` is named after its node-type short name (`bff`,
-`cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in the
-`memql` namespace. Same-namespace cluster DNS resolves the mesh
-values (`bff:50058`, `agent:50055`, ...), so `MEMQL_NODE_ADDRESS` /
-`MEMQL_WORKER_PEERS` are the same in the local k3d cluster and on AKS.
+`cognition`, `voice`, `agent`, `planner`, `identity`, `workbench`) in
+**whichever namespace the overlay places it in**. Same-namespace cluster DNS
+resolves the mesh values (`bff:50058`, `agent:50055`, ...), so
+`MEMQL_NODE_ADDRESS` / `MEMQL_WORKER_PEERS` are the same in the local k3d
+cluster and on AKS.
+
+**That bare-name addressing is what lets one base serve two environments**
+(memql#3766). Nothing here names a namespace in a string it owns, so kustomize's
+namespace transformer -- which rewrites `metadata.namespace` on every resource
+and `metadata.name` on `namespace.yaml` -- is the whole of the change between
+`overlays/prod` (ns `memql-prod`) and `overlays/staging` (ns `memql-staging`).
+Two independent meshes form, with no cross-talk and no per-environment
+manifest. Adding a fully-qualified `<svc>.memql.svc.cluster.local` anywhere in
+this base would break that silently, by pinning one environment's node to the
+other's Service.
 
 **#1399 exception -- the parent dial target is `bff-active`, not `bff`.**
 Under the live Argo Rollouts blue/green cutover the unscoped `bff` Service
