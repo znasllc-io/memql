@@ -144,38 +144,130 @@ const coreStyles = `
   padding: 8px 0;
 }
 
-.vk-detail { color: var(--vk-fg, inherit); }
+/* The value viewer (valueView.ts) -- row detail, run results, construct
+   arguments. */
 
-/* One level of the recursive walk. The rule is the indent AND the guide line;
-   nesting depth is legible without a disclosure control. */
-.vk-nested {
-  padding-left: 12px;
-  border-left: 1px solid var(--vk-border, currentColor);
+.vk-vv { color: var(--vk-fg, inherit); }
+
+/* Where the value being shown sits inside the whole record. Only rendered
+   when the caller passed a path, so its absence is not an empty bar. */
+.vk-vv-crumb {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.7;
+  padding-bottom: 4px;
+  overflow-wrap: anywhere;
 }
 
-.vk-field { display: flex; gap: 8px; padding: 1px 0; align-items: baseline; }
+.vk-vv-tree { min-width: 0; }
 
-.vk-key {
+/* Nothing to show -- an empty root, or a filter that matched nothing. */
+.vk-vv-nothing {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.6;
+  padding: 8px 0;
+}
+
+/* A collapsible object or array. No presentation of its own beyond making the
+   disclosure a block -- the summary row inside it carries the layout. */
+.vk-vv-branch { min-width: 0; }
+
+.vk-vv-node,
+.vk-vv-summary {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+  align-items: baseline;
+  min-width: 0;
+}
+
+/* The disclosure triangle is the browser's; a summary laid out as flex loses
+   its default marker in some engines, so it is asked for explicitly. */
+.vk-vv-summary { cursor: pointer; list-style: revert; }
+
+.vk-vv-key {
   flex: none;
   min-width: 8em;
   color: var(--vk-muted-fg, inherit);
   opacity: 0.7;
 }
 
-.vk-value { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+/* The type badge. Small and quiet: it is there to be READ when two values
+   look alike ("42" and 42), not to compete with the value itself. Every type
+   shares one presentation -- colouring them apart would imply a hierarchy
+   between string and number that does not exist. */
+.vk-vv-type,
+.vk-vv-type-string,
+.vk-vv-type-number,
+.vk-vv-type-boolean,
+.vk-vv-type-null,
+.vk-vv-type-object,
+.vk-vv-type-array,
+.vk-vv-type-unknown {
+  flex: none;
+  font-size: 0.85em;
+  opacity: 0.55;
+  color: var(--vk-muted-fg, inherit);
+}
+
+.vk-vv-value { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+/* One level of nesting: the indent AND the guide line, so depth stays legible
+   when several siblings are expanded at once. */
+.vk-vv-children {
+  padding-left: 12px;
+  border-left: 1px solid var(--vk-border, currentColor);
+}
+
+/* How many keys or items are behind a collapsed node. */
+.vk-vv-count { color: var(--vk-muted-fg, inherit); opacity: 0.7; }
 
 /* The three "this is not data" markers. They share one presentation
    deliberately: each says the slot holds no value to read, and an operator
    scanning a detail pane should be able to skip all three by the same visual
    cue. The literal text ("null", "{}", "[circular]") is what distinguishes
    them. */
-.vk-null,
-.vk-empty-value,
-.vk-cycle {
+.vk-vv-null,
+.vk-vv-empty,
+.vk-vv-cycle {
   color: var(--vk-muted-fg, inherit);
   opacity: 0.5;
   font-style: italic;
 }
+
+/* The three "you are not seeing all of it" markers, likewise sharing one
+   presentation -- and deliberately NOT sharing the one above. A value that was
+   cut short is not a value that is absent, and an operator has to be able to
+   tell those apart at a glance. */
+.vk-vv-truncated,
+.vk-vv-more,
+.vk-vv-budget {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+.vk-vv-more,
+.vk-vv-budget { padding: 2px 0 2px 12px; }
+
+/* A node the filter matched, as opposed to one revealed only because a
+   descendant matched. */
+.vk-vv-match { background: var(--vk-selected-bg, transparent); }
+
+.vk-vv-actions { flex: none; display: inline-flex; gap: 4px; }
+
+.vk-vv-copy {
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--vk-muted-fg, inherit);
+  background: none;
+  border: 1px solid var(--vk-border, currentColor);
+  border-radius: 3px;
+  padding: 0 4px;
+  cursor: pointer;
+  opacity: 0.5;
+}
+
+.vk-vv-copy:hover { opacity: 1; }
 
 /* The cluster topology grid (cluster.ts). Auto-filling columns rather than a
    fixed count: the same grid is drawn into a narrow editor tab and a wide
@@ -220,6 +312,16 @@ const coreStyles = `
   padding: 0 6px;
   border: 1px solid var(--vk-border, currentColor);
   border-radius: 8px;
+}
+
+/* A tile value that could not be derived ("version unknown", "no deployment
+   id"). Drawn as itself rather than as a blank, so a missing answer is never
+   mistaken for an absent field -- the same rule the value viewer's own
+   vk-vv-null follows. */
+.vk-null {
+  color: var(--vk-muted-fg, inherit);
+  opacity: 0.5;
+  font-style: italic;
 }
 
 /* Supporting lines. flex-basis 100% puts each on its own row inside the tile,

@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from "react";
-import { renderDetail } from "@znasllc-io/memql-view-kit";
+import { renderValueView } from "@znasllc-io/memql-view-kit";
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { vnodeToReact } from "../viewkit/react";
@@ -22,8 +22,11 @@ import { ensureViewKitStyles } from "../viewkit/styles";
 // This is also why the browse query returns rawNodes() rather than the
 // flattened rows(): the nesting has to survive the wire to be shown here.
 //
-// renderDetail does the recursive walk, from view-kit, with no concept
-// knowledge anywhere in it -- the same renderer the VS Code panel uses.
+// renderValueView does the recursive walk, from view-kit, with no concept
+// knowledge anywhere in it -- the same renderer the VS Code panel uses. It
+// collapses through native <details>, so the disclosure works here with no
+// React state and no handler: the attribute pass-through in viewkit/react.ts
+// carries `open` straight onto the element.
 
 export interface RowDetailProps {
   row: Row;
@@ -34,5 +37,5 @@ export function RowDetail({ row }: RowDetailProps): ReactNode {
     ensureViewKitStyles();
   }, []);
 
-  return <>{vnodeToReact(renderDetail(row))}</>;
+  return <>{vnodeToReact(renderValueView(row))}</>;
 }

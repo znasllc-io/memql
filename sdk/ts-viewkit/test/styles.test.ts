@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 import { SRC_DIR, sourceFiles, stripComments } from "./support/source.js";
 
 import { renderRowList } from "../src/rowList.js";
-import { renderDetail } from "../src/detail.js";
+import { renderValueView } from "../src/valueView.js";
 import { renderToHtml } from "../src/vnode.js";
 import { renderElement } from "../src/fitness.js";
 import { VIEW_KIT_ELEMENTS } from "../src/elements.js";
@@ -65,7 +65,7 @@ test("the source tree really does emit view-kit classes (guards the scanner itse
   // Spot-check one from each renderer so a regex that matched the wrong thing
   // cannot pass on volume alone.
   assert.ok(emitted.has("vk-row"), "expected rowList's vk-row");
-  assert.ok(emitted.has("vk-key"), "expected detail's vk-key");
+  assert.ok(emitted.has("vk-vv-key"), "expected the value viewer's vk-vv-key");
 });
 
 test("every class the renderers can emit has a rule in the stylesheet", () => {
@@ -107,24 +107,30 @@ test("every class in rendered output is styled", () => {
   const emptyHtml = renderToHtml(
     renderRowList([], { id: "v1:agents:agent", entity: "agent" }),
   );
-  // Exercises every detail branch: scalar, null, nested object, array, empty
-  // object, empty array, and a cycle.
+  // Exercises every value-viewer branch: scalar, null, nested object, array,
+  // empty object, empty array, a cycle, a truncated string, a paged
+  // collection, the node budget, a filter match, the breadcrumb and copy.
   const cyclic: Record<string, unknown> = { id: "a1" };
   cyclic["self"] = cyclic;
-  const detailHtml = renderToHtml(
-    renderDetail({
-      id: "a1",
-      name: "Sofia",
-      count: 3,
-      active: true,
-      missing: null,
-      payload: { nested: "x" },
-      tags: ["a"],
-      emptyObj: {},
-      emptyArr: [],
-      loop: cyclic,
-    }),
-  );
+  const detailValue = {
+    id: "a1",
+    name: "Sofia",
+    count: 3,
+    active: true,
+    missing: null,
+    payload: { nested: "x" },
+    tags: ["a"],
+    emptyObj: {},
+    emptyArr: [],
+    long: "z".repeat(600),
+    many: Array.from({ length: 12 }, (_, i) => i),
+    loop: cyclic,
+  };
+  const detailHtml =
+    renderToHtml(renderValueView(detailValue, { copy: true, path: ["payload"], pageSize: 4 })) +
+    renderToHtml(renderValueView(detailValue, { filter: "name" })) +
+    renderToHtml(renderValueView(detailValue, { nodeBudget: 3 })) +
+    renderToHtml(renderValueView({}));
 
   // Every element in the library, over a row set shaped to reach its slots.
   // The list is derived from VIEW_KIT_ELEMENTS rather than written out, so a
