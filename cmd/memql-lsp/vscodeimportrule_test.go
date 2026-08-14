@@ -48,7 +48,7 @@ var vscodeImportAllowList = []string{
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
 	"webview/addClusterPanel.ts", // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
-	"webview/clusterPanel.ts",    // WebviewPanel adapter over deploy/clusterPanelState.ts + state/topology.ts
+	"webview/connectionPanel.ts", // WebviewPanel adapter over clusters/connectionView.ts + clusters/portalUrl.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/deploymentPanel.ts", // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
 	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
@@ -212,17 +212,22 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"clusters/model.ts",
 		"connection/endpoint.ts",
 		"connection/manager.ts",
+		"clusters/connectionView.ts",
+		"clusters/portalUrl.ts",
 		"deploy/actions.ts",
-		"deploy/clusterPanelState.ts",
-		"deploy/clusterView.ts",
 		"deploy/controller.ts",
+		"deploy/instanceActions.ts",
+		"deploy/pipelineState.ts",
 		"state/automationForm.ts",
 		"state/conceptPanelState.ts",
 		"state/conceptsCache.ts",
 		"state/deploymentHistory.ts",
+		"state/deployments.ts",
+		"state/deploymentsCatalog.ts",
 		"state/rowProjection.ts",
+		"state/runLog.ts",
 		"state/stepTrace.ts",
-		"state/topology.ts",
+		"state/upgradePlan.ts",
 	} {
 		if !present[want] {
 			t.Errorf("editors/vscode/src/%s is missing; either it moved (update this list) or the logic layer this guard protects has been dissolved back into the adapters", want)

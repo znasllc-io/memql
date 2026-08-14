@@ -49,7 +49,7 @@ import type { AutomationTarget, RunTarget } from "../src/constructs/runnable.js"
 import { StepTraceModel } from "../src/state/stepTrace.js";
 import { AutomationRunPanel, StepTracePanel } from "../src/webview/automationPanel.js";
 import type { AutomationPanelHost } from "../src/webview/automationPanel.js";
-import { ClusterPanel } from "../src/webview/clusterPanel.js";
+import { ConnectionPanel } from "../src/webview/connectionPanel.js";
 import { ConceptPanel } from "../src/webview/conceptPanel.js";
 import { DeploymentPanel } from "../src/webview/deploymentPanel.js";
 import { ResultPanel, RunPanel } from "../src/webview/runPanel.js";
@@ -453,7 +453,15 @@ smoke("every webview surface opens without throwing", async () => {
   ConceptPanel.open(context, connections, concept);
   expected.push(`Concept: ${concept.entity}`);
 
-  ClusterPanel.open(context, connections, "smoke-cluster");
+  ConnectionPanel.open(
+    context,
+    {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-no-such-clusters.yaml"),
+      connections,
+      readExpiry: async () => undefined,
+    },
+    "smoke-cluster",
+  );
   expected.push("Cluster: smoke-cluster");
 
   RunPanel.open(context, runHost, runTarget);

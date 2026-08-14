@@ -48,6 +48,7 @@ import {
   type SignInTokenStore,
 } from './auth/signin.js';
 import {
+  ClusterCredentialStore,
   persistSignIn,
   reconcileClusterCredentials,
   signOut as signOutCredentials,
@@ -105,12 +106,13 @@ import {
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
 import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
 import { DeploymentPanel } from './webview/deploymentPanel.js';
+import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
-import { ClusterPanel } from './webview/clusterPanel.js';
+import { ConnectionPanel } from './webview/connectionPanel.js';
 import { ConceptPanel } from './webview/conceptPanel.js';
 import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/runPanel.js';
 
@@ -721,14 +723,26 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // this surface is an operator reading "remove" as "uninstall", so the
       // confirmation spends its second line ruling that out rather than asking
       // a generic "are you sure?".
+      //
+      // A LOCAL CLUSTER GETS ITS OWN SENTENCE (memql#3742). For a remote one
+      // "nothing is uninstalled" is nearly tautological -- this editor could
+      // not uninstall it if it tried. For the local one it is the whole point:
+      // the k3d cluster, the hosts block and the CA are all still there, and
+      // the sentence names where the operator goes to change that. It belongs
+      // in the dialog rather than in documentation, because the dialog is
+      // where the question is being asked.
       const confirmed = await window.showWarningMessage(
         `Remove "${name}" from the cluster list?`,
         {
           modal: true,
           detail:
-            'This editor forgets the cluster and deletes the credential it stored for it. ' +
-            'Nothing is uninstalled, and no data on the cluster is touched. ' +
-            'You can add it back at any time.',
+            target.cluster.local === true
+              ? 'This removes the connection only. The cluster keeps running -- uninstall it ' +
+                'from Deployments. This editor forgets it and deletes the credential it stored, ' +
+                'and you can connect to it again from the "+" menu without re-typing anything.'
+              : 'This editor forgets the cluster and deletes the credential it stored for it. ' +
+                'Nothing is uninstalled, and no data on the cluster is touched. ' +
+                'You can add it back at any time.',
         },
         'Remove'
       );
@@ -784,13 +798,17 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         saveClusterEdit(clustersPath, originalName, edited, { secrets: context.secrets })
       );
     }),
-    // The Cluster tab (memql#3312): topology, deployment history, and the
-    // deploy actions. Reached from the Clusters tree's inline action, which
-    // supplies the node -- and from the palette, which cannot, so it falls
-    // back to the selected cluster rather than doing nothing. That fallback
-    // is why this command carries the trust clause instead of
-    // "when": "false" like the other argument-taking commands.
-    commands.registerCommand('memql.cluster.open', async (node?: ClusterNode) => {
+    // The CONNECTION page (memql#3742), which replaces the Cluster tab. What
+    // went with that tab was cluster state -- a pod grid, orphan verdicts,
+    // under-replica alarms -- which the portal owns and already draws. What
+    // arrives is the question nothing answered: what this editor dials, as
+    // whom, and what happened.
+    //
+    // Reached from the Clusters tree's inline action, which supplies the node
+    // -- and from the palette, which cannot, so it falls back to the selected
+    // cluster rather than doing nothing. That fallback is why this command
+    // carries the trust clause instead of "when": "false".
+    commands.registerCommand('memql.clusters.connection', async (node?: ClusterNode) => {
       if (connections === undefined) {
         return;
       }
@@ -798,7 +816,45 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      ClusterPanel.open(context, connections, target.cluster.name);
+      ConnectionPanel.open(
+        context,
+        {
+          clustersPath,
+          connections,
+          // Straight off SecretStorage through the same store every other
+          // credential path uses -- one place decides how a credential is
+          // kept, so there is one place this can read it from.
+          readExpiry: (name) =>
+            new ClusterCredentialStore(context.secrets).readExpiry(name),
+        },
+        target.cluster.name,
+      );
+    }),
+    // Open Portal, as an inline action on the tree as well as a button on the
+    // page. The cluster's OWN site row when there is a connection to read it
+    // over, and the composed `api.<domain>/portal/` when there is not --
+    // reading the row is what keeps this correct when memql#3711 moves the
+    // portal to its own origin.
+    commands.registerCommand('memql.clusters.openPortal', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      const query = connections?.query;
+      const state = connections?.state;
+      const connected =
+        query !== undefined && state?.status === 'connected' && state.clusterName === target.cluster.name;
+      const page = connected
+        ? await browseConceptPage(query, SITE_CONCEPT, { pageSize: 50 }).catch(() => null)
+        : null;
+      const url = portalTarget(target.cluster, page?.rows ?? []).url;
+      if (url === '') {
+        void window.showErrorMessage(
+          'memQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.'
+        );
+        return;
+      }
+      await env.openExternal(Uri.parse(url));
     })
   );
 

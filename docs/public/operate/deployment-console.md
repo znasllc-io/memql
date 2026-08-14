@@ -293,7 +293,7 @@ error page or an empty one:
 
 Concept rows go through the normal query surface and never touch the
 deploy-control gate; the status block and the version preview do. So a
-developer opening the VS Code Cluster tab or the portal's Deployments
+developer opening the VS Code Deployments view or the portal's Deployments
 view gets topology, history and per-tier composition as usual, with the
 status block replaced by an explanation naming the role required. That
 explanation is the designed behaviour of the surface, not a failure of

@@ -21,7 +21,7 @@ questions.
 |---|---|---|
 | Unit | `make vscode-test` | Does the logic compute the right answer? Fast, Electron-free, covers only modules that do not import `vscode`. |
 | Host smoke | `make vscode-test-host` | Does the extension survive a real VS Code? Activation, command registration, the activity-bar contributions, the host runtime's WebSocket story, watching a path outside the workspace, webview creation. Runs against both the declared `engines.vscode` floor and current stable. |
-| Host smoke, live half | `make vscode-test-host` with `MEMQL_HOST_SMOKE_CLUSTERS_FILE` set | Does the half downstream of a connection work at all? Dials a real cluster and does the READ-ONLY things: connect, list concepts, page rows, resolve a row's detail, validate a bundle and map its diagnostics, read the Cluster tab's three concept sets. Skips, loudly, when no registry is configured. |
+| Host smoke, live half | `make vscode-test-host` with `MEMQL_HOST_SMOKE_CLUSTERS_FILE` set | Does the half downstream of a connection work at all? Dials a real cluster and does the READ-ONLY things: connect, list concepts, page rows, resolve a row's detail, validate a bundle and map its diagnostics, read the deployment and node-spec concept sets. Skips, loudly, when no registry is configured. |
 | This checklist | A human, `F5` | Does it *work*, and does it *look right*, against a live cluster? |
 
 The host smoke lane (memql#3302) exists because a whole class of defect passes
@@ -550,30 +550,88 @@ Open a file containing an `automation`.
 - [ ] Saving the automation run as a configuration, then re-running it from the
       Runs view, refills the form and fires the same payload
 
-## 5. The Cluster tab (B4, memql#3312)
+## 5. Deployments, and the connection page (memql#3733)
 
-Open it from the Clusters tree's inline action, or from the palette
-(**memQL: Open Cluster Topology and Deployments**).
+The Cluster tab is gone. Topology -- the pod grid, the replica tally, the
+orphan verdicts -- is cluster state, and the portal owns it; **Open Portal**,
+on the Clusters row and on the connection page, is one click away. What
+replaced it is split in two: Deployments answers "what do I operate", and the
+connection page answers "what does this editor dial, and as whom".
 
-- [ ] The tab opens against the selected cluster and is titled with its name
-- [ ] **Topology** shows one tile per registered node: label, short id,
-      advertised address, version, deployment, health
-- [ ] The replica tally shows one row per node type, and a short tier is
-      flagged as under-replica
-- [ ] A tier with no declared replica count reads "N running", never "N of 0"
-- [ ] An orphaned node is marked as such, with its reason
-- [ ] **Deployment history** lists deployments newest first, with status and
-      shortened digests
-- [ ] Selecting a deployment shows its per-node-type specs
-- [ ] The view updates live as a deployment progresses -- no manual refresh
-- [ ] **Actions** shows only what your role permits (Cut version / Deploy /
-      Promote / Roll back / Rollout promote-abort), and the hidden ones say why
+### 5a. The Deployments view
+
+- [ ] On a machine with no local cluster: the `local` row still appears, reads
+      `not installed`, and offers **Create deployment** and nothing else
+- [ ] With a local cluster installed: the row reads `healthy - <version>`, and
+      the version is the tag the install recorded
+- [ ] A cluster that is installed and not answering reads `not answering`, keeps
+      its version, and leads with **Repair**
+- [ ] A version that cannot be worked out renders as the word `unknown`, never
+      as a blank
+- [ ] An instance with no runs renders with its actions and no children -- not
+      as an empty state
+- [ ] Run rows are newest first and carry the verb, the version transition, the
+      status and a relative time
+- [ ] A run started from this editor appears in the tree BEFORE its first step
+      reports, and its steps fill in live
+- [ ] Kill VS Code mid-run, reopen: the run is still listed, and names exactly
+      the steps that had completed
+
+### 5b. Deploying a local cluster to another tag
+
+- [ ] **Create deployment** on an installed instance offers the release tags
+      from the checkout's origin, newest first, with **nothing pre-selected**
+- [ ] With no network, the list is absent, the reason is printed, and the text
+      box still accepts a tag
+- [ ] A mistyped tag (`0.18.0`, `latest`) is refused under the box, before
+      anything runs
+- [ ] The preview names which steps will change something (the checkout and the
+      reconcile) and which are expected to skip
+- [ ] Picking the tag the cluster is already on is allowed, and says so
+- [ ] The run reports every step; the ones already satisfied report as skipped
+- [ ] Docker not running fails at `detect`, **in the page with its guidance** --
+      not as a notification toast
+- [ ] A failed step still offers Retry and Switch-to-guided
+
+### 5c. Repair and uninstall, from Deployments
+
+- [ ] Repair and Uninstall appear on the Deployments local-instance row, and on
+      **no** Clusters row
+- [ ] Uninstall still confirms against the itemised dry run
+- [ ] An artifact the install FOUND rather than created is listed as
+      **preserved**, is left on the machine, and appears as `preserved` in the
+      run record afterwards
+
+### 5d. A remote instance
+
+- [ ] Its runs read from the cluster, newest first, and their items are labelled
+      **Node types** -- never "Steps" -- with version, replicas and digest
+- [ ] A remote this editor is not connected to still lists, with its version
+      `unknown` rather than hidden
+- [ ] Exactly one of the three pipeline states renders: the actions, "no deploy
+      pipeline is configured" in the engine's own words, or "status is not
+      visible at your role"
+- [ ] Only the actions your role permits are drawn -- and a refusal from the
+      engine names the role required, verbatim, with its audit id
 - [ ] A destructive action requires typing its confirmation phrase, and a
       mismatch refuses
-- [ ] Disconnecting shows the "not connected" state and the live-updates-offline
-      notice rather than stale data
-- [ ] Switching to a different cluster repaints the tab from the new cluster
-      rather than leaving the old one's data on screen
+
+### 5e. The connection page
+
+- [ ] Selecting a Clusters row opens it, titled with the cluster's name
+- [ ] It shows the endpoint, the issuer (marked *derived* when the entry carries
+      none), and whether the cluster answered
+- [ ] A cluster this editor has NOT dialled reads `not dialled from this editor`
+      -- not "unreachable"
+- [ ] Signed in: the email and role come from the live session
+- [ ] The token shows a **duration** and says it renews itself; leave the page
+      open for a minute and the duration updates without reopening it
+- [ ] **Open Portal** opens the cluster's portal -- its own site row when
+      connected, the composed `api.<domain>/portal/` when not
+- [ ] **Remove from list** on a LOCAL cluster says the cluster keeps running and
+      names Deployments as where to uninstall it
+- [ ] After removing it, the **+** offers *Connect to the local cluster*, and
+      taking it asks for nothing at all before the cluster is back in the list
 
 ## 6. Cross-cutting
 
