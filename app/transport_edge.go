@@ -58,21 +58,52 @@ const defaultSiteCacheTTL = 30 * time.Second
 // component's engine adapter uses, over the one executor component/edge
 // ships.
 //
-// Options.APITarget is deliberately left unset: MEMQL_EDGE_API_TARGET
-// belongs to Task 7's /_memql/* reverse proxy. A Handler built without it
-// refuses that prefix for every site (see handler.go's serveAPI) -- the
-// correct behaviour until the proxy lands.
+// Options.APITarget names the bff's plain-HTTP address that the /_memql/*
+// reverse proxy (component/edge/proxy.go's serveAPI) forwards to -- Task 7,
+// #3712. A Handler built with an empty APITarget refuses that prefix for
+// every site (see handler.go's serveAPI dispatch), which is what an edge
+// deployed without MEMQL_EDGE_API_TARGET falls back to.
 func (a *App) mountEdgeEndpoints() {
 	executor := edge.NewEngineExecutor(&EdgeEngineAdapter{Engine: a.engine})
 	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv(a.Logger))
 
 	handler := edge.NewHandler(edge.Options{
-		Resolver: resolver,
-		Opener:   edgeBundleOpener(a.Logger),
-		Logger:   a.Logger,
+		Resolver:  resolver,
+		Opener:    edgeBundleOpener(a.Logger),
+		Logger:    a.Logger,
+		APITarget: edgeAPITargetFromEnv(a.Logger),
 	})
 
 	a.handleRoute("/", handler)
+}
+
+// edgeAPITargetFromEnv resolves MEMQL_EDGE_API_TARGET -- the bff's
+// plain-HTTP address (e.g. "http://bff-http:8085"), NOT the gRPC one
+// ("bff:50051"). POST /memql/query is served by HTTP middleware
+// (component/grpc/gateway.go's Middleware, installed into the HTTP chain by
+// transportBFF), not on the gRPC listener, so the entire /_memql/* prefix is
+// a plain-HTTP proxy with no gRPC leg at all. Registered in
+// scripts/secrets/manifest.yaml (component: edge).
+//
+// UNSET IS NOT QUIET. Unlike edgeSiteCacheTTLFromEnv's TTL knob -- where
+// "unset" is the ordinary, expected case -- an edge that boots with no API
+// target may already be serving a site whose row says apiProxy: true; that
+// site's API traffic then 404s on every request with nothing in the site's
+// own logs to explain why (handler.go's serveAPI refuses the prefix
+// unconditionally once apiTarget is empty). So this warns once at boot
+// rather than staying silent. Not fatal: a cluster hosting only sites with
+// apiProxy: false (pure static hosting) legitimately never needs this var,
+// and refusing to boot over it would be disproportionate for the same
+// reason a malformed cache TTL does not fail the node.
+func edgeAPITargetFromEnv(logger *slog.Logger) string {
+	reader := env.NewEnvReader("MEMQL_EDGE")
+	target, ok := reader.String("API_TARGET")
+	if !ok || target == "" {
+		logger.Warn("edge: MEMQL_EDGE_API_TARGET is unset; /_memql/* is refused for every site regardless of a site's apiProxy setting",
+			"component", "edge")
+		return ""
+	}
+	return target
 }
 
 // edgeSiteCacheTTLFromEnv resolves MEMQL_EDGE_SITE_CACHE_TTL_SECONDS,

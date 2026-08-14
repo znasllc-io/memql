@@ -124,3 +124,55 @@ func TestEdgeSiteCacheTTLFromEnvDefaultsQuietlyWhenUnset(t *testing.T) {
 		t.Errorf("an unset var must not warn: %q", buf.String())
 	}
 }
+
+// Unlike the cache TTL, an unset API target is NOT the quiet ordinary case:
+// a site can already carry apiProxy: true, and with no target its API calls
+// would 404 with nothing in its own logs to explain why. So this one DOES
+// warn on absence.
+func TestEdgeAPITargetFromEnvWarnsWhenUnset(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	got := edgeAPITargetFromEnv(logger)
+
+	if got != "" {
+		t.Errorf("got %q, want empty when unset", got)
+	}
+	if !strings.Contains(buf.String(), "MEMQL_EDGE_API_TARGET") {
+		t.Errorf("warning should name the env var so an operator can find it: %q", buf.String())
+	}
+}
+
+// An explicitly empty value is the same as unset -- an operator's env
+// template that sets the var to "" must not be treated as "configured".
+func TestEdgeAPITargetFromEnvWarnsOnEmptyValue(t *testing.T) {
+	t.Setenv("MEMQL_EDGE_API_TARGET", "")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	got := edgeAPITargetFromEnv(logger)
+
+	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+	if !strings.Contains(buf.String(), "MEMQL_EDGE_API_TARGET") {
+		t.Errorf("warning should name the env var: %q", buf.String())
+	}
+}
+
+// A configured value is used quietly -- no warning for the ordinary
+// "operator set it" case.
+func TestEdgeAPITargetFromEnvUsesAConfiguredValueQuietly(t *testing.T) {
+	t.Setenv("MEMQL_EDGE_API_TARGET", "http://bff-http:8085")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	got := edgeAPITargetFromEnv(logger)
+
+	if got != "http://bff-http:8085" {
+		t.Errorf("got %q, want the configured value", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("a configured value must not warn: %q", buf.String())
+	}
+}
