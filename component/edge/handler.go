@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 )
@@ -91,7 +92,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	securityHeaders(w, r)
-	w.Header().Set("Content-Security-Policy", policyForSite(r, site))
+	w.Header().Set("Content-Security-Policy", policyForSite(r, site, os.Getenv))
 
 	if name, ok := resolveAsset(fsys, r.URL.Path); ok {
 		h.serveFile(w, r, fsys, name)

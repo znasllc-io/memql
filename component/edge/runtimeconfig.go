@@ -37,12 +37,24 @@ type RuntimeConfig struct {
 	IdentityURL string `json:"identityUrl"`
 	// IdentityAPIBaseURL is the base a client uses for the identity JSON
 	// calls it makes with fetch() -- POST /oauth/token, /auth/refresh,
-	// /auth/logout. Equal to IdentityURL: cross-origin against the identity
-	// service, the zero-configuration default every deployment gets without
-	// front-door rules. A same-origin (proxied) alternative would need its
-	// own opt-in and its own CSP allowance -- csp.go's connect-src is the
-	// site's own origin only -- and neither exists yet; documented as a
-	// known gap rather than guessed at.
+	// /auth/logout. Equal to IdentityURL: cross-origin against the
+	// identity service, the zero-configuration default every deployment
+	// gets without front-door rules. This WORKS: csp.go's connect-src
+	// names the cluster's identity origin (identityOriginFromEnv, reading
+	// the same env this field does) on every site's policy alike, not
+	// only the portal's, which is what makes a cross-origin fetch() here
+	// survive the browser's own CSP check rather than being silently
+	// blocked before the request leaves the page.
+	//
+	// REJECTED FOR NOW: a same-origin path proxied through the site's own
+	// /_memql/* surface to identity. It would need a SECOND proxy target
+	// (today /_memql/* forwards only to the bff, which does not itself
+	// serve /oauth/token et al.) and a second declared prefix to carry
+	// it, which is a design change to the proxy Task 7 shipped -- not
+	// this task's to make. Cross-origin is not a workaround; it is the
+	// same shape every other OAuth 2.1 + PKCE public client on the web
+	// uses, and it is what component/portal/config.go defaulted to
+	// before this epic.
 	IdentityAPIBaseURL string `json:"identityApiBaseUrl"`
 	// OAuthClientID is the public OAuth client_id registered for THIS
 	// site's own hostname -- see clientIDForHostname. Empty when no
@@ -77,10 +89,7 @@ func (h *Handler) serveRuntimeConfig(w http.ResponseWriter, r *http.Request, sit
 // os.Getenv directly and has its own tested false-value vocabulary
 // (false/0/no/off) that this package must not reimplement.
 func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool) RuntimeConfig {
-	identityURL := firstNonEmpty(
-		env("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"),
-		env("MEMQL_IDENTITY_BASE_URL"),
-	)
+	identityURL := identityURLFromEnv(env)
 	hostname := ""
 	if site != nil {
 		hostname = site.Hostname
@@ -110,13 +119,13 @@ type registeredClient struct {
 //
 // THIS IS WHAT MAKES OAuthClientID GENERIC. It is looked up from DATA --
 // the requesting site's own hostname against the cluster's already-derived
-// client registry -- never from a name this package recognises. One site's
-// row happens to resolve to "portal" here only because
-// component/genesis/domain.go registered https://portal.<d>/auth/callback
-// under clientId "portal"; a customer site's row resolves through the exact
-// same lookup once ITS hostname is registered the same way, and an
-// unregistered site's row resolves to "" -- not a special case, the same
-// code path answering honestly that it found nothing.
+// client registry -- never from a name this package recognises. Site #1's
+// row happens to resolve to its seeded client id here only because
+// component/genesis/domain.go registered that site's own callback URI under
+// that same id; a customer site's row resolves through the exact same
+// lookup once ITS hostname is registered the same way, and an unregistered
+// site's row resolves to "" -- not a special case, the same code path
+// answering honestly that it found nothing.
 func clientIDForHostname(hostname string, registeredClientsJSON string) string {
 	hostname = strings.TrimSpace(hostname)
 	if hostname == "" || strings.TrimSpace(registeredClientsJSON) == "" {
@@ -136,6 +145,20 @@ func clientIDForHostname(hostname string, registeredClientsJSON string) string {
 		}
 	}
 	return ""
+}
+
+// identityURLFromEnv resolves the browser-reachable identity-service origin
+// from the same env component/genesis/domain.go's ApplyDomainDerivations
+// already sets at boot. Shared by runtimeConfigForSite (identityUrl /
+// identityApiBaseUrl above) and csp.go's identityOriginFromEnv (connect-src)
+// so the document and the policy can never name two different identity
+// origins -- one function, two callers, not two derivations that could
+// drift against each other.
+func identityURLFromEnv(env func(string) string) string {
+	return firstNonEmpty(
+		env("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"),
+		env("MEMQL_IDENTITY_BASE_URL"),
+	)
 }
 
 // firstNonEmpty returns the first argument that is non-blank after
