@@ -1293,11 +1293,11 @@ jobs:
           start=$SECONDS
           go test -count=1 -timeout=600s ./component/memql/...
           echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
-      - name: db-gated -- the fast five (tight budget)
+      - name: db-gated -- the fast six (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
-          echo "headroom: the fast five used $((SECONDS - start))s of their 180s budget"
+          go test -count=1 -timeout=180s ./component/automations/... ./component/database/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
+          echo "headroom: the fast six used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary
