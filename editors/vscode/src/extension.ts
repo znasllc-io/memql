@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  CancellationToken,
   commands,
   Diagnostic,
   DiagnosticSeverity,
@@ -71,6 +72,8 @@ import {
   type RunTarget,
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
+import { TrainingCodeLensProvider } from './constructs/trainingLens.js';
+import { TrainingDecorations } from './constructs/decorations.js';
 import { defaultReceiptPath } from './install/receipt.js';
 import { defaultRunsDir } from './state/runLog.js';
 import {
@@ -1125,8 +1128,8 @@ function registerRunSurface(
   // renders no Run affordance at all, so there is nothing to click and no
   // implication that there could be.
   if (client !== undefined) {
-    const lensProvider = new RunnableCodeLensProvider({
-      sendRequest: (method, params, token) =>
+    const lspBridge = {
+      sendRequest: (method: string, params: unknown, token?: CancellationToken) =>
         token === undefined
           ? (client as LanguageClient).sendRequest(method, params)
           : (client as LanguageClient).sendRequest(method, params, token),
@@ -1134,9 +1137,29 @@ function registerRunSurface(
         (client as LanguageClient).initializeResult?.capabilities.experimental as
           | Record<string, unknown>
           | undefined,
-    });
+    };
+    const lensProvider = new RunnableCodeLensProvider(lspBridge);
     context.subscriptions.push(
       languages.registerCodeLensProvider({ language: 'memql' }, lensProvider)
+    );
+
+    // The training surface (memql#3761): state label above each signature, a
+    // gutter mark, and the untrained/drifted count in the status bar.
+    //
+    // BOTH FEATURE-DETECT on `memqlTrainingState`, so until #3759 ships every
+    // server answers "no" and this surface is simply ABSENT. That is the
+    // correct behaviour rather than a degraded one -- a training UI that
+    // rendered `unknown` for everything would say a cluster has none of these
+    // constructs, which is the one wrong answer available here.
+    const trainingLens = new TrainingCodeLensProvider();
+    trainingLens.setClient(lspBridge);
+    const trainingDecorations = new TrainingDecorations();
+    trainingDecorations.setClient(lspBridge);
+    trainingDecorations.activate();
+    context.subscriptions.push(
+      trainingLens,
+      trainingDecorations,
+      languages.registerCodeLensProvider({ language: 'memql' }, trainingLens)
     );
   }
 
