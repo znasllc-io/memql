@@ -112,6 +112,7 @@ var unroutedFamilies = map[string]string{
 	"list_pack_domains_result":               "single-reply",
 	"list_pack_files_result":                 "single-reply",
 	"read_pack_file_result":                  "single-reply",
+	"list_constructs_result":                 "single-reply",
 	"node_maintenance_result":                "single-reply",
 	"authoring_validate_bundle_result":       "single-reply",
 	"authoring_session_define_bundle_result": "single-reply",
