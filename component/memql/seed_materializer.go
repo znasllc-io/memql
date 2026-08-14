@@ -86,9 +86,13 @@ const seedMaterializerActor = "system:seedMaterializer"
 // Role must be RoleOwner specifically, not RoleWriter --
 // AccessContext.IsClusterOwner() reads Role == RoleOwner and nothing else,
 // which is why auth.ContextWithUserActor is NOT a substitute (it hardcodes
-// RoleWriter). Mirrors component/edge/edge.go's systemActorContext and
-// component/campaigns/worker.go's systemCampaignsActor precedent exactly,
-// including the reasoning.
+// RoleWriter). The AccessContext half mirrors component/edge/edge.go's
+// systemActorContext and component/campaigns/worker.go's systemCampaignsActor
+// precedent exactly, including the reasoning -- but NOT the whole envelope:
+// both of those set claims/TokenInfo `"role": "owner"` too, and this
+// deliberately keeps `"role": "system"` (see above) rather than following
+// them there, precisely so isSystemActor's other callers see no change.
+// That is a considered divergence from the precedent, not an oversight.
 func systemActorContext(ctx context.Context) context.Context {
 	claims := map[string]any{"sub": seedMaterializerActor, "role": "system"}
 	ctx = auth.ContextWithToken(ctx, &auth.TokenInfo{

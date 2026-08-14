@@ -50,11 +50,11 @@
 // THE SEAM FOR (2). If multi-cluster is revisited, THIS MODULE is where it
 // lands and the only place that changes. A server-side registry would surface
 // as a `clusters: [...]` field on the runtime-config document (src/cluster/
-// config.ts and component/portal/config.go -- already the one thing the bundle
-// reads before it has a connection to read anything else from), and this
-// module would gain a resolver that picks an entry and returns its absolute
-// bridge URL instead of a relative path. Everything downstream goes through
-// `portalBridgePath`, so nothing else moves. Do NOT spread endpoint knowledge
+// config.ts and component/edge/runtimeconfig.go -- already the one thing the
+// bundle reads before it has a connection to read anything else from), and
+// this module would gain a resolver that picks an entry and returns its
+// absolute bridge URL instead of a relative path. Everything downstream goes
+// through `portalBridgePath`, so nothing else moves. Do NOT spread endpoint knowledge
 // outward in anticipation: the single choke point is what makes that change
 // cheap.
 

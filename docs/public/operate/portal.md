@@ -88,13 +88,14 @@ appears in a URL.**
 
 (*) The portal is site #1 (memql#3711), served by the generic `component/edge`
 -- which must not carry portal-specific config-serving logic
-(`TestPortalHasNoSpecialCaseInTheServingPath`). **As of this writing nothing
-serves `GET /runtime-config.json` at the portal's new origin**:
-`component/portal`, the only thing that ever did, is retired, and its
-replacement (the edge's `/_memql/*` proxy to the bff, opted into via this
-site's `apiProxy: true`) has no `runtime-config.json` handler on the bff side
-either. See `clients/portal/src/cluster/config.ts`'s file-level comment for
-the current state of this gap.
+(`TestPortalHasNoSpecialCaseInTheServingPath`). `GET /runtime-config.json` is
+answered by `component/edge/runtimeconfig.go` for EVERY hosted site alike,
+not a portal branch: the cluster-wide fields (`identityUrl`,
+`identityApiBaseUrl`, `authEnabled`) come from the same domain-derived env
+`component/genesis/domain.go` sets at boot, and the one per-site field
+(`oauthClientId`) is looked up by matching the requesting site's own hostname
+against `MEMQL_IDENTITY_REGISTERED_CLIENTS` -- an unregistered site still
+gets a 200, just with an empty client id.
 
 ### Token storage, and the threat model
 
@@ -161,7 +162,7 @@ socket is ever constructed across an expiry.
 ## Required configuration
 
 The portal reads its configuration at runtime from the node that served it, at
-`GET /portal/runtime-config.json`. Nothing is baked into the bundle -- the
+`GET /runtime-config.json`. Nothing is baked into the bundle -- the
 engine image is product- and environment-agnostic, so the same bytes run
 against local, staging and a customer install.
 
@@ -185,16 +186,14 @@ The portal is site #1 (memql#3711): its bundle location is the seeded site
 row's `bundleRef` (`dsl/platform/seeds.memql`), not an env var --
 `MEMQL_PORTAL_DIST` and its three `MEMQL_PORTAL_IDENTITY_*` /
 `MEMQL_PORTAL_OAUTH_CLIENT_ID` siblings are retired along with
-`component/portal`, which used to read them.
-
-**Unresolved as of this writing**: those three identity-facing variables
-configured the `runtime-config.json` document a browser fetches before it can
-authenticate at all (`identityUrl`, `identityApiBaseUrl`, `oauthClientId`,
-`authEnabled` -- described below). Nothing currently serves that document at
-the portal's new origin; `component/edge` is a generic bundle server and must
-not carry portal-specific config logic, and the bff has no equivalent
-generic endpoint yet. See `clients/portal/src/cluster/config.ts`'s file-level
-comment for the current state.
+`component/portal`, which used to read them. The identity-facing values
+those four variables used to configure are no longer configuration at all:
+they are DERIVED, per request, by `component/edge/runtimeconfig.go` from the
+same domain-wide env `component/genesis/domain.go` already sets
+(`identityUrl` / `identityApiBaseUrl` / `authEnabled`) plus a lookup of the
+requesting site's own hostname against `MEMQL_IDENTITY_REGISTERED_CLIENTS`
+(`oauthClientId`). There is nothing left for an operator to set on the edge
+node for this.
 
 ### On the identity service
 
@@ -237,35 +236,37 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    instead, and takes effect with no identity restart -- see
    [identity-service.md](auth/identity-service.md#cross-origin-access-cors).
 
-### Cross-origin XHR, or a same-origin proxy
+### Cross-origin XHR, only
 
-The portal used to default to calling `/oauth/token`, `/auth/refresh` and
-`/auth/logout` **cross-origin** on the identity host (the CORS entry above is
-still needed for that path). Since the portal became site #1 (memql#3711) that
-default is on weaker footing than the prose below describes: the portal's CSP
-now comes from `component/edge/csp.go`, which is generic across every hosted
-site and derives `connect-src` from the SITE's own origin plus its
-same-origin `/_memql/*` API surface -- it does **not** add an arbitrary
-identity origin to `connect-src` the way the retired `component/portal/csp.go`
-did. A cross-origin XHR to identity is therefore likely CSP-blocked before it
-leaves the page. `MEMQL_PORTAL_IDENTITY_API_BASE_URL`, the toggle that used to
-choose between this and the same-origin path below, is retired along with
-`component/portal` and has no replacement yet.
+The portal calls `/oauth/token`, `/auth/refresh` and `/auth/logout`
+**cross-origin** on the identity host -- the CORS entry above is required for
+it, and it works: `component/edge/csp.go`'s per-site CSP names the cluster's
+identity origin in `connect-src` for every hosted site
+(`identityOriginFromEnv`, reading the same domain-derived env
+`runtimeconfig.go`'s `identityUrl` field does, memql#3711 fix round 2). The
+original per-site policy accounted for a site's own data through `/_memql/*`
+and forgot that a site with signed-in users also has to reach identity
+directly -- that omission is what the fix round closed, not a design that
+was ever intended to block this.
 
-[identity-service.md](auth/identity-service.md) prescribes the alternative and
-explains why independent of the CSP question: browsers should reach those
-endpoints **same-origin** through the front door, because Safari has an
-HTTP/2 connection-coalescing bug that intermittently fails cross-origin
-credentialed XHR to a sibling host sharing a wildcard certificate and IP. It
-surfaces as `TypeError: Load failed` with no server-side trace at all. For the
-portal specifically, "same-origin through the front door" is the site's own
-`apiProxy: true` / `/_memql/*` surface (memql#3712) proxying to the bff --
-which is a proxy to the BFF, not to identity directly, so reaching identity's
-JSON endpoints through it depends on whatever the bff-side forwarding for
-those paths turns out to be. That wiring is not designed yet. Only the
-top-level `/authorize` navigation is settled either way -- it is an HTML page
-and has no same-origin variant, so it always goes to the identity host
-directly.
+[identity-service.md](auth/identity-service.md) still names a reason to
+prefer a same-origin path where one exists: Safari has an HTTP/2
+connection-coalescing bug that intermittently fails cross-origin credentialed
+XHR to a sibling host sharing a wildcard certificate and IP, surfacing as
+`TypeError: Load failed` with no server-side trace at all. **For the portal,
+that alternative does not exist.** The old `MEMQL_PORTAL_IDENTITY_API_BASE_URL=self`
+toggle is retired along with `component/portal`, and nothing replaces it:
+reaching identity same-origin would mean forwarding `/oauth/token` /
+`/auth/refresh` / `/auth/logout` through the site's own `/_memql/*` proxy,
+which today targets only the bff (which does not itself serve those paths)
+-- a second proxy target and a second declared prefix, recorded as a
+rejected-for-now design decision
+(`component/edge/runtimeconfig.go`'s `IdentityAPIBaseURL` doc comment) rather
+than left unmentioned. Cross-origin is not standing in for that; it is the
+ordinary shape of an OAuth 2.1 + PKCE public client, and every deployment
+gets it with no front-door rules at all. Only the top-level `/authorize`
+navigation is unaffected either way -- it is an HTML page and has no
+same-origin variant, so it always goes to the identity host directly.
 
 ### Clusters with authentication disabled
 
@@ -312,23 +313,26 @@ See [per-row-authz-audit.md](auth/per-row-authz-audit.md).
 
 ## Administration
 
-`/portal/admin` is the operator console: the cluster's own state, rather than
-the data it holds. Every surface is owner-and-admin.
+`/admin` is the operator console: the cluster's own state, rather than
+the data it holds. Every surface is owner-and-admin. (Root-relative since
+memql#3711 -- the portal is site #1, served at its own hostname rather than
+a `/portal/` sub-path of another node's origin, so its own client-side
+routes carry no mount prefix.)
 
 | Surface | Address | What it answers |
 |---|---|---|
-| Overview | `/portal/admin` | How many people can sign in, how they divide by role, how a new person gets an account, which key is signing, and what has happened recently. |
-| People | `/portal/admin/people` | Who can sign in, and the changes an owner or admin may make to one of them: profile, cluster role, suspension. |
-| Sessions and tokens | `/portal/admin/tokens` | Every personal access token issued against the cluster and who holds it, plus every node credential; revoke either. |
-| Signing keys | `/portal/admin/keys` | The Ed25519 keys the cluster publishes, which one is signing, whether an overlap window is open, and when it last rotated. |
-| Cluster settings | `/portal/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and the form that changes them. |
+| Overview | `/admin` | How many people can sign in, how they divide by role, how a new person gets an account, which key is signing, and what has happened recently. |
+| People | `/admin/people` | Who can sign in, and the changes an owner or admin may make to one of them: profile, cluster role, suspension. |
+| Sessions and tokens | `/admin/tokens` | Every personal access token issued against the cluster and who holds it, plus every node credential; revoke either. |
+| Signing keys | `/admin/keys` | The Ed25519 keys the cluster publishes, which one is signing, whether an overlap window is open, and when it last rotated. |
+| Cluster settings | `/admin/settings` | The runtime-editable settings in force -- registration policy, token lifetimes, branding -- and the form that changes them. |
 
 The audit trail and deployments are **not** here: they are populations, and
-they live in the predefined views at `/portal/views/audit` and
-`/portal/views/deployments`. Neither is the People *population*
-(`/portal/views/people`) -- that view answers "who is in this organisation and
+they live in the predefined views at `/views/audit` and
+`/views/deployments`. Neither is the People *population*
+(`/views/people`) -- that view answers "who is in this organisation and
 who is signed in", carries no controls, and composes only view-kit elements.
-`/portal/admin/people` is the CHANGE surface, one person at a time. Putting an
+`/admin/people` is the CHANGE surface, one person at a time. Putting an
 owner-only write inside a predefined view would break the contract that makes
 those views work for a concept nobody has designed for.
 
@@ -360,7 +364,7 @@ event, with the same `role_not_admin` reason, that the retired route wrote --
 so an audit trail an operator greps is unbroken across the move.
 
 **Every write reports its audit event id**, refusals included, next to a link
-into `/portal/views/audit`. Quote it in an incident thread; it is the durable
+into `/views/audit`. Quote it in an incident thread; it is the durable
 artefact of the action, and a status line saying only "Saved." would have
 thrown it away.
 
@@ -381,7 +385,7 @@ the identity node, so the portal's deploy calls used to reach a bff with no
 such service and come back `UNIMPLEMENTED`. A `NodeService` forward now carries
 them to the identity node -- with the caller's authority attached, so the
 owner-only rollback gate still runs against the human who pressed the button --
-and `/portal/views/deployments` both reads live state and acts.
+and `/views/deployments` both reads live state and acts.
 
 What remains on the identity service is `/admin/login` (which establishes the
 session); `/admin/` answers `410 Gone` and points here.
@@ -394,7 +398,7 @@ the reason is who they are for rather than what they do.
 
 The portal is an operator's console: it is reached with an operator's
 credential, it assumes you are looking after a cluster, and every surface under
-`/portal/admin` shows nothing at all unless you are owner or admin. `/me/*` is
+`/admin` shows nothing at all unless you are owner or admin. `/me/*` is
 the opposite -- it is where an ordinary person reads their own sessions,
 revokes their own device, exports their own data and closes their own account,
 and every one of those flows is self-scoped by construction. Moving them behind
@@ -418,10 +422,10 @@ waiting on a seam.
 | Symptom | Cause |
 |---|---|
 | The portal's hostname 404s asset-by-asset, or serves an empty bundle | No bundle at the site row's `bundleRef` on the edge pod's disk (`file:///app/portal` by default). `make portal-build`, then `updateSiteBundle` to point at the built directory, or deploy an image whose portal stage built. |
-| Sign-in page says "not configured for portal sign-in" | The node published no `identityUrl` / `oauthClientId` -- and, as of memql#3711, likely because nothing serves `runtime-config.json` at the portal's new origin at all (see the unresolved-gap note above). Check `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` on the bff once that gap has a fix. |
-| "Unknown client" on the identity page | The client id the portal presents is not in `MEMQL_IDENTITY_REGISTERED_CLIENTS`. |
+| Sign-in page says "not configured for portal sign-in" | The node published no `identityUrl` / `oauthClientId`. Check `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (or the `MEMQL_IDENTITY_BASE_URL` fallback) on the edge node -- `component/edge/runtimeconfig.go` reads it from there now, not the bff. |
+| "Unknown client" on the identity page | Either `MEMQL_IDENTITY_REGISTERED_CLIENTS` has no entry at all for this domain, or its `redirectURIs` do not carry an exact `https://<this site's hostname>/auth/callback` -- `clientIDForHostname` (`component/edge/runtimeconfig.go`) matches by exact string, so a trailing slash or the wrong hostname resolves to an empty client id, not a fuzzy match. |
 | "Invalid redirect URI" | The registered URI is not byte-identical to the portal's own origin's `/auth/callback` (no mount prefix -- the portal is site #1, not a `/portal/` sub-path of another node). |
-| Sign-in button does nothing; console shows a CSP `connect-src` violation | The portal's origin is reaching an identity origin the edge's site-generic CSP (`component/edge/csp.go`) does not allow -- see the cross-origin-XHR note above; this is now the LIKELY case rather than a misconfiguration. |
+| Sign-in button does nothing; console shows a CSP `connect-src` violation | Should not happen for the identity exchange itself -- `component/edge/csp.go` names the cluster's identity origin on every site's policy (memql#3711 fix round 2). If it does, check that `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` / `MEMQL_IDENTITY_BASE_URL` on the edge node resolves to the SAME origin the browser is actually being sent to -- a mismatch between what the edge derives and what identity is really reachable at is the remaining way this fires. |
 | `TypeError: Load failed` on `/auth/refresh`, intermittently, Safari only | The known HTTP/2 coalescing bug. Take the same-origin proxy option above. |
 | Signed in, then signed out again ~15 minutes later | `/auth/refresh` is failing. Check the CORS allowlist and that the `memql_refresh` cookie's `SameSite` suits your topology (`MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE=none` when the portal and identity are on different registrable domains). |
 | Sign-in loops back to the sign-in page | Session storage is blocked for the origin. The portal reports this explicitly rather than redirecting. |
