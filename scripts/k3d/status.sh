@@ -101,27 +101,87 @@ function check_cluster() {
 # ARGOCD STATUS
 #=============================================================================
 
+# check_argocd ASSERTS that the cluster is still reconciling (memql#3817).
+#
+# IT USED TO ONLY PRINT. The old body ran `kubectl get application` with a
+# custom-columns format including SYNC, wrote the row to stderr, and returned 0
+# unconditionally -- no result field, no assertion. So when this machine's
+# Application spent four hours unable to resolve its targetRevision, `SYNC:
+# Unknown` was on screen for every one of those runs and the envelope still said
+# ok:true. A display mistaken for a check is worse than an absent one: it
+# occupies the space where the check would go and looks like coverage.
+#
+# WHAT MAKES IT INVISIBLE OTHERWISE. `health.status` stays `Healthy`, because
+# health describes the workloads that ARE running and they are fine. It says
+# nothing about whether they are what the repository asks for. Every pod
+# Running, every probe green, and a merged fix that never arrives -- from
+# outside, indistinguishable from a fix that did not work.
+#
+# THE FAILURE IS RESERVED FOR "CANNOT RECONCILE", not for "not synced".
+# OutOfSync means the comparison SUCCEEDED and found drift; auto-sync resolves
+# it in seconds, and failing on it would make this litmus flaky. A
+# ComparisonError means nothing will happen at all, ever, without a human. Only
+# the second is an outage in slow motion.
 function check_argocd() {
     section "ArgoCD Application"
+
+    ARGOCD_SYNC=""
+    ARGOCD_HEALTH=""
+    ARGOCD_TARGET=""
+    ARGOCD_RECONCILING=""
 
     if ! kubectl get namespace argocd &>/dev/null; then
         echo "  STATUS: ArgoCD namespace not found -- run 'make up' first." >&2
         return 0
     fi
 
-    if kubectl get application "${APP_NAME}" -n argocd &>/dev/null; then
-        kubectl get application "${APP_NAME}" -n argocd \
-            -o custom-columns=\
-"NAME:.metadata.name,\
-SYNC:.status.sync.status,\
-HEALTH:.status.health.status,\
-REVISION:.status.sync.revision" >&2 2>/dev/null || \
-        kubectl get application "${APP_NAME}" -n argocd >&2 2>/dev/null
-    else
+    if ! kubectl get application "${APP_NAME}" -n argocd &>/dev/null; then
         {
             echo "  STATUS: ${APP_NAME} Application not found."
             echo "  Run:    make up"
         } >&2
+        return 0
+    fi
+
+    ARGOCD_SYNC="$(kubectl get application "${APP_NAME}" -n argocd \
+        -o 'jsonpath={.status.sync.status}' 2>/dev/null || true)"
+    ARGOCD_HEALTH="$(kubectl get application "${APP_NAME}" -n argocd \
+        -o 'jsonpath={.status.health.status}' 2>/dev/null || true)"
+    ARGOCD_TARGET="$(kubectl get application "${APP_NAME}" -n argocd \
+        -o 'jsonpath={.spec.source.targetRevision}' 2>/dev/null || true)"
+    local conditions
+    conditions="$(kubectl get application "${APP_NAME}" -n argocd \
+        -o 'jsonpath={.status.conditions[*].type}' 2>/dev/null || true)"
+
+    info "  sync=${ARGOCD_SYNC:-unknown} health=${ARGOCD_HEALTH:-unknown} targetRevision=${ARGOCD_TARGET:-unknown}"
+
+    # A ComparisonError means ArgoCD cannot even work out what the desired
+    # state IS -- most commonly a targetRevision that no longer resolves,
+    # which is what a merged-and-deleted feature branch leaves behind.
+    if [[ "$conditions" == *ComparisonError* ]]; then
+        ARGOCD_RECONCILING="false"
+        cap_result_set     argocdSync   "$ARGOCD_SYNC"
+        cap_result_set     argocdHealth "$ARGOCD_HEALTH"
+        cap_result_set     argocdTargetRevision "$ARGOCD_TARGET"
+        cap_result_set_raw argocdReconciling false
+        cap_fail 5 "ArgoCD is NOT RECONCILING this cluster: the '${APP_NAME}' Application reports a ComparisonError against targetRevision '${ARGOCD_TARGET}'. Nothing merged reaches this cluster until it is fixed -- and every pod stays Running and Healthy meanwhile, so nothing else will tell you. If that revision is a branch that has since merged and been deleted, point it back at main:  kubectl -n argocd patch app ${APP_NAME} --type=merge -p '{\"spec\":{\"source\":{\"targetRevision\":\"main\"}}}'"
+    fi
+
+    ARGOCD_RECONCILING="true"
+
+    # Tracking a branch is LEGITIMATE -- testing an overlay change from one is
+    # how this is normally done, and it is also how memql#3817 happened. So it
+    # is reported rather than refused: the defect was never that someone
+    # pointed it at a branch, it was that the fact then outlived the branch
+    # with nothing surfacing it.
+    if [[ -n "$ARGOCD_TARGET" && "$ARGOCD_TARGET" != "main" ]]; then
+        warn "  this cluster tracks '${ARGOCD_TARGET}', NOT main -- merges to main will not reach it."
+        warn "  That is fine while you mean it. If that branch merges and is deleted, ArgoCD"
+        warn "  stops reconciling entirely and every other signal here stays green (memql#3817)."
+    fi
+
+    if [[ -n "$ARGOCD_SYNC" && "$ARGOCD_SYNC" != "Synced" ]]; then
+        warn "  sync status is '${ARGOCD_SYNC}' -- ArgoCD has found drift and auto-sync should close it."
     fi
 }
 
@@ -368,6 +428,14 @@ function main() {
 
     cap_result_set     cluster "$CLUSTER_NAME"
     cap_result_set     namespace "$NAMESPACE"
+    # ArgoCD reconciliation (memql#3817). argocdReconciling is true | false |
+    # null on the same contract as identityKeysShared below: null means NOT
+    # MEASURED -- no argocd namespace, or no Application -- and never "fine".
+    # The false case never reaches here; check_argocd cap_fails on it.
+    cap_result_set     argocdSync   "$ARGOCD_SYNC"
+    cap_result_set     argocdHealth "$ARGOCD_HEALTH"
+    cap_result_set     argocdTargetRevision "$ARGOCD_TARGET"
+    cap_result_set_raw argocdReconciling "${ARGOCD_RECONCILING:-null}"
     cap_result_set_raw pods "$PODS_TOTAL"
     cap_result_set_raw uniqueNodeIds "$UNIQUE_NODE_IDS"
     cap_result_set_raw meshHealthy "$MESH_HEALTHY"
