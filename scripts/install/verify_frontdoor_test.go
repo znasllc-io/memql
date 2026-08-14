@@ -230,6 +230,12 @@ if [[ "$rc" != "0" ]]; then echo "stub curl: failure rc=$rc for $host" >&2; exit
 out="${w//\\n/$'\n'}"
 out="${out//%\{http_version\}/$ver}"
 out="${out//%\{http_code\}/$code}"
+# Content type, driven by STUB_CT_MAP (host|value). Defaults to
+# application/json so every world written before memql#3814 keeps the
+# behaviour it was written against.
+ct="$(awk -F'|' -v h="$host" '$1==h {print $2; exit}' "${STUB_CT_MAP:-/dev/null}" 2>/dev/null)"
+[[ -z "$ct" ]] && ct="application/json"
+out="${out//%\{content_type\}/$ct}"
 # Real curl writes the body to stdout unless it was told to put it somewhere
 # else, then the --write-out string after the transfer.
 [[ -z "$sink" ]] && printf '%s' "$body"
@@ -244,8 +250,35 @@ printf '%s' "$out"
 		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
 		"STUB_DNS_MAP=" + dnsMap,
 		"STUB_HTTP_MAP=" + httpMap,
+		"STUB_CT_MAP=" + filepath.Join(maps, "ct"),
 		"STUB_CALL_LOG=" + filepath.Join(maps, "calls"),
 	}
+}
+
+// fdWorldWithContentTypes is fdWorld plus a per-host Content-Type (memql#3814).
+//
+// A separate constructor rather than a fourth parameter on fdWorld: every world
+// written before this cared only about the body, the stub defaults to
+// application/json, and rewriting a dozen call sites to pass nil would add
+// noise to tests that are about something else. The map file is always named in
+// the environment; an absent file is the default.
+func fdWorldWithContentTypes(t *testing.T, dns, http, contentTypes map[string]string) []string {
+	t.Helper()
+	env := fdWorld(t, dns, http)
+	for _, kv := range env {
+		path, ok := strings.CutPrefix(kv, "STUB_CT_MAP=")
+		if !ok {
+			continue
+		}
+		var b strings.Builder
+		for h, ct := range contentTypes {
+			b.WriteString(h + "|" + ct + "\n")
+		}
+		if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
+			t.Fatalf("write content-type map: %v", err)
+		}
+	}
+	return env
 }
 
 // fdDialled returns every hostname the stub curl was asked for, in order. Used
