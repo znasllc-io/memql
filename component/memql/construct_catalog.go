@@ -116,6 +116,78 @@ var constructKeyword = map[string]string{
 	ConstructKindSeed:       "seed",
 }
 
+// kindForConstructKeyword inverts constructKeyword once, at init. The map is
+// injective -- `mutation`/`mutate` is the only pair whose two halves differ at
+// all -- so the inverse is total and unambiguous.
+var kindForConstructKeyword = func() map[string]string {
+	out := make(map[string]string, len(constructKeyword))
+	for kind, keyword := range constructKeyword {
+		out[keyword] = kind
+	}
+	return out
+}()
+
+// ConstructKindForKeyword maps an AUTHORED construct keyword to the kind this
+// catalog reports it under, and reports whether the catalog carries that kind at
+// all.
+//
+// Exported for the language server, which holds the other half of drift
+// detection (memql#3759): the document side of that comparison sees the keyword
+// an author wrote (`mutate`) while the catalog side sees the kind the registries
+// key on (`mutation`), so one of the two has to be translated before anything
+// can be matched at all. Reading the same map both sides are built from is the
+// only way that translation cannot rot -- a kind added to constructKeyword
+// extends the language server for free, where a hand-written "map the one name
+// that differs" in the client would silently mis-key the next one.
+//
+// THE FALSE RETURN IS LOAD-BEARING, and it is not an error case. `action` and
+// `capability` are authored kinds this catalog deliberately does not carry (see
+// this file's header): they are loaded by component/actions, not by any registry
+// the engine holds, so the catalog has nothing to say about them rather than an
+// empty answer to give. A caller must render that as "the catalog cannot speak
+// to this", never as "the cluster does not have this" -- the same distinction
+// the disconnected case turns on, at a smaller scale and with the identical
+// failure if the two are collapsed.
+func ConstructKindForKeyword(keyword string) (string, bool) {
+	kind, ok := kindForConstructKeyword[keyword]
+	return kind, ok
+}
+
+// CatalogConstructKey and DocumentConstructKey are the ONE identity under which
+// a construct known to a REGISTRY and a construct declared in a FILE are matched
+// to each other. Two functions rather than one because the two sides hold
+// different halves of the same key and neither can be asked for the other's:
+//
+//   - a registry entry names a concept by its canonical id (v1:cognition:space),
+//     which carries the domain inside it;
+//   - a file declares the same concept as a bare short name (`space`), with the
+//     domain supplied by the directory the file sits in.
+//
+// Concepts are the only kind that needs the domain, and they need it because a
+// concept's registry key is that canonical id and two domains may each declare a
+// `state`. Every other kind lives in a flat, process-wide registry, so its name
+// is already unique and the domain would only add a way to miss a match.
+//
+// Both are exported for the language server (memql#3759), which computes the
+// document half of drift detection and must land on exactly the key the catalog
+// half landed on. A second implementation of this rule is the failure mode
+// memql#3758's parity gate exists to catch -- a keying disagreement makes every
+// construct read as drifted at once, which looks like a broken cluster.
+func CatalogConstructKey(kind, name string) string {
+	if kind == ConstructKindConcept {
+		return DocumentConstructKey(kind, conceptShortName(name), conceptRootDomain(name))
+	}
+	return DocumentConstructKey(kind, name, "")
+}
+
+// DocumentConstructKey is CatalogConstructKey's file-side half: see there.
+func DocumentConstructKey(kind, name, domain string) string {
+	if kind == ConstructKindConcept {
+		return kind + "\x00" + domain + "/" + name
+	}
+	return kind + "\x00" + name
+}
+
 // ConstructCatalogEntry is one construct the engine has loaded.
 type ConstructCatalogEntry struct {
 	// Name is the construct's registry key. For a concept that is its
@@ -260,7 +332,7 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 			// Carried only here: with no file, this is the only copy a client
 			// can reach.
 			entry.Source = marker.Source
-		} else if src, found := index.lookup(entry.Kind, entry.Name, entry.Namespace); found {
+		} else if src, found := index.lookup(entry.Kind, entry.Name); found {
 			source = src.source
 			entry.OriginPath = src.path
 			entry.SourceHash = sense.ConstructSourceHash(src.source)
@@ -587,20 +659,16 @@ type constructSourceIndex struct {
 	byKindName map[string]constructSource
 }
 
-// lookup resolves one construct.
+// lookup resolves one construct, by the registry-side name: a concept's
+// canonical id, or the declared name for every other kind.
 //
-// Concepts key on domain as well as name, because a concept's registry key is
-// its canonical id and two domains may each declare a `state`. Every other kind
-// lives in a flat, process-wide registry, so its name is already unique and the
-// namespace is what the index TELLS the caller rather than what it needs to be
-// asked.
-func (i constructSourceIndex) lookup(kind, name, namespace string) (constructSource, bool) {
-	if kind == ConstructKindConcept {
-		src, ok := i.byKindName[kind+"\x00"+conceptRootDomain(name)+"/"+conceptShortName(name)]
-		return src, ok
-	}
-	_ = namespace
-	src, ok := i.byKindName[kind+"\x00"+name]
+// It takes no namespace. The namespace is what the index TELLS a caller rather
+// than what it needs to be asked -- for a concept the domain is already inside
+// the canonical id, and for every other kind the flat registry makes the name
+// unique on its own. The parameter used to be there for signature symmetry and
+// was discarded with `_ = namespace`, which read as though it were consulted.
+func (i constructSourceIndex) lookup(kind, name string) (constructSource, bool) {
+	src, ok := i.byKindName[CatalogConstructKey(kind, name)]
 	return src, ok
 }
 
@@ -621,10 +689,7 @@ func buildConstructSourceIndex() constructSourceIndex {
 		// catalog reports, and pointing at the first file found is no more
 		// wrong than pointing at the last.
 		record := func(kind, name, source string) {
-			key := kind + "\x00" + name
-			if kind == ConstructKindConcept {
-				key = kind + "\x00" + domain + "/" + name
-			}
+			key := DocumentConstructKey(kind, name, domain)
 			if _, exists := index.byKindName[key]; exists {
 				return
 			}
