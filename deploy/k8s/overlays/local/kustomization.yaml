@@ -54,6 +54,7 @@ resources:
   - front-door.yaml
   - api-front-door.yaml
   - mcp-front-door.yaml
+  - edge-front-door.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
   - postgres.yaml
