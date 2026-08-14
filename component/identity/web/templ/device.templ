@@ -52,6 +52,20 @@ type DevicePending struct {
 	// self-asserted at registration, the id is what the session is
 	// actually bound to.
 	ClientId string
+	// ClientSelfRegistered is true when ClientName came from a
+	// v1:identity:oauthClient row -- whoever called the unauthenticated
+	// POST /register chose it (memql#3824).
+	//
+	// The comment above already knew the name was self-asserted, and the
+	// page acted on it as far as showing the id alongside. It never SAID
+	// so, though, which left a reader to infer from the presence of a
+	// second field that the first one was untrustworthy. This states the
+	// claim on the rows where it is true.
+	//
+	// False for an operator-configured client, and false when there is no
+	// name at all and this falls back to the raw client_id -- an opaque id
+	// is nobody's assertion, so there is nothing to distrust.
+	ClientSelfRegistered bool
 	// SourceIP is where the POST /device/code request came from.
 	SourceIP string
 	// UserAgent is what that request identified itself as.
@@ -122,7 +136,15 @@ templ deviceApproval(data DeviceData) {
 				<th>Application</th>
 				<td>
 					{ data.Pending.ClientName }
+					if data.Pending.ClientSelfRegistered {
+						<span style="display:inline-block;margin-left:6px;padding:1px 6px;border-radius:4px;background:#7c2d12;color:#fff;font-size:11px;font-weight:600;letter-spacing:.02em;vertical-align:middle;">NOT VERIFIED</span>
+					}
 					<div class="text-small text-muted"><code>{ data.Pending.ClientId }</code></div>
+					if data.Pending.ClientSelfRegistered {
+						<div class="text-small" style="color:#7c2d12;margin-top:4px;">
+							This application registered itself and chose this name. Nobody has verified it -- check the code and the request details below instead.
+						</div>
+					}
 				</td>
 			</tr>
 			<tr>

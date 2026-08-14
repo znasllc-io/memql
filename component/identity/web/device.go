@@ -84,11 +84,28 @@ type DeviceFlow struct {
 	Adapter DeviceCodeAdapter
 	Issuer  *identity.JWTIssuer
 	Audit   identity.AuditLogger
-	// ClientName resolves a client_id to its registered human name.
-	// Optional -- a nil hook (or an unknown id) falls back to showing
-	// the raw client_id, which is the value the session is actually
-	// bound to and so is never the wrong thing to show.
-	ClientName func(ctx context.Context, clientId string) string
+	// ClientDisplay resolves a client_id to what this page should tell a
+	// person about it: the registered human name, and whether anyone
+	// vouched for that name.
+	//
+	// Optional -- a nil hook (or an unknown id) falls back to showing the
+	// raw client_id, which is the value the session is actually bound to
+	// and so is never the wrong thing to show.
+	//
+	// WHY ONE HOOK RETURNING TWO THINGS rather than a second hook beside a
+	// string one (memql#3824). The question this page asks is not "what is
+	// this client called" -- it is "what should I show someone who is about
+	// to approve it", and since memql#3794 that has two parts which must
+	// not be able to disagree. Two hooks can be wired to different
+	// resolvers, can be nil independently, and can answer about different
+	// clients. One cannot.
+	//
+	// selfRegistered is true when the name came from a
+	// v1:identity:oauthClient row -- whoever called the unauthenticated
+	// POST /register chose it. False for an operator-configured client, and
+	// false when there is no name at all, which is deliberate: see
+	// projectPending.
+	ClientDisplay func(ctx context.Context, clientId string) (name string, selfRegistered bool)
 }
 
 // SetDeviceFlow stashes the device-verification dependencies. Called
@@ -261,10 +278,20 @@ func (s *Server) resolveDeviceCode(r *http.Request, raw string) (*devicecode.Row
 
 // projectPending builds the approval panel's evidence block.
 func (s *Server) projectPending(r *http.Request, row *devicecode.Row, typed string) *webtempl.DevicePending {
+	// The badge marks a SELF-ASSERTED NAME, not an unknown client
+	// (memql#3824). Both start false and only the resolved-name branch can
+	// set them, which is the whole distinction: falling back to the raw
+	// client_id is nobody's claim about anything -- it is the opaque value
+	// the session binds to -- so there is no assertion for a reader to
+	// distrust and no badge to show. Marking that case "unverified" would
+	// train people to ignore the word on the page where it means most.
 	name := row.ClientId
-	if s.deviceFlow != nil && s.deviceFlow.ClientName != nil {
-		if resolved := strings.TrimSpace(s.deviceFlow.ClientName(r.Context(), row.ClientId)); resolved != "" {
+	selfRegistered := false
+	if s.deviceFlow != nil && s.deviceFlow.ClientDisplay != nil {
+		resolved, self := s.deviceFlow.ClientDisplay(r.Context(), row.ClientId)
+		if resolved = strings.TrimSpace(resolved); resolved != "" {
 			name = resolved
+			selfRegistered = self
 		}
 	}
 	// Echo the CANONICAL display form rather than what the user typed:
@@ -280,13 +307,14 @@ func (s *Server) projectPending(r *http.Request, row *devicecode.Row, typed stri
 		ip = "(unknown)"
 	}
 	return &webtempl.DevicePending{
-		UserCode:    display,
-		ClientName:  name,
-		ClientId:    row.ClientId,
-		SourceIP:    ip,
-		UserAgent:   ua,
-		RequestedAt: formatStamp(row.CreatedAt),
-		ExpiresAt:   formatStamp(row.ExpiresAt),
+		UserCode:             display,
+		ClientName:           name,
+		ClientSelfRegistered: selfRegistered,
+		ClientId:             row.ClientId,
+		SourceIP:             ip,
+		UserAgent:            ua,
+		RequestedAt:          formatStamp(row.CreatedAt),
+		ExpiresAt:            formatStamp(row.ExpiresAt),
 	}
 }
 
