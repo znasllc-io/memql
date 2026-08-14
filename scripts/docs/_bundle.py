@@ -34,6 +34,10 @@ def front_matter(path):
                     k, _, v = line.partition(":")
                     fm[k.strip()] = v.strip()
     except OSError:
+        # Best-effort by contract (see docstring): a file we cannot read has
+        # no readable front-matter, so it returns {} -- which fails the
+        # `audience: public` check in main() and keeps the file OUT of the
+        # bundle. Failing open here could never publish a non-public doc.
         pass
     return fm
 
