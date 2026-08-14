@@ -153,7 +153,20 @@ suggests it affects only a definition. And a concept promoted by a typo, with
 nothing written to it, must still be cleanly withdrawable — otherwise the
 misspelling owns that name on that cluster forever.
 
-A retired concept survives a restart still retired.
+A retired concept survives a restart still retired. The refusal a write gets
+names the state and the way out, rather than failing as a generic validation
+error:
+
+```
+concept "v1:acme:widget" is RETIRED: it was demoted while rows already existed
+under it, so the rows stay readable and new writes are refused. Re-promote the
+concept to resume writing to it.
+```
+
+A node with **no database** cannot take the count, and a demote there is
+**refused** rather than guessed. The two wrong guesses are not symmetric:
+guessing "retired" costs writes that one more demote can refuse again, while
+guessing "removed" frees a name that rows are still addressed by.
 
 The row count that decides between the two outcomes is taken **against
 storage, under no actor at all**. That is deliberate, not a shortcut: per-row
