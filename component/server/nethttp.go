@@ -771,10 +771,24 @@ func withBasePath(paths ...string) []string {
 
 // MetricsPaths returns the public Prometheus scrape endpoint(s). The
 // /metrics endpoint carries no user data and is only reachable on the
-// in-cluster pod network (the public ingress routes specific paths
-// only), so it is unauthenticated like the health probes -- a
-// ServiceMonitor/Prometheus scrape can't present a bearer token.
-// memql#1523.
+// in-cluster pod network, so it is unauthenticated like the health
+// probes -- a ServiceMonitor/Prometheus scrape can't present a bearer
+// token. memql#1523.
+//
+// THE SECOND CLAUSE IS A LOAD-BEARING DEPLOYMENT FACT, and it is now checked
+// rather than asserted (memql#3703). It used to end "(the public ingress routes
+// specific paths only)", which was true while the front door's path list was
+// hand-written and stopped being self-evident the moment that list became
+// GENERATED from these declarations: the generator reads PublicPaths(), which
+// appends this function, so the naive derivation would have published an
+// unauthenticated Prometheus scrape at api.<domain> -- and being in PublicPaths()
+// is what makes that serious, since the verifier bypasses these paths, so
+// external reachability is the whole of the exposure.
+//
+// This declaration is therefore classified servedButNotExternallyRouted in
+// cmd/frontdoorpaths, and TestWithheldPathsAreAbsentFromTheEmittedSet fails if
+// /metrics ever appears in the emitted block. Wanting metrics externally
+// reachable is a decision to make there, and it needs authentication first.
 func MetricsPaths() []string {
 	base := sanitizeBaseURLFromEnv()
 	metricsPath := "/metrics"
