@@ -103,8 +103,10 @@ import {
   type RunConfig,
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
-import { DeploymentsTreeProvider } from './views/deploymentsTree.js';
+import { DeploymentsTreeProvider, type DeploymentNode } from './views/deploymentsTree.js';
 import { DeploymentPanel } from './webview/deploymentPanel.js';
+import { roleVisibility } from './deploy/actions.js';
+import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
@@ -367,13 +369,61 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // revealed -- a receipt written by a run the page itself started is the
     // ordinary case, and a page holding a snapshot from when it opened would
     // report the version it replaced.
-    commands.registerCommand('memql.deployments.open', () => {
+    commands.registerCommand('memql.deployments.open', (node?: DeploymentNode) => {
       DeploymentPanel.show(context, {
         catalog: {
           clustersPath,
           receiptPath: defaultReceiptPath(),
           presence: () => presence.get(),
         },
+        // The same two thunks the tree takes, for the same reason: a remote
+        // instance's version AND its history are the connected cluster's rows,
+        // and the connection changes without this page being told.
+        connection: () => {
+          const state = connections?.state;
+          if (state === undefined || state.status === 'disconnected') return undefined;
+          return { clusterName: state.clusterName, connected: state.status === 'connected' };
+        },
+        readDeployments: () => {
+          const query = connections?.query;
+          if (query === undefined) return undefined;
+          return async () => {
+            const [deployments, specs] = await Promise.all([
+              browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
+              browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
+            ]);
+            return { deployments: deployments.rows, specs: specs.rows };
+          };
+        },
+        // Rebuilt per call from the LIVE dispatcher rather than cached: the
+        // ConnectionManager drops it the moment the socket dies, and a cached
+        // client would go on writing into a dead stream.
+        deployPort: () => {
+          const dispatcher = connections?.dispatcher;
+          return dispatcher === undefined ? undefined : new DeployControlClient(dispatcher);
+        },
+        readRole: async () => {
+          const query = connections?.query;
+          if (query === undefined) return roleVisibility(undefined);
+          const access = await query.getMyAccess().catch(() => null);
+          return roleVisibility(access?.clusterRole);
+        },
+        // The deploy console scopes to an ENVIRONMENT, and the registry entry's
+        // name is the only thing this editor knows about a remote cluster. They
+        // coincide for the conventional `staging` / `production` entries and a
+        // cluster named otherwise is answered by the engine, which refuses an
+        // environment it does not have -- and that refusal is one of the three
+        // states the page renders.
+        deployEnv: (name) => name,
+        confirm: (prompt, phrase) =>
+          Promise.resolve(
+            window.showInputBox({
+              title: 'memQL: confirm',
+              prompt,
+              placeHolder: phrase,
+              ignoreFocusOut: true,
+            }),
+          ),
         installRoot: installRootFor(context),
         receiptFile: defaultReceiptPath(),
         refreshTree: () => {
@@ -391,7 +441,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         openInstallFlow: (action) => {
           AddClusterPanel.show(context, presence, addClusterDeps(), action);
         },
-      });
+      },
+      // From a tree row, the instance it names; from the palette, where no row
+      // exists, the local one -- which is the only instance a machine always
+      // has.
+      node?.kind === 'instance' ? node.instance.name : '');
     }),
   );
   // The connection decides a remote instance's version and its history, so a

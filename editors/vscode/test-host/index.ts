@@ -524,6 +524,73 @@ smoke("every webview surface opens without throwing", async () => {
   }
 });
 
+smoke("the remote instance page renders all three pipeline states", async () => {
+  await closeAllTabs();
+  const context = fakeContext();
+
+  // Driven entirely through injected seams, because none of the three states
+  // needs a cluster to be true and two of them are FAILURES of a read -- the
+  // point of the design is that neither is an error, so neither should need a
+  // broken cluster to reach.
+  const base = {
+    catalog: {
+      clustersPath: path.join(os.tmpdir(), "memql-smoke-remote-clusters.yaml"),
+      receiptPath: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+      runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+      presence: async () => ({
+        verdict: "absent" as const,
+        evidence: { receipt: false, registry: false },
+        endpoint: "",
+      }),
+      readClusters: async () => ({
+        ok: true as const,
+        file: { clusters: [{ name: "staging", endpoint: "api.staging.example.com:443" }], selectedCluster: "staging" },
+      }),
+    },
+    installRoot: os.tmpdir(),
+    receiptFile: path.join(os.tmpdir(), "memql-smoke-no-such-receipt.json"),
+    runsDir: path.join(os.tmpdir(), "memql-smoke-no-such-runs"),
+    refreshTree: () => undefined,
+    openInstallFlow: () => {
+      throw new Error("no install flow in the smoke lane");
+    },
+  };
+
+  try {
+    for (const [label, port] of [
+      // Not connected: the read never happened, which is its own sentence and
+      // not a claim that the cluster has no deploy console.
+      ["no connection", undefined],
+      // Refused by the role gate.
+      [
+        "role gate",
+        {
+          getDeploymentStatus: () => Promise.reject(new Error("PERMISSION_DENIED")),
+        } as never,
+      ],
+      // Answered.
+      ["answered", { getDeploymentStatus: () => Promise.resolve({ environment: "staging" }) } as never],
+    ] as const) {
+      DeploymentPanel.show(
+        context,
+        { ...base, ...(port === undefined ? {} : { deployPort: () => port }) },
+        "staging",
+      );
+      await waitFor(
+        `the remote page (${label}) to title itself (saw: ${openTabLabels().join(", ")})`,
+        () => openTabLabels().includes("Deployment: staging"),
+        15_000
+      );
+      info(`remote instance page rendered: ${label}`);
+    }
+  } finally {
+    await closeAllTabs();
+    for (const entry of context.subscriptions) {
+      entry.dispose();
+    }
+  }
+});
+
 // -----------------------------------------------------------------------------
 // Sign-in (memql#3403)
 // -----------------------------------------------------------------------------

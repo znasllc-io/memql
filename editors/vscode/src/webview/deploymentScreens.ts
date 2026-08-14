@@ -15,6 +15,7 @@ import { escapeHtml } from "@znasllc-io/memql-view-kit";
 import type { InstanceAction } from "../deploy/instanceActions.js";
 import { displayVersion, type Instance, type Run } from "../state/deployments.js";
 import { instanceRowStatus, runRowStatus } from "../state/deploymentsCatalog.js";
+import type { PipelineState } from "../deploy/pipelineState.js";
 import type { TagListing } from "../install/tags.js";
 import type { PlannedStepView } from "../state/upgradePlan.js";
 
@@ -179,4 +180,105 @@ ${plan}
   }>Start</button>
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// the remote instance
+// ---------------------------------------------------------------------------
+
+export interface RemoteOverviewInput {
+  instance: Instance;
+  runs: readonly Run[];
+  pipeline: PipelineState;
+  nowMs: number;
+  /** The outcome line of the last action taken, or "" before any. */
+  outcome: string;
+  /** A failure this page produced, as opposed to one the engine reported. */
+  error: string;
+}
+
+/**
+ * A remote instance: what it runs, what deployed it, and what can be done.
+ *
+ * THE ITEMS ARE LABELLED "NODE TYPES", NEVER "STEPS". A local run's items are
+ * capability-script executions and a remote run's are per-tier
+ * `deploymentNodeSpec` rows -- a declaration of version, replicas and digest,
+ * not an account of something that ran. The label is what stops one being read
+ * as the other, and it is the only place the asymmetry between the two kinds of
+ * run is visible to an operator.
+ */
+export function renderRemoteInstance(input: RemoteOverviewInput): string {
+  const { instance, pipeline } = input;
+  const status = instanceRowStatus(instance);
+
+  const actions =
+    pipeline.actions.length === 0
+      ? ""
+      : `<div class="actions">${pipeline.actions
+          .map(
+            (action) =>
+              `<button class="${
+                action.typeToConfirm ? "secondary destructive" : "primary"
+              }" type="button" data-deploy="${escapeHtml(action.id)}" title="${escapeHtml(
+                action.description,
+              )}">${escapeHtml(action.label)}</button>`,
+          )
+          .join("")}</div>`;
+
+  const runs =
+    input.runs.length === 0
+      ? `<p class="lede">No deployments have been recorded for this cluster${
+          instance.connected ? "" : ", and this editor is not connected to it"
+        }.</p>`
+      : input.runs
+          .map((run) => {
+            const row = runRowStatus(run, input.nowMs);
+            const items =
+              run.items.length === 0
+                ? ""
+                : `<div class="items-label">Node types</div>
+<ul class="runs">${run.items
+                    .map(
+                      (item) => `<li class="run">
+  <span class="run-kind">${escapeHtml(item.label)}</span>
+  <span class="run-detail">${escapeHtml(item.detail ?? "")}</span>
+</li>`,
+                    )
+                    .join("")}</ul>`;
+            return `<div class="run-block" data-status="${escapeHtml(run.status)}">
+  <div class="run">
+    <span class="run-kind">${escapeHtml(row.label)}</span>
+    <span class="run-detail">${escapeHtml(row.description)}</span>
+  </div>
+  ${items}
+</div>`;
+          })
+          .join("");
+
+  const outcome =
+    input.outcome === ""
+      ? ""
+      : `<p class="${
+          input.outcome.startsWith("ERROR") ? "error" : "notice"
+        }">${escapeHtml(input.outcome)}</p>`;
+  const error = input.error === "" ? "" : `<p class="error">${escapeHtml(input.error)}</p>`;
+
+  return `<h1>${escapeHtml(instance.name)}</h1>
+<p class="lede">${escapeHtml(status.tooltip)}</p>
+${error}
+${outcome}
+<div class="facts">
+  <div class="fact"><span class="fact-key">kind</span><span class="fact-value">remote</span></div>
+  <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
+    displayVersion(instance.version),
+  )}</span></div>
+  <div class="fact"><span class="fact-key">domain</span><span class="fact-value">${escapeHtml(
+    instance.domain ?? "not recorded",
+  )}</span></div>
+</div>
+<h2>${escapeHtml(pipeline.title)}</h2>
+<p class="lede">${escapeHtml(pipeline.detail)}</p>
+${actions}
+<h2>Deployments</h2>
+${runs}`;
 }
