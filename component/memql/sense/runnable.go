@@ -39,6 +39,7 @@ package sense
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/znasllc-io/memql/component/language/parser"
@@ -206,6 +207,14 @@ type constructSpan struct {
 // non-runnable construct that was skipped here would leave its own annotations
 // dangling and they would be spliced onto the next runnable construct's
 // fragment.
+//
+// A span's `start` is the first byte of the declaration's TEXT, comment
+// preamble included -- the same extent the engine's slicer cuts. The token
+// stream alone cannot give that, because comments are not tokens: the scan can
+// only see back as far as the first `@`, and every `///` doc comment above the
+// annotation block falls outside it. So the last thing this function does is
+// hand each span's start to parser.PreambleStartOf, the one implementation of
+// that rule (see extendSpansOverPreamble for why it has to be the same one).
 func scanTopLevelConstructs(source string) []constructSpan {
 	lexer := parser.NewLexer(source)
 	tokens, err := lexer.Tokenize()
@@ -269,7 +278,66 @@ func scanTopLevelConstructs(source string) []constructSpan {
 			}
 		}
 	}
-	return out
+	return extendSpansOverPreamble(source, out)
+}
+
+// extendSpansOverPreamble moves each span's start back over the comment and
+// annotation preamble the token scan cannot see.
+//
+// # Why this is not a local walk
+//
+// The rule -- contiguous lines that trim to a leading `@` or `//`, stopping at
+// the first line that is neither -- is parser.PreambleStartOf, and it MUST be
+// the same implementation the engine's slicer uses rather than a copy that
+// agrees today. The construct source hash (memql#3758) is computed on both
+// sides over "the declaration's text", so any disagreement about where that
+// text begins makes the two hashes differ for a construct neither side has
+// touched. A copy of a five-line walk is exactly the kind of thing that stays
+// correct until someone fixes an edge case in one of them.
+//
+// # The offset spaces genuinely differ, so the conversion is real work
+//
+// The lexer scans a []rune, so every Token.Pos is a RUNE offset;
+// PreambleStartOf indexes a string, so it speaks BYTES. runeToByte is built
+// once per scan rather than per span: converting by re-counting runes from the
+// top of the file would be O(n) per construct and so O(n^2) over a file, on a
+// path the editor drives from every keystroke.
+//
+// Before handing an offset over, the start is backed up to its own line start
+// when everything between is whitespace. That is not cosmetic: the engine's
+// header regexp is anchored `^[ \t]*<keyword>`, so ITS headerStart is the line
+// start, and PreambleStartOf walking from mid-line sees the indentation as the
+// "previous line", decides it is not a preamble line, and stops -- dropping the
+// whole preamble for any indented declaration. The whitespace-only guard is
+// what keeps two declarations sharing one line from swallowing each other.
+func extendSpansOverPreamble(source string, spans []constructSpan) []constructSpan {
+	if len(spans) == 0 {
+		return spans
+	}
+
+	// runeToByte[i] is the byte offset at which rune i begins; the final entry
+	// is len(source) so a span ending at EOF still indexes.
+	runeToByte := make([]int, 0, len(source)+1)
+	for i := range source {
+		runeToByte = append(runeToByte, i)
+	}
+	runeToByte = append(runeToByte, len(source))
+
+	for i := range spans {
+		start := spans[i].start
+		if start < 0 || start >= len(runeToByte) {
+			continue
+		}
+		byteStart := runeToByte[start]
+		if lineStart := strings.LastIndexByte(source[:byteStart], '\n') + 1; strings.TrimSpace(source[lineStart:byteStart]) == "" {
+			byteStart = lineStart
+		}
+		// PreambleStartOf returns either byteStart itself or a line start, and
+		// both are rune boundaries, so the reverse lookup is exact rather than
+		// a nearest match.
+		spans[i].start = sort.SearchInts(runeToByte, parser.PreambleStartOf(source, byteStart))
+	}
+	return spans
 }
 
 // matchConstructHeader recognises a construct declaration header starting at

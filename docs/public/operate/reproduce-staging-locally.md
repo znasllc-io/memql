@@ -36,7 +36,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
-| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2** | equivalent |
+| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**, matching prod; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width (memql#3766) |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
@@ -392,7 +392,7 @@ with its justification.
 
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
-| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment | Resource-constrained laptops. Multi-node is opt-in via `make scale N=2`. The fieldRef mechanism is identical to staging so the multi-node path fully reproduces. |
+| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment, matching prod (0 when idle) | Resource-constrained laptops locally; cost in staging, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2` / `ENV=staging`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
