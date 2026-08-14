@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/server"
 )
 
 // serverPkgDir is where the exhaustiveness gate scans. Relative to this
@@ -113,12 +115,79 @@ func TestCollectExcludesTheGRPCCatchAll(t *testing.T) {
 	}
 }
 
-// The one path excluded on evidence rather than on doubt.
-// AudioWebsocketPaths() is mounted only at app/transport_audio.go:46 under
-// `//go:build agent || voice`, so a bff-tagged build does not serve it.
-func TestCollectExcludesTheAudioWebsocket(t *testing.T) {
-	if collected(t)["/memql/audio"] {
-		t.Error("collect() emits /memql/audio, which only agent and voice builds serve")
+// Every path an exclusion map names must actually be absent from the emitted
+// set. This is the counterpart to TestAggregateClaimsAreTrue: an exclusion is a
+// claim too, and for servedButNotExternallyRouted it is a claim that has to
+// survive the path ALSO being contributed by PublicPaths().
+//
+// /metrics is the case that matters. It is in PublicPaths(), which collect()
+// unions, so its exclusion is a real subtraction rather than a natural absence --
+// and if that subtraction regressed, the front door would publish an
+// unauthenticated Prometheus scrape while every other test stayed green.
+func TestWithheldPathsAreAbsentFromTheEmittedSet(t *testing.T) {
+	emitted := collected(t)
+
+	for _, m := range []map[string]declaration{notServedByTheBFF, servedButNotExternallyRouted} {
+		for name, d := range m {
+			for _, p := range d.paths() {
+				if emitted[p] {
+					t.Errorf("collect() emits %q, which server.%s() is classified as withheld:\n  %s",
+						p, name, d.reason)
+				}
+			}
+		}
+	}
+
+	// Named individually as well, so the paths whose exposure this prevents are
+	// legible without resolving a map.
+	for _, p := range []string{"/metrics", "/api/concepts", "/api/concepts/subscribe", "/memql/audio"} {
+		if emitted[p] {
+			t.Errorf("collect() emits %q; routing it makes an endpoint externally "+
+				"reachable that is deliberately not", p)
+		}
+	}
+}
+
+// PublicPaths() must not contain "/" -- an auth bypass, not a routing concern,
+// asserted here because this is where the declarations are already audited.
+//
+// component/identity/verifier/middleware.go:161-177 checks two ways and only one
+// of them is guarded:
+//
+//	path := normalizePath(r.URL.Path)
+//	if _, ok := publicPaths[path]; ok {
+//	        return true          // EXACT match, reached FIRST, no guard
+//	}
+//	for allowed := range publicPaths {
+//	        if allowed == "" || allowed == "/" || allowed == path {
+//	                continue     // the famous guard -- PREFIX loop only
+//	        }
+//
+// The `allowed == "/"` skip that everyone cites protects the prefix walk. The
+// exact-match branch above it does not, so "/" in PublicPaths() means a request
+// to exactly "/" bypasses bearer verification on EVERY verifier-consuming node --
+// bff, identity, mcp. The effect is nil today only because nothing registers "/"
+// and the mux 404s, and AssertUnauthenticatedSurfaceDeclared -- which refuses "/"
+// as a prefix declaration for this very reason -- does not run on a node that has
+// a verifier (app/transport.go:265).
+//
+// THE SCOPE IS THE UNTAGGED BUILD, deliberately. An edge node serving a public
+// website genuinely serves the root, and the legitimate shape for that is a
+// declaration whose CONTRIBUTION to PublicPaths() is compiled only into the edge
+// binary, while the declaration itself stays unconditionally compiled so the
+// exhaustiveness scan still sees it. This test permits exactly that shape -- a
+// build-tagged contribution is invisible from here -- and refuses an
+// unconditional one, which is the distinction worth enforcing.
+func TestPublicPathsDoesNotDeclareRoot(t *testing.T) {
+	for _, p := range server.PublicPaths() {
+		if strings.TrimSpace(p) == "/" {
+			t.Error(`server.PublicPaths() contains "/", which bypasses bearer verification ` +
+				`for a request to exactly "/" on every verifier-consuming node: ` +
+				`verifier.shouldBypassAuth's exact-match branch has no "/" guard, only its ` +
+				`prefix loop does (component/identity/verifier/middleware.go:161-177). ` +
+				`A node that legitimately serves the root must contribute "/" from a ` +
+				`build-tagged declaration, not unconditionally.`)
+		}
 	}
 }
 
@@ -191,13 +260,22 @@ func TestSpliceReplacesOnlyTheMarkedRegion(t *testing.T) {
 // test makes "a new HTTP route declaration either reaches the front door or
 // breaks the build" true.
 //
-// Every exported zero-argument `…Paths() []string` in package server must be
-// classified by exactly one of three maps in main.go, each of which carries its
-// reason inline. An unclassified one fails here, naming itself.
+// Every exported zero-argument `…Paths() []string` or `…Routes() []string` in
+// package server must be classified by exactly one of FOUR maps in main.go, each
+// of which carries its reason inline. An unclassified one fails here, naming
+// itself.
+//
+// Both suffixes are accepted because keying on one naming convention is how a
+// gate like this fails: server.ContractRoutes() is the live list of what
+// HandlerWithOptions registers -- as real a route declaration as any -- and an
+// earlier version of this test could not see it. A sixth contract route would
+// have reached the front door via nothing, been classified by nothing, and left
+// the suite green, which is exactly the recurrence mode the gate exists to
+// prevent.
 func TestEveryServerPathDeclarationIsClassified(t *testing.T) {
-	declared := serverPathFuncNames(t)
+	declared := serverRouteDeclNames(t)
 	if len(declared) < 15 {
-		t.Fatalf("scanned only %d Paths() declarations in %s; the scan is not finding them",
+		t.Fatalf("scanned only %d route declarations in %s; the scan is not finding them",
 			len(declared), serverPkgDir)
 	}
 
@@ -212,15 +290,22 @@ func TestEveryServerPathDeclarationIsClassified(t *testing.T) {
 		if _, ok := notServedByTheBFF[name]; ok {
 			classifications = append(classifications, "not-served-by-the-bff")
 		}
+		if _, ok := servedButNotExternallyRouted[name]; ok {
+			classifications = append(classifications, "served-but-not-externally-routed")
+		}
 
 		switch len(classifications) {
 		case 1:
 		case 0:
-			t.Errorf("server.%s() is a new HTTP path declaration that cmd/frontdoorpaths "+
-				"does not classify. Add it to includedPathFuncs so the front door routes it, "+
-				"or to reachedThroughAggregate if an aggregate already carries it, or to "+
-				"notServedByTheBFF with the build tags that keep the bff from serving it. "+
-				"An unrouted HTTP path does not 404 -- it hands HTTP/1.1 to an h2c backend.", name)
+			t.Errorf("server.%s() is a new HTTP route declaration that cmd/frontdoorpaths "+
+				"does not classify. Choose one:\n"+
+				"  includedPathFuncs             -- the bff serves it and the front door must route it\n"+
+				"  reachedThroughAggregate       -- an aggregate already carries its paths\n"+
+				"  notServedByTheBFF             -- with the build tags that keep the bff from serving it\n"+
+				"  servedButNotExternallyRouted  -- the bff serves it and it must stay off the public ingress\n"+
+				"Getting this wrong costs one of two things: an unrouted HTTP path does not 404, it "+
+				"hands HTTP/1.1 to an h2c backend; and a wrongly-routed one publishes an endpoint "+
+				"that is deliberately internal.", name)
 		default:
 			t.Errorf("server.%s() is classified %d ways (%s); exactly one is correct",
 				name, len(classifications), strings.Join(classifications, ", "))
@@ -263,31 +348,48 @@ func TestAggregateClaimsAreTrue(t *testing.T) {
 	}
 }
 
-// classifiedNames returns every name the three classification maps mention.
+// classifiedNames returns every name the four classification maps mention.
 func classifiedNames() []string {
 	var out []string
 	for name := range includedPathFuncs {
 		out = append(out, name)
 	}
-	for name := range reachedThroughAggregate {
-		out = append(out, name)
-	}
-	for name := range notServedByTheBFF {
-		out = append(out, name)
+	for _, m := range []map[string]declaration{
+		reachedThroughAggregate, notServedByTheBFF, servedButNotExternallyRouted,
+	} {
+		for name := range m {
+			out = append(out, name)
+		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// serverPathFuncNames returns every `func <Name>Paths() []string` declared in
-// package server.
+// serverRouteDeclNames returns every `func <Name>Paths() []string` and
+// `func <Name>Routes() []string` declared in package server.
 //
 // AST rather than a text scan because the signature is what matters: a
-// same-named method, or a Paths() returning something else, is not a path
-// declaration. parser.ParseDir reads every file regardless of build tags, which
-// is what this gate wants -- a declaration compiled into no binary at all still
-// has to be classified.
-func serverPathFuncNames(t *testing.T) []string {
+// same-named method, or a Paths() returning something else, is not a route
+// declaration.
+//
+// Three properties of parser.ParseDir, each deliberate but none obvious:
+//
+//   - It reads every file REGARDLESS OF BUILD TAGS, which is what this gate
+//     wants: a declaration compiled into no binary at all still has to be
+//     classified, and a declaration whose contribution to PublicPaths() is
+//     build-tagged (the edge-node root case) must still be seen here.
+//   - It reads _test.go FILES TOO, since the filter argument is nil. Harmless
+//     today -- package server declares no `*Paths()` in a test file -- but it
+//     means a test helper named that way would demand a classification. Left as
+//     it is: the failure mode is a spurious demand a reader can resolve in
+//     seconds, whereas filtering risks skipping a real declaration that happens
+//     to live beside tests.
+//   - It is NON-RECURSIVE, so the subpackages (audiows, memqlws, polyphonws)
+//     are not scanned. Correct rather than a gap: those are different packages,
+//     so nothing in them can be a `server.XPaths()` the generator could call.
+//     A route declaration moved down there would leave this scan -- and would
+//     also stop compiling in main.go, which is the louder failure.
+func serverRouteDeclNames(t *testing.T) []string {
 	t.Helper()
 
 	if _, err := os.Stat(serverPkgDir); err != nil {
@@ -305,7 +407,7 @@ func serverPathFuncNames(t *testing.T) []string {
 		for _, file := range pkg.Files {
 			for _, decl := range file.Decls {
 				fn, ok := decl.(*ast.FuncDecl)
-				if !ok || fn.Recv != nil || !isPathsFuncName(fn.Name.Name) {
+				if !ok || fn.Recv != nil || !isRouteDeclName(fn.Name.Name) {
 					continue
 				}
 				if !returnsOneStringSlice(fn.Type) || fn.Type.Params.NumFields() != 0 {
@@ -319,8 +421,19 @@ func serverPathFuncNames(t *testing.T) []string {
 	return names
 }
 
-func isPathsFuncName(name string) bool {
-	return strings.HasSuffix(name, "Paths") && name != "Paths" && ast.IsExported(name)
+// isRouteDeclName matches the two suffixes package server uses to name a route
+// declaration. The bare words are excluded so `Paths` or `Routes` alone -- which
+// would be some other kind of accessor -- does not demand a classification.
+func isRouteDeclName(name string) bool {
+	if !ast.IsExported(name) {
+		return false
+	}
+	for _, suffix := range []string{"Paths", "Routes"} {
+		if name != suffix && strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 func returnsOneStringSlice(sig *ast.FuncType) bool {

@@ -10,15 +10,23 @@
 // the repository routed either one. The failure is not a 404 -- it is an
 // HTTP/1.1 request handed to an h2c backend, which fails naming nothing.
 //
-// The path declarations already exist and are already verified against real
-// registration by TestContractRoutesMatchesRegistration. This tool makes the
-// front door read from them instead of from somebody's memory.
+// The path declarations already exist, so this tool makes the front door read
+// from them instead of from somebody's memory. Be precise about how much that
+// buys, because the imprecise version of this sentence is the kind of claim this
+// file exists to stop: TestContractRoutesMatchesRegistration verifies the five
+// entries of ContractRoutes() against a recording ServeMux, and NOTHING
+// comparable covers the other twenty declarations. They are hand-written lists
+// whose only enforcement is the boot check in
+// AssertUnauthenticatedSurfaceDeclared -- which, on a node that installs a
+// verifier, does not run at all (app/transport.go:265). What is generated here
+// is therefore only as complete as the declarations are, which is what makes the
+// exhaustiveness gate below the load-bearing part rather than a formality.
 //
 // WHAT THE EMITTED SET IS, PRECISELY. It is *the paths that must reach the HTTP
 // backend if they are served at all* -- NOT *the paths the bff definitely
 // serves*. The distinction is deliberate and is the reason collect() looks the
-// way it does. Three things follow from it, and each has been reverted into a
-// defect before, so none of them is an accident:
+// way it does. Four things follow from it, and each has been a defect at some
+// point, so none of them is an accident:
 //
 //  1. /memql/query is an HTTP path and is NOT excluded. The gRPC gateway is
 //     HTTP MIDDLEWARE: component/grpc/gateway.go's Middleware() returns
@@ -38,26 +46,41 @@
 //     Every per-route declaration a bff-tagged build mounts is unioned in
 //     explicitly; see includedPathFuncs.
 //
-//  3. Over-approximation is deliberate. PublicPaths() also carries paths only
-//     the IDENTITY node serves -- JWKSPaths() and IdentityDiscoveryPaths(), both
-//     documented in component/server/nethttp.go as mounted by identity's
-//     Service.RegisterRoutes. They are KEPT. Over-approximating a routing rule
-//     costs a 404; under-approximating costs a protocol error naming nothing.
-//     Excluding them correctly would need a per-node mount map that does not
-//     exist in this repository. WHEN IN DOUBT, INCLUDE.
+//  3. Over-approximation is deliberate FOR A PATH THE BFF DOES NOT SERVE.
+//     PublicPaths() also carries paths only the IDENTITY node serves --
+//     JWKSPaths() and IdentityDiscoveryPaths(), both documented in
+//     component/server/nethttp.go as mounted by identity's
+//     Service.RegisterRoutes. They are KEPT: adding a rule for a path this
+//     backend does not serve costs a 404, while omitting a rule for one it does
+//     costs a protocol error naming nothing. Excluding them correctly would need
+//     a per-node mount map that does not exist in this repository.
+//
+//  4. That pricing INVERTS for a path the bff does serve, and the rule in item 3
+//     is wrong if applied to one. There, adding a rule does not produce a 404 --
+//     it produces REACHABILITY, and for an unauthenticated endpoint that means
+//     exposure. /metrics is the case: it is in PublicPaths() so the verifier
+//     bypasses it, it is mounted on EVERY node type (app/config.go:62-64), and
+//     MetricsPaths()'s own comment justifies leaving it unauthenticated on the
+//     grounds that it "is only reachable on the in-cluster pod network (the
+//     public ingress routes specific paths only)". Routing it here would falsify
+//     that sentence and publish an unauthenticated Prometheus scrape at the
+//     front door. So there is a fourth classification --
+//     servedButNotExternallyRouted -- for "the bff serves it, and it must stay
+//     off the public ingress". "When in doubt, include" applies ONLY to item 3.
 //
 // So do not "simplify" collect() back to the three aggregates, and do not prune
 // it to what looks like the bff's real surface. Both changes have a name here:
 // the first reintroduces the /spaces/ class of defect, the second trades a
-// harmless 404 for an unroutable request. The one path excluded on EVIDENCE
-// rather than on doubt is /memql/audio -- AudioWebsocketPaths() is mounted only
-// under `//go:build agent || voice`, so a bff build does not serve it.
+// harmless 404 for an unroutable request.
 //
 // The classification is exhaustive and enforced:
 // TestEveryServerPathDeclarationIsClassified AST-scans package server for every
-// `func <Name>Paths() []string` and fails when one is in none of the three maps
-// below. A new HTTP route declaration therefore either reaches the front door or
-// breaks the build.
+// `func <Name>Paths() []string` and `func <Name>Routes() []string`, and fails
+// when one is in none of the four maps below. So a new route DECLARATION either
+// reaches the front door or breaks the build. Note the word: a new route mounted
+// through handleRoute with an inline path literal and no declaration of its own
+// is invisible both to this tool and (on a verifier-consuming node) to the boot
+// check -- see the qualification above.
 //
 // Usage:
 //
@@ -125,11 +148,11 @@ var includedPathFuncs = map[string]func() []string{
 	"PolyphonStatusPaths":    server.PolyphonStatusPaths,
 }
 
-// aggregateClaim pairs the reason a declaration needs no entry of its own with
-// the function that reason is about, so the two cannot drift. A reason string
-// beside a name the test cannot call is a comment, and this map exists precisely
-// because comments are what stopped being true here.
-type aggregateClaim struct {
+// declaration pairs a reason with the function the reason is about, so the two
+// cannot drift. A reason string beside a name no test can call is a comment, and
+// every map below exists precisely because comments are what stopped being true
+// here.
+type declaration struct {
 	reason string
 	paths  func() []string
 }
@@ -144,14 +167,12 @@ type aggregateClaim struct {
 // TestAggregateClaimsAreTrue calls each one and asserts every path it returns is
 // in the emitted set. The day PublicPaths() stops appending PortalPaths(), that
 // test fails instead of the portal bundle silently losing its route.
-var reachedThroughAggregate = map[string]aggregateClaim{
-	"HealthzPaths":    {"appended by PublicPaths()", server.HealthzPaths},
-	"ReadyzPaths":     {"appended by PublicPaths()", server.ReadyzPaths},
-	"LivezPaths":      {"appended by PublicPaths()", server.LivezPaths},
-	"MetricsPaths":    {"appended by PublicPaths()", server.MetricsPaths},
-	"AuthPaths":       {"appended by PublicPaths()", server.AuthPaths},
-	"ConceptAPIPaths": {"appended by PublicPaths()", server.ConceptAPIPaths},
-	"PortalPaths":     {"appended by PublicPaths()", server.PortalPaths},
+var reachedThroughAggregate = map[string]declaration{
+	"HealthzPaths": {"appended by PublicPaths()", server.HealthzPaths},
+	"ReadyzPaths":  {"appended by PublicPaths()", server.ReadyzPaths},
+	"LivezPaths":   {"appended by PublicPaths()", server.LivezPaths},
+	"AuthPaths":    {"appended by PublicPaths()", server.AuthPaths},
+	"PortalPaths":  {"appended by PublicPaths()", server.PortalPaths},
 	"JWKSPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
 		server.JWKSPaths},
 	"IdentityDiscoveryPaths": {"appended by PublicPaths() -- identity-only, kept per over-approximation",
@@ -160,17 +181,79 @@ var reachedThroughAggregate = map[string]aggregateClaim{
 		server.InboundWebhookPaths},
 	"UnsubscribePaths": {"appended by HandlerAuthorizedPaths() and SelfAuthenticatedPaths()",
 		server.UnsubscribePaths},
+	// The one declaration here that is not named `*Paths`, and the reason the
+	// scan accepts a `Routes` suffix too: it is the live list of what
+	// HandlerWithOptions actually registers, so a sixth contract route must not
+	// be able to slip past a gate that keys on a naming convention. All five of
+	// today's are carried by the aggregates, which is what the claim asserts.
+	"ContractRoutes": {"the five HandlerWithOptions routes, all appended by PublicPaths() " +
+		"(/healthz, /readyz, /livez) or HandlerAuthorizedPaths() (/automations/, " +
+		"/automations/resume)", server.ContractRoutes},
 }
 
-// notServedByTheBFF names the declarations excluded on EVIDENCE. Each carries
-// the reason the bff cannot serve the path, which is the only argument that
-// justifies an exclusion -- doubt is not one, per item 3 of the package comment.
-var notServedByTheBFF = map[string]string{
-	"AudioWebsocketPaths": "/memql/audio is mounted only at app/transport_audio.go under " +
+// notServedByTheBFF names declarations excluded because this backend does not
+// serve the path at all. Each carries the evidence -- build tags or a retired
+// surface -- because evidence is the only argument that justifies an exclusion
+// under item 3 of the package comment. Doubt is not one.
+var notServedByTheBFF = map[string]declaration{
+	"AudioWebsocketPaths": {"/memql/audio is mounted only at app/transport_audio.go under " +
 		"`//go:build agent || voice`, so a bff-tagged build does not serve it. Neither node " +
 		"type has a front-door host either -- the media plane is deliberately separate.",
-	"AIHTTPPaths": "returns nil: the legacy /si/* HTTP surface is retired in favour of " +
-		"MemqlService.Stream (component/server/nethttp.go).",
+		server.AudioWebsocketPaths},
+	"AIHTTPPaths": {"returns nil: the legacy /si/* HTTP surface is retired in favour of " +
+		"MemqlService.Stream (component/server/nethttp.go).", server.AIHTTPPaths},
+}
+
+// servedButNotExternallyRouted is the fourth classification, and the one whose
+// absence was a defect. These paths ARE served by the bff, and are deliberately
+// kept off the public ingress -- so unlike notServedByTheBFF they must be
+// SUBTRACTED from what the aggregates contribute, not merely absent from it.
+//
+// Adding a rule for one of these does not cost a 404. It makes an endpoint
+// externally reachable, and both of today's entries are in PublicPaths(), so the
+// verifier bypasses them: the cost is exposure. This is the inversion item 4 of
+// the package comment describes, and it is why "when in doubt, include" is scoped
+// to paths the bff does not serve.
+var servedButNotExternallyRouted = map[string]declaration{
+	"MetricsPaths": {"/metrics is unauthenticated BECAUSE it is not externally routed: " +
+		"MetricsPaths()'s own comment says it \"carries no user data and is only reachable " +
+		"on the in-cluster pod network (the public ingress routes specific paths only)\". " +
+		"Mounted on every node type (app/config.go:62-64) and in PublicPaths(), so routing " +
+		"it here would publish an unauthenticated Prometheus scrape at the front door and " +
+		"falsify that comment. Scrapes reach it in-cluster on the pod network.",
+		server.MetricsPaths},
+	"ConceptAPIPaths": {"/api/concepts and /api/concepts/subscribe are served by the bff and " +
+		"in PublicPaths(), but NOTHING dials them over HTTP -- measured across clients/, " +
+		"sdk/ and editors/: every consumer of the concept registry reads it over gRPC via " +
+		"ConceptsListMsg (clients/portal/src/cluster/useConcepts.ts, sdk/go/client/queries.go, " +
+		"editors/vscode/src/views/conceptsTree.ts), which is where the endpoint-protocol " +
+		"policy puts this. The portal's /concepts is a client-side ROUTE under /portal/, not " +
+		"this endpoint. Publishing an unauthenticated schema feed nobody dials is cost " +
+		"without benefit; route it the day an HTTP caller exists.",
+		server.ConceptAPIPaths},
+}
+
+// withheld returns every path subtracted from the union: the h2c catch-all, plus
+// every path the two exclusion maps name.
+//
+// Both maps are subtracted, though only servedButNotExternallyRouted strictly
+// needs to be -- nothing in notServedByTheBFF is reachable through an aggregate
+// today. Subtracting both means a classification is HONOURED rather than merely
+// recorded, so moving a declaration into either map has the effect its reason
+// claims, even if some aggregate later starts appending it.
+func withheld() map[string]bool {
+	out := map[string]bool{}
+	for p := range grpcSurface {
+		out[p] = true
+	}
+	for _, m := range []map[string]declaration{notServedByTheBFF, servedButNotExternallyRouted} {
+		for _, d := range m {
+			for _, p := range d.paths() {
+				out[strings.TrimSpace(p)] = true
+			}
+		}
+	}
+	return out
 }
 
 // collect returns the deduplicated, sorted HTTP paths the front door must route
@@ -181,11 +264,12 @@ func collect() []string {
 
 	// Map iteration order is irrelevant: the paths land in a set and the sort
 	// below is a strict total order over distinct strings.
+	skip := withheld()
 	seen := map[string]bool{}
 	for _, paths := range includedPathFuncs {
 		for _, p := range paths() {
 			p = strings.TrimSpace(p)
-			if p == "" || grpcSurface[p] {
+			if p == "" || skip[p] {
 				continue
 			}
 			seen[p] = true
@@ -210,6 +294,18 @@ func collect() []string {
 
 // render turns a path list into Ingress path entries, indented to sit inside
 // spec.rules[0].http.paths.
+//
+// Every entry is pathType: Prefix, including the ones whose declaration says
+// EXACT -- /unsubscribe's comment, for instance, is emphatic that it "takes its
+// token from a query parameter, so nothing legitimate is ever mounted beneath
+// it". That is not a contradiction, because the two statements are about
+// different layers. The Ingress decides only WHICH BACKEND a request reaches,
+// and both /unsubscribe and a hypothetical /unsubscribe/x belong to the same
+// backend; the exactness that matters is enforced where the declaration is read
+// -- verifier.isSelfAuthenticated bounds its match to one path segment, and the
+// mux has no /unsubscribe/x route, so the suffix 404s. An Exact pathType would
+// buy a 404 from the ingress instead of a 404 from the mux, and cost a rule that
+// silently stops matching the day a path grows a sub-route.
 func render(paths []string) string {
 	var b strings.Builder
 	for _, p := range paths {

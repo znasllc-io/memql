@@ -624,8 +624,8 @@ naming nothing.** Hand-maintaining the list left `/inbound/{source}` and
 by third parties -- routed by no overlay in this repository at all.
 
 `cmd/frontdoorpaths` emits the block between the markers in
-`deploy/k8s/overlays/local/api-front-door.yaml`. Two things about the derivation
-are load-bearing:
+`deploy/k8s/overlays/local/api-front-door.yaml`. Three things about the
+derivation are load-bearing:
 
 - **It is per-ROUTE, not per-authentication-tier.** `server.PublicPaths()` +
   `HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()` answer *who may reach
@@ -634,19 +634,36 @@ are load-bearing:
   `/polyphon/status` came to be served by the bff and routed by nothing. The
   generator unions the aggregates **and** every per-route declaration a
   bff-tagged build mounts.
-- **It over-approximates deliberately.** Paths only the identity node serves
-  (`JWKSPaths()`, `IdentityDiscoveryPaths()`) are kept: over-approximating a
-  routing rule costs a 404, under-approximating costs a protocol error naming
-  nothing. When in doubt, include.
+- **It over-approximates for a path the bff does NOT serve.** Paths only the
+  identity node serves (`JWKSPaths()`, `IdentityDiscoveryPaths()`) are kept:
+  adding a rule for a path this backend does not serve costs a 404, while
+  omitting one for a path it does costs a protocol error naming nothing.
+- **That pricing INVERTS for a path the bff does serve, and this is the trap.**
+  There, adding a rule does not cost a 404 -- it makes the endpoint externally
+  reachable, and for anything in `PublicPaths()` (which the verifier bypasses)
+  that means exposure. `/metrics` is the case: it is unauthenticated *because* it
+  is in-cluster-only, and it is mounted on every node type. So there is a fourth
+  classification, `servedButNotExternallyRouted`, for "the bff serves it and it
+  must stay off the public ingress" -- `/metrics` and `/api/concepts*` are in it.
+  **"When in doubt, include" applies only to the previous bullet.**
 
 Two gates make it non-recurring. `TestFrontDoorPathsAreNotStale` fails when the
 checked-in block is not what the generator produces
 (`make frontdoor-paths-check`), and `TestEveryServerPathDeclarationIsClassified`
-AST-scans `component/server` for every `func …Paths() []string` and fails when
-one is classified by none of the generator's three maps. **So a new HTTP path
-either reaches the front door or breaks the build.** Do not hand-edit the block
-and do not "simplify" the generator back to the three aggregates -- its package
-comment says why, at length, because both changes look like cleanups.
+AST-scans `component/server` for every `func …Paths() []string` /
+`…Routes() []string` and fails when one is classified by none of the generator's
+four maps. **So a new HTTP path DECLARATION either reaches the front door or
+breaks the build.**
+
+Note the word *declaration*, because the stronger claim is false on the bff: a
+route mounted through `handleRoute` with an inline path literal and no `*Paths()`
+declaration of its own is invisible to the generator, and the boot check that
+would otherwise catch it (`AssertUnauthenticatedSurface`) runs only when the node
+installs **no** verifier (`app/transport.go:265`) -- which the bff does. Declare
+new HTTP routes with a `*Paths()` function; that is what puts them inside the
+gate. Do not hand-edit the block, and do not "simplify" the generator back to the
+three aggregates -- its package comment says why, at length, because both changes
+look like cleanups.
 
 ### gRPC-Only Endpoints (HTTP Retired)
 

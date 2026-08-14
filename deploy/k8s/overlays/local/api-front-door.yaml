@@ -21,6 +21,16 @@
 # package comment carries the full reasoning and the exhaustiveness gate that
 # makes a new declaration break the build rather than go unrouted.
 #
+# AND SOME PATHS THE BFF SERVES ARE DELIBERATELY WITHHELD from this block, which
+# is the half a reader is most likely to mistake for an omission. /metrics and
+# /api/concepts* are served here and are in PublicPaths(), so the verifier
+# bypasses them -- routing them would not cost a 404, it would publish an
+# unauthenticated endpoint at the front door. /metrics is unauthenticated
+# BECAUSE it is in-cluster-only; nothing dials /api/concepts* over HTTP at all
+# (every consumer reads the registry over gRPC). They are classified
+# servedButNotExternallyRouted in the generator and a test fails if either
+# reappears here. Adding a rule for one by hand is not a fix, it is an exposure.
+#
 # THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
 # choosing another domain overrides it through the ArgoCD Application's
 # spec.source.kustomize.patches, emitted by scripts/k3d/up.sh. The default is
@@ -50,13 +60,6 @@ spec:
                 port:
                   number: 8085
           - path: /.well-known/memql-config.json
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
-          - path: /api/concepts/subscribe
             pathType: Prefix
             backend:
               service:
@@ -99,13 +102,6 @@ spec:
                 port:
                   number: 8085
           - path: /auth/exchange
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
-          - path: /api/concepts
             pathType: Prefix
             backend:
               service:
@@ -169,13 +165,6 @@ spec:
                 port:
                   number: 8085
           - path: /healthz
-            pathType: Prefix
-            backend:
-              service:
-                name: bff-http
-                port:
-                  number: 8085
-          - path: /metrics
             pathType: Prefix
             backend:
               service:

@@ -3,6 +3,7 @@ package local
 import (
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -51,12 +52,12 @@ func describePathDrift(checkedIn, generated string) string {
 
 	var missing, extra []string
 	for _, p := range want {
-		if !contains(have, p) {
+		if !slices.Contains(have, p) {
 			missing = append(missing, p)
 		}
 	}
 	for _, p := range have {
-		if !contains(want, p) {
+		if !slices.Contains(want, p) {
 			extra = append(extra, p)
 		}
 	}
@@ -86,13 +87,4 @@ func pathsOf(block string) []string {
 		}
 	}
 	return out
-}
-
-func contains(hay []string, needle string) bool {
-	for _, h := range hay {
-		if h == needle {
-			return true
-		}
-	}
-	return false
 }
