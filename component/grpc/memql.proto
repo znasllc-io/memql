@@ -1538,25 +1538,52 @@ message DurablePromoteBundleResult {
 
 // DurableDemoteBundleMsg requests the owner-gated DURABLE demotion of a
 // previously promoted bundle out of the SHARED engine registry (memql#2163) --
-// the inverse of DurablePromoteBundleMsg. The engine removes every plain
-// construct (query / mutation / logic / spec / trait) the source names from the
+// the inverse of DurablePromoteBundleMsg. The engine withdraws every construct
+// (concept / query / mutation / logic / spec / trait) the source names from the
 // shared registry (author-promoted-only safety gate, never a core construct),
-// flips the persisted bundle/construct rows to "retired" (so a restart never
-// re-hydrates them), and broadcasts a live cross-node removal event so the
-// construct stops being callable on every node within seconds. There is NO
-// Gate-1 compile -- demote only needs the names + kinds, not a compiled form, so
-// a construct whose source no longer compiles can still be demoted. OWNER-only.
+// writes the withdrawal onto the persisted bundle/construct rows, and broadcasts
+// a live cross-node event so the construct stops being callable on every node
+// within seconds. There is NO Gate-1 compile -- demote only needs the names +
+// kinds, not a compiled form, so a construct whose source no longer compiles can
+// still be demoted. OWNER-only.
 message DurableDemoteBundleMsg {
   string request_id = 1;
   string sources = 2;  // .memql bundle source (names + kinds drive the demote)
 }
 
+// DurableDemoteOutcome is the per-construct RESULT of a demote (memql#3756):
+// WHICH of the two withdrawals happened, and the evidence that chose it.
+//
+// It exists because a CONCEPT does not necessarily leave the registry. Rows
+// written under it outlive its definition, so a demote with rows under the
+// concept RETIRES it -- registered, name still claimed, existing rows still
+// readable, new writes refused -- and only a demote with ZERO rows REMOVES it
+// and frees the name. Both are successes, and `ok = true` cannot be read
+// backwards to tell them apart, so the outcome is stated rather than left to be
+// parsed out of prose: what an operator does next depends on whether the name
+// they just withdrew is claimable again.
+message DurableDemoteOutcome {
+  string kind = 1;        // concept / query / mutation / logic / spec / trait
+  string name = 2;        // as the SOURCE named it (for a concept, the declaration name)
+  string concept_id = 3;  // canonical concept id; empty for every non-concept kind
+  string outcome = 4;     // "retired" (still registered, writes refused) or "removed" (gone, name free)
+  // row_count is the number of DISTINCT rows found under the concept, counted
+  // across every owner -- the evidence that chose the outcome. Always 0 for a
+  // non-concept kind, which has no rows of its own.
+  int64 row_count = 5;
+}
+
 message DurableDemoteBundleResult {
   string request_id = 1;
-  bool ok = 2;  // true only when every plain construct named in the source was demoted
+  bool ok = 2;  // true only when every construct named in the source was demoted
   repeated AuthoringConstruct demoted = 3;      // constructs durably demoted out of the shared registry
   repeated AuthoringDiagnostic diagnostics = 4; // per-construct diagnostics (currently unused; demote does not compile)
   string error = 5;  // non-empty when the demote was rejected (no demotable constructs) or a demote failed
+  // outcomes carries the same constructs as `demoted`, in the same order, each
+  // with what actually happened to it (memql#3756). Both lists are built in one
+  // loop from one slice, so they cannot disagree; `demoted` stays the identity
+  // list, `outcomes` is what a client renders.
+  repeated DurableDemoteOutcome outcomes = 6;
 }
 
 // -----------------------------------------------------------------------------

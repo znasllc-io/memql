@@ -30,6 +30,10 @@ type fakeDemoteStore struct {
 	constructs map[string][]AuthoringConstructRow // bundleId -> constructs
 	retiredCs  []string                           // constructIds retired
 	retiredBs  []string                           // bundleIds retired
+	// stampedCs are the constructIds a CONCEPT retire-in-place stamped
+	// (memql#3756): conceptRetired set, status deliberately left ACTIVE so the
+	// boot walk keeps re-registering the concept whose rows are still readable.
+	stampedCs []string
 }
 
 func (s *fakeDemoteStore) LoadPromotedBundles(context.Context) ([]AuthoringBundleRow, error) {
@@ -46,6 +50,18 @@ func (s *fakeDemoteStore) RetireConstruct(_ context.Context, _, constructId stri
 		for i := range rows {
 			if rows[i].Id == constructId {
 				s.constructs[bid][i].Status = string(BundleRetired)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *fakeDemoteStore) RetireConstructConcept(_ context.Context, _, constructId string) error {
+	s.stampedCs = append(s.stampedCs, constructId)
+	for bid, rows := range s.constructs {
+		for i := range rows {
+			if rows[i].Id == constructId {
+				s.constructs[bid][i].ConceptRetired = true
 			}
 		}
 	}
@@ -95,7 +111,7 @@ func TestDemoteConstructDurable_UnregistersAndRetires(t *testing.T) {
 		t.Fatal("seed promote did not register the spec")
 	}
 
-	if err := e.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "spec", "mcpSessSpec"); err != nil {
+	if _, err := e.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "spec", "mcpSessSpec"); err != nil {
 		t.Fatalf("durable demote: %v", err)
 	}
 
@@ -136,7 +152,7 @@ func TestDemoteConstructDurable_RejectsNonOwner(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry()}
 	store := seedPromotedSpec(t, e, "owner-1")
 
-	if err := e.demoteConstructDurableWithStore(context.Background(), store, "  ", "spec", "mcpSessSpec"); err == nil {
+	if _, err := e.demoteConstructDurableWithStore(context.Background(), store, "  ", "spec", "mcpSessSpec"); err == nil {
 		t.Fatal("expected an error demoting with no authenticated owner")
 	}
 	if len(store.retiredCs) != 0 || len(store.retiredBs) != 0 {
@@ -161,7 +177,7 @@ func TestDemoteConstructDurable_RefusesNonPromotedName(t *testing.T) {
 	}
 	store := &fakeDemoteStore{constructs: map[string][]AuthoringConstructRow{}}
 
-	if err := e.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "query", "coreOwned"); err == nil {
+	if _, err := e.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "query", "coreOwned"); err == nil {
 		t.Fatal("durable demote must refuse a non-author-promoted (core) name")
 	}
 	if got, _ := e.functions.Get("coreOwned"); got == nil || got.ExprSource != "core" {
@@ -179,7 +195,7 @@ func TestDemoteConstructDurable_RefusesNonPromotedName(t *testing.T) {
 func TestDemote_RehydrationSkipsRetiredAfterRestart(t *testing.T) {
 	old := &MemQLEngine{specs: newSpecRegistry()}
 	store := seedPromotedSpec(t, old, "owner-1")
-	if err := old.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "spec", "mcpSessSpec"); err != nil {
+	if _, err := old.demoteConstructDurableWithStore(context.Background(), store, "owner-1", "spec", "mcpSessSpec"); err != nil {
 		t.Fatalf("durable demote: %v", err)
 	}
 

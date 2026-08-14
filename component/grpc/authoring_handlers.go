@@ -165,18 +165,23 @@ func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClient
 }
 
 // handleDurableDemoteBundle is the inverse of handleDurablePromoteBundle
-// (memql#2163): it durably DEMOTES (retires) every previously promoted plain
-// construct named in the bundle source out of the SHARED engine registry. OWNER-
-// only, same gate as the promote handler. There is no Gate-1 compile -- a demote
-// only needs the names + kinds, so a construct whose source no longer compiles
-// can still be demoted.
+// (memql#2163): it durably DEMOTES every previously promoted construct named in
+// the bundle source out of the SHARED engine registry. OWNER-only, same gate as
+// the promote handler. There is no Gate-1 compile -- a demote only needs the
+// names + kinds, so a construct whose source no longer compiles can still be
+// demoted.
 //
-// On success the named constructs are removed from the shared registry on this
+// On success the named constructs are withdrawn from the shared registry on this
 // node (author-promoted-only safety gate -- a core construct can never be
-// removed), the persisted bundle/construct rows are flipped to "retired" (so a
-// restart never re-hydrates them), and a broadcast event removes them on EVERY
-// node within seconds. On failure (no demotable constructs, or a per-construct
-// demote error) it returns ok=false with a populated error.
+// removed), the persisted rows carry the withdrawal into the next boot, and a
+// broadcast event applies it on EVERY node within seconds. On failure (no
+// demotable constructs, or a per-construct demote error) it returns ok=false with
+// a populated error.
+//
+// The reply carries `outcomes` as well as `demoted` (memql#3756): a CONCEPT with
+// rows under it is RETIRED rather than removed -- still registered, rows still
+// readable, new writes refused -- and the client cannot tell which happened from
+// ok=true alone.
 func (s *streamSession) handleDurableDemoteBundle(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DurableDemoteBundleMsg) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "durable_demote_bundle: request body missing")
@@ -209,6 +214,7 @@ func (s *streamSession) handleDurableDemoteBundle(envelope *memqlv1.MemqlClientM
 		RequestId:   requestId,
 		Ok:          res.OK,
 		Demoted:     durableDemotedConstructsToProto(res.Demoted),
+		Outcomes:    durableDemoteOutcomesToProto(res.Outcomes),
 		Diagnostics: authoringDiagnosticsToProto(res.Diagnostics),
 	}
 	if err != nil {
@@ -220,6 +226,24 @@ func (s *streamSession) handleDurableDemoteBundle(envelope *memqlv1.MemqlClientM
 			DurableDemoteBundleResult: result,
 		},
 	})
+}
+
+// durableDemoteOutcomesToProto maps the engine-side per-construct demote
+// outcomes onto the wire form (memql#3756) -- retired vs removed, with the row
+// count that chose it for a concept. Kept structured all the way to the wire so
+// a client renders the outcome instead of pattern-matching a sentence.
+func durableDemoteOutcomesToProto(outcomes []memqlengine.DemoteOutcome) []*memqlv1.DurableDemoteOutcome {
+	out := make([]*memqlv1.DurableDemoteOutcome, 0, len(outcomes))
+	for _, o := range outcomes {
+		out = append(out, &memqlv1.DurableDemoteOutcome{
+			Kind:      o.Kind,
+			Name:      o.Name,
+			ConceptId: o.ConceptId,
+			Outcome:   o.Outcome,
+			RowCount:  o.RowCount,
+		})
+	}
+	return out
 }
 
 // durableDemotedConstructsToProto maps the engine-side DefinedConstructs (the

@@ -21,6 +21,16 @@ package memql
 //	d. emits the dedicated authoring.demote.<bundleId> broadcast so every other
 //	   node removes the construct from its own shared registry with no restart.
 //
+// A CONCEPT takes the same path with one difference that runs through every step
+// (memql#3756). Its rows outlive its definition, so a demote with rows under the
+// concept RETIRES it rather than removing it: registered, readable, closed to new
+// writes. Step (b) then stamps `conceptRetired` on the row and deliberately
+// leaves `status` alone -- a status-retired row is skipped by the re-hydration,
+// which for a concept means never registering it again, which means every row
+// ever written under it becomes unreadable. Step (d) carries no outcome: each
+// node re-derives it from the SAME shared Postgres, so the decision cannot
+// diverge across the mesh even though nothing about it travels on the wire.
+//
 // Ordering mirrors the promote path inverted: it removes from the shared registry
 // FIRST (the authoritative safety gate -- a name that is NOT author-promoted is
 // refused there, so a refused demote never retires a persisted row), then flips
@@ -35,6 +45,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	"github.com/znasllc-io/memql/component/events"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // AuditActionConstructDemoted is the audit action stamped when a plain construct
@@ -60,7 +71,12 @@ func isRetiredConstructStatus(status string) bool {
 // owner is the AUTHENTICATED actor; the OWNER-ONLY gate is enforced by the caller
 // (the gRPC durable-demote handler matches the promote owner gate). The persisted
 // row writes run under the owner's envelope, exactly like the promote path.
-func (e *MemQLEngine) DemoteConstructDurable(ctx context.Context, owner, kind, name string) error {
+//
+// It returns the structured DemoteOutcome -- which withdrawal happened, and for a
+// concept the row count that chose it -- because for a concept "it worked" does
+// not say whether the name is claimable again, which is the next thing the caller
+// needs to know.
+func (e *MemQLEngine) DemoteConstructDurable(ctx context.Context, owner, kind, name string) (DemoteOutcome, error) {
 	return e.demoteConstructDurableWithStore(ctx, &engineDemoteStore{engine: e}, owner, kind, name)
 }
 
@@ -69,8 +85,14 @@ func (e *MemQLEngine) DemoteConstructDurable(ctx context.Context, owner, kind, n
 // construct named in the source was demoted. On a mid-demote failure Demoted
 // holds the ones that were removed before the failing one.
 type DemoteBundleResult struct {
-	OK          bool                `json:"ok"`
-	Demoted     []DefinedConstruct  `json:"demoted,omitempty"`
+	OK      bool               `json:"ok"`
+	Demoted []DefinedConstruct `json:"demoted,omitempty"`
+	// Outcomes is the per-construct record of WHICH withdrawal happened
+	// (memql#3756): removed, or -- for a concept with rows under it -- retired,
+	// with the row count that decided. Same constructs as Demoted, in the same
+	// order, built in the same loop, so the two cannot disagree; Demoted stays
+	// as the identity list every existing renderer reads.
+	Outcomes    []DemoteOutcome     `json:"outcomes,omitempty"`
 	Diagnostics []SandboxDiagnostic `json:"diagnostics,omitempty"`
 }
 
@@ -97,18 +119,19 @@ func (e *MemQLEngine) DemoteBundleDurable(ctx context.Context, owner, bundleSour
 // split out so it is unit testable with a fake demoteStore (no live DB), exactly
 // like promoteBundleDurableWithStore.
 //
-// A bundle that declares a CONCEPT cannot be demoted at all, and refuses as a
-// whole rather than demoting its other members (memql#3746). Concepts became
-// promotable without becoming demotable -- withdrawing one would strand rows
-// already written under it, so retire-vs-remove is memql#3756's decision -- and
-// the shared isDurablePromotableKind filter is what routes the concept to
-// DemoteAuthoredConstruct's explicit refusal instead of skipping it.
+// A bundle that declares a CONCEPT demotes it along with everything else, in
+// source order (memql#3756). It used to refuse the whole bundle -- concepts were
+// promotable and not yet demotable, and refusing was better than silently
+// demoting the verbs and leaving the noun live with nothing that reads or writes
+// it. Now that a concept has withdrawal semantics of its own, the common shape of
+// a promoted bundle (a noun plus the verbs bound to it) withdraws as one unit,
+// which is what a caller handing back the source they promoted is asking for.
 //
-// Skipping is the alternative and it is worse. The common shape of a promoted
-// bundle is a noun plus the verbs bound to it, so silently demoting the verbs
-// would leave the concept live with nothing that reads or writes it, and report
-// success. Refusing says plainly that this bundle cannot be withdrawn yet; a
-// single construct can still be demoted by name via DemoteConstructDurable.
+// Note what "demoted" then means per member: the verbs are removed, and the noun
+// is removed ONLY if nothing was ever written under it -- otherwise it is retired
+// in place, so the bundle's rows stay readable through a concept whose verbs are
+// gone. That is the intended end state, not a leak: reading those rows back needs
+// a concept, not the queries the owner just withdrew.
 func (e *MemQLEngine) demoteBundleDurableWithStore(ctx context.Context, store demoteStore, owner, bundleSource string) (DemoteBundleResult, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
@@ -128,11 +151,13 @@ func (e *MemQLEngine) demoteBundleDurableWithStore(ctx context.Context, store de
 
 	result := DemoteBundleResult{OK: true}
 	for _, c := range demotable {
-		if derr := e.demoteConstructDurableWithStore(ctx, store, owner, c.Kind, c.Name); derr != nil {
+		outcome, derr := e.demoteConstructDurableWithStore(ctx, store, owner, c.Kind, c.Name)
+		if derr != nil {
 			result.OK = false
 			return result, fmt.Errorf("authoring: durable demote %s %q: %w", c.Kind, c.Name, derr)
 		}
 		result.Demoted = append(result.Demoted, DefinedConstruct{Kind: c.Kind, Name: c.Name})
+		result.Outcomes = append(result.Outcomes, outcome)
 	}
 	return result, nil
 }
@@ -154,54 +179,89 @@ type demoteStore interface {
 	// RetireBundle retires a v1:authoring:bundle (status -> retired, retiredAt
 	// stamped) once all of its constructs are retired.
 	RetireBundle(ctx context.Context, owner, bundleId string) error
+	// RetireConstructConcept stamps `conceptRetired` on a v1:authoring:construct
+	// row and leaves `status` ACTIVE (memql#3756). The two are not
+	// interchangeable and the difference is the whole point: status "retired"
+	// makes the boot walk skip the row, which for a concept with rows under it
+	// would leave every one of them addressed by a name the engine no longer
+	// knows.
+	RetireConstructConcept(ctx context.Context, owner, constructId string) error
 }
 
 // demoteConstructDurableWithStore is the store-driven core, split out so it is
 // unit testable with a fake demoteStore (no live DB).
-func (e *MemQLEngine) demoteConstructDurableWithStore(ctx context.Context, store demoteStore, owner, kind, name string) error {
+func (e *MemQLEngine) demoteConstructDurableWithStore(ctx context.Context, store demoteStore, owner, kind, name string) (DemoteOutcome, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
-		return fmt.Errorf("authoring: durable demote requires an authenticated owner")
+		return DemoteOutcome{}, fmt.Errorf("authoring: durable demote requires an authenticated owner")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("authoring: durable demote requires a construct name")
+		return DemoteOutcome{}, fmt.Errorf("authoring: durable demote requires a construct name")
 	}
 	if !isDurablePromotableKind(kind) {
-		return fmt.Errorf("authoring: durable demotion of %s constructs is not supported (function-family + spec only)", kind)
+		return DemoteOutcome{}, fmt.Errorf("authoring: durable demotion of %s constructs is not supported (concept + function-family + spec only)", kind)
 	}
 
-	// Remove from the shared registry FIRST (the authoritative safety gate). A
+	// Withdraw from the shared registry FIRST (the authoritative safety gate). A
 	// name that is NOT author-promoted is refused here, so a refused demote never
-	// retires a persisted row.
-	if err := e.DemoteAuthoredConstruct(ctx, kind, name); err != nil {
-		return err
+	// touches a persisted row. The outcome it returns is what decides how the
+	// persisted rows are then written: a REMOVED construct retires its row, a
+	// RETIRED concept stamps its row and stays active (see below).
+	outcome, err := e.demoteAuthoredConstructWithOutcome(ctx, kind, name)
+	if err != nil {
+		return DemoteOutcome{}, err
 	}
+	conceptRetiredInPlace := outcome.Outcome == DemoteOutcomeRetired
 
 	// Persist under the owner's envelope so the #954 lifecycle mutations run with
 	// ownerUserId == owner -- mirrors how the promote store runs its writes.
 	persistCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
 
 	// Locate the persisted construct row(s) for (kind, name) among the durable
-	// promote bundles, flip each to retired, then retire any bundle whose every
-	// member is now retired.
+	// promote bundles, write the withdrawal onto each, then retire any bundle
+	// whose every member is now retired.
+	//
+	// EVERY matching row is written, not just the first. A concept can carry more
+	// than one active row (each promote of the same source appends one), and the
+	// re-hydration resolves the retired state as "a live row wins" -- so a row
+	// left unstamped here would un-retire the concept on the next boot. The
+	// existing loop already had to visit them all to retire duplicates; the
+	// concept case is what makes visiting them all load-bearing.
+	//
+	// rowName is what the persisted rows are named by, which for a concept is the
+	// DECLARATION name even when the caller demoted by canonical id (the two
+	// identities, again). Resolving it from the outcome rather than from the
+	// argument means a demote addressed either way still finds its rows -- and a
+	// demote that found none would leave the withdrawal in memory only, to be
+	// undone by the next restart.
+	rowName := name
+	if kind == "concept" && outcome.ConceptId != "" {
+		rowName = conceptDeclarationName(outcome.ConceptId)
+	}
 	bundles, err := store.LoadPromotedBundles(persistCtx)
 	if err != nil {
-		return fmt.Errorf("authoring: enumerate promoted bundles for demote: %w", err)
+		return DemoteOutcome{}, fmt.Errorf("authoring: enumerate promoted bundles for demote: %w", err)
 	}
 	var bundleId string
 	for _, bundle := range bundles {
 		rows, lerr := store.LoadConstructsForBundle(persistCtx, bundle.OwnerUserId, bundle.Id)
 		if lerr != nil {
-			return fmt.Errorf("authoring: load constructs for demote: %w", lerr)
+			return DemoteOutcome{}, fmt.Errorf("authoring: load constructs for demote: %w", lerr)
 		}
 		matched := false
 		for _, row := range rows {
-			if row.Kind != kind || row.Name != name || isRetiredConstructStatus(row.Status) {
+			if row.Kind != kind || row.Name != rowName || isRetiredConstructStatus(row.Status) {
 				continue
 			}
-			if rerr := store.RetireConstruct(persistCtx, bundle.OwnerUserId, row.Id); rerr != nil {
-				return fmt.Errorf("authoring: retire construct row: %w", rerr)
+			if conceptRetiredInPlace {
+				// Stamp, do NOT retire. The row must keep re-hydrating: it is
+				// what re-registers the concept whose rows are still being read.
+				if rerr := store.RetireConstructConcept(persistCtx, bundle.OwnerUserId, row.Id); rerr != nil {
+					return DemoteOutcome{}, fmt.Errorf("authoring: stamp retired concept row: %w", rerr)
+				}
+			} else if rerr := store.RetireConstruct(persistCtx, bundle.OwnerUserId, row.Id); rerr != nil {
+				return DemoteOutcome{}, fmt.Errorf("authoring: retire construct row: %w", rerr)
 			}
 			matched = true
 			bundleId = bundle.Id
@@ -210,30 +270,33 @@ func (e *MemQLEngine) demoteConstructDurableWithStore(ctx context.Context, store
 			continue
 		}
 		// Retire the bundle once every member construct is retired. Re-load so the
-		// just-retired row is reflected.
+		// just-retired row is reflected. A bundle holding a retired-in-place
+		// concept never qualifies -- its concept row is still active, which is
+		// exactly what has to stay true for the boot walk to reach it.
 		fresh, ferr := store.LoadConstructsForBundle(persistCtx, bundle.OwnerUserId, bundle.Id)
 		if ferr != nil {
-			return fmt.Errorf("authoring: re-load constructs after demote: %w", ferr)
+			return DemoteOutcome{}, fmt.Errorf("authoring: re-load constructs after demote: %w", ferr)
 		}
 		if allConstructsRetired(fresh) {
 			if berr := store.RetireBundle(persistCtx, bundle.OwnerUserId, bundle.Id); berr != nil {
-				return fmt.Errorf("authoring: retire bundle: %w", berr)
+				return DemoteOutcome{}, fmt.Errorf("authoring: retire bundle: %w", berr)
 			}
 		}
 	}
 
 	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("authored construct durably demoted out of the shared registry",
-			"owner", owner, "kind", kind, "name", name, "bundleId", bundleId, "action", AuditActionConstructDemoted)
+			"owner", owner, "kind", kind, "name", name, "bundleId", bundleId,
+			"outcome", outcome.Outcome, "rows", outcome.RowCount, "action", AuditActionConstructDemoted)
 	}
 
 	// Live cross-node propagation (memql#2163): broadcast the demoted bundle id +
-	// owner so every other node removes the construct from its own shared registry
-	// within seconds (no restart). Best-effort: a missing event bus degrades to
-	// the local demote only -- the retired row keeps the construct out on the next
-	// boot.
+	// owner so every other node withdraws the construct from its own shared
+	// registry within seconds (no restart). Best-effort: a missing event bus
+	// degrades to the local demote only -- the persisted rows carry the withdrawal
+	// into the next boot either way.
 	e.publishAuthoringDemote(bundleId, owner)
-	return nil
+	return outcome, nil
 }
 
 // allConstructsRetired reports whether every demotable construct row in the slice
@@ -302,4 +365,22 @@ func (s *engineDemoteStore) RetireConstruct(ctx context.Context, owner, construc
 func (s *engineDemoteStore) RetireBundle(ctx context.Context, owner, bundleId string) error {
 	authorCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
 	return (&engineActivationStore{engine: s.engine}).SetBundleRetired(authorCtx, bundleId)
+}
+
+// RetireConstructConcept stamps the concept-only retired-in-place flag
+// (memql#3756) through the dedicated retireConstructConcept mutation, under the
+// owner's envelope like every other write here. A separate mutation rather than
+// a status transition because it is a separate state: the row stays active so
+// the boot walk keeps re-registering the concept, and the flag is what the walk
+// replays afterwards.
+func (s *engineDemoteStore) RetireConstructConcept(ctx context.Context, owner, constructId string) error {
+	authorCtx := auth.ContextWithAccess(ctx, &auth.AccessContext{UserId: owner, Role: auth.RoleWriter})
+	// NAMED ARGS, not the `name({...})` object-literal wrapper several of the
+	// neighbouring authoring stores still build: that wrapper was REMOVED from
+	// the grammar (memql#2335) and the parser now refuses it, so a call written
+	// that way fails at runtime on a live engine while every fake-store unit test
+	// passes. See the note in the PR for the neighbours that still carry it.
+	_, err := s.engine.Execute(authorCtx,
+		fmt.Sprintf("retireConstructConcept(constructId: %s)", languageParser.QuoteString(constructId)))
+	return err
 }

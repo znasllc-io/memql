@@ -286,13 +286,13 @@ func (e *MemQLEngine) publishAuthoringPromote(bundleId, owner string) {
 // `concept` is the memql#3746 addition and the anchor of the training epic: a
 // customer's domain arrives as nouns first, and every other kind binds to one.
 //
-// The DEMOTE path shares this predicate, and for `concept` the two now differ:
-// promotable, not yet demotable. That asymmetry is deliberate rather than an
-// oversight -- withdrawing a concept would strand rows already written under it,
-// so its semantics are their own decision (memql#3756). The predicate is left
-// shared because the refusal it lets through is the RIGHT one: a demote of a
-// concept reaches DemoteAuthoredConstruct's explicit concept branch, which names
-// the reason, instead of dying against a generic "unsupported kind" here.
+// The DEMOTE path shares this predicate, and the two are now symmetric again:
+// what can be promoted can be withdrawn. For a concept "withdrawn" is not
+// necessarily "unregistered" -- rows written under it outlive its definition, so
+// a demote RETIRES it while rows exist and only REMOVES it when there are none
+// (memql#3756, authoring_concept_retire.go). That distinction lives in the demote
+// branch, not in this predicate, which answers only whether the kind has a
+// durable lifecycle at all.
 func isDurablePromotableKind(kind string) bool {
 	switch kind {
 	case "concept", "query", "mutation", "logic", "spec", "trait":
@@ -323,7 +323,31 @@ func promoteTargetNamespace(c *AuthoredConstruct) string {
 // (the others still come back). It does NOT touch automation bundles -- those
 // keep their owner-scoped re-arm path (RearmActiveBundles).
 func (e *MemQLEngine) RehydratePromotedConstructs(ctx context.Context) (RehydrateResult, error) {
-	return e.rehydratePromotedNow(ctx, &enginePromoteRehydrateStore{engine: e})
+	store := &enginePromoteRehydrateStore{engine: e}
+	result, err := e.rehydratePromotedNow(ctx, store)
+	if err != nil {
+		return result, err
+	}
+	// A demoted CONCEPT does not come back as an absence, it comes back RETIRED
+	// (memql#3756): registered, so its rows stay readable, and closed to new
+	// writes. The walk above cannot express that -- it registers a row or skips
+	// it -- so the retired state is replayed here, after every concept is
+	// registered, from the persisted rows. See applyPersistedConceptRetirements
+	// for why the fold is over canonical ids rather than per-row.
+	//
+	// A replay failure is reported but does NOT fail the re-hydration: the
+	// concepts are already registered and readable at that point, and the
+	// alternative to a logged failure is a boot that stops.
+	retired, rerr := e.applyPersistedConceptRetirements(ctx, store)
+	if rerr != nil {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("could not replay promoted-concept retirements at re-hydration; a demoted concept may accept writes until the next boot",
+				"component", "memql.engine", "error", rerr)
+		}
+		return result, nil
+	}
+	result.ConceptsRetired = retired
+	return result, nil
 }
 
 // RehydrateResult reports what a boot re-hydration did: how many promoted
@@ -338,6 +362,12 @@ type RehydrateResult struct {
 	// reserved, nothing registered), neither re-hydrated nor failed
 	// (memql#2643).
 	SkippedDisabled int `json:"skippedDisabled,omitempty"`
+	// ConceptsRetired counts promoted concepts that came back REGISTERED BUT
+	// RETIRED (memql#3756) -- readable, closed to new writes. They are counted in
+	// Rehydrated too, because they were re-registered; this says how many of them
+	// will refuse a write, which is the difference an operator reading the boot
+	// log needs to see.
+	ConceptsRetired int `json:"conceptsRetired,omitempty"`
 }
 
 // promoteRehydrateStore is the narrow graph surface the boot re-hydration needs:

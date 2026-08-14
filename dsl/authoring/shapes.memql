@@ -41,6 +41,11 @@ shape construct constructFull {
   source
   compiledForm
   status
+  // conceptRetired is what the boot re-hydration reads to replay a demoted
+  // concept as retired rather than active (memql#3756). A body-carrying shape
+  // projects ONLY the paths it lists, so a field missing here is a field the
+  // re-hydration cannot see, whatever the row stores.
+  conceptRetired
   catalogued
   catalogKey
   catalogMatchText

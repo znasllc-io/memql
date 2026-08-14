@@ -206,27 +206,77 @@ func (c *Client) DurablePromoteBundle(ctx context.Context, sources string) (*Pro
 	}, nil
 }
 
+// DemoteOutcomeRetired / DemoteOutcomeRemoved are the two values
+// DemoteOutcome.Outcome takes. Compare against these rather than the string
+// literals: they are the SDK's own copy of the engine vocabulary, which is what
+// keeps a consumer off the wire types.
+const (
+	// DemoteOutcomeRetired: the construct is still REGISTERED and its name is
+	// still claimed. Only a concept with rows under it reaches this -- its rows
+	// stay readable and new writes to it are refused until it is re-promoted.
+	DemoteOutcomeRetired = "retired"
+	// DemoteOutcomeRemoved: the construct is gone from the shared registry and
+	// its name is claimable again.
+	DemoteOutcomeRemoved = "removed"
+)
+
+// DemoteOutcome is what actually happened to ONE construct in a demote
+// (memql#3756).
+//
+// A concept is why this is not implied by success. Rows written under a concept
+// outlive its definition, so demoting one with rows under it RETIRES it --
+// registered, readable, closed to new writes -- and only demoting one with zero
+// rows REMOVES it and frees the name. Both are OK=true, so the outcome is
+// reported rather than inferred: whether the name is claimable again is the next
+// thing the caller needs to know, and no reading of "it worked" establishes it.
+type DemoteOutcome struct {
+	// Kind and Name are the construct as the SOURCE named it (for a concept,
+	// Name is the declaration name, not the canonical id).
+	Kind string
+	Name string
+	// ConceptId is the canonical concept id the outcome applies to; empty for
+	// every non-concept kind.
+	ConceptId string
+	// Outcome is DemoteOutcomeRetired or DemoteOutcomeRemoved.
+	Outcome string
+	// RowCount is the number of DISTINCT rows the engine found under the
+	// concept, across every owner -- the evidence that chose the outcome. Always
+	// 0 for a non-concept kind, which has no rows of its own.
+	RowCount int64
+}
+
 // DemoteResult is the response from DurableDemoteBundle, the inverse of
-// PromoteResult. On success OK is true and Demoted lists the constructs durably
-// demoted out of the shared registry (persisted as retired so a restart never
-// re-hydrates them, and -- via the live broadcast -- removed on every node within
-// seconds). On failure OK is false and Error explains the rejection (no demotable
-// constructs in the source, or a per-construct demote failure).
+// PromoteResult. On success OK is true, Demoted lists the constructs durably
+// demoted out of the shared registry, and Outcomes says what happened to each of
+// them. The withdrawal is persisted (so a restart replays it) and broadcast (so
+// every node applies it within seconds). On failure OK is false and Error
+// explains the rejection (no demotable constructs in the source, or a
+// per-construct demote failure).
 type DemoteResult struct {
-	OK          bool
-	Demoted     []Construct
+	OK      bool
+	Demoted []Construct
+	// Outcomes carries the same constructs as Demoted, in the same order, each
+	// with the outcome that applied to it. Read this -- not the presence of a
+	// name in Demoted -- to learn whether a demoted concept's name is free again.
+	Outcomes    []DemoteOutcome
 	Diagnostics []Diagnostic
 	Error       string
 }
 
-// DurableDemoteBundle durably demotes every plain construct (query / mutation /
-// logic / spec / trait) named in the bundle source OUT of the SHARED engine
-// registry -- the inverse of DurablePromoteBundle (memql#2163). The demoted
-// constructs are persisted as retired (so a restart never re-hydrates them),
-// removed from the shared registry on this node (author-promoted-only safety
-// gate -- a core construct can never be removed), and -- via a live cross-node
-// broadcast -- removed on every node within seconds with no restart. OWNER-only:
-// the engine rejects a non-owner caller with a permission-denied wire error.
+// DurableDemoteBundle durably demotes every construct (concept / query /
+// mutation / logic / spec / trait) named in the bundle source OUT of the SHARED
+// engine registry -- the inverse of DurablePromoteBundle (memql#2163). The
+// withdrawal is persisted (so a restart replays it), applied to the shared
+// registry on this node (author-promoted-only safety gate -- a core construct can
+// never be removed), and -- via a live cross-node broadcast -- applied on every
+// node within seconds with no restart. OWNER-only: the engine rejects a non-owner
+// caller with a permission-denied wire error.
+//
+// CHECK Outcomes, not just OK (memql#3756). A CONCEPT with rows under it is
+// RETIRED rather than removed: it stays registered so those rows stay readable,
+// new writes to it are refused, and its name stays claimed until it is
+// re-promoted. Only a concept with zero rows is removed and its name freed. Both
+// come back OK=true.
 //
 // A demote needs only the names + kinds the source declares; it never compiles
 // the construct, so a construct whose source no longer compiles can still be
@@ -251,9 +301,20 @@ func (c *Client) DurableDemoteBundle(ctx context.Context, sources string) (*Demo
 	for _, d := range result.GetDemoted() {
 		demoted = append(demoted, Construct{Kind: d.GetKind(), Name: d.GetName()})
 	}
+	outcomes := make([]DemoteOutcome, 0, len(result.GetOutcomes()))
+	for _, o := range result.GetOutcomes() {
+		outcomes = append(outcomes, DemoteOutcome{
+			Kind:      o.GetKind(),
+			Name:      o.GetName(),
+			ConceptId: o.GetConceptId(),
+			Outcome:   o.GetOutcome(),
+			RowCount:  o.GetRowCount(),
+		})
+	}
 	return &DemoteResult{
 		OK:          result.GetOk(),
 		Demoted:     demoted,
+		Outcomes:    outcomes,
 		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
 		Error:       result.GetError(),
 	}, nil
