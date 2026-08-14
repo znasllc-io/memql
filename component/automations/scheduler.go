@@ -346,6 +346,30 @@ func (s *Scheduler) GetAutomations() []*Automation {
 	return result
 }
 
+// CatalogAutomations reports every loaded automation to the engine's construct
+// catalog (memql#3749), satisfying memql.AutomationCataloger.
+//
+// It reports what this SCHEDULER holds, not what the tree declares. That is the
+// point of the seam: an automation the loader skipped is not in the map, and a
+// file walk would have listed it as something the cluster runs.
+func (s *Scheduler) CatalogAutomations() []memql.AutomationCatalogEntry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]memql.AutomationCatalogEntry, 0, len(s.automations))
+	for _, a := range s.automations {
+		if a == nil {
+			continue
+		}
+		out = append(out, memql.AutomationCatalogEntry{
+			Name:        a.Name,
+			Description: a.Description,
+			Origin:      a.Origin,
+		})
+	}
+	return out
+}
+
 // ResumeAutomation resumes a failed automation from a checkpoint.
 // It loads the checkpoint by executionId, validates it, and resumes execution
 // from the specified step (or the failed step if fromStep is empty).

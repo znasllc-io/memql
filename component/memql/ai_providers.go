@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -418,6 +419,26 @@ func (r *ProviderRegistry) Count() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.byName)
+}
+
+// Names returns every REGISTERED provider name, sorted.
+//
+// Registered, not declared: a @disabled provider is deliberately never
+// registered and never resolves its auth, so it is not something this node has
+// loaded. `declared` is the separate set, and the difference between the two is
+// load-bearing (see the field comment on it).
+func (r *ProviderRegistry) Names() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.byName))
+	for name := range r.byName {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Default returns the preferred provider name, if any.
