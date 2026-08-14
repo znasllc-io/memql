@@ -11,6 +11,8 @@ import (
 	"path"
 	"sort"
 
+	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/integrations/azureblob"
 )
 
@@ -195,4 +197,85 @@ func bundleFileContentType(name string, data []byte) string {
 		return http.DetectContentType(data)
 	}
 	return "application/octet-stream"
+}
+
+// systemEdgePublishActor is a synthetic cluster-owner identity for the one
+// clusterOwner-tier write this file issues: updateSiteBundle
+// (dsl/platform/mutations.memql), which SiteStore.UpdateBundleRef calls --
+// the site concept carries @rowAuthz(clusterOwner) (dsl/platform/concepts.memql),
+// same tier as the siteByHostname read edge.go issues.
+//
+// Deliberately a SEPARATE identity from edge.go's systemEdgeActor, not a
+// reuse of it. That constant's own comment says "never used for anything
+// else," scoped tightly to the one read SiteByHostname issues, and
+// component/edge/edge.go is held by a concurrent task in this epic, so this
+// file has no way to widen that comment to cover a second operation even if
+// reuse were otherwise desirable. Same shape, same tier, same concept,
+// different named operation -- kept distinct so each synthetic identity's
+// audit trail (the "sub" claim an engine-side log or trigger would see)
+// names exactly the one thing it does. See edge.go's file-level note for
+// the fuller reasoning this mirrors.
+//
+// Safe to stamp unconditionally on every call: by the time
+// engineSiteStore.UpdateBundleRef runs, the calling HTTP handler
+// (component/server.SiteBundleHandler) has already verified the request
+// carries a class="service_account" credential. That check is the actual
+// authorization gate; this identity exists only to carry the clusterOwner
+// authority the concept's row-authz tier requires to perform a write the
+// gate already authorized -- the same division of labour SiteByHostname's
+// synthetic actor has relative to whatever authorized the resolver's caller.
+const systemEdgePublishActor = "system:edge-publish"
+
+// engineSiteStore is the production SiteStore: it points a site at a new
+// bundle by calling the updateSiteBundle mutation through the engine.
+type engineSiteStore struct {
+	engine Engine
+}
+
+// NewEngineSiteStore wraps engine as a SiteStore. The concrete counterpart to
+// the fakeSiteStore the tests use, mirroring NewEngineExecutor's shape in
+// edge.go (same Engine interface, same "one narrow named call" scope).
+func NewEngineSiteStore(engine Engine) SiteStore {
+	return &engineSiteStore{engine: engine}
+}
+
+// UpdateBundleRef calls the updateSiteBundle mutation under a synthetic
+// cluster-owner actor -- see systemEdgePublishActor's comment for why a
+// second synthetic identity exists here rather than reusing edge.go's.
+//
+// The invocation keyword is "mutation", not "mutate": "mutate" is the
+// DECLARATION verb used when authoring the .memql construct
+// (`mutate site updateSiteBundle { ... }`); in call position the invocation
+// noun is "mutation" (component/campaigns/store.go's call() helper uses the
+// same keyword for exactly this reason, and the parser rejects the
+// declaration verb written in call position rather than silently dropping
+// it, memql#2358). Neither form repeats the bound concept name -- that
+// binding is resolved from the construct's own signature at load time, the
+// same way edge.go's "query siteByHostname(...)" names no concept either.
+func (s *engineSiteStore) UpdateBundleRef(ctx context.Context, siteID, bundleRef string) error {
+	ctx = publishActorContext(ctx)
+	q := fmt.Sprintf("mutation updateSiteBundle(siteId: %s, bundleRef: %s)",
+		langparser.QuoteString(siteID), langparser.QuoteString(bundleRef))
+	if _, err := s.engine.Execute(ctx, q); err != nil {
+		return fmt.Errorf("edge: mutation updateSiteBundle for %s: %w", siteID, err)
+	}
+	return nil
+}
+
+// publishActorContext stamps systemEdgePublishActor onto ctx using the same
+// three-surface pattern edge.go's systemActorContext documents (claims,
+// TokenInfo, AccessContext) and for the same reason: createdBy and
+// actor.userId read different surfaces (memql#2989), so a synthetic actor
+// that sets only one of them silently resolves to nobody on whichever the
+// mutation happens to read. Role is RoleOwner specifically because
+// AccessContext.IsClusterOwner() reads Role == RoleOwner, which is what the
+// site concept's @rowAuthz(clusterOwner) tier checks.
+func publishActorContext(ctx context.Context) context.Context {
+	claims := map[string]any{"sub": systemEdgePublishActor, "role": "owner"}
+	ctx = auth.ContextWithClaims(ctx, claims)
+	ctx = auth.ContextWithToken(ctx, auth.BuildTokenInfo(claims))
+	return auth.ContextWithAccess(ctx, &auth.AccessContext{
+		UserId: systemEdgePublishActor,
+		Role:   auth.RoleOwner,
+	})
 }

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // fakeBlobStore is a BlobWriter that records every Put and can be told to
@@ -272,5 +274,95 @@ func TestBundleFileContentTypeDefaultsToOctetStream(t *testing.T) {
 	got := bundleFileContentType("no-extension", nil)
 	if got != "application/octet-stream" {
 		t.Errorf("bundleFileContentType for empty data = %q, want application/octet-stream", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// engineSiteStore -- the production SiteStore. fakeEngine is edge_test.go's
+// (same package), reused rather than redefined.
+// ---------------------------------------------------------------------------
+
+// The site concept declares @rowAuthz(clusterOwner); without a synthetic
+// cluster-owner actor on the ctx handed to Execute, updateSiteBundle refuses
+// the write the same way siteByHostname would refuse the read.
+func TestEngineSiteStoreRunsUnderASyntheticClusterOwnerActor(t *testing.T) {
+	fe := &fakeEngine{}
+	s := NewEngineSiteStore(fe)
+
+	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err != nil {
+		t.Fatalf("UpdateBundleRef: %v", err)
+	}
+
+	ac, ok := auth.AccessFromContext(fe.gotCtx)
+	if !ok || ac == nil {
+		t.Fatalf("engine.Execute ran with no AccessContext on ctx; updateSiteBundle will refuse this actor")
+	}
+	if !ac.IsClusterOwner() {
+		t.Errorf("engine.Execute ran as role %q, want a cluster owner", ac.Role)
+	}
+}
+
+// The write runs under its OWN synthetic identity, distinct from edge.go's
+// systemEdgeActor -- see systemEdgePublishActor's comment for why the two
+// must not be the same constant.
+func TestEngineSiteStoreUsesItsOwnSyntheticIdentityNotEdgeGos(t *testing.T) {
+	fe := &fakeEngine{}
+	s := NewEngineSiteStore(fe)
+
+	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err != nil {
+		t.Fatalf("UpdateBundleRef: %v", err)
+	}
+
+	ac, _ := auth.AccessFromContext(fe.gotCtx)
+	if ac.UserId != systemEdgePublishActor {
+		t.Errorf("actor UserId = %q, want %q", ac.UserId, systemEdgePublishActor)
+	}
+	if systemEdgePublishActor == systemEdgeActor {
+		t.Fatal("systemEdgePublishActor must not equal edge.go's systemEdgeActor -- that constant's own comment says it is never used for anything else")
+	}
+}
+
+// The invocation keyword must be "mutation" (call position), never "mutate"
+// (the declaration verb) -- the parser rejects the latter in call position
+// rather than silently dropping it (memql#2358), so getting this wrong would
+// fail LOUD, but the point is to get it right, not just to fail loud.
+func TestEngineSiteStoreCallsUpdateSiteBundleAsAMutation(t *testing.T) {
+	fe := &fakeEngine{}
+	s := NewEngineSiteStore(fe)
+
+	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v2/"); err != nil {
+		t.Fatalf("UpdateBundleRef: %v", err)
+	}
+
+	if !strings.HasPrefix(fe.gotQuery, "mutation updateSiteBundle(") {
+		t.Errorf("query = %q, want it to start with %q", fe.gotQuery, "mutation updateSiteBundle(")
+	}
+	if !strings.Contains(fe.gotQuery, `siteId: "s1"`) {
+		t.Errorf("query %q does not carry siteId", fe.gotQuery)
+	}
+	if !strings.Contains(fe.gotQuery, `bundleRef: "blob://sites/s1/v2/"`) {
+		t.Errorf("query %q does not carry bundleRef", fe.gotQuery)
+	}
+}
+
+// siteID / bundleRef reach the engine as quoted argument values, not
+// interpolated unescaped into the statement.
+func TestEngineSiteStoreQuotesArguments(t *testing.T) {
+	fe := &fakeEngine{}
+	s := NewEngineSiteStore(fe)
+
+	if err := s.UpdateBundleRef(context.Background(), `s1".injected`, "blob://x/"); err != nil {
+		t.Fatalf("UpdateBundleRef: %v", err)
+	}
+	if !strings.Contains(fe.gotQuery, `\"`) {
+		t.Errorf("query %q does not look like an escaped siteId", fe.gotQuery)
+	}
+}
+
+func TestEngineSiteStoreSurfacesEngineError(t *testing.T) {
+	s := NewEngineSiteStore(&fakeEngine{err: errors.New("boom")})
+
+	if err := s.UpdateBundleRef(context.Background(), "s1", "blob://sites/s1/v1/"); err == nil {
+		t.Fatal("UpdateBundleRef swallowed an engine error")
 	}
 }
