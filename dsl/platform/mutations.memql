@@ -405,3 +405,60 @@ mutate inboundRequest updateInboundRequestStatus {
     }
   }
 }
+
+/// Create a site. Defaults are applied with ?? because a concept-field @default is never applied
+/// on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to
+/// serve a row whose status it cannot read.
+@actor
+@description("Create a site")
+mutate site createSite {
+  args {
+    siteId    string!
+    hostname  string!
+    kind      enum("spa", "static")
+    bundleRef string!
+    apiProxy  boolean
+    title     string
+  }
+  insert {
+    accept { hostname, bundleRef }
+    stamp {
+      id:          args.siteId
+      kind:        args.kind ?? "spa"
+      status:      "draft"
+      apiProxy:    args.apiProxy ?? false
+      systemOwned: false
+      title:       args.title ?? args.hostname
+      createdAt:   now
+      createdBy:   actor.userId
+    }
+  }
+}
+
+/// Point a site at a different bundle version. THE deploy operation, and THE rollback operation --
+/// they are the same write in opposite directions, which is the whole reason bundles are stored
+/// under versioned prefixes rather than overwritten.
+@description("Point a site at a bundle version")
+mutate site updateSiteBundle {
+  args {
+    siteId    string!
+    bundleRef string!
+  }
+  update {
+    id:        args.siteId
+    bundleRef: args.bundleRef
+  }
+}
+
+/// Move a site between draft / live / disabled.
+@description("Set a site's status")
+mutate site updateSiteStatus {
+  args {
+    siteId  string!
+    status  enum("draft", "live", "disabled")!
+  }
+  update {
+    id:     args.siteId
+    status: args.status
+  }
+}
