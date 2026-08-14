@@ -61,15 +61,44 @@ action deployCluster {
 // the domain, and the domain is what a concept declaration is matched on.
 const trainingDocURI = "file:///w/dsl/cognition/queries.memql"
 
-// callTraining drives the wrapper exactly as glsp's server does: a raw JSON-RPC
-// params payload on a glsp.Context carrying the custom method name. Raw JSON
-// rather than a marshalled struct so the PARAMS field names are pinned too --
-// `catalog` and its four entry fields are half of the contract.
-func callTraining(t *testing.T, h *customHandler, rawParams string) (any, bool, bool, error) {
+// pushCatalog delivers a catalog the way the extension does: the
+// `memql/clusterCatalog` NOTIFICATION, driven through the wrapper exactly as
+// glsp's server drives it. Raw JSON rather than a marshalled struct so the
+// PARAMS field names are pinned too -- `catalog` and its four entry fields are
+// half of the contract.
+//
+// Pass `null` for the disconnected case; pass `[]` for a connected cluster that
+// has loaded nothing. NOT calling this at all is a third, distinct case -- a
+// server nobody has told about a cluster -- and it is the state every server
+// starts in.
+func pushCatalog(t *testing.T, h *customHandler, catalogJSON string) {
+	t.Helper()
+	res, validMethod, validParams, err := h.Handle(&glsp.Context{
+		Method: methodClusterCatalog,
+		Params: json.RawMessage(fmt.Sprintf(`{"catalog":%s}`, catalogJSON)),
+		Notify: func(string, any) {},
+	})
+	if err != nil {
+		t.Fatalf("clusterCatalog notification: %v", err)
+	}
+	if !validMethod || !validParams {
+		t.Fatalf("clusterCatalog: validMethod=%v validParams=%v; want true/true", validMethod, validParams)
+	}
+	// A notification has no reply, so the wrapper must produce no result to be
+	// sent as one. jsonrpc2 would discard it either way; returning nil is what
+	// makes that discard uninteresting rather than lucky.
+	if res != nil {
+		t.Fatalf("clusterCatalog notification returned a result %#v; a notification has no reply", res)
+	}
+}
+
+// callTraining drives the request through the wrapper the way glsp's server
+// does.
+func callTraining(t *testing.T, h *customHandler, uri string) (any, bool, bool, error) {
 	t.Helper()
 	return h.Handle(&glsp.Context{
 		Method: methodTrainingState,
-		Params: json.RawMessage(rawParams),
+		Params: json.RawMessage(fmt.Sprintf(`{"textDocument":{"uri":%q}}`, uri)),
 		Notify: func(string, any) {},
 	})
 }
@@ -89,17 +118,10 @@ func localHashOf(t *testing.T, doc, name string) string {
 	return ""
 }
 
-// trainingParams renders a params payload with the given catalog JSON. Pass
-// `null` for the disconnected case; pass `[]` for a connected cluster that has
-// loaded nothing.
-func trainingParams(uri, catalogJSON string) string {
-	return fmt.Sprintf(`{"textDocument":{"uri":%q},"catalog":%s}`, uri, catalogJSON)
-}
-
 // decodeTraining runs the request and returns the decoded result.
-func decodeTraining(t *testing.T, h *customHandler, rawParams string) trainingStateResult {
+func decodeTraining(t *testing.T, h *customHandler, uri string) trainingStateResult {
 	t.Helper()
-	res, validMethod, validParams, err := callTraining(t, h, rawParams)
+	res, validMethod, validParams, err := callTraining(t, h, uri)
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -147,13 +169,15 @@ func fullTrainingCatalog(t *testing.T) string {
 // on the Go structs -- a renamed tag, a dropped `omitempty`, or a nil slice
 // serialising as `null` all have to fail here.
 //
-// It is also the issue's first acceptance criterion: all five states, produced
-// from a real document against a real catalog.
+// It is also half of the issue's first acceptance criterion: all five states
+// from one real document. The other half -- against a REAL catalog rather than a
+// hand-written one -- is training_acceptance_test.go.
 func TestTrainingState_HandleProducesContractJSON(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	openDoc(t, s, trainingDocURI, trainingDoc)
+	pushCatalog(t, h, fullTrainingCatalog(t))
 
-	res, validMethod, validParams, err := callTraining(t, h, trainingParams(trainingDocURI, fullTrainingCatalog(t)))
+	res, validMethod, validParams, err := callTraining(t, h, trainingDocURI)
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
@@ -194,25 +218,35 @@ func TestTrainingState_HandleProducesContractJSON(t *testing.T) {
 // Asserted over a document whose constructs the cluster demonstrably DOES know
 // -- the contract test above proves the same buffer produces trained / drifted /
 // seeded against a catalog -- so a regression that reported them as untrained
-// would be claiming something the previous test disproves. Both spellings of
-// "no catalog" are exercised: an omitted field and an explicit null, which are
-// what a client that has no cluster and a client that has disconnected
-// respectively send.
+// would be claiming something the previous test disproves.
+//
+// All three spellings of "no cluster" are exercised, and the FIRST is the one
+// that matters most now that the catalog is pushed rather than passed: a server
+// nobody has told about a cluster is the state every server starts in and the
+// state it stays in for the whole life of a client that never pushes. The other
+// two are a client that has no cluster, and a client that HAD one -- the case
+// where a wrong answer would be worst, because a catalog was there a moment ago
+// and something has to actively forget it.
 func TestTrainingState_DisconnectedIsUnknownForEveryConstruct(t *testing.T) {
-	h, s := newInitializedHandler(t)
-	openDoc(t, s, trainingDocURI, trainingDoc)
-
 	for _, tc := range []struct {
-		name   string
-		params string
+		name string
+		push func(t *testing.T, h *customHandler)
 	}{
-		{"explicit null", trainingParams(trainingDocURI, `null`)},
-		{"field omitted", fmt.Sprintf(`{"textDocument":{"uri":%q}}`, trainingDocURI)},
+		{"never pushed", func(*testing.T, *customHandler) {}},
+		{"explicit null", func(t *testing.T, h *customHandler) { pushCatalog(t, h, `null`) }},
+		{"disconnected after a real catalog", func(t *testing.T, h *customHandler) {
+			pushCatalog(t, h, fullTrainingCatalog(t))
+			pushCatalog(t, h, `null`)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res := decodeTraining(t, h, tc.params)
+			h, s := newInitializedHandler(t)
+			openDoc(t, s, trainingDocURI, trainingDoc)
+			tc.push(t, h)
+
+			res := decodeTraining(t, h, trainingDocURI)
 			if res.Connected {
-				t.Errorf("connected = true with no catalog supplied; want false")
+				t.Errorf("connected = true with no catalog held; want false")
 			}
 			if len(res.Constructs) == 0 {
 				t.Fatal("no constructs reported: this assertion would pass vacuously")
@@ -240,10 +274,11 @@ func TestTrainingState_DisconnectedIsUnknownForEveryConstruct(t *testing.T) {
 func TestTrainingState_EmptyCatalogIsUntrainedNotUnknown(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	openDoc(t, s, trainingDocURI, trainingDoc)
+	pushCatalog(t, h, `[]`)
 
-	res := decodeTraining(t, h, trainingParams(trainingDocURI, `[]`))
+	res := decodeTraining(t, h, trainingDocURI)
 	if !res.Connected {
-		t.Errorf("connected = false for an empty (but supplied) catalog; want true -- " +
+		t.Errorf("connected = false for an empty (but pushed) catalog; want true -- " +
 			"an empty catalog is a cluster that has loaded nothing, not the absence of a cluster")
 	}
 	states := statesByName(res)
@@ -257,6 +292,36 @@ func TestTrainingState_EmptyCatalogIsUntrainedNotUnknown(t *testing.T) {
 	if states["deployCluster"] != trainingStateUnknown {
 		t.Errorf("action deployCluster = %q against an empty catalog; want %q",
 			states["deployCluster"], trainingStateUnknown)
+	}
+}
+
+// A push REPLACES; it never merges. The case that decides it is a demote: a
+// construct the cluster had and no longer has must stop reading as trained, and
+// a merge has no way to express "gone" -- an absent entry is indistinguishable
+// from one the client simply did not mention this time.
+func TestClusterCatalogPush_ReplacesWholesale(t *testing.T) {
+	h, s := newInitializedHandler(t)
+	openDoc(t, s, trainingDocURI, trainingDoc)
+
+	pushCatalog(t, h, fullTrainingCatalog(t))
+	if got := statesByName(decodeTraining(t, h, trainingDocURI))["trainedQuery"]; got != trainingStateTrained {
+		t.Fatalf("trainedQuery = %q after the first push; want %q", got, trainingStateTrained)
+	}
+
+	// The same cluster, one construct demoted: the entry is simply gone.
+	pushCatalog(t, h, fmt.Sprintf(
+		`[{"name":"seededMutation","kind":"mutation","origin":"core","sourceHash":%q}]`,
+		localHashOf(t, trainingDoc, "seededMutation")))
+
+	states := statesByName(decodeTraining(t, h, trainingDocURI))
+	if states["trainedQuery"] != trainingStateUntrained {
+		t.Errorf("trainedQuery = %q after a push that omits it; want %q -- a push replaces, "+
+			"so an omitted construct is one the cluster no longer has", states["trainedQuery"], trainingStateUntrained)
+	}
+	if states["seededMutation"] != trainingStateSeeded {
+		t.Errorf("seededMutation = %q after the second push; want %q -- the entries that "+
+			"WERE pushed must survive, or this test would pass for a push that did nothing",
+			states["seededMutation"], trainingStateSeeded)
 	}
 }
 
@@ -291,6 +356,14 @@ func TestTrainingState_ZeroValuesFailSafeToUnknown(t *testing.T) {
 	if got := trainingStateFor(declared, catalogConstruct{}, unsetAnswer); got != trainingStateUnknown {
 		t.Errorf("the zero-value catalogAnswer produced state %q; want %q", got, trainingStateUnknown)
 	}
+
+	// And the server's own field: a server that has been initialized but never
+	// pushed a catalog holds that zero value, which is the state the editor
+	// finds it in on the very first CodeLens refresh after start.
+	if snap := newTestServer().clusterCatalogSnapshot(); snap.connected {
+		t.Error("a freshly-constructed server reports connected; want false -- " +
+			"nobody has told it about a cluster yet")
+	}
 }
 
 // The issue's third acceptance criterion: a construct edited in the buffer but
@@ -300,9 +373,9 @@ func TestTrainingState_ZeroValuesFailSafeToUnknown(t *testing.T) {
 func TestTrainingState_UnsavedBufferEditReportsDrifted(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	openDoc(t, s, trainingDocURI, trainingDoc)
-	catalog := fullTrainingCatalog(t)
+	pushCatalog(t, h, fullTrainingCatalog(t))
 
-	if got := statesByName(decodeTraining(t, h, trainingParams(trainingDocURI, catalog)))["trainedQuery"]; got != trainingStateTrained {
+	if got := statesByName(decodeTraining(t, h, trainingDocURI))["trainedQuery"]; got != trainingStateTrained {
 		t.Fatalf("trainedQuery = %q before the edit; want %q", got, trainingStateTrained)
 	}
 
@@ -321,7 +394,7 @@ func TestTrainingState_UnsavedBufferEditReportsDrifted(t *testing.T) {
 		t.Fatalf("didChange: %v", err)
 	}
 
-	states := statesByName(decodeTraining(t, h, trainingParams(trainingDocURI, catalog)))
+	states := statesByName(decodeTraining(t, h, trainingDocURI))
 	if states["trainedQuery"] != trainingStateDrifted {
 		t.Errorf("trainedQuery = %q after an unsaved edit; want %q -- the buffer is what "+
 			"the developer is looking at", states["trainedQuery"], trainingStateDrifted)
@@ -362,9 +435,9 @@ query participant knownQuery {
 	openDoc(t, s, uri, doc)
 
 	// A populated catalog, so nothing here can be blamed on a missing cluster.
-	catalog := fmt.Sprintf(`[{"name":"knownQuery","kind":"query","origin":"core","sourceHash":%q}]`,
-		localHashOf(t, doc, "knownQuery"))
-	states := statesByName(decodeTraining(t, h, trainingParams(uri, catalog)))
+	pushCatalog(t, h, fmt.Sprintf(`[{"name":"knownQuery","kind":"query","origin":"core","sourceHash":%q}]`,
+		localHashOf(t, doc, "knownQuery")))
+	states := statesByName(decodeTraining(t, h, uri))
 
 	for _, name := range []string{"rolloutCluster", "rolloutScript"} {
 		if states[name] != trainingStateUnknown {
@@ -404,8 +477,8 @@ concept state {
 		t.Run(tc.uri, func(t *testing.T) {
 			h, s := newInitializedHandler(t)
 			openDoc(t, s, tc.uri, doc)
-			params := trainingParams(tc.uri, fmt.Sprintf(catalog, localHashOf(t, doc, "state")))
-			if got := statesByName(decodeTraining(t, h, params))["state"]; got != tc.want {
+			pushCatalog(t, h, fmt.Sprintf(catalog, localHashOf(t, doc, "state")))
+			if got := statesByName(decodeTraining(t, h, tc.uri))["state"]; got != tc.want {
 				t.Errorf("concept state in %s = %q; want %q -- %s", tc.uri, got, tc.want, tc.why)
 			}
 		})
@@ -427,8 +500,8 @@ func TestTrainingState_EmptyHashNeverReadsAsTrained(t *testing.T) {
 	const doc = "query participant reservedName {\n  filter  isActiveRecord\n}\n"
 	openDoc(t, s, uri, doc)
 
-	params := trainingParams(uri, `[{"name":"reservedName","kind":"query","origin":"promoted","sourceHash":""}]`)
-	if got := statesByName(decodeTraining(t, h, params))["reservedName"]; got != trainingStateDrifted {
+	pushCatalog(t, h, `[{"name":"reservedName","kind":"query","origin":"promoted","sourceHash":""}]`)
+	if got := statesByName(decodeTraining(t, h, uri))["reservedName"]; got != trainingStateDrifted {
 		t.Errorf("a promoted construct with an EMPTY catalog hash = %q; want %q", got, trainingStateDrifted)
 	}
 
@@ -456,10 +529,10 @@ func TestTrainingState_SeededStaysSeededWhenTheLocalSourceDiffers(t *testing.T) 
 	openDoc(t, s, uri, doc)
 
 	for _, origin := range []string{"core", "bundle"} {
-		params := trainingParams(uri, fmt.Sprintf(
+		pushCatalog(t, h, fmt.Sprintf(
 			`[{"name":"coreQuery","kind":"query","origin":%q,"sourceHash":"1111111111111111111111111111111111111111111111111111111111111111"}]`,
 			origin))
-		if got := statesByName(decodeTraining(t, h, params))["coreQuery"]; got != trainingStateSeeded {
+		if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateSeeded {
 			t.Errorf("an edited %s construct = %q; want %q", origin, got, trainingStateSeeded)
 		}
 	}
@@ -467,8 +540,8 @@ func TestTrainingState_SeededStaysSeededWhenTheLocalSourceDiffers(t *testing.T) 
 	// An unrecognised origin degrades the same way, on purpose: `seeded` is the
 	// one state that offers no action, so a client bug costs a missing
 	// affordance rather than a refused one.
-	params := trainingParams(uri, `[{"name":"coreQuery","kind":"query","origin":"","sourceHash":"1111"}]`)
-	if got := statesByName(decodeTraining(t, h, params))["coreQuery"]; got != trainingStateSeeded {
+	pushCatalog(t, h, `[{"name":"coreQuery","kind":"query","origin":"","sourceHash":"1111"}]`)
+	if got := statesByName(decodeTraining(t, h, uri))["coreQuery"]; got != trainingStateSeeded {
 		t.Errorf("a catalog entry with an unrecognised origin = %q; want %q", got, trainingStateSeeded)
 	}
 }
@@ -480,8 +553,9 @@ func TestTrainingState_SeededStaysSeededWhenTheLocalSourceDiffers(t *testing.T) 
 // was asked about.
 func TestTrainingState_UnknownURIReturnsEmptyConstructs(t *testing.T) {
 	h, _ := newInitializedHandler(t)
+	pushCatalog(t, h, `[]`)
 
-	res, validMethod, validParams, err := callTraining(t, h, trainingParams("file:///w/never-opened.memql", `[]`))
+	res, validMethod, validParams, err := callTraining(t, h, "file:///w/never-opened.memql")
 	if err != nil {
 		t.Fatalf("Handle returned an error for an unopened URI: %v", err)
 	}
@@ -505,8 +579,9 @@ func TestTrainingState_MalformedBufferStillAnswers(t *testing.T) {
 	h, s := newInitializedHandler(t)
 	const uri = "file:///w/dsl/cognition/queries.memql"
 	openDoc(t, s, uri, "query participant finished {\n  filter  isActiveRecord\n}\n\n@description(\"wip\")\nquery partici")
+	pushCatalog(t, h, `[]`)
 
-	states := statesByName(decodeTraining(t, h, trainingParams(uri, `[]`)))
+	states := statesByName(decodeTraining(t, h, uri))
 	if states["finished"] != trainingStateUntrained {
 		t.Errorf("the complete construct in a half-typed buffer = %q; want %q",
 			states["finished"], trainingStateUntrained)
@@ -514,7 +589,8 @@ func TestTrainingState_MalformedBufferStillAnswers(t *testing.T) {
 }
 
 // The client feature-detects on this rather than calling blind and handling
-// MethodNotFound.
+// MethodNotFound. One key covers both the request and the catalog push: they are
+// one feature, and a pair of flags that must agree is a pair that can disagree.
 func TestTrainingState_CapabilityIsAdvertised(t *testing.T) {
 	s := newTestServer()
 	res, err := s.initialize(nil, &protocol.InitializeParams{})
@@ -534,10 +610,10 @@ func TestTrainingState_CapabilityIsAdvertised(t *testing.T) {
 	}
 }
 
-// catalogFieldWireNames maps each field of the request's catalog entry to its
+// catalogFieldWireNames maps each field of the pushed catalog entry to its
 // spelling in ListConstructs' ConstructInfo, which is where every one of them
 // comes from: the extension holds the cluster stream, reads the catalog, and
-// forwards it into this request. A rename on the proto side with no
+// forwards it over the notification. A rename on the proto side with no
 // corresponding rename here does not fail loudly -- the field simply arrives
 // empty, and an empty origin reads as `seeded` while an empty hash reads as
 // `drifted`. Both are plausible-looking states, which is what makes the silence
@@ -557,6 +633,10 @@ var catalogFieldWireNames = map[string]string{
 // to it. Naming them is the point: a NEW proto field lands in neither map and
 // fails the test below, which turns "should training state read this?" into a
 // decision somebody makes rather than one that gets made by omission.
+//
+// memql#3805 will add a `trigger` to ConstructInfo. It will land here, with the
+// reason an automation's trigger decides its RUN form and nothing about its
+// training state -- but it lands as a decision, which is the whole point.
 var catalogFieldsDeliberatelyNotRead = map[string]string{
 	"namespace":    "a concept's domain is already inside its canonical name, and memql.CatalogConstructKey reads it out; accepting a second answer would let the two contradict each other",
 	"originPath":   "which file a construct came from does not change what state it is in",
@@ -567,8 +647,8 @@ var catalogFieldsDeliberatelyNotRead = map[string]string{
 	"source":       "carried only for a construct with no file; the hash is what a comparison needs",
 }
 
-// TestCatalogConstructMatchesConstructInfo pins the request's catalog entry to
-// the message it is copied from. See catalogFieldWireNames for what goes wrong
+// TestCatalogConstructMatchesConstructInfo pins the pushed catalog entry to the
+// message it is copied from. See catalogFieldWireNames for what goes wrong
 // without it.
 //
 // jsonName and protoJSONName live in constructs_parity_test.go, which pins the
@@ -593,22 +673,22 @@ func TestCatalogConstructMatchesConstructInfo(t *testing.T) {
 	for lspName, wireName := range catalogFieldWireNames {
 		lf, ok := lspByJSON[lspName]
 		if !ok {
-			t.Errorf("the training request no longer accepts %q; either it was renamed (update catalogFieldWireNames) or it stopped reading a field it needs", lspName)
+			t.Errorf("the catalog push no longer accepts %q; either it was renamed (update catalogFieldWireNames) or it stopped reading a field it needs", lspName)
 			continue
 		}
 		wf, ok := wireByJSON[wireName]
 		if !ok {
-			t.Errorf("ConstructInfo no longer carries %q, which the training request reads as %q -- the field would arrive empty, and an empty origin reads as seeded while an empty hash reads as drifted", wireName, lspName)
+			t.Errorf("ConstructInfo no longer carries %q, which the catalog push reads as %q -- the field would arrive empty, and an empty origin reads as seeded while an empty hash reads as drifted", wireName, lspName)
 			continue
 		}
 		if lf.Type != wf.Type {
-			t.Errorf("field %q: the training request has %s, ConstructInfo has %s", lspName, lf.Type, wf.Type)
+			t.Errorf("field %q: the catalog push has %s, ConstructInfo has %s", lspName, lf.Type, wf.Type)
 		}
 	}
 
 	for name := range lspByJSON {
 		if _, mapped := catalogFieldWireNames[name]; !mapped {
-			t.Errorf("the training request gained catalog field %q with no ConstructInfo counterpart to fill it", name)
+			t.Errorf("the catalog push gained field %q with no ConstructInfo counterpart to fill it", name)
 		}
 	}
 	for name := range wireByJSON {
@@ -626,15 +706,64 @@ func TestCatalogConstructMatchesConstructInfo(t *testing.T) {
 // the way glsp's other custom methods report it -- an error with validMethod and
 // validParams both true, which becomes an ordinary JSON-RPC error rather than
 // MethodNotFound or InvalidParams.
+//
+// The catalog push holds the same precondition. Its error goes to a log rather
+// than to a client (a notification has no reply), which is precisely why it must
+// not be allowed to half-apply: refusing outright leaves the zero value, and the
+// zero value is `unknown`.
 func TestTrainingState_UninitializedServerErrors(t *testing.T) {
-	h := newCustomHandler(newTestServer())
-
-	_, validMethod, validParams, err := callTraining(t, h, trainingParams(trainingDocURI, `[]`))
-	if err == nil {
-		t.Fatal("Handle succeeded before initialization; want an error")
+	for _, tc := range []struct {
+		name   string
+		method string
+		params string
+	}{
+		{"request", methodTrainingState, `{"textDocument":{"uri":"file:///w/x.memql"}}`},
+		{"catalog push", methodClusterCatalog, `{"catalog":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newCustomHandler(newTestServer())
+			_, validMethod, validParams, err := h.Handle(&glsp.Context{
+				Method: tc.method,
+				Params: json.RawMessage(tc.params),
+				Notify: func(string, any) {},
+			})
+			if err == nil {
+				t.Fatal("Handle succeeded before initialization; want an error")
+			}
+			if !validMethod || !validParams {
+				t.Errorf("validMethod=%v validParams=%v; want true/true -- an uninitialized server "+
+					"must not report this as MethodNotFound or InvalidParams", validMethod, validParams)
+			}
+		})
 	}
-	if !validMethod || !validParams {
-		t.Errorf("validMethod=%v validParams=%v; want true/true -- an uninitialized server "+
-			"must not report this as MethodNotFound or InvalidParams", validMethod, validParams)
+}
+
+// Malformed params are InvalidParams, not a silently-applied partial catalog.
+// The push cannot report failure to the client, so the only safe outcome is that
+// nothing changed -- and a catalog that never arrived is `unknown`, which is the
+// state the whole design falls back to.
+func TestClusterCatalogPush_MalformedParamsLeaveTheCatalogUntouched(t *testing.T) {
+	h, s := newInitializedHandler(t)
+	openDoc(t, s, trainingDocURI, trainingDoc)
+	pushCatalog(t, h, fullTrainingCatalog(t))
+
+	_, validMethod, validParams, err := h.Handle(&glsp.Context{
+		Method: methodClusterCatalog,
+		Params: json.RawMessage(`{"catalog":"not a list"}`),
+		Notify: func(string, any) {},
+	})
+	if err == nil {
+		t.Fatal("a malformed catalog push succeeded; want a decode error")
+	}
+	if !validMethod {
+		t.Error("validMethod=false for a known method")
+	}
+	if validParams {
+		t.Error("validParams=true for params that did not decode; want false (InvalidParams)")
+	}
+
+	if got := statesByName(decodeTraining(t, h, trainingDocURI))["trainedQuery"]; got != trainingStateTrained {
+		t.Errorf("trainedQuery = %q after a REJECTED push; want %q -- a push that did not "+
+			"decode must not disturb the catalog that did", got, trainingStateTrained)
 	}
 }

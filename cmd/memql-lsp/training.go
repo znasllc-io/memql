@@ -20,27 +20,42 @@ package main
 //
 // # Where the cluster's half comes from
 //
-// The catalog arrives IN THE REQUEST. This server has no cluster connection and
-// should not grow one: it is an offline analysis process built over a workspace
-// directory, while the extension already holds the authenticated stream that
-// serves `ListConstructs` (memql#3749). So the client says what the cluster
-// knows and the server says what that means, which keeps the one thing that must
-// not be duplicated -- the reading of a .memql buffer -- on the side that has the
-// parser. It is the same division `memql/imports` settled on when it let the
-// client supply the bytes: the client says which inputs to look at, the server
-// owns what they mean.
+// This server has no cluster connection and should not grow one: it is an
+// offline analysis process built over a workspace directory (see
+// server.buildSense), with no credentials, no dialer and no stream. The
+// extension is what holds the authenticated stream that serves `ListConstructs`
+// (memql#3749). So the catalog is PUSHED IN by the client, over the
+// `memql/clusterCatalog` notification, and cached here until the next push.
 //
-// It is sent WITH EVERY REQUEST rather than pushed once and cached here, and the
-// cost of that is the reason catalogConstruct is four fields instead of
-// ConstructInfo's eleven: the whole catalog is roughly a thousand entries, which
-// is a manageable payload at four small strings each and a wholly unmanageable
-// one once `args` and `source` are along for the ride. The alternative -- a
-// notification that sets a cached catalog on the server -- buys that payload
-// back and pays for it in exactly the wrong currency. A cache has to distinguish
-// "never pushed" from "pushed empty" from "the cluster went away since", every
-// one of those transitions is a chance to get the rule below wrong, and none of
-// them is visible in the request that gets the answer wrong. Sending it makes
-// the state a pure function of the call.
+// It is a NOTIFICATION rather than a field on the request, and the two reasons
+// are worth stating because the request field is the obvious design and it is
+// the wrong one.
+//
+//   - SIZE AND FREQUENCY DO NOT MATCH. The engine's own tree alone declares
+//     upwards of fifteen hundred constructs, and a catalog entry is a name, a
+//     kind, an origin and a 64-character hash. That is on the order of a hundred
+//     kilobytes. `memql/trainingState` is issued by the gutter on EVERY
+//     keystroke and by the CodeLens provider on every refresh, so carrying the
+//     catalog in the request would serialize that payload per keystroke -- and
+//     the client would have to have obtained it from the cluster somehow anyway,
+//     which is the cache this design supposedly avoids, relocated to the side
+//     that cannot be tested from Go.
+//   - THE CLIENT'S REQUEST SHAPE ALREADY SHIPPED. memql#3761 landed the
+//     rendering against `{textDocument}` and nothing else. A server that
+//     required a `catalog` field would receive none, report every construct
+//     `unknown`, and render nothing at all -- forever, silently, looking exactly
+//     like a cluster that is simply not connected. That is this issue's own
+//     failure mode arriving through the front door.
+//
+// The cache's lifecycle is the honest cost of the choice, and it is paid in one
+// place: `connected` is `a catalog was pushed and it was not null`, and every
+// transition the client can be in maps onto that one predicate. Never pushed is
+// the zero value, which is disconnected. A push carrying `null` -- what the
+// client sends when it has no cluster, or when its own catalog read failed -- is
+// disconnected. A push carrying `[]` is a connected cluster that has loaded
+// nothing. There is no fourth case and no staleness a wrong answer can hide
+// behind: a server restarted underneath a client holds no catalog, which is
+// `unknown`, which renders as nothing.
 //
 // # The rule this file is mostly about
 //
@@ -51,10 +66,11 @@ package main
 // That is not enforced here by remembering to check a flag. It is structural, in
 // three places that each fail safe on their own:
 //
-//   - the request carries `catalog` as a POINTER, so an absent catalog and an
-//     empty one are different JSON values rather than the same nil slice;
+//   - the notification carries `catalog` as a POINTER, so an absent catalog and
+//     an empty one are different JSON values rather than the same nil slice;
 //   - clusterCatalog's ZERO VALUE is disconnected, so a catalog nobody
-//     constructed answers `unknown` rather than "absent from an empty map";
+//     constructed -- including one nobody has pushed yet -- answers `unknown`
+//     rather than "absent from an empty map";
 //   - catalogAnswer's zero value is catalogSilent, so the three-valued lookup
 //     degrades to "no answer" rather than to "not there".
 //
@@ -99,6 +115,17 @@ import (
 const methodTrainingState = "memql/trainingState"
 const capabilityTrainingState = "memqlTrainingState"
 
+// methodClusterCatalog is the NOTIFICATION the client pushes the connected
+// cluster's construct catalog over.
+//
+// It carries no capability key of its own, deliberately. The push and the
+// request are one feature -- a catalog with nothing to answer is pointless, and
+// a request with no catalog answers `unknown` -- so they ship together and a
+// client gates both on capabilityTrainingState. A second key could only ever be
+// advertised in lockstep with the first, and a pair of flags that must agree is
+// a pair of flags that can disagree.
+const methodClusterCatalog = "memql/clusterCatalog"
+
 // The five states. Fixed vocabulary, defined in the design's §2 and named here
 // exactly as the wire carries them.
 const (
@@ -120,22 +147,29 @@ const (
 	trainingStateSeeded = "seeded"
 )
 
+// trainingStateParams is the request payload, and it is `{textDocument}` and
+// nothing else -- exactly what memql#3761's shipped client sends. The cluster
+// half arrives separately, over methodClusterCatalog; see the module comment for
+// why it is not a field here.
 type trainingStateParams struct {
 	TextDocument protocol.TextDocumentIdentifier `json:"textDocument"`
-	// Catalog is what the connected cluster has loaded -- the `constructs` list
-	// from ListConstructs, projected to the fields the state rules read.
-	//
-	// A POINTER, and this is the single most important declaration in the file.
-	// `null` (or absent) is NO CONNECTED CLUSTER; `[]` is a connected cluster
-	// that has loaded nothing. Those two are worlds apart -- the first means
-	// every state is unknown, the second means every state is untrained -- and a
-	// plain `[]catalogConstruct` would decode both to the same nil slice, at
-	// which point no code downstream could tell them apart no matter how
-	// carefully it was written.
-	//
-	// `memql/imports` takes the same shape for the same reason on a smaller
-	// stake: `Text *string`, so an absent buffer and an empty one stay
-	// distinguishable.
+}
+
+// clusterCatalogParams is the notification payload: what the connected cluster
+// has loaded, as the `constructs` list from ListConstructs projected to the
+// fields the state rules read.
+//
+// A POINTER, and this is the single most important declaration in the file.
+// `null` (or absent) is NO CONNECTED CLUSTER; `[]` is a connected cluster that
+// has loaded nothing. Those two are worlds apart -- the first means every state
+// is unknown, the second means every state is untrained -- and a plain
+// `[]catalogConstruct` would decode both to the same nil slice, at which point
+// no code downstream could tell them apart no matter how carefully it was
+// written.
+//
+// `memql/imports` takes the same shape for the same reason on a smaller stake:
+// `Text *string`, so an absent buffer and an empty one stay distinguishable.
+type clusterCatalogParams struct {
 	Catalog *[]catalogConstruct `json:"catalog"`
 }
 
@@ -145,11 +179,14 @@ type trainingStateParams struct {
 // Deliberately a SUBSET of ListConstructs' ConstructInfo rather than a mirror of
 // it. Every field a client copies across is a field the two sides can disagree
 // about, and the ones omitted here -- description, args, runnable, origin_path,
-// source -- have no bearing on training state. `namespace` is omitted too, and
-// that one is worth naming: a concept's domain is already inside its canonical
-// `name`, and memql.CatalogConstructKey is what reads it out, so accepting a
-// separate namespace would create a second, contradictable answer to "which
-// domain is this concept in".
+// source -- have no bearing on training state. It is also what makes the push
+// affordable: four small strings an entry rather than eleven fields, over a
+// catalog that runs to four figures.
+//
+// `namespace` is omitted too, and that one is worth naming: a concept's domain
+// is already inside its canonical `name`, and memql.CatalogConstructKey is what
+// reads it out, so accepting a separate namespace would create a second,
+// contradictable answer to "which domain is this concept in".
 type catalogConstruct struct {
 	// Name is the registry key: a concept's canonical id
 	// ("v1:cognition:space"), or the declared name for every other kind.
@@ -169,7 +206,7 @@ type catalogConstruct struct {
 }
 
 type trainingStateResult struct {
-	// Connected reports whether a catalog was supplied at all. It carries no
+	// Connected reports whether the server holds a catalog at all. It carries no
 	// information the per-construct states do not, and exists so the client can
 	// render "no cluster" once instead of inferring it from a screenful of
 	// `unknown` -- and so the disconnected case stays legible on the wire, not
@@ -203,6 +240,34 @@ type trainingConstruct struct {
 	Origin string `json:"origin,omitempty"`
 }
 
+// clusterCatalogPush records what the client says the connected cluster has
+// loaded, replacing whatever was there.
+//
+// WHOLESALE REPLACEMENT, never a merge. A merge would need a rule for what an
+// absent entry means -- removed, or simply not mentioned this time -- and the
+// answer that a demote makes a construct disappear is exactly the one a merge
+// cannot express. The client sends the whole catalog or it sends `null`.
+//
+// It returns nothing. A notification has no reply, so there is nothing to report
+// to and nothing a client could do about a failure it never hears about.
+func (s *server) clusterCatalogPush(params clusterCatalogParams) {
+	next := newClusterCatalog(params.Catalog)
+	s.catalogMu.Lock()
+	s.catalog = next
+	s.catalogMu.Unlock()
+}
+
+// clusterCatalogSnapshot returns the catalog to answer a request against.
+//
+// By value, and safely: newClusterCatalog builds a fresh map that is never
+// mutated after construction, so a reader holding a copy of the struct holds a
+// map no writer will touch. The lock covers the pointer swap, not the contents.
+func (s *server) clusterCatalogSnapshot() clusterCatalog {
+	s.catalogMu.RLock()
+	defer s.catalogMu.RUnlock()
+	return s.catalog
+}
+
 // trainingState answers the request for one document.
 //
 // It never fails, for the reasons runnable.go states: the editor issues this on
@@ -216,7 +281,7 @@ type trainingConstruct struct {
 // engine build failed, which is precisely the workspace an author is most likely
 // to be looking at while iterating.
 func (s *server) trainingState(params trainingStateParams) trainingStateResult {
-	catalog := newClusterCatalog(params.Catalog)
+	catalog := s.clusterCatalogSnapshot()
 
 	// Allocated up front so the field marshals as [] and never as null: the
 	// TypeScript consumer iterates it directly.
@@ -287,6 +352,13 @@ func (a catalogAnswer) String() string {
 // no connected cluster. Its ZERO VALUE IS THE SECOND: an unset clusterCatalog is
 // a disconnected one, and answers `unknown` for everything.
 //
+// That zero value is load-bearing rather than merely tidy, because it is the
+// state the server is in before any client has pushed anything -- from process
+// start until the first `memql/clusterCatalog` arrives, and again for the whole
+// life of a server talking to a client that never sends one. "Nobody has told me
+// about a cluster" and "there is no cluster" are the same fact, and both are
+// `unknown`.
+//
 // The `connected` field is not redundant with a nil map, and that is the entire
 // point of the type. Go cannot distinguish a nil map from an empty one at a
 // lookup -- both miss, silently -- so a model that carried only the map would
@@ -297,9 +369,9 @@ type clusterCatalog struct {
 	entries   map[string]catalogConstruct
 }
 
-// newClusterCatalog converts the request's catalog into the model. A nil pointer
-// -- an absent or `null` field -- yields the disconnected zero value; anything
-// else, INCLUDING an empty list, yields a connected catalog.
+// newClusterCatalog converts a pushed catalog into the model. A nil pointer -- an
+// absent or `null` field -- yields the disconnected zero value; anything else,
+// INCLUDING an empty list, yields a connected catalog.
 func newClusterCatalog(supplied *[]catalogConstruct) clusterCatalog {
 	if supplied == nil {
 		return clusterCatalog{}

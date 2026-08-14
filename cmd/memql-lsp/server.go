@@ -27,6 +27,18 @@ type server struct {
 
 	mu    sync.RWMutex
 	sense *sense.Service
+
+	// catalogMu guards catalog, the connected cluster's construct catalog as
+	// last pushed by the client over `memql/clusterCatalog`. Its ZERO VALUE IS
+	// DISCONNECTED, which is what makes "no client has pushed anything yet" and
+	// "there is no cluster" the same fact -- see training.go, which owns
+	// everything about this field except its declaration.
+	//
+	// A lock of its own rather than mu: mu is held across the offline Sense
+	// rebuild, and a catalog push arriving mid-rebuild has no reason to wait for
+	// a workspace compile it has nothing to do with.
+	catalogMu sync.RWMutex
+	catalog   clusterCatalog
 }
 
 func newServer(root string, log commonlog.Logger) *server {
