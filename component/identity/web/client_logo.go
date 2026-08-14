@@ -13,6 +13,27 @@ var knownClientLogos = map[string]string{
 // clientLogoURL returns the versioned asset URL for a recognized client's
 // logo, or "" when we have no bundled logo for it (the consent page then
 // renders a placeholder initial avatar instead).
+//
+// CALLERS MUST NOT PASS A SELF-ASSERTED NAME (memql#3794 / memql#3820).
+//
+// This keys on the DISPLAY NAME, and for a client resolved from the
+// oauthClient store that name is whatever the unauthenticated POST /register
+// caller chose. Passing it here means a client registering as "Claude" is
+// handed the bundled Claude mark and shown it beside its own redirect URI --
+// not a missing warning, but the page lending a trusted brand's artwork to a
+// stranger. That was live until memql#3794.
+//
+// The gate belongs at the CALL SITE, on provenance, and there is exactly one:
+// authorize.go withholds the lookup entirely when
+// identity.ResolveClientWithOrigin reports the client self-registered. One
+// caller is what makes that safe today; a second that forgot would reintroduce
+// the vector without touching this file, which is why the rule is written here
+// rather than only there.
+//
+// Keying on provenance INSIDE this function is the tempting fix and the wrong
+// shape: it would thread an origin bit through a lookup whose job is
+// "name -> asset", and a caller could still pass a name whose provenance it had
+// never established.
 func (s *Server) clientLogoURL(displayName string) string {
 	p, ok := knownClientLogos[strings.ToLower(strings.TrimSpace(displayName))]
 	if !ok {
