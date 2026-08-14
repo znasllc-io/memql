@@ -192,9 +192,25 @@ var reachedThroughAggregate = map[string]declaration{
 }
 
 // notServedByTheBFF names declarations excluded because this backend does not
-// serve the path at all. Each carries the evidence -- build tags or a retired
-// surface -- because evidence is the only argument that justifies an exclusion
-// under item 3 of the package comment. Doubt is not one.
+// serve the path at all. Each carries the evidence, because evidence is the only
+// argument that justifies an exclusion under item 3 of the package comment.
+// Doubt is not one.
+//
+// The evidence takes THREE shapes, and the third was learned from a member
+// rather than anticipated:
+//
+//   - build tags on the MOUNT, so no bff-tagged build registers the route
+//     (AudioWebsocketPaths);
+//   - a retired surface that returns nothing at all (AIHTTPPaths);
+//   - a declaration that is unconditionally compiled while its CONTRIBUTION to
+//     an aggregate is build-tag scoped (EdgePaths).
+//
+// That third shape is worth spelling out, because this comment used to say
+// "build tags" and mean only the first, which would have made the rule not
+// describe its own member. The tag is not always on the declaration -- and for
+// EdgePaths it deliberately is not, so that a source scan like the
+// exhaustiveness gate can still see it. What matters for membership is that the
+// BFF does not serve the path, not where the tag that arranges it happens to sit.
 var notServedByTheBFF = map[string]declaration{
 	"AudioWebsocketPaths": {"/memql/audio is mounted only at app/transport_audio.go under " +
 		"`//go:build agent || voice`, so a bff-tagged build does not serve it. Neither node " +
@@ -202,6 +218,22 @@ var notServedByTheBFF = map[string]declaration{
 		server.AudioWebsocketPaths},
 	"AIHTTPPaths": {"returns nil: the legacy /si/* HTTP surface is retired in favour of " +
 		"MemqlService.Stream (component/server/nethttp.go).", server.AIHTTPPaths},
+	// Caught by TestEveryServerPathDeclarationIsClassified in production rather
+	// than by a simulation: another session merged the edge node while this work
+	// was in review, and the gate named EdgePaths() as unclassified. Nobody wrote
+	// it to be caught, which is the point of the gate.
+	"EdgePaths": {"served by the edge node, not the bff, so it must not be routed to " +
+		"bff-http on api.<domain>. NOTE the shape, which the two entries above do not " +
+		"share: the tag is NOT on the declaration. EdgePaths() is compiled into every " +
+		"binary on purpose -- its own doc comment says so -- precisely so a source scan " +
+		"like this gate can see it; what is build-tag scoped is its RETURN VALUE, the " +
+		"edgeRootPaths var, which is []string{\"/\"} under `//go:build edge` and nil " +
+		"under `!edge` (edge_paths_edge.go / edge_paths_default.go, memql#3710). So the " +
+		"reason the bff does not serve \"/\" as an HTTP route is the scoped contribution, " +
+		"not an absent declaration. That scoping is also what keeps \"/\" out of " +
+		"PublicPaths() on every verifier-consuming node, where it would bypass bearer " +
+		"verification outright -- see TestPublicPathsDoesNotDeclareRoot.",
+		server.EdgePaths},
 }
 
 // servedButNotExternallyRouted is the fourth classification, and the one whose

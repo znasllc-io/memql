@@ -166,18 +166,22 @@ func TestWithheldPathsAreAbsentFromTheEmittedSet(t *testing.T) {
 // The `allowed == "/"` skip that everyone cites protects the prefix walk. The
 // exact-match branch above it does not, so "/" in PublicPaths() means a request
 // to exactly "/" bypasses bearer verification on EVERY verifier-consuming node --
-// bff, identity, mcp. The effect is nil today only because nothing registers "/"
-// and the mux 404s, and AssertUnauthenticatedSurfaceDeclared -- which refuses "/"
-// as a prefix declaration for this very reason -- does not run on a node that has
-// a verifier (app/transport.go:265).
+// bff, identity, mcp. The effect is nil today only because only the edge
+// registers "/" and every other node's mux 404s, and
+// AssertUnauthenticatedSurfaceDeclared -- which refuses "/" as a prefix
+// declaration for this very reason -- does not run on a node that has a verifier
+// (app/transport.go:265).
 //
-// THE SCOPE IS THE UNTAGGED BUILD, deliberately. An edge node serving a public
-// website genuinely serves the root, and the legitimate shape for that is a
-// declaration whose CONTRIBUTION to PublicPaths() is compiled only into the edge
-// binary, while the declaration itself stays unconditionally compiled so the
-// exhaustiveness scan still sees it. This test permits exactly that shape -- a
-// build-tagged contribution is invisible from here -- and refuses an
-// unconditional one, which is the distinction worth enforcing.
+// THE SCOPE IS THE UNTAGGED BUILD, deliberately, and this is no longer
+// hypothetical. The edge node genuinely serves the root, and it takes exactly the
+// shape this test was written to permit: server.EdgePaths() is unconditionally
+// compiled -- its doc comment says explicitly that this is so it stays visible to
+// a source scan -- while its RETURN VALUE is tag-scoped via edgeRootPaths, which
+// is []string{"/"} under `//go:build edge` and nil under `!edge`
+// (edge_paths_edge.go / edge_paths_default.go, memql#3710). So from the untagged
+// build PublicPaths() carries no "/" and this passes, while an unconditional "/"
+// would fail. Both halves are live and both are asserted: this test covers the
+// contribution, and notServedByTheBFF["EdgePaths"] covers the routing.
 func TestPublicPathsDoesNotDeclareRoot(t *testing.T) {
 	for _, p := range server.PublicPaths() {
 		if strings.TrimSpace(p) == "/" {
@@ -301,7 +305,8 @@ func TestEveryServerPathDeclarationIsClassified(t *testing.T) {
 				"does not classify. Choose one:\n"+
 				"  includedPathFuncs             -- the bff serves it and the front door must route it\n"+
 				"  reachedThroughAggregate       -- an aggregate already carries its paths\n"+
-				"  notServedByTheBFF             -- with the build tags that keep the bff from serving it\n"+
+				"  notServedByTheBFF             -- the bff does not serve it; give the evidence "+
+				"(build tags on the mount, a retired surface, or a tag-scoped contribution)\n"+
 				"  servedButNotExternallyRouted  -- the bff serves it and it must stay off the public ingress\n"+
 				"Getting this wrong costs one of two things: an unrouted HTTP path does not 404, it "+
 				"hands HTTP/1.1 to an h2c backend; and a wrongly-routed one publishes an endpoint "+
