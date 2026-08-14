@@ -12,12 +12,31 @@
 # be the one whose hostname has no label in front of it. Both rules point at the
 # same Service and the edge cannot tell them apart.
 #
-# WILDCARD VERSUS EXACT. `*.memql.localhost` also matches api., identity. and
-# mcp.. The Ingress spec gives an exact host precedence over a wildcard and both
-# traefik and ingress-nginx implement that, so the four named hosts keep their
-# own backends and only unclaimed names fall through to the edge. This is the
-# rule the epic's five-host table depends on; it is probed explicitly during
-# front-door verification rather than assumed.
+# WILDCARD VERSUS EXACT -- DECLARED, NOT SPEC-GUARANTEED. `*.memql.localhost`
+# also matches api., identity. and mcp., so whether the four named hosts keep
+# their own backends is not a given. The Ingress spec says what a wildcard host
+# MATCHES and says nothing about which rule wins when an exact rule and a
+# wildcard rule both match -- there is no spec guarantee to lean on, and
+# traefik's own default (router priority = compiled rule LENGTH) probably
+# points the wrong way: the wildcard's `HostRegexp(...)` rule is longer than
+# most of the three exact hosts' own rules, so on default priority the
+# wildcard could outrank them and the whole API would be served by the site
+# edge instead of the bff. So precedence is DECLARED here: api-front-door.yaml,
+# front-door.yaml (identity) and mcp-front-door.yaml each carry an explicit
+# `traefik.ingress.kubernetes.io/router.priority` above the wildcard's
+# computed default. This wildcard/apex Ingress carries no priority annotation
+# of its own -- it does not need one, since a declared priority elsewhere is
+# what the ranking depends on, not a value here.
+#
+# This is checked by the `precedence` check in
+# scripts/install/verify-frontdoor.sh, for api. and identity. only -- never
+# mcp., whose Ingress routes :8090 while the check reads :8085's /healthz, so
+# it can never report more than inconclusive for that host. A probe compares
+# responses at the paths it dials, so a passing check is evidence for the
+# design rather than proof of it at every path; the DECLARED priority above is
+# what holds everywhere, including the paths and hosts nothing dials. See
+# docs/public/operate/front-door.md's precedence section for the full
+# reasoning and measurement.
 #
 # THE HOSTNAME IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). An install
 # that chooses another domain overrides both hosts through the ArgoCD
