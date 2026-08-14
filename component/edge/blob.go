@@ -83,6 +83,13 @@ type blobFile struct {
 	off  int
 }
 
+// blobFile satisfies io.ReadSeeker. fs.File does not statically expose
+// Seek, so http.ServeContent's own type assertion for range-request support
+// depends on this holding even though nothing in the fs.File interface
+// enforces it -- this compile-time check documents that contract where it
+// can't silently rot.
+var _ io.ReadSeeker = (*blobFile)(nil)
+
 func (f *blobFile) Stat() (fs.FileInfo, error) {
 	return blobInfo{name: f.name, size: int64(len(f.data))}, nil
 }
@@ -166,13 +173,26 @@ func NewAzureBlobClient(d AzureDownloader, container string) BlobClient {
 	return &azureBlobClient{downloader: d, container: container}
 }
 
-// Get downloads key from the configured container. A bloberror.BlobNotFound
-// response is translated to ErrNotFound so blobFS.Open sees the same miss
-// shape (-> fs.ErrNotExist) regardless of which BlobClient is backing it.
+// Get downloads key from the configured container. Azure's not-found codes
+// are translated to ErrNotFound so blobFS.Open sees the same miss shape
+// (-> fs.ErrNotExist) regardless of which BlobClient is backing it; any
+// other failure is returned wrapped, unmapped.
 func (a *azureBlobClient) Get(ctx context.Context, key string) ([]byte, error) {
 	data, err := a.downloader.Download(ctx, a.container, key)
 	if err != nil {
-		if bloberror.HasCode(err, bloberror.BlobNotFound) {
+		// BlobNotFound and ResourceNotFound both mean "this object is not
+		// there" -- map both to ErrNotFound. If Azure ever answers with the
+		// generic code instead of the blob-specific one, a legitimately
+		// missing file must still 404, because the resolution order depends
+		// on it: a missing <path>.html is supposed to fall through to the
+		// next rung, not fail the whole request with a 503.
+		//
+		// ContainerNotFound is deliberately NOT mapped here. A missing
+		// container is an infrastructure failure -- the entire bucket is
+		// gone -- not a per-object miss. Answering 404 for that would hide a
+		// real outage behind a response that looks like an ordinary missing
+		// file: every site would silently 404 and nothing would page anyone.
+		if bloberror.HasCode(err, bloberror.BlobNotFound, bloberror.ResourceNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, fmt.Errorf("edge: download %q from container %q: %w", key, a.container, err)
