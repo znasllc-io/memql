@@ -438,8 +438,10 @@ This spec is **C** of four, decomposed from the 2026-08-14 brainstorm.
 |---|---|---|
 | **A** | Constructs view + the readable input/output viewer | separate spec |
 | **B** | Training in the editor (untrained/drifted flagging, read-only rules, promote) | separate spec, depends on A |
-| **C** | **Deployments view + the plugin/portal split** | **this spec** |
+| **C** | **Deployments view + the plugin/portal split** | **this spec** -- epic memql#3733 |
 | **D** | Virtual staging/production inside one cluster | separate spec |
+
+C is tracked as memql#3733 and broken into memql#3736 through memql#3743.
 
 **What C deliberately does not do.**
 
