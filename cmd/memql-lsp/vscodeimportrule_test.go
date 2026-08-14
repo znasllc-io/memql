@@ -44,11 +44,13 @@ var vscodeImportAllowList = []string{
 	"extension.ts",               // activation, command registration, LSP client wiring
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
 	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
+	"views/constructsTree.ts",    // TreeDataProvider adapter over state/constructCatalog.ts
 	"views/deploymentsTree.ts",   // TreeDataProvider adapter over state/deploymentsCatalog.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
 	"webview/addClusterPanel.ts", // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
 	"webview/connectionPanel.ts", // WebviewPanel adapter over clusters/connectionView.ts + clusters/portalUrl.ts
+	"webview/constructPanel.ts",  // WebviewPanel adapter over webview/constructScreens.ts + constructs/signature.ts
 	"webview/conceptPanel.ts",    // WebviewPanel adapter over state/conceptPanelState.ts
 	"webview/deploymentPanel.ts", // WebviewPanel adapter over state/deploymentsCatalog.ts + install/session.ts
 	"webview/runPanel.ts",        // WebviewPanel adapter over state/argForm.ts + state/runResult.ts
@@ -213,6 +215,7 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"connection/endpoint.ts",
 		"connection/manager.ts",
 		"clusters/connectionView.ts",
+		"constructs/signature.ts",
 		"clusters/portalUrl.ts",
 		"deploy/actions.ts",
 		"deploy/controller.ts",
@@ -222,6 +225,7 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"state/conceptPanelState.ts",
 		"state/conceptsCache.ts",
 		"state/deploymentHistory.ts",
+		"state/constructCatalog.ts",
 		"state/deployments.ts",
 		"state/deploymentsCatalog.ts",
 		"state/rowProjection.ts",

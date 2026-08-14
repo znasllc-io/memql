@@ -66,6 +66,7 @@ test('a missing memql-lsp does not take the runtime surface down with it', () =>
   assert.deepEqual(recorded.treeViews, [
     'memqlClusters',
     'memqlDeployments',
+    'memqlConstructs',
     'memqlConcepts',
     'memqlRuns',
   ]);
