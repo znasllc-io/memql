@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"testing"
-
-	"github.com/znasllc-io/memql/component/server"
 )
 
 // serverPkgDir is where the exhaustiveness gate scans. Relative to this
@@ -148,52 +146,12 @@ func TestWithheldPathsAreAbsentFromTheEmittedSet(t *testing.T) {
 	}
 }
 
-// PublicPaths() must not contain "/" -- an auth bypass, not a routing concern,
-// asserted here because this is where the declarations are already audited.
-//
-// component/identity/verifier/middleware.go:161-177 checks two ways and only one
-// of them is guarded:
-//
-//	path := normalizePath(r.URL.Path)
-//	if _, ok := publicPaths[path]; ok {
-//	        return true          // EXACT match, reached FIRST, no guard
-//	}
-//	for allowed := range publicPaths {
-//	        if allowed == "" || allowed == "/" || allowed == path {
-//	                continue     // the famous guard -- PREFIX loop only
-//	        }
-//
-// The `allowed == "/"` skip that everyone cites protects the prefix walk. The
-// exact-match branch above it does not, so "/" in PublicPaths() means a request
-// to exactly "/" bypasses bearer verification on EVERY verifier-consuming node --
-// bff, identity, mcp. The effect is nil today only because only the edge
-// registers "/" and every other node's mux 404s, and
-// AssertUnauthenticatedSurfaceDeclared -- which refuses "/" as a prefix
-// declaration for this very reason -- does not run on a node that has a verifier
-// (app/transport.go:265).
-//
-// THE SCOPE IS THE UNTAGGED BUILD, deliberately, and this is no longer
-// hypothetical. The edge node genuinely serves the root, and it takes exactly the
-// shape this test was written to permit: server.EdgePaths() is unconditionally
-// compiled -- its doc comment says explicitly that this is so it stays visible to
-// a source scan -- while its RETURN VALUE is tag-scoped via edgeRootPaths, which
-// is []string{"/"} under `//go:build edge` and nil under `!edge`
-// (edge_paths_edge.go / edge_paths_default.go, memql#3710). So from the untagged
-// build PublicPaths() carries no "/" and this passes, while an unconditional "/"
-// would fail. Both halves are live and both are asserted: this test covers the
-// contribution, and notServedByTheBFF["EdgePaths"] covers the routing.
-func TestPublicPathsDoesNotDeclareRoot(t *testing.T) {
-	for _, p := range server.PublicPaths() {
-		if strings.TrimSpace(p) == "/" {
-			t.Error(`server.PublicPaths() contains "/", which bypasses bearer verification ` +
-				`for a request to exactly "/" on every verifier-consuming node: ` +
-				`verifier.shouldBypassAuth's exact-match branch has no "/" guard, only its ` +
-				`prefix loop does (component/identity/verifier/middleware.go:161-177). ` +
-				`A node that legitimately serves the root must contribute "/" from a ` +
-				`build-tagged declaration, not unconditionally.`)
-		}
-	}
-}
+// TestPublicPathsDoesNotDeclareRoot lives in root_public_path_test.go, NOT here,
+// and moving it back would break it silently. Everything in this file is true in
+// every build; that assertion is true only in the untagged one, because
+// PublicPaths() legitimately contains "/" under `-tags edge`. Its file carries
+// `//go:build !edge` to say so in a constraint rather than a comment, and that
+// file explains why no runtime guard can substitute.
 
 // Longest-first-then-lexical, because traefik orders by specificity and nginx by
 // declaration: emitting longest-first makes both agree without relying on
