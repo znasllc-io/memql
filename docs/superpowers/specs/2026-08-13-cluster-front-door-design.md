@@ -197,20 +197,40 @@ the shape of the system. The edge Deployment lives in git and is reconciled like
 everything else. A customer's landing page is no more a Kubernetes object than a
 chat message is.
 
-### D6 — The site concept is admin-tier, not owner-tier
+### D6 — The site concept is `@rowAuthz(clusterOwner)`, not owner-tier
 
 `@rowAuthz(owner="ownerUserId")` would be wrong here, and measurably so. §5.1 of
 the account-isolation design records that a concept declares **one** tier and
 that `enforceRowAuthzOnPlan` ANDs the owned predicate **unconditionally**, with
 no cluster-owner escape on the read path. So on an owner-tier concept, "list
 every site in this cluster" is not merely unimplemented — it is *not
-expressible*, and an admin asking for it gets a confidently wrong subset. That
-query is the portal's primary screen.
+expressible*, and the caller gets a confidently wrong subset. That query is the
+portal's primary screen. It would also make cluster-wide hostname uniqueness
+uncheckable: you cannot enforce uniqueness against rows you are not allowed to
+see.
 
-Sites are cluster infrastructure. They are gated by a context-spec conjunct over
-the `@actor` envelope (the `requiresAdmin` shape CLAUDE.md documents), which
-also makes **cluster-wide hostname uniqueness checkable** — you cannot enforce
-uniqueness against rows you are not allowed to see.
+Sites are cluster infrastructure, so the tier is **`clusterOwner`** — the same
+one `v1:campaigns:sendJob` and `v1:campaigns:suppression` carry, and for the
+same reason: one deployment, one front door, and these are not any individual
+operator's rows.
+
+**`@rowAuthz` has exactly four tiers** — `owner="<field>"`, `clusterOwner`,
+`via="<spec>"`, `public` (`component/memql/rowauthz_enforce.go`). There is no
+"admin" tier; the word names a *classification bucket* in
+`test/dslconformance`, which is a different thing, and an earlier draft of this
+decision conflated the two.
+
+*Consequence, accepted:* `rowAuthzAdmits` admits **only the cluster owner** for
+this tier — an `admin` cannot manage sites. Under D1 that is defensible and
+arguably right: one cluster, one customer, and the cluster owner is the
+developer or, post-handover, the customer themselves. The alternative is
+`via="<spec>"`, and §5.3 of the account-isolation design measures that the
+mixed `@row` + `@actor` shape such a spec requires has **zero authored
+instances anywhere in `dsl/`** — the form is documented and has never been
+exercised. Making site management the first exercise of an untried
+authorization form, in the component that serves every customer-facing page, is
+not a trade worth taking for v1. Widening to admins is later work with a named
+mechanism.
 
 ### D7 — The edge is its own node type
 
@@ -372,10 +392,15 @@ Request paths:
 | `systemOwned` | `bool` | Blocks deletion. The portal only |
 | `title`, `notes` | `string` | Operator-facing |
 
-Authorization tier: **admin**, per D6, gated by a context-spec conjunct over the
-`@actor` envelope. Not `@public` — §7 of the account-isolation document records
-that `@public` is matched ahead of every other tier, carries no runtime
-semantics, and permanently blocks tier inference for the concept afterwards.
+Authorization: **`@rowAuthz(clusterOwner)`**, per D6. Not `@public` — §7 of the
+account-isolation document records that `@public` is matched ahead of every
+other tier, carries no runtime semantics, and permanently blocks tier inference
+for the concept afterwards.
+
+Note that `@default` on a concept field is **never applied on insert**
+(memql#2960), so every default above is documentation only; the mutations fill
+them with `??` (`args.kind ?? "spa"`), which is the sole mechanism that
+actually writes a value.
 
 Versioning is the graph's own history: `bundleRef` on an earlier row version is
 the previous deploy, so rollback needs no separate version table.
