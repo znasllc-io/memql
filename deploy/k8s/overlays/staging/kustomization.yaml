@@ -3,7 +3,8 @@
 # ONE CLUSTER, ONE ArgoCD, ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766).
 # This overlay and deploy/k8s/overlays/prod are the same file with different
 # numbers in it. Diff them: the differences are the namespace, the environment
-# ConfigMap's two values, the replica counts, and the image digests. Staging is
+# ConfigMap's two values, and the image digests -- the replica counts match
+# today, and are stated separately so either may move without the other. Staging is
 # not a second installation any more -- it is a second namespace in the one
 # cluster, reconciled from the same base by the same ArgoCD, its data separated
 # from production's by the schema search path in environment.yaml and by
@@ -58,10 +59,13 @@ resources:
 
 patches:
   # Replica counts, stated rather than inherited -- the same nodes in the same
-  # order as the prod twin, with different integers. One replica each, because
-  # staging exists to exercise the delivery path and the mesh's cross-node
-  # behaviour is what the local 2-replica parity cluster is for
-  # (`make up SERVERS=2` + `make scale N=2 ENV=local`).
+  # order as the prod twin, and currently the same integers. Restating them is
+  # the point even when they match: the two overlays must differ only in VALUES,
+  # so a count inherited here and overridden there would be a structural
+  # difference wearing a number's clothes.
+  #
+  # They match PROD deliberately -- see the COST SHAPE note above. The saving is
+  # the idle time, not the width.
   #
   # Scale to zero when idle with `make scale N=0 ENV=staging`; these are the
   # counts a reconcile returns to when you scale it back.

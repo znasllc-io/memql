@@ -3,8 +3,9 @@
 # ONE CLUSTER, ONE ArgoCD, ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766).
 # This overlay and deploy/k8s/overlays/staging are the same file with different
 # numbers in it. Diff them: the differences are the namespace, the environment
-# ConfigMap's two values, the replica counts, and the image digests -- nothing
-# structural, because there is nothing structural left to differ. Staging and
+# ConfigMap's two values, and the image digests -- nothing structural, because
+# there is nothing structural left to differ. (Even the replica counts match
+# today; they are stated separately so either may move without the other.) Staging and
 # production run the SAME engine images reconciled from the SAME base by the
 # same ArgoCD, and the only thing that separates their DATA is the schema search
 # path that arrives through environment.yaml.
@@ -52,7 +53,8 @@ patches:
   # overlays must differ only in VALUES, so a count that is inherited here and
   # overridden there would be a structural difference wearing a number's
   # clothes. Read this block against the staging twin -- same nodes, same order,
-  # different integers.
+  # and today the same integers, because staging is deliberately prod-shaped
+  # while up and parked at zero while idle (see the COST SHAPE note there).
   #
   # ArgoCD ignores /spec/replicas on both Applications (see
   # deploy/argocd/apps/memql-prod.yaml), so `make scale N=<n> ENV=prod` is a
