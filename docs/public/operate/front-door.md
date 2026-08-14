@@ -272,7 +272,7 @@ The `*.<domain>` rule is what makes that possible: one wildcard rule routes
 every present and future site name to the one node that knows how to look them
 up — every name, that is, that the four exact hosts have not claimed, which is
 an assumption about rule ranking rather than a given
-([above](#exact-versus-wildcard-precedence-is-a-real-question-and-it-is-not-settled)).
+([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)).
 The certificate is the matching SAN pair (`*.<domain>` and `<domain>`), issued
 once at install — by mkcert locally, cert-manager in the cloud — so a new site
 needs no reissue either.
@@ -352,20 +352,35 @@ curl -sS --http1.1 https://api.memql.localhost/healthz
 `verify-frontdoor.sh` runs **seven** checks against the default host set, not
 three per host: DNS, TLS and precedence for each of `api.` and `identity.`, plus
 **one** gRPC/h2 check, against the first host only. `precedence` is the one that
-can come back neither passed nor failed — an `inconclusive` check counts in
+CAN come back neither passed nor failed — an `inconclusive` check counts in
 neither tally, so it leaves `allPassed` alone
-([above](#exact-versus-wildcard-precedence-is-a-real-question-and-it-is-not-settled)).
+([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)) — but
+that is a property of the check, not a permanent state of this cluster: with
+`svc/edge` deployed (memql#3714) it is genuinely testable and reports
+`passed`, measured live:
 
 ```
-allPassed: true, passedCount: 5, failedCount: 0, inconclusiveCount: 2
+allPassed: true, passedCount: 7, failedCount: 0, inconclusiveCount: 0
 PASS dns  api.memql.localhost: resolves to 127.0.0.1
 PASS tls  api.memql.localhost: TLS handshake ok against a trusted certificate (HTTP 415)
-PASS dns  identity.memql.localhost
-PASS tls  identity.memql.localhost: ... (HTTP 302)
+PASS dns  identity.memql.localhost: resolves to 127.0.0.1
+PASS tls  identity.memql.localhost: TLS handshake ok against a trusted certificate (HTTP 302)
 PASS grpc api.memql.localhost: negotiated HTTP/2 (HTTP 415) -- gRPC can ride this door
-INCONCLUSIVE precedence api.memql.localhost: ... the wildcard router is not loaded, so there is nothing for an exact host to take precedence over
-INCONCLUSIVE precedence identity.memql.localhost: ... (the same)
+PASS precedence api.memql.localhost: /healthz answered by nodeType=bff, not by the
+  wildcard's nodeType=edge -- the exact host rule takes precedence
+PASS precedence identity.memql.localhost: /healthz answered by nodeType=identity, not
+  by the wildcard's nodeType=edge -- the exact host rule takes precedence
 ```
+
+Before `svc/edge` existed, the same command reported
+`allPassed: true, passedCount: 5, failedCount: 0, inconclusiveCount: 2` — both
+`precedence` checks `INCONCLUSIVE` ("the wildcard router is not loaded, so
+there is nothing for an exact host to take precedence over"), because with no
+backend Service for the wildcard rule, traefik dropped that router entirely.
+That is history, not the current state of this front door; it is recorded
+[above](#exact-versus-wildcard-precedence-is-declared-not-inherited) as the
+measurement that motivated declaring the priority explicitly rather than
+trusting it to still be true once a competing router existed.
 
 Two things in that output are deliberate and neither is obvious.
 
