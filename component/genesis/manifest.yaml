@@ -1433,6 +1433,12 @@ variables:
     optional: true
     description: "The cluster's domain. Every domain-shaped identity value (base URL, expected issuer, bootstrap domain, discovery endpoint, CORS origins, OAuth redirect URIs) is derived from it set-if-absent at boot by component/genesis/domain.go; an explicitly configured value always wins. Delivered to local pods as the single key of the memql-domain ConfigMap (memql#3593)."
 
+  - name: MEMQL_HOST_LABEL
+    component: platform
+    scope: node
+    optional: true
+    description: "The DNS label distinguishing this environment's front-door hosts (memql#3767). Empty -- the default, and every single-environment cluster including every local one -- means the unprefixed hosts api.<domain> / identity.<domain> / mcp.<domain> / *.<domain> plus the apex. A label folds in at two positions that are NOT interchangeable: a ROLE host hyphenates (api-staging.<domain>) so the cluster's existing *.<domain> wildcard certificate still covers it, since a wildcard matches exactly one label; a SITE host nests (portal.staging.<domain>) because its own name already occupies that label, which is why a labelled environment requests one additional wildcard for its sites. Composed through component/frontdoor by BOTH consumers -- cmd/frontdoorhosts, which reads it from the overlay's environment.yaml and generates the Ingress rules, and component/genesis/domain.go, which composes this node's issuer / CORS origins / redirect URIs / MCP public URL with it -- so the hosts the front door serves and the hosts the nodes believe in cannot disagree. Delivered alongside MEMQL_ENVIRONMENT and MEMQL_DB_SEARCH_PATH on the memql-environment ConfigMap. It is a VALUE and never a branch: the engine learns what its own hosts are called, not which environment it is."
+
   - name: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
     component: identity
     scope: node
