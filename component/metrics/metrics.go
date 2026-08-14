@@ -124,21 +124,21 @@ var (
 		Namespace: namespace,
 		Subsystem: "identity",
 		Name:      "signing_key_created_timestamp_seconds",
-		Help:      "Unix timestamp at which the ACTIVE Ed25519 signing key was created. Key age is time() minus this. Meaningful only while memql_identity_signing_key_age_known is 1; it is 0 otherwise.",
+		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this series at a constant 0 because it holds no signing key. Unix timestamp at which the ACTIVE Ed25519 signing key was created. Key age is time() minus this. Meaningful only while memql_identity_signing_key_age_known is 1; it is 0 otherwise.",
 	})
 
 	identitySigningKeyAgeKnown = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "identity",
 		Name:      "signing_key_age_known",
-		Help:      "1 when this replica knows when its active signing key was really created, 0 when it does not. An env-provided seed (MEMQL_IDENTITY_SIGNING_KEY_B64) carries no creation date, so without MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT the only date available is process start -- which measures pod uptime, not key age. Alert on 0: key age is UNOBSERVABLE, not zero.",
+		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this series at a constant 0 because it holds no signing key, so an unqualified alert fires forever on most of the mesh and buries the one case this measures. 1 when this replica knows when its active signing key was really created, 0 when it does not. An env-provided seed (MEMQL_IDENTITY_SIGNING_KEY_B64) carries no creation date, so without MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT the only date available is process start -- which measures pod uptime, not key age. Alert on 0 WHERE app=\"identity\": key age is UNOBSERVABLE, not zero.",
 	})
 
 	identitySigningKeyRotationSupported = prometheus.NewGauge(prometheus.GaugeOpts{
 		Namespace: namespace,
 		Subsystem: "identity",
 		Name:      "signing_key_rotation_supported",
-		Help:      "1 when this replica can rotate its own signing key (on-disk MEMQL_IDENTITY_KEY_DIR mode, dev), 0 when it cannot (env-seed mode -- staging/prod). At 0 the in-process 90-day rotation scheduler is INERT and rotation is the manual re-seal-and-roll runbook (memql#3381).",
+		Help:      "IDENTITY NODES ONLY -- select app=\"identity\"; every other node type exports this series at a constant 0 because it holds no signing key. 1 when this replica can rotate its own signing key (on-disk MEMQL_IDENTITY_KEY_DIR mode, dev), 0 when it cannot (env-seed mode -- staging/prod). At 0 the in-process 90-day rotation scheduler is INERT and rotation is the manual re-seal-and-roll runbook (memql#3381).",
 	})
 )
 
@@ -166,6 +166,16 @@ func init() {
 	// (identity.EmitKeysetMetric). Every other node exports them at these
 	// zeros, which is honest -- a bff holds no signing key -- so every
 	// alert over them must select app="identity".
+	//
+	// THAT QUALIFICATION NOW LIVES IN THE Help STRINGS TOO, and it has to
+	// (memql#3804). This comment is the right note for someone editing this
+	// file and reaches nobody else: an operator writing an alerting rule reads
+	// the scrape, where Help is the only prose there is. So for as long as the
+	// qualifier was here and not there, the audience that needed it was the one
+	// audience structurally unable to see it -- while age_known's own Help said
+	// "Alert on 0" flat, on a series that is a constant 0 across seven of eight
+	// node types. Keep both in step; TestSigningKeyHelpNamesTheIdentityScope
+	// fails if a Help string loses the scope.
 	identitySigningKeyCreatedTimestamp.Set(0)
 	identitySigningKeyAgeKnown.Set(0)
 	identitySigningKeyRotationSupported.Set(0)
