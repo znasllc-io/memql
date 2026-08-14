@@ -328,21 +328,43 @@ func TestRelationshipWrapperSignatureHelp(t *testing.T) {
 		}
 	})
 
-	t.Run("contains and ids offer only the unscoped reading", func(t *testing.T) {
+	// The claim here is about the LABEL axis: these two take no `as` label, so
+	// neither offers a label-scoped reading. It is asserted as exactly that.
+	//
+	// It used to be asserted as `len(Signatures) != 1`, which conflated "no
+	// label-scoped reading" with "one reading in total" -- true of both names
+	// at the time, and no longer true of `contains`, which is ALSO the
+	// two-argument substring builtin and now offers that reading second
+	// (memql#3779). Nothing about the label claim changed; the count was
+	// incidental to it, and the builtin's own doc has always said the two forms
+	// are "discriminated by arg count".
+	t.Run("contains and ids offer no label-scoped reading", func(t *testing.T) {
 		for _, fn := range []string{"contains", "ids"} {
 			src := fn + "("
 			res := svc.SignatureHelp(src, 1, len(src)+1)
 			if res == nil {
 				t.Fatalf("%s should still have signature help", fn)
 			}
-			if len(res.Signatures) != 1 {
-				t.Errorf("%s takes no label, so it has ONE reading, got %d: %+v",
-					fn, len(res.Signatures), res.Signatures)
+			for _, sig := range res.Signatures {
+				if strings.Contains(sig.Label, "(as, ") {
+					t.Errorf("%s takes no label, so no reading may be label-scoped, got %q", fn, sig.Label)
+				}
 			}
 			if !strings.Contains(res.Signatures[0].Documentation, "no `as` label") {
 				t.Errorf("%s should say WHY it takes no label, got: %s",
 					fn, res.Signatures[0].Documentation)
 			}
+		}
+	})
+
+	// `ids` follows no relationship and is not a builtin, so it stays at
+	// exactly one reading -- which is what keeps the case above from passing
+	// vacuously if the label check ever stopped matching anything.
+	t.Run("ids has exactly one reading", func(t *testing.T) {
+		src := "ids("
+		res := svc.SignatureHelp(src, 1, len(src)+1)
+		if res == nil || len(res.Signatures) != 1 {
+			t.Errorf("ids should offer exactly one reading, got %+v", res)
 		}
 	})
 
