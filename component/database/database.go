@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"io"
@@ -336,7 +337,23 @@ func defaultConfig() *config {
 			// Wrap the connector so Connect() retries transient Postgres
 			// connection-slot exhaustion (SQLSTATE 53300) with jittered
 			// backoff instead of failing the query outright (memql#1076).
-			db := sql.OpenDB(newRetryingConnector(connector, slog.Default()))
+			// The environment boundary (memql#3765, epic #3748). Applied
+			// here rather than as a conn param above because pgdriver binds
+			// each param as a statement PARAMETER, which Postgres reads as one
+			// schema name -- see search_path.go for the measurement. Wrapped
+			// INSIDE the retrying connector so a retried connect re-applies it:
+			// a backend that came up without the search path is the exact
+			// failure this exists to prevent.
+			var base driver.Connector = connector
+			if raw := searchPathFromEnv(); raw != "" {
+				schemas, spErr := parseSearchPath(raw)
+				if spErr != nil {
+					return nil, spErr
+				}
+				base = newSearchPathConnector(base, schemas)
+			}
+
+			db := sql.OpenDB(newRetryingConnector(base, slog.Default()))
 
 			// Configure connection pool limits to prevent exhaustion.
 			// Defaults are conservative so steady+rollout-surge demand across
@@ -1338,6 +1355,21 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 	// a reconnect) clears a previously recorded failure. MigrationError() then
 	// reflects the outcome of the most recent attempt (#671).
 	d.clearMigrationErr()
+
+	// The environment's schema has to exist before anything migrates into it:
+	// `CREATE TABLE IF NOT EXISTS` cannot land in a schema a fresh database has
+	// never heard of, and the search path names exactly such a schema
+	// (memql#3765). The same call verifies the path can reach the extensions
+	// the migrations call by bare name, so a wrong path fails HERE, naming
+	// itself, instead of forty migrations later as "function
+	// create_hypertable does not exist".
+	if raw := searchPathFromEnv(); raw != "" {
+		if err := ensureSearchPathSchema(runCtx, bunDB, raw); err != nil {
+			d.Logger.Error("failed to prepare the environment schema", "error", err)
+			d.recordMigrationErr(fmt.Errorf("environment schema: %w", err))
+			return
+		}
+	}
 
 	if d.config.migrator != nil {
 		if err := d.config.migrator.Migrate(runCtx, bunDB); err != nil {
