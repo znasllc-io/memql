@@ -388,15 +388,16 @@ go build -tags voice .           # voice      (30 MB)
 go build -tags cognition .       # cognition  (35 MB, -34%)
 go build -tags agent .           # agent      (43 MB, -19%)
 go build -tags planner .         # planner    (25 MB, -53%)
+go build -tags edge .            # edge       (serves hosted sites + the portal)
 ```
 
 ```
-        ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-        │   BFF    │ │  Voice   │ │Cognition │ │ Planner  │ │  Agent   │
-        │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │
-        └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
-         backend      voice        cognition     planning     task exec
-         for front.   transport    pipeline       orchestr.    AI work
+        ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │   BFF    │ │  Voice   │ │Cognition │ │ Planner  │ │  Agent   │ │   Edge   │
+        │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │ │  Node    │
+        └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+         backend      voice        cognition     planning     task exec    sites +
+         for front.   transport    pipeline       orchestr.    AI work    portal
 ```
 
 - **BFF** (default): Backend for frontend, domain-specific API surface
@@ -404,6 +405,9 @@ go build -tags planner .         # planner    (25 MB, -53%)
 - **Cognition**: Cognition pipeline, Polyphon
 - **Agent**: Task execution, AI work, tool calling
 - **Planner**: Task planning and orchestration
+- **Edge**: Serves this cluster's hosted web surfaces -- every hosted SPA/website
+  and the memQL Portal itself (site #1, no special path) -- by resolving the
+  request `Host` header to a `v1:platform:site` graph row (epic memql#3700)
 
 Nodes discover each other via mesh. All nodes share a single
 PostgreSQL + TimescaleDB database. Inter-node communication uses `NodeService` gRPC
@@ -519,7 +523,7 @@ in *shape* it stops proving anything about staging/prod. Ask of any change: *is
 this the shape of the system (→ base/component, everywhere) or a value (→
 overlay, per env)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
 
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. Clients (the Cockpit + SDKs) reach the cluster **exactly as in staging/prod** -- through the `cockpit.memql.localhost` traefik front door (TLS on 443 with the mkcert `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.memql.localhost` works the same way. The domain is a VALUE, not the shape of the system (memql#3593): `make up DOMAIN=lab.example.com` serves any domain the operator brings, seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives its issuer, CORS origins and OAuth redirect URIs from at boot (`component/genesis/domain.go`), plus two `kustomize.patches` on the ArgoCD Application for the Ingress hostnames when it differs from the committed default. No file under `deploy/` names a domain. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, livekit `:7880`) remain for low-level debugging only. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench/edge) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. Clients (the Cockpit + SDKs) reach the cluster **exactly as in staging/prod** -- through the `cockpit.memql.localhost` traefik front door (TLS on 443 with the mkcert `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.memql.localhost` works the same way. The domain is a VALUE, not the shape of the system (memql#3593): `make up DOMAIN=lab.example.com` serves any domain the operator brings, seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives its issuer, CORS origins and OAuth redirect URIs from at boot (`component/genesis/domain.go`), plus two `kustomize.patches` on the ArgoCD Application for the Ingress hostnames when it differs from the committed default. No file under `deploy/` names a domain. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, livekit `:7880`) remain for low-level debugging only. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
