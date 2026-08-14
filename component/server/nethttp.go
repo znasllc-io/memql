@@ -806,6 +806,10 @@ func PublicPaths() []string {
 	// The portal's static bundle (memql#3314). The bytes are public; the data
 	// the bundle reads is gated on the stream it dials -- see PortalPaths.
 	paths = append(paths, PortalPaths()...)
+	// The edge node's site-serving mount (memql#3710) -- see EdgePaths for why
+	// this is public in the strongest sense used in this file, not merely the
+	// "bytes public, data gated" shape PortalPaths above has.
+	paths = append(paths, EdgePaths()...)
 	return paths
 }
 
@@ -915,6 +919,40 @@ func SpaceAttachmentPaths() []string {
 // property to re-check before mounting anything else there.
 func PortalPaths() []string {
 	return pathsWithBase("/portal/")
+}
+
+// EdgePaths returns the edge node's site-serving mount (memql#3710).
+//
+// Unlike every other function in this file, this is NOT composed with
+// pathsWithBase: the edge resolves a request by HOSTNAME, not by a shared
+// SERVER_PUBLIC_PATH prefix -- every hosted site owns the WHOLE path space
+// under its own hostname, so app/transport_edge.go registers the literal
+// pattern "/" (a.handleRoute("/", handler)) regardless of any configured
+// base path, and the declaration below has to name that exact pattern to be
+// found.
+//
+// PUBLIC in the strongest sense used in this file: not "the bundle is public
+// but the data behind it is gated" (PortalPaths' distinction) -- the edge's
+// handler serves the SAME response to every caller regardless of identity,
+// because it has no per-caller identity to consult in the first place. See
+// app/auth_mode_edge.go for why this node type runs no identity verifier at
+// all (verifierRequired=false), which is what makes this declaration load-
+// bearing rather than decorative: with no verifier middleware installed,
+// createHTTPServer's unauthenticated-surface boot check
+// (component/server/unauthenticated_surface.go, memql#2939) is what stands
+// between "the edge's mount is deliberately public" and "boot refuses,
+// because a route this binary serves is accounted for by nothing."
+//
+// A bare "/" here does NOT bless every other node type's entire mux. It is
+// an EXACT declaration, and surfaceDeclaredBy (unauthenticated_surface.go)
+// deliberately refuses to treat "/" as a PREFIX -- TestSurfaceDeclaredByRefusesRootAsPrefix
+// pins both halves: "/" still matches "/" exactly (a genuinely declared root
+// route is unaffected), and "/" is never honoured as a prefix of some other
+// path (which would make the boot check pass vacuously for every node). No
+// other node type registers anything at "/", so this entry is vacuously true
+// there -- the same shape PortalPaths() already has on every non-bff node.
+func EdgePaths() []string {
+	return []string{"/"}
 }
 
 // InboundWebhookPaths returns the path prefix the inbound-delivery receiver

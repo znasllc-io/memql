@@ -175,3 +175,35 @@ func TestRouteRegisteredAfterTheAssertionIsRefused(t *testing.T) {
 			"is a one-spelling gate and the other spelling walks around it")
 	}
 }
+
+// The edge node runs with no identity verifier at all (verifierRequired=false,
+// app/auth_mode_edge.go, memql#3710) because it is not an auth boundary -- so
+// its one registered route, the site-serving mount at "/"
+// (app/transport_edge.go's mountEdgeEndpoints), has to survive the same
+// unauthenticated-surface boot check every other undeclared route fails.
+//
+// This does NOT go through createHTTPServer(): the wholeMux branch it would
+// take is chosen by `!verifierRequired`, a build-tag const, so a test binary
+// compiled without -tags edge would run the identity-only-shaped
+// contract-only branch and never look at a.registeredRoutes at all --
+// exactly the gap TestUnauthenticatedSurfaceRoutesIncludeMuxRoutesForIdentity
+// above already works around for the identity binary's own mux routes, and
+// exactly what silently passed here on the first attempt at this test
+// (`go test ./app/`, no tags: wholeMux=false, the fatal never fired, for the
+// wrong reason). Assembling the whole-mux route list directly, as that test
+// does, makes this meaningful under any tag the suite happens to run with.
+//
+// Exercises the REAL, live PublicPaths() (via server.AssertUnauthenticatedSurfaceDeclared,
+// not a stand-in) -- if component/server's EdgePaths() declaration is ever
+// removed, this is what catches it.
+func TestEdgeRootMountSurvivesTheUnauthenticatedSurfaceAssertion(t *testing.T) {
+	// The exact pattern mountEdgeEndpoints registers: no method verb, because
+	// the /_memql/* reverse proxy (Task 7, #3712) needs every HTTP method
+	// routed through this same mount, not just GET.
+	a := &App{registeredRoutes: []string{"/"}}
+
+	whole := a.unauthenticatedSurfaceRoutes(true)
+	if err := server.AssertUnauthenticatedSurfaceDeclared(whole); err != nil {
+		t.Fatalf("the edge's root mount must be declared public (component/server.EdgePaths) -- %v", err)
+	}
+}
