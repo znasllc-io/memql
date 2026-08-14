@@ -5583,6 +5583,7 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 
 // CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
 // status and systemOwned are caller-settable (default "draft" / false, the ordinary operator-created site) so the SeedMaterializer can pass "live" / true for the portal seed (dsl/platform/seeds.memql, memql#3711) -- the platform's own console has to resolve the moment the cluster boots, and it must not be deletable by an operator who does not realize it is how sites get managed at all.
+// `createdAt` / `createdBy` are NEVER authored here -- both are reserved payload fields (component/database/memory-nodes/constants.go) the engine stamps intrinsically from `now` / the caller's actor (component/database/memory-nodes/concept.go). An earlier version of this mutation stamped them explicitly in `stamp{}`, which every write refused at the reserved-field guard in executor_mutation.go with "mutation payload ... declares reserved field" -- silently, because nothing exercised this mutation against a live boot until memql#3714's edge verification found the portal's own seed failing with exactly that error on every fresh cluster (memql#3714b).
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
 type CreateSiteArgs struct {
