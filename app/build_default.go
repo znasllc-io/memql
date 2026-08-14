@@ -1,4 +1,4 @@
-//go:build !cognition && !agent && !planner && !bff && !voice && !identity && !workbench && !mcp
+//go:build !cognition && !agent && !planner && !bff && !voice && !identity && !workbench && !mcp && !edge
 
 package app
 

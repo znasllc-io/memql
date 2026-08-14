@@ -4112,6 +4112,45 @@ func SignInIdentitiesForSelfBuild(args SignInIdentitiesForSelfArgs) string {
 	return "query signInIdentitiesForSelf()"
 }
 
+// SiteByHostname -- Resolve a request Host to the site that answers it. The edge's hot path -- called once per cache miss, not once per request. Cluster-owner gated per v1:platform:site's declared tier; the edge integration calls this under a cluster-owner-equivalent credential, not a per-request user.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteByHostname"] in generated_concepts.go).
+type SiteByHostnameArgs struct {
+	Hostname string
+}
+
+// SiteByHostname calls the engine query siteByHostname.
+func (qc *QueryClient) SiteByHostname(ctx context.Context, args SiteByHostnameArgs) (*Result, error) {
+	call := SiteByHostnameBuild(args)
+	return qc.executeNamed(ctx, "siteByHostname", call)
+}
+
+func SiteByHostnameBuild(args SiteByHostnameArgs) string {
+	var b strings.Builder
+	b.WriteString("query siteByHostname(")
+	b.WriteString("hostname: ")
+	b.WriteString(quoteMemQL(args.Hostname))
+	b.WriteString(")")
+	return b.String()
+}
+
+// SitesAll -- Every site in the cluster. The portal's primary screen, and the read that would silently return a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.go).
+type SitesAllArgs struct {
+}
+
+// SitesAll calls the engine query sitesAll.
+func (qc *QueryClient) SitesAll(ctx context.Context, args SitesAllArgs) (*Result, error) {
+	call := SitesAllBuild(args)
+	return qc.executeNamed(ctx, "sitesAll", call)
+}
+
+func SitesAllBuild(args SitesAllArgs) string {
+	_ = args
+	return "query sitesAll()"
+}
+
 // SkillBySlug -- Resolve a single skill catalog row by its slug. Used by the planner-driven mintSkill / attach flows to look up a candidate skill's full composition before deciding whether to apply it.
 //
 // Bound concept: v1:agents:skill (machine-readable: BoundConcepts["skillBySlug"] in generated_concepts.go).
