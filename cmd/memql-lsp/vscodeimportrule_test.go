@@ -44,6 +44,7 @@ var vscodeImportAllowList = []string{
 	"extension.ts",               // activation, command registration, LSP client wiring
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
 	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
+	"views/deploymentsTree.ts",   // TreeDataProvider adapter over state/deploymentsCatalog.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
 	"webview/addClusterPanel.ts", // WebviewPanel adapter over state/addCluster.ts + clusters/presence.ts
 	"webview/automationPanel.ts", // WebviewPanel adapter over state/automationForm.ts + state/stepTrace.ts
