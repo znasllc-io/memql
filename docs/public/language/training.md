@@ -187,19 +187,37 @@ classifies the change.
   only mechanism that would fill it
 - a narrowed `@enum`
 
+Two changes are **reported in the diff but not classified breaking**: removing
+a `@relationship`, and changing a node type. Removing a relationship makes no
+row unreadable — and if the field it pointed through went too, that is caught
+as a removed field — while the engine's own registry derivation is already the
+authority on whether a node type is legal.
+
 A refusal names the field, the number of rows affected, and the constructs
 that reference it:
 
 ```
 BREAKING - refused
   - sku                      removed; 1,284 rows carry it, 3 queries reference it
-  ~ price  string -> number  old rows hold strings
-  + region string!           required; existing mutations do not supply it
+  ~ price  string -> number  1,284 rows hold string values
+  + region string!           required; 1,284 rows lack it, 2 mutations do not supply it
+
+ADDITIVE - lands
+  + notes  string            optional; nothing to backfill
 ```
 
-An explicit override lands the change anyway, and is audited as an override.
-It exists for when the break is meant; it is not a way to make the message
-stop.
+The breaking changes come first, because they are what the heading is about;
+the additive ones follow so the whole change is visible rather than only the
+part that stopped it. Row counts are real counts taken against the live table,
+never estimates — and on a node with no database they are omitted rather than
+reported as zero, because zero would be a claim the node is not entitled to
+make.
+
+An explicit override lands the change anyway. The heading then reads
+`BREAKING - landed by explicit override`, and the engine writes an audit event
+carrying the concept and the whole classified diff — an override leaves no
+other record of what was overridden. It exists for when the break is meant; it
+is not a way to make the message stop.
 
 A **first** promote — one with no prior version to diff against — is not run
 through the classifier at all.
