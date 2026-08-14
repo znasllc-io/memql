@@ -78,7 +78,6 @@ import {
 } from "../install/session.js";
 import {
   AddClusterState,
-  requiredFields,
   SUPPORTED_PROVIDERS,
   type ConnectField,
   type InputField,

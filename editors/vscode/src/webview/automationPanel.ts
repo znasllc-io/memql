@@ -65,8 +65,6 @@ import {
   formatDuration,
 } from "../state/stepTrace.js";
 
-const ROW_PICKER_PAGE_SIZE = 100;
-
 /** What the automation form asks the extension to do when the user acts. */
 export interface AutomationPanelHost {
   /** Runs the automation, filling `trace` as frames land and calling onProgress after each. */
