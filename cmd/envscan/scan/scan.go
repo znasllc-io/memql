@@ -25,28 +25,37 @@
 // defect it was written to fix -- a clean number that is clean only about
 // what the mechanism happened to see (memql#3818).
 //
+// A THIRD read class -- core/env.EnvReader -- is DETECTED AND COUNTED but
+// deliberately not resolved. reader.String("HOST") names a suffix; the full
+// key is that suffix under the prefix the reader's constructor was given,
+// and finding it means tracing a reader value across parameters, struct
+// fields and packages. So each site lands in Unresolvable with
+// Kind == KindReaderPrefix and a reason naming the mechanism. It used to be
+// detected as NOTHING, which made it the worst of the three: absent from
+// the read count AND absent from the residual, with the limitation
+// recorded only in this comment. See goast.go.
+//
 // # What this still does not see, stated so the total is not read as coverage
 //
-// A read that goes through neither os.Getenv/os.LookupEnv nor an env*
-// helper is not detected AT ALL -- not as a read, and not as a residual
-// either, because nothing at the call site marks it as an env access.
-// Three live shapes:
+// A read through neither os.Getenv/os.LookupEnv, nor an env* helper, nor an
+// EnvReader is still detected AT ALL -- not as a read, not as a residual --
+// because nothing at the call site marks it as an env access. Two live
+// shapes:
 //
-//   - an env.NewEnvReader(prefix) reader with a bare suffix
-//     (reader.String("HOST")), where no full key appears at the site;
-//   - the same reader called with a FULL key
-//     (reader.OptionalBool("MEMQL_PLANNER_WATCHDOG_ENABLED"));
-//   - an injected getter func value, used for testability
-//     (get("MEMQL_VOICE_EXECUTOR", "realtime") in the voice-agent), and
-//     name tables like integrations/email's Host: "SMTP_HOST".
+//   - an injected getter func value, used for testability:
+//     get("MEMQL_VOICE_EXECUTOR", "realtime") in the voice-agent, where
+//     `get` is a plain func parameter and so is indistinguishable from any
+//     other two-argument call;
+//   - a name table, like integrations/email's Host: "SMTP_HOST", where the
+//     key is data rather than an argument.
 //
-// Registered keys in that class are still covered by the REVERSE
-// direction (their name appears in the corpus), so they cannot go stale
-// silently -- they are simply not FORCED into the registry by the forward
-// check. Unregistered ones are invisible, which is this defect's shape
-// again with a different mechanism; measured at roughly 70 names.
-// Closing it means deciding which callees count as env readers, so it is
-// a separate task rather than a widened regex here.
+// Registered keys in that class are still covered by the REVERSE direction
+// (their name appears in the corpus), so they cannot go stale silently --
+// they are simply not FORCED into the registry by the forward check.
+// Unregistered ones are invisible, which is this defect's shape again with
+// a different mechanism, and it is the honest remaining gap. Closing it
+// means deciding which callees count as env readers, so it is a separate
+// task rather than a widened match here.
 package scan
 
 import (
@@ -265,6 +274,23 @@ func UniqueKeys(reads []Read) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// CountKind returns how many residual sites are of one kind.
+//
+// The split is reported alongside the total because the two kinds want
+// DIFFERENT fixes: an unresolved key is fixed at the CALL SITE (name the key
+// with a constant), while a reader-prefix site is fixed in THIS SCANNER (teach
+// it to trace a reader's constructor prefix). A single number hides which of
+// those a reader is looking at.
+func CountKind(sites []Unresolvable, kind UnresolvableKind) int {
+	n := 0
+	for _, u := range sites {
+		if u.Kind == kind {
+			n++
+		}
+	}
+	return n
 }
 
 // UnregisteredKeys returns the sorted reads that are missing from the

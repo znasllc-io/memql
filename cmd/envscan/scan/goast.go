@@ -68,6 +68,62 @@ var envKeyShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
 // regexes found rather than a different set.
 var envHelperShape = regexp.MustCompile(`^env[A-Z][A-Za-z0-9]*$`)
 
+// --- core/env.EnvReader: DETECTED, deliberately not resolved -----------------
+//
+// A reader read names a SUFFIX -- reader.String("HOST") -- and the full key is
+// that suffix under the prefix the reader's constructor was given. Resolving it
+// means following a reader VALUE from its construction site to each call, across
+// parameters, struct fields and package boundaries, which is the
+// interprocedural analysis this scanner deliberately does not do.
+//
+// So these sites are COUNTED, not resolved, and that is the whole change: before
+// it they were the worst of the three read classes -- not a read, and not a
+// residual either, so the summary line omitted them and the limitation lived
+// only in a package comment. A checker that reports only what it found makes a
+// pass indistinguishable from a blind spot, which is the whole of memql#3818;
+// shipping this fix with a countable class uncounted would have been the fix
+// reproducing the defect it closes.
+//
+// Detection is anchored on the CONSTRUCTOR and the TYPE, never on the receiver's
+// name, and the tree shows why: `g.reader.City(...)` is a GeoIP database and
+// `r.reader.PlanStatus(...)` is a harness reader. Only a value built by
+// NewEnvReader or declared EnvReader counts.
+const (
+	// envReaderCtor is the constructor whose result is an EnvReader.
+	envReaderCtor = "NewEnvReader"
+	// envReaderTypeName marks a parameter, receiver or struct field as a
+	// reader when it appears as its declared type.
+	envReaderTypeName = "EnvReader"
+)
+
+// envReaderReadMethods are the EnvReader methods whose first argument is a key.
+// WithLookup is excluded deliberately: it takes a func and returns a reader, so
+// it reads no variable.
+//
+// Closed on purpose and GUARDED. TestEnvReaderReadMethodsAreComplete parses
+// core/env/reader.go and fails when an exported method taking a `key string`
+// first parameter is missing here -- without which, adding OptionalDuration to
+// core/env would silently stop its call sites being counted. That is a new blind
+// spot opened by the very mechanism that exists to report them, so it breaks the
+// build instead.
+var envReaderReadMethods = map[string]bool{
+	"String":       true,
+	"OptionalBool": true,
+	"OptionalInt":  true,
+}
+
+// UnresolvableKind is why a residual site is residual.
+type UnresolvableKind string
+
+const (
+	// KindUnresolvedKey is a read whose key argument does not fold: a
+	// parameter, a loop variable, a struct field, a computed expression.
+	KindUnresolvedKey UnresolvableKind = "unresolved-key"
+	// KindReaderPrefix is an env.NewEnvReader read: the site names a SUFFIX
+	// and the prefix lives at the reader's construction site.
+	KindReaderPrefix UnresolvableKind = "reader-prefix"
+)
+
 // Unresolvable is a read-shaped call site whose env key could not be
 // folded to a constant -- a parameter, a loop variable, a struct field,
 // or a computed expression.
@@ -76,6 +132,12 @@ var envHelperShape = regexp.MustCompile(`^env[A-Z][A-Za-z0-9]*$`)
 // of an absence they have to infer. Do not silence one by widening the
 // resolver until the site really is statically resolvable.
 type Unresolvable struct {
+	// Kind separates the two reasons a site is residual, because they want
+	// DIFFERENT fixes and a single total hides that: an unresolved key needs
+	// the call site to name a constant, while a reader read needs the
+	// scanner to learn prefix tracing. Carried as a field rather than
+	// re-derived from Why, so a caller never pattern-matches prose.
+	Kind UnresolvableKind
 	Call string // the callee as written, e.g. "os.Getenv" or "envIntDefault"
 	Arg  string // the first argument as written, e.g. "key" or "e.Name"
 	File string // repo-relative
@@ -159,6 +221,13 @@ type goIndex struct {
 	// an unaliased import's local name can be resolved to the directory
 	// that declares the constant.
 	pkgName map[string]string
+
+	// readerFields is the set of STRUCT FIELD names declared with type
+	// EnvReader, per package directory. It is what makes
+	// `d.reader.String("X")` detectable when `reader` is a field rather
+	// than a local, and what keeps `g.reader.City(...)` (a GeoIP handle
+	// that happens to share the field name) out of the count.
+	readerFields map[string]map[string]bool
 }
 
 // goFile is one parsed source file.
@@ -202,10 +271,11 @@ func scanGo(root string) (Outcome, error) {
 // the per-package constant tables.
 func indexGo(root string) (*goIndex, error) {
 	idx := &goIndex{
-		root:       root,
-		modulePath: modulePath(root),
-		consts:     map[string]stringConsts{},
-		pkgName:    map[string]string{},
+		root:         root,
+		modulePath:   modulePath(root),
+		consts:       map[string]stringConsts{},
+		pkgName:      map[string]string{},
+		readerFields: map[string]map[string]bool{},
 	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -240,6 +310,7 @@ func indexGo(root string) (*goIndex, error) {
 	}
 
 	idx.collectPackageConsts()
+	idx.collectReaderFields()
 	return idx, nil
 }
 
@@ -483,6 +554,171 @@ func (idx *goIndex) qualifiers(f goFile) map[string]string {
 	return quals
 }
 
+// collectReaderFields records every struct field declared with type
+// EnvReader, per package. Anchored on the TYPE, so a same-named field of a
+// different reader type is not collected.
+func (idx *goIndex) collectReaderFields() {
+	for _, f := range idx.files {
+		ast.Inspect(f.ast, func(n ast.Node) bool {
+			st, ok := n.(*ast.StructType)
+			if !ok || st.Fields == nil {
+				return true
+			}
+			for _, field := range st.Fields.List {
+				if !isEnvReaderType(field.Type) {
+					continue
+				}
+				for _, name := range field.Names {
+					if idx.readerFields[f.dir] == nil {
+						idx.readerFields[f.dir] = map[string]bool{}
+					}
+					idx.readerFields[f.dir][name.Name] = true
+				}
+			}
+			return true
+		})
+	}
+}
+
+// isEnvReaderType reports whether a type expression names EnvReader, as
+// `env.EnvReader`, a bare `EnvReader` inside core/env itself, or a pointer to
+// either.
+func isEnvReaderType(expr ast.Expr) bool {
+	switch t := expr.(type) {
+	case *ast.StarExpr:
+		return isEnvReaderType(t.X)
+	case *ast.SelectorExpr:
+		return t.Sel.Name == envReaderTypeName
+	case *ast.Ident:
+		return t.Name == envReaderTypeName
+	}
+	return false
+}
+
+// collectReaderIdents finds the identifiers that hold an EnvReader inside one
+// declaration: assigned from NewEnvReader, or declared with the type (a
+// parameter, a receiver, or a named result).
+func collectReaderIdents(decl ast.Decl) map[string]bool {
+	idents := map[string]bool{}
+
+	bindFromValues := func(names []*ast.Ident, values []ast.Expr) {
+		for i, name := range names {
+			if i < len(values) && isNewEnvReaderCall(values[i]) {
+				idents[name.Name] = true
+			}
+		}
+	}
+
+	ast.Inspect(decl, func(n ast.Node) bool {
+		switch d := n.(type) {
+		case *ast.AssignStmt:
+			names := make([]*ast.Ident, 0, len(d.Lhs))
+			for _, lhs := range d.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					names = append(names, id)
+				} else {
+					names = append(names, ast.NewIdent("_"))
+				}
+			}
+			bindFromValues(names, d.Rhs)
+		case *ast.ValueSpec:
+			bindFromValues(d.Names, d.Values)
+			if isEnvReaderType(d.Type) {
+				for _, name := range d.Names {
+					idents[name.Name] = true
+				}
+			}
+		case *ast.FuncType:
+			for _, list := range []*ast.FieldList{d.Params, d.Results} {
+				if list == nil {
+					continue
+				}
+				for _, field := range list.List {
+					if !isEnvReaderType(field.Type) {
+						continue
+					}
+					for _, name := range field.Names {
+						idents[name.Name] = true
+					}
+				}
+			}
+		case *ast.FuncDecl:
+			if d.Recv == nil {
+				return true
+			}
+			for _, field := range d.Recv.List {
+				if !isEnvReaderType(field.Type) {
+					continue
+				}
+				for _, name := range field.Names {
+					idents[name.Name] = true
+				}
+			}
+		}
+		return true
+	})
+	delete(idents, "_")
+	return idents
+}
+
+// isNewEnvReaderCall reports whether expr is a call to NewEnvReader, qualified
+// (env.NewEnvReader) or bare (inside core/env).
+func isNewEnvReaderCall(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	switch fun := call.Fun.(type) {
+	case *ast.SelectorExpr:
+		return fun.Sel.Name == envReaderCtor
+	case *ast.Ident:
+		return fun.Name == envReaderCtor
+	}
+	return false
+}
+
+// readerCallee reports whether call is an EnvReader key read, and returns the
+// callee as written.
+//
+// The receiver must be provably a reader: an identifier bound in this
+// declaration, a struct field of the right type in this package, or the
+// constructor call itself in a chain. Never the receiver's NAME -- see the
+// comment on envReaderCtor.
+func readerCallee(call *ast.CallExpr, f goFile, idents map[string]bool, fields map[string]bool) (string, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || !envReaderReadMethods[sel.Sel.Name] {
+		return "", false
+	}
+	switch recv := sel.X.(type) {
+	case *ast.Ident:
+		if idents[recv.Name] {
+			return recv.Name + "." + sel.Sel.Name, true
+		}
+	case *ast.SelectorExpr:
+		if fields[recv.Sel.Name] {
+			return exprText(f, recv) + "." + sel.Sel.Name, true
+		}
+	case *ast.CallExpr:
+		if isNewEnvReaderCall(recv) {
+			return exprText(f, recv) + "." + sel.Sel.Name, true
+		}
+	}
+	return "", false
+}
+
+// readerWhy explains a reader site. It states the MECHANISM rather than a
+// failure, because nothing about the site is malformed: the full key genuinely
+// is not written down here.
+func readerWhy(f goFile, arg ast.Expr) string {
+	if _, value, ok := stringLiteral(arg); ok {
+		return fmt.Sprintf("env.NewEnvReader suffix read: the full key is the reader's constructor "+
+			"prefix + %q, and reader prefixes are not resolved (they would need the reader value "+
+			"traced from its construction site)", value)
+	}
+	return fmt.Sprintf("env.NewEnvReader read whose key argument (%s) is not a literal either, so "+
+		"neither the reader's prefix nor the suffix is resolved here", exprText(f, arg))
+}
+
 // scanFile finds every read-shaped call in one file and folds its key.
 //
 // Scope handling is per top-level declaration: locals are collected from
@@ -493,6 +729,7 @@ func (idx *goIndex) qualifiers(f goFile) map[string]string {
 // become residual rather than resolving to whichever came first.
 func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 	quals := idx.qualifiers(f)
+	readerFields := idx.readerFields[f.dir]
 	var reads []Read
 	var unresolvable []Unresolvable
 
@@ -503,11 +740,32 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 			quals:  quals,
 			locals: idx.collectLocals(f, quals, decl),
 		}
+		readerIdents := collectReaderIdents(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
+
+			// An EnvReader read is DETECTED and never resolved: the site
+			// names a suffix and the prefix lives at the construction site.
+			// It is a residual by definition, so it short-circuits the fold
+			// -- folding the suffix would produce a "read" of a key nothing
+			// sets.
+			if callee, ok := readerCallee(call, f, readerIdents, readerFields); ok && len(call.Args) > 0 {
+				arg := call.Args[0]
+				unresolvable = append(unresolvable, Unresolvable{
+					Kind:     KindReaderPrefix,
+					Call:     callee,
+					Arg:      exprText(f, arg),
+					File:     f.rel,
+					Line:     f.fset.Position(arg.Pos()).Line,
+					Why:      readerWhy(f, arg),
+					MoreArgs: len(call.Args) > 1,
+				})
+				return true
+			}
+
 			callee, ok := readCallee(call)
 			if !ok || len(call.Args) == 0 {
 				return true
@@ -516,6 +774,7 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 			value, why := r.fold(arg, 0)
 			if why != "" {
 				unresolvable = append(unresolvable, Unresolvable{
+					Kind:     KindUnresolvedKey,
 					Call:     callee,
 					Arg:      exprText(f, arg),
 					File:     f.rel,

@@ -37,8 +37,12 @@ func TestNoEnvRegistryDrift(t *testing.T) {
 	// outcome. "Clean" here means clean about the reads this check can
 	// RESOLVE, and a log line that omits the two carve-outs is how that gets
 	// read as coverage instead (memql#3818).
-	t.Logf("%d read-shaped site(s) unresolvable (key is a parameter / loop variable / computed); "+
-		"run `go run ./cmd/envscan -unresolvable` for the file:line list", len(res.Unresolvable))
+	t.Logf("%d read-shaped site(s) unresolvable -- %d unresolved key(s) (parameter / loop variable / "+
+		"computed) and %d env.NewEnvReader prefix read(s); run "+
+		"`go run ./cmd/envscan -unresolvable` for the file:line list",
+		len(res.Unresolvable),
+		CountKind(res.Unresolvable, KindUnresolvedKey),
+		CountKind(res.Unresolvable, KindReaderPrefix))
 	if len(res.ExemptUnprefixed) > 0 {
 		t.Logf("%d memQL-owned key(s) read but NOT registered, exempt from forward drift pending a "+
 			"MEMQL_ rename: %v", len(res.ExemptUnprefixed), res.ExemptUnprefixed)

@@ -2,6 +2,9 @@ package scan
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -347,6 +350,236 @@ func viaParameter(key string) string { return os.Getenv(key) }
 		t.Errorf("a residual site turned the check red (unregistered=%v stale=%v); it is a "+
 			"reporting obligation, not a violation", res.Unregistered, res.Stale)
 	}
+}
+
+// An env.NewEnvReader read must produce a RESIDUAL and never a read.
+//
+// This is the third read class, and until it was counted it was the worst of the
+// three: not a read, and not a residual either, so the summary line omitted it
+// and the limitation lived only in a package comment. Counting it is this issue's
+// own acceptance criterion applied to its own fix -- a checker reporting only
+// what it found makes a pass indistinguishable from a blind spot.
+//
+// The suffix must NOT become a read. `reader.String("API_TARGET")` under a
+// MEMQL_EDGE prefix reads MEMQL_EDGE_API_TARGET; recording "API_TARGET" would be
+// a confidently wrong key nothing sets, which is worse than the gap.
+func TestEnvReaderReadIsResidualNeverARead(t *testing.T) {
+	const src = `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load() {
+	reader := env.NewEnvReader("MEMQL_EDGE")
+	_, _ = reader.String("API_TARGET")
+	_, _ = reader.OptionalInt("SITE_CACHE_TTL_SECONDS")
+	_, _ = reader.OptionalBool("ENABLED")
+}
+`
+	root := writeGoFixture(t, map[string]string{
+		"app/x.go": src,
+		"go.mod":   "module github.com/znasllc-io/memql\n\ngo 1.26.1\n",
+	})
+	out, err := ScanReads(root)
+	if err != nil {
+		t.Fatalf("ScanReads: %v", err)
+	}
+
+	if got := keysOf(out); len(got) != 0 {
+		t.Errorf("reads = %v, want none. A suffix is not a key: under MEMQL_EDGE the first call "+
+			"reads MEMQL_EDGE_API_TARGET, so recording \"API_TARGET\" would register a name "+
+			"nothing sets.", got)
+	}
+	if len(out.Unresolvable) != 3 {
+		t.Fatalf("residual = %d site(s), want 3.\nGot: %v\nZERO means the reader form is detected as "+
+			"NOTHING -- neither read nor residual -- which is the class the summary line used to "+
+			"omit while a reader had to find the limitation in a doc comment.",
+			len(out.Unresolvable), out.Unresolvable)
+	}
+	for _, u := range out.Unresolvable {
+		if !strings.Contains(u.Why, "env.NewEnvReader") {
+			t.Errorf("residual %s does not name the mechanism, so a reader cannot tell it apart "+
+				"from a parameter-keyed os.Getenv -- which needs a different fix", u)
+		}
+		if !strings.Contains(u.Why, "prefix") {
+			t.Errorf("residual reason %q does not say the prefix is what is missing", u.Why)
+		}
+		if u.File != "app/x.go" || u.Line == 0 {
+			t.Errorf("residual %s is not locatable", u)
+		}
+	}
+}
+
+// Every way a reader value reaches a call site must be detected, and detection
+// must be anchored on the CONSTRUCTOR or the TYPE rather than the receiver's
+// NAME. The tree has `g.reader.City(...)` (a GeoIP handle) and
+// `r.reader.PlanStatus(...)` (a harness reader), so a name-based rule would
+// count calls that read no environment at all.
+func TestEnvReaderReceiverShapes(t *testing.T) {
+	cases := []struct {
+		name          string
+		src           string
+		wantResiduals int
+	}{
+		{
+			name: "local assigned from the constructor",
+			src: `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load() { r := env.NewEnvReader("P"); _, _ = r.String("K") }
+`,
+			wantResiduals: 1,
+		},
+		{
+			name: "parameter declared with the type",
+			src: `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func read(reader env.EnvReader, key string) (string, bool) { return reader.String(key) }
+`,
+			wantResiduals: 1,
+		},
+		{
+			name: "struct field declared with the type",
+			src: `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+type describer struct{ reader env.EnvReader }
+
+func (d *describer) get() (string, bool) { return d.reader.String("HOST") }
+`,
+			wantResiduals: 1,
+		},
+		{
+			name: "chained straight off the constructor",
+			src: `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load() { _, _ = env.NewEnvReader("P").String("K") }
+`,
+			wantResiduals: 1,
+		},
+		{
+			// The negative case, and the reason the rule is type-anchored: a
+			// field called `reader` of a DIFFERENT type, with a method whose
+			// name happens to be in the EnvReader read set.
+			name: "same-named field of a different type is not a reader",
+			src: `package x
+
+type geo struct{ reader *cityDB }
+
+type cityDB struct{}
+
+func (c *cityDB) String(s string) (string, bool) { return s, true }
+
+func (g *geo) lookup() (string, bool) { return g.reader.String("NOT_AN_ENV_VAR") }
+`,
+			wantResiduals: 0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeGoFixture(t, map[string]string{
+				"app/x.go": tc.src,
+				"go.mod":   "module github.com/znasllc-io/memql\n\ngo 1.26.1\n",
+			})
+			out, err := ScanReads(root)
+			if err != nil {
+				t.Fatalf("ScanReads: %v", err)
+			}
+			readerSites := CountKind(out.Unresolvable, KindReaderPrefix)
+			if readerSites != tc.wantResiduals {
+				t.Errorf("reader residuals = %d, want %d (all residuals: %v)",
+					readerSites, tc.wantResiduals, out.Unresolvable)
+			}
+			if got := keysOf(out); len(got) != 0 {
+				t.Errorf("reads = %v, want none", got)
+			}
+		})
+	}
+}
+
+// envReaderReadMethods is a closed set, so a method ADDED to core/env's reader
+// would silently stop its call sites being counted -- a fresh blind spot opened
+// by the mechanism whose whole job is to report them. This makes it a build
+// failure instead.
+//
+// It PARSES core/env/reader.go rather than reflecting over it, so the scan
+// package does not import the thing it measures.
+func TestEnvReaderReadMethodsAreComplete(t *testing.T) {
+	path := filepath.Join(repoRoot(t), "core", "env", "reader.go")
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+
+	seen := map[string]bool{}
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv == nil || !fn.Name.IsExported() {
+			continue
+		}
+		onReader := false
+		for _, field := range fn.Recv.List {
+			if isEnvReaderType(field.Type) {
+				onReader = true
+			}
+		}
+		if !onReader || fn.Type.Params == nil || len(fn.Type.Params.List) == 0 {
+			continue
+		}
+		// A key-taking method is one whose FIRST parameter is a string.
+		// WithLookup's first parameter is a func, so it drops out here: it
+		// configures a reader rather than reading a variable.
+		first, ok := fn.Type.Params.List[0].Type.(*ast.Ident)
+		if !ok || first.Name != "string" {
+			continue
+		}
+		seen[fn.Name.Name] = true
+		if !envReaderReadMethods[fn.Name.Name] {
+			t.Errorf("core/env's EnvReader has an exported key-taking method %q that "+
+				"envReaderReadMethods does not list. Every call to it is an env read this scanner "+
+				"reports as NOTHING -- not a read, not a residual -- which is exactly the blind "+
+				"spot the detector exists to close. Add it to the map.", fn.Name.Name)
+		}
+	}
+
+	for name := range envReaderReadMethods {
+		if !seen[name] {
+			t.Errorf("envReaderReadMethods lists %q, which core/env's EnvReader no longer has as an "+
+				"exported key-taking method. A stale entry means the detector matches a method name "+
+				"that moved on; drop it.", name)
+		}
+	}
+	if len(seen) == 0 {
+		t.Fatal("found no key-taking EnvReader methods at all, so this guard asserted nothing -- " +
+			"the parse or the receiver test is wrong, not core/env")
+	}
+}
+
+// The reader class must be POPULATED on the real tree. A detector that compiles,
+// passes its fixtures, and matches nothing in the corpus is the same false
+// negative wearing a test suite.
+func TestEnvReaderSitesAreCountedOnTheRealTree(t *testing.T) {
+	out, err := ScanReads(repoRoot(t))
+	if err != nil {
+		t.Fatalf("ScanReads: %v", err)
+	}
+	readerSites := CountKind(out.Unresolvable, KindReaderPrefix)
+	// A floor, not an exact number: these move whenever a config loader gains
+	// a knob. Measured at 105 when the form landed; 40 is far below that and
+	// far above anything a broken detector would produce.
+	if readerSites < 40 {
+		t.Errorf("only %d env.NewEnvReader site(s) counted on the real tree. Dozens of config "+
+			"loaders are built on it, so a number this low means receiver detection stopped "+
+			"matching and the class went back to being uncounted.", readerSites)
+	}
+	t.Logf("env.NewEnvReader sites counted: %d of %d residual sites", readerSites, len(out.Unresolvable))
 }
 
 // The pre-convention exemption is the one place this change WEAKENS the forward

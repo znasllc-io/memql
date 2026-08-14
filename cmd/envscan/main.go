@@ -115,9 +115,16 @@ func reportUnresolvable(w io.Writer, sites []scan.Unresolvable) {
 		fmt.Fprintln(w, "INFO: 0 read-shaped sites unresolvable -- every detected read folded to a constant")
 		return
 	}
-	fmt.Fprintf(w, "INFO: %d read-shaped site(s) could NOT be resolved statically "+
-		"(key is a parameter, loop variable, or computed value); these are not drift, "+
-		"they are the surface this check cannot speak for:\n", len(sites))
+	// The SPLIT, not just the total: an unresolved key is fixed at the CALL
+	// SITE (name it with a constant), a reader-prefix site is fixed in the
+	// SCANNER (trace the reader's constructor prefix). One number tells a
+	// reader how much the check cannot see but not what to do about any of it.
+	keys := scan.CountKind(sites, scan.KindUnresolvedKey)
+	readers := scan.CountKind(sites, scan.KindReaderPrefix)
+	fmt.Fprintf(w, "INFO: %d read-shaped site(s) could NOT be resolved statically -- %d whose key is a "+
+		"parameter / loop variable / computed value, and %d env.NewEnvReader reads whose prefix this "+
+		"scanner does not trace. These are not drift; they are the surface this check cannot speak "+
+		"for:\n", len(sites), keys, readers)
 	var b strings.Builder
 	scan.PrintUnresolvable(&b, sites)
 	for _, line := range strings.Split(strings.TrimRight(b.String(), "\n"), "\n") {
