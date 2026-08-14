@@ -398,24 +398,17 @@ func parseSiteBundlePublishPath(path string) (siteID string, ok bool) {
 	const prefix = "/sites/"
 	const suffix = "/bundles"
 
-	if !strings.HasPrefix(path, prefix) || !strings.HasSuffix(path, suffix) {
-		return "", false
-	}
-	// A short path can satisfy BOTH HasPrefix and HasSuffix while the two
-	// matched regions overlap -- "/sites/bundles" starts with "/sites/" AND
-	// ends with "/bundles" with nothing of its own between them. Slicing
-	// path[len(prefix):len(path)-len(suffix)] without this guard panics
-	// with a negative-length slice bounds error in exactly that case
-	// (len(path)-len(suffix) < len(prefix)). attachment_handler.go's
-	// extractPartitionIdFromAttachmentPath shares this exact shape and the
-	// same latent bug for its own "/spaces/attachments" (no id) case --
-	// out of scope to fix here (this file does not touch that one), tracked
-	// as memql#3773 instead of just living on as this comment.
-	if len(path) < len(prefix)+len(suffix) {
-		return "", false
-	}
-	middle := strings.TrimSpace(path[len(prefix) : len(path)-len(suffix)])
-	if middle == "" || strings.Contains(middle, "/") {
+	// The prefix/suffix match, the overlap guard and the single-segment rule
+	// now live in segmentBetween (path_segment.go).
+	//
+	// That guard was written HERE first, in memql#3713, with a comment recording
+	// that attachment_handler.go had the identical defect unfixed. memql#3773
+	// then found a THIRD copy of the shape, in http_contract.go, that nobody had
+	// looked at -- so two of the three were panicking at once while this one was
+	// correct in isolation. A fourth careful edit was not the answer; one
+	// function the callers share is.
+	middle, ok := segmentBetween(path, prefix, suffix)
+	if !ok {
 		return "", false
 	}
 	// THE SAME BOUNDARY the bundle file names get, two dozen lines away in
