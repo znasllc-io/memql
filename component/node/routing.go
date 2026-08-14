@@ -119,6 +119,24 @@ func defaultRoutingRules() []RoutingRule {
 		{Pattern: "graph.node.created.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.updated.v1:planner:*", TargetType: ""},
 		{Pattern: "graph.node.deleted.v1:planner:*", TargetType: ""},
+		// Site edge cache invalidation (memql#3714, Task 9). The site row
+		// (v1:platform:site) is written wherever an admin surface writes it
+		// -- typically the bff -- and read on EVERY edge replica's own
+		// process-local resolver cache (component/edge/resolve.go). Without
+		// this rule the write stays on the writer's node and every OTHER
+		// edge replica keeps serving its stale cached resolution until the
+		// TTL backstop expires (MEMQL_EDGE_SITE_CACHE_TTL_SECONDS). Both
+		// verbs are forwarded: `created` so a brand-new hostname resolves on
+		// every replica immediately rather than only after the writer's
+		// replica happens to serve it once, and `updated` because a status
+		// flip (live -> disabled) or a bundle rollback (updateSiteBundle)
+		// both go through update(), not insert(). Same broadcast shape as
+		// the v1:cluster:* / v1:planner:* rules above -- this concept has no
+		// automation subscribers of its own, so broadcasting it carries no
+		// double-fire risk. component/edge's SiteInvalidationSubscriber is
+		// the consumer.
+		{Pattern: "graph.node.created.v1:platform:site", TargetType: ""},
+		{Pattern: "graph.node.updated.v1:platform:site", TargetType: ""},
 		// Self-healing precondition-miss signal (Epic 4 / memql#2139). A
 		// first-class automation precondition that evaluates false emits
 		// healing.precondition.missed; the LLM repair loop (E4.4) subscribes.
