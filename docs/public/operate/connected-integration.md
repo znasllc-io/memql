@@ -188,6 +188,12 @@ bff, which a cross-origin client also crosses:
 | `wss://api.<domain>/memql/ws` | `MEMQL_WS_ORIGIN_PATTERNS` on the bff (`component/server/memqlws`) | **Not CORS.** A WebSocket handshake is not subject to CORS, so the server checks `Origin` itself. Unset falls back to a wildcard and logs a WARN on every upgrade — populate it in any real deployment |
 | HTTP exceptions on `api.<domain>` (for example a multipart attachment upload) | `SERVER_ALLOWED_ORIGINS` on the bff | Defaults to `*`, which here degrades to a credential-less posture rather than allowing credentialed reads. See [env-vars.md](env-vars.md) |
 
+All three of those are on our side of the fence. There is a **fourth** place the
+same origins have to be named, on theirs — `connect-src` in the customer's own
+CSP — and getting the cluster's three right while missing that one produces a
+sign-in that fails at its last step with nothing in any server log. See
+[the `connect-src` subsection below](#the-origin-grant-is-necessary-and-not-sufficient-connect-src).
+
 A hosted site (rung 2 or 3) is designed to need none of this, because it is
 same-origin. That is the concrete content of "moving up the ladder removes
 code".
@@ -237,6 +243,67 @@ Two consequences specific to being cross-origin:
   site and the cluster are on different registrable domains, set
   `MEMQL_IDENTITY_REFRESH_COOKIE_SAMESITE=none` on identity. `Lax` there has
   the same problem as the paragraph above, for the same reason.
+
+### The origin grant is necessary and not sufficient: `connect-src`
+
+**Two independent gates stand between a cross-origin SPA and a working sign-in,
+and only one of them is visible from the cluster.** The admin CORS grant is the
+first. The second is the customer's own Content-Security-Policy, enforced by the
+browser — the same shape as the `SameSite=Lax` problem above: a browser-side
+rule that makes a correct server-side configuration insufficient. A reader who
+hits one of these will hit the other.
+
+memQL emits no CSP for a Connected site and cannot: the customer serves their
+own site and their own headers, so there is no setting on our side to go looking
+for. What we can tell them is **which origins to allow**. If they set a CSP at
+all, `connect-src` has to name them:
+
+```
+Content-Security-Policy: connect-src 'self' https://api.<domain> wss://api.<domain> https://identity.<domain>;
+```
+
+**Two origins, not one, and this is the part people get wrong.** The API lives
+at `api.<domain>`, but the OAuth token exchange in step 3 is a `fetch()` to
+`identity.<domain>` — a different origin — and so is the refresh in step 5. A
+`connect-src` listing only the API origin passes every test a developer thinks
+to run, and then fails at the exchange.
+
+**The failure mode is why this earns a paragraph rather than a footnote.** Step
+1 is a *navigation*, and `connect-src` does not govern navigations — so sign-in
+appears to work. The redirect happens, the person authenticates, the callback
+lands. It dies at the token exchange, the very last step. And **identity's logs
+are empty**, because a CSP refusal means the request never left the browser: the
+one place an operator would look for the cause holds no evidence that anything
+was even attempted. The only signal is a CSP violation in the customer's own
+browser console, so that is where the diagnosis is.
+
+None of this is theoretical, and memQL has already been on the receiving end of
+it. `component/portal/csp.go:68-75` carries the identity origin in the portal's
+own policy for exactly this reason (memql#3315), and says so in those terms —
+without that source the sign-in exchange is *"blocked SILENTLY from the server's
+point of view: the request never leaves the page, so identity's access log is
+empty and an operator debugging 'login does nothing' has nothing to correlate."*
+A Connected site has the same defect available to it, with the difference that
+no code of ours can prevent it.
+
+Two practical notes from that same file:
+
+- **Name the `wss:` form explicitly** rather than trusting the `https:` entry to
+  cover the WebSocket. The portal's own case is the same-origin one — CSP3 says
+  `'self'` matches `ws:`/`wss:` on the same origin, Chrome and Firefox implement
+  it, and Safari's support has been inconsistent long enough that the portal
+  names its WebSocket origin outright (`component/portal/csp.go:16-21`); the
+  symptom of relying on it was "the portal does not connect on Safari", found by
+  a user. A cross-origin `wss://api.<domain>` is not that exact measurement, but
+  it is the same scheme-matching family, and spelling it out costs one token.
+- **Emit the origin, never a path.** The portal deliberately puts only the
+  identity *origin* in its policy, so the value survives an endpoint path
+  changing. Do the same.
+
+For contrast, memQL *does* generate the policy for pages it serves itself, from
+the same configuration the bundle reads, so the two cannot drift apart. A
+Connected site is outside that mechanism by construction — which is the whole
+reason it needs writing down here.
 
 `localStorage` is the wrong home for the access token for a reason that has
 nothing to do with being cross-origin: it outlives the page, is readable by any
