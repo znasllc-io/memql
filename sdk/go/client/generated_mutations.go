@@ -5581,6 +5581,66 @@ func CreateSessionForParticipantBuild(args CreateSessionForParticipantArgs) stri
 	return b.String()
 }
 
+// CreateSite -- Create a site. Defaults are applied with ?? because a concept-field @default is never applied on insert (memql#2960) -- writing the field without ?? leaves it empty and the edge refuses to serve a row whose status it cannot read.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["createSite"] in generated_concepts.go).
+type CreateSiteArgs struct {
+	SiteId   string
+	Hostname string
+	// Enum: spa | static
+	Kind        string
+	BundleRef   string
+	ApiProxy    bool
+	ApiProxySet bool // set true to send apiProxy; required because zero-value bool is ambiguous
+	Title       string
+}
+
+// CreateSite calls the engine mutation createSite.
+func (qc *QueryClient) CreateSite(ctx context.Context, args CreateSiteArgs) (*Result, error) {
+	call := CreateSiteBuild(args)
+	return qc.executeNamed(ctx, "createSite", call)
+}
+
+func CreateSiteBuild(args CreateSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("hostname: ")
+	b.WriteString(quoteMemQL(args.Hostname))
+	if args.Kind != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("kind: ")
+		b.WriteString(quoteMemQL(args.Kind))
+	}
+	if b.Len() > 20 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bundleRef: ")
+	b.WriteString(quoteMemQL(args.BundleRef))
+	if args.ApiProxySet {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("apiProxy: ")
+		b.WriteString(fmt.Sprintf("%v", args.ApiProxy))
+	}
+	if args.Title != "" {
+		if b.Len() > 20 {
+			b.WriteString(", ")
+		}
+		b.WriteString("title: ")
+		b.WriteString(quoteMemQL(args.Title))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CreateSkill -- Materialize a v1:agents:skill catalog row from a `seed skill ...` declaration under dsl/agents/skills/*.memql. Matches the SeedMaterializer's `mutationCreate<Concept>` naming convention -- the materializer stamps the seed body's id into `skillId` and forwards every other seed body field as a same-named arg, so this mutation's arg surface mirrors the on-disk seed body 1:1. Sibling to `mintSkill`: same row shape, but the seed path is for the predefined catalog (predefined defaults true) and carries no originatingPlanId / mintedByAgentId provenance triad. Was missing pre-#344, which made every skill seed in the bundled catalog fail to materialize with `function "createSkill" not found`. The materializer convention itself lives in component/memql/seed_materializer.go.
 //
 // Bound concept: v1:agents:skill (machine-readable: BoundConcepts["createSkill"] in generated_concepts.go).
@@ -14008,6 +14068,63 @@ func UpdateSessionStreamsBuild(args UpdateSessionStreamsArgs) string {
 	}
 	b.WriteString("payload: ")
 	b.WriteString(renderMemQLValue(args.Payload))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSiteBundle -- Point a site at a different bundle version. THE deploy operation, and THE rollback operation -- they are the same write in opposite directions, which is the whole reason bundles are stored under versioned prefixes rather than overwritten.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteBundle"] in generated_concepts.go).
+type UpdateSiteBundleArgs struct {
+	SiteId    string
+	BundleRef string
+}
+
+// UpdateSiteBundle calls the engine mutation updateSiteBundle.
+func (qc *QueryClient) UpdateSiteBundle(ctx context.Context, args UpdateSiteBundleArgs) (*Result, error) {
+	call := UpdateSiteBundleBuild(args)
+	return qc.executeNamed(ctx, "updateSiteBundle", call)
+}
+
+func UpdateSiteBundleBuild(args UpdateSiteBundleArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteBundle(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bundleRef: ")
+	b.WriteString(quoteMemQL(args.BundleRef))
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpdateSiteStatus -- Move a site between draft / live / disabled.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["updateSiteStatus"] in generated_concepts.go).
+type UpdateSiteStatusArgs struct {
+	SiteId string
+	// Enum: draft | live | disabled
+	Status string
+}
+
+// UpdateSiteStatus calls the engine mutation updateSiteStatus.
+func (qc *QueryClient) UpdateSiteStatus(ctx context.Context, args UpdateSiteStatusArgs) (*Result, error) {
+	call := UpdateSiteStatusBuild(args)
+	return qc.executeNamed(ctx, "updateSiteStatus", call)
+}
+
+func UpdateSiteStatusBuild(args UpdateSiteStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation updateSiteStatus(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	if b.Len() > 26 {
+		b.WriteString(", ")
+	}
+	b.WriteString("status: ")
+	b.WriteString(quoteMemQL(args.Status))
 	b.WriteString(")")
 	return b.String()
 }
