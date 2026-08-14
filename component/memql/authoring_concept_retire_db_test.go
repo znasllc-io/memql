@@ -31,6 +31,7 @@ import (
 
 	"github.com/znasllc-io/memql/component/auth"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
+	languageParser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // retireDBFixture is one self-contained authored bundle: a concept, a mutation
@@ -218,7 +219,8 @@ func TestDemoteConcept_EndToEnd_RetiredStaysReadableAndRefusesWrites(t *testing.
 	}
 
 	// WRITES ARE REFUSED, by name.
-	_, werr := eng.Execute(userA, fmt.Sprintf(`mutation createDemoWidget(widgetId: %q, label: "after the demote")`, "e2e2-"+fx.namespace))
+	_, werr := eng.Execute(userA, fmt.Sprintf(`mutation createDemoWidget(widgetId: %s, label: "after the demote")`,
+		languageParser.QuoteString("e2e2-"+fx.namespace)))
 	if werr == nil {
 		t.Fatal("a write to a retired concept was accepted")
 	}
