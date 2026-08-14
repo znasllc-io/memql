@@ -30,6 +30,7 @@ memQL uses Go build tags to compile separate binaries for each node type in the 
 | **planner** | `planner` | Task planning and orchestration | ~25 MB |
 | **workbench** | `workbench` | Sandboxed per-Plan Linux execution surface | ~25 MB |
 | **mcp** | `mcp` | MCP (Model Context Protocol) server -- engine tool surface to external MCP hosts (epic memql#1529) | ~70 MB |
+| **edge** | `edge` | Serves this cluster's hosted web surfaces (every SPA/website + the memQL Portal, site #1) by resolving the request `Host` header to a `v1:platform:site` row. Excludes the voice pipeline, the cognition pipeline, file processing, and the agent tool surface (epic memql#3700) | ~76 MB |
 
 ## Building
 
@@ -44,6 +45,7 @@ go build -tags agent -o bin/memql-agent .
 go build -tags planner -o bin/memql-planner .
 go build -tags workbench -o bin/memql-workbench .
 go build -tags mcp -o bin/memql-mcp .
+go build -tags edge -o bin/memql-edge .
 ```
 
 Tags are **mutually exclusive** -- never combine them (e.g., `-tags "bff cognition"`).
