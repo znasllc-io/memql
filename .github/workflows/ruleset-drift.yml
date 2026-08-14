@@ -1,0 +1,45 @@
+name: ruleset-drift
+
+# Notice when `main`'s protection ruleset loses a rule (memql#3836).
+#
+# WHY A SCHEDULED CHECK AND NOT A GATE. The thing being watched is repository
+# CONFIGURATION, not the contents of a commit. No PR can introduce the drift and
+# no PR can fix it, so gating merges on it would block work nobody in the PR can
+# act on. It runs on a schedule and on demand, and it is deliberately NOT part
+# of `ci-required`.
+#
+# WHAT IT WOULD HAVE CAUGHT. On 2026-08-06 one edit to ruleset 16630577 dropped
+# `required_status_checks` AND `merge_queue`. The first had an immediate visible
+# symptom -- merges stopped being gated -- and was restored the same day. The
+# second's only symptom was that merges got slower, so it went unnoticed for
+# over a week while docs/internal/ops/merge-queue.md continued to say "Status --
+# enabled and verified". A ruleset PATCH replaces the whole rules array, so an
+# edit that omits a rule deletes it: this is the API's default behaviour rather
+# than a mistake to be more careful about, and the only reliable defence is to
+# notice afterwards.
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily 07:00 UTC -- config drift is not urgent, but a
+                        # week of silence is what made this worth building
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+# READ ONLY, and deliberately so: the check that notices a ruleset regression
+# must not itself hold the permission to cause one. `gh api .../rulesets/{id}`
+# needs no more than this.
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: ruleset-drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: check ruleset against the recorded baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/ruleset-drift.sh
