@@ -43,10 +43,14 @@ func TestFrontDoorPathsAreNotStale(t *testing.T) {
 	}
 }
 
-// describePathDrift names WHICH paths differ, because a 24-entry block diffed
-// wholesale is a wall of YAML in which the one changed line is invisible -- and
-// the message a gate prints is the whole of what the person who tripped it
-// learns.
+// describePathDrift names WHICH paths differ, because the block is dozens of
+// paths at seven YAML lines each, and diffed wholesale that is a wall in which
+// the one changed line is invisible -- while the message a gate prints is the
+// whole of what the person who tripped it learns.
+//
+// Deliberately no count here. An earlier version of this comment said "a
+// 24-entry block", which was true when written and stale one review round later
+// at 21 -- a stale number inside the staleness gate's own explanation.
 func describePathDrift(checkedIn, generated string) string {
 	have, want := pathsOf(checkedIn), pathsOf(generated)
 
