@@ -13,7 +13,7 @@ import (
 )
 
 func (e *MemQLEngine) Init(concepts concept.Registry) error {
-	e.relationships = relationshipRegistry{}
+	e.setConceptRelationships(nil)
 	e.concepts = nil
 	e.initialized = false
 	e.prompts = nil
@@ -35,124 +35,18 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	}
 
 	all := concepts.List()
+
+	relationshipsByConcept, err := deriveConceptRegistryState(all)
+	if err != nil {
+		return err
+	}
+	e.setConceptRelationships(relationshipsByConcept)
+	e.concepts = concepts
+
 	if len(all) == 0 {
-		e.relationships = relationshipRegistry{ByConcept: make(map[string][]RelationshipDefinition)}
-		e.concepts = concepts
 		e.initialized = true
 		return nil
 	}
-
-	conceptNames := make(map[string]struct{}, len(all))
-	conceptsByName := make(map[string]*concept.Concept, len(all))
-	relationshipsByConcept := make(map[string][]RelationshipDefinition, len(all))
-
-	for _, c := range all {
-		if c == nil {
-			return fmt.Errorf("concept registry contains nil concept entry")
-		}
-
-		name := strings.TrimSpace(c.Name)
-		if name == "" {
-			return fmt.Errorf("concept registry contains a concept with empty name")
-		}
-
-		if _, exists := conceptNames[name]; exists {
-			return fmt.Errorf("concept registry contains duplicate concept %q", name)
-		}
-
-		c.Name = name
-		conceptNames[name] = struct{}{}
-		conceptsByName[name] = c
-		relationshipsByConcept[name] = nil
-	}
-
-	duplicateTracker := make(map[string]map[string]map[string]struct{})
-	reverseTracker := make(map[string]relationshipEdge)
-
-	for _, c := range all {
-		name := c.Name
-		if len(c.Relationships) == 0 {
-			continue
-		}
-
-		for idx := range c.Relationships {
-			normalized, err := normalizeRelationshipDefinition(c.Relationships[idx])
-			if err != nil {
-				return fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
-			}
-
-			if _, ok := conceptNames[normalized.TargetConcept]; !ok {
-				// This used to `continue` with a Debug log, justified by
-				// @visibility filtering letting a target live on another node
-				// type. @visibility is RETIRED (zero uses in dsl/; every binary
-				// now loads every concept), so the justification is gone and a
-				// missing target means a typo or a missing `use` import.
-				//
-				// Skipping was not a missing edge, it was silent data
-				// corruption: the relationship drives id canonicalization on
-				// both the write path and the filter path, so no relationship
-				// means ids persist non-canonical and (concept, id) lookups
-				// quietly return nothing, with no error anywhere. memql#3653.
-				return fmt.Errorf(
-					"concept %q relationship[%d] on field %q: target %q is not a registered concept.%s",
-					name, idx, normalized.Field, normalized.TargetConcept,
-					suggestRelationshipTarget(normalized.TargetConcept, conceptNames),
-				)
-			}
-
-			if err := checkRelationshipFieldDeclared(normalized, c, conceptsByName[normalized.TargetConcept]); err != nil {
-				return fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
-			}
-
-			if err := checkDuplicateRelationship(duplicateTracker, name, normalized); err != nil {
-				return err
-			}
-
-			if err := checkRelationshipDirection(reverseTracker, name, normalized); err != nil {
-				return err
-			}
-
-			c.Relationships[idx] = normalized
-			relationshipsByConcept[name] = append(relationshipsByConcept[name], normalized)
-		}
-	}
-
-	for _, c := range all {
-		nodeType := strings.ToLower(strings.TrimSpace(c.NodeType))
-		if nodeType == "" {
-			nodeType = concept.NodeTypeObject
-		}
-
-		switch nodeType {
-		case concept.NodeTypeObject, concept.NodeTypeCollection, concept.NodeTypeReference:
-		default:
-			return fmt.Errorf("concept %q has invalid node type %q", c.Name, c.NodeType)
-		}
-
-		c.NodeType = nodeType
-
-		defs := relationshipsByConcept[c.Name]
-
-		if nodeType == concept.NodeTypeReference && !hasRelationshipOfType(defs, relationshipTypeAlias, relationshipTypeEquals) {
-			return fmt.Errorf("reference concept %q must declare alias or equals relationship", c.Name)
-		}
-
-		if nodeType == concept.NodeTypeCollection && !hasRelationshipOfType(defs, relationshipTypeContains) {
-			return fmt.Errorf("collection concept %q must declare contains relationship", c.Name)
-		}
-
-		for _, def := range defs {
-			switch def.Type {
-			case relationshipTypeContains:
-				if nodeType != concept.NodeTypeCollection {
-					return fmt.Errorf("concept %q must be type collection to define contains relationships", c.Name)
-				}
-			}
-		}
-	}
-
-	e.relationships = relationshipRegistry{ByConcept: relationshipsByConcept}
-	e.concepts = concepts
 
 	schemaIdx, err := buildSchemaIndex(concepts)
 	if err != nil {
@@ -162,7 +56,7 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	if err != nil {
 		return err
 	}
-	e.schemaIdx = schemaIdx
+	e.setSchemaIndex(schemaIdx)
 	e.specs = specRegistry
 
 	// Load functions after specs (functions can reference specs)
@@ -537,6 +431,185 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	e.initialized = true
 
 	return nil
+}
+
+// deriveConceptRegistryState is THE derivation the engine performs over a
+// concept registry, and the only implementation of it.
+//
+// Holding onto the registry is the small half of what Init does with it. The
+// large half is DERIVING state from it, and two structural invariants live
+// entirely inside that derivation:
+//
+//   - Every `@relationship` is normalized, its target resolved against the
+//     registry, its `field` checked against whichever side declares it
+//     (memql#3654 -- the declaring concept for `outgoing`, the TARGET for
+//     `incoming`), and duplicate / direction-conflicting edges refused. What
+//     survives becomes e.relationships, which drives id canonicalization on the
+//     write path, (concept, id) resolution on the filter path, and traversal.
+//   - The node-type invariants on the `type` column: a `collection` must declare
+//     a `contains` edge, a `reference` must declare `alias` or `equals`, and
+//     `contains` is legal only on a collection.
+//
+// It is a function rather than inline code in Init because a concept can now
+// arrive AFTER boot: authoring's durable concept promote (memql#3746) merges one
+// into the live registry of a running engine. A concept merged into the registry
+// and nothing else would write rows perfectly well while contributing no
+// relationships and passing no node-type check -- both invariants above would
+// simply not exist for it, silently. That is the same shape of defect memql#3653
+// recorded when an unresolvable relationship target was skipped rather than
+// refused: not a missing edge, but ids persisting non-canonical and lookups
+// quietly returning nothing. Re-deriving over the WHOLE registry on promote is
+// cheap (promotes are rare) and, more to the point, is the SAME code -- two
+// implementations of one rule is how several of this repo's recorded defects
+// survived their own fixes.
+//
+// It MUTATES the concepts it walks, in place: trimmed Name, defaulted +
+// lower-cased NodeType, and normalized Relationships are written back onto each
+// *Concept, exactly as the inline version did (that write-back is what makes
+// `concepts()` metadata report canonical values).
+//
+// IDEMPOTENCY IS LOAD-BEARING, in two senses, and NEITHER held when this was
+// extracted from Init. Both broke for the same reason -- the derivation used to
+// run exactly once, so nothing had ever run it twice over the same data.
+//
+//  1. It must produce identical VALUES on a second pass, because the promote
+//     path derives over the candidate set BEFORE merging it -- which is what
+//     leaves the live registry untouched when a candidate is refused, there
+//     being no remove on MemoryRegistry to roll back with. What broke it:
+//     normalizeRelationshipDefinition refused any non-empty `fieldSource`, and
+//     the first pass writes a derived one, so the second pass refused every core
+//     concept that declares a relationship. See the comment at that refusal.
+//
+//  2. It must perform no redundant WRITES on a second pass, because on the
+//     promote path the concepts it walks are LIVE: request goroutines read
+//     Concept.Relationships directly for id canonicalization (partition_context.go)
+//     and filter-side resolution (executor_filter.go). Re-writing a slice element
+//     with the value it already holds is still a concurrent write, and a data
+//     race for being one. Hence the guarded assignments below: an
+//     already-derived concept is READ and not touched, so the only concept this
+//     writes to during a promote is the candidate, which no reader can reach
+//     until it is merged.
+//
+// Anything added here MUST satisfy both.
+func deriveConceptRegistryState(all []*concept.Concept) (map[string][]RelationshipDefinition, error) {
+	conceptNames := make(map[string]struct{}, len(all))
+	conceptsByName := make(map[string]*concept.Concept, len(all))
+	relationshipsByConcept := make(map[string][]RelationshipDefinition, len(all))
+
+	for _, c := range all {
+		if c == nil {
+			return nil, fmt.Errorf("concept registry contains nil concept entry")
+		}
+
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			return nil, fmt.Errorf("concept registry contains a concept with empty name")
+		}
+
+		if _, exists := conceptNames[name]; exists {
+			return nil, fmt.Errorf("concept registry contains duplicate concept %q", name)
+		}
+
+		// Guarded: see "no redundant WRITES" above. Same for NodeType and each
+		// relationship element below.
+		if c.Name != name {
+			c.Name = name
+		}
+		conceptNames[name] = struct{}{}
+		conceptsByName[name] = c
+		relationshipsByConcept[name] = nil
+	}
+
+	duplicateTracker := make(map[string]map[string]map[string]struct{})
+	reverseTracker := make(map[string]relationshipEdge)
+
+	for _, c := range all {
+		name := c.Name
+		if len(c.Relationships) == 0 {
+			continue
+		}
+
+		for idx := range c.Relationships {
+			normalized, err := normalizeRelationshipDefinition(c.Relationships[idx])
+			if err != nil {
+				return nil, fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
+			}
+
+			if _, ok := conceptNames[normalized.TargetConcept]; !ok {
+				// This used to `continue` with a Debug log, justified by
+				// @visibility filtering letting a target live on another node
+				// type. @visibility is RETIRED (zero uses in dsl/; every binary
+				// now loads every concept), so the justification is gone and a
+				// missing target means a typo or a missing `use` import.
+				//
+				// Skipping was not a missing edge, it was silent data
+				// corruption: the relationship drives id canonicalization on
+				// both the write path and the filter path, so no relationship
+				// means ids persist non-canonical and (concept, id) lookups
+				// quietly return nothing, with no error anywhere. memql#3653.
+				return nil, fmt.Errorf(
+					"concept %q relationship[%d] on field %q: target %q is not a registered concept.%s",
+					name, idx, normalized.Field, normalized.TargetConcept,
+					suggestRelationshipTarget(normalized.TargetConcept, conceptNames),
+				)
+			}
+
+			if err := checkRelationshipFieldDeclared(normalized, c, conceptsByName[normalized.TargetConcept]); err != nil {
+				return nil, fmt.Errorf("concept %q relationship[%d]: %w", name, idx, err)
+			}
+
+			if err := checkDuplicateRelationship(duplicateTracker, name, normalized); err != nil {
+				return nil, err
+			}
+
+			if err := checkRelationshipDirection(reverseTracker, name, normalized); err != nil {
+				return nil, err
+			}
+
+			if c.Relationships[idx] != normalized {
+				c.Relationships[idx] = normalized
+			}
+			relationshipsByConcept[name] = append(relationshipsByConcept[name], normalized)
+		}
+	}
+
+	for _, c := range all {
+		nodeType := strings.ToLower(strings.TrimSpace(c.NodeType))
+		if nodeType == "" {
+			nodeType = concept.NodeTypeObject
+		}
+
+		switch nodeType {
+		case concept.NodeTypeObject, concept.NodeTypeCollection, concept.NodeTypeReference:
+		default:
+			return nil, fmt.Errorf("concept %q has invalid node type %q", c.Name, c.NodeType)
+		}
+
+		if c.NodeType != nodeType {
+			c.NodeType = nodeType
+		}
+
+		defs := relationshipsByConcept[c.Name]
+
+		if nodeType == concept.NodeTypeReference && !hasRelationshipOfType(defs, relationshipTypeAlias, relationshipTypeEquals) {
+			return nil, fmt.Errorf("reference concept %q must declare alias or equals relationship", c.Name)
+		}
+
+		if nodeType == concept.NodeTypeCollection && !hasRelationshipOfType(defs, relationshipTypeContains) {
+			return nil, fmt.Errorf("collection concept %q must declare contains relationship", c.Name)
+		}
+
+		for _, def := range defs {
+			switch def.Type {
+			case relationshipTypeContains:
+				if nodeType != concept.NodeTypeCollection {
+					return nil, fmt.Errorf("concept %q must be type collection to define contains relationships", c.Name)
+				}
+			}
+		}
+	}
+
+	return relationshipsByConcept, nil
 }
 
 // ReloadAIProviders re-loads the AI provider registry from .memql

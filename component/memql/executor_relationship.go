@@ -896,11 +896,39 @@ func (e *MemQLEngine) resolveIds(nodes []memorynodes.MemoryNode, limit int) ([]m
 	return mapToSortedSlice(result, nil)
 }
 
+// relationshipDefinitionsForConcept is the read side of e.relationships, which a
+// concept promote rewrites on a running engine (memql#3746) -- hence the lock.
+// See the conceptStateMu comment on MemQLEngine.
 func (e *MemQLEngine) relationshipDefinitionsForConcept(name string) []RelationshipDefinition {
+	e.conceptStateMu.RLock()
+	defer e.conceptStateMu.RUnlock()
 	if e.relationships.ByConcept == nil {
 		return nil
 	}
 	return e.relationships.ByConcept[strings.TrimSpace(name)]
+}
+
+// setConceptRelationships publishes a freshly-derived relationship index. The
+// only writer besides Init's own reset.
+func (e *MemQLEngine) setConceptRelationships(byConcept map[string][]RelationshipDefinition) {
+	e.conceptStateMu.Lock()
+	defer e.conceptStateMu.Unlock()
+	e.relationships = relationshipRegistry{ByConcept: byConcept}
+}
+
+// schemaIndex is the read side of e.schemaIdx, rebuilt by a concept promote for
+// the same reason and under the same lock.
+func (e *MemQLEngine) schemaIndex() *schemaIndex {
+	e.conceptStateMu.RLock()
+	defer e.conceptStateMu.RUnlock()
+	return e.schemaIdx
+}
+
+// setSchemaIndex publishes a freshly-built schema index.
+func (e *MemQLEngine) setSchemaIndex(idx *schemaIndex) {
+	e.conceptStateMu.Lock()
+	defer e.conceptStateMu.Unlock()
+	e.schemaIdx = idx
 }
 
 // filterRelationshipDefinitions selects the definitions a traversal should

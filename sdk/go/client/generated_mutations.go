@@ -2580,13 +2580,13 @@ func CreateAuthoringBundleBuild(args CreateAuthoringBundleArgs) string {
 	return b.String()
 }
 
-// CreateAuthoringConstruct -- Create an authored construct (the .memql source for one automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
+// CreateAuthoringConstruct -- Create an authored construct (the .memql source for one concept / automation / logic / shape / spec / trait / policy / mutation / query / prompt) as a member of a bundle. ownerUserId stamped from actor.userId; status starts draft and follows the bundle.
 //
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["createAuthoringConstruct"] in generated_concepts.go).
 type CreateAuthoringConstructArgs struct {
 	ConstructId string
 	BundleId    string
-	// Enum: automation | logic | shape | spec | trait | policy | mutation | query | prompt
+	// Enum: concept | automation | logic | shape | spec | trait | policy | mutation | query | prompt
 	Kind            string
 	Name            string
 	TargetNamespace string

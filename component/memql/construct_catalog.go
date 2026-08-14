@@ -245,9 +245,17 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 			// directory to take a namespace from. Everything the catalog can
 			// say about its source comes off the promotion marker, which is
 			// the only copy the shared registries keep.
+			//
+			// It does NOT clear entry.Namespace. That line used to be here and
+			// was a pure no-op: every cataloger except catalogConcepts leaves
+			// Namespace empty for the else-branch to fill from the file path,
+			// and catalogConcepts sets it from the concept's own CANONICAL ID,
+			// which owes nothing to a directory. So its only reachable effect
+			// was to erase a correct answer -- invisible until memql#3746 made
+			// a concept promotable, at which point every promoted concept would
+			// have reported an empty namespace and sorted ahead of the tree.
 			source = marker.Source
 			entry.OriginPath = ""
-			entry.Namespace = ""
 			entry.SourceHash = marker.SourceHash
 			// Carried only here: with no file, this is the only copy a client
 			// can reach.
@@ -316,6 +324,11 @@ func deriveConstructOrigin(originPath string, promoted bool, domains map[string]
 // is how PromoteAuthoredConstruct and DemoteAuthoredConstruct key it, and this
 // must read it the same way or a demote would leave a construct reading as
 // promoted.
+//
+// A concept's registry key is its CANONICAL ID (memql#3746), and `name` here is
+// already that: catalogConcepts reports Concept.Name, which the concept registry
+// is keyed by. Keying on a declaration name instead would find nothing and
+// report every promoted concept as `core`.
 func (e *MemQLEngine) promotedConstruct(kind, name string) (bool, promotedMarker) {
 	key := ""
 	switch kind {
@@ -323,6 +336,8 @@ func (e *MemQLEngine) promotedConstruct(kind, name string) (bool, promotedMarker
 		key = "function:" + name
 	case ConstructKindSpec, ConstructKindTrait:
 		key = "spec:" + name
+	case ConstructKindConcept:
+		key = "concept:" + name
 	default:
 		return false, promotedMarker{}
 	}
