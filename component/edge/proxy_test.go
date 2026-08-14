@@ -133,6 +133,41 @@ func TestAPIProxyRefusesPathsThatDoNotSurviveCleaning(t *testing.T) {
 	}
 }
 
+// A trailing slash is not a dot-segment, and cleanPathLikeMux says so:
+// http.ServeMux's own cleanPath passes "/_memql/ws/" through unmodified
+// (it puts the trailing slash back after path.Clean would otherwise strip
+// it), so the guard must too, or a client library that normalizes its own
+// URLs with a trailing slash gets a 400 about dot-segments a request like
+// this never had. Pins the "match the mux" decision end-to-end: not refused,
+// AND the slash survives the hop to the upstream.
+func TestAPIProxyPreservesATrailingSlash(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Upstream-Path", r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws/", nil)
+	req.Host = "shop.example.com"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /_memql/ws/ = %d, want 200 -- a trailing slash is not a dot-segment", rec.Code)
+	}
+	if got := rec.Header().Get("X-Upstream-Path"); got != "/memql/ws/" {
+		t.Errorf("upstream saw %q, want /memql/ws/ -- the trailing slash must survive the hop", got)
+	}
+}
+
 // A bare "/_memql" (no trailing slash) never matches apiPrefix at all -- it
 // falls through to ordinary static-file resolution instead of ever reaching
 // serveAPI's guard. A DIFFERENT reason for the same outcome (the API is

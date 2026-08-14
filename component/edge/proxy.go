@@ -47,7 +47,15 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// same reasoning ("there is no legitimate request outside the bundle to
 	// repair") -- true here even more sharply, since there is no legitimate
 	// /_memql/ request containing a dot-segment or a doubled slash at all.
-	if cleaned := path.Clean(r.URL.Path); cleaned != r.URL.Path {
+	//
+	// The comparison uses cleanPathLikeMux below, NOT bare path.Clean: the
+	// two differ on a trailing slash (path.Clean("/_memql/ws/") strips it;
+	// ServeMux's own cleanPath puts it back), and a guard that claims to
+	// backstop the mux has to refuse exactly what the mux would have
+	// rewritten -- no more, no less. Refusing a bare trailing slash too
+	// would turn a client library's harmless URL-normalization choice into
+	// a 400 about dot-segments the request never had.
+	if cleaned := cleanPathLikeMux(r.URL.Path); cleaned != r.URL.Path {
 		h.logger.Warn("edge: refusing a /_memql/* path that does not survive cleaning",
 			"component", "edge", "site", site.ID, "path", r.URL.Path)
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -90,4 +98,33 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 	// trusting it, because a plain GET test would pass while every WebSocket
 	// silently died.
 	proxy.ServeHTTP(w, r)
+}
+
+// cleanPathLikeMux reproduces net/http's own unexported cleanPath
+// (server.go, the helper behind ServeMux's path canonicalization) exactly,
+// rather than relying on bare path.Clean. serveAPI's guard has to refuse
+// precisely what the mux would have rewritten -- no stricter, no looser --
+// or the comment describing it becomes false. The one place this departs
+// from path.Clean alone: a trailing slash survives ("/_memql/ws/" stays
+// "/_memql/ws/"), because path.Clean strips a trailing slash and ServeMux's
+// cleanPath puts it back. Duplicated rather than imported because it is
+// unexported.
+func cleanPathLikeMux(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if p[0] != '/' {
+		p = "/" + p
+	}
+	np := path.Clean(p)
+	// path.Clean removes a trailing slash except for root; restore it if
+	// the original had one, exactly as net/http's cleanPath does.
+	if p[len(p)-1] == '/' && np != "/" {
+		if len(p) == len(np)+1 && strings.HasPrefix(p, np) {
+			np = p
+		} else {
+			np += "/"
+		}
+	}
+	return np
 }
