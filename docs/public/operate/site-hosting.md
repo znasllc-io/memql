@@ -216,12 +216,26 @@ the opposite case -- it will change far more often than the engine does, so
 
 ## Deploying a site, end to end
 
+**The portal's Sites screen is where an operator does most of this.**
+`/sites` (`clients/portal/src/sites/`, memql#3717) lists every site in the
+cluster, live -- updating through the same `subscribeGraph` mechanism
+[Live data](#live-data-in-a-hosted-site) describes below -- with a form to
+create one, and a detail screen per site (`/sites/:siteId`) to publish,
+roll back, change status and delete. What follows is the underlying graph
+writes those controls perform; reach for the portal first, and use the raw
+mutation calls below when scripting a step (CI, an install wizard, a
+one-off fix) instead of clicking through it. Two things the portal does
+NOT do, which is why steps 2 and 3 below still exist as CLI/ops tasks:
+register the hostname, and get bundle bytes into storage in the first
+place.
+
 ### 1. Create the site row
 
-`createSite` (`dsl/platform/mutations.memql`) is the only way a site starts
-existing. It requires a `bundleRef` up front -- there is no "empty" state
-in the schema -- so for a brand-new uploaded site, pass a placeholder
-prefix and leave `status` at its default:
+`createSite` (`dsl/platform/mutations.memql`) is the write behind the
+portal's "New site" form -- it is the only way a site starts existing. It
+requires a `bundleRef` up front -- there is no "empty" state in the
+schema -- so for a brand-new uploaded site, pass a placeholder prefix and
+leave `status` at its default:
 
 ```
 mutation createSite(
@@ -249,10 +263,17 @@ Three things worth knowing before you run it:
   unenforceable, or would make site management the first-ever use of an
   authorization shape with zero prior instances in the tree. Widening to
   admins is later work with a named mechanism, not the default today.
-- There is no portal screen for this yet -- the portal's Sites screen
-  (memql#3717) is landing separately from this page. Today `createSite`
-  runs through whatever authenticated client you have available for an ad
-  hoc mutation call.
+- **A non-owner is refused, not shown an empty list.** `sitesAll` and
+  `siteById` (`dsl/platform/queries.memql`) both carry
+  `actor.isClusterOwner==true` as an explicit filter conjunct, so an
+  `admin` role's read comes back with zero rows at the engine -- not an
+  error, just nothing, which reads exactly like "there are no sites" if
+  nothing else says otherwise. The portal's own `/sites` screen renders
+  `SitesRefused` (`clients/portal/src/sites/SitesRefused.tsx`) in place of
+  the whole screen for a non-owner instead, stating the gate plainly. If
+  you are scripting against the raw queries, do the same: "zero rows" and
+  "you are not the owner" are different facts, and only one of them is a
+  bug.
 
 ### 2. Add the hostname
 
@@ -304,6 +325,19 @@ credential. This is a SEPARATE authorization decision from the
 pins `MemqlService.Stream` traffic to reads plus one agent-turn message
 type; this is a plain HTTP handler on the bff checking the same `class`
 claim on its own, independently.
+
+**What a signed-in operator CAN do in the portal is the other half of
+this.** `/sites/:siteId`'s "Publish" control (`SiteDetailPage.tsx`,
+`useSiteDetail.ts`) calls `updateSiteBundle` directly with a `bundleRef`
+VALUE and flips the row -- exactly the same write [Rollback](#rollback)
+below uses, in the other direction. It does not touch bytes and cannot:
+`updateSiteBundle` has no way to know whether the prefix it is pointing at
+has anything in it. The two halves are complementary, not redundant -- CI
+puts bytes at a `blob://` prefix (this section) and gets back the
+resulting `bundleRef`; the portal is where a human then points a site's
+row at a `bundleRef` that already exists, whichever process produced it.
+A reader who has just learned a browser session cannot upload bytes here
+is usually asking what it CAN do -- this is the answer.
 
 Mint a token the same way the deploy gate does:
 
@@ -384,6 +418,29 @@ mutation updateSiteStatus(siteId: "shop", status: "live")
 Only a `live` site reaches anything past that check -- including
 `GET /runtime-config.json` ([below](#apiproxy-same-origin-access-to-your-data)),
 which is dispatched after the status switch, not before it.
+
+**`deleted` is a separate flag, not a fourth status value** -- worth
+saying plainly, because it is the state a reader will otherwise try to
+infer from the three above. `deleteSite` (`dsl/platform/mutations.memql`,
+memql#3717) soft-deletes by stamping `deleted: true`; the row survives,
+time-series history intact, but `isNotDeleted` is now an explicit
+conjunct on `siteByHostname`, `sitesAll` AND `siteById`
+(`dsl/platform/queries.memql`), so a deleted site simply stops matching
+`siteByHostname` -- the edge resolves it exactly like an unknown
+hostname, `404`, the same bucket as `draft`, not a status code of its
+own.
+
+**Deleting a `systemOwned` row is refused server-side, not just hidden
+behind a disabled button.** `component/memql/platform_site_delete_guard.go`
+runs on every write that would set `deleted: true`, reads the PRIOR row's
+`systemOwned` flag, and refuses (naming the hostname in the error) unless
+the caller is a system actor. That is what actually protects the portal's
+own row -- `systemOwned`'s doc comment has said "blocks deletion" since
+before this guard existed, and nothing enforced it until this landed. The
+portal's own detail screen (`SiteDetailPage.tsx`) disables the delete
+control for a `systemOwned` row as a courtesy; the real gate is this
+write-path check, reachable and effective against a raw mutation call
+too.
 
 ---
 
@@ -526,6 +583,19 @@ ordinary query surface -- proven against a live engine in
 whoever is asking: finding a prior version this way is a walk, not a
 lookup.
 
+**The portal does exactly this walk for you.** `/sites/:siteId`'s "Version
+history" band (`clients/portal/src/sites/history.ts`,
+`useSiteHistory.ts`) re-issues `siteById` under successive `asOf`
+timestamps, each one set just before the previous result's `createdAt`,
+bounded to the last `MAX_HISTORY_VERSIONS` (5) versions -- the mechanism
+above, already built, with a "Roll back to this" button on each entry that
+calls `updateSiteBundle` with that version's `bundleRef`. `siteById`
+(`dsl/platform/queries.memql`, memql#3717) is a query added specifically
+for this: it deliberately carries no `asOf latest` clause of its own,
+because a query that declares one refuses to be wrapped in a caller's own
+`asOf` a second time -- which is exactly the caller-chosen-instant
+capability the walk needs.
+
 ---
 
 ## Two different 404s, and why one of them is a 503
@@ -637,3 +707,9 @@ rather than trusting this paragraph's age.
 - Publish path: `component/edge/publish.go`,
   `component/server/site_bundle_handler.go`, `app/transport_sites.go`.
 - Node wiring: `app/transport_edge.go`, `app/build_edge.go`.
+- Soft-delete guard: `component/memql/platform_site_delete_guard.go`.
+- Portal Sites screen (memql#3717): `clients/portal/src/sites/` --
+  `SitesPage.tsx` / `useSites.ts` (list + create), `SiteDetailPage.tsx` /
+  `useSiteDetail.ts` (publish, roll back, status, delete),
+  `history.ts` / `useSiteHistory.ts` (the `asOf` version walk),
+  `SitesRefused.tsx` (the non-owner explanation).
