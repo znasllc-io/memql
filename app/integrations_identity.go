@@ -376,11 +376,15 @@ func (a *App) integrationsIdentity() {
 		Adapter: deviceCodeStore,
 		Issuer:  svc.Issuer(),
 		Audit:   auditLogger,
-		ClientName: func(ctx context.Context, clientId string) string {
-			if c := identity.ResolveClient(ctx, cfg, store, clientId); c != nil {
-				return c.Name
+		// Returns the ORIGIN alongside the name (memql#3824): the device
+		// approval page marks a self-asserted name so the approver knows
+		// which of the things in front of them nobody vouched for.
+		ClientDisplay: func(ctx context.Context, clientId string) (string, bool) {
+			c, selfRegistered := identity.ResolveClientWithOrigin(ctx, cfg, store, clientId)
+			if c == nil {
+				return "", false
 			}
-			return ""
+			return c.Name, selfRegistered
 		},
 	})
 	// GET /enroll (memql#3408). The web package stays engine-free, so the
