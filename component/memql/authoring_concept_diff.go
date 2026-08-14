@@ -86,17 +86,17 @@ import (
 // reported because the editor (memql#3763) renders the whole diff, not only the
 // refusal -- a promote that lands still tells the author what it changed.
 const (
-	ConceptChangeFieldAdded          = "field_added"
-	ConceptChangeFieldRemoved        = "field_removed"          // BREAKING
-	ConceptChangeFieldTypeChanged    = "field_type_changed"     // BREAKING
-	ConceptChangeFieldRequiredAdded  = "field_required_added"   // BREAKING
-	ConceptChangeFieldRequiredDroppd = "field_required_dropped" // relaxing
-	ConceptChangeEnumWidened         = "enum_widened"
-	ConceptChangeEnumNarrowed        = "enum_narrowed" // BREAKING
-	ConceptChangeDescriptionChanged  = "description_changed"
-	ConceptChangeRelationshipAdded   = "relationship_added"
-	ConceptChangeRelationshipRemoved = "relationship_removed"
-	ConceptChangeNodeTypeChanged     = "node_type_changed"
+	ConceptChangeFieldAdded           = "field_added"
+	ConceptChangeFieldRemoved         = "field_removed"          // BREAKING
+	ConceptChangeFieldTypeChanged     = "field_type_changed"     // BREAKING
+	ConceptChangeFieldRequiredAdded   = "field_required_added"   // BREAKING
+	ConceptChangeFieldRequiredDropped = "field_required_dropped" // relaxing
+	ConceptChangeEnumWidened          = "enum_widened"
+	ConceptChangeEnumNarrowed         = "enum_narrowed" // BREAKING
+	ConceptChangeDescriptionChanged   = "description_changed"
+	ConceptChangeRelationshipAdded    = "relationship_added"
+	ConceptChangeRelationshipRemoved  = "relationship_removed"
+	ConceptChangeNodeTypeChanged      = "node_type_changed"
 )
 
 // ConceptSchemaChange is ONE classified difference between the concept version a
@@ -374,7 +374,7 @@ func compareConceptField(conceptId, path string, was, now conceptFieldShape) []C
 	case was.Required && !now.Required:
 		// Relaxing. Every existing row satisfies a weaker constraint.
 		out = append(out, ConceptSchemaChange{
-			Concept: conceptId, Field: path, Kind: ConceptChangeFieldRequiredDroppd,
+			Concept: conceptId, Field: path, Kind: ConceptChangeFieldRequiredDropped,
 			Was: "required", Now: "optional",
 		})
 	}
@@ -1084,7 +1084,7 @@ func describeConceptSchemaChange(c ConceptSchemaChange) string {
 		return quoteConceptValues(added) + " added"
 	case ConceptChangeFieldAdded:
 		return "new optional field"
-	case ConceptChangeFieldRequiredDroppd:
+	case ConceptChangeFieldRequiredDropped:
 		return "no longer required"
 	case ConceptChangeDescriptionChanged:
 		return "description edited"
@@ -1296,7 +1296,7 @@ func conceptChangeLabel(c ConceptSchemaChange) string {
 		return "~ " + name + " enum narrowed"
 	case ConceptChangeEnumWidened:
 		return "~ " + name + " enum widened"
-	case ConceptChangeFieldRequiredDroppd:
+	case ConceptChangeFieldRequiredDropped:
 		return "~ " + name + " required -> optional"
 	case ConceptChangeRelationshipAdded:
 		return "+ @relationship " + c.Now
