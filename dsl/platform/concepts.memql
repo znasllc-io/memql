@@ -217,4 +217,5 @@ concept site {
   systemOwned  bool     @description("Blocks deletion. The portal only: its row is re-seeded at boot, so an operator cannot brick cluster management by deleting it. Does NOT branch the serving path -- see TestPortalHasNoSpecialCase.")
   title        string   @description("Operator-facing label shown in the portal's site list.")
   notes        string   @description("Operator-facing notes.")
+  deleted      bool     @default("false") @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
 }

@@ -13,6 +13,7 @@ import { ViewPage } from "../views/ViewPage";
 import { AdminRoutes } from "../admin/AdminRoutes";
 import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
+import { SitesRoutes } from "../sites/SitesRoutes";
 import {
   CONCEPTS_ROUTE_PATTERN,
   CONCEPT_ROUTE_PATTERN,
@@ -84,6 +85,8 @@ import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN } from "../views/urls";
 //   /integrations/*   integration + campaign management   (memql#3323)
 //   /compose/*        the user-composed view builder      (memql#3320)
 //   /admin/*          the absorbed server-rendered admin  (memql#3324)
+//   /sites/*          hosted sites: list, create, publish, roll back, delete
+//                     (memql#3717)
 //
 // Each owns a `<name>Routes` module that declares its own sub-routes. Three
 // separate changes would otherwise each need an edit here and in AppShell, and
@@ -110,6 +113,7 @@ export function AppRoutes(): ReactNode {
           <Route path="compose/*" element={<ComposeRoutes />} />
           <Route path="integrations/*" element={<IntegrationsRoutes />} />
           <Route path="admin/*" element={<AdminRoutes />} />
+          <Route path="sites/*" element={<SitesRoutes />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>

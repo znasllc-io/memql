@@ -6912,6 +6912,28 @@ func DeleteRecordBuild(args DeleteRecordArgs) string {
 	return b.String()
 }
 
+// DeleteSite -- Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express that conditional, so the block is a Go write guard wired beside executeWrite (see component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["deleteSite"] in generated_concepts.go).
+type DeleteSiteArgs struct {
+	SiteId string
+}
+
+// DeleteSite calls the engine mutation deleteSite.
+func (qc *QueryClient) DeleteSite(ctx context.Context, args DeleteSiteArgs) (*Result, error) {
+	call := DeleteSiteBuild(args)
+	return qc.executeNamed(ctx, "deleteSite", call)
+}
+
+func DeleteSiteBuild(args DeleteSiteArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation deleteSite(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // DeleteUserHard -- Hard-delete (soft-delete + generic @pii scrub) a user after the deletion-cooldown sweep.
 //
 // Bound concept: v1:identity:user (machine-readable: BoundConcepts["deleteUserHard"] in generated_concepts.go).

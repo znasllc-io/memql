@@ -469,3 +469,20 @@ mutate site updateSiteStatus {
     status: args.status
   }
 }
+
+/// Soft-delete a site by stamping deleted=true (memql#3717). The time-series row survives for
+/// history; isNotDeleted on siteByHostname/sitesAll/siteById is what actually stops the edge
+/// resolving a deleted site's hostname -- this mutation only flips the flag. A systemOwned row
+/// (the portal's own seed) is refused regardless of who calls this: the DSL grammar cannot express
+/// that conditional, so the block is a Go write guard wired beside executeWrite (see
+/// component/memql/platform_site_delete_guard.go), not something this mutation body can enforce.
+@description("Soft-delete a site")
+mutate site deleteSite {
+  args {
+    siteId  string!
+  }
+  update {
+    id:      args.siteId
+    deleted: true
+  }
+}

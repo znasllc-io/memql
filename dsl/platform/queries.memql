@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ isActiveRecord }
+use common.traits.{ isActiveRecord, isNotDeleted }
 
 /// Recent persisted policy traces for the named policy, most-recent first.
 query policyTrace policyTracesForPolicy {
@@ -253,7 +253,7 @@ query site siteByHostname {
   args {
     hostname  string!
   }
-  filter  hostname==args.hostname && actor.isClusterOwner==true
+  filter  hostname==args.hostname && actor.isClusterOwner==true && isNotDeleted
   shape   siteFull
 }
 
@@ -261,7 +261,24 @@ query site siteByHostname {
 /// a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
 @actor
 query site sitesAll {
-  filter  actor.isClusterOwner==true
+  filter  actor.isClusterOwner==true && isNotDeleted
   shape   siteFull
   sort    "hostname", "asc"
+}
+
+/// Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in
+/// successive `asOf` timestamps to walk a row's history one version back at a time -- there is no
+/// single query that returns every version at once (D10 / #2880), so re-issuing this one under each
+/// prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query
+/// unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs
+/// (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per
+/// v1:platform:site's declared tier.
+@unbounded("site by id -- bounded to a single row (id is the row's own primary key)")
+@actor
+query site siteById {
+  args {
+    siteId  string!
+  }
+  filter  row.id==args.siteId && actor.isClusterOwner==true && isNotDeleted
+  shape   siteFull
 }

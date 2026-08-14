@@ -4151,6 +4151,28 @@ func SiteByHostnameBuild(args SiteByHostnameArgs) string {
 	return b.String()
 }
 
+// SiteById -- Resolve a site by its own row id (memql#3717). The seam the portal's rollback picker wraps in successive `asOf` timestamps to walk a row's history one version back at a time -- there is no single query that returns every version at once (D10 / #2880), so re-issuing this one under each prior `createdAt` IS the walk. Deliberately carries NO `asOf latest`: that would make the query unwrappable by a caller's own `asOf`, which is exactly the capability the walk needs (dsl/deployment/queries.memql:78-97 documents the same reasoning). Cluster-owner gated per v1:platform:site's declared tier.
+//
+// Bound concept: v1:platform:site (machine-readable: BoundConcepts["siteById"] in generated_concepts.go).
+type SiteByIdArgs struct {
+	SiteId string
+}
+
+// SiteById calls the engine query siteById.
+func (qc *QueryClient) SiteById(ctx context.Context, args SiteByIdArgs) (*Result, error) {
+	call := SiteByIdBuild(args)
+	return qc.executeNamed(ctx, "siteById", call)
+}
+
+func SiteByIdBuild(args SiteByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query siteById(")
+	b.WriteString("siteId: ")
+	b.WriteString(quoteMemQL(args.SiteId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // SitesAll -- Every site in the cluster. The portal's primary screen, and the read that would silently return a subset if this concept were owner-tier. Cluster-owner gated per v1:platform:site's declared tier.
 //
 // Bound concept: v1:platform:site (machine-readable: BoundConcepts["sitesAll"] in generated_concepts.go).
