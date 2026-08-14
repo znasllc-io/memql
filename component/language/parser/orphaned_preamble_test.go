@@ -387,7 +387,7 @@ func TestOrphanedPreamblesIgnoresAnnotationsInsideADeclarationBody(t *testing.T)
 // A KNOWN GAP, pinned so it is recorded rather than rediscovered.
 //
 // `@description("d") /*` opens a block comment on a line that STARTS with `@`.
-// preambleStartOf keeps walking across that line, so the loader really does
+// PreambleStartOf keeps walking across that line, so the loader really does
 // orphan the run -- but the rule only considers a comment that opens its own
 // line, and reports nothing. Closing it means deciding whether an annotation
 // line that opens a comment terminates its own run, which is a judgement about

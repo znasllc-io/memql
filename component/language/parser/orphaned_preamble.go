@@ -7,7 +7,7 @@ import (
 
 // orphaned_preamble.go -- memql#2965.
 //
-// preambleStartOf walks backwards from a declaration header over contiguous
+// PreambleStartOf walks backwards from a declaration header over contiguous
 // `@` and `//` lines and stops at anything else. A `*/` closing a block comment
 // is neither, so the walk stops there and the annotations above the comment are
 // left OUT of the slice:
@@ -85,7 +85,7 @@ type OrphanedPreamble struct {
 // comment separates from the declaration below it.
 //
 // It scans the ORIGINAL source, not the blanked view, for the same reason
-// preambleStartOf does (rule 3 in declaration_slices.go): BlankComments blanks
+// PreambleStartOf does (rule 3 in declaration_slices.go): BlankComments blanks
 // `//` lines too, and a `//` line is part of a preamble.
 func OrphanedPreambles(source string) []OrphanedPreamble {
 	lines := strings.Split(source, "\n")
@@ -113,7 +113,7 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 	opens := make([]bool, len(lines))
 	openEnd := make([]int, len(lines))
 	for _, span := range CommentSpans(source) {
-		// `//` line comments are not separators -- preambleStartOf accepts
+		// `//` line comments are not separators -- PreambleStartOf accepts
 		// them inside a run -- so only block comments matter here.
 		if span.End-span.Start < 2 || source[span.Start:span.Start+2] != "/*" {
 			continue
@@ -153,7 +153,7 @@ func OrphanedPreambles(source string) []OrphanedPreamble {
 			continue
 		}
 		// Walk back over the contiguous preamble run, exactly as
-		// preambleStartOf does: `@` and `//` lines, nothing else.
+		// PreambleStartOf does: `@` and `//` lines, nothing else.
 		start := -1
 		sawAttribute := false
 		for k := i - 1; k >= 0; k-- {
