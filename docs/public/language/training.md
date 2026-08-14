@@ -50,7 +50,7 @@ runs. It is the single thing people get wrong, so it is worth stating flatly:
 - One file may hold trained, untrained and drifted constructs **at the same
   time**, and saving it leaves all three exactly as they were.
 
-The editor's status bar reads `3 untrained - 1 drifted` for the active
+The editor's status bar reads `3 untrained · 1 drifted` for the active
 document precisely so that this is impossible to miss. It reports only what
 needs attention: a file whose constructs are all trained shows nothing.
 

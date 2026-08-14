@@ -305,7 +305,7 @@ it clickable would leave a developer wondering what clicking it does. A
 `seeded` construct gets no disabled buttons either -- a control that cannot
 work is not drawn.
 
-**A status-bar item** for the active document: `3 untrained - 1 drifted`. It
+**A status-bar item** for the active document: `3 untrained · 1 drifted`. It
 reports only what needs attention, so a file whose constructs are all trained
 shows nothing -- an item that is always present saying "12 trained" is one you
 stop reading, and it would take the warning with it. Its hover is where
