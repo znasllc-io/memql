@@ -110,7 +110,7 @@ import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
-import { ConceptsTreeProvider } from './views/conceptsTree.js';
+import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ConstructPanel } from './webview/constructPanel.js';
 import { catalogFrom, classifyCatalogFailure, type CatalogState } from './state/constructCatalog.js';
@@ -528,10 +528,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     })
   );
 
-  const conceptsTree = new ConceptsTreeProvider(connections);
+  const conceptsTree = new DataTreeProvider(connections);
   context.subscriptions.push(
-    window.registerTreeDataProvider('memqlConcepts', conceptsTree),
-    commands.registerCommand('memql.concepts.refresh', () => conceptsTree.refresh())
+    window.registerTreeDataProvider('memqlData', conceptsTree),
+    commands.registerCommand('memql.data.refresh', () => conceptsTree.refresh())
   );
 
   context.subscriptions.push(
@@ -542,7 +542,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // (or a manifest edit that forgets the palette exclusion) invoking this
     // with no argument, which would otherwise throw inside ConceptPanel.open
     // on `concept.id`.
-    commands.registerCommand('memql.concepts.open', (concept?: Concept) => {
+    commands.registerCommand('memql.data.open', (concept?: Concept) => {
       if (connections === undefined || concept === undefined) {
         return;
       }

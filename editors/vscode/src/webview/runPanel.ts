@@ -28,6 +28,7 @@ import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import {
   escapeHtml,
   renderRowList,
+  renderValueView,
   renderToHtml,
   viewKitStyles,
   type ConceptLike,
@@ -405,13 +406,19 @@ export class ResultPanel {
 
     let bodyHtml: string;
     let bannerHtml = "";
-    let rawJson = "";
+    // THE VALUE, not a stringified copy of it (memql#3754). The raw pane used
+    // to be `<pre>` of JSON.stringify -- which is the unreadable-value
+    // complaint the value viewer exists to answer, and the one surface still
+    // showing it. The viewer needs the value itself to collapse, badge and
+    // filter it, so what is carried here is the value and the rendering
+    // happens at the end.
+    let rawValue: unknown;
 
     if (o.status === "ok") {
       // Always present, on every run: a banner that only ever appears on the
       // bad case is one the reader learns to skip.
       bannerHtml = `<div class="${o.ranDeployedDefinition ? "warning" : "notice"}">${escapeHtml(resultBannerFor({ ...o, kind: o.target.kind }))}</div>`;
-      rawJson = safeJson(o.toolContent ?? o.raw);
+      rawValue = o.toolContent ?? o.raw;
       bodyHtml =
         o.toolContent !== undefined ? toolContentHtml(o.toolContent) : this.rowsHtml(o.rows);
     } else if (o.status === "invalid") {
@@ -424,7 +431,7 @@ export class ResultPanel {
             `<li>${escapeHtml(d.message)}${d.fileLevel ? "" : ` <span class="muted">(${escapeHtml(d.path)}:${d.start.line + 1}:${d.start.character + 1})</span>`}</li>`,
         )
         .join("")}</ul>`;
-      rawJson = safeJson(o.diagnostics);
+      rawValue = o.diagnostics;
     } else if (o.status === "declined") {
       bodyHtml = `<div class="placeholder">Cancelled. ${escapeHtml(o.target.name)} was not run.</div>`;
     } else if (o.status === "superseded") {
@@ -443,7 +450,7 @@ export class ResultPanel {
           ? ""
           : `<p>Error id: <code id="error-id" class="selectable">${escapeHtml(o.errorId)}</code></p>`;
       bodyHtml = `<div class="error">ERROR (${escapeHtml(o.phase)}): ${escapeHtml(o.message)}</div>${idHtml}`;
-      rawJson = safeJson({ phase: o.phase, message: o.message, errorId: o.errorId });
+      rawValue = { phase: o.phase, message: o.message, errorId: o.errorId };
     }
 
     this.panel.webview.html = `<!DOCTYPE html>
@@ -466,11 +473,11 @@ ${viewKitStyles}
 <body>
 <div class="toolbar">
   <strong>${escapeHtml(resultTitle(this.outcome))}</strong>
-  <button id="raw" type="button">${this.showRaw ? "Show rows" : "Show raw JSON"}</button>
+  <button id="raw" type="button">${this.showRaw ? "Show rows" : "Show the raw result"}</button>
 </div>
 ${bannerHtml}
 <div class="pane">
-${this.showRaw ? `<pre>${escapeHtml(rawJson)}</pre>` : bodyHtml}
+${this.showRaw ? renderToHtml(renderValueView(rawValue, { copy: false })) : bodyHtml}
 </div>
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
@@ -520,16 +527,6 @@ function toolContentHtml(content: readonly { type: string; text: string }[]): st
   return content
     .map((c) => `<pre>${escapeHtml(c.text === "" ? `(${c.type} content)` : c.text)}</pre>`)
     .join("\n");
-}
-
-function safeJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? "null";
-  } catch (err) {
-    // A cycle cannot come out of protojson, but the raw-JSON toggle must never
-    // be the thing that takes the panel down.
-    return `(not serialisable: ${err instanceof Error ? err.message : String(err)})`;
-  }
 }
 
 // The chrome both panels share. Kept as one string rather than duplicated so
