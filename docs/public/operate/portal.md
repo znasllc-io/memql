@@ -214,9 +214,16 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS=https://cockpit.example.com,...
    ```
 
-   Do **not** use `*` here: identity's CORS middleware emits
-   `Access-Control-Allow-Credentials: true` alongside it, a combination
-   browsers reject outright for credentialed requests.
+   `*` is **refused** here (memql#3716). Identity's CORS middleware emits
+   `Access-Control-Allow-Credentials: true` on every match, so a wildcard would
+   grant credentialed cross-origin read access to every origin on the internet;
+   browsers reject the pair anyway, but identity no longer relies on that. List
+   the origins.
+
+   This env var is the **bootstrap** half of the allowlist. An origin that
+   belongs to a customer's own website is granted per registered OAuth client
+   instead, and takes effect with no identity restart -- see
+   [identity-service.md](auth/identity-service.md#cross-origin-access-cors).
 
 ### Cross-origin XHR, or a same-origin proxy
 

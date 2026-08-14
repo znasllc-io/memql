@@ -3006,6 +3006,7 @@ message IdentityAdminMsg {
     UpdateClusterSettingsRequest update_cluster_settings = 15;
     IssueEnrolmentLinkRequest issue_enrolment_link = 16;
     RevokeEnrolmentLinkRequest revoke_enrolment_link = 17;
+    SetOAuthClientCorsOriginsRequest set_oauth_client_cors_origins = 18;
   }
 }
 
@@ -3157,4 +3158,37 @@ message IssueEnrolmentLinkRequest {
 message RevokeEnrolmentLinkRequest {
   // The v1:identity:enrolmentToken row id.
   string enrolment_token_id = 1;
+}
+
+// SetOAuthClientCorsOriginsRequest grants or revokes CREDENTIALED cross-origin
+// access for one registered OAuth client (memql#3716) -- what makes a
+// customer's own website able to call this cluster without an env change and an
+// identity restart.
+//
+// It is on THIS envelope for the reason IssueEnrolmentLinkRequest is: it is a
+// trust decision about somebody else, behind the same owner/admin gate, the same
+// audit trail and the same refusal shape as the operations above. And it has to
+// be an explicit operation rather than a derivation, because the row it writes
+// is created at POST /register -- RFC 7591 dynamic client registration, which is
+// deliberately UNAUTHENTICATED and enabled by default. An allowlist derived from
+// that row's redirect_uris would let one anonymous POST buy cookie-bearing read
+// access to the auth endpoints.
+message SetOAuthClientCorsOriginsRequest {
+  // The v1:identity:oauthClient row id -- the public client_id issued at
+  // registration. A statically configured client (MEMQL_IDENTITY_REGISTERED_CLIENTS)
+  // has no row, and its origins belong in MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS.
+  string client_id = 1;
+
+  // The COMPLETE allowance, sent in full every time -- not an addition to what
+  // is already there, so an EMPTY list is how a grant is revoked and there is no
+  // second verb to fall out of step with this one.
+  //
+  // Each entry is a scheme, a host and an optional port, and nothing else: a
+  // path, query, fragment, trailing slash, userinfo or wildcard is refused with
+  // the offending entry named. Explicit origins rather than a "cors_allowed"
+  // boolean deriving them from redirect_uris, because RFC 8252 loopback
+  // redirects are NORMAL on this concept -- deriving would silently admit
+  // http://127.0.0.1 and hand every local process on somebody's machine
+  // cookie-bearing read access to identity.
+  repeated string origins = 2;
 }

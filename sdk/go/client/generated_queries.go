@@ -3233,6 +3233,23 @@ func OAuthClientByClientIdBuild(args OAuthClientByClientIdArgs) string {
 	return b.String()
 }
 
+// OAuthClientCORSGrants -- Returns every registered OAuth client carrying a non-empty granted CORS origin list.
+//
+// Bound concept: v1:identity:oauthClient (machine-readable: BoundConcepts["oAuthClientCORSGrants"] in generated_concepts.go).
+type OAuthClientCORSGrantsArgs struct {
+}
+
+// OAuthClientCORSGrants calls the engine query oAuthClientCORSGrants.
+func (qc *QueryClient) OAuthClientCORSGrants(ctx context.Context, args OAuthClientCORSGrantsArgs) (*Result, error) {
+	call := OAuthClientCORSGrantsBuild(args)
+	return qc.executeNamed(ctx, "oAuthClientCORSGrants", call)
+}
+
+func OAuthClientCORSGrantsBuild(args OAuthClientCORSGrantsArgs) string {
+	_ = args
+	return "query oAuthClientCORSGrants()"
+}
+
 // OutboundRequestsByStatus -- Outbound requests in a given delivery status, oldest first (memql#2521). The outbound worker drains 'pending' and 'retrying' through this; operators and products use it to audit delivery state. Bounded first page: the worker drains batches per poll, so a burst larger than one page simply takes extra polls.
 //
 // Bound concept: v1:platform:outboundRequest (machine-readable: BoundConcepts["outboundRequestsByStatus"] in generated_concepts.go).

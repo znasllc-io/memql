@@ -530,6 +530,55 @@ query oauthClient oAuthClientByClientId {
   shape   oauthClientFull
 }
 
+// ---- queries/v1/identity/oAuthClientCORSGrants.memql ----
+
+// oAuthClientCORSGrants - The admin-granted half of identity's CORS allowlist
+// ===========================================================================
+//
+// Read LIVE by component/identity/http/cors.go on a CORS miss against the
+// boot-time MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS list, which is what makes an
+// owner/admin grant take effect without an identity restart (memql#3716).
+//
+// WHY LIVE AND NOT A CDC-INVALIDATED CACHE. The write can land on a DIFFERENT
+// node than the middleware: the IdentityAdminMsg bridge is wired on every node
+// with an engine (app/transport.go), so an admin's grant may execute on `bff`
+// while cors() runs on `identity`. And the identity node is filtered OUT of
+// every mesh broadcast target list (component/node/eventbridge.go's
+// meshEventParticipants, memql#3380), so an invalidation event could not reach
+// it even on a channel that has a routing rule. A cache invalidated on this
+// concept's CDC feed would pass a single-node test and silently fail in the
+// 2-replica mesh. The middleware bounds the read rate with a short in-process
+// TTL window instead; correctness does not depend on it.
+//
+// `corsOriginsJSON != ""` is the canonical is-set idiom and EXCLUDES rows where
+// the field is absent (authoring rule 27), which is every client registered
+// before this field existed and every client registered since -- /register
+// writes no allowance. So the result set is exactly the rows a human granted.
+//
+// @unbounded rather than paged, and that is a correctness choice: truncating
+// this set silently un-allows a granted origin, which surfaces as a customer's
+// website breaking for no visible reason. The bound is human -- every row here
+// exists because an owner or admin performed one gated write.
+//
+// No caller scope -- the read runs on an UNAUTHENTICATED preflight, before any
+// caller exists to bind to (classifies as 'other' in the per-row-authz audit,
+// same as oAuthClientByClientId above).
+//
+// Arguments:
+//   none
+//
+// Returns:
+//   Every oauthClient row carrying a non-empty allowance, in
+//   oauthClientCORSGrant shape (the client id and the allowance, nothing else).
+//
+
+/// Returns every registered OAuth client carrying a non-empty granted CORS origin list.
+@unbounded("the admin-granted CORS allowlist -- bounded by owner/admin action, and truncating it would silently un-allow a granted origin")
+query oauthClient oAuthClientCORSGrants {
+  filter  corsOriginsJSON != ""
+  shape   oauthClientCORSGrant
+}
+
 // ---- queries/v1/identity/authSessionByPreviousRefreshTokenHash.memql ----
 
 // authSessionByPreviousRefreshTokenHash - Look up a session by the

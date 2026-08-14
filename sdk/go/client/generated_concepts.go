@@ -405,6 +405,7 @@ var BoundConcepts = map[string]string{
 	"numberByE164":                          "v1:telephony:number",
 	"numbersByPartition":                    "v1:telephony:number",
 	"oAuthClientByClientId":                 "v1:identity:oauthClient",
+	"oAuthClientCORSGrants":                 "v1:identity:oauthClient",
 	"outboundRequestsByStatus":              "v1:platform:outboundRequest",
 	"overrideById":                          "v1:healing:healedOverride",
 	"overridesForConstruct":                 "v1:healing:healedOverride",

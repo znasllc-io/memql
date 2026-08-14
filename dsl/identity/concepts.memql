@@ -144,6 +144,9 @@ concept deviceCode {
 /// like a static MEMQL_IDENTITY_REGISTERED_CLIENTS entry. Public clients only -- no secret is
 /// issued (token_endpoint_auth_method = none). Global scope: registration + token redemption are
 /// unauthenticated and must work without a partition context.
+/// Because registration is unauthenticated, NOTHING on a freshly-registered row may confer a
+/// privilege: corsOriginsJSON is the one field here an owner/admin has to write deliberately, and
+/// it is written by nothing on the /register path (memql#3716).
 @displayCard(primary="clientName", secondary="clientId", tertiary="tokenEndpointAuthMethod")
 concept oauthClient {
   clientId                string!  @description("Public OAuth client_id issued at dynamic registration (RFC 7591). Lookup key in /authorize + /oauth/token.")
@@ -153,6 +156,7 @@ concept oauthClient {
   responseTypes           string  @description("Joined response_types (default code).")
   tokenEndpointAuthMethod string  @description("Client auth method; public clients use none (no secret issued).")
   registeredAt            string  @description("RFC3339 registration time. Mirrors the row's createdAt intrinsic (createdAt is reserved and cannot be a payload field), kept explicit so the RFC 7591 client_id_issued_at can be re-derived without the row envelope.")
+  corsOriginsJSON         string  @description("JSON array of origins an owner/admin has granted credentialed CORS access for this client -- what makes a customer's own website able to call this cluster without an env change and a restart (memql#3716). EMPTY for every dynamically-registered client: /register is unauthenticated, so the allowance is a separate admin act on this row and a self-registered client cannot confer one on itself. Set only through IdentityAdminMsg / component/identity/adminops, and NEVER derived from redirectURIsJSON -- RFC 8252 loopback redirects are normal here (config.go implements it), so deriving would silently admit http://127.0.0.1 and hand every local process on somebody's machine cookie-bearing read access to identity. Entries are scheme + host + optional port and nothing else; '*' is refused on both the write and the read, because the CORS response always carries Access-Control-Allow-Credentials.")
 }
 
 /// Bearer-token session record. One row per access token issued by the identity service's

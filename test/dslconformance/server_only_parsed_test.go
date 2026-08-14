@@ -268,6 +268,27 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// wire and is unchanged. Sole caller: component/identity/store.go, which
 		// stamps auth.ContextWithInternalOrigin.
 		{Path: "identity/queries.memql", Name: "signInIdentitiesForUser"}: true,
+		// memql#3716. The write that grants an OAuth client credentialed CORS
+		// access to identity's cookie-bearing auth endpoints.
+		//
+		// actor.userId scoping does not merely fail here, it names NOBODY: a
+		// v1:identity:oauthClient row has no owning user at all. It is minted by
+		// an unauthenticated stranger at POST /register (RFC 7591 dynamic client
+		// registration), so there is no owner field for actor.userId to be
+		// compared against and a self-scoped filter would match zero rows for
+		// every caller -- including the owner or admin the surface exists for.
+		//
+		// Which leaves the shape memql#2991 found on updateUser: a
+		// caller-supplied target id plus a caller-supplied value, on a field
+		// that decides who may read authenticated responses cross-origin.
+		// Client-reachable, any authenticated writer could grant their own
+		// origin over the ordinary mutation surface and the owner/admin gate in
+		// component/identity/adminops would be decorative. Its one caller is
+		// that package, which authorizes first and then stamps internal origin
+		// (asserted behaviourally by adminops/cors_test.go's
+		// TestSetCORSOriginsStampsInternalOrigin, so the gate cannot break the
+		// surface it protects).
+		{Path: "identity/mutations.memql", Name: "setOAuthClientCORSOrigins"}: true,
 	}
 	for k := range want {
 		if !set[k] {
