@@ -245,3 +245,39 @@ func TestEvaluateRouting_BlockTakesPrecedence(t *testing.T) {
 		t.Error("block rule should take precedence over forward rule")
 	}
 }
+
+// TestEvaluateRouting_SiteEdgeInvalidationBroadcast pins the cross-node
+// correctness guarantee for the site edge's resolver cache (memql#3714, Task
+// 9): a v1:platform:site write must reach EVERY edge replica's own
+// process-local cache (component/edge/resolve.go), not just the replica that
+// handled the write. A single-node green test would not catch a missing
+// forward -- each replica's Resolver cache is independent.
+//
+// Both created and updated forward: createSite is an insert(), while
+// updateSiteBundle / updateSiteStatus (the deploy/rollback and
+// draft/live/disabled transitions) go through update(). deleted is
+// deliberately NOT asserted here -- there is no deleteSite mutation in the
+// DSL today, so asserting a forward rule for it would pin behaviour nothing
+// exercises.
+func TestEvaluateRouting_SiteEdgeInvalidationBroadcast(t *testing.T) {
+	rules := defaultRoutingRules()
+
+	for _, topic := range []string{
+		"graph.node.created.v1:platform:site",
+		"graph.node.updated.v1:platform:site",
+	} {
+		d := evaluateRouting(rules, topic)
+		if !d.Forward {
+			t.Errorf("topic %q must forward cross-node so every edge replica invalidates its cache, but it does not", topic)
+		}
+		if !d.Broadcast {
+			t.Errorf("topic %q must broadcast to every edge replica, got targeted %q", topic, d.TargetType)
+		}
+	}
+
+	// A sibling platform concept must NOT ride this rule -- it is scoped to
+	// site, not to the whole v1:platform:* namespace.
+	if d := evaluateRouting(rules, "graph.node.created.v1:platform:globalVariable"); d.Forward {
+		t.Error("graph.node.created.v1:platform:globalVariable must NOT be forwarded by the site invalidation rule (no wildcard on the concept segment)")
+	}
+}

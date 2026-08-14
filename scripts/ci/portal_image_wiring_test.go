@@ -17,18 +17,18 @@
 //
 //	Dockerfile                              -- the runtime COPYs from `portal-dist`
 //	scripts/lib/engine_build_args.sh        -- the LOCAL edge build selects portal-build
-//	.github/workflows/build-engine-images.yml -- the RELEASE build, once it carries an
-//	                                            edge entry (memql#3711 lands only the
-//	                                            local path; the release matrix has no
-//	                                            `edge` node yet)
+//	.github/workflows/build-engine-images.yml -- the RELEASE build's `edge` matrix
+//	                                            entry (memql#3711 landed only the
+//	                                            local path; memql#3714 added the
+//	                                            release matrix entry)
 //
 // Any one of them silently omits the bundle. The release one would be the
 // worst, because it is the path staging and production actually run and it
 // is not exercised by any pull-request lane -- which is exactly why this
-// guard also asserts the NEGATIVE today: nothing in the release matrix may
-// claim `portal-build` until an `edge` entry exists to receive it, because a
-// stray bff (or any other node) still carrying it would silently ship dead
-// weight for a bundle nothing serves.
+// guard also asserts the NEGATIVE: nothing in the release matrix other than
+// `edge` may claim `portal-build`, because a stray bff (or any other node)
+// still carrying it would silently ship dead weight for a bundle nothing
+// serves.
 //
 // # Scope
 //
@@ -170,17 +170,16 @@ func TestLocalEdgeBuildSelectsThePortalStage(t *testing.T) {
 	}
 }
 
-// The RELEASE build path must agree with the local one -- once it carries an
-// `edge` entry. It does not yet (memql#3711 lands only the local build path
-// and the DSL/serving side; wiring the edge node type into the release image
-// matrix is a later task), so this asserts the invariant FORWARD-compatibly
-// rather than requiring infrastructure this change does not add: an `edge`
-// entry, if present, must select portal-build; every OTHER entry -- bff
-// included -- must select portal-skip. That still catches the two failure
-// modes that matter today: the bff silently keeping the stage it no longer
-// serves, and any node other than edge picking it up by accident. This is
-// the one no pull-request lane exercises, so a static assertion is the only
-// signal before staging.
+// The RELEASE build path must agree with the local one (memql#3714 wires the
+// `edge` entry into the release image matrix; #3711 landed only the local
+// build path and the DSL/serving side). The matrix must carry an `edge` entry
+// selecting portal-build; every OTHER entry -- bff included -- must select
+// portal-skip. That catches the three failure modes that matter: the bff
+// silently keeping the stage it no longer serves, any node other than edge
+// picking it up by accident, and the edge entry itself going missing or
+// losing its portal-build selection on some future edit. This is the one no
+// pull-request lane exercises, so a static assertion is the only signal
+// before staging.
 func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 	raw := readRepoFile(t, ".github/workflows/build-engine-images.yml")
 
@@ -223,6 +222,7 @@ func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 			portalDistStageArg)
 	}
 
+	sawEdge := false
 	for _, entry := range job.Strategy.Matrix.Include {
 		node, portal := entry["node"], entry["portal"]
 		// An absent key renders as the empty string in `FROM ${VAR}`, which is
@@ -236,6 +236,7 @@ func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 			continue
 		}
 		if node == "edge" {
+			sawEdge = true
 			if portal != portalBuildStage {
 				t.Errorf("the edge matrix entry selects portal stage %q, want %q. The edge is "+
 					"the node that serves the portal (site #1, memql#3711); any other value "+
@@ -252,10 +253,16 @@ func TestReleaseBuildSelectsThePortalStageOnlyForTheEdge(t *testing.T) {
 				node, portal, portalSkipStage)
 		}
 	}
-	// No requirement that an `edge` entry exists: the release matrix does not
-	// carry one yet (a later task adds it alongside the rest of the edge
-	// node's deploy wiring). The negative assertion above -- nothing else may
-	// claim portal-build -- is what this guard can enforce today.
+	// The release matrix MUST carry an `edge` entry (memql#3714): without one,
+	// staging and production run every node type EXCEPT the one that serves
+	// the portal, and nothing above would catch its quiet disappearance --
+	// the loop just would not have anything to check.
+	if !sawEdge {
+		t.Error("the release matrix declares no `edge` entry. The edge is the node that " +
+			"serves the portal (site #1, memql#3711) and staging/prod images must come from " +
+			"the build server (CLAUDE.md); without this entry the edge cannot be deployed " +
+			"above local.")
+	}
 }
 
 func keysOf(m map[string]bool) []string {

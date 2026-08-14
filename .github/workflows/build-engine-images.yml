@@ -73,14 +73,12 @@ jobs:
         # Portal bundle from (memql#3314). The portal is site #1, served by
         # the edge (component/edge, memql#3711) -- component/portal, which
         # used to serve it from the bff, is retired. Every entry here takes
-        # `portal-skip`, an empty directory, and never pulls the Node image;
-        # there is no `edge` entry in this matrix yet (the edge node type's
-        # release-image wiring is a later task), so nothing in THIS workflow
-        # carries the bundle to staging/production right now -- the local
-        # build path (scripts/lib/engine_build_args.sh) already does, for
-        # `make dev NODE=edge`. Set on every entry rather than defaulted,
-        # because `FROM ${PORTAL_DIST_STAGE}` cannot take an empty string and
-        # a missing matrix key renders as one.
+        # `portal-skip`, an empty directory, and never pulls the Node image,
+        # EXCEPT `edge` below, which takes `portal-build` -- it is the only
+        # node type that serves the bundle, so it is the only one that pays
+        # for the Node stage that builds it (memql#3714). Set on every entry
+        # rather than defaulted, because `FROM ${PORTAL_DIST_STAGE}` cannot
+        # take an empty string and a missing matrix key renders as one.
         include:
           # identity: CGO-free; matches build_one (no --target -> the
           # Dockerfile's last stage). voice: CGO + the voice-runtime stage.
@@ -127,6 +125,14 @@ jobs:
             cgo: "0"
             target: ""
             portal: portal-skip
+          # edge: serves every hosted site, including the portal (site #1,
+          # memql#3711) -- the only node type that takes portal-build, so
+          # staging/prod carry the same bundle the local build path already
+          # does (memql#3714).
+          - node: edge
+            cgo: "0"
+            target: ""
+            portal: portal-build
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

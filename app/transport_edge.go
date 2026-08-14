@@ -64,6 +64,14 @@ const defaultSiteCacheTTL = 30 * time.Second
 // #3712. A Handler built with an empty APITarget refuses that prefix for
 // every site (see handler.go's serveAPI dispatch), which is what an edge
 // deployed without MEMQL_EDGE_API_TARGET falls back to.
+//
+// Also wires SiteInvalidationSubscriber (Task 9, #3714) onto a.Dependencies:
+// the site row is written wherever an admin surface writes it, and read on
+// EVERY edge replica's own process-local resolver cache, so the TTL alone is
+// a backstop -- see resolve.go's own comment on NewResolver and
+// component/edge/invalidation_subscriber.go. Appended rather than Start()'d
+// directly, the same shape observe.NewCodeProfileSubscriber uses in
+// app/engine.go -- the app bootstrap starts every registered Dependency.
 func (a *App) mountEdgeEndpoints() {
 	executor := edge.NewEngineExecutor(&EdgeEngineAdapter{Engine: a.engine})
 	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv(a.Logger))
@@ -76,6 +84,8 @@ func (a *App) mountEdgeEndpoints() {
 	})
 
 	a.handleRoute("/", handler)
+
+	a.Dependencies = append(a.Dependencies, edge.NewSiteInvalidationSubscriber(a.Logger, a.eventBus, resolver))
 }
 
 // edgeAPITargetFromEnv resolves MEMQL_EDGE_API_TARGET -- the bff's

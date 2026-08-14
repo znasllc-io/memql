@@ -22,6 +22,13 @@ owner: znas
 > inert. Both are stale — see "What the docs get wrong" at the bottom. That
 > staleness is tracked as memql#3305; this note works around it rather than
 > fixing those pages.
+>
+> **Update (memql#3700 D12): parked, not stale.** The cluster front-door
+> design chose per-cluster-per-customer as the isolation model (D1 — one
+> memQL cluster per customer) rather than a shared-cluster multi-tenant
+> registry. `v1:identity:account` stays exactly where this note left it —
+> inert, not removed — and §6(a)/(b)/(c) below are PARKED, not scheduled:
+> nothing there needs building unless that isolation model changes.
 
 ---
 
