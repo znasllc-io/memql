@@ -9,8 +9,10 @@ import (
 	"strings"
 )
 
-// Options configures a Handler. APITarget is consumed in Task 7; a Handler
-// built without it simply refuses /_memql/* for every site.
+// Options configures a Handler. APITarget names the bff's plain-HTTP address
+// (e.g. "http://bff-http:8085") that serveAPI (proxy.go) reverse-proxies
+// /_memql/* to; a Handler built without it simply refuses /_memql/* for
+// every site.
 type Options struct {
 	Resolver  Resolver
 	Opener    BundleOpener
@@ -97,20 +99,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	noCache(w)
-	http.NotFound(w, r)
-}
-
-// serveAPI answers requests under apiPrefix ("/_memql/*"). Task 7 (#3712)
-// replaces this body with a reverse proxy to apiTarget; until that lands --
-// and for any site that has not opted in via APIProxy -- the prefix is
-// refused outright rather than falling through to static-file resolution,
-// because a path reserved for a site's API must never be servable as a file.
-func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
-	if !site.APIProxy || h.apiTarget == "" {
-		http.NotFound(w, r)
-		return
-	}
-	// TODO(#3712): reverse proxy the request to h.apiTarget.
 	http.NotFound(w, r)
 }
 
