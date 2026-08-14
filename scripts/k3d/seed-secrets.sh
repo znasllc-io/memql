@@ -11,7 +11,8 @@
 #   local-znas-tls         -- front-door TLS (the mkcert *.memql.localhost pair)
 #   memql-secrets          -- main app envelope (MEMQL_MASTER_KEY,
 #                             MEMQL_GENESIS_B64,
-#                             MEMQL_IDENTITY_SIGNING_KEY_B64, DATABASE_DSN, ...)
+#                             MEMQL_IDENTITY_SIGNING_KEY_B64,
+#                             MEMQL_NODE_BOOTSTRAP_TOKEN, DATABASE_DSN, ...)
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
 #   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
 #
@@ -35,6 +36,11 @@
 #     when the cluster has none (memql#3400), and REUSED verbatim thereafter --
 #     a re-run must never rotate it, because rotation invalidates every live
 #     session and every minted mesh node token. See resolve_signing_key.
+#   - MEMQL_NODE_BOOTSTRAP_TOKEN (the shared secret identity mints class="node"
+#     JWTs against, and every leaf node presents to get one) is likewise
+#     GENERATED when the cluster has none and REUSED thereafter (memql#3784).
+#     Without it the cross-node event mesh never forms at all. See
+#     resolve_node_bootstrap_token.
 #
 # The Azurite connection string is always the well-known Azurite dev constant
 # (account: devstoreaccount1, key: Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq
@@ -187,6 +193,7 @@ CLUSTER_MASTER_KEY=""
 CLUSTER_GENESIS_B64=""
 CLUSTER_SIGNING_KEY_B64=""
 CLUSTER_SIGNING_KEY_CREATED_AT=""
+CLUSTER_NODE_BOOTSTRAP_TOKEN=""
 
 function load_cluster_secret_snapshot() {
     local state
@@ -243,6 +250,26 @@ function load_cluster_secret_snapshot() {
               -o 'jsonpath={.data.MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT}' 2>/dev/null || true)"
     if [ -n "$raw" ]; then
         CLUSTER_SIGNING_KEY_CREATED_AT="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+    fi
+
+    # The mesh bootstrap secret (memql#3784) gets the same fail-closed read as
+    # the three fields above, for a reason specific to how it is consumed:
+    # container environment is read ONCE, at container start. So minting a new
+    # token over a live one does not "rotate" anything gracefully -- it leaves
+    # every running pod presenting a secret identity no longer accepts, and the
+    # mesh stays down until something restarts all of them. `make secrets` does
+    # not restart pods.
+    #
+    # "I could not read it" must therefore not become "there is nothing there":
+    # that is memql#2958's lesson applied to the one field whose absence is
+    # indistinguishable, from here, from a value we simply failed to fetch.
+    raw="$(kubectl get secret memql-secrets --namespace="$NAMESPACE" \
+              -o 'jsonpath={.data.MEMQL_NODE_BOOTSTRAP_TOKEN}' 2>/dev/null)" \
+        || cap_fail 5 "memql-secrets exists but its MEMQL_NODE_BOOTSTRAP_TOKEN could not be read; refusing to overwrite it blind. Minting a fresh token over the one the running mesh is using breaks every peer connection until all pods restart."
+    if [ -n "$raw" ]; then
+        CLUSTER_NODE_BOOTSTRAP_TOKEN="$(trim_space "$(printf '%s' "$raw" | b64_decode 2>/dev/null || true)")"
+        [ -n "$CLUSTER_NODE_BOOTSTRAP_TOKEN" ] \
+            || cap_fail 5 "memql-secrets holds a MEMQL_NODE_BOOTSTRAP_TOKEN that could not be base64-decoded; refusing to overwrite it blind."
     fi
 }
 
@@ -514,6 +541,90 @@ function resolve_signing_key() {
 }
 
 #=============================================================================
+# RESOLVE NODE BOOTSTRAP TOKEN (memql#3784)
+#=============================================================================
+
+# WHY THIS EXISTS. Every leaf node authenticates its outbound NodeService.Stream
+# with a class="node" JWT it mints from identity's /node/bootstrap, presenting
+# this shared secret to prove it may. Nothing supplied that secret locally, so:
+#
+#   - identity read an empty MEMQL_NODE_BOOTSTRAP_TOKEN into
+#     Cfg.NodeBootstrapToken and answered every mint request
+#     `503 bootstrap_disabled`;
+#   - every leaf node found nothing to mint WITH, so it dialled its peers with
+#     no Authorization header and was refused `Unauthenticated` -- permanently,
+#     on a 30s reconnect loop.
+#
+# The whole cross-node event mesh therefore never formed on a local cluster:
+# component/node/routing.go's forward rules delivered nothing, and the
+# cross-node invariant test/clustere2e exists to protect could not be exercised
+# at all. A green single-node test was the only kind available, which is the
+# false signal CLAUDE.md's "multi-node is the DEFAULT" section is about.
+#
+# This is the same shape as the identity signing seed (memql#3400) and gets the
+# same treatment, because it is the same class of thing: a cluster-internal
+# shared secret that staging and prod receive from ESO/Key Vault and local
+# received from nothing. The SHAPE is identical everywhere -- one value,
+# delivered through memql-secrets, read by every node via envFrom; only the
+# VALUE is local. That is env parity, not a local special case.
+
+# NEVER echoed. Anyone holding this value can mint a class="node" JWT for any
+# node type in the mesh.
+#
+# Hex rather than base64 because it travels in an `Authorization: Bootstrap
+# <token>` header: 64 hex characters raise no question about '+', '/' or '='
+# surviving the trip, and the runtime imposes no format of its own.
+function generate_node_bootstrap_token() {
+    od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
+}
+
+RESOLVED_NODE_BOOTSTRAP_TOKEN=""
+RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE=""
+
+# Strict precedence: environment, then the token already in the cluster, then a
+# freshly generated one -- the same order as the master key and the signing seed.
+#
+# NOTHING VALIDATES THE VALUE'S SHAPE, deliberately. identity compares the
+# presented token against the configured one with subtle.ConstantTimeCompare
+# over raw bytes (component/identity/http/node_bootstrap.go), so there is no
+# format to conform to. A shape check here would invent a constraint the mesh
+# does not have and would reject a perfectly good secret handed to an operator
+# by Key Vault. Only emptiness is judged.
+#
+# Requires load_cluster_secret_snapshot to have run.
+function resolve_node_bootstrap_token() {
+    if [ -n "${MEMQL_NODE_BOOTSTRAP_TOKEN:-}" ]; then
+        local from_env
+        from_env="$(trim_space "$MEMQL_NODE_BOOTSTRAP_TOKEN")"
+        if [ -n "$CLUSTER_NODE_BOOTSTRAP_TOKEN" ] && [ "$CLUSTER_NODE_BOOTSTRAP_TOKEN" != "$from_env" ]; then
+            warn "MEMQL_NODE_BOOTSTRAP_TOKEN differs from the token currently in memql-secrets."
+            warn "  This run ROTATES the mesh bootstrap secret. Pods read their environment at"
+            warn "  start, so every peer connection stays refused until all nodes restart"
+            warn "  ('make dev' rolls them). Unset MEMQL_NODE_BOOTSTRAP_TOKEN to keep the existing one."
+        fi
+        RESOLVED_NODE_BOOTSTRAP_TOKEN="$from_env"
+        RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE="env"
+        return
+    fi
+
+    # The load-bearing branch, exactly as it is for the signing seed: `make
+    # secrets` runs on every `make up`, so a token regenerated per run would
+    # silently break a working mesh on a routine re-run.
+    if [ -n "$CLUSTER_NODE_BOOTSTRAP_TOKEN" ]; then
+        RESOLVED_NODE_BOOTSTRAP_TOKEN="$CLUSTER_NODE_BOOTSTRAP_TOKEN"
+        RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE="cluster"
+        return
+    fi
+
+    RESOLVED_NODE_BOOTSTRAP_TOKEN="$(generate_node_bootstrap_token)"
+    RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE="generated"
+    if [ -z "$RESOLVED_NODE_BOOTSTRAP_TOKEN" ]; then
+        cap_fail 5 "generating a node bootstrap token produced an empty value; /dev/urandom or od is not behaving as expected."
+    fi
+    info "generated a mesh bootstrap secret (identity mints node tokens against it; every node presents it)."
+}
+
+#=============================================================================
 # FRONT-DOOR TLS (local-znas-tls -- browser-trusted wildcard for the ingress)
 #=============================================================================
 
@@ -685,10 +796,12 @@ function seed_memql_secrets() {
     # Both values were resolved in main BEFORE any mutation -- see the note
     # there. This function only writes.
     local genesis_b64 master_key signing_key signing_key_created_at db_dsn db_direct_dsn
+    local node_bootstrap_token
     genesis_b64="$RESOLVED_GENESIS_B64"
     master_key="$RESOLVED_MASTER_KEY"
     signing_key="$RESOLVED_SIGNING_KEY_B64"
     signing_key_created_at="$RESOLVED_SIGNING_KEY_CREATED_AT"
+    node_bootstrap_token="$RESOLVED_NODE_BOOTSTRAP_TOKEN"
     # Database DSN: local in-cluster Postgres.
     # The connection string uses 'disable' sslmode because the local Postgres
     # container does not have TLS configured (dev only).
@@ -703,6 +816,7 @@ function seed_memql_secrets() {
         --from-literal="MEMQL_GENESIS_B64=$genesis_b64" \
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_B64=$signing_key" \
         --from-literal="MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT=$signing_key_created_at" \
+        --from-literal="MEMQL_NODE_BOOTSTRAP_TOKEN=$node_bootstrap_token" \
         --from-literal="MEMQL_DATABASE_DSN=$db_dsn" \
         --from-literal="MEMORY_NODES_DATABASE_DIRECT_DSN=$db_direct_dsn" \
         --from-literal="AZURE_BLOB_CONNECTION_STRING=$AZURITE_CONN" \
@@ -862,7 +976,7 @@ function main() {
 
     # Resolve EVERYTHING that can be rejected before the first mutation.
     #
-    # These three run in the main shell, not a $(...), for two reasons. The
+    # These run in the main shell, not a $(...), for two reasons. The
     # cheap one: they set globals. The load-bearing one: they can cap_fail, and
     # a bad MEMQL_MASTER_KEY must abort while the cluster is still untouched.
     # Previously resolution happened inside seed_memql_secrets -- the fourth
@@ -874,6 +988,7 @@ function main() {
     resolve_master_key
     resolve_signing_key
     resolve_signing_key_created_at
+    resolve_node_bootstrap_token
     resolve_genesis_b64
 
     seed_internal_ca
@@ -899,6 +1014,12 @@ function main() {
     # identity signing seed from one that minted or rotated it (memql#3400).
     # The seed itself is never emitted; only where it came from.
     cap_result_set     signingKeySource "$RESOLVED_SIGNING_KEY_SOURCE"
+    # env | cluster | generated -- same contract as the signing seed, and read
+    # for the same reason: "generated" on a cluster that was already running
+    # means the mesh bootstrap secret just changed under live pods, and they
+    # need a restart before peer connections recover (memql#3784). The token
+    # itself is never emitted; only where it came from.
+    cap_result_set     nodeBootstrapTokenSource "$RESOLVED_NODE_BOOTSTRAP_TOKEN_SOURCE"
     # existing | issued -- so a caller can tell a routine re-run from the run
     # that minted the front-door pair (memql#3384).
     cap_result_set     frontDoorTlsSource "$TLS_CERT_SOURCE"
