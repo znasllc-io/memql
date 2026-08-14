@@ -42,6 +42,7 @@ import * as vscode from "vscode";
 import { WebSocket as NodeWebSocket } from "ws";
 
 import { defaultClustersPath } from "../src/clusters/file.js";
+import { defaultRunsDir } from "../src/state/runLog.js";
 import { ClusterPresence, defaultEndpointProbe } from "../src/clusters/presence.js";
 import { ConnectionManager } from "../src/connection/manager.js";
 import type { AutomationTarget, RunTarget } from "../src/constructs/runnable.js";
@@ -339,6 +340,58 @@ smoke("a watcher fires for a path outside the workspace", async () => {
   } finally {
     watcher.dispose();
     stringWatcher.dispose();
+  }
+});
+
+smoke("the run-log directory is watched, so a run in flight repaints the tree", async () => {
+  await extension().activate();
+
+  // The Deployments tree's third refresh trigger, and the one most exposed to
+  // the B1 bug class above: unlike clusters.yaml and the receipt, ~/.memql/runs
+  // is a DIRECTORY that has never existed on a machine that has never run an
+  // install -- which is every machine the first time. A non-recursive watch of
+  // a missing directory cannot be established and, on the declared 1.91 floor,
+  // never recovers when the directory later appears. So activation has to
+  // create it, and only a real host can show whether it did.
+  const runsDir = defaultRunsDir();
+  assert.ok(
+    fs.existsSync(runsDir),
+    `${runsDir} does not exist after activation. The Deployments tree must create the watch base before calling createFileSystemWatcher, or a run in flight never repaints the tree -- and nothing throws when it does not.`
+  );
+
+  const runFile = path.join(runsDir, "20260814T120000Z-install-hostsmoke.json");
+  const watcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(vscode.Uri.file(runsDir), "*.json")
+  );
+  let fired = false;
+  watcher.onDidCreate(() => {
+    fired = true;
+  });
+  watcher.onDidChange(() => {
+    fired = true;
+  });
+
+  try {
+    // Written repeatedly for the reason the case above documents: the watcher
+    // is not established when createFileSystemWatcher returns, and a run log
+    // is rewritten per step anyway -- so this is also what the real write
+    // pattern looks like.
+    await waitFor(
+      `a RelativePattern watcher on ${runsDir} to fire`,
+      () => {
+        fs.writeFileSync(
+          runFile,
+          `{"version":1,"run":{"id":"20260814T120000Z-install-hostsmoke","instance":"local","kind":"install","startedAt":"2026-08-14T12:00:00Z","status":"running","items":[]}}\n`,
+          "utf8"
+        );
+        return fired;
+      },
+      30_000,
+      500
+    );
+  } finally {
+    watcher.dispose();
+    fs.rmSync(runFile, { force: true });
   }
 });
 

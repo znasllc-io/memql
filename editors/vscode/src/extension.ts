@@ -71,6 +71,11 @@ import {
 } from './constructs/runnable.js';
 import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { defaultReceiptPath } from './install/receipt.js';
+import { defaultRunsDir } from './state/runLog.js';
+import {
+  DEPLOYMENT_CONCEPT,
+  DEPLOYMENT_NODE_SPEC_CONCEPT,
+} from './state/deploymentHistory.js';
 import { resolveInstallRoot } from './install/root.js';
 import {
   AutomationRunner,
@@ -98,6 +103,7 @@ import {
   type RunConfig,
 } from './run/runConfig.js';
 import { ClustersTreeProvider, type ClusterNode } from './views/clustersTree.js';
+import { DeploymentsTreeProvider } from './views/deploymentsTree.js';
 import { ConceptsTreeProvider } from './views/conceptsTree.js';
 import { RunsTreeProvider, type RunsTreeNode } from './views/runsTree.js';
 import { AutomationRunPanel, type AutomationPanelHost } from './webview/automationPanel.js';
@@ -309,6 +315,87 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   watcher.onDidCreate(() => clustersRegistryChanged(clustersTree));
   watcher.onDidDelete(() => clustersRegistryChanged(clustersTree));
   context.subscriptions.push(watcher);
+
+
+  // The Deployments tree (memql#3737). Above Clusters in the container, because
+  // it answers the question an operator arrives with -- "what do I run, and at
+  // what version" -- while Clusters answers "what can I reach".
+  //
+  // Every collaborator is passed as a THUNK rather than a value: the connection
+  // and its query client both change without this view being told, and a
+  // captured `undefined` from activation time would leave the connected
+  // cluster's history permanently unreadable.
+  const deploymentsTree = new DeploymentsTreeProvider({
+    clustersPath,
+    receiptPath: defaultReceiptPath(),
+    presence: () => presence.get(),
+    connection: () => {
+      const state = connections?.state;
+      if (state === undefined || state.status === 'disconnected') return undefined;
+      return { clusterName: state.clusterName, connected: state.status === 'connected' };
+    },
+    // Deployment history is ORDINARY CONCEPT ROWS, read through the same
+    // browseConceptPage the concept browser uses -- no deploy-control bridge
+    // involved (memql#3311 records that decision). Issued as one pair so the
+    // records and their per-tier specs describe one instant.
+    readDeployments: () => {
+      const query = connections?.query;
+      if (query === undefined) return undefined;
+      return async () => {
+        const [deployments, specs] = await Promise.all([
+          browseConceptPage(query, DEPLOYMENT_CONCEPT, { pageSize: 200 }),
+          browseConceptPage(query, DEPLOYMENT_NODE_SPEC_CONCEPT, { pageSize: 200 }),
+        ]);
+        return { deployments: deployments.rows, specs: specs.rows };
+      };
+    },
+  });
+  context.subscriptions.push(
+    window.registerTreeDataProvider('memqlDeployments', deploymentsTree),
+    commands.registerCommand('memql.deployments.refresh', () => deploymentsTree.refresh()),
+    // Create deployment on a machine with NO local cluster is the install
+    // graph, which is the same run the "+" opened -- re-parented, not
+    // rewritten. Contributed on the absent row only; moving an INSTALLED
+    // instance to another tag is a different flow and lands with the instance
+    // page (#3739).
+    commands.registerCommand('memql.deployments.createDeployment', () => {
+      AddClusterPanel.show(context, presence, addClusterDeps(), 'install');
+    }),
+  );
+  // The connection decides a remote instance's version and its history, so a
+  // connect or a drop changes what this tree can say.
+  connections.onDidChangeState(() => deploymentsTree.refresh());
+  // The Deployments tree reads three files that change underneath it, all in
+  // ~/.memql and all outside any workspace -- so each needs a RelativePattern
+  // over an existing base directory, for the two reasons the clusters watcher
+  // above documents at length.
+  //
+  //   clusters.yaml       the instance list (the same file, a second reader)
+  //   install-receipt.json the local instance's version and domain
+  //   runs/               the local run log: one file per run, rewritten per
+  //                       step, so a run in flight repaints the tree as it goes
+  const runsDir = defaultRunsDir();
+  try {
+    fs.mkdirSync(runsDir, { recursive: true });
+  } catch {
+    // Same call as the clusters directory above: a home we cannot write is not
+    // worth failing activation over, and the tree still reads what is there.
+  }
+  const deploymentsWatchers = [
+    workspace.createFileSystemWatcher(
+      new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))
+    ),
+    workspace.createFileSystemWatcher(
+      new RelativePattern(Uri.file(clustersDir), path.basename(defaultReceiptPath()))
+    ),
+    workspace.createFileSystemWatcher(new RelativePattern(Uri.file(runsDir), '*.json')),
+  ];
+  for (const w of deploymentsWatchers) {
+    w.onDidChange(() => deploymentsTree.refresh());
+    w.onDidCreate(() => deploymentsTree.refresh());
+    w.onDidDelete(() => deploymentsTree.refresh());
+    context.subscriptions.push(w);
+  }
 
   const conceptsTree = new ConceptsTreeProvider(connections);
   context.subscriptions.push(
