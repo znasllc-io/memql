@@ -10,18 +10,33 @@
 # (xahn9ru4v6) via the MEMQL_DATABASE_DSN (transaction pooler) +
 # MEMORY_NODES_DATABASE_DIRECT_DSN (direct) keys in memql-secrets (#1925).
 #
-# The `memql-secrets` Secret is intentionally NOT listed here -- it carries
-# real values and is created out-of-band (see secret.example.yaml). Create it
-# BEFORE applying this kustomization so the pods can mount it. $POOLER_DSN is
-# the transaction-pooler string (tsdb_transaction:39578).
+# ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766). The `namespace: memql`
+# below is only the base's default; each overlay overrides it -- `overlays/prod`
+# to `memql-prod`, `overlays/staging` to `memql-staging` -- and kustomize's
+# namespace transformer rewrites both `metadata.namespace` on every resource
+# here AND `metadata.name` on namespace.yaml. That is why two environments need
+# no per-environment manifest.
 #
-#   kubectl apply -f deploy/k8s/namespace.yaml
-#   kubectl create secret generic memql-secrets -n memql \
+# WHAT THIS BUYS ONLY IF NOTHING BREAKS IT: every intra-mesh address below is a
+# BARE Service name (`identity:50061`, `bff-active:50058`), resolved by
+# same-namespace cluster DNS. A fully-qualified `<svc>.memql.svc.cluster.local`
+# anywhere in this base would still RESOLVE -- to the other environment's node
+# -- so it fails silently and in the worst direction. There is a render gate on
+# it (deploy/k8s/overlays/environments_test.go).
+#
+# The `memql-secrets` Secret is intentionally NOT listed here -- it carries
+# real values and is created out-of-band (see secret.example.yaml), PER
+# NAMESPACE. Create it BEFORE applying an overlay so the pods can mount it.
+# $POOLER_DSN is the transaction-pooler string (tsdb_transaction:39578); the
+# per-environment schema search path is NOT in this Secret -- it is a
+# committed, non-secret value in the overlay's environment.yaml.
+#
+#   kubectl create secret generic memql-secrets -n memql-staging \
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
 #     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
 #     --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
 #     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
-#   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699)
+#   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699); creates the namespace
 #
 # identity comes up first (runs the one-time migration + serves JWKS); the
 # other nodes' verifiers retry JWKS non-fatally until it is ready.

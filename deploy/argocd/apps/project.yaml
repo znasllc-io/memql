@@ -13,9 +13,19 @@ spec:
   description: memQL engine mesh on AKS (digest-pinned overlays)
   sourceRepos:
     - https://github.com/znasllc-io/memql.git
+  # THE TWO ENVIRONMENTS (epic memql#3748 / #3766). memql-prod and
+  # memql-staging are namespaces in THIS cluster, not a second estate; an
+  # Application whose destination namespace is missing from this list is
+  # rejected at sync, so both had to be named here in the same commit that
+  # added them. `memql` stays because the downstream product pack's own
+  # Application still reconciles into it.
   destinations:
     - server: https://kubernetes.default.svc
       namespace: memql
+    - server: https://kubernetes.default.svc
+      namespace: memql-prod
+    - server: https://kubernetes.default.svc
+      namespace: memql-staging
     - server: https://kubernetes.default.svc
       namespace: argocd
   # Cluster-scoped resources the mesh legitimately needs (none today beyond the

@@ -33,7 +33,9 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 K8S_DIR="$REPO_ROOT/deploy/k8s"
-NAMESPACE="memql"
+# Set from --env by namespace_for_env(); see there for why it is no longer a
+# constant.
+NAMESPACE=""
 
 #=============================================================================
 # OUTPUT HELPERS
@@ -59,21 +61,45 @@ Options:
     --live        Assert live cluster digests == the committed overlay digests
                   (needs a kubectl context to the env cluster).
     --env=ENV     Overlay to check (default: staging) -> deploy/k8s/overlays/ENV
+                  Also selects the namespace --live compares against:
+                  prod -> memql-prod, staging -> memql-staging, local -> memql.
+    --namespace=NS  Override that namespace (--live only).
     --help        Show this help.
 
 Exit: 0 = no drift; non-zero = drift / unpinned image / render failure.
 EOF
 }
 
+# namespace_for_env prints the namespace an environment's workloads run in.
+#
+# THIS USED TO BE THE CONSTANT `memql` FOR EVERY ENV, and that stopped being
+# true when staging and production became two namespaces in one cluster
+# (memql#3766). `--live --env=staging` was then comparing the staging overlay's
+# committed digests against pods in a namespace the staging overlay does not
+# deploy to -- so it reported either "converged" against somebody else's
+# workloads or nothing at all, which is the worst possible answer from a drift
+# detector. The overlay path and the namespace are two faces of one input, so
+# they are derived from one flag.
+function namespace_for_env() {
+    case "$1" in
+        prod)    printf 'memql-prod' ;;
+        staging) printf 'memql-staging' ;;
+        local)   printf 'memql' ;;
+        *)       printf 'memql-%s' "$1" ;;
+    esac
+}
+
 function parse_arguments() {
     MODE="rendered"
     ENV="staging"
     NORMALIZE_ARG=""
+    NAMESPACE_OVERRIDE=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --rendered) MODE="rendered"; shift ;;
             --live)     MODE="live"; shift ;;
             --env=*)    ENV="${1#*=}"; shift ;;
+            --namespace=*) NAMESPACE_OVERRIDE="${1#*=}"; shift ;;
             # Hidden: canonicalize a single image ref to stdout and exit.
             # Exposes normalize_imageref to the test harness (drift_check_test.go);
             # not part of the user-facing CLI, so it is absent from show_help.
@@ -83,6 +109,7 @@ function parse_arguments() {
         esac
     done
     OVERLAY_DIR="$K8S_DIR/overlays/$ENV"
+    NAMESPACE="${NAMESPACE_OVERRIDE:-$(namespace_for_env "$ENV")}"
 }
 
 #=============================================================================

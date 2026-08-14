@@ -469,7 +469,7 @@ single-process deployment.
 
 **Verify it.** `make status` reads `/.well-known/jwks.json` from every
 identity replica through the apiserver pod proxy and reports
-`identityKeysShared`. Run it after `make scale N=2`:
+`identityKeysShared`. Run it after `make scale N=2 ENV=local`:
 
 ```
 Identity litmus: JWKS keyset per identity replica (must be identical)

@@ -1,21 +1,110 @@
-# Placeholder overlay -- ENGINE-ONLY (decoupling P3). PROD IS A PLACEHOLDER:
-# there is no prod cluster / Argo CD app yet, so this overlay is declarative-only
-# (kept coherent with staging). It pins the seven engine mesh node images plus
-# the self-hosted media plane (livekit/sip/redis) by @sha256: digest. A product
-# runs on this surface via a downstream product overlay that adds the
-# deploy/k8s/components/dsl-bundle component and pins the {bundle digest, client
-# digest} alongside these engine digests; bff is a plain product-agnostic engine
-# node fronting that bundle, and the product OAuth client registration lives in
-# that product overlay too. When prod is stood up for real, set
-# prod-specific values (livekit NODE_IP = prod livekit-rtc LB IP, etc.) before
-# pointing an Argo CD app at it.
+# PRODUCTION overlay -- ENGINE-ONLY (decoupling P3).
+#
+# ONE CLUSTER, ONE ArgoCD, ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766).
+# This overlay and deploy/k8s/overlays/staging are the same file with different
+# numbers in it. Diff them: the differences are the namespace, the environment
+# ConfigMap's two values, the replica counts, and the image digests -- nothing
+# structural, because there is nothing structural left to differ. Staging and
+# production run the SAME engine images reconciled from the SAME base by the
+# same ArgoCD, and the only thing that separates their DATA is the schema search
+# path that arrives through environment.yaml.
+#
+# That satisfies CLAUDE.md's parity standard MORE completely than the
+# arrangement it replaces, not less: two overlay trees maintained in parallel
+# were the drift risk the standard exists to prevent, and one base with two
+# value sets is the standard's own prescription ("is this the shape of the
+# system (-> base/component, everywhere) or a value (-> overlay, per env)?").
+#
+# PROD IS STILL A PLACEHOLDER. There is no prod cluster yet, so the values below
+# that can only come from real prod infrastructure -- the livekit LB address,
+# the mcp image digest -- are documented fail-closed placeholders rather than
+# plausible-looking guesses. They are PRESENT, so the two overlays stay
+# structurally identical and a promote is a value edit; they are UNROUTABLE, so
+# reconciling this overlay before those values are real fails loudly instead of
+# half-working. Set them, and pin real digests, when prod is stood up.
+#
+# A product runs on this engine surface via a downstream product overlay that
+# adds the deploy/k8s/components/dsl-bundle component and pins the {bundle
+# digest, client digest} alongside these engine digests; bff is a plain
+# product-agnostic engine node fronting that bundle, and the product OAuth
+# client registration lives in that product overlay too.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: memql
+# The namespace is a VALUE, and kustomize's namespace transformer is what makes
+# one base serve two environments for free: it rewrites `metadata.namespace` on
+# every namespaced resource AND `metadata.name` on the Namespace object that
+# base/namespace.yaml declares. Nothing in base names a namespace in a string
+# it does not own -- every intra-mesh address is a bare Service name
+# (`identity:50061`, `bff-active:50058`), which resolves inside the pod's own
+# namespace -- so the two environments form two independent meshes with no
+# cross-talk and no per-environment manifest.
+namespace: memql-prod
 
 resources:
   - ../../base
+  # The two values that make this namespace an environment.
+  - environment.yaml
+
+patches:
+  # Replica counts, stated rather than inherited. Prod's numbers happen to match
+  # base's for most nodes, and restating them anyway is the point: the two
+  # overlays must differ only in VALUES, so a count that is inherited here and
+  # overridden there would be a structural difference wearing a number's
+  # clothes. Read this block against the staging twin -- same nodes, same order,
+  # different integers.
+  #
+  # ArgoCD ignores /spec/replicas on both Applications (see
+  # deploy/argocd/apps/memql-prod.yaml), so `make scale N=<n> ENV=prod` is a
+  # runtime override selfHeal will not revert, and these are the counts a
+  # reconcile returns to.
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  # voice-agent is a room DISPATCHER rather than a request-serving mesh node --
+  # one replica serves up to MEMQL_VOICE_MAX_ROOMS rooms concurrently -- so its
+  # count does not track the rest of the mesh. Two is supported (the dispatcher
+  # skips rooms that already hold a `-ga` participant), and raising it is a
+  # capacity decision, not part of standing this environment up.
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  # The self-hosted LiveKit server advertises this address to WebRTC clients.
+  # PLACEHOLDER: there is no prod livekit-rtc LoadBalancer, so there is no
+  # address to name. 0.0.0.0 is unroutable by design -- it keeps this overlay
+  # structurally identical to staging while making a premature reconcile fail
+  # visibly, which a plausible-looking wrong IP would not.
+  - target: { kind: Deployment, name: livekit }
+    patch: |
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: NODE_IP
+          value: "0.0.0.0"
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
@@ -30,14 +119,14 @@ images:
     digest: sha256:c68b33dd6fcd736a920b981555821f84498f2ec970d7a90692bb651568be9f9c
   - name: acrmemql.azurecr.io/memql-workbench
     digest: sha256:d3d849354d5615534ad74a090a42fa4b693727b9cd3dc6561aa890b5e92118d0
-  # memql-mcp (epic memql#1550) is in base, so this placeholder overlay must pin
-  # it too. PROD IS A PLACEHOLDER (no prod cluster yet) and the MCP node is a
-  # STAGING-only rollout for now -- this all-zeros digest only keeps the digest-pin
-  # gate green; it fails closed if ever reconciled. When prod is stood up for real,
-  # decide whether to expose MCP in prod (separate review) and pin a real digest.
+  # memql-mcp (epic memql#1550) is in base, so this overlay must pin it too. The
+  # MCP node is a STAGING-only rollout for now -- this all-zeros digest keeps
+  # the digest-pin gate green and fails closed if ever reconciled. When prod is
+  # stood up, decide whether to expose MCP in prod (separate review) and pin a
+  # real digest.
   - name: acrmemql.azurecr.io/memql-mcp
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  # Self-hosted LiveKit server (memql#1043) — upstream OSS image, digest-pinned.
+  # Self-hosted LiveKit server (memql#1043) -- upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4

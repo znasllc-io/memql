@@ -1,44 +1,106 @@
-# Staging overlay -- ENGINE-ONLY (decoupling P3). This overlay pins the seven
-# engine mesh node images (identity/cognition/voice/agent/planner/workbench/mcp)
-# plus the self-hosted media plane (livekit/sip/redis), each by @sha256: digest.
+# STAGING overlay -- ENGINE-ONLY (decoupling P3).
+#
+# ONE CLUSTER, ONE ArgoCD, ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766).
+# This overlay and deploy/k8s/overlays/prod are the same file with different
+# numbers in it. Diff them: the differences are the namespace, the environment
+# ConfigMap's two values, the replica counts, and the image digests. Staging is
+# not a second installation any more -- it is a second namespace in the one
+# cluster, reconciled from the same base by the same ArgoCD, its data separated
+# from production's by the schema search path in environment.yaml and by
+# nothing else.
+#
+# WHY THAT SEPARATION HAD TO BE THE CONNECTION. memQL has no tenancy dimension
+# in the actor envelope (a recorded finding, memql#3321; the partition dimension
+# that once did the job was retired in #56), so an environment boundary cannot
+# be a filter -- there is nothing in `actor.*` to filter on. Nor can it be
+# "shared data, separate artifacts": exercising a staging SPA performs
+# MUTATIONS, automations fire and agents write, and those land wherever the
+# connection points. The connection is the one place no code path can forget.
+#
+# COST SHAPE. Staging runs 1 replica per node type and is expected to spend most
+# of its life scaled to zero (`make scale N=0 ENV=staging`), which is what makes
+# a second environment cost storage rather than compute. ArgoCD ignores
+# /spec/replicas on this Application, so scaling to zero and back is a runtime
+# act selfHeal will not fight and no manual repair follows.
 #
 # A product runs on this engine surface via a downstream product overlay that
 # adds the deploy/k8s/components/dsl-bundle component (a data-only DSL bundle
 # image, mounted at MEMQL_DSL_PATH by an init-container) and pins the {bundle
 # digest, client digest} alongside these engine image digests. bff is a plain
 # product-agnostic engine node fronting that bundle -- there is no bff carrier.
-# The product OAuth client registration lives in that product overlay too; this
-# overlay is the engine's standalone deploy surface, and base carries only the
-# product-neutral cockpit OAuth client. The pack's ArgoCD Application reconciles
-# the product surface alongside this engine surface.
 #
 # Digests are cut on the GitHub build server (OIDC->ACR) and pinned here.
 # Release lockfiles are retired entirely: a release is captured by the digest
-# pins in the overlay (the engine legs here; a product overlay adds the
-# {bundle, client} legs), not by an on-disk lockfile.
+# pins in the overlay, not by an on-disk lockfile.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: memql
+# The namespace is a VALUE -- see the prod twin for why kustomize's namespace
+# transformer is what lets one base serve two environments with no
+# per-environment manifest and no cross-talk between the two meshes.
+namespace: memql-staging
 
 resources:
   - ../../base
+  # The two values that make this namespace an environment.
+  - environment.yaml
 
 patches:
-  - target:
-      kind: Deployment
-      name: livekit
+  # Replica counts, stated rather than inherited -- the same nodes in the same
+  # order as the prod twin, with different integers. One replica each, because
+  # staging exists to exercise the delivery path and the mesh's cross-node
+  # behaviour is what the local 2-replica parity cluster is for
+  # (`make up SERVERS=2` + `make scale N=2 ENV=local`).
+  #
+  # Scale to zero when idle with `make scale N=0 ENV=staging`; these are the
+  # counts a reconcile returns to when you scale it back.
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  # voice-agent is a room DISPATCHER rather than a request-serving mesh node --
+  # see the prod twin.
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  # The self-hosted LiveKit server advertises this address to WebRTC clients:
+  # the staging livekit-rtc LoadBalancer's external IP.
+  #
+  # NOTE: the automation-driven deploy cutover (#2115) is now the ONLY path --
+  # #2115 step 6 retired the synchronous Go apply and dropped the
+  # MEMQL_DEPLOY_AUTOMATION_DRIVEN flag, so the deploy pack is always anchored
+  # on the identity binary and Deploy/RollbackDeployment always kick off the
+  # lifecycle automations. No env patch is needed here anymore.
+  - target: { kind: Deployment, name: livekit }
     patch: |
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
           name: NODE_IP
           value: "20.246.247.180"
-  # NOTE: the automation-driven deploy cutover (#2115) is now the ONLY path --
-  # #2115 step 6 retired the synchronous Go apply and dropped the
-  # MEMQL_DEPLOY_AUTOMATION_DRIVEN flag, so the deploy pack is always anchored
-  # on the identity binary and Deploy/RollbackDeployment always kick off the
-  # lifecycle automations. No env patch is needed here anymore.
 
 images:
   - name: acrmemql.azurecr.io/memql-identity
@@ -57,6 +119,7 @@ images:
   # build server (#1581 wired it into build-engine-images + the release tooling).
   - name: acrmemql.azurecr.io/memql-mcp
     digest: sha256:8cd301fe1b84a8eb977d9b1a07bb566c2fad5e81c97afaf7bb37a2ca9aad1cd4
+  # Self-hosted LiveKit server (memql#1043) -- upstream OSS image, digest-pinned.
   - name: livekit/livekit-server
     newName: livekit/livekit-server
     digest: sha256:2c6869d2d5ff6c9c0166f47be1c92dad6928bfecfa5e4060a6ece48db8accfa3

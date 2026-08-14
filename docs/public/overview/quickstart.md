@@ -45,7 +45,7 @@ cluster up multi-node and scale the Deployments:
 
 ```bash
 make up SERVERS=2 AGENTS=1
-make scale N=2
+make scale N=2 ENV=local
 ```
 
 This brings up Postgres + TimescaleDB, identity, mcp, the product-neutral

@@ -1,0 +1,53 @@
+# The STAGING environment (epic memql#3748 / #3766).
+#
+# The twin of apps/memql-prod.yaml. Same repo, same base, same engine images --
+# a different overlay path, a different destination namespace, and auto-sync
+# instead of manual. Read the two side by side; there is nothing else to them.
+#
+# AUTO-SYNC HERE, MANUAL ON PROD. Staging exists to be reconciled without
+# ceremony: a merge to the overlay lands, `selfHeal` keeps the namespace pinned
+# to it, and `prune` removes what the overlay stopped declaring. Prod's
+# Application deliberately omits the `automated:` block so an operator triggers
+# every production sync. That difference is a POLICY value, not a difference in
+# how the two are deployed -- both reconcile the same base through the same
+# reconciler, which is the parity property this epic is protecting.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: memql-staging
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: memql
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/k8s/overlays/staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: memql-staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # The namespace is a resource in the reconciled set (base/namespace.yaml,
+      # renamed by the overlay's `namespace:` field), not a side effect of the
+      # sync option.
+      - CreateNamespace=false
+  ignoreDifferences:
+    # THE SCALE-TO-ZERO CONTRACT. Staging is expected to spend most of its life
+    # at zero replicas -- that is what makes the second environment cost storage
+    # rather than compute -- and it is brought back with
+    # `make scale N=1 ENV=staging`. With selfHeal on and /spec/replicas in the
+    # diff, Argo would scale it straight back up within a reconcile interval and
+    # scaling down would require suspending auto-sync every time. Excluding the
+    # field is what makes "scales to zero and back without manual repair" true.
+    #
+    # The overlay's committed counts still define what a fresh reconcile
+    # establishes; only the deliberate runtime override is exempt.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
