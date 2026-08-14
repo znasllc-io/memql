@@ -26,14 +26,18 @@ func (s *Service) SignatureHelp(source string, line, col int) *SignatureResult {
 		}
 	}
 
-	// 1. Check builtin functions first.
+	// 1. Builtin functions. Reached only for a name the wrapper table above does
+	// not own -- a name in BOTH is served there, with this reading appended as
+	// its second overload (see builtinSignature).
+	//
+	// This comment used to read "1. Check builtin functions first", which
+	// stopped being true when memql#3661 inserted step 0 above it. The stale
+	// word was load-bearing in the wrong direction: it is exactly what a reader
+	// checks when signature help returns something other than the builtin's
+	// own reading, and it told them to look somewhere else (memql#3779).
 	if def, ok := BuiltinFunctions[ctx.ParentFunc]; ok {
 		return &SignatureResult{
-			Signatures: []Signature{{
-				Label:         def.Signature,
-				Documentation: def.Doc,
-				Parameters:    def.Parameters,
-			}},
+			Signatures:      []Signature{builtinSignature(def)},
 			ActiveSignature: 0,
 			ActiveParameter: ctx.ArgIndex,
 		}
@@ -133,6 +137,29 @@ func relationshipWrapperSignatures(name string) ([]Signature, bool) {
 		},
 	}
 	if !entry.labelled {
+		// An unlabelled wrapper whose name is ALSO a builtin has a second real
+		// reading, and it is the builtin's. `contains` is the case and the
+		// reason the entry is unlabelled at all -- its own doc says so: "the
+		// two-argument form is already the substring search contains(text,
+		// substr)". Returning only the traversal reading dropped a grammar-
+		// backed arity that BuiltinFunctions already carries, with parameter
+		// docs, on the one name where the table itself records that the other
+		// arity means something else (memql#3779).
+		//
+		// Second rather than first: activeRelationshipSignature highlights
+		// index 1 past the first comma, and past a comma `contains` can ONLY be
+		// the two-argument form -- the traversal takes no label and no second
+		// argument. So the existing rule already picks the right reading with
+		// no change.
+		//
+		// DERIVED from the two tables rather than hand-listed, because a name
+		// in both always has both readings and offering one would be the same
+		// bug under a different name. Which names those are is pinned by
+		// TestWrapperBuiltinOverlapIsPinned, so a new collision arrives as a
+		// test diff to confirm rather than as a surprise.
+		if def, isBuiltin := BuiltinFunctions[name]; isBuiltin {
+			return []Signature{unscoped, builtinSignature(def)}, true
+		}
 		return []Signature{unscoped}, true
 	}
 
@@ -149,6 +176,18 @@ func relationshipWrapperSignatures(name string) ([]Signature, bool) {
 	// Unscoped first: it is the form every traversal predating memql#3656
 	// uses, and the one a reader should see by default.
 	return []Signature{unscoped, labelled}, true
+}
+
+// builtinSignature projects a BuiltinDef onto a Signature. Factored out
+// because two call sites build it -- the builtin branch of SignatureHelp and
+// the second overload of an unlabelled wrapper that is also a builtin -- and a
+// reader comparing the two should not have to check whether they agree.
+func builtinSignature(def BuiltinDef) Signature {
+	return Signature{
+		Label:         def.Signature,
+		Documentation: def.Doc,
+		Parameters:    def.Parameters,
+	}
 }
 
 // activeRelationshipSignature picks which reading to highlight. Past the first
