@@ -12,6 +12,7 @@
 //
 // Refs: #3477 #3463 #3401
 
+import { composeEndpointFromDomain } from "../connection/endpoint.js";
 import type { ClusterUpdate } from "../clusters/file.js";
 import type { ClusterConfig } from "../clusters/model.js";
 
@@ -60,7 +61,11 @@ export function installedClusterEntry(params: InstalledCluster): ClusterUpdate {
   return {
     name,
     domain,
-    endpoint: `api.${domain}:443`,
+    // THE ONE SPELLING of the `api.<domain>` convention (memql#3475). This was
+    // a private copy, which is the duplication that function exists to
+    // prevent: a front door whose port or prefix changed in one place and not
+    // the other is a cluster the tree dials at an address nothing serves.
+    endpoint: composeEndpointFromDomain(domain),
     local: true,
   };
 }
@@ -133,8 +138,12 @@ export async function completeInstallHandoff(
       ok: false,
       reachableAt: entry.endpoint ?? "",
       message:
-        `The cluster was installed and is reachable at ${entry.endpoint}, but it could not be ` +
-        `added to your cluster list: ${err instanceof Error ? err.message : String(err)}`,
+        // "its front door is" rather than "it is reachable at": this path is
+        // now also reached by a RECONNECT (memql#3741), which is offered for a
+        // cluster that is installed and NOT answering. The endpoint is a fact
+        // about the entry that was composed; reachability is not.
+        `The cluster is on this machine and its front door is ${entry.endpoint}, but it could ` +
+        `not be added to your cluster list: ${err instanceof Error ? err.message : String(err)}`,
     };
   }
 
