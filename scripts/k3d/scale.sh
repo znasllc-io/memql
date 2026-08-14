@@ -59,6 +59,7 @@ APP_DEPLOYMENTS=(
     planner
     workbench
     voice-agent
+    edge
 )
 
 SCALED_COUNT=0
