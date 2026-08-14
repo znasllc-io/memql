@@ -10,8 +10,9 @@ owner: znas
 # VS Code Runtime Panel
 
 The memQL extension's activity-bar panel connects VS Code to a running
-cluster: pick a cluster, browse every registered concept, and inspect
-rows without leaving the editor.
+cluster: pick a cluster, browse what that cluster has **defined**
+(Constructs) and what rows **exist** (Data), and run either without
+leaving the editor.
 
 Verifying a change to this panel: [VS Code Runtime Panel -- Manual Verification
 Checklist](vscode-runtime-panel-verification.md), which also states what the
@@ -210,11 +211,88 @@ repository and the inner development loop
 ([reproduce-staging-locally.md](../operate/reproduce-staging-locally.md)),
 while the page installs onto a machine that need not have one.
 
-## Concepts
+## Constructs
 
-The Concepts view lists every registered concept on the connected
-cluster, grouped by domain, read from the engine's own registry. A
-concept added to the DSL appears with no extension update.
+The Constructs view lists everything the connected cluster has **loaded**,
+grouped by kind and then by namespace, read from the engine's own
+registry. It answers what a `.memql` file cannot: what is actually
+running there, which is not necessarily what is in your checkout.
+
+A construct added to the DSL appears with no extension update, and a
+kind this extension has never heard of still renders -- under its own
+name, at the end of the list. A client outlives several engine releases,
+and a view that silently dropped what it did not recognise would
+disagree with the cluster it claims to describe.
+
+Selecting one opens its detail page: kind, namespace, origin, bound
+concept, and its arguments with types and flags. **Nothing on that page
+edits.** Editing happens in a `.memql` file, where the language server
+owns it; a second authoring path here would be a second answer to a
+question that already has one.
+
+### Origin, and finding the source
+
+| Origin | Meaning | Jump to source |
+|---|---|---|
+| `core` | The engine's embedded DSL tree | Opens the file, revealed at the signature -- when the file is in this workspace |
+| `bundle` | A product's DSL, mounted at `MEMQL_DSL_PATH` | Same, and the same caveat |
+| `promoted` | Lives in the cluster's database; **there is no file** | Nothing to open. The source is rendered on the page from what the cluster holds |
+
+The catalog reports a path relative to the **cluster's** tree, which is
+not obliged to be the checkout you have open -- for a remote cluster it
+usually is not. When the path does not resolve here the page says so and
+names it, rather than opening nothing.
+
+The `promoted` case is where an operator first meets the seeded-versus-trained
+distinction: a construct that exists on the cluster and in no repository.
+
+### Which kinds run, and why the rest do not
+
+**query, mutation, logic and tool** run from the detail page, through the
+same path a CodeLens run takes -- the same argument form, preflight,
+Result view and write confirmation. A mutation against a non-local
+cluster still asks for confirmation; browsing a catalog is not a quieter
+way to write to production.
+
+**An automation does not run from here.** It is fired by an event, so its
+form is decided by its trigger -- which payload modes to offer, which
+concept the row picker browses -- and the catalog does not carry one. A
+form missing the field that decides it would fire a real event on a real
+cluster with a payload nobody chose. Run it from its `.memql` file
+instead. (Carrying the trigger on the wire is tracked as memql#3805.)
+
+**The other eight kinds are not runnable, and that is settled rather than
+missing.** Each would need an execution semantic decided before a Run
+control could mean anything:
+
+| Kind | What "run it" would have to mean first |
+|---|---|
+| `spec`, `trait` | A predicate compiling to a SQL `WHERE` fragment or evaluating against the auth envelope. Running one alone means choosing rows to run it against -- which is a query. |
+| `shape` | A projection with no inputs and no return. |
+| `concept` | A schema. Browsing its rows is the Data view; "executing" it is undefined. |
+| `prompt` | A model call, so it needs a cost decision before it needs a control. |
+| `provider` | A vendor + model + auth record. |
+| `seed` | Writes fixture rows -- a mutation with different intent, and the intent is what would need deciding. |
+| `builtin` | The Go implementation behind a DSL name; reached through the tool or function that declares it. |
+
+The absence of a Run control is the statement. Nothing is drawn disabled.
+
+Design: [the Constructs view](../../superpowers/specs/2026-08-14-vscode-constructs-view-design.md).
+
+## Data
+
+The Data view lists every registered concept on the connected cluster,
+grouped by domain, read from the engine's own registry. A concept added
+to the DSL appears with no extension update.
+
+> **This view was called Concepts** until memql#3754, and the old name was
+> wrong from the start: it never showed a concept's definition, it showed
+> rows. Definitions are the Constructs view above -- and a concept is
+> itself a construct, which is what made the two names collide. Its
+> commands moved with it: `memql.concepts.refresh` and
+> `memql.concepts.open` are now `memql.data.refresh` and
+> `memql.data.open`. There is no alias, so a keybinding or workspace
+> `.vscode/` file naming the old ids needs updating.
 
 Click a concept to open its browser tab: rows on the left, detail on the
 right.
@@ -235,10 +313,25 @@ There is no concept-specific rendering anywhere in the panel. That is
 deliberate: it is what makes a newly declared concept work the day it is
 declared.
 
+### One value viewer, everywhere
+
+A row's detail, a run's result, and an automation trace's raw payload and
+per-step output all render through the **same** viewer -- collapsing,
+type-badged, filterable, and bounded so a payload too large to draw
+renders as much as its budget allows and says it stopped. None of these
+surfaces prints stringified JSON into a `<pre>`, and a guard test
+(`editors/vscode/test/surfaceGuards.test.ts`) fails the build if one
+starts to.
+
+It lives in `sdk/ts-viewkit`, which is also what the memQL portal renders
+through, so the two surfaces agree on what a value looks like rather than
+each deriving an answer.
+
 ## Beyond browsing
 
-Executing constructs from a CodeLens, running automations with a step
-trace, and driving deployments from the **Deployments** view have since
+Executing constructs from a CodeLens or from the **Constructs** catalog,
+running automations with a step trace, and driving deployments from the
+**Deployments** view have since
 landed alongside the views above. (Deployments replaced the Cluster tab in
 memql#3733: topology is cluster state and belongs to the portal, while what
 you operate and what you can reach belong here. The extension's README states

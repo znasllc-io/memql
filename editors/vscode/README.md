@@ -16,7 +16,7 @@ Cockpit uses). Works fully offline against local files -- no cluster, no auth.
   kind-filtered in-body invocation completion.
 - Hover documentation and signature help.
 
-## The four views, and which question each answers
+## The five views, and which question each answers
 
 An activity-bar panel connects the extension to a running cluster. It requires
 a trusted workspace, since it reads credentials and opens a network connection.
@@ -25,8 +25,16 @@ a trusted workspace, since it reads credentials and opens a network connection.
 |---|---|
 | **Deployments** | What do I operate, at what version, and what changed it |
 | **Clusters** | Which clusters can I reach, as whom |
-| **Concepts** | What rows exist |
+| **Constructs** | What is DEFINED on this cluster |
+| **Data** | What rows EXIST |
 | **Runs** | What have I run against a cluster |
+
+Constructs and Data are the two halves of one question, and keeping them apart
+is what the naming is for: a query is a definition, the rows it returns are
+data, and a *concept* is itself a construct. The view that browses rows was
+called Concepts until memql#3754 -- which was the wrong name from the start,
+since it never showed a concept's definition. It shows rows, so it is Data, and
+its commands moved with it: `memql.concepts.*` is now `memql.data.*`.
 
 ### The boundary
 
@@ -43,7 +51,7 @@ nobody has proposed yet:
 | Which clusters can I reach, as whom? | plugin -- Clusters |
 | Which pods run, which are orphaned, which tier is under-replicated | **portal** |
 | Integrations, identity, sites, accounts | **portal** |
-| What does this construct do, what rows exist | plugin -- Concepts / Runs |
+| What does this construct do, what rows exist | plugin -- Constructs / Data / Runs |
 
 **Topology used to be here and is not any more.** A pod grid, orphan verdicts
 and under-replica alarms are cluster state, the portal already draws them, and
@@ -169,6 +177,100 @@ both the page and `src/install/cli.ts` are callers of it, so there is no second
 run path to drift out of step.
 
 Operator-facing detail: [VS Code Runtime Panel](https://github.com/znasllc-io/memql/blob/main/docs/public/language/vscode-runtime-panel.md).
+
+## Constructs
+
+Everything the connected cluster has LOADED, grouped by kind and then by
+namespace, read from the engine's own registry. A construct added to the DSL
+appears with no extension update, and a kind this extension has never heard of
+still renders -- under its own name, at the end -- because a client is expected
+to outlive several engine releases and a view that silently drops what it does
+not recognise disagrees with the cluster it claims to describe.
+
+This is what a `.memql` file cannot tell you: **what is actually loaded there**,
+which is not the same as what is in your checkout.
+
+Selecting one opens its detail page -- kind, namespace, origin, bound concept,
+arguments with their types and flags, and the way back to its source.
+
+### Where a construct came from
+
+Three origins, and they are three different situations rather than three
+labels:
+
+| Origin | What it means |
+|---|---|
+| **core** | The engine's embedded DSL tree. |
+| **bundle** | A product's DSL, mounted at `MEMQL_DSL_PATH`. |
+| **promoted** | It lives in the cluster's database and **has no file at all**. |
+
+Jump-to-source has the same three answers. When the file is in your workspace
+it opens, revealed at the signature. When it is not, the page says so and names
+the path -- the catalog reports a path relative to the CLUSTER's tree, and a
+remote cluster is usually not the checkout you have open. When there is no file,
+the source is rendered on the page from what the cluster holds, labelled as
+living in the database. That last case is where a developer first meets the
+seeded-versus-trained distinction.
+
+### Running from the catalog
+
+**query, mutation, logic and tool** run from the detail page, through exactly
+the run path a CodeLens uses -- the same argument form, the same preflight, the
+same Result view, and the same write confirmation. Browsing a catalog is not a
+quieter way to write to production: a mutation against a non-local cluster
+still asks (memql#3309).
+
+**An automation does not**, and the page says why rather than leaving an
+unexplained gap. An automation is fired by an event, so its form is decided by
+its TRIGGER -- which payload modes to offer, which concept the row picker
+browses -- and `ListConstructs` does not carry one. A form missing the field
+that decides it would fire a real event on a real cluster with a payload nobody
+chose. Open it from its `.memql` file to run it. Tracked as memql#3805, which
+adds the trigger to the wire.
+
+**The other eight kinds -- spec, trait, prompt, seed, concept, shape, provider,
+builtin -- are not runnable, and that is a decision rather than a gap.** Each
+would need an execution semantic settled before a Run button could mean
+anything, and none of them has one:
+
+- a **spec** or **trait** is a predicate that compiles into a SQL `WHERE`
+  fragment or evaluates against the auth envelope; running one alone means
+  choosing rows to run it against, which is a query;
+- a **shape** is a projection with no inputs and no return;
+- a **concept** is a schema -- what "running" it would even be is undefined,
+  and browsing its rows is the Data view;
+- a **prompt** would spend money on a model call, so it needs a cost decision
+  before it needs a button;
+- a **provider** is a vendor record, a **seed** writes fixture rows, and a
+  **builtin** is the Go implementation behind a DSL name, reachable through the
+  tool or function that declares it.
+
+So the absence of a Run button is the statement. There are no disabled buttons
+here -- a control that cannot work is not drawn.
+
+**Nothing on this page edits.** Editing happens in a `.memql` file, where the
+language server owns it. A surface that could change a construct from here
+would be a second authoring path for something that already has one.
+
+Full rationale: [the Constructs view design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-vscode-constructs-view-design.md).
+
+## Data
+
+Every registered concept on the connected cluster, grouped by domain. Click one
+to browse its rows: the list on the left, the selected row's full nested shape
+on the right -- payload, provenance and intrinsics kept distinct, nothing
+flattened away. The list updates live as rows are created, updated and deleted,
+and **Load more** pages through the whole concept.
+
+There is no concept-specific rendering anywhere in the panel, deliberately: it
+is what lets a newly declared concept work the day it is declared. Rows are
+labelled through whatever `@displayCard` slots the concept declares and fall
+through to a stated contract when it declares none.
+
+Row values, run results and automation step output all render through **one**
+viewer, which collapses, badges types, filters, and stays bounded on a payload
+too large to draw. It lives in `sdk/ts-viewkit` so the portal renders values
+the same way.
 
 ## Install / update the extension locally
 
