@@ -30,14 +30,37 @@ import (
 // nil (static-only resolution -- used by tests and by code paths that
 // don't carry a Store handle); a nil store simply skips the DB fallback.
 func ResolveClient(ctx context.Context, cfg Config, store *Store, clientId string) *RegisteredClient {
+	c, _ := ResolveClientWithOrigin(ctx, cfg, store, clientId)
+	return c
+}
+
+// ResolveClientWithOrigin is ResolveClient plus the answer to WHERE the client
+// came from: selfRegistered is true when it was found in the DB-backed
+// oauthClient store rather than in the operator-configured static list.
+//
+// WHY THAT DISTINCTION IS WORTH RETURNING (memql#3794). The two sources carry
+// completely different trust. A static client was written into
+// MEMQL_IDENTITY_REGISTERED_CLIENTS by an operator. A store row was created by
+// whoever called POST /register -- unauthenticated by design, because the point
+// of RFC 7591 is completing the flow with no human present -- and it CHOSE ITS
+// OWN client_name, which is the string a person is then shown when asked to
+// approve access.
+//
+// This function has always known which branch it took and always discarded it,
+// so the consent page could not tell an operator-configured application from a
+// stranger's self-description, and everything downstream treated them alike.
+//
+// Callers that only need the redirect matcher keep using ResolveClient. This is
+// for the ones rendering something to a human.
+func ResolveClientWithOrigin(ctx context.Context, cfg Config, store *Store, clientId string) (client *RegisteredClient, selfRegistered bool) {
 	if clientId == "" {
-		return nil
+		return nil, false
 	}
 	if c := cfg.FindClient(clientId); c != nil {
-		return c
+		return c, false
 	}
 	if store == nil {
-		return nil
+		return nil, false
 	}
 	row, err := store.LookupOAuthClientByClientId(ctx, clientId)
 	if err != nil {
@@ -47,16 +70,16 @@ func ResolveClient(ctx context.Context, cfg Config, store *Store, clientId strin
 				slog.String("error", err.Error()),
 			)
 		}
-		return nil
+		return nil, false
 	}
 	if row == nil || row.ClientId == "" {
-		return nil
+		return nil, false
 	}
 	return &RegisteredClient{
 		ClientId:     row.ClientId,
 		RedirectURIs: row.RedirectURIs,
 		Name:         row.ClientName,
-	}
+	}, true
 }
 
 // ClientAllowsRedirectURI resolves clientId through ResolveClient (static
