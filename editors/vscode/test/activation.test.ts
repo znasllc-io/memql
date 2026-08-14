@@ -67,7 +67,7 @@ test('a missing memql-lsp does not take the runtime surface down with it', () =>
     'memqlClusters',
     'memqlDeployments',
     'memqlConstructs',
-    'memqlConcepts',
+    'memqlData',
     'memqlRuns',
   ]);
 });
@@ -85,8 +85,8 @@ test('the runtime commands are registered, so a cluster can be selected and conn
     'memql.clusters.disconnect',
     'memql.clusters.connection',
     'memql.clusters.openPortal',
-    'memql.concepts.refresh',
-    'memql.concepts.open',
+    'memql.data.refresh',
+    'memql.data.open',
     'memql.runs.refresh',
     'memql.runs.execute',
   ]) {

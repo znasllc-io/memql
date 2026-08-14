@@ -135,8 +135,8 @@
           "when": "isWorkspaceTrusted"
         },
         {
-          "id": "memqlConcepts",
-          "name": "Concepts",
+          "id": "memqlData",
+          "name": "Data",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -231,13 +231,13 @@
         "icon": "$(link-external)"
       },
       {
-        "command": "memql.concepts.refresh",
-        "title": "memQL: Refresh Concepts",
+        "command": "memql.data.refresh",
+        "title": "memQL: Refresh Data",
         "icon": "$(refresh)"
       },
       {
-        "command": "memql.concepts.open",
-        "title": "memQL: Open Concept"
+        "command": "memql.data.open",
+        "title": "memQL: Browse Concept Rows"
       },
       {
         "command": "memql.runs.refresh",
@@ -347,11 +347,11 @@
           "when": "isWorkspaceTrusted"
         },
         {
-          "command": "memql.concepts.refresh",
+          "command": "memql.data.refresh",
           "when": "isWorkspaceTrusted"
         },
         {
-          "command": "memql.concepts.open",
+          "command": "memql.data.open",
           "when": "false"
         },
         {
@@ -405,8 +405,8 @@
           "group": "navigation@1"
         },
         {
-          "command": "memql.concepts.refresh",
-          "when": "view == memqlConcepts",
+          "command": "memql.data.refresh",
+          "when": "view == memqlData",
           "group": "navigation@1"
         },
         {

@@ -41,9 +41,12 @@ const vscodeExtensionSrcDir = "../../editors/vscode/src"
 var vscodeImportAllowList = []string{
 	"auth/deviceCodeUi.ts",       // progress / clipboard / openExternal adapter over auth/deviceCode.ts
 	"constructs/lensProvider.ts", // CodeLensProvider adapter over constructs/runnable.ts
+	"constructs/decorations.ts",  // gutter + signature decoration + status bar, over state/training.ts
+	"constructs/trainingLens.ts", // CodeLensProvider adapter over state/training.ts
+	"constructs/readonlyDecorations.ts", // FileDecorationProvider + files.readonlyInclude adapter over constructs/readonly.ts
 	"extension.ts",               // activation, command registration, LSP client wiring
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/
-	"views/conceptsTree.ts",      // TreeDataProvider adapter over state/conceptsCache.ts
+	"views/dataTree.ts",          // TreeDataProvider adapter over state/conceptsCache.ts
 	"views/constructsTree.ts",    // TreeDataProvider adapter over state/constructCatalog.ts
 	"views/deploymentsTree.ts",   // TreeDataProvider adapter over state/deploymentsCatalog.ts
 	"views/runsTree.ts",          // TreeDataProvider adapter over run/runConfig.ts
@@ -215,6 +218,7 @@ func TestVSCodeImportGuardCoversTheLogicModules(t *testing.T) {
 		"connection/endpoint.ts",
 		"connection/manager.ts",
 		"clusters/connectionView.ts",
+		"constructs/catalogTarget.ts",
 		"constructs/signature.ts",
 		"clusters/portalUrl.ts",
 		"deploy/actions.ts",

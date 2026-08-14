@@ -87,7 +87,7 @@ UI (`component/identity/web`). `/.well-known/jwks.json` is mounted by
 | `POST /oauth/token` | none | Redeem an auth code, a refresh token, or a `device_code` for tokens |
 | `POST /auth/refresh` | refresh token | Rotate the refresh token |
 | `POST /auth/logout` | session | Revoke the current session |
-| `POST /register` | none | RFC 7591 dynamic client registration. Gated on `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` (default true) |
+| `POST /register` | none | RFC 7591 dynamic client registration. Gated on `MEMQL_IDENTITY_OAUTH_DCR_ENABLED` (**default false**, memql#3719); answers `403 registration_disabled` when off |
 | `POST /auth/webauthn/register/{begin,finish}` | Bearer JWT **or** `Authorization: Enrolment mql_enr_<...>` | Passkey registration (memql#3406, enrolment authorization memql#3408) |
 | `POST /auth/webauthn/login/{begin,finish}` | none -- this pair IS the authentication | Usernameless passkey login; ends in the same auth code a magic link produces (memql#3407) |
 | `POST /device/code` | none | RFC 8628 device authorization request (memql#3410). Answers `temporarily_unavailable` when no device-code store is wired |
@@ -195,8 +195,32 @@ per-origin control on identity, it belongs in the two sources above.
 
 `POST /register` is RFC 7591 dynamic client registration. It is **deliberately
 unauthenticated** -- the endpoint exists so that clients nobody pre-configured
-(claude.ai's "add custom connector", say) can self-register -- and it is enabled
-by default (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`).
+(claude.ai's "add custom connector", say) can self-register.
+
+**It is DISABLED by default** (`MEMQL_IDENTITY_OAUTH_DCR_ENABLED`, memql#3719).
+Enable it only on clusters that expose an MCP surface; everywhere else it is an
+unauthenticated write endpoint with no consumer. When off, `POST /register`
+answers `403 registration_disabled` and persists nothing.
+
+The reasoning, since "disabled by default" otherwise reads as mere caution:
+under one-cluster-per-customer most clusters route no `mcp.<domain>` at all, and
+their OAuth clients -- the portal, the Cockpit, the customer's own SPAs -- are
+known in advance and registerable through `MEMQL_IDENTITY_REGISTERED_CLIENTS`.
+Left on, the endpoint lets anyone who can reach identity create unbounded
+`v1:identity:oauthClient` rows and choose the `client_name` a human later
+approves on the consent screen. It was also one half of the CORS escalation in
+memql#3716 -- unauthenticated rows becoming an input to a *different* trust
+decision, which every future such decision would then have to remember.
+
+There is no middle setting. Approval-gated registration -- create the row, let
+an admin bless it before it grants anything, which is what memql#3716 does for
+CORS -- cannot work here, because the entire point of DCR is completing the flow
+with **no human present**. So it is one binary per cluster.
+
+Enable it on the identity node. The **mcp node warns at boot** when it serves
+the remote protocol head and cannot see the flag enabled, because the failure
+mode of forgetting is not an error anyone sees -- it is "claude.ai cannot add
+the connector", from a 403 the operator never reads.
 
 A row created that way carries **no** CORS allowance and cannot give itself one.
 Granting is a separate, explicitly authorized act on the same row, and the reason

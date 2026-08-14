@@ -38,6 +38,8 @@ import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import type { CatalogConstruct } from "../state/constructCatalog.js";
 import { renderConstructPage } from "./constructScreens.js";
+import { catalogRunTarget, offersRun, runUnavailableReason } from "../constructs/catalogTarget.js";
+import { COMMAND_RUN, COMMAND_RUN_WITH } from "../constructs/runnable.js";
 import { signatureLine } from "../constructs/signature.js";
 
 export class ConstructPanel {
@@ -121,8 +123,33 @@ export class ConstructPanel {
   private async onMessage(message: unknown): Promise<void> {
     if (message === null || typeof message !== "object") return;
     const { type } = message as { type?: unknown };
+    if (type === "run" || type === "runWith") {
+      await this.run(type === "runWith");
+      return;
+    }
     if (type !== "openFile") return;
     await this.openFile();
+  }
+
+  /**
+   * Runs the construct through the ONE run path.
+   *
+   * The same commands the CodeLens uses, taking the same `RunTarget` -- so the
+   * write confirmation, the supersession token, the preflight and the Result
+   * view are all the ones that already existed. A second run path here would
+   * be a second answer to "what ran, against which cluster", including a
+   * second write-confirmation path, which is the one thing memql#3309 exists
+   * to keep single.
+   */
+  private async run(withArguments: boolean): Promise<void> {
+    const target = catalogRunTarget(this.construct);
+    if (target === undefined) {
+      // Unreachable through the page, which renders no button in that case.
+      // Present because the webview channel is untrusted and a message naming
+      // an action the page never drew must not reach the run path.
+      return;
+    }
+    await vscode.commands.executeCommand(withArguments ? COMMAND_RUN_WITH : COMMAND_RUN, target);
   }
 
   private async openFile(): Promise<void> {
@@ -154,6 +181,8 @@ export class ConstructPanel {
     const body = renderConstructPage({
       construct: this.construct,
       fileInWorkspace: this.fileUri !== undefined,
+      offerRun: offersRun(this.construct),
+      runUnavailable: runUnavailableReason(this.construct),
       error: this.error,
     });
     this.panel.webview.html = `<!DOCTYPE html>

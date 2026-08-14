@@ -158,7 +158,7 @@ export class ConceptPanel {
     // ConceptPanelState's Latest guards, so loadPage()/selectRow()
     // calls started before this fire discard their result when they settle.
     // We then re-render the now-empty state and kick off a fresh load --
-    // ConceptsTreeProvider follows the same invalidate-on-every-state-change
+    // DataTreeProvider follows the same invalidate-on-every-state-change
     // policy for the same reason (concepts.memql is per-cluster too).
     //
     // The CDC subscription is tied to the OLD connection's socket, so it

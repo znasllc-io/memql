@@ -35,6 +35,14 @@ export interface ConstructPageInput {
    * broken. #3753 turns this on in the same change that makes it work.
    */
   offerRun?: boolean;
+  /**
+   * Why a construct the engine calls runnable is nonetheless not offered here.
+   *
+   * Said rather than left as an unexplained absence, for the one case an
+   * operator will otherwise read as a bug: an automation IS runnable, the tree
+   * says so, and the button is missing.
+   */
+  runUnavailable?: string;
   /** A failure this page produced, or "". */
   error: string;
 }
@@ -116,8 +124,12 @@ function actionsHtml(input: ConstructPageInput): string {
   if (input.construct.originPath !== "" && input.fileInWorkspace) {
     buttons.push(`<button class="secondary" type="button" data-act="openFile">Open the .memql file</button>`);
   }
-  if (buttons.length === 0) return "";
-  return `<div class="actions">${buttons.join("")}</div>`;
+  const note =
+    (input.runUnavailable ?? "") === ""
+      ? ""
+      : `<p class="notice">${escapeHtml(input.runUnavailable ?? "")}</p>`;
+  if (buttons.length === 0) return note;
+  return `${note}<div class="actions">${buttons.join("")}</div>`;
 }
 
 function argsHtml(construct: CatalogConstruct): string {
