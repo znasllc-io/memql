@@ -36,7 +36,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
 | Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
-| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2 ENV=local`) | **1** since memql#3766, scaled to 0 when idle (prod runs **2**) | equivalent -- and the local cluster is now the only place a developer can iterate against the 2-replica topology |
+| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**, matching prod; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width (memql#3766) |
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
@@ -129,7 +129,7 @@ make up
 
 # Multi-node (2 servers + 1 agent, for cross-node mesh testing):
 make up SERVERS=2 AGENTS=1
-make scale N=2 ENV=local
+make scale N=2
 
 # Clean slate (nuke + repave -- wipes the in-cluster DB by construction):
 make up-refresh
@@ -272,13 +272,13 @@ pod restart is purely at the pod level; ArgoCD still owns the Deployment spec.
 
 ```bash
 # Scale to 2 replicas per Deployment:
-make scale N=2 ENV=local
+make scale N=2
 
 # Litmus: unique MEMQL_NODE_ID per pod + one shared identity signing keyset:
 make status
 
 # Scale back to single-node:
-make scale N=1 ENV=local
+make scale N=1
 ```
 
 Because `deploy/k8s/base/` sets `MEMQL_NODE_ID` via `fieldRef: metadata.name`,
@@ -297,7 +297,7 @@ more than one replica:
    minted its OWN Ed25519 key, so a token issued by one is unverifiable by any
    node that fetched JWKS from the other: roughly half of all auth fails, and
    the rejection reads as an authentication error rather than a key problem.
-   That is memql#3400 -- `make scale N=2 ENV=local` walked straight into it before
+   That is memql#3400 -- `make scale N=2` walked straight into it before
    `make secrets` started seeding a shared `MEMQL_IDENTITY_SIGNING_KEY_B64`.
 
 A replica the litmus could not read is reported `UNKNOWN`, never as a pass.
@@ -350,7 +350,7 @@ with its justification.
 
 | # | Divergence | Local | Staging | Why acceptable |
 |---|---|---|---|---|
-| 1 | **Replicas (default)** | 1 per Deployment | 1 per Deployment since memql#3766 (0 when idle); prod runs 2 | Resource-constrained laptops locally; cost in staging, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2 ENV=local` / `ENV=staging`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
+| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment, matching prod (0 when idle) | Resource-constrained laptops locally; cost in staging, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2` / `ENV=staging`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
@@ -370,7 +370,7 @@ with its justification.
 
 ## Worked example: reproduce a cross-node mesh bug
 
-1. `make up SERVERS=2 AGENTS=1 && make scale N=2 ENV=local`.
+1. `make up SERVERS=2 AGENTS=1 && make scale N=2`.
 2. `make status` -- verify all pods show distinct `MEMQL_NODE_ID` values.
    If any share an id, stop: the mesh cannot reproduce cross-node bugs.
 3. Reproduce the scenario (e.g. send a chat message that triggers an assistant

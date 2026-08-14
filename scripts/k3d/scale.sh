@@ -62,7 +62,7 @@ source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "k3d.scale" "Scale all memQL app Deployments in one environment to a target replica count."
 cap_spec_param "replicas"  "replica count per Deployment (0 parks the environment)"
-cap_spec_param "env"       "environment to scale: prod | staging | local (default: prod)"
+cap_spec_param "env"       "environment to scale: local | staging | prod (default: local)"
 cap_spec_param "cluster"   "k3d cluster name"
 cap_spec_param "namespace" "k8s namespace; overrides the one --env resolves to"
 #=============================================================================
@@ -70,7 +70,17 @@ cap_spec_param "namespace" "k8s namespace; overrides the one --env resolves to"
 #=============================================================================
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
-ENVIRONMENT="prod"
+
+# DEFAULTS TO local, and the direction of that default is the safety property.
+# `make scale N=2` is the inner-loop command a developer types from memory
+# (CLAUDE.md documents it for cross-node mesh testing), so the habit is already
+# formed -- and a default of `prod` would silently point that habit at
+# production. Naming a remote environment is one word; mistyping nothing and
+# hitting prod is unrecoverable.
+#
+# memql#3766 originally specified `prod` as the default. Reversed on the repo
+# owner's call while that issue was landing, for the reason above.
+ENVIRONMENT="local"
 NAMESPACE=""
 
 # All Deployments the mesh runs, in every environment. Excludes postgres +
