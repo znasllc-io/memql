@@ -9,8 +9,13 @@
 // Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
 // state into typed status (pure mappers in status.go / overlay.go /
 // lockfile.go). Write RPCs go through the sanctioned action scripts
-// (scripts/release/promote.sh, `git revert`, `kubectl argo rollouts`)
+// (scripts/deploy/promote-overlay.sh, `git revert`, `kubectl argo rollouts`)
 // via the Executor boundary -- never ad-hoc `kubectl set image`.
+//
+// Every cluster address is per-ENVIRONMENT (environment.go): `memql-prod` /
+// `memql-staging` for both the namespace and the ArgoCD Application, since
+// epic memql#3748 / memql#3766 made staging and production two namespaces in
+// one cluster reconciled by one ArgoCD.
 //
 // Every write RPC is gated to owner/admin (#728) and emits an audit
 // event (success / failure / blocked). Read RPCs are NOT audited per
@@ -36,7 +41,19 @@ import (
 )
 
 // validEnvs is the set of environments the console operates on.
-var validEnvs = map[string]bool{"staging": true, "prod": true}
+//
+// DERIVED from environmentSurfaces (environment.go) rather than restated, so
+// "an env the console admits" and "an env the console knows how to address"
+// are the same set by construction. They were two independent literals until
+// memql#3769, which is the arrangement where a third environment gets accepted
+// by the argument check and then addressed as an empty namespace.
+var validEnvs = func() map[string]bool {
+	m := make(map[string]bool, len(environmentSurfaces))
+	for env := range environmentSurfaces {
+		m[env] = true
+	}
+	return m
+}()
 
 // Options configures NewService.
 type Options struct {
@@ -289,8 +306,23 @@ func (s *Service) emitAudit(
 // required set from the generated interface, so an RPC added later cannot
 // re-open the hole by being forgotten.
 
-// DeployStaging assembles + applies a release into the staging overlay
-// via promote.sh --env=staging.
+// DeployStaging assembled + applied a release into the staging overlay.
+//
+// IT NO LONGER HAS A MECHANISM, and says so rather than pretending. It ran
+// `scripts/release/promote.sh --env=staging`, which assembled the overlay from
+// an on-disk release lockfile (`releases/<version>.yaml`); the script left this
+// repository with the product deploy estate (992deb41) and lockfiles are
+// retired outright -- "a release is captured by the digest pins in the overlay,
+// not by an on-disk lockfile" (deploy/k8s/overlays/staging/kustomization.yaml).
+// Staging's digests are now cut on the GitHub build server and pinned into its
+// overlay directly.
+//
+// So this call has been failing since that removal, with `fork/exec
+// .../promote.sh: no such file or directory` -- an error naming a path and no
+// reason. Since memql#3769 it fails at RunPromote with a message that says
+// staging is promoted from nothing and why (executor.go). The RPC is left in
+// place because it is consumed cross-repo by the cockpit's Deploy Console and
+// the SDK; retiring the surface is owner-gated follow-on work (doc.go).
 func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingRequest) (*memqlv1.ActionResult, error) {
 	version := req.GetVersion()
 	act, err := s.authorize(ctx, "deploy_staging", map[string]any{"env": "staging", "version": version})
@@ -303,8 +335,17 @@ func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingR
 	return s.promoteRelease(ctx, act, "deploy_staging", "staging", version), nil
 }
 
-// Promote copies a validated staging release into the prod overlay
-// (digest copy, no rebuild) via promote.sh --env=prod.
+// Promote pins the production overlay's image digests to the ones staging is
+// running (digest copy, no rebuild) and lands that edit as ONE COMMIT.
+//
+// Both overlays live in THIS tree and are reconciled by ONE ArgoCD (epic
+// memql#3748), so a promote is a commit rather than a copy between two estates
+// -- which is also what makes the rollback a `git revert` of that one commit.
+//
+// A product's DSL bundle rides the same commit for the same reason: the bundle
+// is a data-only image mounted at MEMQL_DSL_PATH, so promoting it IS pinning
+// production to the digest staging runs. Trained constructs do NOT ride it --
+// see environment.go, which records why and what asserts it.
 func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*memqlv1.ActionResult, error) {
 	version := req.GetVersion()
 	act, err := s.authorize(ctx, "promote", map[string]any{"env": "prod", "version": version})
@@ -323,9 +364,14 @@ func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*me
 // E2.5, #2098) reduces deploycontrol toward the Executor effect boundary
 // without changing behavior: the call order, the persisted deployment
 // record (#1872; in_progress at start -> succeeded/failed on return), the
-// promote.sh invocation via the SAME Executor.RunPromote, and the single
+// promote invocation via the SAME Executor.RunPromote, and the single
 // audit event are byte-identical to the inlined form. The azure deploy
 // path is unchanged.
+//
+// What RunPromote DOES changed in memql#3769 (pin from the source overlay +
+// one commit, rather than shell out to a script that had been removed); the
+// sequence around it did not, which is why the parity test below still holds
+// it call-for-call.
 func (s *Service) promoteRelease(ctx context.Context, act actor, verb, consoleEnv, version string) *memqlv1.ActionResult {
 	// Persist the deployment record: write at deploy start (in_progress) so
 	// a record exists even if the process dies mid-rollout, then transition
@@ -438,10 +484,21 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeplo
 		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
 	}
 
+	// Resolved once, above every read below: the namespace the workloads run in
+	// and the Application that reconciles them are per-ENVIRONMENT since epic
+	// memql#3748 / memql#3766, not the single `memql` this used to name. The
+	// lookup cannot fail here -- validEnvs is derived from the same table -- but
+	// it is checked rather than assumed, because the failure mode of guessing is
+	// an empty namespace that reads as a healthy environment (environment.go).
+	surface, ok := SurfaceFor(env)
+	if !ok {
+		return nil, status.Errorf(codes.Internal, "deploy console: no cluster surface for env %q", env)
+	}
+
 	out := &memqlv1.DeploymentStatus{Env: env}
 
 	// Overlay (on-disk image authority) -> components + promoted version.
-	overlayPath := filepath.Join(s.repoRoot, "deploy", "k8s", "overlays", env, "kustomization.yaml")
+	overlayPath := filepath.Join(s.repoRoot, surface.OverlayDir, "kustomization.yaml")
 	overlayRaw, err := os.ReadFile(overlayPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "deploy console: read overlay %s: %v", overlayPath, err)
@@ -483,21 +540,25 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeplo
 	}
 
 	// Argo CD app status (best-effort: a kubectl failure leaves argocd nil).
-	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", "memql", "-o", "json"); aerr == nil {
+	// One ArgoCD, two Applications -- so the app NAME is the environment.
+	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", surface.ArgoApp, "-o", "json"); aerr == nil {
 		if argo, merr := MapArgoStatus(argoRaw); merr == nil {
 			out.Argocd = argo
 		}
 	}
 
-	// Rollouts.
-	if rolloutsRaw, rerr := s.exec.KubectlJSON(ctx, "-n", "memql", "get", "rollout", "-o", "json"); rerr == nil {
+	// Rollouts. Best-effort in the sense that a kubectl FAILURE leaves the field
+	// nil -- but note that a wrong namespace is not a failure: it is an empty
+	// list and exit 0, which is why this address is resolved rather than
+	// constant (environment.go).
+	if rolloutsRaw, rerr := s.exec.KubectlJSON(ctx, "-n", surface.Namespace, "get", "rollout", "-o", "json"); rerr == nil {
 		if rollouts, merr := MapRolloutList(rolloutsRaw); merr == nil {
 			out.Rollouts = rollouts
 		}
 	}
 
 	// Deploy gate (latest AnalysisRun).
-	if gateRaw, gerr := s.exec.KubectlJSON(ctx, "-n", "memql", "get", "analysisrun", "-o", "json"); gerr == nil {
+	if gateRaw, gerr := s.exec.KubectlJSON(ctx, "-n", surface.Namespace, "get", "analysisrun", "-o", "json"); gerr == nil {
 		if gate, merr := MapGateResult(gateRaw); merr == nil {
 			out.GateResult = gate
 		}
