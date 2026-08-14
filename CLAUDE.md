@@ -451,7 +451,7 @@ class. See
 #### Node image source: product-agnostic engine images + runtime DSL delivery (platform consolidation #2472)
 
 **The engine is the whole platform.** Every node type -- identity, bff,
-cognition, agent, planner, voice, workbench, mcp -- ships as a
+cognition, agent, planner, voice, workbench, mcp, edge -- ships as a
 **product-agnostic engine image** from THIS repo's Dockerfile
 (`BUILD_TAGS=<type>`). There are no per-product node images and no
 carrier-built nodes in the common case. Reusable capabilities (chat,

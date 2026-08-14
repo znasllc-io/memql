@@ -4,9 +4,10 @@ package app
 
 import "log/slog"
 
-// Build constructs service dependencies for an EDGE node -- the surface that
-// serves this cluster's web surfaces: every hosted SPA and website, and the
-// memQL Portal itself, which is site #1 and takes no special path.
+// Build constructs service dependencies for an EDGE node -- the eventual
+// surface that will serve this cluster's web surfaces: every hosted SPA and
+// website, and the memQL Portal itself, which is site #1 and takes no
+// special path.
 //
 // It is a node type rather than a handler bolted onto the bff for three
 // reasons. A website-hosting cluster should be able to drop to four nodes
@@ -14,6 +15,12 @@ import "log/slog"
 // API node. A site deploy must never share fate with the API. And per-node-type
 // binaries selected by build tag is the pattern this repository already uses
 // for exactly this kind of separation.
+//
+// Task 2 (memql#3707, epic memql#3700) stands up the skeleton: the binary
+// builds, boots, connects to the engine, and joins the cluster mesh -- and
+// serves nothing. Hostname resolution against v1:platform:site, the
+// file:// / blob:// bundle readers, the request handler, and the
+// same-origin /_memql/* API proxy land in later tasks (#3708-#3712).
 //
 // Edge nodes need config/auth, database/concepts (they read v1:platform:site),
 // engine/bus, core integrations (storage, for bundles) and the cluster mesh.
