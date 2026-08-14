@@ -52,7 +52,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	// Resolve through the unified resolver (static config first, then the
 	// DB-backed oauthClient store) so dynamically-registered (RFC 7591)
 	// clients work exactly like static MEMQL_IDENTITY_REGISTERED_CLIENTS.
-	rc := identity.ResolveClient(r.Context(), s.Cfg, s.Store, clientID)
+	rc, selfRegistered := identity.ResolveClientWithOrigin(r.Context(), s.Cfg, s.Store, clientID)
 	if clientID == "" || rc == nil {
 		s.renderAuthorizeError(w, http.StatusBadRequest,
 			"Unknown client",
@@ -93,26 +93,43 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if n := strings.TrimSpace(rc.Name); n != "" {
 		displayName = n
 	}
+	// THE LOGO IS GATED ON PROVENANCE, not on the name (memql#3794).
+	//
+	// clientLogoURL is keyed on the DISPLAY NAME, and for a self-registered
+	// client that name is whatever the unauthenticated caller put in
+	// client_name. So before this, POSTing /register as {"client_name":
+	// "Claude"} rendered the bundled Claude mark beside the attacker's own
+	// redirect URI: the page did not merely fail to warn, it lent a trusted
+	// brand's artwork to a stranger.
+	//
+	// A bundled logo now means exactly one thing -- an operator configured
+	// this client in MEMQL_IDENTITY_REGISTERED_CLIENTS -- which is the only
+	// reading that can support the trust a logo conveys.
+	logoURL := ""
+	if !selfRegistered {
+		logoURL = s.clientLogoURL(displayName)
+	}
 	data := webtempl.LoginData{
 		// Same passkey enhancement the plain /login render ships
 		// (memql#3407). This is the page that matters most for it: the
 		// /authorize path is the one carrying a PKCE challenge, and the
 		// control's whole job is to reach the same auth code with that
 		// binding intact.
-		Layout:              s.LayoutData(r, "Authorize access", false, nil, []string{s.assetURL("/static/passkey-login.js")}),
-		Mode:                string(settings.RegistrationMode),
-		Stage:               "email",
-		AllowedDomainsHint:  settings.RegistrationDomains,
-		PrefillEmail:        strings.TrimSpace(q.Get("login_hint")),
-		ClientID:            clientID,
-		ClientName:          displayName,
-		ClientInitial:       clientInitial(displayName),
-		ClientLogo:          s.clientLogoURL(displayName),
-		RedirectURI:         redirectURI,
-		OAuthState:          state,
-		CodeChallenge:       codeChallenge,
-		CodeChallengeMethod: codeChallengeMethod,
-		AuthorizeMode:       true,
+		Layout:               s.LayoutData(r, "Authorize access", false, nil, []string{s.assetURL("/static/passkey-login.js")}),
+		Mode:                 string(settings.RegistrationMode),
+		Stage:                "email",
+		AllowedDomainsHint:   settings.RegistrationDomains,
+		PrefillEmail:         strings.TrimSpace(q.Get("login_hint")),
+		ClientID:             clientID,
+		ClientName:           displayName,
+		ClientInitial:        clientInitial(displayName),
+		ClientLogo:           logoURL,
+		ClientSelfRegistered: selfRegistered,
+		RedirectURI:          redirectURI,
+		OAuthState:           state,
+		CodeChallenge:        codeChallenge,
+		CodeChallengeMethod:  codeChallengeMethod,
+		AuthorizeMode:        true,
 	}
 	s.render(w, r, "login", webtempl.Login(data))
 }
