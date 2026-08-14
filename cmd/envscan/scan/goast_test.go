@@ -411,9 +411,15 @@ func load() {
 
 // Every way a reader value reaches a call site must be detected, and detection
 // must be anchored on the CONSTRUCTOR or the TYPE rather than the receiver's
-// NAME. The tree has `g.reader.City(...)` (a GeoIP handle) and
-// `r.reader.PlanStatus(...)` (a harness reader), so a name-based rule would
-// count calls that read no environment at all.
+// NAME.
+//
+// The final case is the negative one, and it is not hypothetical. Two non-test
+// files hold a value named `reader`, reached as `X.reader.M(…)`, that reads no
+// environment: component/metadata/geoip.go's `g.reader.City(ip)` (field
+// `reader *geoip2.Reader`) and component/harness/reconciler.go's
+// `r.reader.PlanStatus(ctx, …)` (field `reader StepReader`). A name-keyed rule
+// counts both. Cited by path and expression rather than line, so a grep that
+// returns nothing is how the citation goes stale -- loudly.
 func TestEnvReaderReceiverShapes(t *testing.T) {
 	cases := []struct {
 		name          string

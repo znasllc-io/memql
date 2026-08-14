@@ -85,9 +85,18 @@ var envHelperShape = regexp.MustCompile(`^env[A-Z][A-Za-z0-9]*$`)
 // reproducing the defect it closes.
 //
 // Detection is anchored on the CONSTRUCTOR and the TYPE, never on the receiver's
-// name, and the tree shows why: `g.reader.City(...)` is a GeoIP database and
-// `r.reader.PlanStatus(...)` is a harness reader. Only a value built by
-// NewEnvReader or declared EnvReader counts.
+// name. Two values in this tree are named `reader`, are reached as `X.reader.M(…)`,
+// and read no environment at all -- so a name-keyed rule would count them:
+//
+//	component/metadata/geoip.go   g.reader.City(ip)              reader *geoip2.Reader
+//	component/harness/reconciler.go  r.reader.PlanStatus(ctx, …)  reader StepReader
+//
+// Both are non-test files, which is what makes them the right evidence: those are
+// files this scanner actually reads. (Cited by path and expression rather than by
+// line, so the citation fails LOUDLY -- a grep that returns nothing -- instead of
+// silently pointing at whatever moved into that line.)
+//
+// Only a value built by NewEnvReader or declared EnvReader counts.
 const (
 	// envReaderCtor is the constructor whose result is an EnvReader.
 	envReaderCtor = "NewEnvReader"
@@ -225,8 +234,10 @@ type goIndex struct {
 	// readerFields is the set of STRUCT FIELD names declared with type
 	// EnvReader, per package directory. It is what makes
 	// `d.reader.String("X")` detectable when `reader` is a field rather
-	// than a local, and what keeps `g.reader.City(...)` (a GeoIP handle
-	// that happens to share the field name) out of the count.
+	// than a local -- and, because it is keyed on the declared TYPE, what
+	// keeps component/metadata/geoip.go's `g.reader.City(ip)` (a
+	// *geoip2.Reader field that happens to share the name) out of the
+	// count.
 	readerFields map[string]map[string]bool
 }
 
