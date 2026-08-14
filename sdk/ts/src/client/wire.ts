@@ -335,6 +335,14 @@ export interface AuthoringSessionDefineBundlePayload {
   sources: string;
 }
 
+// ListConstructs asks a cluster what constructs it has actually LOADED, at
+// registry grain (memql#3749). No filters: the surface that consumes it groups
+// client-side, and a filter parameter would put the kind vocabulary in a
+// second place.
+export interface ListConstructsPayload {
+  requestId: string;
+}
+
 // Polyphon -- LiveKit room token request. The room name + LiveKit
 // URL come back in the reply so the consumer can hand them to the
 // LiveKit client SDK without a separate config call.
@@ -458,6 +466,7 @@ type ClientPayload =
   | { runAutomation: RunAutomationPayload }
   | { authoringValidateBundle: AuthoringValidateBundlePayload }
   | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
+  | { listConstructs: ListConstructsPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
   | { clientToolResult: ClientToolResultPayload };
@@ -893,6 +902,48 @@ export interface AuthoringSessionDefineBundleResultPayload {
   error?: string;
 }
 
+// ConstructArgWire is the catalog's argument shape. Field for field the
+// language server's `RunnableArg` (cmd/memql-lsp/runnable.go), because the
+// extension generates ONE argument form from both -- from the LSP when the
+// .memql file is open, from the catalog when browsing a cluster where it is
+// not. `enumValues` is the one rename, and only because `enum` is a reserved
+// word in the proto language. TestRunnableArgMatchesConstructArg pins the two.
+export interface ConstructArgWire {
+  name?: string;
+  /** string | number | boolean | object | array | any -- a closed set. */
+  type?: string;
+  required?: boolean;
+  enumValues?: string[];
+  description?: string;
+  autoInjected?: boolean;
+}
+
+// ConstructInfoWire is one construct the cluster has loaded.
+//
+// Three fields carry rules a consumer will get wrong by guessing, all three
+// documented on the plain type in ../constructs/constructs.ts: `kind` is the
+// kind and NOT the authored keyword (so `runnable` is the answer, not a
+// re-derivation from it), `origin` is server-derived, and `source` is present
+// only when there is no file to read it from.
+export interface ConstructInfoWire {
+  name?: string;
+  kind?: string;
+  namespace?: string;
+  origin?: string;
+  originPath?: string;
+  description?: string;
+  runnable?: boolean;
+  args?: ConstructArgWire[];
+  boundConcept?: string;
+  sourceHash?: string;
+  source?: string;
+}
+
+export interface ListConstructsResultPayload {
+  requestId?: string;
+  constructs?: ConstructInfoWire[];
+}
+
 // expiresAt is int64 unix seconds -- protojson encodes int64 as
 // either string or number depending on the runtime. We accept both.
 export interface PolyphonRoomTokenResultPayload {
@@ -1037,6 +1088,7 @@ type ServerPayload =
   | { automationRunEvent: AutomationRunEventPayload }
   | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
   | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
+  | { listConstructsResult: ListConstructsResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
   | { clientToolCall: ClientToolCallPayload };
@@ -1077,6 +1129,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
   | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
   | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
+  | { kind: "listConstructsResult"; value: ListConstructsResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
   | { kind: "clientToolCall"; value: ClientToolCallPayload }
@@ -1161,6 +1214,11 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "authoringSessionDefineBundleResult",
       value: m.authoringSessionDefineBundleResult as AuthoringSessionDefineBundleResultPayload,
+    };
+  if (m.listConstructsResult)
+    return {
+      kind: "listConstructsResult",
+      value: m.listConstructsResult as ListConstructsResultPayload,
     };
   if (m.listToolsResult)
     return { kind: "listToolsResult", value: m.listToolsResult as ListToolsResultPayload };
