@@ -49,7 +49,10 @@ in what the portal does:
    in *this* repo is a platform surface (the portal is the ops console); a
    product's own client belongs in the product's own repo, which is what the
    `memql-project` template is for. The rule bans product *names*, not user
-   interfaces.
+   interfaces. That repo consumes the engine as **pinned images** and never
+   forks it — it holds the cluster's definition, not the cluster's code; see the
+   per-customer-cluster amendment in
+   [platform-consolidation.md](../docs/internal/design/platform-consolidation.md).
 2. **Applications are private, libraries are published.** A client is an
    application: `"private": true`, no `publishConfig`, and its
    `package-lock.json` **is** committed — it pins the tree the released bundle
