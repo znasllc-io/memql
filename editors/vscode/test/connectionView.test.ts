@@ -126,10 +126,10 @@ test("the identity is what the CONNECTION produced, not what the file claims", (
   const view = connectionView({
     cluster: cluster(),
     state: { status: "connected", clusterName: "staging", nodeId: "n" },
-    identity: { email: "znas@znas.io", role: "owner" },
+    identity: { email: "ada@example.com", role: "owner" },
     nowMs: NOW,
   });
-  assert.equal(factOf(view.identity, "signed in as").value, "znas@znas.io");
+  assert.equal(factOf(view.identity, "signed in as").value, "ada@example.com");
   assert.equal(factOf(view.identity, "role").value, "owner");
 });
 
