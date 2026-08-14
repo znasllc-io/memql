@@ -83,6 +83,7 @@ test('granting trust registers the runtime surface, exactly once', () => {
   assert.deepEqual(recorded.treeViews, [
     'memqlClusters',
     'memqlDeployments',
+    'memqlConstructs',
     'memqlConcepts',
     'memqlRuns',
   ]);
