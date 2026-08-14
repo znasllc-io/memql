@@ -41,6 +41,8 @@ const vscodeExtensionSrcDir = "../../editors/vscode/src"
 var vscodeImportAllowList = []string{
 	"auth/deviceCodeUi.ts",       // progress / clipboard / openExternal adapter over auth/deviceCode.ts
 	"constructs/lensProvider.ts", // CodeLensProvider adapter over constructs/runnable.ts
+	"constructs/decorations.ts",  // gutter + signature decoration + status bar, over state/training.ts
+	"constructs/trainingLens.ts", // CodeLensProvider adapter over state/training.ts
 	"constructs/readonlyDecorations.ts", // FileDecorationProvider + files.readonlyInclude adapter over constructs/readonly.ts
 	"extension.ts",               // activation, command registration, LSP client wiring
 	"views/clustersTree.ts",      // TreeDataProvider adapter over clusters/ + connection/

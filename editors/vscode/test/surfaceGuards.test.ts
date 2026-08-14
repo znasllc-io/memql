@@ -102,6 +102,38 @@ function stripComments(source: string): string {
 }
 
 // -----------------------------------------------------------------------------
+// Nothing runs automatically
+// -----------------------------------------------------------------------------
+
+test("no training surface is triggered by a save", () => {
+  // memql#3761's hardest rule to test, because it is an ABSENCE: no
+  // promote-on-save, no train-on-save. The extension already holds this line
+  // for runs -- `capabilities.untrustedWorkspaces` records it in the manifest --
+  // and promotion is a strictly larger commitment than a run.
+  //
+  // Scoped to the training modules rather than the whole extension, because a
+  // save subscription elsewhere is legitimate (a formatter, a watcher). Here it
+  // is not: state comes from the BUFFER, so a save is by definition a moment at
+  // which nothing about it changed.
+  const offenders = sources()
+    .filter(({ file }) =>
+      [
+        path.join("src", "state", "training.ts"),
+        path.join("src", "constructs", "decorations.ts"),
+        path.join("src", "constructs", "trainingLens.ts"),
+        path.join("src", "constructs", "gutterIcons.ts"),
+      ].includes(file),
+    )
+    .filter(({ text }) => /onDidSaveTextDocument|onWillSaveTextDocument/.test(stripComments(text)))
+    .map(({ file }) => file);
+  assert.deepEqual(
+    offenders,
+    [],
+    `these training modules subscribe to a save event: ${offenders.join(", ")}. Saving is not promoting -- that is the one idea this surface exists to convey.`,
+  );
+});
+
+// -----------------------------------------------------------------------------
 // Concepts became Data
 // -----------------------------------------------------------------------------
 
