@@ -13,6 +13,8 @@
 package overlays
 
 import (
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,8 +113,15 @@ func parse(t *testing.T, rendered string) []resource {
 	for {
 		var r resource
 		err := dec.Decode(&r)
-		if err != nil {
+		if errors.Is(err, io.EOF) {
 			break
+		}
+		// A mid-stream decode error is FATAL rather than a break. Stopping
+		// quietly at the first bad document would leave every gate below
+		// asserting about a truncated prefix of the overlay -- they would all
+		// pass, having checked a fraction of it.
+		if err != nil {
+			t.Fatalf("decoding document %d of the rendered overlay: %v", len(out)+1, err)
 		}
 		if r.Kind == "" {
 			continue
