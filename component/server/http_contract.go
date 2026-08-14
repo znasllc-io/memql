@@ -379,24 +379,18 @@ func registerAutomationTriggerRoute(m ServeMux, basePath string, handler http.Ha
 
 // extractAutomationNameFromPath extracts the automation name from a path like
 // {basePath}/automations/{name}/trigger. Returns empty string if the path doesn't match.
+//
+// The parse is segmentBetween's (path_segment.go), not this function's own.
+// It used to be spelled out here, and the inline version PANICKED on
+// "/automations/trigger" -- a path with no name satisfies both the prefix and
+// the suffix check at once, because the two matched regions overlap. The route
+// is registered as a prefix pattern, so that path reaches this handler
+// (memql#3773).
 func extractAutomationNameFromPath(path, prefix, suffix string) string {
-	// Path must start with prefix and end with suffix
-	if !strings.HasPrefix(path, prefix) {
+	name, ok := segmentBetween(path, prefix, suffix)
+	if !ok {
 		return ""
 	}
-	if !strings.HasSuffix(path, suffix) {
-		return ""
-	}
-
-	// Extract the name between prefix and suffix
-	name := path[len(prefix) : len(path)-len(suffix)]
-
-	// Validate: name should not be empty or contain path separators
-	name = strings.TrimSpace(name)
-	if name == "" || strings.Contains(name, "/") {
-		return ""
-	}
-
 	return name
 }
 
