@@ -117,3 +117,89 @@ func TestFormatArgList(t *testing.T) {
 		t.Error("optional arg label should carry a trailing ?")
 	}
 }
+
+// TestWrapperBuiltinOverlapIsPinned pins the names carried by BOTH
+// relationshipWrapperArities and BuiltinFunctions.
+//
+// The overlap is what made memql#3779 a random failure rather than a visible
+// one. relationshipWrapperSignatures now DERIVES the second reading for such a
+// name from BuiltinFunctions, which is right for any collision -- but a
+// collision is still a decision about what a name means in two grammars at
+// once, and deriving it silently is how the next one arrives as a flake in
+// somebody else's PR. Pinning the set makes it arrive as this diff.
+//
+// Adding a name here is fine. Doing it deliberately is the point.
+func TestWrapperBuiltinOverlapIsPinned(t *testing.T) {
+	want := map[string]bool{"contains": true}
+
+	got := map[string]bool{}
+	for name := range relationshipWrapperArities {
+		if _, ok := BuiltinFunctions[name]; ok {
+			got[name] = true
+		}
+	}
+
+	for name := range got {
+		if !want[name] {
+			t.Errorf("%q is now both a relationship wrapper and a builtin. Both readings are real, so "+
+				"SignatureHelp will offer both -- confirm that is what you meant and add it to `want`", name)
+		}
+	}
+	for name := range want {
+		if !got[name] {
+			t.Errorf("%q is no longer in both tables; drop it from `want`", name)
+		}
+	}
+}
+
+// TestSignatureHelpContainsOffersBothReadings: `contains` is the one name the
+// DSL gives two grammars -- a one-argument collection traversal and the
+// two-argument substring search -- and signature help has to offer both.
+//
+// It offered only the traversal until memql#3779, because the wrapper branch
+// runs first and returns before the builtin branch is reached. The substring
+// reading was sitting in BuiltinFunctions the whole time, with parameter docs.
+func TestSignatureHelpContainsOffersBothReadings(t *testing.T) {
+	s := New(nil)
+	src, line, col := funcCallSource("contains")
+
+	res := s.SignatureHelp(src, line, col)
+	if res == nil {
+		t.Fatal("no signature help for contains(")
+	}
+	if len(res.Signatures) != 2 {
+		t.Fatalf("expected both readings, got %d: %+v", len(res.Signatures), res.Signatures)
+	}
+	if res.Signatures[0].Label != "contains(expr)" {
+		t.Errorf("first reading = %q; want the traversal, which is the default a reader should see",
+			res.Signatures[0].Label)
+	}
+	if want := BuiltinFunctions["contains"].Signature; res.Signatures[1].Label != want {
+		t.Errorf("second reading = %q; want the builtin's own %q", res.Signatures[1].Label, want)
+	}
+	if len(res.Signatures[1].Parameters) != len(BuiltinFunctions["contains"].Parameters) {
+		t.Error("the substring reading lost its parameter docs on the way through")
+	}
+	if res.ActiveSignature != 0 {
+		t.Errorf("before the first comma the traversal is active, got index %d", res.ActiveSignature)
+	}
+}
+
+// Past the first comma `contains` can only be the two-argument substring
+// search: the traversal takes no label and no second argument. The existing
+// activeRelationshipSignature rule already says so -- this pins that it keeps
+// meaning the right thing now that index 1 is the builtin rather than a
+// label-scoped form.
+func TestSignatureHelpContainsHighlightsSubstringPastTheComma(t *testing.T) {
+	s := New(nil)
+	const line3 = `    return contains("haystack", `
+	src := "logic x {\n  body {\n" + line3 + "\n  }\n}"
+
+	res := s.SignatureHelp(src, 3, len(line3)+1)
+	if res == nil {
+		t.Fatal("no signature help past the comma")
+	}
+	if res.ActiveSignature != 1 {
+		t.Errorf("ActiveSignature = %d; past a comma contains can only be the substring search", res.ActiveSignature)
+	}
+}
