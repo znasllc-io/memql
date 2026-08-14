@@ -131,10 +131,15 @@ identically rather than coincidentally. **No file under
 with the edge Deployment (memql#3714) — outstanding work, not something already
 handled.
 
-**Until then the property is unestablished: nothing in this repository verifies
-it.** A probe run today could not settle it either, for the reason the callout
-above gives — with `svc/edge` absent, traefik drops the wildcard router
-entirely, so there is nothing for an exact host to take precedence *over*. An
+**Until then the property is unestablished — but no longer for want of anything
+looking.** `scripts/install/verify-frontdoor.sh` carries a `precedence` check,
+reported per host for `api.` and `identity.` (never `mcp.`, whose Ingress routes
+`:8090` while the `/healthz` the check reads is on `:8085`), and today it reports
+`inconclusive` rather than passed — so the gap is observable in a run instead of
+asserted on this page. A probe run today could not settle it either, for the
+reason the callout above gives — with `svc/edge` absent, traefik drops the
+wildcard router entirely, so there is nothing for an exact host to take
+precedence *over*. An
 exact host answering from its own backend under those conditions measures the
 absence of the wildcard router, not precedence. Reading that result as the
 latter is exactly how this assumption came to be written down as a fact.
@@ -327,21 +332,26 @@ Requires a running cluster, so it belongs on an operator machine or in CI.
 
 ```bash
 kubectl -n memql get ingress -o wide             # the Ingress objects and their hosts
-scripts/install/verify-frontdoor.sh              # dns + tls per host, h2 once
+scripts/install/verify-frontdoor.sh              # dns + tls + precedence per host, h2 once
 curl -sS --http1.1 https://api.memql.localhost/healthz
 ```
 
-`verify-frontdoor.sh` runs **five** checks against the default host set, not
-three per host: DNS and TLS for each of `api.` and `identity.`, plus **one**
-gRPC/h2 check, against the first host only.
+`verify-frontdoor.sh` runs **seven** checks against the default host set, not
+three per host: DNS, TLS and precedence for each of `api.` and `identity.`, plus
+**one** gRPC/h2 check, against the first host only. `precedence` is the one that
+can come back neither passed nor failed — an `inconclusive` check counts in
+neither tally, so it leaves `allPassed` alone
+([above](#exact-versus-wildcard-precedence-is-a-real-question-and-it-is-not-settled)).
 
 ```
-allPassed: true, passedCount: 5, failedCount: 0
+allPassed: true, passedCount: 5, failedCount: 0, inconclusiveCount: 2
 PASS dns  api.memql.localhost: resolves to 127.0.0.1
 PASS tls  api.memql.localhost: TLS handshake ok against a trusted certificate (HTTP 415)
 PASS dns  identity.memql.localhost
 PASS tls  identity.memql.localhost: ... (HTTP 302)
 PASS grpc api.memql.localhost: negotiated HTTP/2 (HTTP 415) -- gRPC can ride this door
+INCONCLUSIVE precedence api.memql.localhost: ... the wildcard router is not loaded, so there is nothing for an exact host to take precedence over
+INCONCLUSIVE precedence identity.memql.localhost: ... (the same)
 ```
 
 Two things in that output are deliberate and neither is obvious.
