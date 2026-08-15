@@ -270,6 +270,26 @@
       {
         "command": "memql.run.automation",
         "title": "memQL: Run Automation"
+      },
+      {
+        "command": "memql.training.dryRun",
+        "title": "memQL: Dry-run Construct Against The Cluster"
+      },
+      {
+        "command": "memql.training.tryInSession",
+        "title": "memQL: Try Construct In This Session"
+      },
+      {
+        "command": "memql.training.promote",
+        "title": "memQL: Promote Construct To The Cluster"
+      },
+      {
+        "command": "memql.training.demote",
+        "title": "memQL: Demote Construct From The Cluster"
+      },
+      {
+        "command": "memql.training.showList",
+        "title": "memQL: Show Untrained And Drifted Constructs"
       }
     ],
     "menus": {
@@ -381,6 +401,26 @@
         {
           "command": "memql.run.automation",
           "when": "false"
+        },
+        {
+          "command": "memql.training.dryRun",
+          "when": "false"
+        },
+        {
+          "command": "memql.training.tryInSession",
+          "when": "false"
+        },
+        {
+          "command": "memql.training.promote",
+          "when": "false"
+        },
+        {
+          "command": "memql.training.demote",
+          "when": "false"
+        },
+        {
+          "command": "memql.training.showList",
+          "when": "isWorkspaceTrusted"
         }
       ],
       "view/title": [

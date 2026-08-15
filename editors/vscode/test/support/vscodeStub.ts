@@ -74,6 +74,8 @@ export const recorded = {
   inputBoxes: [] as Record<string, unknown>[],
   /** Every terminal created, with what was typed into it (memql#3551). */
   terminals: [] as { name: string; shown: boolean; sent: { text: string; executed: boolean }[] }[],
+  /** Every output channel created, with what was written to it (memql#3763). */
+  outputChannels: [] as { name: string; lines: string[]; shown: boolean }[],
 };
 
 /**
@@ -124,6 +126,7 @@ export function resetRecorded(): void {
   // silently accumulates across cases is worse than none: it reports a fact
   // about the whole file while reading like a fact about one case.
   recorded.inputBoxes.length = 0;
+  recorded.outputChannels.length = 0;
   nextOpenDialogResult = undefined;
   // Back to DISMISSED, the documented default. An armed answer surviving into the
   // next case would hand a password to a run that never asked for one.
@@ -354,6 +357,17 @@ export class Range {
   ) {}
 }
 
+// A CodeLens is constructed only inside a provider callback, which activation
+// never invokes -- but the import is resolved when esbuild BUNDLES the
+// extension, so an absent export fails the whole build rather than the one case
+// that would have reached it. Present for that reason and modelled no further.
+export class CodeLens {
+  constructor(
+    readonly range: Range,
+    readonly command?: { title: string; command: string; tooltip?: string; arguments?: unknown[] }
+  ) {}
+}
+
 export class Diagnostic {
   source?: string;
 
@@ -417,6 +431,28 @@ export const window = {
   showErrorMessage(message: string): Promise<undefined> {
     recorded.errors.push(message);
     return Promise.resolve(undefined);
+  },
+
+  // The training surface's record channel (memql#3763). Created during
+  // ACTIVATION rather than on first use, so it sits on the path a trusted
+  // activation takes and has to exist here even though nothing in this lane
+  // writes to one.
+  createOutputChannel(name: string): {
+    appendLine(line: string): void;
+    show(preserveFocus?: boolean): void;
+    dispose(): void;
+  } {
+    const entry = { name, lines: [] as string[], shown: false };
+    recorded.outputChannels.push(entry);
+    return {
+      appendLine(line: string): void {
+        entry.lines.push(line);
+      },
+      show(): void {
+        entry.shown = true;
+      },
+      dispose(): void {},
+    };
   },
 
   showInformationMessage(message: string, ..._items: string[]): Promise<undefined> {
