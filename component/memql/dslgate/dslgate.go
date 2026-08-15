@@ -79,6 +79,7 @@ const (
 	// GateAdminGateComposition -- an admin gate that a false value would not
 	// zero the result set with.
 	GateAdminGateComposition Gate = "authz-admin-gate"
+	// GateCrossNamespaceImport is declared in imports.go, where the rule lives.
 )
 
 // Violation is one contract-gate failure, attributed as precisely as the gate
@@ -180,6 +181,15 @@ func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
 		}
 		out = append(out, ScanSource(p, string(raw), opts)...)
 	}
+	// The cross-namespace import gate is TREE-level, not per-file: whether a
+	// reference crosses a boundary depends on where the referenced name is
+	// declared, which one file cannot answer (memql#3803).
+	crossNs, nsErr := scanCrossNamespaceImports(tree)
+	if nsErr != nil {
+		return nil, nsErr
+	}
+	out = append(out, crossNs...)
+
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
 			return out[i].File < out[j].File

@@ -2451,3 +2451,83 @@ optional arg omits its key from an object literal and omits its element
 from an array literal — `{ v: [args.a, args.b, "c"] }` with only `b`
 supplied renders `{"v":["B","c"]}`, not a `null` hole (memql#3627). An
 explicit `null` the author wrote is preserved in both.
+
+---
+
+## 31. `use` and namespaces: what an import means, per construct kind
+
+**A directory is a namespace.** Every `.memql` file in one directory shares a
+namespace and its constructs reference each other freely. A **subdirectory is a
+different namespace** — `dsl/agents/roles/` is `agents/roles`, not `agents`.
+Anything from another namespace must be imported with `use`, whatever kind it
+is. Name collisions across namespaces are resolved by **aliasing**
+(`use harness.concepts.{ plan as harnessPlan }`, memql#3802).
+
+That is the model, and until memql#3803 the engine enforced only a third of it.
+
+### Does `use` participate in resolution?
+
+| Construct kind | Registry | Two domains may share a name? | Is `use` required for a cross-namespace reference? |
+|---|---|---|---|
+| `concept` | namespaced, `v1:<ns>:<name>` | **yes** — 4 do today | **YES**, and it is also the disambiguator: an unimported bare name resolves *ambiently* to this namespace, and a foreign one is a hard error naming the import |
+| `query`, `mutation`, `logic`, `spec`, `trait`, `shape`, `tool`, `prompt`, `provider`, `builtin`, `policy`, `seed` | flat, keyed by bare name | **no** — the S5 uniqueness gate (#2360) refuses a duplicate at load | **YES** — enforced by the `cross-namespace-import` contract gate (memql#3803). It does not *disambiguate* (a flat name is globally unique), it declares the dependency |
+
+Before memql#3803 the second row read "no": a cross-domain reference to
+`statusIsActive` — which lives in `common.traits` — resolved from a bundle with
+no import at all. For twelve kinds the import was documentation that nothing
+checked, and for one it was load-bearing resolution.
+
+**That conflation was not cosmetic.** memql#2617 banned same-namespace imports
+on the premise that they are "pure ceremony" — true of the twelve, false of the
+one — and wrote the rule across all thirteen. Both bugs that followed trace to
+it: memql#3800 (the authoring path could not do ambient resolution, so 45
+constructs compiled at boot and were refused by every editor) and memql#3802 (a
+foreign import silently captured every bare use of a name and bound the wrong
+concept with `OK=true`).
+
+### The cost of enforcing it was one line
+
+Measured across `dsl/` at **resolution sites only** — a call, a `shape` clause,
+a bare filter conjunct — with comments **and string literals** stripped:
+
+| kind | unimported | imported |
+|---|---|---|
+| builtin | 1 | 0 |
+| query | 0 | 1 |
+| shape | 0 | 3 |
+| spec | 0 | 7 |
+| trait | 0 | 102 |
+| **total** | **1** | **113** |
+
+The tree was already 113/114 compliant *by habit*: authors have been writing
+the imports the engine never asked for. The single holdout was
+`builtin cognitionTrackPresence(...)` in `dsl/cognition/automations.memql`, a
+file that carried no `use` block at all.
+
+> **A naive count says 345.** Word-boundary matching over raw source reports
+> `builtin agent`, `builtin error`, `builtin tools`, `builtin help` and
+> `builtin concepts` — ordinary English in doc comments and `@description`
+> text. Two further traps: an *indented* `provider enum("heygen", ...)` is a
+> concept **field**, not a `provider` construct named `enum` (registering it
+> turns every `@enum(...)` in the tree into a cross-namespace call, worth 45
+> phantom findings); and strings must be stripped **before** comments, or a
+> `//` inside a URL in a `@description` eats that string's closing quote and
+> desynchronises every string after it. Both are pinned by tests in
+> `component/memql/dslgate/imports_test.go`.
+
+### Should the flat kinds be namespaced? — ACCEPTED, not yet built
+
+**Decision (2026-08-15): yes, this is the intended design.** The twelve flat
+kinds should be per-namespace like concepts, with aliasing resolving
+collisions. It is not built yet; the migration touches every flat-kind
+reference in the tree plus the registry keying, and is tracked separately.
+
+**The constraint it leaves in place, stated so it is a known boundary rather
+than a surprise:** a product DSL bundle mounted at `MEMQL_DSL_PATH` **cannot
+declare a `shape`, `spec`, `query`, `trait` or any other flat-kind construct
+whose name a core construct already uses.** Every product shares one flat
+namespace with the engine, and the collision is a **load-time error the product
+cannot resolve** except by renaming its own construct. Aliasing does not help:
+two same-named flat constructs cannot coexist, so there is nothing to alias
+between. Prefix product-owned flat constructs until the migration lands.
+
