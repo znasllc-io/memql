@@ -16,6 +16,20 @@ same Kustomize overlays, the same ArgoCD-reconciled manifests, the same
 `ignoreDifferences`/selfHeal config -- so the full class of GitOps +
 cross-node mesh bugs reproduces locally instead of only on staging.
 
+> **Local is ONE environment, and stays one.** The cloud cluster carries
+> staging and production as two namespaces on two schema search paths
+> (epic memql#3748); `make up` grows no second namespace, the local
+> overlay supplies no environment ConfigMap, and an unset
+> `MEMQL_DB_SEARCH_PATH` is exactly what "one environment" means to the
+> engine. `TestLocalStaysOneEnvironment` asserts it. Development is not
+> staging: a second local environment would make the inner loop slower to
+> prove nothing, and the class of bug this cluster exists to reproduce --
+> GitOps plus cross-node mesh -- does not need one. What local therefore
+> does NOT reproduce is the environment boundary itself; that model is
+> [environments.md](environments.md), and `ENV=` on `make scale` is where
+> it touches this page (it defaults to `local`, so the inner-loop command
+> typed from memory cannot point at production).
+
 > **Development principle: multi-node is the default.** Every feature
 > runs across the 2-replica mesh in local, staging, and prod -- never
 > assume a single process. State/context/events that cross a node

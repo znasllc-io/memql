@@ -2,12 +2,15 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   CancellationToken,
+  CodeLens,
   commands,
   Diagnostic,
   DiagnosticSeverity,
   env,
+  EventEmitter,
   ExtensionContext,
   languages,
+  OutputChannel,
   Position,
   ProgressLocation,
   Range,
@@ -75,6 +78,33 @@ import { RunnableCodeLensProvider } from './constructs/lensProvider.js';
 import { TrainingCodeLensProvider } from './constructs/trainingLens.js';
 import { TrainingDecorations } from './constructs/decorations.js';
 import { ClusterCatalogPublisher } from './constructs/clusterCatalog.js';
+import {
+  COMMAND_DEMOTE,
+  COMMAND_DRY_RUN,
+  COMMAND_PROMOTE,
+  COMMAND_SHOW_LIST,
+  COMMAND_TRY_IN_SESSION,
+  TRAINING_STATE_CAPABILITY,
+  TRAINING_STATE_METHOD,
+  parseTrainingConstructs,
+  type TrainingConstruct,
+} from './state/training.js';
+import {
+  TrainingActions,
+  type TrainingEngine,
+  type TrainingOutcome,
+  type TrainingRequest,
+  type TrainingScope,
+} from './training/actions.js';
+import {
+  assembleClosure,
+  assembleConstruct,
+  type TrainingBundle,
+  type TrainingWorkspace,
+} from './training/closure.js';
+import { outcomeReport } from './training/outcomeReport.js';
+import type { TrainingPrompt } from './training/report.js';
+import { sessionLensPlans } from './training/session.js';
 import { defaultReceiptPath } from './install/receipt.js';
 import { defaultRunsDir } from './state/runLog.js';
 import {
@@ -1002,6 +1032,118 @@ function registerRunSurface(
   // Warm the name -> config cache the synchronous cluster() read depends on.
   void refreshClusterCache(clustersPath);
 
+  // ---------------------------------------------------------------------------
+  // The four training actions (memql#3763)
+  // ---------------------------------------------------------------------------
+
+  // A DIAGNOSTIC COLLECTION OF ITS OWN, separate from `memql-run`. Both carry
+  // the engine's answer about an assembled bundle, but they assemble DIFFERENT
+  // bundles -- a run carries dependencies with unsaved edits, a training action
+  // carries the ones the cluster does not have -- so neither can vouch for the
+  // other's findings. Sharing one would let a green run clear a dry-run's errors
+  // about constructs the run never submitted.
+  const trainingDiagnostics = languages.createDiagnosticCollection('memql-training');
+  // The structure goes HERE. A classified schema diff -- field, was, now, rows,
+  // referencing constructs -- does not fit in a toast, and the toast is where a
+  // developer learns something happened. So both: the headline notifies, the
+  // channel keeps the record.
+  const trainingOutput = window.createOutputChannel('memQL Training');
+  context.subscriptions.push(trainingDiagnostics, trainingOutput);
+
+  // Assigned once the language client exists (see the client block below).
+  // No-ops until then, which is the right degradation rather than a gap: without
+  // a language server there are no training lenses, so there is no surface a
+  // promote could leave stale.
+  let refreshTrainingSurfaces: () => Promise<void> = async () => {};
+  let refreshSessionLens: () => void = () => {};
+  // The status bar's click-through. It is registered UNCONDITIONALLY below, so
+  // it needs an answer for the window where there is no language server -- and
+  // "nothing happens" is the wrong one for a command the palette offers. The
+  // default explains instead.
+  let showTrainingList: () => Promise<void> = async () => {
+    window.showInformationMessage(
+      'memQL: training state needs the memQL language server, which is not running. Set "memql.lsp.serverPath" or install memql-lsp on your PATH.'
+    );
+  };
+
+  const training = new TrainingActions({
+    cluster: () => currentRunCluster(clustersPath, conns),
+    engine: () => buildTrainingEngine(conns),
+    assemble: (request, scope) => assembleTraining(request, scope, workspaceRoot),
+    confirm: (prompt) => showTrainingModal(prompt),
+    // The same modal, and the separation that matters is not its icon: it is
+    // that this is a SECOND question, asked after the diff exists, with its own
+    // button naming its own consequence. TrainingActions keeps the two channels
+    // apart so an ordinary yes can never answer this one.
+    confirmOverride: (prompt) => showTrainingModal(prompt),
+    publishDiagnostics: (mapped) => publishRunDiagnostics(trainingDiagnostics, mapped),
+    display: (p) => displayPath(workspaceRoot, p),
+    catalogChanged: () => refreshTrainingSurfaces(),
+  });
+
+  context.subscriptions.push(
+    // All four are palette-hidden ("when": false): each takes the lens's
+    // {uri, name} payload, which the palette cannot supply, and an invocation
+    // without one returns rather than guessing at the active editor.
+    commands.registerCommand(COMMAND_DRY_RUN, async (request?: TrainingRequest) => {
+      if (request === undefined) return;
+      reportTraining(await training.dryRun(request), trainingOutput);
+    }),
+    commands.registerCommand(COMMAND_TRY_IN_SESSION, async (request?: TrainingRequest) => {
+      if (request === undefined) return;
+      const outcome = await training.tryInSession(request);
+      reportTraining(outcome, trainingOutput);
+      // The lens that says "defined for this session only" is the half of the
+      // temporariness message that survives the modal being dismissed, so it has
+      // to redraw now rather than at the next keystroke.
+      if (outcome.status === 'ok') refreshSessionLens();
+    }),
+    commands.registerCommand(COMMAND_PROMOTE, async (request?: TrainingRequest) => {
+      if (request === undefined) return;
+      const outcome = await training.promote(request);
+      if (outcome.status !== 'breaking') {
+        reportTraining(outcome, trainingOutput);
+        return;
+      }
+      // THE OVERRIDE IS A SECOND ACT, and this is where its shape is enforced in
+      // the UI. The refusal is written up and REVEALED first, so the classified
+      // diff is on screen before anything offers to bypass it; only then does a
+      // button appear, and that button opens a modal of its own. Two deliberate
+      // clicks with the diff visible between them -- never a retry, never a
+      // checkbox that was ticked before the diff existed.
+      //
+      // Written WITHOUT the usual toast: the channel is revealed outright here,
+      // so a "Show details" notification beside the override one would be two
+      // notifications competing for the same click.
+      const refusal = writeTraining(outcome, trainingOutput);
+      trainingOutput.show(true);
+      const override = 'Override and promote...';
+      const answer = await window.showWarningMessage(
+        refusal?.headline ??
+          'The engine refused this promote. The classified diff is in the memQL Training output.',
+        override
+      );
+      if (answer !== override) return;
+      reportTraining(
+        await training.promoteWithOverride(
+          request,
+          outcome.cluster,
+          outcome.bundle,
+          outcome.diffs
+        ),
+        trainingOutput
+      );
+    }),
+    commands.registerCommand(COMMAND_DEMOTE, async (request?: TrainingRequest) => {
+      if (request === undefined) return;
+      reportTraining(await training.demote(request), trainingOutput);
+    }),
+    // The one training command that IS in the palette. It navigates and submits
+    // nothing, and it takes no arguments -- the four above take the lens's
+    // {uri, name} payload, which the palette cannot supply.
+    commands.registerCommand(COMMAND_SHOW_LIST, () => showTrainingList())
+  );
+
   // Every connection-state change ends the stream that held any session-define.
   // Bumping the epoch here is what makes the next run re-inject before
   // honouring itself -- without it a re-run after a reconnect silently
@@ -1009,6 +1151,13 @@ function registerRunSurface(
   context.subscriptions.push({
     dispose: conns.onDidChangeState((state) => {
       orchestrator.noteStreamReset();
+      // The training half of the same fact: every session-defined construct
+      // dies with the stream, silently, and a lens still claiming one after the
+      // reconnect would be this editor asserting something false about the
+      // cluster. Dropped here, then redrawn so the claim disappears from screen
+      // rather than only from memory.
+      training.noteStreamReset();
+      refreshSessionLens();
       if (state.status === 'connected') {
         void conns.query?.listConcepts().then(
           (list) => {
@@ -1193,11 +1342,76 @@ function registerRunSurface(
     const trainingDecorations = new TrainingDecorations();
     trainingDecorations.setClient(lspBridge);
     trainingDecorations.activate();
+    // The status bar and its list have ONE OWNER, which is the whole reason the
+    // handler delegates here rather than fetching for itself: the list has to be
+    // the set the count was computed from, and a second reader is a second
+    // answer.
+    showTrainingList = () => trainingDecorations.showList();
     context.subscriptions.push(
       trainingLens,
       trainingDecorations,
       languages.registerCodeLensProvider({ language: 'memql' }, trainingLens)
     );
+
+    // The lens that keeps "temporary" on screen (memql#3763).
+    //
+    // A SECOND PROVIDER rather than a fifth state on the first one, because it
+    // is not a state: a session-defined construct is still `untrained` on that
+    // cluster and still wants a Promote offered beside it. What this adds is a
+    // fact about the CONNECTION -- a copy of this source is answering calls
+    // right now and will stop without notice -- and the reason it needs saying
+    // at all is that a session-define and a promote are indistinguishable from
+    // the call site.
+    //
+    // It asks the server for itself rather than sharing the state lens's reply.
+    // VS Code refreshes the two providers independently, so a shared cache would
+    // be stale in whichever of them redrew second; and the cost is bounded to
+    // the case where something IS defined, because an empty session returns
+    // before making a request at all.
+    const sessionLensChanged = new EventEmitter<void>();
+    context.subscriptions.push(
+      sessionLensChanged,
+      languages.registerCodeLensProvider(
+        { language: 'memql' },
+        {
+          onDidChangeCodeLenses: sessionLensChanged.event,
+          provideCodeLenses: async (document) => {
+            const cluster = currentRunCluster(clustersPath, conns);
+            if (cluster === undefined) return [];
+            if (training.sessionDefinitions.defined(cluster.name).length === 0) return [];
+            const constructs = await requestTrainingStates(document.uri.fsPath);
+            if (constructs === undefined) return [];
+            return sessionLensPlans(constructs, (name) =>
+              training.sessionDefinitions.isDefined(cluster.name, name)
+            ).map(
+              (plan) =>
+                new CodeLens(lspRange(plan.signatureRange), {
+                  // NO COMMAND. Clicking it would have to do something, and
+                  // there is nothing to do -- undefining is not offered, and the
+                  // way to make it permanent is the Promote lens on the same
+                  // line.
+                  title: plan.title,
+                  command: '',
+                  tooltip: plan.tooltip,
+                })
+            );
+          },
+        }
+      )
+    );
+    refreshSessionLens = () => sessionLensChanged.fire();
+
+    // What a promote or a demote has to redraw, in the order it has to redraw
+    // it. THE CATALOG FIRST: training state is the server comparing a buffer
+    // against the catalog this process pushed, so redrawing a lens before
+    // replacing the catalog would repaint it from the answer that is about to
+    // change -- which looks exactly like a promote that did nothing.
+    refreshTrainingSurfaces = async () => {
+      await clusterCatalog.refresh();
+      trainingLens.setClient(lspBridge);
+      void trainingDecorations.refresh(window.activeTextEditor);
+      sessionLensChanged.fire();
+    };
   }
 
   context.subscriptions.push(
@@ -1405,6 +1619,190 @@ async function assembleForTarget(target: RunTarget, workspaceRoot: string | unde
     imports: (p, text) => requestImports(p, text),
   };
   return assembleBundle(activePath, activeText, sources);
+}
+
+// buildTrainingEngine adapts the live connection to the four calls a training
+// action makes. Undefined whenever anything is missing, which TrainingActions
+// reports as "not connected" rather than failing mid-action.
+//
+// NO ROLE CHECK, here or anywhere on this path. Promote and demote are
+// owner-only and this process has no trustworthy view of the caller's role; a
+// client-side guess would either block a legitimate owner or promise a non-owner
+// a call the engine refuses anyway. The engine enforces, the editor explains.
+function buildTrainingEngine(conns: ConnectionManager): TrainingEngine | undefined {
+  const authoring = conns.authoring;
+  if (authoring === undefined) return undefined;
+  return {
+    validateBundle: (sources) => authoring.validateBundle(sources),
+    sessionDefineBundle: (sources) => authoring.sessionDefineBundle(sources),
+    durablePromoteBundle: (sources, options) => authoring.durablePromoteBundle(sources, options),
+    durableDemoteBundle: (sources) => authoring.durableDemoteBundle(sources),
+  };
+}
+
+// assembleTraining builds what a training action submits: the closure for
+// dry-run / try-in-session / promote, the construct alone for demote.
+//
+// It OPENS every file it needs to classify, which is the one mechanical
+// requirement the closure rule has. `memql/trainingState` answers out of the
+// server's own copy of a document, so a dependency the editor has never opened
+// is a dependency the server cannot describe -- and the closure would then leave
+// it out on an assumption rather than on an answer. `openTextDocument` loads a
+// document without showing it and the language client forwards the didOpen; it
+// is the same mechanic `constructForConfig` already uses to ask about a file
+// outside the active editor.
+async function assembleTraining(
+  request: TrainingRequest,
+  scope: TrainingScope,
+  workspaceRoot: string | undefined
+): Promise<TrainingBundle | undefined> {
+  const uri = Uri.parse(request.uri);
+  const activePath = uri.fsPath;
+  const document = await workspace.openTextDocument(uri);
+  const activeText = document.getText();
+
+  if (scope === 'construct') {
+    const constructs = await requestTrainingStates(activePath);
+    if (constructs === undefined) {
+      // NOT the same as "no such construct". The server declining to describe
+      // the file means the construct cannot be isolated from its neighbours, and
+      // a demote built from a guess would withdraw the wrong thing.
+      throw new Error(
+        'The language server could not describe this file, so the construct to demote cannot be isolated from the rest of it.'
+      );
+    }
+    return assembleConstruct(activePath, activeText, constructs, request.name);
+  }
+
+  const ws: TrainingWorkspace = {
+    resolveImport: (dotted) => resolveImportPath(dotted, workspaceRoot, activePath),
+    read: (p) => readTrainingSource(p),
+    imports: (p, text) => requestImports(p, text),
+    trainingStates: (p) => requestTrainingStates(p),
+  };
+  return assembleClosure(activePath, activeText, ws);
+}
+
+// requestTrainingStates asks the server what state each construct in a file is
+// in. `undefined` is "could not say" and is kept distinct from `[]` all the way
+// down -- see closure.ts, where the two get different decisions.
+//
+// FEATURE-DETECTED, like every other custom request: an older memql-lsp on the
+// PATH is an ordinary situation. Note that a server without the capability also
+// renders no training lens, so in practice this path is unreachable from a click
+// -- the detection is here because the alternative is a MethodNotFound surfacing
+// as a raw command-error toast.
+async function requestTrainingStates(filePath: string): Promise<TrainingConstruct[] | undefined> {
+  if (client === undefined) return undefined;
+  const experimental = client.initializeResult?.capabilities.experimental as
+    | Record<string, unknown>
+    | undefined;
+  if (experimental === undefined || experimental[TRAINING_STATE_CAPABILITY] !== true) {
+    return undefined;
+  }
+  let document;
+  try {
+    document = await workspace.openTextDocument(Uri.file(filePath));
+  } catch {
+    return undefined;
+  }
+  try {
+    const raw = await client.sendRequest(TRAINING_STATE_METHOD, {
+      textDocument: { uri: document.uri.toString() },
+    });
+    return parseTrainingConstructs(raw);
+  } catch {
+    return undefined;
+  }
+}
+
+// readTrainingSource is readSource with the DIRTY FLAG DROPPED, deliberately and
+// visibly. The run bundle includes a dependency because it has unsaved edits;
+// the training closure includes one because the cluster does not have it, and
+// those two rules disagree for the ordinary case of a saved, never-promoted
+// file. Handing the closure a field it must not consult would leave the
+// separation to discipline; not handing it over at all settles it.
+function readTrainingSource(p: string): { text: string } | undefined {
+  const source = readSource(p);
+  return source === undefined ? undefined : { text: source.text };
+}
+
+// displayPath renders an absolute path for a confirmation modal. Relative to the
+// workspace where it can be -- a closure listing eight absolute paths is a
+// closure nobody reads.
+function displayPath(workspaceRoot: string | undefined, absolute: string): string {
+  if (workspaceRoot === undefined) return absolute;
+  const relative = path.relative(workspaceRoot, absolute);
+  if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return absolute;
+  return relative.split(path.sep).join('/');
+}
+
+// showTrainingModal asks a training confirmation.
+//
+// A MODAL, for the run path's reason and more so: a dismissable toast would let
+// a promote proceed while the developer's attention is elsewhere, and a promote
+// is persisted, shared and replayed on restart. The button carries the prompt's
+// own label -- it names the act rather than saying "OK", which is what makes the
+// dialog readable at a glance.
+async function showTrainingModal(prompt: TrainingPrompt): Promise<boolean> {
+  const answer = await window.showWarningMessage(
+    prompt.message,
+    { modal: true, detail: prompt.detail },
+    prompt.confirmLabel
+  );
+  return answer === prompt.confirmLabel;
+}
+
+// reportTraining writes an outcome to both surfaces: the channel keeps the
+// structure, the notification says something happened.
+//
+// `superseded` and `declined` report NOTHING and that is not an oversight --
+// outcomeReport returns undefined for both. A superseded action was overtaken by
+// a newer one whose report belongs on screen instead, and telling somebody their
+// Cancel worked is noise.
+function reportTraining(outcome: TrainingOutcome, output: OutputChannel): void {
+  const report = writeTraining(outcome, output);
+  if (report === undefined) return;
+
+  const details = 'Show details';
+  const shown =
+    report.severity === 'error'
+      ? window.showErrorMessage(report.headline, details)
+      : report.severity === 'warning'
+        ? window.showWarningMessage(report.headline, details)
+        : window.showInformationMessage(report.headline, details);
+  void Promise.resolve(shown).then((answer) => {
+    // preserveFocus: revealing the record must not take the cursor out of the
+    // file the developer is working in.
+    if (answer === details) output.show(true);
+  });
+}
+
+// writeTraining puts an outcome in the record and returns what it wrote, or
+// undefined when there was nothing to say. Split out so the breaking-refusal
+// path can reveal the channel itself instead of offering a second notification
+// beside the one carrying the override.
+function writeTraining(
+  outcome: TrainingOutcome,
+  output: OutputChannel
+): ReturnType<typeof outcomeReport> {
+  const report = outcomeReport(outcome);
+  if (report === undefined) return undefined;
+  output.appendLine(`[${new Date().toISOString()}] ${report.headline}`);
+  output.appendLine(report.body);
+  output.appendLine('');
+  return report;
+}
+
+// lspRange converts the server's 0-based line/character range to the editor's.
+function lspRange(range: {
+  start: { line: number; character: number };
+  end: { line: number; character: number };
+}): Range {
+  return new Range(
+    new Position(range.start.line, range.start.character),
+    new Position(range.end.line, range.end.character)
+  );
 }
 
 // requestImports asks the language server which modules `text` imports.

@@ -26,6 +26,7 @@ import {
   statusBarText,
   statusBarTooltip,
   trainingLensPlans,
+  trainingListEntries,
   type TrainingConstruct,
   type TrainingState,
 } from "../src/state/training.js";
@@ -386,4 +387,84 @@ test("state is a function of the reply alone -- nothing here can observe a save"
   );
   assert.deepEqual(parseTrainingConstructs(raw), constructs);
   assert.deepEqual(parseTrainingConstructs(raw), parseTrainingConstructs(raw));
+});
+
+// -----------------------------------------------------------------------------
+// The list the status bar clicks through to (#3763)
+// -----------------------------------------------------------------------------
+
+test("the list carries exactly the constructs the status bar counts", () => {
+  // THE PROPERTY THAT MATTERS, asserted as an identity rather than as two
+  // separate expectations. The number is a claim about a set; a list clicking
+  // through to a different set makes the number a lie the moment somebody counts
+  // the rows, and that is precisely the sort of disagreement this surface exists
+  // to design out.
+  const constructs = [
+    construct("trained", "a"),
+    construct("untrained", "b"),
+    construct("seeded", "c"),
+    construct("drifted", "d"),
+    construct("unknown", "e"),
+  ];
+  const counts = countStates(constructs);
+  const entries = trainingListEntries(constructs);
+
+  assert.equal(entries.length, counts.untrained + counts.drifted);
+  assert.equal(statusBarText(counts), "1 untrained · 1 drifted");
+  assert.deepEqual(
+    entries.map((e) => e.construct.name),
+    ["b", "d"],
+  );
+});
+
+test("the list is in document order, not grouped by state", () => {
+  // It is a way back to a place in a file. A developer scanning for the one they
+  // were just looking at knows roughly where it sat, not which bucket it fell
+  // into.
+  const entries = trainingListEntries([
+    construct("drifted", "first"),
+    construct("trained", "skipped"),
+    construct("untrained", "second"),
+    construct("drifted", "third"),
+  ]);
+  assert.deepEqual(
+    entries.map((e) => e.construct.name),
+    ["first", "second", "third"],
+  );
+});
+
+test("a row says the kind, the name, the state, and the lens's own sentence", () => {
+  const [entry] = trainingListEntries([construct("drifted", "spaceParticipants")]);
+  assert.equal(entry?.label, "query spaceParticipants");
+  assert.equal(entry?.description, "drifted");
+  // The SAME sentence the lens tooltip carries, not a second wording of it: two
+  // phrasings for one state are two things to keep in step, and the second one
+  // drifts.
+  const [plan] = trainingLensPlans([construct("drifted", "spaceParticipants")]);
+  assert.equal(entry?.detail, plan?.detail);
+});
+
+test("the row keeps the construct, so the reveal uses the server's own range", () => {
+  // The click-through must land where the lens and the gutter are anchored. It
+  // does that by carrying the construct through rather than by re-deriving a
+  // position, which is what constructPanel.ts has to do (it scans the text,
+  // having no server answer) and what this deliberately does not.
+  const source = construct("untrained", "spaceParticipants");
+  const [entry] = trainingListEntries([source]);
+  assert.deepEqual(entry?.construct.signatureRange, source.signatureRange);
+});
+
+test("a file with nothing untrained or drifted lists nothing", () => {
+  // Which is the same set the status bar hides for. The picker's caller turns
+  // this into a sentence rather than an empty list -- "everything here is on the
+  // cluster" is the good news the surface exists to be able to tell somebody.
+  assert.deepEqual(trainingListEntries([construct("trained", "a"), construct("seeded", "b")]), []);
+  assert.equal(statusBarText(countStates([construct("trained", "a")])), "");
+});
+
+test("an unknown construct is never listed -- a disconnection is not a to-do list", () => {
+  // The same rule the gutter holds: `unknown` means no cluster answered, and a
+  // row offering to navigate to "something you have not promoted" would be a
+  // claim about a cluster nobody asked.
+  assert.deepEqual(trainingListEntries([construct("unknown", "a")]), []);
 });
