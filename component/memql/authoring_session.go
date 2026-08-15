@@ -592,7 +592,23 @@ func (e *MemQLEngine) promoteAuthoredConstructWithGate(ctx context.Context, gate
 		if !ok || built == nil {
 			return fmt.Errorf("authoring: promote %s %q: construct is not compiled", c.Kind, c.Name)
 		}
-		return e.promoteConceptIntoLiveRegistry(ctx, gate, c, built)
+		if err := e.promoteConceptIntoLiveRegistry(ctx, gate, c, built); err != nil {
+			return err
+		}
+		// A PROMOTE IS THE UN-RETIRE PATH (memql#3756). A concept demoted while
+		// rows existed under it stays registered and closed to writes; promoting
+		// it again is the operation that re-opens it, and it is the only one --
+		// there is no separate un-retire API to forget to call. A no-op for the
+		// ordinary promote of a concept that was never retired.
+		//
+		// Every promote route funnels here (session promote, durable promote,
+		// boot + cross-node re-hydration), which is what makes that claim true
+		// rather than true-of-one-path. The boot walk clearing a retirement it
+		// is about to replay is harmless and deliberate: the replay
+		// (applyPersistedConceptRetirements) runs AFTER the whole walk, over the
+		// persisted rows, so it decides the final state.
+		e.clearConceptRetirement(built.Name)
+		return nil
 	default:
 		return fmt.Errorf("authoring: promotion of %s constructs is not supported (concept + function-family + spec only)", c.Kind)
 	}
@@ -618,30 +634,48 @@ func (e *MemQLEngine) promoteAuthoredConstructWithGate(ctx context.Context, gate
 // fresh. Idempotent-unfriendly by design: demoting a name that was never
 // author-promoted is an error, not a no-op, so the caller learns it asked to
 // remove something it does not own.
+//
+// A CONCEPT does not necessarily leave the registry (memql#3756): rows written
+// under it outlive its definition, so a demote with rows under the concept
+// RETIRES it -- registered, readable, closed to new writes -- and only a demote
+// with zero rows removes it. Callers that need to know which happened use
+// demoteAuthoredConstructWithOutcome; this signature keeps the error-only shape
+// for the paths that only need the safety gate (the cross-node demote
+// subscriber).
 func (e *MemQLEngine) DemoteAuthoredConstruct(ctx context.Context, kind, name string) error {
+	_, err := e.demoteAuthoredConstructWithOutcome(ctx, kind, name)
+	return err
+}
+
+// demoteAuthoredConstructWithOutcome is DemoteAuthoredConstruct plus the
+// structured record of WHICH withdrawal happened -- retired or removed, and the
+// row count that chose between them for a concept. The durable demote reports it
+// on the wire so a client renders the outcome instead of inferring it from the
+// absence of an error (memql#3756).
+func (e *MemQLEngine) demoteAuthoredConstructWithOutcome(ctx context.Context, kind, name string) (DemoteOutcome, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return fmt.Errorf("authoring: demote requires a construct name")
+		return DemoteOutcome{}, fmt.Errorf("authoring: demote requires a construct name")
 	}
 	switch kind {
 	case "query", "mutation", "logic":
 		if e.functions == nil {
-			return fmt.Errorf("authoring: demote %s %q: function registry is not initialized", kind, name)
+			return DemoteOutcome{}, fmt.Errorf("authoring: demote %s %q: function registry is not initialized", kind, name)
 		}
 		key := "function:" + name
 		if _, promoted := e.promotedAuthored.Load(key); !promoted {
-			return fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
+			return DemoteOutcome{}, fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
 		}
 		e.functions.Remove(name)
 		e.promotedAuthored.Delete(key)
-		return nil
+		return DemoteOutcome{Kind: kind, Name: name, Outcome: DemoteOutcomeRemoved}, nil
 	case "spec", "trait":
 		if e.specs == nil {
-			return fmt.Errorf("authoring: demote %s %q: spec registry is not initialized", kind, name)
+			return DemoteOutcome{}, fmt.Errorf("authoring: demote %s %q: spec registry is not initialized", kind, name)
 		}
 		key := "spec:" + name
 		if _, promoted := e.promotedAuthored.Load(key); !promoted {
-			return fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
+			return DemoteOutcome{}, fmt.Errorf("authoring: demote %s %q: not an author-promoted construct (demotion cannot remove a core construct)", kind, name)
 		}
 		e.specs.Remove(name)
 		// The marker also covers a name reserved by a stored @disabled
@@ -649,22 +683,14 @@ func (e *MemQLEngine) DemoteAuthoredConstruct(ctx context.Context, kind, name st
 		// release the reservation too (memql#2643).
 		e.specs.UnmarkDisabled(name)
 		e.promotedAuthored.Delete(key)
-		return nil
+		return DemoteOutcome{Kind: kind, Name: name, Outcome: DemoteOutcomeRemoved}, nil
 	case "concept":
-		// Deliberately refused, and named separately from the default branch so
-		// the message says WHY rather than "unsupported kind" (memql#3746).
-		//
-		// A concept became PROMOTABLE without becoming demotable, which is a
-		// coherent intermediate state rather than an oversight. Withdrawing a
-		// function makes it uncallable and that is the whole story; withdrawing
-		// a concept would strand every row already written under it, so the
-		// semantics are their own decision -- retire (keep the name claimed, the
-		// rows readable, refuse new writes) when rows exist, remove outright only
-		// when there are none. That is memql#3756. Until it lands, teaching a
-		// cluster a concept is one-way, which loses nothing that was previously
-		// possible.
-		return fmt.Errorf("authoring: demotion of concept %q is not supported yet -- a concept's rows outlive its definition, so withdrawal is retire-vs-remove rather than an unregister (memql#3756)", name)
+		// The kind that is not an unregister. A concept's rows outlive its
+		// definition, so the withdrawal is retire-vs-remove and the row count
+		// decides -- authoring_concept_retire.go carries the decision, the
+		// count's actor, and why each of the two outcomes exists.
+		return e.demoteConceptFromLiveRegistry(ctx, name)
 	default:
-		return fmt.Errorf("authoring: demotion of %s constructs is not supported (function-family + spec only)", kind)
+		return DemoteOutcome{}, fmt.Errorf("authoring: demotion of %s constructs is not supported (concept + function-family + spec only)", kind)
 	}
 }
