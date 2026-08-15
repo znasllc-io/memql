@@ -7,20 +7,33 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
 // The five hosts the front door serves (design D3). The COUNT is the
-// invariant: it must not grow with customers, apps or sites. Listed rather
-// than discovered, for the same reason `nodes` is listed in
-// render_domain_test.go — discovery would grow the list along with the
-// mistake and assert nothing.
-var frontDoorHosts = []string{
-	"api.memql.localhost",
-	"identity.memql.localhost",
-	"mcp.memql.localhost",
-	"*.memql.localhost",
-	"memql.localhost",
-}
+// invariant: it must not grow with customers, apps or sites.
+//
+// COMPUTED from component/frontdoor rather than listed, since memql#3767. Local
+// is ONE environment (TestLocalStaysOneEnvironment) and it is the UNPREFIXED
+// one, so its host set is exactly what the role x environment product yields
+// for the empty label -- the same product cmd/frontdoorhosts writes into the
+// two cloud overlays.
+//
+// The point of computing it is that this overlay's four front-door files stay
+// HAND-AUTHORED, and deliberately so: they are traefik rather than nginx, and
+// they carry the measured reasoning for a priority ranking that broke the API
+// once already (memql#3810). Hand-authored is not the same as unchecked. This
+// binds them to the same derivation the generator uses, so local's committed
+// defaults cannot drift from what every other environment serves -- which is
+// what would make the local cluster stop proving anything about the cloud ones.
+var frontDoorHosts = func() []string {
+	var out []string
+	for _, h := range frontdoor.Hosts("", "memql.localhost") {
+		out = append(out, h.Name)
+	}
+	return out
+}()
 
 // hostsIn returns every Ingress rule host in the rendered overlay. Parsed by
 // line rather than with a YAML decoder because the rendered stream is many

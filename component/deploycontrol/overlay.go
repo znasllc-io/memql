@@ -13,12 +13,21 @@ import (
 // SINGLE image authority for an environment (deployment-v2 Phase 1,
 // znasllc-io/memql#699).
 //
-// For the prod overlay the file's first line is a provenance comment
+// PromotedVersion is parsed from a LEGACY provenance comment
 //
 //	# Promoted from releases/<version>.yaml by scripts/release/promote.sh ...
 //
-// from which PromotedVersion is parsed. The staging overlay carries
-// no such comment, so PromotedVersion is empty there.
+// that the retired promote script wrote as the prod overlay's first line. No
+// overlay in this tree carries one any more and nothing writes one: since
+// memql#3769 both environments live in ONE repository, so a promote's
+// provenance is the COMMIT (executor.go's promoteCommitMessage) -- the author,
+// the timestamp and the exact digest diff, none of which a comment line can
+// restate without becoming a second copy to keep honest.
+//
+// The parse is kept because it is free and reads an older checkout correctly.
+// Treat an empty PromotedVersion as the normal case rather than as missing
+// data: GetDeploymentStatus's `version` field is empty for both environments
+// today, and the answer to "what is production on" is the digest set below it.
 type Overlay struct {
 	// PromotedVersion is the release version parsed from the prod
 	// overlay's "Promoted from releases/<version>.yaml" comment.

@@ -76,6 +76,15 @@ readonly DB_GATED_TREES=(
 # shrink. The count is unchanged at 181 untagged. Each wire module is
 # ADDITIONALLY built and vetted with GOWORK=off by the `module-boundaries` lane,
 # which is where the boundary itself is enforced.
+#
+# memql#3767 added `component/frontdoor`. What the complement now means, having
+# looked: the same as for the wire tier. `component/frontdoor` and the two
+# `cmd/frontdoor*` binaries over it are all still enumerated in workspace mode,
+# so `hosts_test.go` runs in this lane and needs no lane of its own; the count
+# rose to 184. The module exists because component/genesis -- itself a module --
+# derives a node's issuer and CORS origins from the SAME role-vs-site host rule
+# the Ingress generator writes hosts with, and a root-module package cannot be
+# imported from a nested one with GOWORK=off.
 readonly KNOWN_GO_MOD_DIRS=(
 	"."
 	"component/actions"
@@ -89,6 +98,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/deploycontrol"
 	"component/events"
 	"component/fileprocessor"
+	"component/frontdoor"
 	"component/genesis"
 	"component/grpc"
 	"component/grpc/gen"

@@ -66,6 +66,7 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/identity v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
@@ -137,3 +138,5 @@ replace github.com/znasllc-io/memql/core => ../../core
 replace github.com/znasllc-io/memql/docs => ../../docs
 
 replace github.com/znasllc-io/memql/dsl => ../../dsl
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor

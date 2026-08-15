@@ -34,18 +34,19 @@ var environments = []struct {
 	namespace  string // every namespaced resource must land here
 	label      string // MEMQL_ENVIRONMENT, matching v1:cluster:node.environment's enum
 	schema     string // the FIRST schema on the search path -- where every write lands
+	hostLabel  string // MEMQL_HOST_LABEL -- the DNS label its front-door hosts carry
 	replicas   int    // the committed count for a request-serving mesh node
 	argoApp    string // the ArgoCD Application that reconciles it
 	autoSynced bool   // whether that Application carries an `automated:` block
 }{
 	{
 		dir: "prod", namespace: "memql-prod", label: "production",
-		schema: "memql_prod", replicas: 2,
+		schema: "memql_prod", hostLabel: "", replicas: 2,
 		argoApp: "memql-prod", autoSynced: false,
 	},
 	{
 		dir: "staging", namespace: "memql-staging", label: "staging",
-		schema: "memql_staging", replicas: 2,
+		schema: "memql_staging", hostLabel: "staging", replicas: 2,
 		argoApp: "memql-staging", autoSynced: true,
 	},
 }

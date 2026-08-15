@@ -111,6 +111,30 @@
 // loop rides a top-level where-filtered forEach instead of living inside the
 // case. Both stay in THIS one automation; there are no per-env automations.
 //
+// THE ArgoCD APPLICATION IS PER-ENVIRONMENT (memql#3769, epic memql#3748).
+// `argoSync(app: ...)` named the bare `memql` while that was the ONE
+// Application in the cloud -- the surface the product pack's overlay owned.
+// memql#3766 replaced it with two, `memql-prod` and `memql-staging`, each
+// reconciling its own overlay into its own namespace from the one base
+// (deploy/argocd/apps/), and `argocd app sync memql` against an Application
+// that no longer exists is a deploy that reports failure having placed nothing.
+//
+// So staging gets its own `case` and production takes the `default`, which the
+// `environment` enum makes exhaustive (development | staging | production, and
+// development is already matched above). The alternative -- a logic step
+// mapping environment -> app name -- was rejected for a mechanical reason worth
+// recording: every phase here reads ONLY the event payload, which is what keeps
+// them all at the same dependency depth where the topo-sort preserves authored
+// source order (see EXECUTION ORDER above). Making `place` depend on a logic
+// step would give it a data edge the other phases do not have, and reorder the
+// pipeline. The name is a VALUE either way; this is the spelling that does not
+// move the deploy sequence to say it.
+//
+// The `importImageToK3d(cluster: "memql")` above is NOT the same string wearing
+// the same clothes: that is the k3d CLUSTER name on a developer's laptop, which
+// this epic deliberately left as ONE environment in the plain `memql`
+// namespace.
+//
 // LIFECYCLE record. record -> finalize is the deployment timeline the bundle
 // persists: createDeployment (in_progress) at start, updateDeploymentStatus
 // (succeeded | failed) at finish -- reconstructable asOf any time off the one
@@ -170,9 +194,13 @@ automation deployEngineCluster {
   step place {
     switch environment {
       case "development" { }
+      case "staging" {
+        action pinOverlayDigests(overlayPath, digests: digests, dryRun)
+        action argoSync(app: "memql-staging", revision: ref, dryRun)
+      }
       default {
         action pinOverlayDigests(overlayPath, digests: digests, dryRun)
-        action argoSync(app: "memql", revision: ref, dryRun)
+        action argoSync(app: "memql-prod", revision: ref, dryRun)
       }
     }
   }

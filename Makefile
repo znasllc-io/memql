@@ -430,17 +430,43 @@ arch-model:
 arch-model-check:
 	$(GO) test -count=1 -run TestArchitectureModelIsNotStale ./component/architecture/
 
-## Regenerate the bff HTTP path entries in the api front door from
+## Regenerate the whole front door: the HOSTS first, then the PATHS inside
+## them. Order matters -- the hosts generator writes the api Ingress that the
+## paths generator then fills, carrying any existing block across so a
+## regeneration never blanks it.
+frontdoor: frontdoor-hosts frontdoor-paths
+
+## Regenerate each cloud overlay's front door from the role x environment
+## product (memql#3767).
+##
+## The host set is a PRODUCT, not a list: three roles plus the sites wildcard,
+## times however many environments the cluster carries. Hand-maintaining it
+## means a host missing from ONE environment, which is an environment nothing
+## can reach while its manifest looks complete beside the other's.
+frontdoor-hosts:
+	$(GO) run ./cmd/frontdoorhosts
+
+## CI gate: fail when a generated front door is stale.
+frontdoor-hosts-check:
+	$(GO) run ./cmd/frontdoorhosts --check
+
+## Regenerate the bff HTTP path entries in every api front door from
 ## component/server's own path declarations.
 ##
 ## An ingress controller's backend protocol is a per-SERVICE setting, so the
 ## bff's gRPC edge (:50051, h2c) and its HTTP edge (:8085) are two Services --
 ## and every HTTP path needs its own Ingress rule. Hand-maintaining that list
 ## left /inbound/{source} and /unsubscribe routed by no overlay at all.
+##
+## EVERY overlay, not just local: a path routed in one environment and not the
+## other is the same missing rule, discovered later and only by whoever happens
+## to dial it there.
 frontdoor-paths:
 	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/local/api-front-door.yaml
+	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/prod/front-door.generated.yaml
+	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/staging/front-door.generated.yaml
 
-## CI gate: fail when the front door's generated path block is stale. The
+## CI gate: fail when a front door's generated path block is stale. The
 ## drift this catches is a new public HTTP path that nothing routes -- which
 ## does not 404, it hands HTTP/1.1 to an h2c backend. Pair with
 ## `make frontdoor-paths` locally to fix.
@@ -448,7 +474,7 @@ frontdoor-paths:
 ## Also enforced by TestFrontDoorPathsAreNotStale so it runs in the ordinary
 ## `go test ./...` lane, which needs no workflow change.
 frontdoor-paths-check:
-	$(GO) test -count=1 -run TestFrontDoorPathsAreNotStale ./deploy/k8s/overlays/local/
+	$(GO) test -count=1 -run 'TestFrontDoorPathsAreNotStale|TestFrontDoorHostsAreNotStale' ./deploy/k8s/overlays/
 
 ## DSL lint: load the embedded DSL tree through the same
 ## dslimports.Load pipeline the engine runs at boot and fail on any
@@ -570,7 +596,7 @@ test-polyphon:
 # ---------------------------------------------------------------------------
 
 ##@ Quality & codegen
-.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor-paths frontdoor-paths-check
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check
 
 ## Run go vet on all packages
 vet:

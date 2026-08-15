@@ -43,6 +43,7 @@ use (
 	./component/deploycontrol
 	./component/events
 	./component/fileprocessor
+	./component/frontdoor
 	./component/genesis
 	./component/grpc
 	./component/grpc/gen
