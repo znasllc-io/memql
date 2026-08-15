@@ -186,3 +186,48 @@ export function bundleFileAt(bundle: Bundle, bundleLine: number): BundleFile | u
   }
   return undefined;
 }
+
+/**
+ * bundleOrigin derives the TREE-RELATIVE path the engine needs as a bundle's
+ * `origin` -- `"planner/queries.memql"` for
+ * `/home/me/memql/dsl/planner/queries.memql` (memql#3800).
+ *
+ * WHY THE ENGINE NEEDS IT. Concept resolution admits an unimported bare concept
+ * name when the resolved id is one the file's own domain could have DECLARED,
+ * and an unannotated concept declaration assembles its canonical id under its
+ * directory (#2614). Both read the DOMAIN off this path. Without it the engine
+ * runs its no-domain degrade, which refuses every construct naming a short name
+ * more than one domain declares -- `plan`, `request`, `call`, `invocation` --
+ * even though the identical file loads cleanly at boot.
+ *
+ * THE ACTIVE FILE, which `assembleBundle` puts LAST, and that position is
+ * already contract for the diagnostic mapper. A bundle can concatenate dirty
+ * dependencies too, and the engine takes one domain for the whole bundle, so an
+ * unannotated concept declared in a dependency from ANOTHER domain would
+ * assemble under the active file's domain. An annotated one cannot: the
+ * moved-file guard refuses an `@namespace` that disagrees with the directory.
+ *
+ * Returns "" when the path is not under a `dsl/` directory -- a scratch buffer
+ * or a file outside the tree genuinely has no domain, and "" is how the engine
+ * is told so.
+ */
+export function bundleOrigin(bundle: Bundle): string {
+  const active = bundle.files[bundle.files.length - 1];
+  if (active === undefined) return "";
+  return treeRelativeDslPath(active.path);
+}
+
+/**
+ * treeRelativeDslPath returns the part of `path` after its LAST `dsl/` segment,
+ * or "" when there is none.
+ *
+ * The last rather than the first: a checkout at `~/dsl/memql/dsl/planner/...`
+ * has two, and the one that starts the DSL tree is the one nearest the file.
+ */
+export function treeRelativeDslPath(path: string): string {
+  const normalised = path.replace(/\\/g, "/");
+  const idx = normalised.lastIndexOf("/dsl/");
+  if (idx >= 0) return normalised.slice(idx + "/dsl/".length);
+  if (normalised.startsWith("dsl/")) return normalised.slice("dsl/".length);
+  return "";
+}

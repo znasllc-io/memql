@@ -328,11 +328,15 @@ export interface RunAutomationPayload {
 export interface AuthoringValidateBundlePayload {
   requestId: string;
   sources: string;
+  /** Tree-relative bundle path; supplies the ambient domain (memql#3800). */
+  origin?: string;
 }
 
 export interface AuthoringSessionDefineBundlePayload {
   requestId: string;
   sources: string;
+  /** Tree-relative bundle path; supplies the ambient domain (memql#3800). */
+  origin?: string;
 }
 
 // The two DURABLE authoring messages (memql#3760). Same `sources` bundle
@@ -358,6 +362,8 @@ export interface DurablePromoteBundlePayload {
   // keeping the field off the envelope means the dangerous flag appears in a
   // frame only when a caller asked for it.
   allowBreaking?: boolean;
+  /** Tree-relative bundle path; supplies the ambient domain (memql#3800). */
+  origin?: string;
 }
 
 export interface DurableDemoteBundlePayload {

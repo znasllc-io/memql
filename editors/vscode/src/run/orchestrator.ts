@@ -51,7 +51,7 @@ import {
   type RunTarget,
 } from "../constructs/runnable.js";
 import { buildNamedCall, extractErrorId } from "./call.js";
-import type { Bundle } from "./bundle.js";
+import { bundleOrigin, type Bundle } from "./bundle.js";
 import { mapBundleDiagnostics, type MappedDiagnostic } from "./diagnostics.js";
 import { WriteConfirmationGate } from "./preflight.js";
 import { SessionRegistry } from "./session.js";
@@ -68,8 +68,11 @@ export type RunPhase = "preflight" | "bundle" | "validate" | "define" | "invoke"
  * builds this from ConnectionManager.
  */
 export interface RunEngine {
-  validateBundle(sources: string): Promise<ValidateBundleResult>;
-  sessionDefineBundle(sources: string): Promise<SessionDefineBundleResult>;
+  // `origin` is the bundle's tree-relative path, which supplies the engine's
+  // ambient domain for concept resolution (memql#3800). Optional so a buffer
+  // outside the DSL tree simply omits it.
+  validateBundle(sources: string, origin?: string): Promise<ValidateBundleResult>;
+  sessionDefineBundle(sources: string, origin?: string): Promise<SessionDefineBundleResult>;
   /** query / mutation / logic, as a rendered named call. */
   executeNamed(name: string, call: string): Promise<{ rows: Row[]; raw: unknown }>;
   /** tool, against the DEPLOYED definition. */
@@ -213,7 +216,7 @@ export class RunOrchestrator {
     // even when the thing being invoked is the deployed tool.
     let validated: ValidateBundleResult;
     try {
-      validated = await engine.validateBundle(bundle.sources);
+      validated = await engine.validateBundle(bundle.sources, bundleOrigin(bundle));
     } catch (err) {
       if (!this.latest.isCurrent(token)) return { status: "superseded" };
       return fail(target, "validate", err instanceof Error ? err.message : String(err));
@@ -243,7 +246,7 @@ export class RunOrchestrator {
       if (this.session.needsInjection(cluster.name, bundle.sources)) {
         let defined: SessionDefineBundleResult;
         try {
-          defined = await engine.sessionDefineBundle(bundle.sources);
+          defined = await engine.sessionDefineBundle(bundle.sources, bundleOrigin(bundle));
         } catch (err) {
           if (!this.latest.isCurrent(token)) return { status: "superseded" };
           // The registration state is now UNKNOWN -- the request may have been

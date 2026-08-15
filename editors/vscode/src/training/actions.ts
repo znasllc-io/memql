@@ -73,6 +73,7 @@ import type {
 import { Latest, type LatestToken } from "../async/latest.js";
 import { extractErrorId } from "../run/call.js";
 import { mapBundleDiagnostics, type MappedDiagnostic } from "../run/diagnostics.js";
+import { bundleOrigin } from "../run/bundle.js";
 import type { TrainingBundle } from "./closure.js";
 import {
   breakingOverridePrompt,
@@ -117,8 +118,9 @@ export type TrainingScope =
  * functions are a far cheaper fixture than a live Connection.
  */
 export interface TrainingEngine {
-  validateBundle(sources: string): Promise<ValidateBundleResult>;
-  sessionDefineBundle(sources: string): Promise<SessionDefineBundleResult>;
+  // `origin` supplies the engine's ambient domain (memql#3800).
+  validateBundle(sources: string, origin?: string): Promise<ValidateBundleResult>;
+  sessionDefineBundle(sources: string, origin?: string): Promise<SessionDefineBundleResult>;
   durablePromoteBundle(
     sources: string,
     options: { allowBreaking?: boolean },
@@ -596,7 +598,7 @@ export class TrainingActions {
   ): Promise<{ ok: true } | { outcome: TrainingOutcome }> {
     let validated: ValidateBundleResult;
     try {
-      validated = await engine.validateBundle(bundle.sources);
+      validated = await engine.validateBundle(bundle.sources, bundleOrigin(bundle));
     } catch (err) {
       if (!this.latest.isCurrent(token)) return { outcome: superseded() };
       return { outcome: this.fail(action, request, err) };

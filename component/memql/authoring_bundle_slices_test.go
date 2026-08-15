@@ -109,7 +109,7 @@ func TestExtractCapabilityBundleSlices_DottedName(t *testing.T) {
 // with zero skips -- the Gate-1 sandbox now has action + capability compile
 // cases (deliverable 2).
 func TestValidateBundle_ActionAndCapabilityCompile(t *testing.T) {
-	report := ValidateBundle(bundleCapabilitySrc + "\n\n" + bundleActionSrc)
+	report := ValidateBundle(bundleCapabilitySrc + "\n\n" + bundleActionSrc, "")
 	if !report.OK {
 		t.Fatalf("expected OK, got %+v", report.Diagnostics)
 	}
@@ -136,7 +136,7 @@ func TestValidateBundle_UnrecognizedConstructHardFails(t *testing.T) {
 prompt sneakyPrompt {
   space object
 }`
-	report := ValidateBundle(sessionConceptSrc + "\n\n" + promptSrc)
+	report := ValidateBundle(sessionConceptSrc + "\n\n" + promptSrc, "")
 	if report.OK {
 		t.Fatal("a bundle carrying an unrecognized construct must not validate as OK")
 	}
@@ -181,7 +181,7 @@ action badArgs {
   }
   capability readFile(path: args.p, bogus: args.p)
 }`
-	report := ValidateBundle(bundleCapabilitySrc + "\n\n" + bundleActionSrc + "\n\n" + badActionSrc)
+	report := ValidateBundle(bundleCapabilitySrc + "\n\n" + bundleActionSrc + "\n\n" + badActionSrc, "")
 	if report.OK {
 		t.Fatal("a bundle with one broken action must not validate as OK")
 	}

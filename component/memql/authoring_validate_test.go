@@ -13,7 +13,7 @@ import (
 // clean per-construct diagnostic for each construct, and mutates NOTHING (it is
 // the pure Gate-1 sandbox).
 func TestValidateBundle_OK(t *testing.T) {
-	report := ValidateBundle(sessionConceptSrc + "\n\n" + sessionMutationSrc)
+	report := ValidateBundle(sessionConceptSrc + "\n\n" + sessionMutationSrc, "")
 	if !report.OK {
 		t.Fatalf("expected OK, got %+v", report)
 	}
@@ -32,7 +32,7 @@ func TestValidateBundle_OK(t *testing.T) {
 // The validate-fail path: a syntactically broken construct comes back OK=false
 // with a populated, non-skipped diagnostic explaining the failure.
 func TestValidateBundle_FailCarriesDiagnostics(t *testing.T) {
-	report := ValidateBundle(`spec actorEnvelope broken { return role == }`)
+	report := ValidateBundle(`spec actorEnvelope broken { return role == }`, "")
 	if report.OK {
 		t.Fatal("expected OK=false for a broken bundle")
 	}
@@ -57,7 +57,7 @@ func TestValidateBundle_FailCarriesDiagnostics(t *testing.T) {
 // panicking or returning a bare nil -- so the gRPC surface always has something
 // to send back.
 func TestValidateBundle_EmptyReportsTyped(t *testing.T) {
-	report := ValidateBundle("   \n  ")
+	report := ValidateBundle("   \n  ", "")
 	if report.OK {
 		t.Error("empty bundle should not be OK")
 	}
@@ -83,7 +83,7 @@ func TestSessionDefine_CallableAndNeverShadowsCore(t *testing.T) {
 
 	// Session-define a net-new construct (callable) and one that collides with
 	// the seeded core name (must be dropped from the overlay).
-	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc)
+	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "")
 	if err != nil {
 		t.Fatalf("session-define net-new: %v (diags %+v)", err, res.Diagnostics)
 	}

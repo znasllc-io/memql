@@ -319,7 +319,7 @@ func TestDemoteConcept_ResolvesTheDeclarationNameToItsCanonicalId(t *testing.T) 
 func seedPromotedConcept(t *testing.T, e *MemQLEngine, owner, source, name string) *fakeDemoteStore {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, owner, source); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, source, ""); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup(owner, "concept", name)
@@ -438,7 +438,7 @@ func TestDemoteBundleDurable_ReportsPerConstructOutcomes(t *testing.T) {
 	persist := &fakePromoteStore{}
 	// allowBreaking=false is the ordinary promote (memql#3757); this bundle has
 	// no prior version to break against.
-	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, false); err != nil {
+	if _, err := e.promoteBundleDurableWithStore(context.Background(), persist, "owner-1", bundle, "", false); err != nil {
 		t.Fatalf("promote bundle: %v", err)
 	}
 	store := &fakeDemoteStore{constructs: map[string][]AuthoringConstructRow{}}

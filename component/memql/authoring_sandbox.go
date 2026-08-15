@@ -29,11 +29,13 @@ package memql
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/znasllc-io/memql/component/actions"
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	languageAst "github.com/znasllc-io/memql/component/language/ast"
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
+	memqldsl "github.com/znasllc-io/memql/dsl"
 )
 
 // SandboxConstruct is one candidate construct to compile in isolation,
@@ -60,6 +62,57 @@ type SandboxConstruct struct {
 	//     preamble, not the construct body, so its position is omitted.
 	BundleLine          int `json:"-"`
 	BundlePreambleLines int `json:"-"`
+
+	// Origin is the bundle's TREE-RELATIVE path ("planner/queries.memql"),
+	// stamped onto every construct the bundle produced. Empty for an untitled
+	// buffer and for the planner/DB-row path, which has no file.
+	//
+	// It exists to supply the AMBIENT DOMAIN (memql#3800). Concept resolution
+	// admits an unimported bare name when the resolved id is one the file's own
+	// domain could have DECLARED -- and derives that domain from the origin's
+	// leading path segment. The sandbox built its origin as
+	// "sandbox:<kind>:<name>", which has no slash, so RootDomainFromFilePath
+	// returned "" and the ambient step could not run. Every construct naming an
+	// ambiguous short name then compiled at boot and was REFUSED from every
+	// authoring surface, on byte-identical source.
+	//
+	// Carried per-construct rather than passed alongside so it travels with the
+	// construct into the per-kind compilers, which is where the origin is built.
+	Origin string `json:"origin,omitempty"`
+}
+
+// sandboxOrigin is the origin string a construct's compiler stamps on its
+// diagnostics, and the value concept resolution derives the ambient domain
+// from.
+//
+// With an Origin it is "sandbox:planner/queries.memql:allPlans", which
+// stripOriginDecoration reduces to "planner/queries.memql:allPlans" -- so
+// RootDomainFromFilePath yields "planner", exactly as it does for the boot
+// loader's "unified:planner/queries.memql:allPlans". No change to that helper
+// was needed; it already strips a colon-prefix before the first slash.
+//
+// Without one it keeps the historical "sandbox:<kind>:<name>" shape, which has
+// no slash and therefore no domain -- the documented dir=="" degrade, which is
+// the correct answer for a buffer that genuinely belongs to no domain.
+func (c SandboxConstruct) sandboxOrigin() string {
+	if trimmed := strings.TrimSpace(c.Origin); trimmed != "" {
+		return fmt.Sprintf("sandbox:%s:%s", trimmed, c.Name)
+	}
+	return fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+}
+
+// WithOrigin stamps origin onto every construct in the slice and returns it.
+// The bundle carries one path, so this is where a per-bundle fact becomes a
+// per-construct one.
+func WithOrigin(constructs []SandboxConstruct, origin string) []SandboxConstruct {
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		return constructs
+	}
+	for i := range constructs {
+		constructs[i].Origin = origin
+	}
+	return constructs
 }
 
 // SandboxDiagnostic is the per-construct compile-and-bind result.
@@ -239,7 +292,7 @@ func sandboxCompileConcept(c SandboxConstruct, overlay *memoryNodes.MemoryRegist
 // Errors are already origin-prefixed, so a caller can surface err.Error()
 // verbatim as a diagnostic.
 func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, error) {
-	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+	origin := c.sandboxOrigin()
 
 	decls := ExtractConceptDecls(c.Source)
 	if len(decls) == 0 {
@@ -262,15 +315,33 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	}
 
 	// The concept's canonical id is assembled from @namespace + the
-	// declaration name (@version defaults to 1.0.0, #2613). A candidate
-	// concept must carry @namespace so the authored runtime can register
-	// it under a real id.
-	id, err := languageAst.AssembleConceptIdFromDecl(decl)
+	// declaration name (@version defaults to 1.0.0, #2613).
+	//
+	// WITH AN ORIGIN the DIRECTORY supplies the namespace, exactly as it does
+	// at boot (#2614: file location is id-bearing). That is the same divergence
+	// memql#3800 is about, one construct kind over: 26 of the 30
+	// dsl/*/concepts.memql files carry NO @namespace and rely on their
+	// directory, so every concept in them was refused by the authoring path
+	// while loading cleanly at boot. The pin is read through the loader's own
+	// reader, so the sandbox and the loader cannot disagree about what a
+	// domain's namespace is -- dsl/deployment pins "cluster", and a second
+	// definition here is the copy that drifts.
+	//
+	// WITHOUT ONE the explicit-@namespace requirement stands. An untitled
+	// buffer has no directory to derive from, so a concept in it genuinely has
+	// to say which namespace it belongs to.
+	var id string
+	var err error
+	if dir := RootDomainFromFilePath(c.Origin); dir != "" {
+		id, err = languageAst.AssembleConceptIdFromDeclInDir(decl, dir, namespacePin(memqldsl.Tree(), dir))
+	} else {
+		id, err = languageAst.AssembleConceptIdFromDecl(decl)
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("%s: %v", origin, err)
 	}
 	if id == "" {
-		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace -- cannot assemble a canonical concept id", origin, c.Name)
+		return "", nil, fmt.Errorf("%s: concept %q is missing @namespace and the bundle carries no origin path to derive one from -- either annotate it or send the document's tree-relative path", origin, c.Name)
 	}
 
 	// BuildConceptFromDecl is where the reserved-property refusal lives
@@ -293,7 +364,7 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 // read-only for binding context (only the function path consults it).
 func sandboxCompileOne(c SandboxConstruct, concepts memoryNodes.Registry) SandboxDiagnostic {
 	d := SandboxDiagnostic{Name: c.Name, Kind: c.Kind, OK: true}
-	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+	origin := c.sandboxOrigin()
 
 	// actualName is the name parsed from the source; compared to the declared
 	// construct.Name below so a row whose metadata lies about its source is

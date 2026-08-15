@@ -146,8 +146,12 @@ func SplitBundleSource(source string) []SandboxConstruct {
 // A bundle with no recognizable constructs reports OK=false with a single
 // diagnostic explaining the empty parse, so the caller always gets a typed
 // answer rather than a bare error.
-func ValidateBundle(bundleSource string) SandboxReport {
-	constructs := SplitBundleSource(bundleSource)
+// origin is the bundle's tree-relative path ("planner/queries.memql"), which
+// supplies the AMBIENT DOMAIN for signature-concept resolution (memql#3800).
+// Empty means an untitled buffer: it has no domain, and the documented
+// dir=="" degrade is the right answer for it.
+func ValidateBundle(bundleSource, origin string) SandboxReport {
+	constructs := WithOrigin(SplitBundleSource(bundleSource), origin)
 	if len(constructs) == 0 {
 		return SandboxReport{
 			OK: false,
@@ -170,7 +174,9 @@ func ValidateBundle(bundleSource string) SandboxReport {
 // (OK=false) plus a non-nil error. On success every recognized construct is
 // registered ACTIVE and the function-family ones become callable by name within
 // the session.
-func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource string) (SessionDefineResult, error) {
+// origin carries the bundle's tree-relative path for ambient domain resolution
+// (memql#3800); empty is an untitled buffer.
+func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource, origin string) (SessionDefineResult, error) {
 	if reg == nil {
 		return SessionDefineResult{}, fmt.Errorf("authoring: session define requires a runtime registry")
 	}
@@ -179,7 +185,7 @@ func AuthorSessionBundle(reg *AuthoredRuntimeRegistry, owner, bundleSource strin
 		return SessionDefineResult{}, fmt.Errorf("authoring: session define requires an authenticated owner")
 	}
 
-	constructs := SplitBundleSource(bundleSource)
+	constructs := WithOrigin(SplitBundleSource(bundleSource), origin)
 	if len(constructs) == 0 {
 		return SessionDefineResult{}, fmt.Errorf("authoring: no recognizable constructs found in bundle source")
 	}

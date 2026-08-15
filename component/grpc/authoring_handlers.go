@@ -47,7 +47,7 @@ func (s *streamSession) handleAuthoringValidateBundle(envelope *memqlv1.MemqlCli
 		return err
 	}
 
-	report := memqlengine.ValidateBundle(msg.GetSources())
+	report := memqlengine.ValidateBundle(msg.GetSources(), msg.GetOrigin())
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_AuthoringValidateBundleResult{
 			AuthoringValidateBundleResult: &memqlv1.AuthoringValidateBundleResult{
@@ -86,7 +86,7 @@ func (s *streamSession) handleAuthoringSessionDefineBundle(envelope *memqlv1.Mem
 			"authoring_session_define_bundle: an authenticated owner is required to session-define a bundle")
 	}
 
-	res, err := memqlengine.AuthorSessionBundle(s.authoredSessionRegistry(), owner, msg.GetSources())
+	res, err := memqlengine.AuthorSessionBundle(s.authoredSessionRegistry(), owner, msg.GetSources(), msg.GetOrigin())
 
 	result := &memqlv1.AuthoringSessionDefineBundleResult{
 		RequestId:   requestId,
@@ -152,7 +152,7 @@ func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClient
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable,
 			"durable_promote_bundle: engine unavailable on this node")
 	}
-	res, err := s.service.engine.PromoteBundleDurable(s.stream.Context(), owner, msg.GetSources(), msg.GetAllowBreaking())
+	res, err := s.service.engine.PromoteBundleDurable(s.stream.Context(), owner, msg.GetSources(), msg.GetOrigin(), msg.GetAllowBreaking())
 
 	result := &memqlv1.DurablePromoteBundleResult{
 		RequestId:    requestId,
