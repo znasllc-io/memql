@@ -210,6 +210,74 @@ function image_name_for_node() {
 }
 
 #=============================================================================
+# PRE-WARM THE BUILDKIT FRONTEND
+#=============================================================================
+
+function build_frontend_ref() {
+    # Read the `# syntax=` directive out of the Dockerfile rather than
+    # hardcoding the image here. Two copies of that reference would drift, and
+    # the drift is silent: this would pre-pull an image the build does not use,
+    # leaving the exact failure it exists to prevent while looking like it ran.
+    sed -n '1,5{s/^#[[:space:]]*syntax=[[:space:]]*//p;}' "${REPO_ROOT}/Dockerfile" | head -1
+}
+
+function prewarm_build_frontend() {
+    # WHY. `Dockerfile:1` is `# syntax=docker/dockerfile:1`, which makes
+    # BuildKit resolve an EXTERNAL frontend image before any of this
+    # repository's code is compiled. On a cold content store -- a fresh
+    # machine, after a prune, or a slow moment on registry-1.docker.io -- that
+    # resolution can time out, and it does so PARTWAY THROUGH a multi-image
+    # build: seven of eight images already built and imported, and a failure
+    # naming Docker Hub rather than anything in this repository (memql#3873).
+    #
+    # MEASURED, because the fix turns on a fact worth checking rather than
+    # assuming. Tagging the frontend to `unreachable-registry.invalid/...` --
+    # a reserved TLD that cannot resolve -- and building against it succeeds
+    # in 0.23s. So BuildKit's docker driver resolves the `# syntax=` reference
+    # from the LOCAL IMAGE STORE and makes no round trip when the image is
+    # already there. Pre-pulling it is therefore sufficient, not merely
+    # hopeful.
+    #
+    # WHY NOT WRAP THE BUILD IN retry.sh. Because that retries the WHOLE
+    # build, including a Go compile failure -- the anti-pattern retry.sh's own
+    # header warns about. A broken build would burn three full compiles and
+    # report the third failure. The network operation is the pull, so the
+    # pull is what gets retried.
+    #
+    # NON-FATAL, and deliberately. If the pull fails but the frontend is
+    # already present, the build works and refusing here would break it for no
+    # reason. If it fails and the frontend is absent, the build fails anyway --
+    # but now after a warning that named Docker Hub BEFORE seven images were
+    # built, which is the whole complaint.
+    local frontend
+    frontend="$(build_frontend_ref)"
+    if [ -z "${frontend}" ]; then
+        # No syntax directive: nothing external to resolve, nothing to warm.
+        # Not an error -- it is the state dropping the directive would leave.
+        return 0
+    fi
+
+    if docker image inspect "${frontend}" >/dev/null 2>&1; then
+        info "BuildKit frontend ${frontend} already in the local image store."
+        return 0
+    fi
+
+    info "Pre-pulling BuildKit frontend ${frontend} (cold store -- see memql#3873)..."
+    if "${REPO_ROOT}/scripts/ci/retry.sh" --attempts=3 --delay=5 -- \
+        docker pull "${frontend}" >&2; then
+        info "BuildKit frontend ${frontend} is warm."
+        return 0
+    fi
+
+    warn "Could not pre-pull the BuildKit frontend ${frontend}."
+    warn "Docker Hub looks unreachable. Every image build below resolves this"
+    warn "frontend first, so they are likely to fail on a network timeout that"
+    warn "names Docker Hub rather than this repository (memql#3873)."
+    warn "Continuing anyway -- the build still succeeds if the frontend is cached."
+    return 0
+}
+
+#=============================================================================
 # BUILD ENGINE IMAGE (from this repo's Dockerfile)
 #=============================================================================
 
@@ -430,6 +498,10 @@ function main() {
 
     if [ ${#nodes_to_build[@]} -gt 0 ]; then
         info "Nodes to build: ${nodes_to_build[*]}"
+        # ONCE, before the loop. The frontend is resolved by every `docker
+        # build` below, so warming it after the first build has already failed
+        # would be too late for the case this exists for.
+        prewarm_build_frontend
         if [ ${#CARRIER_NODES[@]} -gt 0 ]; then
             info "Carrier override: ${CARRIER_NODES[*]} (from ${CARRIER_REPO})"
         fi
@@ -455,4 +527,10 @@ function main() {
     cap_ok
 }
 
-main "$@"
+# Run main only when EXECUTED, so the build helpers can be sourced and
+# exercised directly by scripts/k3d/*_test.go. Executed directly this is
+# identical to the bare `main "$@"` it replaces, and it is the same guard
+# up.sh and bringup.sh already carry for the same reason.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
