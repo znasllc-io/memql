@@ -470,41 +470,72 @@ function wait_for_fresh_pods() {
     local ns="$1" deploy="$2" selector="$3" want="$4" stale="$5"
     local states name rest ready count ok
 
+    local fresh
     while :; do
         states="$(pod_states "$ns" "$selector")"
-        count=0; ok=1
+        count=0; fresh=0; ok=1
         while read -r name rest; do
             [[ -n "$name" ]] || continue
             count=$((count + 1))
-            case " $stale " in *" $name "*) ok=0 ;; esac
+            local this=1
+            case " $stale " in *" $name "*) this=0 ;; esac
             for ready in $rest; do
-                [[ "$ready" == "true" ]] || ok=0
+                [[ "$ready" == "true" ]] || this=0
             done
             # A pod with no container statuses at all is still starting.
-            [[ -n "$rest" ]] || ok=0
+            [[ -n "$rest" ]] || this=0
+            [[ "$this" -eq 1 ]] && fresh=$((fresh + 1)) || ok=0
         done <<< "$states"
 
         if [[ "$count" -eq "$want" && "$ok" -eq 1 ]]; then
             return 0
         fi
         if [[ "$SECONDS" -ge "$_SB_ROLL_DEADLINE" ]]; then
-            cap_fail 5 "${deploy} did not come back after being restarted to pick up the bootstrap values (${count}/${want} pods ready when the ${_SB_ROLL_BUDGET}s budget ran out). The Secret is written but ${deploy} is not running with it, so the cluster has not bootstrapped. Inspect with: kubectl -n ${ns} get pods --selector=${selector}"
+            # COUNT THE RIGHT THING (memql#3880). This used to report
+            # "${count}/${want} pods ready", where count was pods MATCHING THE
+            # SELECTOR -- so the failure read "1/1 pods ready when the budget ran
+            # out", which is a contradiction the operator has to decode before
+            # they can start. `fresh` is what the wait is actually waiting for:
+            # replaced AND ready.
+            cap_fail 5 "${deploy} did not come back after being restarted to pick up the bootstrap values (${fresh} of ${want} replacement pod(s) ready, ${count} matching the selector, when the ${_SB_ROLL_BUDGET}s budget ran out). The Secret is written but ${deploy} is not running with it, so the cluster has not bootstrapped. Inspect with: kubectl -n ${ns} get pods --selector=${selector}"
         fi
         sleep 3
     done
 }
 
 # roll_consumers <ns> <secret> -- restart every node that reads the Secret, and
-# wait for each back before returning. The count lands in _SB_ROLLED.
+# wait for them all back before returning. The count lands in _SB_ROLLED.
+#
+# DELETE EVERYTHING FIRST, THEN WAIT (memql#3880). The budget below is a
+# WHOLE-RUN budget -- one deadline, computed once -- and it used to be spent on a
+# SERIAL sequence: delete a node, wait for it, delete the next. With N consumers
+# each taking T to come back, that needs N*T while the budget only ever covered
+# one T plus the remainder, so the LAST consumer was structurally the one that
+# failed. Measured on the install that produced the issue:
+#
+#     agent      deleted 07:39:45  ready 07:41:25   cumulative 100s
+#     bff        deleted 07:41:29  ready 07:43:09   cumulative 204s
+#     cognition  deleted 07:43:12  ready 07:44:52   cumulative 307s   <- budget 240s
+#
+# Nothing was slow: every node took the same 100s. Issuing the deletes together
+# makes the recoveries overlap, so the run costs max(T) instead of sum(T) and the
+# same 240s is generous rather than marginal. Raising the number instead would
+# have moved the cliff rather than removed it -- N grows every time another node
+# type starts reading this Secret, and the budget's own documentation keeps it
+# under the wizard's 600s per-step.
+#
+# The rolls have no ordering dependency on ONE ANOTHER. The only ordering
+# constraint here is about identity, and it is a different one entirely: identity
+# must not be rolled a second time, which the `rolled-for` marker above enforces
+# and which is unaffected by when its single delete is issued.
 #
 # NOT VIA STDOUT, and this is not a style choice: cap_fail writes the result
 # ENVELOPE to stdout, so a `$(roll_consumers ...)` would capture the envelope of
 # its own failure into a variable and the operator would get
 # "aborted without an explicit result" instead of the reason.
 function roll_consumers() {
-    local ns="$1" secret="$2" deploy replicas selector stale rolled=0 entry
+    local ns="$1" secret="$2" deploy replicas selector stale rolled=0 entry i
     _SB_ROLL_BUDGET="${MEMQL_BOOTSTRAP_ROLL_TIMEOUT:-240}"
-    _SB_ROLL_DEADLINE=$((SECONDS + _SB_ROLL_BUDGET))
     # NOT `mapfile`: it is bash 4, and this installer runs on stock macOS bash
     # 3.2 (the constraint scripts/lib/agents.sh states). A read loop is the
     # portable form and the only one that cannot fail on an operator's machine
@@ -524,6 +555,12 @@ function roll_consumers() {
         return 0
     fi
 
+    # Parallel indexed arrays rather than one associative array: bash 3.2 has no
+    # `declare -A`, and the whole point of the read loop above is that this file
+    # runs on stock macOS bash.
+    local -a w_deploy=() w_selector=() w_replicas=() w_stale=()
+
+    # PHASE 1 -- issue every delete.
     for entry in "${consumers[@]}"; do
         deploy="${entry%% *}"
         replicas="${entry##* }"
@@ -539,7 +576,23 @@ function roll_consumers() {
                 || cap_fail 5 "could not restart ${deploy} to pick up the bootstrap values"
             rolled=$((rolled + 1))
         fi
-        wait_for_fresh_pods "$ns" "$deploy" "$selector" "$replicas" "$stale"
+
+        w_deploy[${#w_deploy[@]}]="$deploy"
+        w_selector[${#w_selector[@]}]="$selector"
+        w_replicas[${#w_replicas[@]}]="$replicas"
+        w_stale[${#w_stale[@]}]="$stale"
+    done
+
+    # The clock starts once every node is already on its way back, so the budget
+    # measures the SLOWEST recovery rather than the sum of all of them.
+    _SB_ROLL_DEADLINE=$((SECONDS + _SB_ROLL_BUDGET))
+
+    # PHASE 2 -- wait for them all. They are recovering concurrently, so the
+    # order this loop happens to check them in does not affect the wall clock.
+    i=0
+    while [[ "$i" -lt "${#w_deploy[@]}" ]]; do
+        wait_for_fresh_pods "$ns" "${w_deploy[$i]}" "${w_selector[$i]}" "${w_replicas[$i]}" "${w_stale[$i]}"
+        i=$((i + 1))
     done
 
     cap_info "${rolled} of ${#consumers[@]} node(s) restarted; every consumer of ${secret} is running with the seeded values."
