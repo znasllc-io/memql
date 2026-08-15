@@ -9407,9 +9407,23 @@ func (x *AuthoringConstruct) GetName() string {
 // bundle. NO engine mutation -- pure validation against a read-only clone of
 // the live registry.
 type AuthoringValidateBundleMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Sources       string                 `protobuf:"bytes,2,opt,name=sources,proto3" json:"sources,omitempty"` // .memql bundle source
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Sources   string                 `protobuf:"bytes,2,opt,name=sources,proto3" json:"sources,omitempty"` // .memql bundle source
+	// origin is the bundle's TREE-RELATIVE path, e.g. "planner/queries.memql".
+	//
+	// It supplies the AMBIENT DOMAIN for signature-concept resolution
+	// (memql#3800). The rule already shipped -- an unimported bare concept name
+	// is admitted when the resolved id is one this domain could have DECLARED --
+	// but it needs to know which domain, and the sandbox had no path in its
+	// origin to derive one from. So every construct naming an ambiguous short
+	// name ("plan", "request", "call", "invocation") compiled at boot and was
+	// REFUSED from every authoring surface, on identical source.
+	//
+	// OPTIONAL, and empty is meaningful rather than missing: an untitled buffer
+	// genuinely has no domain, and the documented dir=="" degrade (unhinted
+	// unique-trailing-segment match) is the right answer for it.
+	Origin        string `protobuf:"bytes,3,opt,name=origin,proto3" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9454,6 +9468,13 @@ func (x *AuthoringValidateBundleMsg) GetRequestId() string {
 func (x *AuthoringValidateBundleMsg) GetSources() string {
 	if x != nil {
 		return x.Sources
+	}
+	return ""
+}
+
+func (x *AuthoringValidateBundleMsg) GetOrigin() string {
+	if x != nil {
+		return x.Origin
 	}
 	return ""
 }
@@ -9523,9 +9544,23 @@ func (x *AuthoringValidateBundleResult) GetDiagnostics() []*AuthoringDiagnostic 
 // Defined function-family constructs become callable by name within the session,
 // never shadowing core, dropped when the stream ends.
 type AuthoringSessionDefineBundleMsg struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	Sources       string                 `protobuf:"bytes,2,opt,name=sources,proto3" json:"sources,omitempty"` // .memql bundle source
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Sources   string                 `protobuf:"bytes,2,opt,name=sources,proto3" json:"sources,omitempty"` // .memql bundle source
+	// origin is the bundle's TREE-RELATIVE path, e.g. "planner/queries.memql".
+	//
+	// It supplies the AMBIENT DOMAIN for signature-concept resolution
+	// (memql#3800). The rule already shipped -- an unimported bare concept name
+	// is admitted when the resolved id is one this domain could have DECLARED --
+	// but it needs to know which domain, and the sandbox had no path in its
+	// origin to derive one from. So every construct naming an ambiguous short
+	// name ("plan", "request", "call", "invocation") compiled at boot and was
+	// REFUSED from every authoring surface, on identical source.
+	//
+	// OPTIONAL, and empty is meaningful rather than missing: an untitled buffer
+	// genuinely has no domain, and the documented dir=="" degrade (unhinted
+	// unique-trailing-segment match) is the right answer for it.
+	Origin        string `protobuf:"bytes,3,opt,name=origin,proto3" json:"origin,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -9570,6 +9605,13 @@ func (x *AuthoringSessionDefineBundleMsg) GetRequestId() string {
 func (x *AuthoringSessionDefineBundleMsg) GetSources() string {
 	if x != nil {
 		return x.Sources
+	}
+	return ""
+}
+
+func (x *AuthoringSessionDefineBundleMsg) GetOrigin() string {
+	if x != nil {
+		return x.Origin
 	}
 	return ""
 }
@@ -9662,6 +9704,12 @@ type DurablePromoteBundleMsg struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Sources   string                 `protobuf:"bytes,2,opt,name=sources,proto3" json:"sources,omitempty"` // .memql bundle source
+	// origin is the bundle's TREE-RELATIVE path, exactly as on
+	// AuthoringValidateBundleMsg (memql#3800). A promote runs the SAME Gate-1
+	// sandbox a validate does, so omitting it here would fix validate and leave
+	// promote refusing the identical source -- the half-fix that produces "it
+	// validates but will not promote".
+	Origin string `protobuf:"bytes,4,opt,name=origin,proto3" json:"origin,omitempty"`
 	// allow_breaking is the explicit operator override for a CONCEPT re-promote
 	// whose schema change would strand rows already written (memql#3757). Unset is
 	// the normal call: the engine classifies the difference against the version it
@@ -9716,6 +9764,13 @@ func (x *DurablePromoteBundleMsg) GetRequestId() string {
 func (x *DurablePromoteBundleMsg) GetSources() string {
 	if x != nil {
 		return x.Sources
+	}
+	return ""
+}
+
+func (x *DurablePromoteBundleMsg) GetOrigin() string {
+	if x != nil {
+		return x.Origin
 	}
 	return ""
 }
@@ -19327,31 +19382,34 @@ const file_memql_proto_rawDesc = "" +
 	"end_column\x18\t \x01(\x05R\tendColumn\"<\n" +
 	"\x12AuthoringConstruct\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"U\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"m\n" +
 	"\x1aAuthoringValidateBundleMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
-	"\asources\x18\x02 \x01(\tR\asources\"\x97\x01\n" +
+	"\asources\x18\x02 \x01(\tR\asources\x12\x16\n" +
+	"\x06origin\x18\x03 \x01(\tR\x06origin\"\x97\x01\n" +
 	"\x1dAuthoringValidateBundleResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12G\n" +
-	"\vdiagnostics\x18\x03 \x03(\v2%.znasllc.memql.v1.AuthoringDiagnosticR\vdiagnostics\"Z\n" +
+	"\vdiagnostics\x18\x03 \x03(\v2%.znasllc.memql.v1.AuthoringDiagnosticR\vdiagnostics\"r\n" +
 	"\x1fAuthoringSessionDefineBundleMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
-	"\asources\x18\x02 \x01(\tR\asources\"\xf2\x01\n" +
+	"\asources\x18\x02 \x01(\tR\asources\x12\x16\n" +
+	"\x06origin\x18\x03 \x01(\tR\x06origin\"\xf2\x01\n" +
 	"\"AuthoringSessionDefineBundleResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
 	"\x02ok\x18\x02 \x01(\bR\x02ok\x12>\n" +
 	"\adefined\x18\x03 \x03(\v2$.znasllc.memql.v1.AuthoringConstructR\adefined\x12G\n" +
 	"\vdiagnostics\x18\x04 \x03(\v2%.znasllc.memql.v1.AuthoringDiagnosticR\vdiagnostics\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"y\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"\x91\x01\n" +
 	"\x17DurablePromoteBundleMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x18\n" +
-	"\asources\x18\x02 \x01(\tR\asources\x12%\n" +
+	"\asources\x18\x02 \x01(\tR\asources\x12\x16\n" +
+	"\x06origin\x18\x04 \x01(\tR\x06origin\x12%\n" +
 	"\x0eallow_breaking\x18\x03 \x01(\bR\rallowBreaking\"\xb6\x02\n" +
 	"\x1aDurablePromoteBundleResult\x12\x1d\n" +
 	"\n" +

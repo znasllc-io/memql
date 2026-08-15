@@ -1601,6 +1601,20 @@ message AuthoringConstruct {
 message AuthoringValidateBundleMsg {
   string request_id = 1;
   string sources = 2;  // .memql bundle source
+  // origin is the bundle's TREE-RELATIVE path, e.g. "planner/queries.memql".
+  //
+  // It supplies the AMBIENT DOMAIN for signature-concept resolution
+  // (memql#3800). The rule already shipped -- an unimported bare concept name
+  // is admitted when the resolved id is one this domain could have DECLARED --
+  // but it needs to know which domain, and the sandbox had no path in its
+  // origin to derive one from. So every construct naming an ambiguous short
+  // name ("plan", "request", "call", "invocation") compiled at boot and was
+  // REFUSED from every authoring surface, on identical source.
+  //
+  // OPTIONAL, and empty is meaningful rather than missing: an untitled buffer
+  // genuinely has no domain, and the documented dir=="" degrade (unhinted
+  // unique-trailing-segment match) is the right answer for it.
+  string origin = 3;
 }
 
 message AuthoringValidateBundleResult {
@@ -1616,6 +1630,20 @@ message AuthoringValidateBundleResult {
 message AuthoringSessionDefineBundleMsg {
   string request_id = 1;
   string sources = 2;  // .memql bundle source
+  // origin is the bundle's TREE-RELATIVE path, e.g. "planner/queries.memql".
+  //
+  // It supplies the AMBIENT DOMAIN for signature-concept resolution
+  // (memql#3800). The rule already shipped -- an unimported bare concept name
+  // is admitted when the resolved id is one this domain could have DECLARED --
+  // but it needs to know which domain, and the sandbox had no path in its
+  // origin to derive one from. So every construct naming an ambiguous short
+  // name ("plan", "request", "call", "invocation") compiled at boot and was
+  // REFUSED from every authoring surface, on identical source.
+  //
+  // OPTIONAL, and empty is meaningful rather than missing: an untitled buffer
+  // genuinely has no domain, and the documented dir=="" degrade (unhinted
+  // unique-trailing-segment match) is the right answer for it.
+  string origin = 3;
 }
 
 message AuthoringSessionDefineBundleResult {
@@ -1637,6 +1665,13 @@ message AuthoringSessionDefineBundleResult {
 message DurablePromoteBundleMsg {
   string request_id = 1;
   string sources = 2;  // .memql bundle source
+
+  // origin is the bundle's TREE-RELATIVE path, exactly as on
+  // AuthoringValidateBundleMsg (memql#3800). A promote runs the SAME Gate-1
+  // sandbox a validate does, so omitting it here would fix validate and leave
+  // promote refusing the identical source -- the half-fix that produces "it
+  // validates but will not promote".
+  string origin = 4;
 
   // allow_breaking is the explicit operator override for a CONCEPT re-promote
   // whose schema change would strand rows already written (memql#3757). Unset is

@@ -43,7 +43,7 @@ func (s *fakePromoteStore) CreatePromoteConstruct(_ context.Context, constructId
 // the compiled construct, so the durable-promote path has a real compiled form.
 func authorOneSpec(t *testing.T, reg *AuthoredRuntimeRegistry, owner string) *AuthoredConstruct {
 	t.Helper()
-	if _, err := AuthorSessionBundle(reg, owner, sessionSpecSrc); err != nil {
+	if _, err := AuthorSessionBundle(reg, owner, sessionSpecSrc, ""); err != nil {
 		t.Fatalf("author session spec: %v", err)
 	}
 	c, ok := reg.Lookup(owner, "spec", "mcpSessSpec")

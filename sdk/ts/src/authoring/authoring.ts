@@ -303,6 +303,27 @@ export interface DurableDemoteBundleResult {
 
 export interface AuthoringCallOptions {
   signal?: AbortSignal;
+  /**
+   * The bundle's TREE-RELATIVE path, e.g. `"planner/queries.memql"`.
+   *
+   * It supplies the AMBIENT DOMAIN the engine resolves an unimported bare
+   * concept name against, and the domain an unannotated concept declaration
+   * assembles its canonical id under (memql#3800). Without it the engine runs
+   * its no-domain degrade, which refuses any construct naming a concept short
+   * name that more than one domain declares -- `plan`, `request`, `call`,
+   * `invocation` today.
+   *
+   * OMIT it for a buffer that genuinely has no path; empty is meaningful
+   * rather than missing.
+   *
+   * ONE PATH PER BUNDLE. A bundle that concatenates several files attributes
+   * every construct in it to this one domain, so pass the path of the file the
+   * constructs belong to -- for an editor, the active document. An unannotated
+   * concept declared in a DIFFERENT file of the same bundle would assemble
+   * under this domain rather than its own. An annotated one cannot: the
+   * moved-file guard refuses an `@namespace` that disagrees with the domain.
+   */
+  origin?: string;
 }
 
 /**
@@ -360,7 +381,7 @@ export class AuthoringClient {
   ): Promise<ValidateBundleResult> {
     const requestId = newShortId();
     const reply = await this.dispatcher.sendAndWait(
-      { authoringValidateBundle: { requestId, sources } },
+      { authoringValidateBundle: { requestId, sources, origin: opts.origin } },
       opts.signal,
     );
     const payload = readServerPayload(reply);
@@ -391,7 +412,7 @@ export class AuthoringClient {
   ): Promise<SessionDefineBundleResult> {
     const requestId = newShortId();
     const reply = await this.dispatcher.sendAndWait(
-      { authoringSessionDefineBundle: { requestId, sources } },
+      { authoringSessionDefineBundle: { requestId, sources, origin: opts.origin } },
       opts.signal,
     );
     const payload = readServerPayload(reply);
@@ -437,6 +458,10 @@ export class AuthoringClient {
   ): Promise<DurablePromoteBundleResult> {
     const requestId = newShortId();
     const body: DurablePromoteBundlePayload = { requestId, sources };
+    // Same ambient-domain contract as validate: a promote runs the SAME Gate-1
+    // sandbox, so omitting the origin here would validate and then refuse
+    // (memql#3800).
+    if (opts.origin !== undefined) body.origin = opts.origin;
     // Set only when asked for: proto3 reads absent and false identically, so
     // omitting it keeps the flag off the frame of every ordinary promote.
     if (opts.allowBreaking) body.allowBreaking = true;

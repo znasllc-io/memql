@@ -24,7 +24,7 @@ mutate mcpWidget mutationCreatePromotedWidget {
   }
 }`
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+promotedMutation); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+promotedMutation, ""); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "mutation", "mutationCreatePromotedWidget")
@@ -43,7 +43,7 @@ mutate mcpWidget mutationCreatePromotedWidget {
 // A non-@mcp construct is NOT promoted.
 func TestAtMcpAnnotation_AbsentByDefault(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, ""); err != nil {
 		t.Fatalf("author: %v", err)
 	}
 	c, _ := reg.Lookup("owner-1", "mutation", "mutationCreateMcpWidget")

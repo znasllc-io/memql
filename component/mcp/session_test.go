@@ -124,7 +124,7 @@ func TestPromote_OwnerOnlyGate(t *testing.T) {
 			reg := newAuthoredRegistry()
 			ctx := withMCPSession(context.Background(), "owner-1", reg)
 			// Pre-author a construct so an allowed promote has something to find.
-			if _, err := memql.AuthorSessionBundle(reg, "owner-1", validSpecBundle); err != nil {
+			if _, err := memql.AuthorSessionBundle(reg, "owner-1", validSpecBundle, ""); err != nil {
 				t.Fatalf("seed author: %v", err)
 			}
 			res := callMCPTool(ctx, eng, c.role, c.tier, toolPromote, map[string]any{"name": "mcpSessionSpec"})

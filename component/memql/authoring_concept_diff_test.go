@@ -66,7 +66,7 @@ const diffWidgetId = "v1:diffns:diffWidget"
 func compileConceptForDiff(t *testing.T, source string) *memoryNodes.Concept {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", source); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", source, ""); err != nil {
 		t.Fatalf("author concept fixture: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "diffWidget")
@@ -433,7 +433,7 @@ func TestRowClause_NeverInventsAZeroItDidNotMeasure(t *testing.T) {
 func promoteDiffConcept(t *testing.T, e *MemQLEngine, source string, gate *conceptPromoteGate) (*fakePromoteStore, error) {
 	t.Helper()
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", source); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", source, ""); err != nil {
 		t.Fatalf("author concept: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "concept", "diffWidget")
@@ -751,7 +751,7 @@ func conceptDiffDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 // a bisect.
 func promoteOrFail(t *testing.T, eng *MemQLEngine, ctx context.Context, source string) {
 	t.Helper()
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", source, "", false)
 	if err == nil {
 		return
 	}
@@ -851,7 +851,7 @@ concept order {
   status       enum("draft", "placed", "shipped")
 }`, ns)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
 	if err == nil {
 		t.Fatal("re-promoting with `sku` removed was allowed against a table that holds rows carrying it")
 	}
@@ -877,7 +877,7 @@ concept order {
 	}
 
 	// The override is the same call with the flag, and it must actually land.
-	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, true)
+	overridden, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", true)
 	if err != nil {
 		t.Fatalf("allow_breaking must land the change: %v", err)
 	}
@@ -950,7 +950,7 @@ concept ticket {
   status       enum("open", "closed")
 }`, ns)
 
-	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, false)
+	res, err := eng.PromoteBundleDurable(ctx, "owner-1", v2, "", false)
 	if err == nil {
 		t.Fatal("narrowing an enum away from a value rows still hold was allowed")
 	}

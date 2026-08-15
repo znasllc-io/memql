@@ -1586,8 +1586,8 @@ function buildRunEngine(conns: ConnectionManager): RunEngine | undefined {
     return undefined;
   }
   return {
-    validateBundle: (sources) => authoring.validateBundle(sources),
-    sessionDefineBundle: (sources) => authoring.sessionDefineBundle(sources),
+    validateBundle: (sources, origin) => authoring.validateBundle(sources, { origin }),
+    sessionDefineBundle: (sources, origin) => authoring.sessionDefineBundle(sources, { origin }),
     executeNamed: async (name, call) => {
       const result = await query.executeNamed(name, call);
       // rawNodes() over rows(): the result view renders through view-kit and
@@ -1648,8 +1648,8 @@ function buildTrainingEngine(conns: ConnectionManager): TrainingEngine | undefin
   const authoring = conns.authoring;
   if (authoring === undefined) return undefined;
   return {
-    validateBundle: (sources) => authoring.validateBundle(sources),
-    sessionDefineBundle: (sources) => authoring.sessionDefineBundle(sources),
+    validateBundle: (sources, origin) => authoring.validateBundle(sources, { origin }),
+    sessionDefineBundle: (sources, origin) => authoring.sessionDefineBundle(sources, { origin }),
     durablePromoteBundle: (sources, options) => authoring.durablePromoteBundle(sources, options),
     durableDemoteBundle: (sources) => authoring.durableDemoteBundle(sources),
   };

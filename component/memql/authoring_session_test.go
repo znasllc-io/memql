@@ -60,7 +60,7 @@ func TestSplitBundleSource(t *testing.T) {
 // owner-scoped registry, compiling the mutation to an executable *Function.
 func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc)
+	res, err := AuthorSessionBundle(reg, "owner-1", sessionConceptSrc+"\n\n"+sessionMutationSrc, "")
 	if err != nil {
 		t.Fatalf("author: %v (diagnostics %+v)", err, res.Diagnostics)
 	}
@@ -80,7 +80,7 @@ func TestAuthorSessionBundle_ValidatesAndRegisters(t *testing.T) {
 // An invalid bundle registers nothing and reports the failure.
 func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken { return role == }`)
+	res, err := AuthorSessionBundle(reg, "owner-1", `spec actorEnvelope broken { return role == }`, "")
 	if err == nil {
 		t.Fatal("expected an error for an invalid bundle")
 	}
@@ -96,10 +96,10 @@ func TestAuthorSessionBundle_RejectsInvalid(t *testing.T) {
 // rejects a non-increasing version, so a flat re-register would fail).
 func TestAuthorSessionBundle_RedefineBumpsVersion(t *testing.T) {
 	reg := NewAuthoredRuntimeRegistry()
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, ""); err != nil {
 		t.Fatalf("first author: %v", err)
 	}
-	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc); err != nil {
+	if _, err := AuthorSessionBundle(reg, "owner-1", sessionSpecSrc, ""); err != nil {
 		t.Fatalf("redefine should bump version, got: %v", err)
 	}
 	c, ok := reg.Lookup("owner-1", "spec", "mcpSessSpec")

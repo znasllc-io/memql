@@ -141,14 +141,14 @@ type PromoteBundleResult struct {
 // and AUDITS it as an override. It affects nothing else -- every other refusal
 // this path can produce (core-first, a failed compile, a broken invariant) is
 // unmoved by it, because none of them is a judgement about data.
-func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource string, allowBreaking bool) (PromoteBundleResult, error) {
-	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource, allowBreaking)
+func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource, origin string, allowBreaking bool) (PromoteBundleResult, error) {
+	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource, origin, allowBreaking)
 }
 
 // promoteBundleDurableWithStore is the store-driven core of PromoteBundleDurable,
 // split out so it is unit testable with a fake promoteStore (no live DB), exactly
 // like promoteConstructDurableWithStore.
-func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource string, allowBreaking bool) (PromoteBundleResult, error) {
+func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource, origin string, allowBreaking bool) (PromoteBundleResult, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return PromoteBundleResult{}, fmt.Errorf("authoring: durable promote requires an authenticated owner")
@@ -165,7 +165,7 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 	// is durable -- it exists only to carry the *Function / *Spec into the
 	// per-construct PromoteConstructDurable.
 	reg := NewAuthoredRuntimeRegistry()
-	defineRes, err := AuthorSessionBundle(reg, owner, bundleSource)
+	defineRes, err := AuthorSessionBundle(reg, owner, bundleSource, origin)
 	result := PromoteBundleResult{OK: defineRes.OK, Diagnostics: defineRes.Diagnostics}
 	if err != nil {
 		// Validation/compile failure: nothing registered, nothing to promote.
