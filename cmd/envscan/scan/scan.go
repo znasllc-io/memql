@@ -25,15 +25,24 @@
 // defect it was written to fix -- a clean number that is clean only about
 // what the mechanism happened to see (memql#3818).
 //
-// A THIRD read class -- core/env.EnvReader -- is DETECTED AND COUNTED but
-// deliberately not resolved. reader.String("HOST") names a suffix; the full
-// key is that suffix under the prefix the reader's constructor was given,
-// and finding it means tracing a reader value across parameters, struct
-// fields and packages. So each site lands in Unresolvable with
-// Kind == KindReaderPrefix and a reason naming the mechanism. It used to be
-// detected as NOTHING, which made it the worst of the three: absent from
-// the read count AND absent from the residual, with the limitation
-// recorded only in this comment. See goast.go.
+// A THIRD read class -- core/env.EnvReader -- is DETECTED, and RESOLVED when
+// its prefix is knowable (memql#3834). reader.String("HOST") names a suffix;
+// the full key is that suffix under the prefix the reader's constructor was
+// given. When the constructor is in the same declaration and its argument
+// folds, the two halves join into the key the process will look up. Of the 32
+// constructor sites in this tree 17 pass a literal, 8 of them the empty string
+// -- where the "suffix" simply IS the whole key, which is why eleven live
+// operator knobs (the agent turn guards, the planner fairness and watchdog
+// settings) were invisible until this landed.
+//
+// A prefix that comes from a PARAMETER or a struct field is still not
+// resolved: that needs the reader value traced across call boundaries. Those
+// sites land in Unresolvable with Kind == KindReaderPrefix and a reason naming
+// the mechanism, so the count still speaks for them. A reader REBOUND to a
+// second prefix resolves to neither -- ambiguity is recorded as absence rather
+// than as a guess. The class used to be detected as NOTHING, which made it the
+// worst of the three: absent from the read count AND absent from the residual.
+// See goast.go.
 //
 // # What this still does not see, stated so the total is not read as coverage
 //
