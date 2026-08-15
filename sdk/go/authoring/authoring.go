@@ -224,7 +224,18 @@ type PromoteResult struct {
 }
 
 // PromoteOption adjusts one DurablePromoteBundle call.
-type PromoteOption func(*memqlv1.DurablePromoteBundleMsg)
+//
+// OPAQUE ON PURPOSE (memql#3874). The struct wraps its mutator rather than
+// being one, so a consumer can hold a PromoteOption and pass it along but
+// cannot build one -- the only way to obtain a non-zero value is a constructor
+// in this package. A `func(*memqlv1.DurablePromoteBundleMsg)` underlying type
+// would have been an escape hatch straight past the boundary this package
+// exists to hold: it lets a caller reach the wire message and set a field the
+// SDK has not wrapped, which is exactly the moment the boundary is
+// load-bearing. The zero value is inert.
+type PromoteOption struct {
+	apply func(*memqlv1.DurablePromoteBundleMsg)
+}
 
 // AllowBreaking lands a CONCEPT re-promote whose schema change would strand rows
 // already written -- a removed field, a changed field type, a new required
@@ -240,7 +251,9 @@ type PromoteOption func(*memqlv1.DurablePromoteBundleMsg)
 // a failed compile, a broken invariant) is unmoved by it, because none of them
 // is a judgement about data.
 func AllowBreaking() PromoteOption {
-	return func(msg *memqlv1.DurablePromoteBundleMsg) { msg.AllowBreaking = true }
+	return PromoteOption{
+		apply: func(msg *memqlv1.DurablePromoteBundleMsg) { msg.AllowBreaking = true },
+	}
 }
 
 // DurablePromoteBundle validates the bundle, then durably promotes every plain
@@ -266,8 +279,8 @@ func AllowBreaking() PromoteOption {
 func (c *Client) DurablePromoteBundle(ctx context.Context, sources string, opts ...PromoteOption) (*PromoteResult, error) {
 	body := &memqlv1.DurablePromoteBundleMsg{Sources: sources}
 	for _, opt := range opts {
-		if opt != nil {
-			opt(body)
+		if opt.apply != nil {
+			opt.apply(body)
 		}
 	}
 	msg := &memqlv1.MemqlClientMessage{
