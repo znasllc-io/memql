@@ -122,7 +122,11 @@ test("the status fields that would have explained the dead end survive", () => {
 });
 
 test("an email address is not treated as a credential", () => {
-  assert.equal(redactResult({ email: "znas@znas.io" }).email, "znas@znas.io");
+  // A fixture domain, not a real one. `TestNoVendorDomainLiterals` sweeps every
+  // tracked file for the vendor domain, this file included -- the domain is a
+  // value the operator supplies as `--domain`, and a literal in the tree is how
+  // it stops being one.
+  assert.equal(redactResult({ email: "owner@example.com" }).email, "owner@example.com");
 });
 
 test("nested values are summarised rather than walked", () => {
