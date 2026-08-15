@@ -634,10 +634,12 @@ var catalogFieldWireNames = map[string]string{
 // fails the test below, which turns "should training state read this?" into a
 // decision somebody makes rather than one that gets made by omission.
 //
-// memql#3805 will add a `trigger` to ConstructInfo. It will land here, with the
-// reason an automation's trigger decides its RUN form and nothing about its
-// training state -- but it lands as a decision, which is the whole point.
+// memql#3805 added `trigger`, and it landed here -- as this comment predicted,
+// and more to the point as a DECISION rather than by omission, which is the
+// whole point of the two maps. Left as the worked example: the next field gets
+// the same treatment.
 var catalogFieldsDeliberatelyNotRead = map[string]string{
+	"trigger":      "an automation's trigger decides its RUN form -- which payload modes, which concept the row picker browses -- and says nothing about whether the construct is trained, drifted or seeded (memql#3805)",
 	"namespace":    "a concept's domain is already inside its canonical name, and memql.CatalogConstructKey reads it out; accepting a second answer would let the two contradict each other",
 	"originPath":   "which file a construct came from does not change what state it is in",
 	"description":  "presentation, and the buffer has its own copy anyway",

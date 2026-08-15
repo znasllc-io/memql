@@ -82,6 +82,48 @@ func BuildTriggerTopic(eventKind, conceptId string) (string, error) {
 	return topic, nil
 }
 
+// SplitTriggerTopic is the inverse of BuildTriggerTopic: it recovers the
+// structured (event-kind, concept) pair from a composed subscription topic.
+//
+// WHY AN INVERSE IS NEEDED AT ALL. The loader folds the concept INTO the topic
+// at load time -- normalizeStructuredTriggers calls BuildTriggerTopic, writes
+// the result back over `event=`, and DELETES `concept=` -- so a running node
+// holds ONE string where the author wrote two fields. Everything that FIRES the
+// automation wants that one string, which is why it is stored that way. But
+// anything that has to DESCRIBE the automation wants the pair back: the
+// construct catalog reports a trigger in the language server's own shape
+// (memql#3805), and the run form it feeds decides which payload modes to offer
+// from the event and which concept's rows to browse from the concept.
+//
+// WHY IT CAN BE DONE WITHOUT AMBIGUITY. A concept id is colon-separated and an
+// event kind is dot-separated, but the topic joins the two with a dot, so a
+// naive split on "." cannot tell where the kind ends. It does not have to: the
+// kinds are a CLOSED SET (allowedEventKinds), so the remainder after "graph."
+// is MATCHED against that set rather than parsed. A topic this function does
+// not recognise -- a raw application topic, a legacy topic whose action is not
+// one of the three, a glob -- returns ok=false, and the caller keeps the whole
+// string as the event, which is what the author wrote.
+//
+//	"graph.node.created.v1:cognition:participant" -> ("node.created", "v1:cognition:participant", true)
+//	"graph.node.deleted"                          -> ("node.deleted", "",                         true)
+//	"system.startup"                              -> ("",             "",                         false)
+func SplitTriggerTopic(topic string) (eventKind, conceptId string, ok bool) {
+	const prefix = "graph."
+	if !strings.HasPrefix(topic, prefix) {
+		return "", "", false
+	}
+	rest := topic[len(prefix):]
+	for kind := range allowedEventKinds {
+		if rest == kind {
+			return kind, "", true
+		}
+		if strings.HasPrefix(rest, kind+".") {
+			return kind, rest[len(kind)+1:], true
+		}
+	}
+	return "", "", false
+}
+
 // ExtractStructuredTriggerArgs pulls the structured fields
 // from an attribute's Args map. Reports which fields were present
 // so the caller can distinguish "missing field" from "field set to

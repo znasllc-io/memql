@@ -7,6 +7,7 @@ export {
   type Construct,
   type ConstructArg,
   type ConstructOrigin,
+  type ConstructTrigger,
   type ConstructsCallOptions,
   type ListConstructsResult,
 } from "./constructs.js";

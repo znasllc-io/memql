@@ -38,8 +38,13 @@ import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
 import type { CatalogConstruct } from "../state/constructCatalog.js";
 import { renderConstructPage } from "./constructScreens.js";
-import { catalogRunTarget, offersRun, runUnavailableReason } from "../constructs/catalogTarget.js";
-import { COMMAND_RUN, COMMAND_RUN_WITH } from "../constructs/runnable.js";
+import {
+  catalogAutomationTarget,
+  catalogRunTarget,
+  isAutomationRun,
+  offersRun,
+} from "../constructs/catalogTarget.js";
+import { COMMAND_RUN, COMMAND_RUN_AUTOMATION, COMMAND_RUN_WITH } from "../constructs/runnable.js";
 import { signatureLine } from "../constructs/signature.js";
 
 export class ConstructPanel {
@@ -142,6 +147,18 @@ export class ConstructPanel {
    * to keep single.
    */
   private async run(withArguments: boolean): Promise<void> {
+    // AN AUTOMATION TAKES THE OTHER COMMAND, and the branch is here rather than
+    // inside the run path because the two take different TARGETS: an
+    // AutomationTarget carries a trigger and no args, a RunTarget carries args
+    // and no trigger. Sending one where the other is expected does not fail --
+    // it opens a form with nothing in it (memql#3805).
+    const automation = catalogAutomationTarget(this.construct);
+    if (automation !== undefined) {
+      // `withArguments` has no meaning here: an automation's inputs live in its
+      // own form, and the page draws no "Run with arguments" for it.
+      await vscode.commands.executeCommand(COMMAND_RUN_AUTOMATION, automation);
+      return;
+    }
     const target = catalogRunTarget(this.construct);
     if (target === undefined) {
       // Unreachable through the page, which renders no button in that case.
@@ -182,7 +199,7 @@ export class ConstructPanel {
       construct: this.construct,
       fileInWorkspace: this.fileUri !== undefined,
       offerRun: offersRun(this.construct),
-      runUnavailable: runUnavailableReason(this.construct),
+      automationRun: isAutomationRun(this.construct),
       error: this.error,
     });
     this.panel.webview.html = `<!DOCTYPE html>

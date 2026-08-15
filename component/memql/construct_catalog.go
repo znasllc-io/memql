@@ -224,6 +224,15 @@ type ConstructCatalogEntry struct {
 	// source. Empty when the source is not available (a construct registered
 	// from Go). This is what drift detection diffs against (memql#3758).
 	SourceHash string
+	// Trigger is what fires an AUTOMATION, and is nil for every other kind --
+	// no other construct has one, and an empty object would read as "a trigger
+	// that fires on nothing" rather than as "not applicable" (memql#3805).
+	//
+	// Shape-identical to the language server's `RunnableTrigger`, for the reason
+	// Args is: the extension generates ONE automation run form, from the LSP
+	// when the .memql file is open and from this catalog when it is not, and two
+	// shapes for one form is how they come to disagree.
+	Trigger *sense.RunnableTrigger
 	// Source is the construct's authored text, carried ONLY when there is no
 	// file to read it out of -- which is to say, only when OriginPath is empty.
 	//
@@ -268,6 +277,15 @@ type AutomationCatalogEntry struct {
 	// Origin is the file path the automation was loaded from, in the same form
 	// Function.Origin carries.
 	Origin string
+	// Trigger is what fires the automation, in the SAME shape the language
+	// server reports it (memql#3805). Nil when the loader reported none.
+	//
+	// It is the field an automation's run form is decided by -- which payload
+	// modes to offer, and which concept's rows the picker browses -- so a
+	// catalog-sourced automation without it has no describable form at all,
+	// which is why the Constructs view shipped without a run affordance for the
+	// kind until this existed.
+	Trigger *sense.RunnableTrigger
 }
 
 // AutomationCataloger reports the automations a node has loaded.
@@ -641,6 +659,7 @@ func (e *MemQLEngine) catalogAutomations(add func(ConstructCatalogEntry)) {
 			Name:        a.Name,
 			Kind:        ConstructKindAutomation,
 			Description: a.Description,
+			Trigger:     a.Trigger,
 		})
 	}
 }

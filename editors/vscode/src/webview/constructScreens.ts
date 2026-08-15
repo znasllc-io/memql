@@ -36,13 +36,13 @@ export interface ConstructPageInput {
    */
   offerRun?: boolean;
   /**
-   * Why a construct the engine calls runnable is nonetheless not offered here.
+   * Route the run through the AUTOMATION form rather than the argument form.
    *
-   * Said rather than left as an unexplained absence, for the one case an
-   * operator will otherwise read as a bug: an automation IS runnable, the tree
-   * says so, and the button is missing.
+   * The two are different commands taking different targets, so the page has to
+   * say which it means. Decided by the caller (`isAutomationRun`) rather than
+   * re-derived from `kind` here, so one module owns the branch.
    */
-  runUnavailable?: string;
+  automationRun?: boolean;
   /** A failure this page produced, or "". */
   error: string;
 }
@@ -114,8 +114,16 @@ ${sourceHtml(construct)}`;
 function actionsHtml(input: ConstructPageInput): string {
   const buttons: string[] = [];
   if (input.offerRun === true && input.construct.runnableKind !== undefined) {
-    buttons.push(`<button class="primary" type="button" data-act="run">Run</button>`);
-    if (input.construct.args.length > 0) {
+    // An automation's button says what clicking it opens. Its run is a FORM --
+    // pick a row or paste a payload, then fire a real event -- rather than the
+    // immediate invocation "Run" means for the other four, and the label is the
+    // only warning before a click that has consequences on a real cluster.
+    const label = input.automationRun === true ? "Run automation..." : "Run";
+    buttons.push(`<button class="primary" type="button" data-act="run">${label}</button>`);
+    // Never for an automation: its `args` is always empty (there is no declared
+    // payload schema), so the argument form has nothing to draw and the
+    // automation form is where its inputs live.
+    if (input.automationRun !== true && input.construct.args.length > 0) {
       buttons.push(
         `<button class="secondary" type="button" data-act="runWith">Run with arguments</button>`,
       );
@@ -124,12 +132,8 @@ function actionsHtml(input: ConstructPageInput): string {
   if (input.construct.originPath !== "" && input.fileInWorkspace) {
     buttons.push(`<button class="secondary" type="button" data-act="openFile">Open the .memql file</button>`);
   }
-  const note =
-    (input.runUnavailable ?? "") === ""
-      ? ""
-      : `<p class="notice">${escapeHtml(input.runUnavailable ?? "")}</p>`;
-  if (buttons.length === 0) return note;
-  return `${note}<div class="actions">${buttons.join("")}</div>`;
+  if (buttons.length === 0) return "";
+  return `<div class="actions">${buttons.join("")}</div>`;
 }
 
 function argsHtml(construct: CatalogConstruct): string {

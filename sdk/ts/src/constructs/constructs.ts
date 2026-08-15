@@ -37,7 +37,7 @@
 import type { Dispatcher } from "../client/dispatcher.js";
 import { newShortId } from "../client/id.js";
 import { readServerPayload } from "../client/wire.js";
-import type { ConstructArgWire, ConstructInfoWire } from "../client/wire.js";
+import type { ConstructArgWire, ConstructInfoWire, ConstructTriggerWire } from "../client/wire.js";
 
 // -----------------------------------------------------------------------------
 // Plain result types (no wire shapes leak to consumers)
@@ -99,6 +99,43 @@ export interface Construct {
   sourceHash: string;
   /** Present only when `originPath` is empty. See the module comment. */
   source: string;
+  /**
+   * What fires this construct, for an AUTOMATION. Undefined for every other
+   * kind, and for an automation the cluster reports no trigger for.
+   *
+   * UNDEFINED IS NOT AN EMPTY TRIGGER. An automation with no trigger is
+   * manual-run, and its form says so from the absence; an empty object would
+   * be a claim that it fires on nothing.
+   */
+  trigger?: ConstructTrigger;
+}
+
+/**
+ * What fires an automation.
+ *
+ * Field for field the language server's own trigger shape, because the editor
+ * builds ONE automation run form -- from the language server when the .memql
+ * file is open, from this catalog when browsing a cluster where it is not.
+ *
+ * The form is decided ENTIRELY by these three: a `schedule` with no `event`
+ * offers a single "fire it now with an empty event" mode; an `event` WITH a
+ * `concept` offers a row picker over that concept's rows plus a pasted
+ * payload; an `event` with no `concept` offers the pasted payload alone,
+ * because there is no row set to pick from.
+ */
+export interface ConstructTrigger {
+  /**
+   * The canonical concept id whose rows the run form's picker browses. Empty
+   * when the trigger names no concept.
+   */
+  concept: string;
+  /**
+   * The structured event kind ("node.created") when the cluster's composed
+   * topic decomposes, and the whole authored topic when it does not.
+   */
+  event: string;
+  /** The cron expression of a time-driven trigger. Empty otherwise. */
+  schedule: string;
 }
 
 export interface ListConstructsResult {
@@ -173,6 +210,21 @@ function constructFromWire(c: ConstructInfoWire): Construct {
     boundConcept: c.boundConcept ?? "",
     sourceHash: c.sourceHash ?? "",
     source: c.source ?? "",
+    ...(c.trigger === undefined ? {} : { trigger: triggerFromWire(c.trigger) }),
+  };
+}
+
+// The one field NOT defaulted into existence, and deliberately: absence is
+// meaningful here in a way it is not for a string or a list. Defaulting it to
+// an empty ConstructTrigger would turn "this construct has no trigger" into
+// "this construct fires on nothing", and the run form reads manual-run off the
+// absence. Its three MEMBERS are defaulted as everything else is, because once
+// a trigger exists protojson still omits its empty strings.
+function triggerFromWire(t: ConstructTriggerWire): ConstructTrigger {
+  return {
+    concept: t.concept ?? "",
+    event: t.event ?? "",
+    schedule: t.schedule ?? "",
   };
 }
 
