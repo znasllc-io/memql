@@ -53,6 +53,15 @@ type (
 		lifecycle    common.Lifecycle
 		readyCh      chan struct{}
 		migrationErr error
+
+		// migrationsRan records that a migration attempt has COMPLETED without
+		// error at least once. Distinct from migrationErr == nil, which is also
+		// true before anything has been attempted -- and the difference is the
+		// whole point (memql#3879): a node that started before the database was
+		// reachable has no recorded error to retry on once its very first
+		// attempt died at connect time, so "no error" must not be read as
+		// "migrated".
+		migrationsRan bool
 	}
 
 	DatabaseEnvOptions struct {
@@ -1138,6 +1147,31 @@ func (d *Database) tryPing(ctx context.Context) bool {
 
 	if currentDB != nil {
 		if err := currentDB.PingContext(ctx); err == nil {
+			// A POOL THAT STARTS WORKING IS NOT A RECONNECT (memql#3879).
+			//
+			// Migrations are re-run below, on the reconnect path -- but only a
+			// reconnect reaches it, and the cold-start race is not one. When a
+			// node starts before the database is up, the startup attempt fails
+			// at connect time and the node starts anyway ("monitoring will
+			// retry"). pgdriver's pool then heals itself, so the very next tick
+			// PINGS SUCCESSFULLY and returns here. The connection is fine
+			// forever after; the schema was never created, and nothing ever
+			// tries again.
+			//
+			// The result is a cluster where every pod is Running and Ready and
+			// every write fails with `relation "MemoryNodes" does not exist`.
+			// Observed on a machine slow enough that postgres spent ~98s waiting
+			// on its PVC while the nodes came up around it -- the same condition
+			// behind memql#3877 and memql#3873.
+			//
+			// So the retry belongs on connectivity RETURNING, which is what this
+			// branch means, and not on the narrower event of a connection being
+			// re-established. It is self-limiting: runMigrations clears the
+			// error and sets migrationsRan on success, so this fires until it
+			// works and then never again.
+			if d.migrationsPending() {
+				d.runMigrations(ctx, d.migrationBun())
+			}
 			return true
 		}
 
@@ -1417,6 +1451,11 @@ func (d *Database) runMigrations(ctx context.Context, bunDB *bun.DB) {
 			}
 		}
 	}
+
+	// Last, so every stage above has had its chance to record a failure. This
+	// is what makes the tryPing retry self-limiting: it fires until an attempt
+	// completes cleanly, and never again after that.
+	d.markMigrationsRan()
 }
 
 // recordMigrationErr stores the first error seen during the current migration
@@ -1445,6 +1484,54 @@ func (d *Database) clearMigrationErr() {
 	defer d.Unlock()
 
 	d.migrationErr = nil
+}
+
+// markMigrationsRan records that an attempt finished without error, which is
+// what stops the retry in tryPing. Called only after every stage of
+// runMigrations has had its chance to record a failure.
+func (d *Database) markMigrationsRan() {
+	d.Lock()
+	defer d.Unlock()
+
+	if d.migrationErr == nil {
+		d.migrationsRan = true
+	}
+}
+
+// migrationsPending reports whether migrations are configured to run and have
+// not yet completed successfully.
+//
+// The two conditions are NOT redundant (memql#3879). `migrationErr != nil` is
+// the ordinary "it was tried and it failed" case. `!migrationsRan` additionally
+// covers "it was never really tried": a startup attempt that dies at connect
+// time can leave no error to find -- the bun handle is nil, runMigrations logs
+// "bun not initialized; skipping migrations" and returns having recorded
+// nothing -- and reading that silence as success is precisely how a database
+// stays empty forever behind a healthy-looking node.
+func (d *Database) migrationsPending() bool {
+	if !d.config.migrateOnStart {
+		return false
+	}
+
+	d.Lock()
+	defer d.Unlock()
+
+	return !d.migrationsRan || d.migrationErr != nil
+}
+
+// migrationBun picks the handle migrations run on: the DIRECT (non-pooled)
+// endpoint when configured, else the main pool. Same rule the reconnect path
+// applies, factored out so the two callers cannot drift -- the migrator's
+// advisory lock is session-scoped and must not ride a transaction pooler
+// (epic memql#1925).
+func (d *Database) migrationBun() *bun.DB {
+	d.Lock()
+	defer d.Unlock()
+
+	if d.DirectBun != nil {
+		return d.DirectBun
+	}
+	return d.Bun
 }
 
 // MigrationError returns the error from the most recent migration attempt, or
