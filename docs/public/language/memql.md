@@ -1097,7 +1097,50 @@ use common.traits.{ isActiveRecord, isNotDeleted }
 
 The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/concepts.memql`); the brace list names the constructs imported into local scope.
 
+#### Aliasing an import (`as`)
+
+An imported name can be bound to a different local name (memql#3802):
+
+```memql
+use harness.concepts.{ plan as harnessPlan }
+
+query harnessPlan tasksForHarnessPlan { ... }   // the imported one
+query plan        activePlansForUser  { ... }   // ambient -> v1:planner:plan
+```
+
+This is what lets one file reference **two same-named concepts**. Four short
+names are ambiguous across domains today — `plan`, `request`, `call`,
+`invocation` — and without an alias, importing one of them captures *every*
+bare use of that name in the file, including the constructs that wanted their
+own domain's.
+
+Three rules, and the third is what makes the first two coherent:
+
+1. **The alias names the imported concept.** `harnessPlan` above is
+   `v1:harness:plan`.
+2. **A bare name stays ambient** — it continues to mean this domain's concept.
+   Aliasing therefore fixes the capture structurally rather than by adding a
+   check.
+3. **An unaliased import that collides with this domain's own concept is
+   refused at load**, naming the alias as the fix. Without that refusal the
+   capture stays writable and still silently wins — and *silently* is the
+   problem: both constructs compile, both bind the foreign concept, and nothing
+   is reported.
+
+An unaliased import that collides with nothing is unchanged and needs no alias;
+that is the shape of every cross-domain import in the tree today.
+
+`as` is defined on `use` generally rather than on concepts specifically, so it
+already works the day another construct kind becomes namespaced. It is **inert
+for the twelve flat kinds** (query, mutation, logic, spec, trait, shape, tool,
+prompt, provider, builtin, policy, seed): their registries are keyed by bare
+name with a load-time uniqueness gate, so two same-named constructs cannot
+coexist and there is nothing to alias between.
+
 > **Retired.** The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`, `@useMutation`, `@useLogic`, `@useBuiltin`, ...) is retired and rejected at parse time with a migration-pointing error. The concept binding lives in the construct signature; everything else comes in through `use` imports.
+>
+> The old **Form A** alias (`use cognition.space as s`) is also retired: the
+> alias goes inside the brace list now, `use cognition.concepts.{ space as s }`.
 
 ### Doc Comments (`///`) -- the preferred description spelling
 

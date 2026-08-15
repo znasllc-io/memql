@@ -2,7 +2,6 @@ package memql
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
@@ -79,6 +78,15 @@ func (r *ConceptResolver) ResolveFileWithSignatureConceptsInDomain(file *languag
 		return nil
 	}
 
+	// An UNALIASED import that collides with this domain's own concept is
+	// refused before anything binds (memql#3802). Left admitted it wins
+	// SILENTLY over every bare use of that name in the file, including the
+	// constructs that wanted the local one -- OK=true, no diagnostic, on the
+	// path that derives row ids and compiles filters.
+	if err := r.refuseCapturingImports(file.Uses, dir, declaredNS); err != nil {
+		return err
+	}
+
 	// Build the symbol table from `use <ns>.<concept>` declarations.
 	symbols, err := r.resolveUseDeclarations(file.Uses, versionContext)
 	if err != nil {
@@ -152,9 +160,11 @@ func (r *ConceptResolver) ResolveSignatureConceptInNamespace(uses []*languagePar
 	dir = strings.TrimSpace(dir)
 	declaredNS = strings.TrimSpace(declaredNS)
 
-	// 1. Explicit import: never gated.
-	if nsHint := namespaceHintForName(uses, bareName); nsHint != "" {
-		id, err := r.resolveBareConceptNameWithNamespace(bareName, nsHint)
+	// 1. Explicit import: never gated. sourceName differs from bareName only
+	// for an ALIASED import -- the use site writes the local name, the registry
+	// knows the source one (memql#3802).
+	if nsHint, sourceName := namespaceHintForName(uses, bareName); nsHint != "" {
+		id, err := r.resolveBareConceptNameWithNamespace(sourceName, nsHint)
 		if err != nil {
 			return "", fmt.Errorf("signature concept %q: %w", bareName, err)
 		}
@@ -259,21 +269,115 @@ func (r *ConceptResolver) resolveBareConceptNameWithNamespace(name, nsHint strin
 	return "", fmt.Errorf("ambiguous concept name %q matches %d concepts: %s", name, len(matches), strings.Join(matches, ", "))
 }
 
-// namespaceHintForName returns the namespace segment of the file-top
-// `use` import that brings <name> into scope (e.g. "planner" for
-// `use planner.concepts.{ plan }`), or "" when no Form B import names
-// it. Used to disambiguate a signature-bound concept whose bare
-// trailing segment collides across namespaces.
-func namespaceHintForName(uses []*languageParser.UseDeclaration, name string) string {
+// namespaceHintForName returns the namespace segment of the file-top `use`
+// import that brings <name> into scope (e.g. "planner" for
+// `use planner.concepts.{ plan }`), together with the SOURCE name to resolve
+// against the registry. Returns ("", "") when no Form B import binds it.
+//
+// The two return values differ exactly when the import is ALIASED
+// (memql#3802): a use site writes `harnessPlan`, and what has to be looked up
+// is `plan` under `harness`. Resolving the use-site name directly would find
+// nothing and report a missing concept, which is the least useful way to fail.
+//
+// The lookup is by LOCAL name on purpose. `Names` holds source names, so an
+// aliased entry is deliberately NOT matched by its source spelling here: once a
+// file renames `plan` to `harnessPlan`, bare `plan` in that file means the
+// AMBIENT one again, which is what makes aliasing fix the capture structurally
+// rather than by adding a check.
+// refuseCapturingImports rejects an UNALIASED concept import whose name this
+// domain ALSO declares (memql#3802).
+//
+// # The defect
+//
+// The import hint is per-name and file-scoped, and step 1 of signature
+// resolution is not scope-gated -- correctly, because that is how a foreign
+// reference is authorized. Together those mean an unaliased foreign import
+// CAPTURES every bare use of that short name in the file:
+//
+//	use harness.concepts.{ plan }
+//
+//	query plan probeWantsHarness  -> v1:harness:plan   wanted
+//	query plan probeWantsPlanner  -> v1:harness:plan   WANTED v1:planner:plan
+//
+// Both compiled. OK=true. No diagnostic. That is worse than #3800's refusal:
+// this one binds the WRONG concept and reports success, on the path that
+// derives row ids and compiles filters.
+//
+// # Why a refusal rather than a smarter bind
+//
+// Because the file is genuinely ambiguous about what it meant, and every way of
+// guessing is worse than asking. Preferring the local one would break the file
+// that imported deliberately; preferring the import is today's silent capture.
+// The alias makes the intent explicit, so the fix is to require one.
+//
+// LATENT TODAY, and this is what keeps it that way. 8 files import an ambiguous
+// short name; none of their domains declares its own, so nothing is mis-bound
+// right now. It goes live the moment a file in dsl/planner/ or dsl/harness/
+// imports the other's `plan` -- the natural thing to do the first time someone
+// needs both.
+func (r *ConceptResolver) refuseCapturingImports(uses []*languageParser.UseDeclaration, dir, declaredNS string) error {
+	dir = strings.TrimSpace(dir)
+	declaredNS = strings.TrimSpace(declaredNS)
+	if dir == "" && declaredNS == "" {
+		// No domain: nothing local for an import to capture. This is the
+		// untitled-buffer / authored-construct case, where an explicit import is
+		// the ONLY way to disambiguate and must stay legal.
+		return nil
+	}
+
+	for _, u := range uses {
+		if u == nil || len(u.Parts) == 0 || len(u.Names) == 0 {
+			continue
+		}
+		// Concepts only. The twelve flat kinds share one registry keyed by bare
+		// name with a load-time uniqueness gate, so two same-named constructs
+		// cannot coexist and there is nothing to capture.
+		if len(u.Parts) < 2 || u.Parts[1] != "concepts" {
+			continue
+		}
+		// An import OF this domain is not a capture -- it names the same
+		// concepts the ambient rule would.
+		if u.Parts[0] == dir || u.Parts[0] == declaredNS {
+			continue
+		}
+		for _, source := range u.Names {
+			if _, aliased := u.Aliases[source]; aliased {
+				continue // the author said which is which
+			}
+			// Would this domain resolve the same bare name to something of its
+			// OWN? Only then is the unaliased import taking a name away.
+			local := ""
+			for _, hint := range ambientHints(dir, declaredNS) {
+				id, err := r.resolveBareConceptNameWithNamespace(source, hint)
+				if err == nil && idIsInDomainAmbientScope(id, dir, declaredNS) {
+					local = id
+					break
+				}
+			}
+			if local == "" {
+				continue
+			}
+			imported, err := r.resolveBareConceptNameWithNamespace(source, u.Parts[0])
+			if err != nil || imported == local {
+				continue
+			}
+			return fmt.Errorf("`use %s.{ %s }` captures every bare %q in this file, including this domain's own %s -- alias it: `use %s.{ %s as <name> }` (memql#3802). A bare name keeps meaning this domain's concept",
+				u.Path, source, source, local, u.Path, source)
+		}
+	}
+	return nil
+}
+
+func namespaceHintForName(uses []*languageParser.UseDeclaration, name string) (namespace, sourceName string) {
 	for _, u := range uses {
 		if u == nil || len(u.Parts) == 0 {
 			continue
 		}
-		if slices.Contains(u.Names, name) {
-			return u.Parts[0]
+		if source, ok := u.SourceNameFor(name); ok {
+			return u.Parts[0], source
 		}
 	}
-	return ""
+	return "", ""
 }
 
 // symbolEntry maps a short name to a resolved concept ID.
@@ -312,11 +416,20 @@ func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDecla
 			if len(u.Parts) > 0 {
 				nsHint = u.Parts[0]
 			}
-			for _, name := range u.Names {
+			for _, source := range u.Names {
+				// KEYED BY THE LOCAL NAME, resolved by the SOURCE name
+				// (memql#3802). The symbol table rewrites the AST, so its keys
+				// are the names a body actually writes. Keying an aliased
+				// import by its SOURCE name would put `widget` back in the
+				// table pointing at the foreign id -- re-creating the capture
+				// through the symbol table after the resolver stopped doing it,
+				// which is exactly how a half-applied fix looks correct in one
+				// test and wrong in the tree.
+				name := u.LocalNameFor(source)
 				if _, dup := symbols[name]; dup {
 					continue
 				}
-				resolvedId, err := r.resolveBareConceptNameWithNamespace(name, nsHint)
+				resolvedId, err := r.resolveBareConceptNameWithNamespace(source, nsHint)
 				if err != nil {
 					// Many Form B imports name non-concept constructs
 					// (shapes / traits / specs / mutations / queries
@@ -327,14 +440,14 @@ func (r *ConceptResolver) resolveUseDeclarations(uses []*languageParser.UseDecla
 					// can still be consulted for collision-detection.
 					symbols[name] = &symbolEntry{
 						leafName: name,
-						fullPath: u.Path + "." + name,
+						fullPath: u.Path + "." + source,
 					}
 					continue
 				}
 				symbols[name] = &symbolEntry{
 					leafName:   name,
 					resolvedId: resolvedId,
-					fullPath:   u.Path + "." + name,
+					fullPath:   u.Path + "." + source,
 				}
 			}
 			continue
