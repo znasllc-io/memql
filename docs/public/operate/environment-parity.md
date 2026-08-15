@@ -142,6 +142,13 @@ and comparing the resource inventories. Two overlay trees maintained in
 parallel were the drift risk this standard exists to prevent; one base with two
 value sets is the standard's own prescription.
 
+One installation, then, and not two. The standard is satisfied MORE completely
+by one base with two value sets than by the two parallel overlay trees it
+replaces -- worth stating outright, because "staging" and "production" are words
+that ordinarily imply separate installations and the inference is wrong here.
+The operator model, including what a promotion moves between them and what it
+deliberately does not, is [environments.md](environments.md).
+
 The boundary between the two environments' **data** follows the same rule: it
 is a configuration value, not a code path. Each namespace's pods get a
 different Postgres schema search path (`memql_prod, public` /
