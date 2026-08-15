@@ -13,7 +13,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SRC_DIR, sourceFiles, stripComments } from "./support/source.js";
+import { sourceFiles, stripComments } from "./support/source.js";
 
 import { renderRowList } from "../src/rowList.js";
 import { renderValueView } from "../src/valueView.js";

@@ -119,6 +119,13 @@ func (s *streamSession) handleAuthoringSessionDefineBundle(envelope *memqlv1.Mem
 // this node, core-first never-shadow), and a broadcast event makes them callable
 // on EVERY node within seconds. On a validation failure it returns ok=false with
 // the diagnostics + a populated error and promotes nothing.
+//
+// A CONCEPT the bundle re-promotes over a version the cluster already runs is
+// classified (memql#3757), and the classification comes back on concept_diffs
+// whichever way the call went -- a breaking refusal IS a diff, and carrying it
+// only in `error` would force a client to regex a field name out of prose. The
+// request's allow_breaking is the operator's explicit override, which the engine
+// applies and audits.
 func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.DurablePromoteBundleMsg) error {
 	if msg == nil {
 		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "durable_promote_bundle: request body missing")
@@ -145,13 +152,14 @@ func (s *streamSession) handleDurablePromoteBundle(envelope *memqlv1.MemqlClient
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable,
 			"durable_promote_bundle: engine unavailable on this node")
 	}
-	res, err := s.service.engine.PromoteBundleDurable(s.stream.Context(), owner, msg.GetSources())
+	res, err := s.service.engine.PromoteBundleDurable(s.stream.Context(), owner, msg.GetSources(), msg.GetAllowBreaking())
 
 	result := &memqlv1.DurablePromoteBundleResult{
-		RequestId:   requestId,
-		Ok:          res.OK,
-		Promoted:    durablePromotedConstructsToProto(res.Promoted),
-		Diagnostics: authoringDiagnosticsToProto(res.Diagnostics),
+		RequestId:    requestId,
+		Ok:           res.OK,
+		Promoted:     durablePromotedConstructsToProto(res.Promoted),
+		Diagnostics:  authoringDiagnosticsToProto(res.Diagnostics),
+		ConceptDiffs: conceptSchemaDiffsToProto(res.ConceptDiffs),
 	}
 	if err != nil {
 		result.Ok = false
@@ -245,6 +253,46 @@ func (s *streamSession) requireOwnerRole(requestId, correlate string) (bool, err
 			"durable promotion requires the owner role")
 	}
 	return true, nil
+}
+
+// conceptSchemaDiffsToProto maps the engine-side concept schema classification
+// (memql#3757) onto the wire form, field for field.
+//
+// A flat mapping with nothing computed here on purpose. The engine already
+// decided what is breaking, counted the rows and rendered the summary; a
+// transport that re-derived any of it would be a second authority on the same
+// question, and the two would eventually disagree on the one call where it
+// mattered.
+func conceptSchemaDiffsToProto(diffs []memqlengine.ConceptSchemaDiff) []*memqlv1.ConceptSchemaDiff {
+	if len(diffs) == 0 {
+		return nil
+	}
+	out := make([]*memqlv1.ConceptSchemaDiff, 0, len(diffs))
+	for _, diff := range diffs {
+		changes := make([]*memqlv1.ConceptSchemaChange, 0, len(diff.Changes))
+		for _, c := range diff.Changes {
+			changes = append(changes, &memqlv1.ConceptSchemaChange{
+				Concept:       c.Concept,
+				Field:         c.Field,
+				Kind:          c.Kind,
+				Breaking:      c.Breaking,
+				Was:           c.Was,
+				Now:           c.Now,
+				RowsAffected:  c.RowsAffected,
+				RowCountKnown: c.RowCountKnown,
+				ReferencedBy:  c.ReferencedBy,
+				Detail:        c.Detail,
+			})
+		}
+		out = append(out, &memqlv1.ConceptSchemaDiff{
+			Concept:    diff.Concept,
+			Breaking:   diff.Breaking,
+			Overridden: diff.Overridden,
+			Changes:    changes,
+			Summary:    diff.Summary,
+		})
+	}
+	return out
 }
 
 // durablePromotedConstructsToProto maps the engine-side DefinedConstructs (the

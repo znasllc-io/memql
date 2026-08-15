@@ -33,7 +33,9 @@
 # receives a READ-ONLY token on `pull_request`, and this job has to push. That
 # trigger runs with repository write access, so the job is fenced four ways:
 #
-#   1. it runs only for PRs authored by dependabot[bot];
+#   1. it runs only for PRs authored by dependabot[bot], and only on events
+#      dependabot itself triggered (`github.actor`) -- a push by anyone else
+#      onto a dependabot branch does not start a privileged run;
 #   2. it REFUSES any PR that touches a path other than go.mod / go.sum /
 #      go.work.sum -- so the checked-out head cannot introduce code, and the
 #      only thing this job ever executes is the Go toolchain over manifests;
@@ -55,7 +57,7 @@ name: dependabot-tidy
 on:
   pull_request_target:
     branches: [main]
-    # SCOPE. The `if:` below gates on the AUTHOR, and Dependabot also opens
+    # SCOPE. The `if:` below gates on the AUTHOR + ACTOR, and Dependabot also opens
     # github-actions PRs, whose files are .github/workflows/*.yml. Those hit
     # the manifest fence in step 1 and FAIL it -- correctly, but the job had
     # no business starting, so every non-Go Dependabot PR carried a red X it
@@ -72,10 +74,12 @@ on:
       - '**/go.sum'
       - 'go.work.sum'
 
-# Write is the point of the workflow: the tidy result is pushed back onto the
-# PR branch. Everything else stays at the default read.
+# Read-only at the top level; write is the point of the workflow (the tidy
+# result is pushed back onto the PR branch), but that grant lives on the one
+# job that pushes, so the elevated token is never workflow-wide (Scorecard
+# Token-Permissions).
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: dependabot-tidy-${{ github.event.pull_request.number }}
@@ -84,9 +88,18 @@ concurrency:
 jobs:
   tidy:
     name: dependabot-tidy
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # FENCE 1. Author AND actor: the PR must be dependabot's, and so must the
+    # event that started this run -- a human pushing onto a dependabot branch
+    # (or reopening the PR) does not start a privileged run; they are already
+    # hands-on and tidy by hand, per the header.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.actor == 'dependabot[bot]'
     timeout-minutes: 20
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tidy commit onto the PR branch
+      pull-requests: read # FENCE 2 reads the PR's changed-file list via gh
     steps:
       - name: refuse anything that is not a manifest change
         env:

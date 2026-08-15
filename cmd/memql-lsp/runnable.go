@@ -105,6 +105,10 @@ func (h *customHandler) Handle(ctx *glsp.Context) (any, bool, bool, error) {
 		return decodeAndServe(h, ctx, h.srv.runnableConstructs)
 	case methodImports:
 		return decodeAndServe(h, ctx, h.srv.imports)
+	case methodTrainingState:
+		return decodeAndServe(h, ctx, h.srv.trainingState)
+	case methodClusterCatalog:
+		return decodeAndAccept(h, ctx, h.srv.clusterCatalogPush)
 	default:
 		return h.Handler.Handle(ctx)
 	}
@@ -128,6 +132,29 @@ func decodeAndServe[P any, R any](h *customHandler, ctx *glsp.Context, serve fun
 		return nil, true, false, err
 	}
 	return serve(params), true, true, nil
+}
+
+// decodeAndAccept is decodeAndServe's NOTIFICATION half: same precondition, same
+// decode, and a nil result because a notification has no reply.
+//
+// The four return values are the same contract either way -- glsp hands both
+// down the same path -- but what happens to them differs, and that is worth
+// stating rather than discovering. jsonrpc2 discards the result and logs the
+// error for a message with no id, so a client learns nothing about a rejected
+// notification. That is the reason `accept` takes no error return: there is
+// nobody to report one to, so a notification handler that could fail would be
+// failing silently by construction. It must therefore be a handler that cannot
+// meaningfully fail, which `clusterCatalogPush` is -- it replaces a value.
+func decodeAndAccept[P any](h *customHandler, ctx *glsp.Context, accept func(P)) (any, bool, bool, error) {
+	if !h.Handler.IsInitialized() {
+		return nil, true, true, errors.New("server not initialized")
+	}
+	var params P
+	if err := json.Unmarshal(ctx.Params, &params); err != nil {
+		return nil, true, false, err
+	}
+	accept(params)
+	return nil, true, true, nil
 }
 
 // runnableConstructs answers the request for one document.

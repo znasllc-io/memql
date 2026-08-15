@@ -321,8 +321,10 @@ frontend coordination.
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
-| **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in `api-front-door.yaml` from `component/server`'s path declarations. Run after adding an HTTP route |
-| **Front-door path gate** | `make frontdoor-paths-check` | Fail when that block is stale. The drift it catches is an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703) |
+| **Regenerate the front door** | `make frontdoor` | Both generators, in order: hosts, then paths |
+| **Regenerate front-door hosts** | `make frontdoor-hosts` | Re-emit each cloud overlay's `front-door.generated.yaml` from the role x environment product (memql#3767). Run after adding an environment or changing its host label |
+| **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in every api front door from `component/server`'s path declarations. Run after adding an HTTP route |
+| **Front-door gates** | `make frontdoor-hosts-check` / `make frontdoor-paths-check` | Fail when a generated front door or path block is stale. The path drift catches an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703); the host drift catches an environment reachable at a name nothing serves |
 
 ---
 
@@ -676,6 +678,46 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | The reasoning already recorded above for `/spaces/{id}/attachments`: multipart bundles map poorly to gRPC (memql#3713, explicit owner approval on the issue). A CI job publishing a built site hands over an arbitrary, variable-shaped tree of files -- unknown paths, unknown count, mixed binary content types -- which is exactly the shape multipart form-data exists to carry and exactly the shape a fixed protobuf message schema does not. Every CI toolchain already knows how to POST a multipart body; none carries a memQL gRPC client. `component/edge.Publisher` is what makes the deploy atomic once the bytes arrive: the whole bundle lands under a new content-addressed version prefix and only then does the site row's `bundleRef` flip, so a failed upload never leaves a half-published site reachable, and rollback is one more row write to bytes that are still there. Authorization is a `class="service_account"` identity-issued JWT (memql#691) the handler verifies itself; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`, for the same reason the inbound receiver is below: that list is consulted by the verifier middleware on every verifier-consuming node, so listing it there would make the route unauthenticated for every bearer instead of pinned to the service-account credential specifically. Served by the bff, never the edge node -- the edge is wildcard-routed by site hostname, so a site-agnostic publish endpoint has no coherent address there |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
+
+### The front door's HOST set is generated too (memql#3767)
+
+The host set is the product of **role x environment**, not a list. One cluster
+carries staging and production as two namespaces (epic memql#3748), so:
+
+| Role | unprefixed | labelled `staging` |
+|---|---|---|
+| api | `api.<domain>` | `api-staging.<domain>` |
+| identity | `identity.<domain>` | `identity-staging.<domain>` |
+| mcp | `mcp.<domain>` | `mcp-staging.<domain>` |
+| sites | `*.<domain>`, apex | `*.staging.<domain>` |
+
+**Role hosts hyphenate; site hosts nest, and the asymmetry is a TLS fact.** A
+wildcard matches exactly ONE label, so `*.<domain>` covers
+`api-staging.<domain>` and does NOT cover `api.staging.<domain>` -- keeping role
+hosts single-label means the certificate the cluster already has covers every
+environment's. Sites cannot: a site's own name occupies that label, so a
+labelled environment requests ONE more wildcard, `*.<label>.<domain>`, for all
+of its sites. A labelled site also lives under the CLUSTER's domain --
+`shop.staging.<clusterdomain>`, never `shop.staging.acme.com`, because that
+environment is the operator's surface and must not need DNS the operator may not
+control.
+
+`cmd/frontdoorhosts` writes `deploy/k8s/overlays/<env>/front-door.generated.yaml`
+from the `MEMQL_HOST_LABEL` value on that overlay's `environment.yaml`, and
+`component/genesis/domain.go` composes the node's own issuer / CORS origins /
+redirect URIs from the SAME label through `component/frontdoor`. One derivation,
+two consumers: a second copy of the rule would disagree, and the disagreement is
+an issuer nothing is served at, which presents as "sign-in is broken" with every
+manifest looking correct.
+
+**Adding an environment is a VALUE change** -- a new overlay directory with a
+new label in it, no generator edit; `TestAThirdEnvironmentIsAValueChange` proves
+it by rendering one. Adding a ROLE is a design change. The LOCAL overlay's four
+front-door files stay hand-authored (traefik, not nginx, and they carry the
+measured priority reasoning from memql#3810), but they are gated against the
+same product, so they cannot drift from it.
+
+Details: [docs/public/operate/front-door.md](docs/public/operate/front-door.md).
 
 ### How an HTTP path reaches the front door (GENERATED, memql#3703)
 

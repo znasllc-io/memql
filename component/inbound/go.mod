@@ -56,6 +56,7 @@ require (
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/database v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
@@ -138,3 +139,5 @@ replace github.com/znasllc-io/memql/component/healing => ../healing
 replace github.com/znasllc-io/memql/component/identity => ../identity
 
 replace github.com/znasllc-io/memql/component/metrics => ../metrics
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor

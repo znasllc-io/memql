@@ -158,7 +158,7 @@ func promoteBundleAndLookup(t *testing.T, e *MemQLEngine, source, kind, name str
 	if !ok {
 		t.Fatalf("session define did not register %s %q", kind, name)
 	}
-	return e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", c)
+	return e.promoteConstructDurableWithStore(context.Background(), &fakePromoteStore{}, nil, "owner-1", c)
 }
 
 // --- the derivation itself ------------------------------------------------
@@ -271,7 +271,7 @@ func TestPromoteConcept_MergesIntoLiveRegistryAndPersists(t *testing.T) {
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
 
 	store := &fakePromoteStore{}
-	if err := e.promoteConstructDurableWithStore(context.Background(), store, "owner-1", c); err != nil {
+	if err := e.promoteConstructDurableWithStore(context.Background(), store, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote concept: %v", err)
 	}
 
@@ -393,7 +393,7 @@ func TestPromoteBundleDurable_ConceptAndItsMutationInOneBundle(t *testing.T) {
 	e := promoteConceptEngineOnTheDefaultRegistry(t)
 
 	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
-	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, false)
 	if err != nil {
 		t.Fatalf("promote bundle: %v (diagnostics %+v)", err, res.Diagnostics)
 	}
@@ -818,7 +818,7 @@ func TestRehydratePromotedConcept_SurvivesARestart(t *testing.T) {
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
 
 	persist := &fakePromoteStore{}
-	if err := old.promoteConstructDurableWithStore(context.Background(), persist, "owner-1", c); err != nil {
+	if err := old.promoteConstructDurableWithStore(context.Background(), persist, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote: %v", err)
 	}
 
@@ -869,7 +869,7 @@ func TestRehydratePromotedConcept_PropagatesAcrossNodes(t *testing.T) {
 	c, _ := reg.Lookup("owner-1", "concept", "trainedWidget")
 
 	persist := &fakePromoteStore{}
-	if err := nodeA.promoteConstructDurableWithStore(context.Background(), persist, "owner-1", c); err != nil {
+	if err := nodeA.promoteConstructDurableWithStore(context.Background(), persist, nil, "owner-1", c); err != nil {
 		t.Fatalf("durable promote on node A: %v", err)
 	}
 
@@ -933,7 +933,7 @@ func TestDemoteConcept_IsRefusedWithItsOwnReason(t *testing.T) {
 func TestDemoteBundle_WithAConceptRefusesTheWholeBundle(t *testing.T) {
 	e := promoteConceptEngineOnTheDefaultRegistry(t)
 	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
-	if _, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle); err != nil {
+	if _, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, false); err != nil {
 		t.Fatalf("promote bundle: %v", err)
 	}
 

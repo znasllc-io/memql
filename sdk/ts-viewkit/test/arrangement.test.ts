@@ -247,7 +247,6 @@ test("sanitizing a hopeless arrangement falls back to the deterministic proposal
 });
 
 test("an empty binding list declines a slot rather than being ignored", () => {
-  const profile = inventedProfile();
   const entry = { element: "statTile", band: "reading" as const, bindings: { metric: [] } };
   const opts = elementOptions(entry);
   assert.deepEqual(opts.bindings, { metric: [] });
