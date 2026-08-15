@@ -190,6 +190,18 @@ jobs:
               # file itself -- so editing it ran zero lanes until memql#3440
               # made it tracked and the coverage guard noticed.
               - '.claude/settings.json'
+              # .memql/runs.json is tracked for the same reason and needs the
+              # same routing. It is the run configuration a repository SHIPS
+              # (component/edge... see editors/vscode/src/run/runConfig.ts), so
+              # it is repo content -- and TestEngineIsProductNeutral sweeps
+              # `git ls-files` skipping only .git, bin and node_modules, which
+              # means it reads this file's PATH AND BODY. Its `args` are
+              # free-form operator text in a public repository, so the sweep is
+              # exactly the gate that should run when it changes. The coverage
+              # guard could not see that on its own and said so: a test that
+              # sweeps `git ls-files` reads files without naming them, so the
+              # absence of a mention was evidence, not proof.
+              - '.memql/runs.json'
               # The three paths that were allow-listed as "no gate reads it"
               # until memql#3451 made that claim checkable and it turned out to
               # be false of each. All three are read by a Go test in
