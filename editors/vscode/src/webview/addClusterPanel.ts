@@ -48,6 +48,7 @@ import { upsertCluster } from "../clusters/file.js";
 import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
+import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -597,6 +598,9 @@ export class AddClusterPanel {
     if (type === "enrolPasskey") {
       void this.enrolPasskey();
     }
+    if (type === "claimCluster") {
+      void this.claimCluster();
+    }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
     // particular is reached only by comparison against a name written out in
@@ -941,6 +945,24 @@ export class AddClusterPanel {
     // "" when the step did not run or produced nothing, which is not a failure:
     // an install that skipped enrolment simply gets no button.
     if (report !== undefined) this.state.setEnrolmentUrl(enrolmentUrlFrom(report));
+
+    // THE MAGIC LINK, and on a fresh install it is the ONLY one of the two that
+    // exists (memql#3884).
+    //
+    // The paragraph above describes the enrolment link as the thing an install
+    // has just created for this operator. That is true of a re-run against a
+    // cluster somebody already claimed, and false of every first install: a
+    // cluster is claimed by its FIRST SIGN-IN, so at `enrolmentLink` time there
+    // is no account to enrol a passkey for and the step correctly returns
+    // nothing, reporting `enrolmentState=awaitingFirstSignIn` and telling the
+    // operator to sign in with the magic link this install recovered.
+    //
+    // That link was recovered, put on the `magicLink` step's result, and then
+    // read by nothing at all -- so the install ended by naming a credential it
+    // had thrown away, and offered "Sign in as owner" for an account that did
+    // not exist. The sign-in then times out and falls back to a device code
+    // which cannot complete either, because there is still no account.
+    if (report !== undefined) this.state.setClaimUrl(claimUrlFrom(report));
 
     // THE HAND-OFF, and the gate in front of it is the whole point (#3477).
     //
@@ -1992,6 +2014,36 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     }
   }
 
+  /**
+   * Claims the cluster by opening the magic link the install recovered.
+   *
+   * The mirror of `enrolPasskey`, under the same rules, for a credential that
+   * matters more: this link authenticates as the cluster OWNER. It never enters
+   * the webview -- the button carries no href -- and `openClaimLink`
+   * re-validates it (https, `/auth/complete?ml=`) before anything is opened, so
+   * a value rewritten between the identity log and this click is refused rather
+   * than followed.
+   *
+   * A failure names the recovery path rather than leaving the operator stuck,
+   * because on a fresh install there IS no other route in: no passkey exists,
+   * and sign-in cannot work until this has been done once.
+   */
+  private async claimCluster(): Promise<void> {
+    const url = this.state.claimUrl;
+    if (url === "") return;
+    try {
+      await openClaimLink(url, {
+        resolveExternalUri: async (target) => (await vscode.env.asExternalUri(vscode.Uri.parse(target))).toString(),
+        openExternal: async (target) => await vscode.env.openExternal(vscode.Uri.parse(target)),
+      });
+    } catch (err) {
+      const detail = err instanceof ClaimError ? err.message : String(err);
+      void vscode.window.showErrorMessage(
+        `${detail} The install recovered the link from the identity service's log; you can recover it again there if this screen is gone.`,
+      );
+    }
+  }
+
   /** Reaches the existing sign-in flow. No new credential path (#3401). */
   private async signInAsOwner(): Promise<void> {
     const handoff = this.state.handoff;
@@ -2046,12 +2098,20 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       //
       // The button carries NO href and no token -- the URL is a credential and
       // stays on the host side, read by `enrolPasskey` when this is clicked.
+      // WHICH ACTION LEADS is `primaryHandoffAction`'s decision, not this
+      // template's (memql#3884). It is the thing that was wrong, and a decision
+      // written into an HTML string is one no test can reach -- this file
+      // imports `vscode`, so nothing under `node --test` can render it.
+      const primary = this.state.primaryHandoffAction;
+      const cls = (name: string) => (primary === name ? "primary" : "secondary");
       const enrol = this.state.hasEnrolmentLink
-        ? `<button class="primary" type="button" data-act="enrolPasskey">Set up a passkey</button>`
+        ? `<button class="${cls("enrol")}" type="button" data-act="enrolPasskey">Set up a passkey</button>`
         : "";
-      const signInClass = enrol === "" ? "primary" : "secondary";
+      const claim = this.state.hasClaimLink
+        ? `<button class="${cls("claim")}" type="button" data-act="claimCluster">Claim this cluster</button>`
+        : "";
       const signIn = handoff.canSignIn
-        ? `<button class="${signInClass}" type="button" data-act="signInAsOwner">Sign in as owner</button>`
+        ? `<button class="${cls("signIn")}" type="button" data-act="signInAsOwner">Sign in as owner</button>`
         : "";
       // Said only when there is a passkey to explain. The link expires and is
       // single-use, and an operator who closes this screen without knowing that
@@ -2061,13 +2121,25 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
             "Setting up a passkey opens your browser once. The link is single-use and expires shortly, so do it now -- otherwise sign in with a magic link.",
           )}</p>`
         : "";
+      // The claim note says what the click DOES, because "claim" is the one
+      // word here an operator has no prior model for: it explains that this
+      // cluster has no owner account yet and that signing in is what creates
+      // one, so closing this screen is a decision rather than an oversight.
+      const claimNote =
+        primary !== "claim"
+          ? ""
+          : `<p>${escapeHtml(
+              "Nobody owns this cluster yet -- signing in once is what creates your account. This opens your browser with a single-use link that expires shortly, so do it now. Afterwards you can add a passkey from the identity service's devices page.",
+            )}</p>`;
       return `<h1>Your cluster is ready</h1>
 <p class="lede">${escapeHtml(
         `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
       )}</p>
 ${enrolNote}
+${claimNote}
 <div class="actions">
   ${enrol}
+  ${claim}
   ${signIn}
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;

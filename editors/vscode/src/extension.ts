@@ -106,7 +106,7 @@ import { outcomeReport } from './training/outcomeReport.js';
 import type { TrainingPrompt } from './training/report.js';
 import { sessionLensPlans } from './training/session.js';
 import { defaultReceiptPath } from './install/receipt.js';
-import { defaultRunsDir } from './state/runLog.js';
+import { defaultRunsDir, reconcileOrphanedRuns } from './state/runLog.js';
 import {
   DEPLOYMENT_CONCEPT,
   DEPLOYMENT_NODE_SPEC_CONCEPT,
@@ -508,6 +508,21 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // Same call as the clusters directory above: a home we cannot write is not
     // worth failing activation over, and the tree still reads what is there.
   }
+  // Close out anything a previous host left mid-flight, BEFORE the tree reads
+  // the directory (memql#3886). At this instant this host is driving no runs, so
+  // every non-terminal record on disk is orphaned by definition -- see
+  // reconcileOrphanedRuns for why that is a stronger signal than any liveness
+  // check. Fire-and-forget: a home we cannot write is already tolerated above,
+  // and the tree refresh at the end repaints whatever was closed.
+  void reconcileOrphanedRuns(runsDir, new Date().toISOString())
+    .then((closed) => {
+      if (closed.length > 0) deploymentsTree.refresh();
+    })
+    .catch(() => {
+      // An unreadable or unwritable run log is not worth failing activation
+      // over, for the same reason the mkdir above swallows its error.
+    });
+
   const deploymentsWatchers = [
     workspace.createFileSystemWatcher(
       new RelativePattern(Uri.file(clustersDir), path.basename(clustersPath))

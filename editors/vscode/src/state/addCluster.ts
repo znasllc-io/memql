@@ -377,6 +377,12 @@ export class AddClusterState {
   // state keeps it so the screen survives a re-render without re-reading the
   // execution report.
   private enrolmentLink = "";
+  // The magic link the run RECOVERED, held under exactly the same rules and for
+  // a more dangerous credential -- it authenticates as the cluster OWNER
+  // (memql#3884). On a FRESH install this is the one that exists and the
+  // enrolment link is empty, because a cluster is claimed by its first sign-in
+  // and there is no account to enrol a passkey for until that has happened.
+  private claimLink = "";
 
   get screen(): Screen {
     return this.currentScreen;
@@ -477,6 +483,48 @@ export class AddClusterState {
 
   setEnrolmentUrl(url: string): void {
     this.enrolmentLink = url;
+  }
+
+  /** Whether the run recovered a magic link, so the cluster can be claimed. */
+  get hasClaimLink(): boolean {
+    return this.claimLink !== "";
+  }
+
+  /** The link itself, for the host-side opener only. */
+  get claimUrl(): string {
+    return this.claimLink;
+  }
+
+  setClaimUrl(url: string): void {
+    this.claimLink = url;
+  }
+
+  /**
+   * Which action the done screen leads with.
+   *
+   * A FUNCTION RATHER THAN THREE CONDITIONALS IN AN HTML TEMPLATE, because this
+   * is the decision that was wrong (memql#3884) and a decision inside a
+   * template string is one no test can reach -- the panel imports `vscode`, so
+   * nothing under `node --test` can render it.
+   *
+   * The order is the operator's own dependency order, not a preference:
+   *
+   *  - `enrol` when the cluster already has an owner and the run minted a
+   *    passkey link. Best outcome, and it means somebody has signed in before.
+   *  - `claim` when it did not, and a magic link was recovered. This IS the
+   *    fresh-install case: a cluster is claimed by its first sign-in, so no
+   *    passkey can exist yet and this is the only route in.
+   *  - `signIn` only when neither link is available -- a re-run against a
+   *    cluster whose owner exists and whose log window no longer holds a link.
+   *    Leading with it in the `claim` case is what sent an operator to
+   *    authenticate against an account that had never been created.
+   */
+  get primaryHandoffAction(): "enrol" | "claim" | "signIn" | "none" {
+    const handoff = this.handoffResult;
+    if (handoff === undefined || !handoff.ok) return "none";
+    if (this.hasEnrolmentLink) return "enrol";
+    if (this.hasClaimLink) return "claim";
+    return handoff.canSignIn ? "signIn" : "none";
   }
 
   // ---------------------------------------------------------------------------

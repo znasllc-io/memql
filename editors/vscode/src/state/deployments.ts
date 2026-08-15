@@ -100,12 +100,25 @@ export type RunKind = "install" | "upgrade" | "repair" | "uninstall" | "rollout"
  * `cancelled` is the exact mirror: local-only, because the deployment concept
  * has no such status. An operator can abandon an install; a deployment record
  * that stops advancing stays `in_progress`.
+ *
+ * `interrupted` is local-only for the same reason and is NOT a synonym for
+ * either neighbour (memql#3886). A local run's record is rewritten after every
+ * step, so a run whose extension host exits mid-flight leaves a file that says
+ * `running` and always will -- nothing is left to write to it. Those records
+ * rendered as a live spinner for work that ended hours earlier, which reads as
+ * "still going" and makes an operator wait instead of retry.
+ *
+ * It is not `failed`: nothing failed, and filing it under failure would put a
+ * healthy step's record in the list an operator scans for defects. It is not
+ * `cancelled` either: that means somebody decided to stop, and the whole point
+ * of this state is that nobody decided anything -- the editor went away.
  */
 export type RunStatus =
   | "running"
   | "succeeded"
   | "failed"
   | "cancelled"
+  | "interrupted"
   | "superseded"
   | "rolled_back";
 
@@ -150,6 +163,7 @@ const TERMINAL_RUN_STATUSES = new Set<RunStatus>([
   "succeeded",
   "failed",
   "cancelled",
+  "interrupted",
   "superseded",
   "rolled_back",
 ]);

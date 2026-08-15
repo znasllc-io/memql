@@ -875,3 +875,66 @@ test("a run cannot begin on an answer that is not a hostname", () => {
   );
   assert.equal(s.screen, "collect");
 });
+
+// ---------------------------------------------------------------------------
+// which action the done screen leads with (znasllc-io/memql#3884)
+// ---------------------------------------------------------------------------
+
+/** A successful hand-off, which is the precondition for any of these. */
+function landed(canSignIn = true) {
+  const s = new AddClusterState();
+  s.setHandoff({
+    ok: true,
+    canSignIn,
+    cluster: { name: "memql", endpoint: "api.memql.localhost:443" } as never,
+  });
+  return s;
+}
+
+test("a fresh install leads with CLAIM, not sign-in", () => {
+  // THE REPORTED BUG. A cluster is claimed by its first sign-in, so on a fresh
+  // install `enrolmentLink` correctly mints nothing -- there is no account to
+  // enrol a passkey for yet -- and only the magic link exists. Leading with
+  // "Sign in as owner" sent the operator to authenticate against an account
+  // that had never been created; it timed out and fell back to a device code
+  // that could not complete either.
+  const s = landed();
+  s.setClaimUrl("https://identity.memql.localhost/auth/complete?ml=abc");
+  s.setEnrolmentUrl("");
+  assert.equal(s.primaryHandoffAction, "claim");
+});
+
+test("a passkey link outranks a magic link when both exist", () => {
+  // Means somebody has already signed in, so the account exists and the better
+  // credential is available.
+  const s = landed();
+  s.setClaimUrl("https://identity.memql.localhost/auth/complete?ml=abc");
+  s.setEnrolmentUrl("https://identity.memql.localhost/enroll?code=mql_enr_x");
+  assert.equal(s.primaryHandoffAction, "enrol");
+});
+
+test("sign-in leads only when there is no link of either kind", () => {
+  // A re-run against a claimed cluster whose log window no longer holds a link.
+  // Here sign-in is correct, and it is the ONLY case where it is.
+  const s = landed();
+  assert.equal(s.primaryHandoffAction, "signIn");
+});
+
+test("no hand-off means no action to lead with", () => {
+  assert.equal(new AddClusterState().primaryHandoffAction, "none");
+});
+
+test("a cluster that cannot be signed into and has no link offers nothing", () => {
+  assert.equal(landed(false).primaryHandoffAction, "none");
+});
+
+test("the claim link is held on the host side, never rendered", () => {
+  // Same rule as the enrolment link, for a credential that authenticates as the
+  // cluster OWNER: the state holds it so the screen survives a re-render, and
+  // the button carries no href.
+  const s = landed();
+  assert.equal(s.hasClaimLink, false);
+  s.setClaimUrl("https://identity.memql.localhost/auth/complete?ml=abc");
+  assert.equal(s.hasClaimLink, true);
+  assert.equal(s.claimUrl, "https://identity.memql.localhost/auth/complete?ml=abc");
+});

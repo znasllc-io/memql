@@ -25,6 +25,7 @@
 // Refs: #3739 #3736 #3733
 
 import type { ExecEvent } from "../install/executor.js";
+import { redactResult } from "../install/secrets.js";
 import {
   newLocalRun,
   settleRunStatus,
@@ -142,12 +143,63 @@ export class RunRecorder {
             status: event.outcome.status as RunItemStatus,
             at: event.outcome.finishedAt !== "" ? event.outcome.finishedAt : this.clock(),
           };
+          // WHAT THE STEP ACTUALLY DID, not just whether it failed (memql#3886).
+          //
+          // This used to record a detail ONLY on a failure with a reason, and
+          // `recordRunItem` replaces the item at a label wholesale -- so a
+          // successful step overwrote the parameter detail `stepStarted` had
+          // just written and landed as a bare {at, label, status}. A completed
+          // install's record therefore held no fact about any step beyond its
+          // name, which is why the deployment view had nothing to show.
+          const detail: string[] = [];
+
           // The step's OWN sentence, when it has one. It is about this failure;
           // the exit-code guidance the panel renders can only be about a class
           // of them, and a history that kept only the class would lose the part
-          // that says which machine this was.
+          // that says which machine this was. First, so a failure leads.
           const reason = (event.outcome.reason ?? "").trim();
-          if (reason !== "") item.detail = reason;
+          if (reason !== "") detail.push(reason);
+
+          // The exit code ONLY when there is no sentence, which is the rule the
+          // test beside this one was already asserting: a step's own sentence is
+          // about THIS machine, and the exit code can only be about a class of
+          // failure, so appending it to a sentence dilutes the specific with the
+          // generic. When a step fails mutely, though, the class is all there
+          // is -- and the capability contract makes it real information (2 bad
+          // param, 3 refused, 4 prerequisite missing, 5 op failed). Zero is
+          // never carried: "it worked" is already the status.
+          const exit = event.outcome.exitCode;
+          if (reason === "" && typeof exit === "number" && exit !== 0) {
+            detail.push(`exit ${exit}`);
+          }
+
+          // A skip that dependents can proceed through is a materially
+          // different outcome from one that leaves them blocked, and the
+          // executor already draws that distinction.
+          if (event.outcome.status === "skipped" && event.outcome.satisfied === true) {
+            detail.push("the condition dependents needed already holds");
+          }
+          // NOTHING IS ADDED FOR `preExisting`. A preserved step's reason
+          // already says why it was kept, in the operator's terms ("you created
+          // this k3d cluster"), and a generic "pre-existing, left alone" beside
+          // it restates the same fact worse.
+
+          // The step's own result fields -- what `enrolmentState` and
+          // `linkState` say, which is exactly the information a stuck operator
+          // needs. Credential-bearing fields are withheld by name AND by value
+          // shape; see redactResult, and note that `redactSecrets` alone would
+          // NOT have caught the magic link.
+          const result = event.outcome.envelope?.result;
+          if (result !== undefined && result !== null) {
+            const safe = redactResult(result as Record<string, unknown>);
+            const rendered = Object.keys(safe)
+              .sort()
+              .map((key) => `${key}=${safe[key]}`)
+              .join(" ");
+            if (rendered !== "") detail.push(rendered);
+          }
+
+          if (detail.length > 0) item.detail = detail.join(" · ");
           this.run = await recordRunItem(this.dir, this.run, item);
         });
         return;
