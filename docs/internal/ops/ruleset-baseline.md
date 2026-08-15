@@ -1,3 +1,12 @@
+---
+title: Ruleset baseline — what `main`'s protection should be, and why
+audience: ops
+status: stable
+area: internal
+sinceVersion: 0.18.0
+owner: znas
+---
+
 # Ruleset baseline — what `main`'s protection should be, and why
 
 **Status:** living record. Edit it when a ruleset's intended state changes.
