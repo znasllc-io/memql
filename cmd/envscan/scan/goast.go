@@ -68,21 +68,32 @@ var envKeyShape = regexp.MustCompile(`^[A-Z][A-Z0-9_]+$`)
 // regexes found rather than a different set.
 var envHelperShape = regexp.MustCompile(`^env[A-Z][A-Za-z0-9]*$`)
 
-// --- core/env.EnvReader: DETECTED, deliberately not resolved -----------------
+// --- core/env.EnvReader: DETECTED, and RESOLVED when the prefix is knowable ---
 //
 // A reader read names a SUFFIX -- reader.String("HOST") -- and the full key is
-// that suffix under the prefix the reader's constructor was given. Resolving it
-// means following a reader VALUE from its construction site to each call, across
-// parameters, struct fields and package boundaries, which is the
-// interprocedural analysis this scanner deliberately does not do.
+// that suffix under the prefix the reader's constructor was given.
 //
-// So these sites are COUNTED, not resolved, and that is the whole change: before
-// it they were the worst of the three read classes -- not a read, and not a
-// residual either, so the summary line omitted them and the limitation lived
-// only in a package comment. A checker that reports only what it found makes a
-// pass indistinguishable from a blind spot, which is the whole of memql#3818;
-// shipping this fix with a countable class uncounted would have been the fix
-// reproducing the defect it closes.
+// INTRAPROCEDURAL resolution (memql#3834). When the constructor is bound in the
+// SAME declaration and its argument folds, the prefix is not far away at all --
+// it is three lines up. collectReaderPrefixes joins the two halves, reproducing
+// NewEnvReader's own normalization rule so the composed key is byte-identical to
+// what the process looks up. That covers 17 of this tree's 32 constructor sites,
+// 8 of which pass "" -- where the "suffix" simply IS the whole key, and where
+// eleven live operator knobs sat invisible.
+//
+// What is still NOT resolved: a prefix from a parameter or a struct field, which
+// needs the reader value followed across call boundaries -- the interprocedural
+// analysis this scanner deliberately does not do. Those sites stay COUNTED, and
+// that counting is what memql#3818 added: before it they were the worst of the
+// three read classes -- not a read, and not a residual either, so the summary
+// line omitted them and the limitation lived only in a package comment. A
+// checker that reports only what it found makes a pass indistinguishable from a
+// blind spot.
+//
+// Ambiguity is recorded as ABSENCE, never as a guess: a reader rebound to a
+// second prefix in one declaration resolves to neither and its reads land in the
+// residual. Recording a bare suffix would be worse than the gap -- it registers
+// a name nothing sets.
 //
 // Detection is anchored on the CONSTRUCTOR and the TYPE, never on the receiver's
 // name. Two values in this tree are named `reader`, are reached as `X.reader.M(…)`,
@@ -239,6 +250,25 @@ type goIndex struct {
 	// *geoip2.Reader field that happens to share the name) out of the
 	// count.
 	readerFields map[string]map[string]bool
+
+	// keyHelpers maps a package directory to the functions in it that take
+	// an env KEY as a parameter and read it -- `f(name string)` whose body
+	// calls os.Getenv(name). The value is the 0-based index of that
+	// parameter, because the key is not always the first argument.
+	//
+	// Why this is a read site (memql#3834). The call
+	// `identity.InsecureTransportEscapeEnabled(envAllowInsecureEnroll)`
+	// passes a RESOLVABLE CONSTANT, so the key is statically knowable -- it
+	// is simply one hop further than os.Getenv(envX). Without this pass the
+	// hop is where resolution stopped, and the two variables it hid were
+	// MEMQL_IDENTITY_ALLOW_INSECURE_ENROLL and ..._PAIR: switches that admit
+	// a PLAINTEXT request to /enroll and /pair, unregistered and therefore
+	// absent from the list an operator reads to discover what switches exist.
+	//
+	// It is DISCOVERED, not a name list. A hardcoded set of helper names
+	// would go stale the first time somebody wrote another one, and would do
+	// so silently -- which is this scanner's entire defect class.
+	keyHelpers map[string]map[string]int
 }
 
 // goFile is one parsed source file.
@@ -322,6 +352,7 @@ func indexGo(root string) (*goIndex, error) {
 
 	idx.collectPackageConsts()
 	idx.collectReaderFields()
+	idx.collectEnvKeyHelpers()
 	return idx, nil
 }
 
@@ -565,6 +596,117 @@ func (idx *goIndex) qualifiers(f goFile) map[string]string {
 	return quals
 }
 
+// collectEnvKeyHelpers finds every function whose body passes one of its OWN
+// string parameters to os.Getenv / os.LookupEnv, and records the index of that
+// parameter (memql#3834).
+//
+// The shape it is looking for, which is the live one in this tree:
+//
+//	func InsecureTransportEscapeEnabled(envVar string) bool {
+//	    return strings.TrimSpace(os.Getenv(envVar)) == "1"
+//	}
+//
+// STRICTNESS MATTERS MORE THAN REACH HERE. The argument at a call site to one
+// of these is treated as an env key, so a false positive does not produce "no
+// answer" -- it produces a confidently WRONG one, registering a variable
+// nothing reads. So the match requires all of: the parameter is declared
+// `string`, the identifier reaching os.Getenv is that exact parameter name, and
+// the name is not shadowed by a local of the same name between the two. The
+// last is what stops `func f(name string) { name := compute(); os.Getenv(name) }`
+// from being claimed.
+func (idx *goIndex) collectEnvKeyHelpers() {
+	idx.keyHelpers = map[string]map[string]int{}
+
+	for _, f := range idx.files {
+		for _, decl := range f.ast.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || fn.Type.Params == nil {
+				continue
+			}
+			// Methods are excluded: a method's key parameter would need the
+			// receiver resolved at the call site to attribute it, which is the
+			// EnvReader problem again rather than the one-hop case this covers.
+			if fn.Recv != nil {
+				continue
+			}
+
+			// index every `string` parameter by name
+			params := map[string]int{}
+			pos := 0
+			for _, field := range fn.Type.Params.List {
+				isString := false
+				if id, ok := field.Type.(*ast.Ident); ok && id.Name == "string" {
+					isString = true
+				}
+				for _, name := range field.Names {
+					if isString && name.Name != "_" {
+						params[name.Name] = pos
+					}
+					pos++
+				}
+				if len(field.Names) == 0 {
+					pos++
+				}
+			}
+			if len(params) == 0 {
+				continue
+			}
+
+			// A local declaration of the same name means the identifier
+			// reaching os.Getenv may not be the parameter.
+			shadowed := map[string]bool{}
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				switch d := n.(type) {
+				case *ast.AssignStmt:
+					if d.Tok != token.DEFINE {
+						return true
+					}
+					for _, lhs := range d.Lhs {
+						if id, ok := lhs.(*ast.Ident); ok {
+							shadowed[id.Name] = true
+						}
+					}
+				case *ast.ValueSpec:
+					for _, name := range d.Names {
+						shadowed[name.Name] = true
+					}
+				}
+				return true
+			})
+
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				call, ok := n.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				if x, ok := sel.X.(*ast.Ident); !ok || x.Name != "os" {
+					return true
+				}
+				if sel.Sel.Name != "Getenv" && sel.Sel.Name != "LookupEnv" {
+					return true
+				}
+				id, ok := call.Args[0].(*ast.Ident)
+				if !ok {
+					return true
+				}
+				argIndex, isParam := params[id.Name]
+				if !isParam || shadowed[id.Name] {
+					return true
+				}
+				if idx.keyHelpers[f.dir] == nil {
+					idx.keyHelpers[f.dir] = map[string]int{}
+				}
+				idx.keyHelpers[f.dir][fn.Name.Name] = argIndex
+				return true
+			})
+		}
+	}
+}
+
 // collectReaderFields records every struct field declared with type
 // EnvReader, per package. Anchored on the TYPE, so a same-named field of a
 // different reader type is not collected.
@@ -672,6 +814,116 @@ func collectReaderIdents(decl ast.Decl) map[string]bool {
 	return idents
 }
 
+// normalizeReaderPrefix mirrors core/env.NewEnvReader's own normalization:
+// trim, then append "_" unless the prefix is empty or already ends in one. The
+// composed key has to be byte-identical to what the process will look up, so
+// this deliberately re-implements the constructor's rule rather than
+// approximating it -- a prefix joined with the wrong separator produces a
+// confidently wrong key, which is worse than an unresolved site.
+func normalizeReaderPrefix(prefix string) string {
+	normalized := strings.TrimSpace(prefix)
+	if normalized != "" && !strings.HasSuffix(normalized, "_") {
+		normalized += "_"
+	}
+	return normalized
+}
+
+// collectReaderPrefixes maps each reader identifier in one declaration to the
+// PREFIX its constructor was given, when that argument folds to a string
+// (memql#3834).
+//
+// This is what turns a suffix read into a key. `env.NewEnvReader("MEMQL_EDGE")`
+// followed by `reader.String("API_TARGET")` is the full key MEMQL_EDGE_API_TARGET,
+// written in two places and statically joinable. Of the 32 constructor sites in
+// this tree, 17 pass a literal -- 8 of them the empty string, where the "suffix"
+// simply IS the whole key.
+//
+// A reader whose prefix comes from a PARAMETER or a struct field is not
+// resolved: that needs the value traced across call boundaries, which is a
+// different and much larger job. Those sites stay in the residual with their
+// existing reason, so the count still speaks for them.
+//
+// ASSIGNED EXACTLY ONCE, or not resolved at all. A reader rebound to a second
+// prefix in the same declaration would make every read after the rebind
+// ambiguous, and picking either binding would be a guess. Ambiguity is recorded
+// as absence here, which lands the site in the residual -- the honest answer.
+func (r *resolver) collectReaderPrefixes(decl ast.Decl) map[string]string {
+	prefixes := map[string]string{}
+	ambiguous := map[string]bool{}
+
+	bind := func(name string, value ast.Expr) {
+		call, ok := value.(*ast.CallExpr)
+		if !ok || !isNewEnvReaderCall(value) || len(call.Args) == 0 {
+			return
+		}
+		folded, why := r.fold(call.Args[0], 0)
+		if why != "" {
+			// A constructor whose prefix does not fold makes this reader
+			// unresolvable; record it so a later foldable rebind cannot
+			// silently claim the earlier reads.
+			ambiguous[name] = true
+			return
+		}
+		if _, seen := prefixes[name]; seen {
+			ambiguous[name] = true
+			return
+		}
+		prefixes[name] = normalizeReaderPrefix(folded)
+	}
+
+	ast.Inspect(decl, func(n ast.Node) bool {
+		switch d := n.(type) {
+		case *ast.AssignStmt:
+			for i, lhs := range d.Lhs {
+				id, ok := lhs.(*ast.Ident)
+				if !ok || i >= len(d.Rhs) {
+					continue
+				}
+				bind(id.Name, d.Rhs[i])
+			}
+		case *ast.ValueSpec:
+			for i, name := range d.Names {
+				if i < len(d.Values) {
+					bind(name.Name, d.Values[i])
+				}
+			}
+		}
+		return true
+	})
+
+	for name := range ambiguous {
+		delete(prefixes, name)
+	}
+	delete(prefixes, "_")
+	return prefixes
+}
+
+// readerPrefixForCall returns the constructor prefix behind one reader read,
+// and whether it is known. It handles the chained form
+// `env.NewEnvReader("X").String("Y")` directly, since the constructor is right
+// there in the expression.
+func (r *resolver) readerPrefixForCall(call *ast.CallExpr, prefixes map[string]string) (string, bool) {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	switch recv := sel.X.(type) {
+	case *ast.Ident:
+		prefix, ok := prefixes[recv.Name]
+		return prefix, ok
+	case *ast.CallExpr:
+		if !isNewEnvReaderCall(recv) || len(recv.Args) == 0 {
+			return "", false
+		}
+		folded, why := r.fold(recv.Args[0], 0)
+		if why != "" {
+			return "", false
+		}
+		return normalizeReaderPrefix(folded), true
+	}
+	return "", false
+}
+
 // isNewEnvReaderCall reports whether expr is a call to NewEnvReader, qualified
 // (env.NewEnvReader) or bare (inside core/env).
 func isNewEnvReaderCall(expr ast.Expr) bool {
@@ -752,19 +1004,31 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 			locals: idx.collectLocals(f, quals, decl),
 		}
 		readerIdents := collectReaderIdents(decl)
+		readerPrefixes := r.collectReaderPrefixes(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
 
-			// An EnvReader read is DETECTED and never resolved: the site
-			// names a suffix and the prefix lives at the construction site.
-			// It is a residual by definition, so it short-circuits the fold
-			// -- folding the suffix would produce a "read" of a key nothing
-			// sets.
+			// An EnvReader read names a SUFFIX; the prefix lives at the
+			// construction site. When that construction is in this same
+			// declaration and its argument folds, the two halves join into the
+			// key the process will actually look up (memql#3834). When it does
+			// not -- a prefix from a parameter or a struct field -- the site is
+			// a residual, because folding the suffix alone would produce a
+			// "read" of a key nothing sets.
 			if callee, ok := readerCallee(call, f, readerIdents, readerFields); ok && len(call.Args) > 0 {
 				arg := call.Args[0]
+				if prefix, known := r.readerPrefixForCall(call, readerPrefixes); known {
+					if suffix, why := r.fold(arg, 0); why == "" {
+						full := prefix + strings.TrimSpace(suffix)
+						if envKeyShape.MatchString(full) && !isExternal(full) {
+							reads = append(reads, Read{Key: full, File: f.rel})
+						}
+						return true
+					}
+				}
 				unresolvable = append(unresolvable, Unresolvable{
 					Kind:     KindReaderPrefix,
 					Call:     callee,
@@ -777,11 +1041,11 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 				return true
 			}
 
-			callee, ok := readCallee(call)
-			if !ok || len(call.Args) == 0 {
+			callee, argPos, ok := idx.readCalleeWithHelpers(call, r, f)
+			if !ok || len(call.Args) <= argPos {
 				return true
 			}
-			arg := call.Args[0]
+			arg := call.Args[argPos]
 			value, why := r.fold(arg, 0)
 			if why != "" {
 				unresolvable = append(unresolvable, Unresolvable{
@@ -878,6 +1142,48 @@ func (idx *goIndex) collectLocals(f goFile, quals map[string]string, decl ast.De
 // direction here -- an extra registry entry costs a row, a missed read
 // costs the gate -- and a residual whose Arg is visible lets a reader
 // dismiss it.
+// readCalleeWithHelpers is readCallee plus the DISCOVERED name-taking helpers
+// (memql#3834): a call to a function whose body reads os.Getenv(param) is a
+// read of whatever that argument resolves to.
+//
+// It returns the argument INDEX as well as the callee, because a helper's key
+// parameter is not always first. readCallee's own forms always take the key at
+// index 0, so they return 0 and nothing about them changes.
+//
+// The shape-matched helper family (readCallee's envHelperShape) is checked
+// FIRST and wins. Those are the component/config env* helpers, already correct;
+// letting a discovered entry override one would change a working attribution on
+// the strength of a heuristic.
+func (idx *goIndex) readCalleeWithHelpers(call *ast.CallExpr, r *resolver, f goFile) (string, int, bool) {
+	if callee, ok := readCallee(call); ok {
+		return callee, 0, true
+	}
+
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		// Same-package call: the helper is declared in this file's own
+		// directory.
+		if argIndex, ok := idx.keyHelpers[f.dir][fun.Name]; ok {
+			return fun.Name, argIndex, true
+		}
+	case *ast.SelectorExpr:
+		x, ok := fun.X.(*ast.Ident)
+		if !ok {
+			return "", 0, false
+		}
+		// Resolve the qualifier through the file's imports, so a same-named
+		// function in an unrelated package cannot be mistaken for the helper.
+		dir, ok := r.packageDir(x.Name)
+		if !ok {
+			return "", 0, false
+		}
+		if argIndex, ok := idx.keyHelpers[dir][fun.Sel.Name]; ok {
+			return x.Name + "." + fun.Sel.Name, argIndex, true
+		}
+	}
+	return "", 0, false
+}
+
 func readCallee(call *ast.CallExpr) (string, bool) {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
