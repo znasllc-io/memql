@@ -1,6 +1,6 @@
 // Concept-browser tests. The query string is the contract: it MUST declare
 // sort + paginate, or the engine applies its implicit unmarked-list backstop
-// (MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows) and silently truncates with no
+// (MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows) and silently truncates with no
 // continuation cursor (memql#2008). These tests pin the emitted string.
 
 import test from "node:test";

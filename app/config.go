@@ -103,7 +103,7 @@ func (a *App) configAndAuth() {
 		// asserts the OpenAPI contract plus everything app code mounts via
 		// a.handleRoute is in PublicPaths() or HandlerAuthorizedPaths(), and
 		// refuses to boot otherwise (#2939). Seven paths on identity with no base
-		// path configured; nine when SERVER_PUBLIC_PATH adds prefixed spellings.
+		// path configured; nine when MEMQL_SERVER_PUBLIC_PATH adds prefixed spellings.
 		//
 		// That is NOT every route this binary serves, and the difference is
 		// exactly what the next reader needs: routes handed to the mux through

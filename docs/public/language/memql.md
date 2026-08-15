@@ -449,7 +449,7 @@ Configuration variables (prefixed with `MEMQL_WS_`) let you tune the gateway:
 | Fields               | `concept`, `id`, `type`, `createdAt`, `createdBy`, or a bare payload property (`status`, `profile.name`).                                         |
 | Operators            | `==`, `!=`, `>`, `>=`, `<`, `<=`, `==nil`, `!=nil` (plus `in` in DSL filter clauses — see Operator Reference).  |
 | Parentheses          | Group complex logic: `(concept==v1:assistant \|\| concept==v1:examples:persona) && active==true`.       |
-| Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
+| Limit                | Use `paginate(<expr>, limit)` to request an explicit page size; omitting both `paginate` and `sort` caps the read at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP` (default 50, the unmarked-list backstop). Continuation is via keyset cursors, not an offset skip. |
 
 > **Retired operator forms.** The legacy `;`-as-AND and `,`-as-OR separators, the `has` membership operator, and the `?.` optional-chain prefix are retired **from authoring** (#977). Use `&&` / `||`, `in`, and `when(args.x) { ... }` respectively. What enforces that is a **text scan**, NOT the parser: all four still parse and load, and `;` / `,` still compute as AND / OR (memql#3630) -- which is why a `,` inside parentheses was an authorization bypass, closed in the scanner as memql#3612. Since memql#3629 that scan runs at **load time** (`component/memql/dslgate`, recorded on the `LoadReport`, refused by strict boot with `MEMQL_DSL_ALLOW_SKIPS` as the break-glass), so it covers a product DSL bundle mounted at `MEMQL_DSL_PATH` as well as the embedded tree; `TestNoRetiredOperatorForms` runs the same detector over this repo's corpus.
 >
@@ -620,7 +620,7 @@ Use `sort(<expr>, "<field>", "<direction>?", ...)` to order results. The functio
 - Must wrap the entire query expression (i.e., `sort(...)` should be the outermost call).
 - Supported fields: the row intrinsics `id`, `concept`, `createdAt`, `createdBy`, `type` -- each also addressable through the `row.` namespace (`"row.createdAt"`) -- and bare payload properties (`status`, `metadata.tags`).
 - In an authored `.memql` sort clause the namespaced spelling is required for intrinsics and enforced by CI (memql#2786), because a bare key cannot be told apart from a payload property of the same name. This runtime form still accepts either spelling, so existing SDK and API callers are unaffected.
-- Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
+- Limits and offsets always apply **after** sorting. Sorting on payload properties may cause the engine to fetch up to `MEMQL_MEMORY_ENGINE_MAX_WINDOW` rows to guarantee correctness.
 
 Example:
 
@@ -647,10 +647,10 @@ sort(
 
 **Default-cap backstop (memql#1965).** A query that arrives with NO
 explicit window — neither `paginate` nor `sort` — is treated as an
-unmarked list read and capped at `MEMORY_ENGINE_DEFAULT_LIST_CAP`
-(default **50**), not `MEMORY_ENGINE_MAX_RESULTS`. This bounds the blast
+unmarked list read and capped at `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP`
+(default **50**), not `MEMQL_MEMORY_ENGINE_MAX_RESULTS`. This bounds the blast
 radius of an accidental full-table read. A query that paginates or sorts
-states its own window (capped at `MEMORY_ENGINE_MAX_WINDOW`); a query
+states its own window (capped at `MEMQL_MEMORY_ENGINE_MAX_WINDOW`); a query
 marked `@unbounded("reason")` is rewritten to an explicit wide paginate
 and bypasses the 50-cap. See the [pagination authoring rule](authoring-rules.md#23-list-returning-queries-must-declare-their-bound).
 
@@ -1676,7 +1676,7 @@ Query-result caching is **opt-in per query**: a query with no cache hint is not 
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| `CACHE_MAX_TTL` | Maximum cache TTL in seconds | `300` |
+| `MEMQL_CACHE_MAX_TTL` | Maximum cache TTL in seconds. Legacy name `CACHE_MAX_TTL` still accepted (memql#3831). | `300` |
 | `MEMQL_SI_CACHE_DEFAULT_ENABLED` | Enable AI response caching | `false` |
 | `MEMQL_SI_CACHE_MAX_SECONDS` | Maximum AI cache TTL | `300` |
 

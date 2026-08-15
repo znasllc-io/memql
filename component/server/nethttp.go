@@ -607,7 +607,7 @@ func (s *NetHTTP) logError(msg string, err error, args ...any) {
 
 const (
 	defaultPublicPath   = "/"
-	serverPublicPathEnv = "SERVER_PUBLIC_PATH"
+	serverPublicPathEnv = "MEMQL_SERVER_PUBLIC_PATH"
 )
 
 func sanitizeBaseURLFromEnv() string {
@@ -651,7 +651,7 @@ func HealthzPaths() []string {
 }
 
 // ReadyzPaths returns the public path(s) for the schema-assertion readiness
-// probe (#657), honoring SERVER_PUBLIC_PATH the same way HealthzPaths does.
+// probe (#657), honoring MEMQL_SERVER_PUBLIC_PATH the same way HealthzPaths does.
 func ReadyzPaths() []string {
 	base := sanitizeBaseURLFromEnv()
 	paths := []string{"/readyz"}
@@ -667,7 +667,7 @@ func ReadyzPaths() []string {
 }
 
 // LivezPaths returns the public path(s) for the pure process-liveness probe
-// (#1117), honoring SERVER_PUBLIC_PATH the same way HealthzPaths does. The
+// (#1117), honoring MEMQL_SERVER_PUBLIC_PATH the same way HealthzPaths does. The
 // k8s livenessProbe targets /livez so a transient dependency/mesh blip never
 // liveness-kills an otherwise-alive pod (readiness stays on /healthz).
 func LivezPaths() []string {
@@ -753,7 +753,7 @@ func IdentityDiscoveryPaths() []string {
 }
 
 // withBasePath returns each path as written, plus its base-prefixed spelling
-// when SERVER_PUBLIC_PATH is configured and that spelling differs.
+// when MEMQL_SERVER_PUBLIC_PATH is configured and that spelling differs.
 func withBasePath(paths ...string) []string {
 	base := sanitizeBaseURLFromEnv()
 	out := make([]string, 0, len(paths)*2)
@@ -852,7 +852,7 @@ func AudioWebsocketPaths() []string {
 	return paths
 }
 
-// pathsWithBase is a helper that returns paths with optional SERVER_PUBLIC_PATH prefix.
+// pathsWithBase is a helper that returns paths with optional MEMQL_SERVER_PUBLIC_PATH prefix.
 func pathsWithBase(path string) []string {
 	base := sanitizeBaseURLFromEnv()
 	paths := []string{path}
@@ -918,7 +918,7 @@ func SpaceAttachmentPaths() []string {
 //
 // Unlike every other function in this file, this is NOT composed with
 // pathsWithBase: the edge resolves a request by HOSTNAME, not by a shared
-// SERVER_PUBLIC_PATH prefix -- every hosted site owns the WHOLE path space
+// MEMQL_SERVER_PUBLIC_PATH prefix -- every hosted site owns the WHOLE path space
 // under its own hostname, so app/transport_edge.go registers the literal
 // pattern "/" (a.handleRoute("/", handler)) regardless of any configured
 // base path, and the declaration below has to name that exact pattern to be

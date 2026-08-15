@@ -72,7 +72,7 @@ func TestEffectiveWindow_ExplicitLimitWins(t *testing.T) {
 // MaxResults is clamped down -- the backstop is a tighter default, never
 // a wider one.
 func TestDefaultListCapClampedToMaxResults(t *testing.T) {
-	t.Setenv("MEMORY_ENGINE_DEFAULT_LIST_CAP", "100000")
+	t.Setenv("MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP", "100000")
 	cfg := loadEngineConfigFromEnv()
 	if cfg.DefaultListCap != cfg.MaxResults {
 		t.Fatalf("DefaultListCap = %d, want clamped to MaxResults=%d", cfg.DefaultListCap, cfg.MaxResults)
@@ -82,7 +82,7 @@ func TestDefaultListCapClampedToMaxResults(t *testing.T) {
 // TestDefaultListCapHonoursOverride: a valid override below MaxResults
 // is honoured.
 func TestDefaultListCapHonoursOverride(t *testing.T) {
-	t.Setenv("MEMORY_ENGINE_DEFAULT_LIST_CAP", "25")
+	t.Setenv("MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP", "25")
 	cfg := loadEngineConfigFromEnv()
 	if cfg.DefaultListCap != 25 {
 		t.Fatalf("DefaultListCap = %d, want 25 (honoured override)", cfg.DefaultListCap)
@@ -92,7 +92,7 @@ func TestDefaultListCapHonoursOverride(t *testing.T) {
 // TestDefaultListCapDefaultsTo50: with no override the backstop defaults
 // to 50.
 func TestDefaultListCapDefaultsTo50(t *testing.T) {
-	t.Setenv("MEMORY_ENGINE_DEFAULT_LIST_CAP", "")
+	t.Setenv("MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP", "")
 	cfg := loadEngineConfigFromEnv()
 	if cfg.DefaultListCap != defaultListCap {
 		t.Fatalf("DefaultListCap = %d, want %d", cfg.DefaultListCap, defaultListCap)

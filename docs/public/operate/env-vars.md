@@ -101,7 +101,7 @@ Where `COMPONENT` is the subsystem that consumes the value:
 | `IDENTITY_`     | In-house identity service (auth subsystem) -- both the service itself and the per-node verifier.   | `MEMQL_IDENTITY_BASE_URL`, `MEMQL_IDENTITY_VERIFIER_BASE_URL`, `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`.|
 | `ANAM_` / `SIMLI_` | Avatar vendors (lip-synced video). Used by the voice-agent avatar and the direct/Guide avatar (`integrations/avatardirect` + `integrations/avatarvendor`). | `MEMQL_ANAM_API_KEY`, `MEMQL_SIMLI_API_KEY`. |
 | `POLYPHON_`     | Polyphon voice helpers (room provider + /memql/audio path).                                | `MEMQL_POLYPHON_VOICE_PROVIDER`, `MEMQL_POLYPHON_LIVEKIT_URL`.                               |
-| `SERVER_`       | HTTP transport (listen address, public path, CORS).                                        | `SERVER_ADDRESS`, `SERVER_PUBLIC_PATH`.                                          |
+| `SERVER_`       | HTTP transport (listen address, public path, CORS).                                        | `SERVER_ADDRESS`, `MEMQL_SERVER_PUBLIC_PATH`.                                          |
 | `SERVICE_`      | Service-level metadata (logging, name).                                                    | `SERVICE_NAME`, `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`.                        |
 
 Frontend (`VITE_*` prefix is added by Vite to mark "safe to ship to
@@ -298,7 +298,7 @@ them.
 |---------------------------|---------------|------------------------------------------------------------------------------------|
 | `MEMQL_GRPC_ADDRESS`      | `:50051`      | MemqlService gRPC listen address.                                                  |
 | `SERVER_ADDRESS`          | per-node      | HTTP listen address. Per-binary defaults: bff `0.0.0.0:8088`, cognition `8086`, planner `8087`, agent `8089`. |
-| `SERVER_PUBLIC_PATH`      | `/`           | Base path prefix for HTTP handlers.                                                |
+| `MEMQL_SERVER_PUBLIC_PATH` | `/`           | Base path prefix for HTTP handlers. Legacy name `SERVER_PUBLIC_PATH` still accepted (memql#3831). |
 | `SERVER_ALLOWED_ORIGINS`  | `*` in dev    | CORS allowed origins (comma- or space-separated).                                  |
 
 #### Logging

@@ -101,9 +101,16 @@ func TestOwnedVarsArePrefixed(t *testing.T) {
 // something. Shrinking this number is legitimate only when the target variable
 // is going away too -- a bare decrement with the target still live would be
 // dropping a migration path operators depend on.
+//
+// 89 -> 95 in memql#3831, which renamed the six PRE-CONVENTION vars that never
+// carried a MEMQL_ prefix at all (CACHE_MAX_TTL, the four MEMORY_ENGINE_*, and
+// SERVER_PUBLIC_PATH). Growing the number is the safe direction -- each new
+// entry ADDS a migration path rather than removing one -- but it still belongs
+// in this guard, because the entries are what make an operator's existing
+// configuration keep working and a silent deletion would be invisible.
 func TestLegacyAliasesCount(t *testing.T) {
-	if len(LegacyAliases) != 89 {
-		t.Fatalf("LegacyAliases has %d entries, want 89 (the Epic 7.3 rename map, minus the memql#3453 removal)", len(LegacyAliases))
+	if len(LegacyAliases) != 95 {
+		t.Fatalf("LegacyAliases has %d entries, want 95 (the Epic 7.3 rename map, minus the memql#3453 removal, plus the six pre-convention renames in memql#3831)", len(LegacyAliases))
 	}
 	seenLegacy := map[string]bool{}
 	for newName, legacy := range LegacyAliases {

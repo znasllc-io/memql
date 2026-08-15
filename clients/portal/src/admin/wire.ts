@@ -107,7 +107,7 @@ async function run(
 // list backstop (defaultListLimit, component/memql/engine.go) only applies its
 // DefaultListCap of 50 to a query that declares NEITHER. A sorted query states
 // its own order, so it falls through to MaxResults -- 500 by default,
-// MEMORY_ENGINE_MAX_RESULTS. `recentAuditEvents` gets 50 because it says
+// MEMQL_MEMORY_ENGINE_MAX_RESULTS. `recentAuditEvents` gets 50 because it says
 // `paginate 50` outright.
 //
 // The retired templ list walked every page, so a cluster with more than 500

@@ -110,32 +110,39 @@ var externalPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}
 // them there would be false, and would also exempt them from the reverse
 // direction.
 //
-// Why they cannot simply be registered, which is what they need:
-// component/genesis's TestOwnedVarsArePrefixed (Epic 7.3 / memql#2106) fails on
-// any non-MEMQL_-prefixed registry entry that is not a legacy alias or an
-// external var. None of these six is an alias -- no shim copies them onto a
-// MEMQL_ name, and inventing one would make ApplyLegacyEnvAliases write to a
-// target that does not exist. So registering them reds that gate while omitting
-// them reds this one, and the resolution is a rename (new MEMQL_ names, these
-// six recorded as legacy aliases, the reading code updated) which is an
-// operator-visible change in component/ and its own task.
+// EMPTY, AND THAT IS THE RESOLUTION -- not a list that happens to have nothing
+// in it (memql#3831).
 //
-// Note what this list means about that gate: TestOwnedVarsArePrefixed passed
-// for as long as it did because the registry could not SEE these variables --
-// the same shape as the defect memql#3818 fixes, one layer down. Its premise
-// ("every owned var is prefixed or aliased") was never true; it was unfalsified.
+// It held six names: MEMORY_ENGINE_MAX_RESULTS / _MAX_WINDOW /
+// _DEFAULT_LIST_CAP / _CACHE_MAX_ITEMS, CACHE_MAX_TTL and SERVER_PUBLIC_PATH.
+// They could not be registered, because component/genesis's
+// TestOwnedVarsArePrefixed (Epic 7.3 / memql#2106) fails on any
+// non-MEMQL_-prefixed entry that is not a legacy alias, and none of the six was
+// one. So registering them reddened that gate and omitting them reddened this
+// one: there was no state of the registry in which both held.
 //
-// Do not add a name here to silence a drift failure. A newly-written env var
-// must be MEMQL_-prefixed and registered; this list is closed to the six that
-// predate the convention.
-var ownedPreConvention = map[string]bool{
-	"MEMORY_ENGINE_MAX_RESULTS":      true, // component/memql/config.go
-	"MEMORY_ENGINE_MAX_WINDOW":       true,
-	"MEMORY_ENGINE_DEFAULT_LIST_CAP": true,
-	"MEMORY_ENGINE_CACHE_MAX_ITEMS":  true,
-	"CACHE_MAX_TTL":                  true,
-	"SERVER_PUBLIC_PATH":             true, // component/server/nethttp.go
-}
+// The exit was never a better exemption. It was a RENAME -- MEMQL_ names, the
+// old names recorded in genesis.LegacyAliases so an operator's existing
+// configuration keeps working through the boot-time shim, and the reading code
+// updated. All six are registered now, so the contradiction is dissolved rather
+// than tolerated on one side of it.
+//
+// What the list meant about that gate is worth keeping: TestOwnedVarsArePrefixed
+// passed for as long as it did because the registry could not SEE these
+// variables -- the same shape as the defect memql#3818 fixed, one layer down.
+// Its premise ("every owned var is prefixed or aliased") was never true; it was
+// unfalsified. It is true now, and falsifiable.
+//
+// The MECHANISM stays, and stays reported: every run still prints
+// `0 unregistered-by-exemption`, which is a claim a reader can act on in a way
+// that removing the counter would not be. If a seventh pre-convention name is
+// ever found, it lands here, becomes visible immediately, and gets renamed.
+//
+// Do NOT add a name here to silence a drift failure. A newly-written env var
+// must be MEMQL_-prefixed and registered; nothing predating the convention
+// remains to be discovered in this tree, which is what
+// TestPreConventionExemptionIsEmpty asserts.
+var ownedPreConvention = map[string]bool{}
 
 func isExternal(key string) bool {
 	if external[key] {
