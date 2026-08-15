@@ -139,6 +139,38 @@ func (r *MemoryRegistry) ReplaceAll(concepts map[string]*Concept) {
 	r.concepts = next
 }
 
+// Remove deletes a concept from the registry by canonical id and reports
+// whether an entry was actually removed. A name the registry does not hold is a
+// no-op returning false.
+//
+// This is the ONLY way a registered concept ever leaves the registry, and it
+// exists for exactly one caller: the authoring demote of a promoted concept with
+// ZERO rows under it (memql#3756). That case has to free the name -- a concept
+// promoted by typo, with nothing written to it, must be cleanly withdrawable or
+// `wodget` is taken forever on that cluster.
+//
+// Deliberately NOT reachable for a concept the engine loaded from the DSL tree:
+// nothing in the loader calls this, and the demote path that does is gated on
+// the promotion marker, so a sealed core concept can never be unregistered. The
+// registry itself does not know the difference -- the gate lives with the
+// authoring lifecycle that owns it, in component/memql.
+//
+// Atomic under the registry's own lock, unlike a read-modify-ReplaceAll by the
+// caller: a concurrent promote merging a different concept cannot be lost
+// between the read and the write.
+func (r *MemoryRegistry) Remove(name string) bool {
+	if name == "" {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.concepts[name]; !ok {
+		return false
+	}
+	delete(r.concepts, name)
+	return true
+}
+
 // Get retrieves a concept by name.
 func Get(name string) (*Concept, error) {
 	return defaultRegistry.Get(name)

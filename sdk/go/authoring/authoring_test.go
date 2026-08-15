@@ -104,6 +104,70 @@ func TestDurableDemoteBundle_MapsResult(t *testing.T) {
 	}
 }
 
+// TestDurableDemoteBundle_MapsConceptOutcomes: the demote reply's per-construct
+// outcomes reach the SDK's own types (memql#3756).
+//
+// A concept with rows under it comes back RETIRED -- still registered, rows still
+// readable, writes refused, name still claimed -- while the verbs bound to it come
+// back REMOVED, and both are OK=true. A consumer that only sees Demoted cannot
+// tell those apart at all, which is the case this pins: without the mapping the
+// SDK silently drops the one field that says whether the name is free again, and
+// the consumer's only remaining option is to reach past the SDK for the wire type.
+func TestDurableDemoteBundle_MapsConceptOutcomes(t *testing.T) {
+	stream := newFakeStream()
+	d := client.NewDispatcher(stream, nil)
+	go d.Run()
+	defer d.Stop()
+
+	c := NewClient(d)
+
+	resCh := make(chan *DemoteResult, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		res, err := c.DurableDemoteBundle(ctx, "concept trainedWidget { }")
+		resCh <- res
+		errCh <- err
+	}()
+
+	sent := <-stream.sendCh
+	stream.recvCh <- &memqlv1.MemqlServerMessage{
+		CorrelateTo: sent.GetMessageId(),
+		Payload: &memqlv1.MemqlServerMessage_DurableDemoteBundleResult{
+			DurableDemoteBundleResult: &memqlv1.DurableDemoteBundleResult{
+				Ok: true,
+				Demoted: []*memqlv1.AuthoringConstruct{
+					{Kind: "concept", Name: "trainedWidget"},
+					{Kind: "mutation", Name: "createTrainedWidget"},
+				},
+				Outcomes: []*memqlv1.DurableDemoteOutcome{
+					{Kind: "concept", Name: "trainedWidget", ConceptId: "v1:trainingns:trainedWidget", Outcome: "retired", RowCount: 412},
+					{Kind: "mutation", Name: "createTrainedWidget", Outcome: "removed"},
+				},
+			},
+		},
+	}
+
+	res := <-resCh
+	if err := <-errCh; err != nil {
+		t.Fatalf("DurableDemoteBundle: %v", err)
+	}
+	if len(res.Outcomes) != 2 {
+		t.Fatalf("outcomes not mapped: %+v", res.Outcomes)
+	}
+	concept := res.Outcomes[0]
+	if concept.Outcome != DemoteOutcomeRetired {
+		t.Errorf("concept outcome = %q, want %q", concept.Outcome, DemoteOutcomeRetired)
+	}
+	if concept.ConceptId != "v1:trainingns:trainedWidget" || concept.RowCount != 412 {
+		t.Errorf("concept outcome lost its id or the row count that chose it: %+v", concept)
+	}
+	if res.Outcomes[1].Outcome != DemoteOutcomeRemoved {
+		t.Errorf("mutation outcome = %q, want %q", res.Outcomes[1].Outcome, DemoteOutcomeRemoved)
+	}
+}
+
 // TestDurableDemoteBundle_SurfacesError: a server-side rejection comes back as
 // OK=false with the Error populated (not a Go error -- that is reserved for
 // wire-level failures).

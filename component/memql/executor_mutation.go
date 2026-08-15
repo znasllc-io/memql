@@ -479,6 +479,21 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	}
 	meta.conceptName = conceptMeta.Name
 
+	// RETIRED CONCEPT: registered, readable, CLOSED TO NEW WRITES (memql#3756).
+	// A promoted concept demoted while rows already existed under it keeps its
+	// registry entry precisely so those rows stay readable -- which means the
+	// lookup above succeeds and every other check downstream would pass. This is
+	// the one place the refusal can live.
+	//
+	// Placed FIRST, before the payload is even parsed, for two reasons: the
+	// refusal is a property of the concept rather than of anything the caller
+	// sent, and it must not cost a database round-trip (the read-merge below) to
+	// reach. It covers insert() and update() alike because executeWrite is the
+	// single write chokepoint (memql#1709).
+	if e.conceptIsRetired(conceptMeta.Name) {
+		return nil, meta, errConceptWriteRetired(conceptMeta.Name)
+	}
+
 	rawPayload := strings.TrimSpace(mutation.PayloadRaw)
 	if rawPayload == "" {
 		return nil, meta, fmt.Errorf("mutation payload is required")
