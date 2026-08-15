@@ -173,6 +173,11 @@ hurt immediately, and would have said so daily for the eight days nobody
 noticed. It needs only READ on rulesets, and now exists:
 `scripts/ci/ruleset-drift.sh`.
 
+The intended state it asserts — for this ruleset and for the Copilot-review
+one, whose `enforcement: disabled` noted above turned out to be a second
+invisible loss of exactly this shape (memql#3837) — is recorded in
+[ruleset-baseline.md](ruleset-baseline.md).
+
 ### What its absence costs, which is why it is worth noticing
 
 Without a queue, and with `strict_required_status_checks_policy` on the

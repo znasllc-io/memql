@@ -32,15 +32,17 @@ import (
 // distinguishable from a clean one. "I could not ask" reported as "no drift" is
 // the failure this whole class of check keeps producing.
 
-// fakeGH answers the one `gh api` call the script makes. FAKE_RULES is the
-// space-separated rule list to report; FAKE_GH_FAILS makes the call fail, which
-// is how the unreadable case is exercised.
+// fakeGH answers the one `gh api` call the script makes. The script asks for
+// two facts in one read, so the fake answers in the same shape: line 1 is the
+// enforcement state (FAKE_ENFORCEMENT, default active), line 2 the
+// space-separated rule list (FAKE_RULES). FAKE_GH_FAILS makes the call fail,
+// which is how the unreadable case is exercised.
 const fakeGH = `#!/usr/bin/env bash
 if [[ -n "${FAKE_GH_FAILS:-}" ]]; then
   echo "HTTP 404: Not Found" >&2
   exit 1
 fi
-printf '%s' "$FAKE_RULES"
+printf '%s\n%s' "${FAKE_ENFORCEMENT:-active}" "$FAKE_RULES"
 `
 
 func repoRootFromTest(t *testing.T) string {
@@ -80,7 +82,14 @@ func runDrift(t *testing.T, rules string, ghFails bool) (string, int) {
 		env = append(env, "FAKE_GH_FAILS=1")
 	}
 	// Baseline overrides, when a test set them (t.Setenv reaches os.Getenv here).
-	for _, k := range []string{"RULESET_DRIFT_EXPECTED", "RULESET_DRIFT_KNOWN_ABSENT"} {
+	// FAKE_ENFORCEMENT drives the fake gh's first line; RULESET_DRIFT_ENFORCEMENT
+	// drives what the script expects it to be.
+	for _, k := range []string{
+		"RULESET_DRIFT_EXPECTED",
+		"RULESET_DRIFT_KNOWN_ABSENT",
+		"RULESET_DRIFT_ENFORCEMENT",
+		"FAKE_ENFORCEMENT",
+	} {
 		if v := os.Getenv(k); v != "" {
 			env = append(env, k+"="+v)
 		}
@@ -220,5 +229,91 @@ func TestDriftDistinguishesUnreadableFromClean(t *testing.T) {
 	// only on the success path and cannot mean anything else.
 	if strings.Contains(out, "ruleset-drift: OK") {
 		t.Errorf("the output reports success after failing to read the ruleset\n%s", out)
+	}
+}
+
+// --- enforcement, the second axis (memql#3837) -------------------------------
+//
+// A ruleset has a rule LIST and an on/off ENFORCEMENT state. They fail
+// independently, and the failure that motivated this axis is the one where
+// membership stays TRUE: ruleset 19450314 carries `copilot_code_review` and is
+// switched off, so the review stopped being requested with nothing going red.
+//
+// The tests below are the mirror image of the membership ones above. What makes
+// them worth writing separately is that each asserts the axis is not being
+// answered by the other -- a single verdict over both would pass half of each.
+
+// TestEnforcementFailsWhenTheRulesetIsSwitchedOff is the 19450314 event: every
+// expected rule present, and the ruleset not enforcing any of them.
+//
+// If this passed, the check would be green over the exact defect it was added
+// for -- which is what the membership-only check WAS, correctly and by design,
+// before this axis existed.
+func TestEnforcementFailsWhenTheRulesetIsSwitchedOff(t *testing.T) {
+	t.Setenv("RULESET_DRIFT_EXPECTED", "copilot_code_review")
+	t.Setenv("RULESET_DRIFT_ENFORCEMENT", "active")
+	t.Setenv("FAKE_ENFORCEMENT", "disabled")
+
+	out, code := runDrift(t, "copilot_code_review", false)
+
+	if code == 0 {
+		t.Errorf("exit 0 for a ruleset carrying every expected rule and enforcing NONE of "+
+			"them. Membership being true is not the ruleset doing anything (memql#3837)."+
+			"\n%s", out)
+	}
+	if !strings.Contains(out, "enforcement") {
+		t.Errorf("the failure does not name enforcement, so a reader sees a drift failure "+
+			"over a rule list that is in fact correct\n%s", out)
+	}
+}
+
+// TestEnforcementPassesWhenDisabledIsTheRecordedBaseline is the decision half.
+//
+// `disabled` on 19450314 is a RECORDED DECISION (docs/internal/ops/ruleset-baseline.md),
+// not a gap being tolerated, so a baseline saying `disabled` over a ruleset that
+// IS disabled must pass -- otherwise the job is permanently red, and a
+// permanently red scheduled check is a muted one, which is how the merge queue
+// stayed lost for eight days.
+func TestEnforcementPassesWhenDisabledIsTheRecordedBaseline(t *testing.T) {
+	t.Setenv("RULESET_DRIFT_EXPECTED", "copilot_code_review")
+	t.Setenv("RULESET_DRIFT_ENFORCEMENT", "disabled")
+	t.Setenv("FAKE_ENFORCEMENT", "disabled")
+
+	out, code := runDrift(t, "copilot_code_review", false)
+
+	if code != 0 {
+		t.Errorf("exit %d for a ruleset in exactly the state the baseline records. A "+
+			"scheduled check that is permanently red is a check people mute.\n%s", code, out)
+	}
+	if !strings.Contains(out, "enforcement disabled") {
+		t.Errorf("the coverage line does not state the enforcement state it asserted, so "+
+			"the pass reads as a clean bill of health over a ruleset that is switched "+
+			"OFF -- the same misreading as \"no drift\" over a missing queue\n%s", out)
+	}
+}
+
+// TestEnforcementFailsWhenARecordedDecisionIsReversed is the arm that keeps the
+// decision record honest, and the reason `disabled` is asserted rather than
+// merely tolerated.
+//
+// Re-enabling 19450314 would be GOOD NEWS and must still fail: the recorded
+// decision no longer describes the repository. This is the exact symmetry of
+// TestDriftFailsWhenAKnownGapIsClosed -- a baseline that silently accepts the
+// state changing back is a baseline asserting nothing.
+func TestEnforcementFailsWhenARecordedDecisionIsReversed(t *testing.T) {
+	t.Setenv("RULESET_DRIFT_EXPECTED", "copilot_code_review")
+	t.Setenv("RULESET_DRIFT_ENFORCEMENT", "disabled")
+	t.Setenv("FAKE_ENFORCEMENT", "active")
+
+	out, code := runDrift(t, "copilot_code_review", false)
+
+	if code == 0 {
+		t.Errorf("exit 0 after the recorded decision was reversed. The point of recording "+
+			"'disabled' as a decision is that changing it is a NEW decision, which "+
+			"nothing would prompt if flipping it back were silently accepted.\n%s", out)
+	}
+	if !strings.Contains(out, "ruleset-baseline.md") {
+		t.Errorf("the failure does not point at the decision record, so whoever hits it "+
+			"has the finding and no route to the choice it contradicts\n%s", out)
 	}
 }

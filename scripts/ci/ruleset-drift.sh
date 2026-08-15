@@ -52,6 +52,20 @@
 # (memql#3831): an exemption declared in the artifact beats an exemption
 # achieved by shrinking what the check looks at.
 #
+# TWO AXES, ASSERTED SEPARATELY (memql#3837). A ruleset has a rule LIST and an
+# on/off ENFORCEMENT state, and they fail independently: 19450314 carries
+# `copilot_code_review` and is switched off, so the review stopped being
+# requested while membership stayed perfectly true. Rolling the two into one
+# verdict would be green over half of each -- the same defect as reading the
+# per-branch aggregate, one level up.
+#
+# So enforcement is its own assertion with its own baseline, and this script is
+# invoked ONCE PER RULESET with that ruleset's baseline supplied by the caller.
+# Each run names the ruleset it asserted in its coverage line, which is what
+# keeps one script from becoming one check quietly speaking for two rulesets.
+# The recorded baselines and the decisions behind them live in
+# docs/internal/ops/ruleset-baseline.md.
+#
 # IT REPORTS ITS OWN COVERAGE for the same reason. A bare "no drift" reads as a
 # clean bill of health over a ruleset missing the queue; naming how many rules
 # were asserted and how many are excused is a statement a reader can act on.
@@ -70,6 +84,22 @@ set -euo pipefail
 
 REPO="${RULESET_DRIFT_REPO:-znasllc-io/memql}"
 RULESET_ID="${RULESET_DRIFT_ID:-16630577}"
+
+# EXPECTED_ENFORCEMENT is the ruleset's own on/off state, asserted SEPARATELY
+# from its rule membership (memql#3837).
+#
+# WHY IT IS A SECOND ASSERTION AND NOT A SIXTH RULE. A ruleset can carry every
+# rule it should and still enforce none of them, and that is not hypothetical:
+# ruleset 19450314 holds `copilot_code_review` and is switched off, so the
+# review it exists to request simply stopped being requested. Membership was
+# green about it the whole time, because membership was TRUE.
+#
+# The two states fail in different directions and a check that conflated them
+# would be green on half of each. Keeping them separate is also what lets ONE
+# script serve both rulesets: the caller supplies the baseline, and each run
+# prints its own coverage line naming the ruleset it asserted. Two invocations
+# with two baselines, not one check quietly speaking for two rulesets.
+EXPECTED_ENFORCEMENT="${RULESET_DRIFT_ENFORCEMENT:-active}"
 
 # EXPECTED is every rule that must be PRESENT right now. It and KNOWN_ABSENT
 # below are DISJOINT: a rule intended but currently missing belongs in exactly
@@ -119,17 +149,40 @@ function have() {
 }
 
 function main() {
-    local actual_raw
-    if ! actual_raw="$(gh api "repos/${REPO}/rulesets/${RULESET_ID}" --jq '[.rules[].type] | sort | join(" ")' 2>&1)"; then
-        echo "FAIL: could not read ruleset ${RULESET_ID} on ${REPO}: ${actual_raw}" >&2
+    # ONE read, two facts. Line 1 is the enforcement state, line 2 the sorted
+    # rule list -- asking twice would let the two assertions describe the
+    # ruleset at two different moments, which is a disagreement no reader of
+    # the output could resolve.
+    local raw
+    if ! raw="$(gh api "repos/${REPO}/rulesets/${RULESET_ID}" \
+        --jq '.enforcement, ([.rules[].type] | sort | join(" "))' 2>&1)"; then
+        echo "FAIL: could not read ruleset ${RULESET_ID} on ${REPO}: ${raw}" >&2
         echo "  This check needs only READ on rulesets. A failure here is a token or" >&2
         echo "  network problem, NOT a drift result -- it must not be read as 'no drift'." >&2
         exit 2
     fi
+    local actual_enforcement actual_raw
+    actual_enforcement="$(printf '%s\n' "${raw}" | sed -n '1p')"
+    actual_raw="$(printf '%s\n' "${raw}" | sed -n '2p')"
     # shellcheck disable=SC2206 # deliberate word-splitting of a space-joined list
     local actual=(${actual_raw})
 
     local rc=0
+
+    # Enforcement first: a ruleset that is switched off makes every membership
+    # result below true-but-inert, and a reader needs to know that before
+    # reading them.
+    if [[ "${actual_enforcement}" != "${EXPECTED_ENFORCEMENT}" ]]; then
+        rc=1
+        echo "FAIL: ruleset ${RULESET_ID} enforcement is '${actual_enforcement}', recorded baseline is '${EXPECTED_ENFORCEMENT}'" >&2
+        echo "  Enforcement is a separate axis from rule membership: a ruleset can carry" >&2
+        echo "  every rule it should and enforce none of them. That is how 19450314's" >&2
+        echo "  copilot_code_review stopped being requested with nothing going red" >&2
+        echo "  (memql#3837)." >&2
+        echo "  If the new state is intended, update the baseline for this ruleset AND the" >&2
+        echo "  decision record in docs/internal/ops/ruleset-baseline.md -- the point of" >&2
+        echo "  the record is that the state was CHOSEN, so a change to it is a new choice." >&2
+    fi
     local missing=() unexpected=() warned=0
 
     local want
@@ -171,7 +224,7 @@ function main() {
 
     # The coverage line, always, pass or fail. "no drift" over a ruleset missing
     # the merge queue is exactly the reading this check exists to prevent.
-    echo "ruleset ${RULESET_ID}: ${#EXPECTED[@]} rule(s) asserted, ${warned} known-absent, actual: ${actual_raw}" >&2
+    echo "ruleset ${RULESET_ID}: enforcement ${actual_enforcement} (want ${EXPECTED_ENFORCEMENT}), ${#EXPECTED[@]} rule(s) asserted, ${warned} known-absent, actual: ${actual_raw}" >&2
     if [[ "$rc" == "0" ]]; then
         echo "ruleset-drift: OK -- no drift from the recorded baseline" >&2
     fi
