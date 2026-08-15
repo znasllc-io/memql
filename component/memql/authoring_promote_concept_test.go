@@ -895,65 +895,9 @@ func TestRehydratePromotedConcept_PropagatesAcrossNodes(t *testing.T) {
 }
 
 // --- demote ---------------------------------------------------------------
-
-// TestDemoteConcept_IsRefusedWithItsOwnReason: a concept became promotable
-// WITHOUT becoming demotable, and that is a coherent intermediate state rather
-// than an oversight -- withdrawing a concept would strand every row already
-// written under it, so retire-vs-remove is its own decision (memql#3756).
 //
-// Pinned as a test because the refusal has to keep saying WHY. Falling through
-// to the generic "unsupported kind" default would read as an omission and invite
-// somebody to "fix" it by unregistering the concept, which is the one outcome
-// #3756 exists to prevent.
-func TestDemoteConcept_IsRefusedWithItsOwnReason(t *testing.T) {
-	e := promoteConceptEngine(t)
-	if err := promoteConceptSource(t, e, trainedWidgetSrc, "trainedWidget"); err != nil {
-		t.Fatalf("promote: %v", err)
-	}
-
-	err := e.DemoteAuthoredConstruct(context.Background(), "concept", "trainedWidget")
-	if err == nil {
-		t.Fatal("demoting a concept must be refused until memql#3756 defines retire-vs-remove")
-	}
-	if !strings.Contains(err.Error(), "3756") {
-		t.Errorf("refusal message = %q, want it to name the issue that owns the semantics", err)
-	}
-	if _, gerr := e.concepts.Get(trainedWidgetId); gerr != nil {
-		t.Error("the refused demote removed the concept anyway")
-	}
-}
-
-// TestDemoteBundle_WithAConceptRefusesTheWholeBundle: a bundle that taught a
-// concept cannot be PARTIALLY withdrawn.
-//
-// The common shape of a promoted bundle is a noun plus the verbs bound to it, so
-// the tempting behaviour -- skip the concept, demote the rest, report success --
-// would leave the concept live with nothing that reads or writes it. The bundle
-// demote refuses as a whole instead, and nothing is retired.
-func TestDemoteBundle_WithAConceptRefusesTheWholeBundle(t *testing.T) {
-	e := promoteConceptEngineOnTheDefaultRegistry(t)
-	bundle := trainedWidgetSrc + "\n\n" + trainedWidgetMutationSrc
-	if _, err := e.promoteBundleDurableWithStore(context.Background(), &fakePromoteStore{}, "owner-1", bundle, false); err != nil {
-		t.Fatalf("promote bundle: %v", err)
-	}
-
-	store := &fakeDemoteStore{}
-	res, err := e.demoteBundleDurableWithStore(context.Background(), store, "owner-1", bundle)
-	if err == nil {
-		t.Fatal("demoting a bundle that declares a concept must be refused, not partially applied")
-	}
-	if !strings.Contains(err.Error(), "3756") {
-		t.Errorf("refusal message = %q, want it to name the issue that owns concept withdrawal", err)
-	}
-	if len(res.Demoted) != 0 {
-		t.Errorf("a refused bundle demote reported %d construct(s) demoted", len(res.Demoted))
-	}
-	// Nothing was withdrawn: the mutation is still callable and the concept is
-	// still live.
-	if got, _ := e.functions.Get("mutationCreateTrainedWidget"); got == nil {
-		t.Error("the refused bundle demote removed the mutation anyway")
-	}
-	if _, gerr := e.concepts.Get(trainedWidgetId); gerr != nil {
-		t.Error("the refused bundle demote removed the concept anyway")
-	}
-}
+// Concept demote semantics -- RETIRE when rows exist, REMOVE only when there are
+// none -- live in authoring_concept_retire_test.go alongside the code that owns
+// them (memql#3756). Two tests here pinned the interim refusal ("a concept can be
+// taught and cannot yet be un-taught") and were deleted with it, rather than
+// weakened into asserting the new behaviour from the promote side.

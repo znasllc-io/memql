@@ -481,6 +481,7 @@ var BoundConcepts = map[string]string{
 	"responsibilityById":                    "v1:planner:responsibility",
 	"resumeCampaign":                        "v1:campaigns:campaign",
 	"retireAuthoringBundle":                 "v1:authoring:bundle",
+	"retireConstructConcept":                "v1:authoring:construct",
 	"revertRecord":                          "v1:data:record",
 	"revokeAccountTokenIdentity":            "v1:identity:identity",
 	"revokeAgentAuthorization":              "v1:agents:agentAuthorization",

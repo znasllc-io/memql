@@ -166,6 +166,26 @@ mutate construct setConstructStatus {
   }
 }
 
+/// Mark a promoted CONCEPT construct row retired-in-place (memql#3756): the concept keeps its
+/// registry entry -- name still claimed, existing rows still readable -- and new writes to it are
+/// refused. status is deliberately left alone: flipping it to "retired" is what the OTHER demote
+/// outcome does (zero rows -> withdraw the definition entirely), and a status-retired row is
+/// SKIPPED by the boot re-hydration, which for a concept with rows under it would strand every one
+/// of them. There is no inverse mutation: a re-promote writes a NEW construct row carrying
+/// conceptRetired=false, and the re-hydration resolves a concept as live whenever any un-stamped
+/// row for it survives.
+@actor
+mutate construct retireConstructConcept {
+  args {
+    constructId  string!
+  }
+  update {
+    id: args.constructId
+    ownerUserId: actor.userId
+    conceptRetired: true
+  }
+}
+
 /// Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness
 /// (#956), so activation doesn't re-parse.
 @actor

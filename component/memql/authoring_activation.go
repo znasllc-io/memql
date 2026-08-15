@@ -81,8 +81,15 @@ type AuthoringConstructRow struct {
 	// (draft / active / retired). The durable-demote path flips it to
 	// "retired"; the boot + cross-node re-hydration skip retired rows so a
 	// demoted construct never re-registers after a restart.
-	Status     string `json:"status"`
-	Catalogued bool   `json:"catalogued"`
+	Status string `json:"status"`
+	// ConceptRetired is the concept-only SECOND withdrawal state (memql#3756):
+	// the promoted concept was demoted while rows already existed under it, so
+	// it stays REGISTERED (name claimed, rows readable) and new writes to it are
+	// refused. Distinct from Status "retired", which is the OTHER outcome --
+	// zero rows, definition withdrawn, and the row skipped by every re-hydration
+	// walk. Replayed after the walk by applyPersistedConceptRetirements.
+	ConceptRetired bool `json:"conceptRetired"`
+	Catalogued     bool `json:"catalogued"`
 	// GrammarVersion is the engine grammar epoch the source was authored
 	// under (parser.GrammarVersion, S6 #2361). Empty on legacy rows.
 	GrammarVersion string `json:"grammarVersion"`
