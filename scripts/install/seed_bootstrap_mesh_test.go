@@ -404,6 +404,82 @@ func TestSeedBootstrapFailsWhenTheRestartedNodesNeverComeBack(t *testing.T) {
 	}
 }
 
+// ONE budget over N consumers has to buy N ROLLS IN PARALLEL, not N rolls one
+// after another (znasllc-io/memql#3880).
+//
+// `_SB_ROLL_DEADLINE` is computed once for the whole roll, but it used to be
+// consulted inside a per-consumer wait that ran immediately after that
+// consumer's own delete. So the budget covered roughly ONE restart while the
+// work needed N of them, and which consumer got blamed was just whichever one
+// the clock happened to run out on. Measured on a real failing install, where
+// each node took about 100s to come back:
+//
+//	agent      deleted 07:39:45  ready 07:41:25   cumulative 100s
+//	bff        deleted 07:41:29  ready 07:43:09   cumulative 204s
+//	cognition  deleted 07:43:12  ready 07:44:52   cumulative 307s   <- 240s budget
+//
+// Nothing was wrong with cognition. Raising the budget only moves the boundary,
+// because the requirement grows with the number of consumers -- which is why
+// the fix is to issue every delete FIRST and then wait on all of them, so the
+// restarts overlap and the elapsed time is one restart rather than N.
+//
+// That is observable without a clock: with the rolls overlapping, the FIRST
+// Deployment is still being waited on after the LAST one has been deleted.
+// Serially it is long finished by then.
+func TestSeedBootstrapRollsTheMeshInParallelSoOneBudgetCoversEveryConsumer(t *testing.T) {
+	w := sbNewMeshWorld(t)
+
+	stdout, stderr, code := sbRun(t, w.env, sbCompleteArgs()...)
+	if code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, stdout, stderr)
+	}
+
+	rolled := w.rolled(t)
+	if len(rolled) < 2 {
+		t.Fatalf("rolled %v -- this test cannot say anything about ordering unless the mesh has\n"+
+			"several consumers to roll", rolled)
+	}
+	first := rolled[0]
+
+	// Split the call log at the last delete. Everything after it is work the step
+	// did once every restart was already in flight.
+	lines := strings.Split(strings.TrimSpace(w.read(t, "argv")), "\n")
+	lastDelete := -1
+	for i, line := range lines {
+		if strings.Contains(line, "delete pods") {
+			lastDelete = i
+		}
+	}
+	if lastDelete < 0 {
+		t.Fatalf("no delete in the call log:\n%s", strings.Join(lines, "\n"))
+	}
+
+	waitedOnFirstAfterLastDelete := false
+	for _, line := range lines[lastDelete+1:] {
+		if strings.Contains(line, "get pods") && strings.Contains(line, "name="+first) {
+			waitedOnFirstAfterLastDelete = true
+			break
+		}
+	}
+	if !waitedOnFirstAfterLastDelete {
+		t.Errorf("the roll is SERIAL: %q was already waited out before %q was even deleted, so the\n"+
+			"single roll budget has to cover %d restarts end to end instead of one.\n"+
+			"call log after the last delete:\n%s",
+			first, rolled[len(rolled)-1], len(rolled),
+			strings.Join(lines[lastDelete+1:], "\n"))
+	}
+
+	// Guard the guard: overlapping the restarts must not lose any of them, and it
+	// must not turn "wait for it to come back" into "delete and hope".
+	if len(rolled) != 7 {
+		t.Errorf("rolled %v -- want all seven consumers of the bootstrap Secret", rolled)
+	}
+	_, res := sbParse(t, stdout)
+	if !res.BootstrapComplete {
+		t.Errorf("bootstrapComplete=false after a roll every node came back from")
+	}
+}
+
 // A cluster with no Deployments yet is not a failure: it is what seeding BEFORE
 // the workloads exist looks like, and the values will be read at first boot.
 func TestSeedBootstrapAcceptsAClusterWithNoWorkloadsYet(t *testing.T) {
