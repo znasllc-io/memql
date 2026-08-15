@@ -54,7 +54,25 @@ If you find yourself importing
 that's the SDK leaking and the right fix is to add a wrapper type to
 the SDK -- not to import the proto package downstream.
 
-Concrete gaps tracked in #115 (proto-leak sweep).
+**Enforced** by `TestSDKPublicSurfaceHasNoProtoLeak` (root package,
+`sdk_proto_leak_test.go`, memql#3874). It AST-walks every non-test
+file under `sdk/go/` and fails when an exported declaration -- func,
+type, exported struct field, interface method, or method on an
+exported receiver -- names a `memqlv1.*` type.
+
+The gate polices the *exported* surface, not usage: the SDK must
+speak proto, it just must not hand one out. An unexported adapter
+(`protoDiagnostics`, `protoConceptDiffs`) is the correct pattern.
+
+The transport seam is the one place translation happens, and it is a
+**declared** allowlist in that file -- `client.Dispatcher` and
+`worker.Connection`, whose whole job is carrying wire messages. The
+list is checked in both directions, so a stale exemption fails too.
+When a typed surface needs to leak, wrap it instead: see
+`authoring.PromoteOption`'s opaque struct for the shape.
+
+(The earlier sweep issue #115 is closed; this gate is what keeps it
+closed.)
 
 ### 3. Generated code is read-only
 
