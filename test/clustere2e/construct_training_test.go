@@ -47,6 +47,21 @@ package clustere2e
 // message rather than failing. That skip is the correct outcome for a
 // non-owner: the gate this file is checking is working.
 //
+// A COLD MESH IS SLOWER THAN 30 SECONDS, OCCASIONALLY. The first cross-node run
+// after a `make dev` rollout has been observed to exceed waitCallable's budget
+// while the two freshly-restarted bff replicas were still establishing their
+// peer link; every run after it passed, and the propagation logs on the reader
+// replica showed a burst arriving ~32s after the promote. So a failure at step 3
+// ALONE, on the first run after a rollout, is more likely to be a mesh still
+// linking than a broken broadcast -- check the reader replica's
+// "authoring promote propagation: bundle re-hydrated from broadcast" lines
+// before concluding otherwise. A second failure is a real one.
+//
+// The wall-clock difference is itself the evidence that the hop is exercised:
+// with both connections on one replica this file runs in ~0.5s, and with the
+// reader pinned to the other replica it takes ~2.8s -- the difference being the
+// broadcast actually being waited on.
+//
 // SIDE EFFECTS: it promotes and then withdraws its own concept, under a
 // namespace and id unique to the run. It writes rows only under that concept
 // and never touches a core one. A run that dies mid-way leaves a promoted
@@ -56,6 +71,7 @@ package clustere2e
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"testing"
@@ -82,19 +98,39 @@ type trainingFixture struct {
 	rowIdShort string
 }
 
-func newTrainingFixture() trainingFixture {
-	suffix := strings.ToLower(id.NewShortId())
-	if len(suffix) > 10 {
-		suffix = suffix[:10]
+// suffixRunes keeps only the characters a MemQL identifier and a `@namespace`
+// both admit. `id.NewShortId()` emits a uuid-shaped value, and its HYPHENS are
+// legal in neither: `@namespace` is validated against
+// ^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)*$, and the same suffix is concatenated into
+// construct names. The live gate caught this on its first real run, refusing the
+// bundle at Gate-1 with the namespace pattern named -- which is the engine
+// behaving correctly and the fixture being wrong.
+func suffixRunes(raw string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(raw) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+		if b.Len() >= 10 {
+			break
+		}
 	}
+	return b.String()
+}
+
+func newTrainingFixture() trainingFixture {
+	suffix := suffixRunes(id.NewShortId())
 	ns := "e2etrain" + suffix
-	name := "trainedWidget"
+	// UNIQUE PER RUN, declaration name included. A promoted concept's name is
+	// claimed cluster-wide and demote resolves by name, so a shared declaration
+	// name makes every run after the first ambiguous and un-demotable.
+	name := "trainedWidget" + suffix
 	return trainingFixture{
 		namespace:  ns,
 		concept:    name,
 		conceptId:  fmt.Sprintf("v1:%s:%s", ns, name),
-		mutation:   "mutationCreate" + strings.ToUpper(name[:1]) + name[1:] + suffix,
-		query:      "query" + strings.ToUpper(name[:1]) + name[1:] + suffix,
+		mutation:   "mutationCreate" + strings.ToUpper(name[:1]) + name[1:],
+		query:      "query" + strings.ToUpper(name[:1]) + name[1:],
 		rowIdShort: "row" + suffix,
 	}
 }
@@ -140,9 +176,16 @@ concept %s {
 // mutationSrc binds the promoted concept by its SIGNATURE, which is the binding
 // a row write goes through -- the thing that proves the promoted concept is not
 // merely registered but resolvable by another construct.
+//
+// `@actor` is REQUIRED on both this and the query below: reading the auth
+// envelope is a declared capability (memql#2621), and a construct that reads
+// `actor.*` without declaring it is refused at Gate-1. The live gate caught
+// this too -- a promoted construct is held to exactly the same authoring rules
+// as a seeded one, which is itself worth having asserted.
 func (f trainingFixture) mutationSrc() string {
 	return fmt.Sprintf(`use %s.concepts.{ %s }
 
+@actor
 @description("Create a trained widget")
 mutate %s %s {
   args {
@@ -157,13 +200,20 @@ mutate %s %s {
 }`, f.namespace, f.concept, f.concept, f.mutation, f.concept)
 }
 
+// querySrc carries NO `shape` clause on purpose. A shape is a named construct,
+// not an inline projection -- `shape { row.id label }` is not a shorthand, it is
+// a lookup of a template by that literal name, and the engine says so ("shape
+// template not found"). Omitting it takes the default projection over the bound
+// concept (memql#2035), which is what this gate wants anyway: the assertion is
+// that the promoted concept is READABLE on another replica, not that any
+// particular subset of its fields comes back.
 func (f trainingFixture) querySrc() string {
 	return fmt.Sprintf(`use %s.concepts.{ %s }
 
+@actor
 @description("Read this owner's trained widgets")
 query %s %s {
   filter  ownerUserId==actor.userId
-  shape   { row.id label }
 }`, f.namespace, f.concept, f.concept, f.query)
 }
 
@@ -176,6 +226,16 @@ func (f trainingFixture) bundle() string {
 func (f trainingFixture) bundleWith(conceptSrc string) string {
 	return conceptSrc + "\n\n" + f.mutationSrc() + "\n\n" + f.querySrc()
 }
+
+// conceptOnly is the demote source for the RETIRE case, and the distinction is
+// load-bearing. DurableDemoteBundle withdraws every construct the source names,
+// so demoting the whole bundle takes the mutation with it -- and a write through
+// a withdrawn mutation fails with "function not found", which is not the
+// refusal the retire rule exists to produce. Withdrawing the noun alone is also
+// the honest shape of the operation being tested: retirement is a property of
+// the CONCEPT, and the constructs bound to it are meant to survive it and be
+// refused by it.
+func (f trainingFixture) conceptOnly() string { return f.conceptSrc() }
 
 // --- helpers -----------------------------------------------------------------
 
@@ -203,7 +263,14 @@ func skipUnlessOwner(t *testing.T, res *authoring.PromoteResult, err error) {
 // failure that caused it.
 func withdraw(ctx context.Context, t *testing.T, ac *authoring.Client, f trainingFixture) {
 	t.Helper()
-	res, err := ac.DurableDemoteBundle(ctx, f.bundle())
+	// The whole bundle first; then the concept alone. A bundle demote fails
+	// WHOLESALE if any construct it names is already withdrawn, so a cleanup that
+	// only tries the bundle leaves the CONCEPT promoted after any partial run --
+	// and a promoted concept's name is claimed cluster-wide forever.
+	if res, err := ac.DurableDemoteBundle(ctx, f.bundle()); err == nil && res.OK {
+		return
+	}
+	res, err := ac.DurableDemoteBundle(ctx, f.conceptOnly())
 	if err != nil {
 		t.Logf("cleanup: demote %s: %v", f.conceptId, err)
 		return
@@ -234,11 +301,39 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
 	defer cancel()
 
-	// Two connections through the front door. nginx round-robins them across
-	// the bff replicas, so with 2 replicas the odds are even that the reader
-	// landed on a different one than the promoter -- which is the hop this
-	// gate exists for. `conns[0]` promotes, `conns[1]` reads.
-	conns := openConnections(ctx, t, tok, 2)
+	// TWO CONNECTIONS, AND THE SECOND ONE'S ADDRESS IS THE WHOLE POINT.
+	//
+	// `conns[0]` promotes; `conns[1]` reads, and the cross-node claim is only as
+	// good as the odds that it landed on a different replica. Through the front
+	// door those odds are round-robin. Through `kubectl port-forward svc/bff`
+	// they are ZERO: a port-forward to a Service resolves to ONE pod at start and
+	// pins every connection to it, so both connections share a replica and the
+	// hop is never exercised -- while the test passes and claims it was.
+	//
+	// So `MEMQL_E2E_ENDPOINT_B` pins the reader to a SPECIFIC second replica,
+	// which makes the assertion deterministic rather than probabilistic:
+	//
+	//	kubectl port-forward pod/<bff-a> 50051:50051 &
+	//	kubectl port-forward pod/<bff-b> 50052:50051 &
+	//	MEMQL_E2E_ENDPOINT=localhost:50051 MEMQL_E2E_ENDPOINT_B=localhost:50052 ...
+	//
+	// When it is unset the test still runs and still asserts the construct is
+	// callable on a second connection -- it just LOGS that the second connection
+	// may be the same replica, rather than quietly implying a hop it did not
+	// take.
+	conns := openConnections(ctx, t, tok, 1)
+	if addrB := os.Getenv("MEMQL_E2E_ENDPOINT_B"); addrB != "" {
+		connB, err := memqlclient.Connect(ctx, memqlclient.ConnectConfig{Endpoint: addrB, Token: tok})
+		if err != nil {
+			t.Fatalf("connect the second replica at %s: %v", addrB, err)
+		}
+		conns = append(conns, connB)
+		t.Logf("reader pinned to a second replica at %s -- the cross-node hop is exercised", addrB)
+	} else {
+		conns = append(conns, openConnections(ctx, t, tok, 1)...)
+		t.Logf("MEMQL_E2E_ENDPOINT_B unset: the reader may share a replica with the promoter, " +
+			"so the cross-node hop is NOT guaranteed to be exercised by this run")
+	}
 	defer func() {
 		for _, c := range conns {
 			c.Close()
@@ -360,7 +455,7 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 	}
 
 	// --- 8. demote with rows RETIRES ----------------------------------------
-	dem, err := promoter.DurableDemoteBundle(ctx, f.bundle())
+	dem, err := promoter.DurableDemoteBundle(ctx, f.conceptOnly())
 	if err != nil {
 		t.Fatalf("demote: %v", err)
 	}
@@ -393,9 +488,13 @@ func TestConceptTrainingRoundTripsAcrossTheMesh(t *testing.T) {
 
 	// --- 10. re-promoting UN-RETIRES ----------------------------------------
 	//
-	// Promote the ORIGINAL schema back. Restoring a removed field is additive
-	// relative to the overridden version, so it lands without the override.
-	un, err := promoter.DurablePromoteBundle(ctx, f.bundle())
+	// The ADDITIVE schema, not the original. By this point the override has
+	// landed {ownerUserId, notes}; the original is {ownerUserId, label}, which
+	// REMOVES notes and is therefore breaking. The additive schema carries both,
+	// so it adds `label` back without taking `notes` away and lands with no
+	// override -- which is the point being made: un-retiring is an ordinary
+	// promote, not a privileged one.
+	un, err := promoter.DurablePromoteBundle(ctx, f.bundleWith(f.conceptSrcAdditive()))
 	if err != nil {
 		t.Fatalf("re-promote to un-retire: %v", err)
 	}
