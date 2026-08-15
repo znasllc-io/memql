@@ -49,6 +49,7 @@ import {
   type RunnableArg,
   type RunnableArgType,
   type RunnableKind,
+  type RunnableTrigger,
 } from "../constructs/runnable.js";
 
 /**
@@ -134,6 +135,15 @@ export interface CatalogConstruct {
   sourceHash: string;
   /** Present only for a promoted construct, which has no file. */
   source: string;
+  /**
+   * What fires this construct, for an AUTOMATION (memql#3805).
+   *
+   * The automation run form is decided ENTIRELY by this, so its absence is not
+   * a missing detail -- it is a form that cannot be drawn. Undefined for every
+   * other kind, and for an automation the cluster reports no trigger for, which
+   * is manual-run rather than "fires on nothing".
+   */
+  trigger?: RunnableTrigger;
 }
 
 /** Narrow one wire arg onto the shape the argument form binds. */
@@ -174,6 +184,10 @@ export function toCatalogConstruct(c: Construct): CatalogConstruct {
     boundConcept: c.boundConcept,
     sourceHash: c.sourceHash,
     source: c.source,
+    // Carried through unchanged and only when present. The SDK already
+    // declines to default it into existence, and re-adding an empty one here
+    // would undo that distinction one layer further in.
+    ...(c.trigger === undefined ? {} : { trigger: { ...c.trigger } }),
   };
 }
 

@@ -89,6 +89,78 @@ func TestRunnableArgMatchesConstructArg(t *testing.T) {
 	}
 }
 
+// triggerFieldWireNames maps each LSP JSON field name for a trigger to the
+// catalog's. No renames: unlike `enum`, none of the three collides with a proto
+// reserved word.
+var triggerFieldWireNames = map[string]string{
+	"concept":  "concept",
+	"event":    "event",
+	"schedule": "schedule",
+}
+
+// TestRunnableTriggerMatchesConstructTrigger: the same gate as the argument one
+// above, for the field that decides an AUTOMATION's form (memql#3805).
+//
+// It matters for the same reason and one more. The same reason: the extension
+// builds ONE automation run form, from `memql/runnableConstructs` when the
+// .memql file is open and from `ListConstructs` when browsing a cluster where
+// it is not, so two shapes for one form is how the two come to disagree. The
+// one more: an argument mismatch shows up as a missing input box, while a
+// trigger mismatch shows up as a form that FIRES A REAL EVENT on a real cluster
+// with a payload nobody chose -- the failure the Constructs view withheld the
+// affordance over until this field existed.
+func TestRunnableTriggerMatchesConstructTrigger(t *testing.T) {
+	lsp := reflect.TypeOf(runnableTrigger{})
+	wire := reflect.TypeOf(memqlv1.ConstructTrigger{})
+
+	lspByJSON := map[string]reflect.StructField{}
+	for i := 0; i < lsp.NumField(); i++ {
+		f := lsp.Field(i)
+		lspByJSON[jsonName(f)] = f
+	}
+	wireByJSON := map[string]reflect.StructField{}
+	for i := 0; i < wire.NumField(); i++ {
+		f := wire.Field(i)
+		if name := protoJSONName(f); name != "" {
+			wireByJSON[name] = f
+		}
+	}
+
+	for lspName, wireName := range triggerFieldWireNames {
+		lf, ok := lspByJSON[lspName]
+		if !ok {
+			t.Errorf("the language server no longer reports trigger field %q; either it was renamed (update triggerFieldWireNames and ConstructTrigger) or the two automation forms have diverged", lspName)
+			continue
+		}
+		wf, ok := wireByJSON[wireName]
+		if !ok {
+			t.Errorf("ConstructTrigger no longer carries %q, the catalog spelling of the language server's %q", wireName, lspName)
+			continue
+		}
+		if lf.Type != wf.Type {
+			t.Errorf("trigger field %q: language server has %s, catalog has %s", lspName, lf.Type, wf.Type)
+		}
+	}
+
+	// Both directions, as the argument gate does: a field gained on either side
+	// with no counterpart is drift, and the one that is caught late is the one
+	// the form silently stops rendering.
+	for name := range lspByJSON {
+		if _, mapped := triggerFieldWireNames[name]; !mapped {
+			t.Errorf("the language server gained trigger field %q with no catalog counterpart", name)
+		}
+	}
+	mapped := map[string]bool{}
+	for _, wireName := range triggerFieldWireNames {
+		mapped[wireName] = true
+	}
+	for name := range wireByJSON {
+		if !mapped[name] {
+			t.Errorf("ConstructTrigger gained field %q that the language server does not report", name)
+		}
+	}
+}
+
 // TestArgTypeSetIsClosedAndShared: the `type` value set is six values, and it
 // is the language server's own normalization that produces them. A seventh
 // would reach a form generator with no widget for it.

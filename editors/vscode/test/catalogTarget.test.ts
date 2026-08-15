@@ -11,11 +11,12 @@ import assert from "node:assert/strict";
 
 import {
   CATALOG_SCHEME,
+  catalogAutomationTarget,
   catalogRunTarget,
   catalogUri,
+  isAutomationRun,
   isCatalogUri,
   offersRun,
-  runUnavailableReason,
 } from "../src/constructs/catalogTarget.js";
 import type { CatalogConstruct } from "../src/state/constructCatalog.js";
 
@@ -49,26 +50,62 @@ test("the four arg-form kinds get a target", () => {
   }
 });
 
-test("an automation gets none, because the catalog does not carry its trigger", () => {
-  // Its trigger decides the entire form -- which payload modes are offered and
-  // which concept the row picker browses -- and `ListConstructs` has no such
-  // field. A form missing the field that decides it would fire a real event on
-  // a real cluster with a payload nobody chose.
-  const c = construct({ kind: "automation", runnableKind: "automation" });
-  assert.equal(catalogRunTarget(c), undefined);
-  assert.equal(offersRun(c), false);
-  // ...and the absence is EXPLAINED, because an operator who sees the tree
-  // call it runnable and finds no button will otherwise read it as a bug.
-  assert.match(runUnavailableReason(c), /trigger/);
-  assert.match(runUnavailableReason(c), /\.memql file/);
+// An automation gets an AutomationTarget, never a RunTarget (memql#3805). The
+// two are different shapes going to different commands, and the failure of
+// confusing them is not an error -- it is a form with nothing in it.
+test("an automation gets an automation target and not an arg-form one", () => {
+  const c = construct({
+    kind: "automation",
+    runnableKind: "automation",
+    args: [],
+    trigger: { event: "node.created", concept: "v1:cognition:participant" },
+  });
+  assert.equal(catalogRunTarget(c), undefined, "an automation must not get an arg-form target");
+  const target = catalogAutomationTarget(c);
+  assert.notEqual(target, undefined);
+  assert.equal(target?.name, c.name);
+  assert.equal(target?.uri, catalogUri(c));
+  // The trigger is what the form is built from: the concept decides which
+  // rows the picker browses, the event decides the modes offered.
+  assert.deepEqual(target?.trigger, { event: "node.created", concept: "v1:cognition:participant" });
+  assert.equal(offersRun(c), true, "the page must now draw a Run control for an automation");
+  assert.equal(isAutomationRun(c), true);
 });
 
-test("a view-only construct gets none, and needs no explanation", () => {
-  // The tree already says it is not runnable; the absence IS the statement,
-  // and a sentence here would answer a question nobody asked.
+// A trigger the cluster did not report is manual-run, which IS a describable
+// form -- so the affordance is offered with no trigger on the target, rather
+// than withheld. Defaulting an empty trigger in here would instead claim the
+// automation fires on nothing.
+test("an automation with no reported trigger still gets a target, carrying none", () => {
+  const c = construct({ kind: "automation", runnableKind: "automation", args: [] });
+  const target = catalogAutomationTarget(c);
+  assert.notEqual(target, undefined);
+  assert.equal(target?.trigger, undefined);
+  assert.equal(offersRun(c), true);
+});
+
+// The target's trigger is a COPY. The catalog entry outlives the panel, and a
+// form mutating its own target must not edit the cached construct underneath
+// the tree.
+test("the automation target copies the trigger rather than aliasing it", () => {
+  const c = construct({
+    kind: "automation",
+    runnableKind: "automation",
+    args: [],
+    trigger: { event: "node.created", concept: "v1:x:y" },
+  });
+  const target = catalogAutomationTarget(c);
+  assert.notEqual(target?.trigger, c.trigger, "the target must not alias the catalog entry's trigger");
+  assert.deepEqual(target?.trigger, c.trigger);
+});
+
+test("a view-only construct gets neither kind of target", () => {
+  // The tree already says it is not runnable; the absence IS the statement.
   const c = construct({ kind: "concept", runnable: false, runnableKind: undefined });
   assert.equal(catalogRunTarget(c), undefined);
-  assert.equal(runUnavailableReason(c), "");
+  assert.equal(catalogAutomationTarget(c), undefined);
+  assert.equal(offersRun(c), false);
+  assert.equal(isAutomationRun(c), false);
 });
 
 // -----------------------------------------------------------------------------

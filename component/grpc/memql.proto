@@ -1497,6 +1497,47 @@ message ConstructInfo {
   // empty with BOTH empty means the source is genuinely unavailable (a
   // construct registered from Go).
   string source = 11;
+
+  // trigger is what fires an AUTOMATION, and is ABSENT for every other kind
+  // (memql#3805). No other construct has one, and an empty message would read
+  // as "a trigger that fires on nothing" rather than as "not applicable".
+  //
+  // It is the field an automation's run form is decided BY: which payload
+  // modes to offer, and which concept's rows the picker browses. Without it a
+  // catalog-sourced automation has no describable form, which is why the
+  // Constructs view shipped with a run affordance for four of the five
+  // runnable kinds and an explanation for the fifth.
+  //
+  // Shape-identical to the language server's `RunnableTrigger`, for the same
+  // reason `args` is identical to its `RunnableArg`: the extension generates
+  // ONE automation form, from the LSP when the .memql file is open and from
+  // this catalog when it is not. TestRunnableTriggerMatchesConstructTrigger
+  // pins the two.
+  ConstructTrigger trigger = 12;
+}
+
+// ConstructTrigger is an automation's trigger, projected exactly as the
+// language server projects it (`sense.RunnableTrigger`).
+//
+// NOTE the server DECOMPOSES the composed subscription topic to fill this in.
+// An author writes `@trigger(event="node.created", concept=cog.participant)`
+// and the loader folds the pair into one topic before the scheduler sees it, so
+// the catalog puts it back through the declared inverse
+// (ast.SplitTriggerTopic). A topic that does not decompose -- a raw application
+// topic, a glob with a non-structured action -- arrives whole in `event` with
+// no `concept`, which is what the author wrote.
+message ConstructTrigger {
+  // concept is the canonical id whose rows the run form's picker browses.
+  // Empty when the trigger names no concept, in which case there is no row set
+  // and the form offers a pasted payload instead.
+  string concept = 1;
+  // event is the structured event kind ("node.created") when the topic
+  // decomposes, and the whole authored topic when it does not.
+  string event = 2;
+  // schedule is the cron expression of a time-driven trigger. A run of a
+  // scheduled automation fires it NOW with an empty event, as a cron firing
+  // would.
+  string schedule = 3;
 }
 
 // ConstructArg is one declared input. Field-for-field the language server's

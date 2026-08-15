@@ -23,19 +23,27 @@
 // never had anything to do with where the source came from. Browsing a catalog
 // must not become a quieter way to write to production (memql#3309).
 //
-// FOUR KINDS, NOT FIVE. An automation's form is decided by its TRIGGER -- which
-// payload modes are offered, and which concept the row picker browses -- and
-// `ListConstructs` does not carry one. A form missing the field that decides it
-// would fire a real event on a real cluster with a payload nobody chose, so an
-// automation renders no run affordance here. The gap is recorded rather than
-// worked around; adding `trigger` to `ConstructInfo` makes it work with no
-// change to this file.
+// FIVE KINDS. An automation's form is decided by its TRIGGER -- which payload
+// modes are offered, and which concept the row picker browses -- and
+// `ListConstructs` now carries one (memql#3805). Until it did, this file
+// withheld the affordance rather than draw a form missing the field that
+// decides it, because that form would fire a real event on a real cluster with
+// a payload nobody chose.
+//
+// AN AUTOMATION TAKES A DIFFERENT TARGET, and that is the whole of why it is a
+// separate branch here rather than a fifth entry in the arg-form set. The other
+// four carry a `RunTarget` (a uri, a kind, an argument schema) and go to
+// COMMAND_RUN; an automation carries an `AutomationTarget` (a uri, a name, a
+// trigger, no args) and goes to COMMAND_RUN_AUTOMATION. Its `args` is always
+// empty -- an automation has no declared payload schema -- so routing it
+// through the argument form would render an empty form and invoke the wrong
+// command.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
-// Refs: #3753 #3747
+// Refs: #3805 #3753 #3747
 
-import type { RunTarget } from "./runnable.js";
+import type { AutomationTarget, RunTarget } from "./runnable.js";
 import { usesArgForm } from "./runnable.js";
 import type { CatalogConstruct } from "../state/constructCatalog.js";
 
@@ -65,7 +73,9 @@ export function isCatalogUri(uri: string): boolean {
  *   - the engine does not call it runnable;
  *   - it is runnable but of a kind this client cannot map (see
  *     state/constructCatalog.ts -- there is no target to build);
- *   - it is an automation, which needs a trigger the catalog does not carry.
+ *   - it is an AUTOMATION, which takes an AutomationTarget instead. Ask
+ *     `catalogAutomationTarget` for that one; this function returns only the
+ *     targets the argument form binds.
  */
 export function catalogRunTarget(construct: CatalogConstruct): RunTarget | undefined {
   const kind = construct.runnableKind;
@@ -90,25 +100,45 @@ export function catalogUri(construct: CatalogConstruct): string {
   return `${CATALOG_SCHEME}:${construct.kind}/${encodeURIComponent(construct.name)}`;
 }
 
-/** Whether the detail page should offer to run this construct. */
+/**
+ * Whether the detail page should offer to run this construct at all.
+ *
+ * EITHER target kind counts. The page asks one question -- draw a Run control
+ * or do not -- and the answer is the same for both; which command it posts is
+ * `isAutomationRun`'s business, one layer in.
+ */
 export function offersRun(construct: CatalogConstruct): boolean {
-  return catalogRunTarget(construct) !== undefined;
+  return catalogRunTarget(construct) !== undefined || catalogAutomationTarget(construct) !== undefined;
 }
 
 /**
- * Why a runnable construct is nonetheless not offered a run here.
+ * Whether a run of this construct goes through the automation form rather than
+ * the argument form.
  *
- * Said on the page rather than left as an unexplained absence, for the one
- * case an operator will otherwise read as a bug: an automation IS runnable,
- * the tree says so, and the button is missing.
+ * Exported so the page and its renderer agree on the branch instead of each
+ * testing `kind === "automation"` -- the same reason `runnableKind` exists
+ * rather than a set membership test on `kind`.
  */
-export function runUnavailableReason(construct: CatalogConstruct): string {
-  if (construct.runnableKind === undefined) return "";
-  if (construct.runnableKind === "automation") {
-    return (
-      "An automation is fired by an event, and the catalog does not carry its trigger -- " +
-      "so this page cannot describe the payload it would run with. Open it from its .memql file to run it."
-    );
-  }
-  return "";
+export function isAutomationRun(construct: CatalogConstruct): boolean {
+  return catalogAutomationTarget(construct) !== undefined;
+}
+
+/**
+ * A run target for an AUTOMATION read from the catalog, or undefined when this
+ * construct is not one that can be run that way.
+ *
+ * THE TRIGGER IS PASSED THROUGH, NOT DEFAULTED. An automation the cluster
+ * reports no trigger for gets a target with none, and `automationFormPlan`
+ * renders that as manual-run -- which is what the engine does with it. That is
+ * a real, describable form, so it is offered; the case this file used to
+ * withhold was a form that could not be described at all.
+ */
+export function catalogAutomationTarget(construct: CatalogConstruct): AutomationTarget | undefined {
+  if (construct.runnableKind !== "automation") return undefined;
+  const target: AutomationTarget = {
+    uri: catalogUri(construct),
+    name: construct.name,
+  };
+  if (construct.trigger !== undefined) target.trigger = { ...construct.trigger };
+  return target;
 }

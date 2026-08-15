@@ -60,6 +60,18 @@ func toConstructInfo(e memqlengine.ConstructCatalogEntry) *memqlv1.ConstructInfo
 			AutoInjected: a.AutoInjected,
 		})
 	}
+	// NIL STAYS NIL. Only an automation has a trigger, and an empty
+	// ConstructTrigger on every other construct would read as "a trigger that
+	// fires on nothing" rather than as "not applicable" -- and protojson would
+	// then ship the object on all ~900 of them (memql#3805).
+	var trigger *memqlv1.ConstructTrigger
+	if e.Trigger != nil {
+		trigger = &memqlv1.ConstructTrigger{
+			Concept:  e.Trigger.Concept,
+			Event:    e.Trigger.Event,
+			Schedule: e.Trigger.Schedule,
+		}
+	}
 	return &memqlv1.ConstructInfo{
 		Name:         e.Name,
 		Kind:         e.Kind,
@@ -72,5 +84,6 @@ func toConstructInfo(e memqlengine.ConstructCatalogEntry) *memqlv1.ConstructInfo
 		BoundConcept: e.BoundConcept,
 		SourceHash:   e.SourceHash,
 		Source:       e.Source,
+		Trigger:      trigger,
 	}
 }

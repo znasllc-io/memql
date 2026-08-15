@@ -164,6 +164,73 @@ test("an all-defaults construct arrives fully typed, with args as an array", asy
 // A promoted construct is the one case with a source and no path. The client
 // must not normalise that away, because the Constructs view keys its
 // open-the-file behaviour on exactly this pair.
+// The trigger (memql#3805) is what decides an automation's run form, so it has
+// to survive the decode intact -- and its ABSENCE has to survive too, because
+// undefined and an empty trigger are different claims about the automation.
+test("an automation carries its trigger through the decode", async () => {
+  const { mock, client } = newClient();
+  const pending = client.listConstructs();
+  mock.reply({
+    listConstructsResult: {
+      constructs: [
+        {
+          name: "autoJoinSI",
+          kind: "automation",
+          runnable: true,
+          trigger: { event: "node.created", concept: "v1:cognition:participant" },
+        },
+      ],
+    },
+  });
+  const c = (await pending).constructs[0]!;
+  // The three members are defaulted like every other field: protojson omits an
+  // empty string, and a form reading `schedule` raw would get undefined.
+  assert.deepEqual(c.trigger, {
+    concept: "v1:cognition:participant",
+    event: "node.created",
+    schedule: "",
+  });
+});
+
+test("a scheduled automation carries its cron and no event", async () => {
+  const { mock, client } = newClient();
+  const pending = client.listConstructs();
+  mock.reply({
+    listConstructsResult: {
+      constructs: [{ name: "sweepStale", kind: "automation", trigger: { schedule: "0 */10 * * * *" } }],
+    },
+  });
+  assert.deepEqual((await pending).constructs[0]!.trigger, {
+    concept: "",
+    event: "",
+    schedule: "0 */10 * * * *",
+  });
+});
+
+// UNDEFINED, not an empty object. Every other field on Construct is defaulted
+// into existence; this one must not be, because the run form reads manual-run
+// off the absence and an empty trigger is a claim that the automation fires on
+// nothing. A view-only construct has none either, and shipping one on all ~900
+// of them is the other thing this avoids.
+test("a construct with no trigger leaves it undefined rather than empty", async () => {
+  const { mock, client } = newClient();
+  const pending = client.listConstructs();
+  mock.reply({
+    listConstructsResult: {
+      constructs: [
+        { name: "manualOnly", kind: "automation", runnable: true },
+        { name: "spaceCard", kind: "shape" },
+      ],
+    },
+  });
+  const { constructs } = await pending;
+  const automation = constructs[0]!;
+  const shape = constructs[1]!;
+  assert.equal(automation.trigger, undefined);
+  assert.equal(shape.trigger, undefined);
+  assert.ok(!("trigger" in shape), "the key itself must be absent, not present-and-undefined");
+});
+
 test("a promoted construct keeps its source and reports no path", async () => {
   const { mock, client } = newClient();
   const pending = client.listConstructs();

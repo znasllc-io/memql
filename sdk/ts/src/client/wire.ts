@@ -1021,6 +1021,26 @@ export interface ConstructArgWire {
   autoInjected?: boolean;
 }
 
+// ConstructTriggerWire is an automation's trigger, field for field the language
+// server's `RunnableTrigger` (cmd/memql-lsp/runnable.go) -- no renames, since
+// none of the three collides with a proto reserved word.
+//
+// ABSENT for every kind except automation. An empty object would read as "a
+// trigger that fires on nothing" rather than as "not applicable", and would
+// ship on every construct in the catalog.
+//
+// The server DECOMPOSES the composed subscription topic to fill it: an author
+// writes `@trigger(event="node.created", concept=cog.participant)` and the
+// loader folds the pair into one topic, so `event` here is the structured kind
+// and `concept` the id. A topic that does not decompose (a raw application
+// topic) arrives whole in `event` with no `concept`.
+// TestRunnableTriggerMatchesConstructTrigger pins the two shapes.
+export interface ConstructTriggerWire {
+  concept?: string;
+  event?: string;
+  schedule?: string;
+}
+
 // ConstructInfoWire is one construct the cluster has loaded.
 //
 // Three fields carry rules a consumer will get wrong by guessing, all three
@@ -1040,6 +1060,8 @@ export interface ConstructInfoWire {
   boundConcept?: string;
   sourceHash?: string;
   source?: string;
+  /** Automation only; absent for every other kind. */
+  trigger?: ConstructTriggerWire;
 }
 
 export interface ListConstructsResultPayload {

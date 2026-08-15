@@ -11,7 +11,9 @@ import (
 
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/events"
+	"github.com/znasllc-io/memql/component/language/ast"
 	"github.com/znasllc-io/memql/component/memql"
+	"github.com/znasllc-io/memql/component/memql/sense"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -365,9 +367,62 @@ func (s *Scheduler) CatalogAutomations() []memql.AutomationCatalogEntry {
 			Name:        a.Name,
 			Description: a.Description,
 			Origin:      a.Origin,
+			Trigger:     catalogTrigger(a),
 		})
 	}
 	return out
+}
+
+// catalogTrigger projects a loaded automation's trigger into the shape the
+// language server reports (memql#3805), or nil when it has none.
+//
+// THE DECOMPOSITION IS THE WHOLE OF IT. An author writes two fields --
+// `@trigger(event="node.created", concept=cog.participant)` -- and the loader
+// folds them into ONE subscription topic before the scheduler ever sees the
+// automation, deleting `concept=` on the way past. Firing wants that one
+// string; DESCRIBING wants the pair back, because the run form offers a row
+// picker only when it knows which concept's rows to browse. So the topic is put
+// back through ast.SplitTriggerTopic, the declared inverse of the function that
+// composed it.
+//
+// A topic the inverse does not recognise -- a raw application topic like
+// system.startup, a glob whose action is not one of the three kinds -- keeps
+// the whole string as the event and reports no concept. That is exactly what
+// the language server reports for the same automation, because in that case the
+// author DID write the whole string as `event=`.
+//
+// One case reads BETTER here than in the language server, and deliberately: an
+// automation authored in the legacy pre-structured form
+// (`@trigger(event="graph.node.created.v1:x:y")`) is reported by the LSP as one
+// opaque event with no concept, because that is literally what the file says.
+// The catalog decomposes it, so its run form gets a row picker the file-backed
+// one does not. More information about the same automation is not a divergence
+// worth suppressing -- and the shapes stay identical, which is what the parity
+// gate pins.
+//
+// SCHEDULE AND EVENT ARE BOTH CARRIED when both are set, rather than one being
+// chosen here. The engine asks IsEventTriggered() before IsScheduled(), and
+// automationFormPlan mirrors that precedence; making the choice in the reporter
+// would move a runtime rule into a description and let the two drift.
+func catalogTrigger(a *Automation) *sense.RunnableTrigger {
+	if a == nil {
+		return nil
+	}
+	tr := &sense.RunnableTrigger{Schedule: a.Schedule}
+	if a.Trigger != nil && a.Trigger.Event != "" {
+		if kind, concept, ok := ast.SplitTriggerTopic(a.Trigger.Event); ok {
+			tr.Event, tr.Concept = kind, concept
+		} else {
+			tr.Event = a.Trigger.Event
+		}
+	}
+	if tr.Event == "" && tr.Concept == "" && tr.Schedule == "" {
+		// Nothing to say. Nil rather than an empty object, matching
+		// triggerFromAttributes: an automation with no trigger at all is
+		// manual-run, and the form says so from the ABSENCE.
+		return nil
+	}
+	return tr
 }
 
 // ResumeAutomation resumes a failed automation from a checkpoint.
