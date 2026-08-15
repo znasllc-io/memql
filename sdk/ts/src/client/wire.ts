@@ -335,6 +335,36 @@ export interface AuthoringSessionDefineBundlePayload {
   sources: string;
 }
 
+// The two DURABLE authoring messages (memql#3760). Same `sources` bundle
+// string as the pair above and a wildly larger effect: a promote persists the
+// constructs, registers them into the SHARED registry and broadcasts them to
+// every node; a demote withdraws them the same way. Both are OWNER-only, a
+// stricter gate than the owner-or-developer bar validate/session-define use.
+//
+// The engine refuses a non-owner with a `queryError` carrying the role, so the
+// refusal arrives on the same correlateTo as a normal reply would.
+
+export interface DurablePromoteBundlePayload {
+  requestId: string;
+  sources: string;
+  // allowBreaking is the operator's explicit override for a CONCEPT re-promote
+  // whose schema change would strand rows already written -- a removed field, a
+  // changed field type, a new required field, a narrowed enum (memql#3757).
+  // Unset is the normal call and the engine refuses such a change with the
+  // classified diff on the reply.
+  //
+  // OMITTED entirely rather than sent as `false` on a normal promote: proto3
+  // reads absent and false identically, so the wire meaning is the same, and
+  // keeping the field off the envelope means the dangerous flag appears in a
+  // frame only when a caller asked for it.
+  allowBreaking?: boolean;
+}
+
+export interface DurableDemoteBundlePayload {
+  requestId: string;
+  sources: string;
+}
+
 // ListConstructs asks a cluster what constructs it has actually LOADED, at
 // registry grain (memql#3749). No filters: the surface that consumes it groups
 // client-side, and a filter parameter would put the kind vocabulary in a
@@ -466,6 +496,8 @@ type ClientPayload =
   | { runAutomation: RunAutomationPayload }
   | { authoringValidateBundle: AuthoringValidateBundlePayload }
   | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
+  | { durablePromoteBundle: DurablePromoteBundlePayload }
+  | { durableDemoteBundle: DurableDemoteBundlePayload }
   | { listConstructs: ListConstructsPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
@@ -902,6 +934,77 @@ export interface AuthoringSessionDefineBundleResultPayload {
   error?: string;
 }
 
+// Durable promote / demote reply envelopes (memql#3760).
+//
+// Both carry a SECOND repeated field beside the identity list, and in both
+// cases that second field is the one a client renders. `promoted` / `demoted`
+// only say which constructs the call touched; `conceptDiffs` / `outcomes` say
+// what happened to them, which for a concept is not implied by ok=true.
+
+// ConceptSchemaChangeWire is ONE classified difference between the concept
+// version the cluster is running and the one being promoted over it
+// (memql#3757).
+//
+// rowsAffected is int64 -- protojson encodes int64 as a STRING on most
+// runtimes and a number on others, so both are accepted here and coerced once
+// on the way out. It is meaningful ONLY when rowCountKnown is true: a node with
+// no database cannot count rows, and reporting its zero as a count would be a
+// claim it is not entitled to make.
+export interface ConceptSchemaChangeWire {
+  concept?: string;
+  field?: string;
+  kind?: string;
+  breaking?: boolean;
+  was?: string;
+  now?: string;
+  rowsAffected?: string | number;
+  rowCountKnown?: boolean;
+  referencedBy?: string[];
+  detail?: string;
+}
+
+export interface ConceptSchemaDiffWire {
+  concept?: string;
+  breaking?: boolean;
+  overridden?: boolean;
+  changes?: ConceptSchemaChangeWire[];
+  summary?: string;
+}
+
+export interface DurablePromoteBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  promoted?: AuthoringConstructWire[];
+  diagnostics?: AuthoringDiagnosticWire[];
+  error?: string;
+  // conceptDiffs rides the REFUSAL reply as well as the success one, because a
+  // refusal IS a diff. Absent for a first promote and for an unchanged
+  // re-promote.
+  conceptDiffs?: ConceptSchemaDiffWire[];
+}
+
+// DurableDemoteOutcomeWire is what actually happened to one construct.
+// `outcome` is "retired" (still registered, name still claimed, existing rows
+// readable, new writes refused) or "removed" (gone, name claimable again).
+// rowCount is int64 -- same string-or-number encoding as rowsAffected above.
+export interface DurableDemoteOutcomeWire {
+  kind?: string;
+  name?: string;
+  conceptId?: string;
+  outcome?: string;
+  rowCount?: string | number;
+}
+
+export interface DurableDemoteBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  demoted?: AuthoringConstructWire[];
+  diagnostics?: AuthoringDiagnosticWire[];
+  error?: string;
+  // outcomes carries the same constructs as `demoted`, in the same order.
+  outcomes?: DurableDemoteOutcomeWire[];
+}
+
 // ConstructArgWire is the catalog's argument shape. Field for field the
 // language server's `RunnableArg` (cmd/memql-lsp/runnable.go), because the
 // extension generates ONE argument form from both -- from the LSP when the
@@ -1088,6 +1191,8 @@ type ServerPayload =
   | { automationRunEvent: AutomationRunEventPayload }
   | { authoringValidateBundleResult: AuthoringValidateBundleResultPayload }
   | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
+  | { durablePromoteBundleResult: DurablePromoteBundleResultPayload }
+  | { durableDemoteBundleResult: DurableDemoteBundleResultPayload }
   | { listConstructsResult: ListConstructsResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
@@ -1129,6 +1234,8 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "automationRunEvent"; value: AutomationRunEventPayload }
   | { kind: "authoringValidateBundleResult"; value: AuthoringValidateBundleResultPayload }
   | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
+  | { kind: "durablePromoteBundleResult"; value: DurablePromoteBundleResultPayload }
+  | { kind: "durableDemoteBundleResult"; value: DurableDemoteBundleResultPayload }
   | { kind: "listConstructsResult"; value: ListConstructsResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
@@ -1214,6 +1321,16 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "authoringSessionDefineBundleResult",
       value: m.authoringSessionDefineBundleResult as AuthoringSessionDefineBundleResultPayload,
+    };
+  if (m.durablePromoteBundleResult)
+    return {
+      kind: "durablePromoteBundleResult",
+      value: m.durablePromoteBundleResult as DurablePromoteBundleResultPayload,
+    };
+  if (m.durableDemoteBundleResult)
+    return {
+      kind: "durableDemoteBundleResult",
+      value: m.durableDemoteBundleResult as DurableDemoteBundleResultPayload,
     };
   if (m.listConstructsResult)
     return {
