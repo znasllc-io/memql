@@ -116,13 +116,17 @@ test("no training surface is triggered by a save", () => {
   // is not: state comes from the BUFFER, so a save is by definition a moment at
   // which nothing about it changed.
   const offenders = sources()
-    .filter(({ file }) =>
-      [
-        path.join("src", "state", "training.ts"),
-        path.join("src", "constructs", "decorations.ts"),
-        path.join("src", "constructs", "trainingLens.ts"),
-        path.join("src", "constructs", "gutterIcons.ts"),
-      ].includes(file),
+    .filter(
+      ({ file }) =>
+        [
+          path.join("src", "state", "training.ts"),
+          path.join("src", "constructs", "decorations.ts"),
+          path.join("src", "constructs", "trainingLens.ts"),
+          path.join("src", "constructs", "gutterIcons.ts"),
+        ].includes(file) ||
+        // The ACTIONS, added by memql#3763. The rule matters more here than in
+        // any of the modules above: those only render, and these ones promote.
+        file.startsWith(path.join("src", "training") + path.sep),
     )
     .filter(({ text }) => /onDidSaveTextDocument|onWillSaveTextDocument/.test(stripComments(text)))
     .map(({ file }) => file);
@@ -130,6 +134,65 @@ test("no training surface is triggered by a save", () => {
     offenders,
     [],
     `these training modules subscribe to a save event: ${offenders.join(", ")}. Saving is not promoting -- that is the one idea this surface exists to convey.`,
+  );
+});
+
+test("the training lens offers the four actions, and each one is contributed AND registered", () => {
+  // THE FLIP AND THE REGISTRATION ARE ONE CHANGE BY CONSTRUCTION (memql#3763).
+  // A lens posting to an unregistered command fails with "command not found",
+  // and a click that does nothing teaches a developer the extension is broken --
+  // which is worse than the button not being there yet. So this asserts the
+  // three halves together: the lens emits the action lenses, the manifest
+  // declares the commands, and activation registers them.
+  const lens = sources().find(
+    ({ file }) => file === path.join("src", "constructs", "trainingLens.ts"),
+  );
+  assert.ok(
+    lens?.text.includes("offerActions: true") === true,
+    "the training CodeLens no longer offers the action lenses",
+  );
+
+  const declared = new Set(manifest.contributes.commands.map((c) => c.command));
+  const palette = new Map(
+    (manifest.contributes.menus.commandPalette ?? []).map((e) => [e.command, e.when]),
+  );
+  const activation = sources().find(({ file }) => file.endsWith("extension.ts"));
+  assert.notEqual(activation, undefined);
+
+  // The ids are spelled out rather than imported, on purpose: they cross into
+  // package.json, which no TypeScript import reaches. A rename that updated the
+  // constant and left the manifest behind is exactly what this catches.
+  for (const [id, constant] of [
+    ["memql.training.dryRun", "COMMAND_DRY_RUN"],
+    ["memql.training.tryInSession", "COMMAND_TRY_IN_SESSION"],
+    ["memql.training.promote", "COMMAND_PROMOTE"],
+    ["memql.training.demote", "COMMAND_DEMOTE"],
+  ] as const) {
+    assert.ok(declared.has(id), `${id} is not contributed`);
+    assert.ok(
+      activation?.text.includes(`registerCommand(${constant}`) === true,
+      `${id} is contributed but never registered in extension.ts`,
+    );
+    // Palette-hidden: each takes the lens's {uri, name} payload, which the
+    // palette cannot supply, so a visible entry would offer a command whose only
+    // possible outcome is a silent no-op.
+    assert.equal(palette.get(id), "false", `${id} must be hidden from the command palette`);
+  }
+});
+
+test("no file spells a training command id as a literal except the one that declares it", () => {
+  // The ids live in src/state/training.ts, which is where the LENS reads them
+  // from. A second spelling anywhere else is a pair of strings that must agree
+  // and can silently disagree -- and the failure it produces is a lens button
+  // that does nothing.
+  const offenders = sources()
+    .filter(({ file }) => file !== path.join("src", "state", "training.ts"))
+    .filter(({ text }) => /["']memql\.training\.[a-zA-Z]+["']/.test(stripComments(text)))
+    .map(({ file }) => file);
+  assert.deepEqual(
+    offenders,
+    [],
+    `these files spell a training command id as a literal: ${offenders.join(", ")}. Import the constant from src/state/training.ts instead.`,
   );
 });
 

@@ -11,13 +11,14 @@
 // and promotion is a strictly larger commitment than a run, so the
 // no-run-on-save line this extension already holds matters more here, not less.
 //
-// THE ACTION LENSES ARE OFF. They are #3763's, which registers the four
-// commands; until then `offerActions` is false and only the STATE renders. A
-// Promote lens posting to an unregistered command fails with "command not
-// found", and a click that does nothing teaches a developer the extension is
-// broken -- which is a worse outcome than the button not being there yet.
+// THE ACTION LENSES ARE ON, as of #3763 -- which is the change that registers
+// the four commands they post to, and they were switched on in it for that
+// reason and no other. A Promote lens posting to an unregistered command fails
+// with "command not found", and a click that does nothing teaches a developer
+// the extension is broken, so the flip and the registration are one commit by
+// construction. `src/training/actions.ts` is what they reach.
 //
-// Refs: #3761 #3745
+// Refs: #3763 #3761 #3745
 
 import * as vscode from "vscode";
 
@@ -65,7 +66,7 @@ export class TrainingCodeLensProvider implements vscode.CodeLensProvider {
     }
 
     const lenses: vscode.CodeLens[] = [];
-    for (const plan of trainingLensPlans(parseTrainingConstructs(raw))) {
+    for (const plan of trainingLensPlans(parseTrainingConstructs(raw), { offerActions: true })) {
       const range = toRange(plan.construct.signatureRange);
       // The state label is NOT a command. It is a fact about the construct, and
       // giving it a command would make a developer wonder what clicking it does.
