@@ -214,7 +214,7 @@ func TestHandlerAuthorizedPathsAreNotPublic(t *testing.T) {
 
 // A configured base path must not change any verdict. An earlier version
 // stripped the base from declarations as well as routes, so with
-// SERVER_PUBLIC_PATH=/memql the declaration "/memql/ws" became "/ws" while the
+// MEMQL_SERVER_PUBLIC_PATH=/memql the declaration "/memql/ws" became "/ws" while the
 // registered route "/memql/memql/ws" became "/memql/ws" -- they stopped
 // matching and the identity binary fatally refused to boot. Nothing tested it,
 // because the existing base-path case ran with the variable unset.
@@ -249,10 +249,10 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 
 	for _, base := range bases {
 		t.Run("declared/base="+base, func(t *testing.T) {
-			t.Setenv("SERVER_PUBLIC_PATH", base)
+			t.Setenv("MEMQL_SERVER_PUBLIC_PATH", base)
 			if err := AssertUnauthenticatedSurfaceDeclared(identitySurface()); err != nil {
 				t.Errorf("the identity binary's surface must stay declared under "+
-					"SERVER_PUBLIC_PATH=%q, otherwise the node crash-loops on boot: %v",
+					"MEMQL_SERVER_PUBLIC_PATH=%q, otherwise the node crash-loops on boot: %v",
 					base, err)
 			}
 		})
@@ -265,11 +265,11 @@ func TestBasePathDoesNotChangeTheVerdict(t *testing.T) {
 	// an undeclared route was accepted and the assertion failed OPEN.
 	for _, base := range bases {
 		t.Run("undeclared-still-rejected/base="+base, func(t *testing.T) {
-			t.Setenv("SERVER_PUBLIC_PATH", base)
+			t.Setenv("MEMQL_SERVER_PUBLIC_PATH", base)
 			surface := append(identitySurface(), "POST /internal/dump-secrets")
 			err := AssertUnauthenticatedSurfaceDeclared(surface)
 			if err == nil {
-				t.Fatalf("SERVER_PUBLIC_PATH=%q made the boot check vacuous: an undeclared "+
+				t.Fatalf("MEMQL_SERVER_PUBLIC_PATH=%q made the boot check vacuous: an undeclared "+
 					"route was accepted. A security assertion must not fail open on an "+
 					"operator config value.", base)
 			}
@@ -315,7 +315,7 @@ func TestSurfacePathFormsNeverYieldsRoot(t *testing.T) {
 		{"/memql/ws", "/memql/ws", "multi-segment base equal to the path"},
 	} {
 		t.Run(tc.base+" "+tc.path, func(t *testing.T) {
-			t.Setenv("SERVER_PUBLIC_PATH", tc.base)
+			t.Setenv("MEMQL_SERVER_PUBLIC_PATH", tc.base)
 			for _, form := range surfacePathForms(tc.path) {
 				if form == "/" {
 					t.Fatalf("%s produced the form \"/\", which surfaceDeclaredBy would honour "+
@@ -327,7 +327,7 @@ func TestSurfacePathFormsNeverYieldsRoot(t *testing.T) {
 
 	// ...while a real stripped form is still produced, so the base handling
 	// this guard sits inside has not been disabled outright.
-	t.Setenv("SERVER_PUBLIC_PATH", "/memql")
+	t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "/memql")
 	var found bool
 	for _, form := range surfacePathForms("/memql/ws") {
 		if form == "/ws" {

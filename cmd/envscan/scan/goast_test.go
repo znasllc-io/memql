@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -592,12 +593,31 @@ func TestEnvReaderSitesAreCountedOnTheRealTree(t *testing.T) {
 // gate, so it gets the same treatment as the residual: reported, bounded, and
 // falsifiable.
 //
-// Six memQL-owned keys predate the MEMQL_ prefix convention. Registering one
-// fails component/genesis's TestOwnedVarsArePrefixed; omitting one fails forward
-// drift. Until they are renamed they are exempt -- and an exemption nobody reads
-// is how a gap becomes permanent, so these tests pin that it is visible, that it
-// is not laundered through `external`, and that every member is still real.
+// withSyntheticExemption installs a one-key ownedPreConvention for the duration
+// of a test and restores the real (empty) one afterwards.
+//
+// The production list is EMPTY since memql#3831 renamed all six of its members.
+// Testing the mechanism against it would therefore assert nothing -- every
+// arm below would pass over an empty loop. A synthetic key keeps the machinery
+// covered for the day a seventh pre-convention name turns up, which is exactly
+// when nobody would notice it had rotted. Same reasoning, and the same shape, as
+// the synthetic baseline in scripts/ci/ruleset_drift_test.go.
+func withSyntheticExemption(t *testing.T, key string) {
+	t.Helper()
+	prev := ownedPreConvention
+	ownedPreConvention = map[string]bool{key: true}
+	t.Cleanup(func() { ownedPreConvention = prev })
+}
+
+// Six memQL-owned keys predated the MEMQL_ prefix convention. Registering one
+// failed component/genesis's TestOwnedVarsArePrefixed; omitting one failed
+// forward drift. They are renamed now (memql#3831), but an exemption nobody
+// reads is how a gap becomes permanent, so these tests still pin that an
+// exemption is visible, that it is not laundered through `external`, and that
+// every member is real.
 func TestPreConventionExemptionIsReportedRatherThanSilent(t *testing.T) {
+	withSyntheticExemption(t, "CACHE_MAX_TTL")
+
 	root := newDriftFixture(t, []string{"MEMQL_FIXTURE_LIVE"}, []string{"MEMQL_FIXTURE_LIVE"})
 	// A read of an exempt key, registered nowhere.
 	writeFixtureFile(t, root, "component/x/legacy.go", `package x
@@ -643,9 +663,45 @@ func read() string { return os.Getenv(envCacheMaxTTL) }
 	}
 }
 
+// TestPreConventionExemptionIsEmpty is the memql#3831 result, asserted rather
+// than assumed.
+//
+// The six names it held are renamed and registered, so there is nothing left to
+// exempt -- and pinning that means re-adding an entry is a deliberate, failing
+// act that forces whoever does it to re-read why the list exists. Left
+// unasserted, "empty" is indistinguishable from "somebody quietly put a new
+// unprefixed var back", which is the exact drift the list was created to make
+// visible.
+//
+// If a seventh pre-convention name really is discovered, the fix is the same
+// one that emptied this list: rename it, alias the old name, register the new.
+// Not an entry here.
+func TestPreConventionExemptionIsEmpty(t *testing.T) {
+	if len(ownedPreConvention) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(ownedPreConvention))
+	for k := range ownedPreConvention {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	t.Errorf("ownedPreConvention has %d entr(y/ies): %v.\n"+
+		"It was emptied by memql#3831, which renamed all six of its members to MEMQL_ "+
+		"names with the old names recorded as legacy aliases. An exemption is not the "+
+		"fix for an unprefixed var -- it is what made the prefix lint and the drift gate "+
+		"each green via the other's blind spot. Rename it, alias the old name in "+
+		"component/genesis/legacyalias.go, and register the new one.", len(keys), keys)
+}
+
 // The exemption must not be laundered through the `external` denylist, which
 // means "not memQL's variable" and exempts a key from BOTH drift directions.
+//
+// Vacuous while the list is empty, and deliberately kept: it is the property a
+// seventh entry would have to satisfy, and the moment it is added is the moment
+// nobody would think to write this test. It states its own coverage so the pass
+// cannot be read as a claim about code it never examined.
 func TestPreConventionKeysAreNotTreatedAsExternal(t *testing.T) {
+	t.Logf("examined %d exemption(s)", len(ownedPreConvention))
 	for key := range ownedPreConvention {
 		if isExternal(key) {
 			t.Errorf("%s is in the external denylist as well as ownedPreConvention. external means "+
@@ -661,7 +717,11 @@ func TestPreConventionKeysAreNotTreatedAsExternal(t *testing.T) {
 // Without this the list is unfalsifiable: a name whose read is deleted, or which
 // somebody later registers properly, would sit here forever suppressing a check
 // that has nothing left to suppress. Both directions fail loudly instead.
+//
+// Vacuous while the list is empty (see TestPreConventionExemptionIsEmpty), and
+// kept for the same reason as the test above it.
 func TestPreConventionExemptionHasNoStaleMembers(t *testing.T) {
+	t.Logf("examined %d exemption(s)", len(ownedPreConvention))
 	root := repoRoot(t)
 	out, err := ScanReads(root)
 	if err != nil {

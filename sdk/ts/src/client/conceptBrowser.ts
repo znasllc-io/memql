@@ -12,7 +12,7 @@ import type { QueryClient, QueryCallOptions } from "./query.js";
 import type { Row } from "./types.js";
 
 // A concept registry can hold far more than the engine's implicit
-// unmarked-list backstop (MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows), so the
+// unmarked-list backstop (MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows), so the
 // browse query MUST declare sort + paginate to opt into a keyset window and a
 // continuation cursor -- otherwise it silently truncates at the backstop with
 // no way to page past it (memql#2008).

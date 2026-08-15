@@ -703,7 +703,7 @@ type structQueryBody struct {
 // it in an explicit `paginate(base, <UnboundedPaginateWindow>)`. That
 // makes plan.Limit non-nil, which the engine reads as "explicit window
 // requested" and therefore skips the default 50-row cap. The engine
-// still clamps the realized window to MEMORY_ENGINE_MAX_WINDOW, so this
+// still clamps the realized window to MEMQL_MEMORY_ENGINE_MAX_WINDOW, so this
 // is a "give me everything up to the hard ceiling" request, not a way
 // to bypass the absolute window ceiling.
 const UnboundedPaginateWindow = 1000000

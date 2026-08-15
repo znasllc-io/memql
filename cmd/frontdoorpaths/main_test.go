@@ -171,15 +171,15 @@ func TestCollectOrdersLongestPathFirst(t *testing.T) {
 }
 
 // The generated artifact is checked in and gated, so it must be a function of
-// the code alone. SERVER_PUBLIC_PATH is read by every declaration in
+// the code alone. MEMQL_SERVER_PUBLIC_PATH is read by every declaration in
 // component/server, and the value on the machine running the generator has
 // nothing to do with the value in the cluster the manifest is applied to.
 func TestCollectIgnoresServerPublicPath(t *testing.T) {
 	base := strings.Join(collect(), "\n")
 
-	t.Setenv("SERVER_PUBLIC_PATH", "/memql")
+	t.Setenv("MEMQL_SERVER_PUBLIC_PATH", "/memql")
 	if got := strings.Join(collect(), "\n"); got != base {
-		t.Errorf("SERVER_PUBLIC_PATH changed the generated set; the artifact must depend "+
+		t.Errorf("MEMQL_SERVER_PUBLIC_PATH changed the generated set; the artifact must depend "+
 			"only on the code\nwithout:\n%s\nwith:\n%s", base, got)
 	}
 }

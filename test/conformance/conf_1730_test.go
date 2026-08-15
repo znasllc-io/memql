@@ -81,7 +81,7 @@ func TestConf1730UserCountReturnsNumericAggregate(t *testing.T) {
 	//
 	// Deriving the declared `paginate` instead is NOT a fix: it swaps one
 	// ceiling for the other and reproduces the bug whenever the declared
-	// value exceeds MaxResults, MEMORY_ENGINE_MAX_RESULTS is lowered, or the
+	// value exceeds MaxResults, MEMQL_MEMORY_ENGINE_MAX_RESULTS is lowered, or the
 	// query is @unbounded.
 	//
 	// Ground truth has no ceiling, so there is nothing to get wrong and this
