@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/repowalk"
 )
 
 // protoSeamAllowlist is the closed set of exported SDK symbols permitted to
@@ -78,7 +80,18 @@ func TestSDKPublicSurfaceHasNoProtoLeak(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+		if info.IsDir() {
+			// The one shared skip list (memql#3678). sdk/go is not an ancestor
+			// of .claude today, so this cannot currently fire -- it is here
+			// because the alternative is an exemption entry asserting a fact
+			// about the tree's SHAPE, which the next person to add a worktree
+			// or a vendor directory under sdk/ would silently falsify.
+			if repowalk.SkipDir(info.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
 			return nil
 		}
 		filesScanned++
