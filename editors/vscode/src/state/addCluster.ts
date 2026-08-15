@@ -20,7 +20,7 @@ import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
 import type { HandoffResult } from "../install/handoff.js";
 import { looksLikeProviderKey } from "../install/secrets.js";
-import { installDomainProblem, DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
+import { installDomainProblem, DEFAULT_LOCAL_DOMAIN, DEFAULT_STACK_TAG } from "../install/stackPin.js";
 
 /** Where the operator is. */
 export type Screen =
@@ -109,6 +109,29 @@ export interface Inputs {
   provider: string;
   /** A PATH. The key itself never enters this module -- see SessionOptions. */
   providerKeyFile: string;
+  /**
+   * The release tag to install (memql#3882).
+   *
+   * COLLECTED WITH A DEFAULT, which is the shape the whole field turns on.
+   * `stackPin.ts` argues at length that the pinned tag should be a reviewed
+   * diff rather than "whatever was pushed this morning", and that argument is
+   * sound -- a packaged extension carries a STAGED COPY of `scripts/` and runs
+   * it against whatever the checkout contains, so the pairing should be
+   * something somebody chose. None of that argues for the pin being the ONLY
+   * thing the wizard can express.
+   *
+   * So DEFAULT_STACK_TAG stays pre-selected and the dropdown is an OVERRIDE.
+   * The reviewed-pin property survives, and an operator who needs the release
+   * carrying a fix they are waiting on stops having to edit TypeScript and
+   * rebuild the extension to get it.
+   *
+   * Note this is the opposite pre-selection from the deployment page's tag
+   * picker, which deliberately never pre-selects: there the operator is MOVING
+   * a cluster and any version is as plausible as another, so a silent choice
+   * would be one they could not be held to. Here there is a house answer, and
+   * offering it is what makes the field optional in practice.
+   */
+  version: string;
 }
 
 export type InputField = keyof Inputs;
@@ -155,6 +178,9 @@ export const DEFAULT_INPUTS: Inputs = {
   // pre-selection is an answer they can accept rather than a guess about them.
   provider: "anthropic",
   providerKeyFile: "",
+  // The constant, not a copy of it -- the same reasoning as `domain` above.
+  // The wizard's offer and the installer's own default are one fact.
+  version: DEFAULT_STACK_TAG,
 };
 
 // -----------------------------------------------------------------------------
@@ -301,6 +327,12 @@ export function requiredFields(action: AddClusterAction): InputField[] {
         "ownerEmail",
         "provider",
         "providerKeyFile",
+        // Asked for LAST, and pre-filled: it is the one field with a house
+        // answer, so it reads as a confirmation rather than a question.
+        // A REPAIR does not collect it -- the receipt replays the version the
+        // cluster was installed at (memql#3605), and asking would invite an
+        // operator to silently upgrade a cluster they meant to repair.
+        "version",
       ];
     case "repair":
       // THE KEY FIELDS ARE COLLECTED, and the receipt supplies their DEFAULTS
@@ -337,6 +369,7 @@ const LABELS: Record<InputField, string> = {
   ownerEmail: "email address",
   provider: "AI provider",
   providerKeyFile: "provider key file",
+  version: "version",
 };
 
 /** The screen each action needs first. */

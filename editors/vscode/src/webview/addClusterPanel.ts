@@ -102,6 +102,8 @@ import {
   renderRunningScreen,
 } from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
+import { listReleaseTags } from "../install/tags.js";
+import { DEFAULT_STACK_REPO } from "../install/stackPin.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -367,6 +369,10 @@ export class AddClusterPanel {
     this.state.chooseAction(action);
     if (action === "uninstall") void this.loadUninstallPreview();
     if (action === "repair") void this.prefillFromReceipt();
+    // Nothing waits on it (memql#3882): the field already carries the pinned
+    // default, so the form is answerable the instant it renders and the list
+    // only widens what can be chosen.
+    if (action === "install" || action === "installGuided") void this.loadVersionChoices();
     this.render();
   }
 
@@ -449,6 +455,7 @@ export class AddClusterPanel {
       // registry that never arrives costs the inline refusal but not the
       // write-time one.
       if (action === "connect") void this.loadRegistry();
+      if (action === "install" || action === "installGuided") void this.loadVersionChoices();
       // A repair now COLLECTS the key fields (memql#3544), so it opens with the
       // recorded answers already in the boxes -- nobody retypes a good path,
       // and a bad one is finally reachable.
@@ -864,9 +871,14 @@ export class AddClusterPanel {
           providerKeyFile,
           // On a REPAIR, the tag the receipt recorded (memql#3605). Without it
           // the run fell through to DEFAULT_STACK_TAG and a repair from a newer
-          // extension silently upgraded the cluster. A fresh install records no
-          // checkout, so this is empty and the default applies.
-          tag: recordedStackTag(priorReceipt),
+          // extension silently upgraded the cluster.
+          //
+          // On a FRESH INSTALL the receipt records no checkout, so the answer is
+          // whatever the version field says -- which starts on DEFAULT_STACK_TAG
+          // and is an OVERRIDE, not a replacement (memql#3882). The receipt is
+          // checked first so a repair can never be steered by a field it does
+          // not collect.
+          tag: recordedStackTag(priorReceipt) || inputs.version,
           timeoutMs: STEP_TIMEOUT_MS,
           env: this.sudoEnv(),
         }),
@@ -1563,7 +1575,37 @@ ${cards}`;
       action,
       values: this.state.inputs,
       errors: this.state.errors,
+      versionChoices: this.versionChoices,
     });
+  }
+
+  /**
+   * The release tags the version field offers (memql#3882).
+   *
+   * Filled ONCE, in the background, when the collect screen first opens. It
+   * starts empty and the field renders as a text box until the listing lands,
+   * which is the right order: an operator must never be blocked on a network
+   * call to answer a question that already has a default.
+   */
+  private versionChoices: readonly string[] = [];
+
+  /**
+   * Loads the tag list and repaints if it found anything.
+   *
+   * FAILURE IS SILENT HERE, and deliberately: `listReleaseTags` already reports
+   * why it came back empty, and the consequence -- typing the version instead
+   * of picking it -- is a working path rather than a degraded one. An error
+   * banner over a form whose default is already correct would be noise about a
+   * choice most operators will not make.
+   */
+  private async loadVersionChoices(): Promise<void> {
+    if (this.versionChoices.length > 0) return;
+    // Asked of the REPOSITORY, not of a checkout: the wizard is choosing what
+    // to clone, so there is no working tree yet to have an origin.
+    const listing = await listReleaseTags({ cwd: process.cwd(), repo: DEFAULT_STACK_REPO });
+    if (listing.tags.length === 0) return;
+    this.versionChoices = listing.tags;
+    this.render();
   }
 
   /**
