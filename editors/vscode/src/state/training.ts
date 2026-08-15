@@ -326,3 +326,59 @@ export function statusBarTooltip(counts: TrainingCounts): string {
   }
   return lines.join("\n");
 }
+
+// -----------------------------------------------------------------------------
+// The list the status bar clicks through to
+// -----------------------------------------------------------------------------
+
+/**
+ * The command the status-bar item posts (design §4: "clicking through to a
+ * list. This is what makes 'I saved but did not promote' impossible to miss").
+ *
+ * It NAVIGATES AND DOES NOT ACT -- it opens a picker and moves a cursor. That is
+ * why it is the only training command safe to offer in the command palette,
+ * where the four that submit something to a cluster are hidden.
+ */
+export const COMMAND_SHOW_LIST = "memql.training.showList";
+
+/** One row of that list. */
+export interface TrainingListEntry {
+  construct: TrainingConstruct;
+  /** The row's primary text: the construct, as the file declares it. */
+  label: string;
+  /** The row's secondary text: the state, in the same word the lens uses. */
+  description: string;
+  /** The row's third line: why that state matters. */
+  detail: string;
+}
+
+/**
+ * The constructs the status bar is counting, as a list.
+ *
+ * SAME SET, SAME MODULE, and that is the whole reason this lives here rather
+ * than next to the picker that renders it. `statusBarText` reports untrained and
+ * drifted and deliberately nothing else, so a list clicking through to any other
+ * set would turn the number into a lie the moment somebody counted the rows. The
+ * two derivations sit beside each other and read the same two states.
+ *
+ * DOCUMENT ORDER, not grouped by state. The list is a way back to a place in a
+ * file; a developer scanning for the one they were just looking at knows roughly
+ * where it sat, not which bucket it landed in.
+ */
+export function trainingListEntries(
+  constructs: readonly TrainingConstruct[],
+): TrainingListEntry[] {
+  const out: TrainingListEntry[] = [];
+  for (const construct of constructs) {
+    if (construct.state !== "untrained" && construct.state !== "drifted") continue;
+    out.push({
+      construct,
+      label: `${construct.kind} ${construct.name}`,
+      description: construct.state,
+      // The lens's own sentence, reused rather than rewritten: two wordings for
+      // one state are two things to keep in step, and the second one drifts.
+      detail: detailFor(construct.state),
+    });
+  }
+  return out;
+}

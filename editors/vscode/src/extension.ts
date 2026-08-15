@@ -82,6 +82,7 @@ import {
   COMMAND_DEMOTE,
   COMMAND_DRY_RUN,
   COMMAND_PROMOTE,
+  COMMAND_SHOW_LIST,
   COMMAND_TRY_IN_SESSION,
   TRAINING_STATE_CAPABILITY,
   TRAINING_STATE_METHOD,
@@ -1055,6 +1056,15 @@ function registerRunSurface(
   // promote could leave stale.
   let refreshTrainingSurfaces: () => Promise<void> = async () => {};
   let refreshSessionLens: () => void = () => {};
+  // The status bar's click-through. It is registered UNCONDITIONALLY below, so
+  // it needs an answer for the window where there is no language server -- and
+  // "nothing happens" is the wrong one for a command the palette offers. The
+  // default explains instead.
+  let showTrainingList: () => Promise<void> = async () => {
+    window.showInformationMessage(
+      'memQL: training state needs the memQL language server, which is not running. Set "memql.lsp.serverPath" or install memql-lsp on your PATH.'
+    );
+  };
 
   const training = new TrainingActions({
     cluster: () => currentRunCluster(clustersPath, conns),
@@ -1127,7 +1137,11 @@ function registerRunSurface(
     commands.registerCommand(COMMAND_DEMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
       reportTraining(await training.demote(request), trainingOutput);
-    })
+    }),
+    // The one training command that IS in the palette. It navigates and submits
+    // nothing, and it takes no arguments -- the four above take the lens's
+    // {uri, name} payload, which the palette cannot supply.
+    commands.registerCommand(COMMAND_SHOW_LIST, () => showTrainingList())
   );
 
   // Every connection-state change ends the stream that held any session-define.
@@ -1328,6 +1342,11 @@ function registerRunSurface(
     const trainingDecorations = new TrainingDecorations();
     trainingDecorations.setClient(lspBridge);
     trainingDecorations.activate();
+    // The status bar and its list have ONE OWNER, which is the whole reason the
+    // handler delegates here rather than fetching for itself: the list has to be
+    // the set the count was computed from, and a second reader is a second
+    // answer.
+    showTrainingList = () => trainingDecorations.showList();
     context.subscriptions.push(
       trainingLens,
       trainingDecorations,

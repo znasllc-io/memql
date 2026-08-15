@@ -178,6 +178,47 @@ test("the training lens offers the four actions, and each one is contributed AND
     // possible outcome is a silent no-op.
     assert.equal(palette.get(id), "false", `${id} must be hidden from the command palette`);
   }
+
+  // The fifth is the status bar's click-through (design §4). It IS in the
+  // palette, and the difference is exactly why it can be: it navigates and
+  // submits nothing, and it takes no argument that could be missing.
+  assert.ok(declared.has("memql.training.showList"), "the click-through is not contributed");
+  assert.ok(
+    activation?.text.includes("registerCommand(COMMAND_SHOW_LIST") === true,
+    "the click-through is contributed but never registered in extension.ts",
+  );
+  assert.equal(palette.get("memql.training.showList"), "isWorkspaceTrusted");
+});
+
+test("the status-bar item posts the click-through, and the list is not a second read", () => {
+  // Design §4: "a status-bar item ... clicking through to a list. This is what
+  // makes 'I saved but did not promote' impossible to miss." An item with no
+  // command is a notice; the command is what makes it a way back.
+  //
+  // The second half is the one worth guarding. The list must be the set the
+  // COUNT was computed from -- a fresh fetch on click could answer differently
+  // from the number the developer just clicked, which is a race inside the very
+  // surface built to stop the gutter and the status bar from disagreeing. So the
+  // handler reads the retained paint and never the server.
+  const decorations = sources().find(
+    ({ file }) => file === path.join("src", "constructs", "decorations.ts"),
+  );
+  assert.ok(decorations !== undefined);
+  assert.ok(
+    decorations.text.includes("this.status.command = COMMAND_SHOW_LIST"),
+    "the status-bar item posts no command, so the count clicks through to nothing",
+  );
+  const body = stripComments(decorations.text);
+  const from = body.indexOf("async showList(");
+  assert.ok(from > 0, "showList is gone; the status bar posts a command nothing implements");
+  const rest = body.slice(from);
+  const nextMethod = rest.indexOf("\n  private ");
+  const scoped = nextMethod < 0 ? rest : rest.slice(0, nextMethod);
+  assert.equal(
+    /this\.fetch\(|sendRequest/.test(scoped),
+    false,
+    "showList reads the server again; it must list the constructs the count was taken from",
+  );
 });
 
 test("no file spells a training command id as a literal except the one that declares it", () => {

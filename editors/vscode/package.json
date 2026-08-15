@@ -286,6 +286,10 @@
       {
         "command": "memql.training.demote",
         "title": "memQL: Demote Construct From The Cluster"
+      },
+      {
+        "command": "memql.training.showList",
+        "title": "memQL: Show Untrained And Drifted Constructs"
       }
     ],
     "menus": {
@@ -413,6 +417,10 @@
         {
           "command": "memql.training.demote",
           "when": "false"
+        },
+        {
+          "command": "memql.training.showList",
+          "when": "isWorkspaceTrusted"
         }
       ],
       "view/title": [
