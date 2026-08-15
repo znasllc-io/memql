@@ -98,6 +98,17 @@
 export const DEFAULT_STACK_TAG = "v0.18.0";
 
 /**
+ * The repository an install clones, and the one the version list is read from.
+ *
+ * It lives here rather than in the panel for the reason every other default in
+ * this file does: `clone-stack.sh` already carries it as its own `DEFAULT_REPO`,
+ * and a second literal is how the two drift. The wizard needs it BEFORE a
+ * checkout exists -- it is choosing what to clone -- so `git ls-remote --tags`
+ * is pointed at this URL rather than at an origin there is not yet.
+ */
+export const DEFAULT_STACK_REPO = "https://github.com/znasllc-io/memql.git";
+
+/**
  * How a cluster the wizard builds treats people who are not its owner.
  *
  * `invite_only`, because that cluster has exactly one owner -- bootstrapped
