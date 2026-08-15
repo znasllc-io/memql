@@ -738,13 +738,41 @@ function print_summary() {
 
 # gate_voice_lane_post_sync re-runs the voice-lane gate once the ArgoCD app
 # has created the Deployments (seed-secrets runs BEFORE the app applies, so
-# its gate is a no-op on a fresh cluster). Bounded wait; best-effort.
+# its gate is a no-op on a fresh cluster).
+#
+# THE BUDGET IS ARGOCD_TIMEOUT, NOT A NUMBER OF ITS OWN (memql#3877).
+#
+# What this waits for is ArgoCD materialising the Deployments -- which is
+# exactly what `--argocd-timeout` already governs, and the operator can already
+# raise. It used to wait a private, hardcoded 120s instead, and on a machine
+# with slow access to public registries that is simply too short: measured on a
+# failing install, the gap from Application creation to the Deployments
+# appearing was 124 SECONDS. The gate gave up four seconds early, voice and
+# voice-agent started ungated with an empty livekit-secrets, crash-looped by
+# design (memql#2416), and wait_for_workloads could not pass. Every install on
+# that machine failed the same way -- deterministic, not flaky.
+#
+# Two budgets for one wait is the defect. A machine slow enough to need
+# `MEMQL_K3D_ARGOCD_TIMEOUT=600` is exactly the machine whose Deployments take
+# longer than 120s to appear, and raising the documented knob did nothing for
+# the gate because the gate was not listening to it.
+#
+# THE EXPIRY IS LOUD, because it is no longer best-effort in any useful sense.
+# With no LiveKit credentials, skipping the gate means the readiness wait two
+# lines below CANNOT pass, and that wait is what the install graph verifies. The
+# operator then sees `workloadsReady did not satisfy resultTrue` -- a
+# consequence, from a step that is not the one that went wrong, naming neither
+# voice nor LiveKit. Saying so here is the difference between a five-second fix
+# and an afternoon.
 function gate_voice_lane_post_sync() {
-    local waited=0
+    local waited=0 interval=5
     while ! kubectl get deploy voice -n "$NAMESPACE" &>/dev/null; do
-        sleep 5; waited=$((waited + 5))
-        if [ "$waited" -ge 120 ]; then
-            info "voice deployment not present after ${waited}s; voice-lane gating deferred to 'make secrets'."
+        sleep "$interval"; waited=$((waited + interval))
+        if [ "$waited" -ge "${ARGOCD_TIMEOUT}" ]; then
+            warn "voice deployment still absent after ${waited}s -- the voice lane is NOT gated."
+            warn "  With no LiveKit credentials its pods fail fast by design, so the workload"
+            warn "  wait below cannot pass and this bring-up will report workloadsReady=false."
+            warn "  Fix: make secrets   (or raise MEMQL_K3D_ARGOCD_TIMEOUT and re-run)"
             return 0
         fi
     done
