@@ -57,8 +57,26 @@ data:
   #     the first migration rather than trusting this comment.
   MEMQL_DB_SEARCH_PATH: "memql_prod, public"
 
-  # The third value, the host prefix, is NOT here yet. Deriving `api.<domain>`
-  # versus `api-staging.<domain>` is a role x environment product the front door
-  # generates rather than authors (memql#3767); until that generator exists
-  # there is no consumer to read a prefix, and no file under deploy/ may name a
-  # domain at all (memql#3593). It joins this ConfigMap with its generator.
+  # THE THIRD VALUE (memql#3767): the DNS label that distinguishes this
+  # environment's front-door hosts. EMPTY means the unprefixed hosts --
+  # `api.<domain>`, `identity.<domain>`, `mcp.<domain>`, `*.<domain>` and the
+  # apex. Exactly one environment may be in that position, because the bare
+  # domain has no label for a second claimant to occupy.
+  #
+  # It is a VALUE with TWO consumers, and they must not be allowed to disagree:
+  #
+  #   - cmd/frontdoorhosts reads it FROM THIS FILE and generates
+  #     front-door.generated.yaml beside it -- which is what makes adding a
+  #     third environment a value change rather than a manifest edit.
+  #   - every node reads it AT BOOT through the same envFrom that carries the
+  #     two values above, and component/genesis/domain.go composes its issuer,
+  #     CORS origins, redirect URIs and MCP public URL with it.
+  #
+  # Both go through component/frontdoor, so the hosts the Ingresses serve and
+  # the hosts the nodes believe in are one derivation. A second copy of that
+  # rule would fail as "sign-in is broken", with both manifests looking correct.
+  #
+  # Note what this is NOT: the engine never learns WHICH environment it is from
+  # this, only what its own hosts are called. Environment reaches the engine as
+  # a value and never as a branch -- TestNoEnvironmentBranchingInEngineCode.
+  MEMQL_HOST_LABEL: ""

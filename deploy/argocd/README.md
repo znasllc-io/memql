@@ -159,8 +159,19 @@ later once a couple of clean GitOps prod deploys have happened.
 
 ### Prod deploy (the steady-state flow)
 
+**Promote = pin prod to the digests staging is running.** Both overlays are
+files in THIS repository reconciled by THIS ArgoCD, so a promote is one commit
+rather than a copy between two estates (#3769). It is mechanised — do not
+hand-edit the digests:
+
 ```bash
-# 1. Pin the prod digests: edit deploy/k8s/overlays/prod -> PR -> merge to main.
+# 1. Promote: pin every prod image digest to the one staging runs.
+#    Dry-run first (the default); --dryRun=false performs the edit.
+bash scripts/deploy/promote-overlay.sh \
+    --from=deploy/k8s/overlays/staging --to=deploy/k8s/overlays/prod --version=<v>
+#    -> then commit that ONE file, open the PR, merge to main.
+#    The deploy console does the same thing over gRPC (DeployControlService.Promote),
+#    through the same script, and makes the commit itself.
 # 2. Confirm git is digest-pinned + the live cluster has no out-of-band drift:
 bash scripts/deploy/drift-check.sh --live --env=prod      # must report converged
 # 3. Hold a sustained authenticated WS client against the prod entrypoint here
@@ -172,10 +183,40 @@ argocd app wait memql-prod --health
 bash scripts/deploy/post-deploy-gate.sh                   # the deploy is "good" only if this passes
 ```
 
-Rollback = `git revert` the overlay change + re-sync (`argocd app sync
-memql-prod`). On manual-sync there is no `selfHeal`, so the app's OutOfSync
-status and `drift-check.sh --live --env=prod` are the drift authority until
-auto-sync is enabled.
+The script **refuses** rather than guessing when the two overlays do not pin the
+same image set, or when staging carries a floating tag instead of a digest. Both
+are review decisions: prod pins `memql-mcp` closed with an all-zeros digest on
+purpose, and promoting a tag would pin production to a moving reference.
+
+Rollback = `git revert` the promote commit + re-sync (`argocd app sync
+memql-prod`). That restores exactly the prior digests **because the promote is
+one commit touching one file** — which is the property the one-tree layout buys
+and the reason the console's rollback is a git operation rather than a second
+promote. On manual-sync there is no `selfHeal`, so the app's OutOfSync status
+and `drift-check.sh --live --env=prod` are the drift authority until auto-sync
+is enabled.
+
+> ### Trained constructs do NOT cross. Read this before filing a bug.
+>
+> A promote moves **image digests**. A product's DSL bundle rides the same
+> commit for the same reason — it is a data-only image mounted at
+> `MEMQL_DSL_PATH`, so promoting it *is* pinning a digest.
+>
+> A **promoted construct** (memql#3746) is none of those things: it is a
+> `v1:authoring:construct` **row**, and the two environments are separated by
+> their Postgres schema search path (`memql_prod, public` /
+> `memql_staging, public`), not by a filter. So a construct trained and promoted
+> while exercising staging lives in `memql_staging` and is **genuinely absent
+> from production** after an engine promote. That is deliberate: shipping an
+> unrelated engine version must not make somebody's staging experiment live in
+> production.
+>
+> **Training production is an explicit act against production.** Asserted at the
+> row level by `TestPromotedConstructsDoNotCrossEnvironments`
+> (`component/database/search_path_db_test.go`) and, on the mechanism, by
+> `TestPromoteCarriesNoGraphState` (`component/deploycontrol/promote_test.go`),
+> which holds that a promote's entire effect is digest lines in one git-tracked
+> file.
 
 ### Prerequisites (one-time, owner-gated)
 

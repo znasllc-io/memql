@@ -133,6 +133,7 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/identity v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
@@ -231,3 +232,5 @@ replace github.com/znasllc-io/memql/component/worker => ../component/worker
 replace github.com/znasllc-io/memql/component/deploycontrol => ../component/deploycontrol
 
 replace github.com/znasllc-io/memql/component/healing => ../component/healing
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../component/frontdoor

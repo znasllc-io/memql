@@ -159,6 +159,7 @@ require (
 	github.com/znasllc-io/memql/component/database v0.0.0
 	github.com/znasllc-io/memql/component/deploycontrol v0.0.0
 	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0
 	github.com/znasllc-io/memql/component/genesis v0.0.0
 	github.com/znasllc-io/memql/component/grpc v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
@@ -305,3 +306,5 @@ replace github.com/znasllc-io/memql/component/server => ./component/server
 replace github.com/znasllc-io/memql/component/inbound => ./component/inbound
 
 replace github.com/znasllc-io/memql/component/grpc => ./component/grpc
+
+replace github.com/znasllc-io/memql/component/frontdoor => ./component/frontdoor
