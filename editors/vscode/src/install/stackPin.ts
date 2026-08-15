@@ -59,7 +59,35 @@
 // as the release it names, which is why bumping it belongs to the release and
 // not to whoever last touched the installer.
 //
-// Refs: #3602 #3600 #3593 #3560 #3375 #3363 #3357
+// BUMPED TO v0.18.0 (memql#3879, memql#3880, memql#3703). A clean uninstall
+// followed by a clean install produced a cluster that could not be used, and
+// every part of that sequence was working correctly. The install faithfully
+// deployed v0.17.1; all three fixes were on main.
+//
+// The one worth reading twice is the front door, because it shows what a stale
+// pin actually costs. v0.17.1's local overlay carries `front-door.yaml`,
+// `cockpit-front-door.yaml` and `identity-external.yaml` -- and no
+// `api-front-door.yaml`, which arrived with the five-host front door. So NOTHING
+// ROUTED `api.memql.localhost`, the one host every client dials. The editor
+// extension reported `websocket open failed: Unexpected server response: 404`
+// and the operator reasonably read it as a plugin fault. It was a manifest that
+// had never been cut into a release.
+//
+// The other two were quieter and pointed at the wrong component just as hard.
+// memql#3879: a v0.17.1 engine that loses the race with Postgres never retries
+// its migrations, so the database stays EMPTY and identity answers `500 could
+// not persist client` -- a failure that names the identity service for a fault
+// in database startup. memql#3880: seedBootstrap spent one shared roll budget
+// serially across seven consumers, so the install failed on whichever node the
+// clock happened to run out on and blamed that node by name.
+//
+// WHAT THIS ADDS TO THE ARGUMENT ABOVE. The v0.16.1 note already says a pin is
+// only as good as the release it names. What v0.17.1 adds is that a stale pin
+// does not fail like a stale pin. Each symptom accused a healthy component --
+// the plugin, identity, cognition -- and none of them pointed at the version.
+// Bumping this is the release step; skipping it spends somebody's afternoon.
+//
+// Refs: #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
  * The release tag an install checks out unless told otherwise.
@@ -67,7 +95,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.17.1";
+export const DEFAULT_STACK_TAG = "v0.18.0";
 
 /**
  * How a cluster the wizard builds treats people who are not its owner.
