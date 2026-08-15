@@ -31,6 +31,14 @@ type fakeExecutor struct {
 	rolloutsJSON []byte
 	analysisJSON []byte
 	kubectlErr   error
+
+	// kubectlCalls records the full argv of every read, so a test can assert
+	// WHICH namespace / Application was addressed. Added with memql#3769: the
+	// addresses used to be the constant `memql` and a wrong one does not error
+	// -- `kubectl -n <nonexistent> get rollout` is an empty list and exit 0 --
+	// so nothing but the argv distinguishes "nothing is rolling out" from
+	// "asked the wrong namespace".
+	kubectlCalls [][]string
 }
 
 func (f *fakeExecutor) RunPromote(_ context.Context, version, env string) (string, error) {
@@ -49,6 +57,7 @@ func (f *fakeExecutor) RunRolloutAction(_ context.Context, env, rollout, action 
 }
 
 func (f *fakeExecutor) KubectlJSON(_ context.Context, args ...string) ([]byte, error) {
+	f.kubectlCalls = append(f.kubectlCalls, append([]string(nil), args...))
 	if f.kubectlErr != nil {
 		return nil, f.kubectlErr
 	}

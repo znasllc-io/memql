@@ -64,6 +64,7 @@ require (
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/database v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language v0.0.0 // indirect
@@ -138,3 +139,5 @@ replace github.com/znasllc-io/memql/core => ../../../core
 replace github.com/znasllc-io/memql/docs => ../../../docs
 
 replace github.com/znasllc-io/memql/dsl => ../../../dsl
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../../frontdoor

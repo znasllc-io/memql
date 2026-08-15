@@ -121,6 +121,7 @@ require (
 	github.com/zeozeozeo/gomplerate v0.0.0-20250404113140-0fbb236df825 // indirect
 	github.com/znasllc-io/memql/component/actions v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language/annotations v0.0.0 // indirect
@@ -220,3 +221,5 @@ replace github.com/znasllc-io/memql/integrations/stt => ../../integrations/stt
 replace github.com/znasllc-io/memql/component/deploycontrol => ../deploycontrol
 
 replace github.com/znasllc-io/memql/component/healing => ../healing
+
+replace github.com/znasllc-io/memql/component/frontdoor => ../frontdoor

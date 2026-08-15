@@ -44,8 +44,14 @@ namespace: memql-prod
 
 resources:
   - ../../base
-  # The two values that make this namespace an environment.
+  # The three values that make this namespace an environment.
   - environment.yaml
+  # The front door, GENERATED from the role x environment product by
+  # cmd/frontdoorhosts (memql#3767) -- run `make frontdoor`, never edit it.
+  # It reads the host label out of environment.yaml above, which is what makes
+  # a third environment a value change: a new overlay directory with a new
+  # label in it generates its own front door with no edit to the generator.
+  - front-door.generated.yaml
 
 patches:
   # Replica counts, stated rather than inherited. Prod's numbers happen to match

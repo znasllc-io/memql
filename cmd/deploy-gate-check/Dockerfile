@@ -27,6 +27,7 @@ COPY component/database/go.* ./component/database/
 COPY component/deploycontrol/go.* ./component/deploycontrol/
 COPY component/events/go.* ./component/events/
 COPY component/fileprocessor/go.* ./component/fileprocessor/
+COPY component/frontdoor/go.* ./component/frontdoor/
 COPY component/genesis/go.* ./component/genesis/
 COPY component/grpc/go.* ./component/grpc/
 COPY component/grpc/gen/go.* ./component/grpc/gen/

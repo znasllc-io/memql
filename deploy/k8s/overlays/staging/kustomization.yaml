@@ -54,8 +54,12 @@ namespace: memql-staging
 
 resources:
   - ../../base
-  # The two values that make this namespace an environment.
+  # The three values that make this namespace an environment.
   - environment.yaml
+  # The front door, GENERATED from the role x environment product by
+  # cmd/frontdoorhosts (memql#3767) -- run `make frontdoor`, never edit it.
+  # Diff it against the prod twin: same objects, same order, different hosts.
+  - front-door.generated.yaml
 
 patches:
   # Replica counts, stated rather than inherited -- the same nodes in the same

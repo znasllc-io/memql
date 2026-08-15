@@ -7,7 +7,7 @@ import (
 )
 
 func TestDomainDerivations(t *testing.T) {
-	got := DomainDerivations("memql.localhost")
+	got := DomainDerivations("memql.localhost", "")
 
 	want := map[string]string{
 		"MEMQL_IDENTITY_BASE_URL":                 "https://identity.memql.localhost",
@@ -59,7 +59,7 @@ func TestDomainDerivationsRejectsMalformed(t *testing.T) {
 		"memql.localhost:443", "MEMQL.localhost", "memql.localhost.",
 		"*.memql.localhost", "127.0.0.1", "memql..localhost",
 	} {
-		if got := DomainDerivations(bad); len(got) != 0 {
+		if got := DomainDerivations(bad, ""); len(got) != 0 {
 			t.Errorf("DomainDerivations(%q) = %v, want empty", bad, got)
 		}
 	}
@@ -99,7 +99,7 @@ func TestApplyDomainDerivationsNoopWithoutDomain(t *testing.T) {
 // the Cockpit, the VS Code extension, sdk/go, sdk/ts, workers, the portal --
 // and a seventh reads it out of a List-Unsubscribe header we send.
 func TestDomainDerivationsUseApiHost(t *testing.T) {
-	got := DomainDerivations("memql.localhost")
+	got := DomainDerivations("memql.localhost", "")
 
 	if want := "api.memql.localhost:443"; got["MEMQL_DISCOVERY_GRPC_ENDPOINT"] != want {
 		t.Errorf("MEMQL_DISCOVERY_GRPC_ENDPOINT = %q, want %q",
@@ -124,5 +124,88 @@ func TestApplyDomainDerivationsIdempotent(t *testing.T) {
 
 	if got := os.Getenv("MEMQL_IDENTITY_BASE_URL"); got != first {
 		t.Errorf("second call changed BASE_URL: %q -> %q", first, got)
+	}
+}
+
+// TestDomainDerivationsUnderAHostLabel is the environment axis (memql#3767).
+//
+// The label lands in TWO positions and they are not interchangeable: a ROLE
+// host hyphenates so the cluster's existing `*.<domain>` wildcard certificate
+// still covers it, and a SITE host nests because its own name already occupies
+// that label. Getting either backwards is not a startup failure -- identity
+// issues tokens naming an issuer nothing is served at, every verifier rejects
+// them, and the symptom is "sign-in is broken" with both manifests looking
+// correct.
+func TestDomainDerivationsUnderAHostLabel(t *testing.T) {
+	got := DomainDerivations("memql.localhost", "e2")
+
+	want := map[string]string{
+		// Roles hyphenate -- single label, covered by *.memql.localhost.
+		"MEMQL_IDENTITY_BASE_URL":                 "https://identity-e2.memql.localhost",
+		"MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER": "https://identity-e2.memql.localhost",
+		"MEMQL_DISCOVERY_GRPC_ENDPOINT":           "api-e2.memql.localhost:443",
+		"MEMQL_MCP_PUBLIC_URL":                    "https://mcp-e2.memql.localhost",
+		// Sites nest -- app. and portal. are site rows, not roles.
+		"MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS": "https://api-e2.memql.localhost," +
+			"https://app.e2.memql.localhost,https://portal.e2.memql.localhost",
+		// The bootstrap domain is the CLUSTER's domain and carries no label:
+		// it is the domain, not a host derived from it.
+		"MEMQL_IDENTITY_BOOTSTRAP_DOMAIN": "memql.localhost",
+	}
+	for name, wantVal := range want {
+		if got[name] != wantVal {
+			t.Errorf("%s = %q, want %q", name, got[name], wantVal)
+		}
+	}
+
+	if clients := got["MEMQL_IDENTITY_REGISTERED_CLIENTS"]; !strings.Contains(
+		clients, "https://portal.e2.memql.localhost/auth/callback") {
+		t.Errorf("the portal's redirect URI does not follow the label: %s", clients)
+	}
+}
+
+// An unset label must produce byte-for-byte what the unprefixed environment
+// produced before the label existed. That is every single-environment cluster,
+// every local one, and production.
+func TestDomainDerivationsWithoutALabelAreUnchanged(t *testing.T) {
+	for name, v := range DomainDerivations("memql.localhost", "") {
+		if strings.Contains(v, "-.") || strings.Contains(v, "..") {
+			t.Errorf("%s = %q -- an empty label leaked a separator into the host", name, v)
+		}
+	}
+	// Whitespace around a ConfigMap value is invisible in every UI that shows
+	// it, and would otherwise be concatenated straight into a hostname.
+	a := DomainDerivations("memql.localhost", "")
+	b := DomainDerivations("memql.localhost", "  ")
+	for name := range a {
+		if a[name] != b[name] {
+			t.Errorf("a whitespace-only label changed %s: %q vs %q", name, a[name], b[name])
+		}
+	}
+}
+
+// A label that cannot be concatenated safely derives NOTHING, for the same
+// reason a malformed domain does: half a derivation is a cluster that boots and
+// cannot be signed into. A dotted label is the dangerous member -- it silently
+// makes a role host two labels, which the wildcard certificate does not cover.
+func TestDomainDerivationsRejectsAMalformedLabel(t *testing.T) {
+	for _, bad := range []string{"a.b", "Staging", "-lead", "trail-", "with space", "*"} {
+		if got := DomainDerivations("memql.localhost", bad); len(got) != 0 {
+			t.Errorf("DomainDerivations(_, %q) = %v, want empty", bad, got)
+		}
+	}
+}
+
+// The label reaches the process the same way the search path does: an env entry
+// off the memql-environment ConfigMap.
+func TestApplyDomainDerivationsReadsTheHostLabel(t *testing.T) {
+	t.Setenv("MEMQL_DOMAIN", "memql.localhost")
+	t.Setenv("MEMQL_HOST_LABEL", "e2")
+	t.Setenv("MEMQL_IDENTITY_BASE_URL", "")
+
+	ApplyDomainDerivations(nil)
+
+	if got, want := os.Getenv("MEMQL_IDENTITY_BASE_URL"), "https://identity-e2.memql.localhost"; got != want {
+		t.Errorf("BASE_URL = %q, want %q", got, want)
 	}
 }
