@@ -158,9 +158,12 @@ func TestAliasIsHonouredByTheAuthoringSandbox(t *testing.T) {
 query harnessPlan probeAliasInSandbox {
   filter  row.id != ""
 }`
-	// Single-arg on this branch; memql#3800 adds the origin parameter and the
-	// two land independently.
-	report := ValidateBundle(src)
+	// The ORIGIN is memql#3800's half: it supplies the ambient domain, so this
+	// bundle is validated as a planner file exactly as the loader would see it.
+	// The two issues landed independently and meet here -- an alias honoured by
+	// the loader and not by the sandbox would be #3800's divergence again, one
+	// construct later.
+	report := ValidateBundle(src, "planner/queries.memql")
 	for _, d := range report.Diagnostics {
 		if d.Skipped || d.OK {
 			continue

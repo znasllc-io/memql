@@ -121,9 +121,19 @@ export function tagProblem(value: string): string | undefined {
 export interface ListTagsOptions {
   /** The checkout whose origin is asked. */
   cwd: string;
+  /**
+   * A repository URL to ask INSTEAD of the checkout's origin (memql#3882).
+   *
+   * The install wizard needs this list BEFORE there is a checkout to ask -- it
+   * is choosing what to clone. `git ls-remote --tags <url>` needs no working
+   * tree at all, so supplying the URL is what makes the same listing serve both
+   * callers: the deployment page asks a cluster's own origin, the wizard asks
+   * the repository it is about to clone from.
+   */
+  repo?: string;
   timeoutMs?: number;
   /** Injectable for tests; the real `git ls-remote` when absent. */
-  run?: (cwd: string, timeoutMs: number) => Promise<{ stdout: string; error: string }>;
+  run?: (cwd: string, timeoutMs: number, repo: string) => Promise<{ stdout: string; error: string }>;
 }
 
 /**
@@ -137,11 +147,12 @@ export async function listReleaseTags(options: ListTagsOptions): Promise<TagList
   const timeoutMs = options.timeoutMs ?? TAG_LIST_TIMEOUT_MS;
   const run = options.run ?? runGitLsRemote;
   try {
-    const result = await run(options.cwd, timeoutMs);
+    const remote = (options.repo ?? "").trim();
+    const result = await run(options.cwd, timeoutMs, remote === "" ? "origin" : remote);
     if (result.error !== "") return { tags: [], error: result.error };
     const tags = parseLsRemoteTags(result.stdout);
     return tags.length === 0
-      ? { tags: [], error: "The checkout's origin published no release tags." }
+      ? { tags: [], error: "The repository published no release tags." }
       : { tags, error: "" };
   } catch (err) {
     return { tags: [], error: err instanceof Error ? err.message : String(err) };
@@ -151,6 +162,7 @@ export async function listReleaseTags(options: ListTagsOptions): Promise<TagList
 const runGitLsRemote = (
   cwd: string,
   timeoutMs: number,
+  remote: string,
 ): Promise<{ stdout: string; error: string }> =>
   new Promise((resolve) => {
     let stdout = "";
@@ -172,7 +184,10 @@ const runGitLsRemote = (
     try {
       // No shell: the only argument that varies is the cwd, and even that goes
       // through spawn's option rather than into a command line.
-      child = spawn("git", ["ls-remote", "--tags", "origin"], {
+      // `remote` is either the literal "origin" or a repository URL, and it is
+      // an ARGUMENT rather than part of a command line: `shell: false` means no
+      // shell parses it, so a URL cannot smuggle anything through.
+      child = spawn("git", ["ls-remote", "--tags", remote], {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,

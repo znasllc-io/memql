@@ -29,7 +29,7 @@ import (
 func TestPromoteBundleDurable_ValidateFail(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
 	store := &fakePromoteStore{}
-	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec actorEnvelope broken { return role == }`, false)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", `spec actorEnvelope broken { return role == }`, "", false)
 	if err == nil {
 		t.Fatal("expected a validation error for a broken bundle")
 	}
@@ -49,7 +49,7 @@ func TestPromoteBundleDurable_ValidateFail(t *testing.T) {
 func TestPromoteBundleDurable_PromotesAndCallable(t *testing.T) {
 	e := &MemQLEngine{specs: newSpecRegistry(), functions: newFunctionRegistry()}
 	store := &fakePromoteStore{}
-	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", sessionSpecSrc, false)
+	res, err := e.promoteBundleDurableWithStore(context.Background(), store, "owner-1", sessionSpecSrc, "", false)
 	if err != nil {
 		t.Fatalf("durable promote bundle: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestAuthoringPromotePropagation_CrossNode(t *testing.T) {
 	}
 
 	// Promote on engine A (fake persist store, real bus broadcast).
-	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, false)
+	res, err := engA.promoteBundleDurableWithStore(ctx, &fakePromoteStore{}, "owner-1", sessionSpecSrc, "", false)
 	if err != nil {
 		t.Fatalf("promote on engine A: %v", err)
 	}

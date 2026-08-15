@@ -94,7 +94,7 @@ type crossRefResolver struct {
 // check runs every reference check applicable to the construct's kind and
 // returns the first failure message (empty when the construct is clean).
 func (r *crossRefResolver) check(c SandboxConstruct) string {
-	origin := fmt.Sprintf("sandbox:%s:%s", c.Kind, c.Name)
+	origin := c.sandboxOrigin()
 
 	// All construct kinds that carry file-top `use` imports get
 	// cross-construct reference resolution.

@@ -55,6 +55,7 @@ export const INPUT_FIELDS: readonly InputField[] = [
   "ownerEmail",
   "provider",
   "providerKeyFile",
+  "version",
 ];
 
 /**
@@ -78,6 +79,7 @@ export const FIELD_LABELS: Record<InputField, string> = {
   ownerEmail: "Email address",
   provider: "AI provider",
   providerKeyFile: "AI provider key file",
+  version: "Version",
 };
 
 /** What each field is for, in one line. */
@@ -90,6 +92,8 @@ export const FIELD_HINTS: Record<InputField, string> = {
   ownerEmail: "Used to create the owner account. A local cluster sends no mail.",
   providerKeyFile:
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
+  version:
+    "Which memQL release to install. The default is the version this extension was built and tested against; pick another only if you need a specific one.",
 };
 
 export const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
@@ -106,6 +110,19 @@ export interface CollectScreenInput {
   action: AddClusterAction;
   values: Inputs;
   errors: readonly FieldError[];
+  /**
+   * The release tags offered for `version`, newest first (memql#3882).
+   *
+   * DYNAMIC, unlike CHOICE_FIELDS, which is why it rides here rather than
+   * there: the set comes from `git ls-remote --tags` at page-open time, not
+   * from a constant this file could hold.
+   *
+   * EMPTY IS AN ORDINARY OUTCOME and renders the free-text box instead --
+   * `git ls-remote` needs a network and a git, and an operator on a plane has
+   * neither and still has a cluster to install. That is the same degradation
+   * `install/tags.ts` documents for the deployment picker, for the same reason.
+   */
+  versionChoices?: readonly string[];
 }
 
 export function renderCollectScreen(input: CollectScreenInput): string {
@@ -135,12 +152,22 @@ export function renderCollectScreen(input: CollectScreenInput): string {
         field === "providerKeyFile"
           ? `<button class="secondary browse" type="button" data-act="browseKeyFile">Browse...</button>`
           : "";
+      // `version` is the one field whose options are not a constant: they come
+      // off the remote at page-open time. Falls through to the text box when
+      // the listing is empty, which is what makes a no-network install still
+      // able to name a version.
+      const fieldChoices =
+        field === "version"
+          ? (input.versionChoices ?? []).length === 0
+            ? undefined
+            : dedupeKeepingDefault(input.versionChoices ?? [], values.version)
+          : choices;
       const control =
-        choices === undefined
+        fieldChoices === undefined
           ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
               values[field],
             )}">${browse}</div>`
-          : `<select id="f-${field}" data-field="${field}">${choices
+          : `<select id="f-${field}" data-field="${field}">${fieldChoices
               .map(
                 (choice) =>
                   `<option value="${escapeHtml(choice)}"${
@@ -345,4 +372,24 @@ export function renderRemedy(failure: { id: string; remedy: string }): string {
     Open a terminal with this command
   </button>
 </div>`;
+}
+
+/**
+ * The version options, with the current value guaranteed present and first.
+ *
+ * A `<select>` silently drops a value that is not one of its options, so a
+ * pinned default the remote listing does not carry -- a tag cut after this
+ * extension was built, or a listing that came back partial -- would leave the
+ * field showing the newest release while `values.version` still said something
+ * else. The operator would then install a version the page never offered them.
+ *
+ * Putting the current value first also keeps the pin at the top of the list,
+ * which is where an operator scanning for "the one I was given" looks.
+ */
+export function dedupeKeepingDefault(
+  choices: readonly string[],
+  current: string,
+): readonly string[] {
+  const rest = choices.filter((c) => c !== current);
+  return current === "" ? rest : [current, ...rest];
 }

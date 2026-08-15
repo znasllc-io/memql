@@ -120,8 +120,16 @@ test("an install needs everything up front; a repair needs what it can get wrong
     "ownerEmail",
     "provider",
     "providerKeyFile",
+    // memql#3882. Collected LAST and pre-filled with DEFAULT_STACK_TAG, so it
+    // reads as a confirmation rather than a question -- the pin stays the
+    // reviewed answer and the field is the override.
+    "version",
   ]);
   assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
+  // A REPAIR DOES NOT COLLECT IT. The receipt replays the version the cluster
+  // was installed at (memql#3605); a field here would invite an operator to
+  // silently upgrade a cluster they meant to repair -- which is the defect
+  // #3605 fixed, offered back as a control.
   assert.deepEqual(requiredFields("repair"), ["domain", "provider", "providerKeyFile"]);
   assert.deepEqual(requiredFields("uninstall"), []);
   assert.deepEqual(requiredFields("connect"), []);

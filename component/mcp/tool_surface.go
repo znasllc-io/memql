@@ -554,7 +554,12 @@ func handleDefine(ctx context.Context, eng Engine, role string, tier Tier, args 
 	if strings.TrimSpace(bundle) == "" {
 		return errorResult("define requires a 'bundle' (.memql source)")
 	}
-	res, err := memql.AuthorSessionBundle(s.registry, s.owner, bundle)
+	// origin is the bundle's tree-relative path when the caller knows it
+	// ("planner/queries.memql"), which supplies the ambient domain for
+	// signature-concept resolution (memql#3800). Optional: a bundle composed in
+	// a chat has no file, and the dir=="" degrade is correct for it.
+	origin, _ := args["origin"].(string)
+	res, err := memql.AuthorSessionBundle(s.registry, s.owner, bundle, origin)
 	if err != nil {
 		// A validation failure carries per-construct diagnostics; surface them.
 		payload, _ := json.Marshal(res)
