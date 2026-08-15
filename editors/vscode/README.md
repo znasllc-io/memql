@@ -224,13 +224,18 @@ same Result view, and the same write confirmation. Browsing a catalog is not a
 quieter way to write to production: a mutation against a non-local cluster
 still asks (memql#3309).
 
-**An automation does not**, and the page says why rather than leaving an
-unexplained gap. An automation is fired by an event, so its form is decided by
-its TRIGGER -- which payload modes to offer, which concept the row picker
-browses -- and `ListConstructs` does not carry one. A form missing the field
-that decides it would fire a real event on a real cluster with a payload nobody
-chose. Open it from its `.memql` file to run it. Tracked as memql#3805, which
-adds the trigger to the wire.
+**An automation runs too, through its own form** rather than the argument one.
+It is fired by an event, so what it needs is not arguments -- it has none -- but
+a trigger: which payload modes to offer, and which concept's rows the picker
+browses. `ListConstructs` carries that trigger (memql#3805), so the detail page
+opens the same automation form a `.memql` file's CodeLens does, with the same
+row picker and the same event synthesis.
+
+Its button reads **Run automation...** rather than **Run**, and the ellipsis is
+load-bearing: for the other four kinds a click invokes, while here it opens a
+form that ends in firing a real event on a real cluster. An automation the
+cluster reports no trigger for is manual-run -- a real, describable form -- so
+it is offered as one rather than withheld.
 
 **The other eight kinds -- spec, trait, prompt, seed, concept, shape, provider,
 builtin -- are not runnable, and that is a decision rather than a gap.** Each

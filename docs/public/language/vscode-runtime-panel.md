@@ -254,12 +254,25 @@ Result view and write confirmation. A mutation against a non-local
 cluster still asks for confirmation; browsing a catalog is not a quieter
 way to write to production.
 
-**An automation does not run from here.** It is fired by an event, so its
-form is decided by its trigger -- which payload modes to offer, which
-concept the row picker browses -- and the catalog does not carry one. A
-form missing the field that decides it would fire a real event on a real
-cluster with a payload nobody chose. Run it from its `.memql` file
-instead. (Carrying the trigger on the wire is tracked as memql#3805.)
+**An automation runs from here too, through its own form.** It is fired
+by an event, so what its form needs is not arguments -- an automation has
+none -- but a trigger: which payload modes to offer, and which concept's
+rows the picker browses. The catalog carries that trigger, so the detail
+page opens the same automation form a `.memql` file's CodeLens does.
+
+The button says **Run automation...**, and the ellipsis is the point: for
+the other four kinds a click invokes, while here it opens a form that
+ends in firing a real event on a real cluster. An automation the cluster
+reports no trigger for is manual-run, which is a real form rather than a
+missing one, so it is offered as such.
+
+One detail worth knowing, because it makes the catalog's answer better
+than the file's: an automation written in the pre-structured trigger form
+(`@trigger(event="graph.node.created.v1:x:y")`) reads to the language
+server as one opaque event with no concept, because that is literally
+what the file says. The cluster stores the composed topic and the catalog
+decomposes it, so the catalog-sourced form gets a row picker the
+file-sourced one does not.
 
 **The other eight kinds are not runnable, and that is settled rather than
 missing.** Each would need an execution semantic decided before a Run
