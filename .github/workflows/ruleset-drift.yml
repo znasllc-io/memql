@@ -43,3 +43,37 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci/ruleset-drift.sh
+
+  # A SECOND, SEPARATELY-NAMED JOB over a SECOND ruleset (memql#3837).
+  #
+  # Not folded into `drift` above, and not a second copy of the script. Ruleset
+  # 19450314 holds one rule, `copilot_code_review`, and is switched OFF -- so
+  # the review it exists to request is not being requested, while its rule
+  # membership stays perfectly true. That is a second invisible loss with the
+  # same shape as the merge queue's: no failure, no red, just a thing that
+  # quietly stopped happening.
+  #
+  # One job asserting both rulesets would produce ONE verdict and ONE coverage
+  # line, true about the first while silent about the second, which is precisely
+  # the reading this workflow exists to prevent. Two jobs, two names, two
+  # coverage lines: `ruleset-drift` is a claim about 16630577 and
+  # `ruleset-enforcement-copilot` is a claim about 19450314, and neither can be
+  # mistaken for the other in the run list.
+  #
+  # The baseline says `disabled` because that state is a RECORDED DECISION, not
+  # an accident being tolerated -- see docs/internal/ops/ruleset-baseline.md.
+  # Re-enabling the ruleset therefore FAILS this job on purpose: it means the
+  # recorded decision no longer matches the repository, and the fix is to update
+  # both, deliberately.
+  enforcement-copilot:
+    name: ruleset-enforcement-copilot
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: check the Copilot-review ruleset against its recorded baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RULESET_DRIFT_ID: "19450314"
+          RULESET_DRIFT_EXPECTED: copilot_code_review
+          RULESET_DRIFT_ENFORCEMENT: disabled
+        run: bash scripts/ci/ruleset-drift.sh
