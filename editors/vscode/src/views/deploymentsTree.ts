@@ -201,6 +201,12 @@ function runIcon(icon: RunRowIcon): vscode.ThemeIcon {
       return new vscode.ThemeIcon("error", new vscode.ThemeColor("charts.red"));
     case "cancelled":
       return new vscode.ThemeIcon("circle-slash");
+    case "interrupted":
+      // `debug-disconnect` rather than a warning triangle: nothing went wrong
+      // with the work, the editor stopped watching it. Yellow because it is
+      // still the row worth acting on -- the run never reached a verdict, so
+      // whether the machine changed is genuinely unknown (memql#3886).
+      return new vscode.ThemeIcon("debug-disconnect", new vscode.ThemeColor("charts.yellow"));
     case "replaced":
       return new vscode.ThemeIcon("history");
   }

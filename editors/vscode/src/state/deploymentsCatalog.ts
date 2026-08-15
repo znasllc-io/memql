@@ -265,7 +265,13 @@ export function instanceRowStatus(instance: Instance): InstanceRowStatus {
   };
 }
 
-export type RunRowIcon = "running" | "succeeded" | "failed" | "cancelled" | "replaced";
+export type RunRowIcon =
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "interrupted"
+  | "replaced";
 
 export interface RunRowStatus {
   icon: RunRowIcon;
@@ -318,6 +324,14 @@ function runRowIcon(status: Run["status"]): RunRowIcon {
       return "failed";
     case "cancelled":
       return "cancelled";
+    case "interrupted":
+      // ITS OWN ICON, not the cancelled one it is nearest to. Both ended
+      // without finishing, but an operator scanning this list is asking a
+      // different question of each: `cancelled` is a decision they made and
+      // need not revisit, while `interrupted` is work that stopped for a
+      // reason unrelated to the work -- so it is the row worth re-running,
+      // and it has to be findable as such (memql#3886).
+      return "interrupted";
     case "superseded":
     case "rolled_back":
       // Both LANDED and were later replaced. Drawing them as failures would

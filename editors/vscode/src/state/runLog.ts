@@ -191,6 +191,7 @@ const RUN_STATUSES = new Set<string>([
   "succeeded",
   "failed",
   "cancelled",
+  "interrupted",
   "superseded",
   "rolled_back",
 ]);
@@ -447,6 +448,49 @@ export async function finishRun(
   finishedAt: string,
 ): Promise<Run> {
   return mutateRun(dir, { ...run, status, finishedAt }, (items) => items);
+}
+
+/**
+ * Closes every run left mid-flight by an extension host that went away.
+ *
+ * WHY A SWEEP AT ACTIVATION IS THE WHOLE MECHANISM (memql#3886). A local run is
+ * driven by this process and its record is rewritten after every step, so the
+ * only thing that can leave a file saying `running` is the process dying before
+ * it could write the close. Nothing is left to finish that write -- the record
+ * stays `running` for as long as the file exists, and `runsToPrune` deliberately
+ * never prunes a non-terminal run, so it stays forever and renders as a live
+ * spinner for work that ended hours ago.
+ *
+ * NO PID, NO HEARTBEAT, NO STALENESS WINDOW. A run this host is driving is held
+ * in memory by this host, and at activation there are none -- so a non-terminal
+ * record on disk at this moment is orphaned BY DEFINITION. Every liveness
+ * mechanism that could be built here would be a less certain way of learning
+ * something already known, and each would carry its own false positive: a pid
+ * reused by an unrelated process, a heartbeat starved by a busy machine, an age
+ * threshold that has to guess how long an install is allowed to take.
+ *
+ * This is why it MUST run before anything else reads the directory, and exactly
+ * once per activation. Calling it while a run is in flight would close that
+ * run's own record out from under it.
+ *
+ * Returns the runs it closed, so the caller can say so rather than changing the
+ * tree silently.
+ */
+export async function reconcileOrphanedRuns(dir: string, at: string): Promise<Run[]> {
+  const runs = await listRuns(dir);
+  const orphaned = runs.filter((run) => !runIsTerminal(run.status));
+  const closed: Run[] = [];
+  for (const run of orphaned) {
+    // ITEM STATUSES ARE LEFT ALONE, and that is the informative choice. The
+    // step that says `running` is the step the run died in, which is the single
+    // most useful fact this record still holds; rewriting it to `failed` would
+    // assert something untrue about a step that may well have completed on the
+    // machine, and there is no honest item status for "we stopped watching".
+    // Read together -- run `interrupted`, step `running` -- the record says
+    // exactly what happened.
+    closed.push(await finishRun(dir, run, "interrupted", at));
+  }
+  return closed;
 }
 
 /**
