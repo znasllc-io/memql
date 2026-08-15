@@ -353,18 +353,19 @@ func viaParameter(key string) string { return os.Getenv(key) }
 	}
 }
 
-// An env.NewEnvReader read must produce a RESIDUAL and never a read.
+// An env.NewEnvReader read whose PREFIX IS KNOWN must produce the JOINED key
+// (memql#3834).
 //
-// This is the third read class, and until it was counted it was the worst of the
-// three: not a read, and not a residual either, so the summary line omitted it
-// and the limitation lived only in a package comment. Counting it is this issue's
-// own acceptance criterion applied to its own fix -- a checker reporting only
-// what it found makes a pass indistinguishable from a blind spot.
+// This test used to assert the opposite -- that every reader read is a residual
+// -- and its own failure message said why the change is right: "under MEMQL_EDGE
+// the first call reads MEMQL_EDGE_API_TARGET, so recording \"API_TARGET\" would
+// register a name nothing sets." Recording the SUFFIX was always wrong. What was
+// missing was the prefix, and when the constructor is right there in the same
+// declaration with a foldable argument, the prefix is not missing at all.
 //
-// The suffix must NOT become a read. `reader.String("API_TARGET")` under a
-// MEMQL_EDGE prefix reads MEMQL_EDGE_API_TARGET; recording "API_TARGET" would be
-// a confidently wrong key nothing sets, which is worse than the gap.
-func TestEnvReaderReadIsResidualNeverARead(t *testing.T) {
+// The suffix alone must still never become a read -- that is the confidently
+// wrong answer this whole scanner exists to avoid, and it is asserted below.
+func TestEnvReaderReadJoinsAKnownPrefix(t *testing.T) {
 	const src = `package x
 
 import "github.com/znasllc-io/memql/core/env"
@@ -385,13 +386,59 @@ func load() {
 		t.Fatalf("ScanReads: %v", err)
 	}
 
-	if got := keysOf(out); len(got) != 0 {
-		t.Errorf("reads = %v, want none. A suffix is not a key: under MEMQL_EDGE the first call "+
-			"reads MEMQL_EDGE_API_TARGET, so recording \"API_TARGET\" would register a name "+
-			"nothing sets.", got)
+	want := []string{"MEMQL_EDGE_API_TARGET", "MEMQL_EDGE_ENABLED", "MEMQL_EDGE_SITE_CACHE_TTL_SECONDS"}
+	got := keysOf(out)
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("reads = %v, want %v. The prefix is written in the same declaration and the "+
+			"suffix at the call site; joining them is what turns two halves of a key into the "+
+			"key the process will actually look up.", got, want)
 	}
-	if len(out.Unresolvable) != 3 {
-		t.Fatalf("residual = %d site(s), want 3.\nGot: %v\nZERO means the reader form is detected as "+
+	for _, k := range got {
+		if !strings.HasPrefix(k, "MEMQL_EDGE_") {
+			t.Errorf("read %q is not under the constructor's prefix -- recording a bare suffix "+
+				"registers a name nothing sets, which is worse than reporting a gap", k)
+		}
+	}
+	if len(out.Unresolvable) != 0 {
+		t.Errorf("residual = %v, want none: every prefix here folds, so nothing is unknown",
+			out.Unresolvable)
+	}
+}
+
+// A reader whose PREFIX DOES NOT FOLD is still a residual, with the reason
+// naming the mechanism.
+//
+// This is the half of the old contract that must survive. The prefix here comes
+// from a parameter, so the full key genuinely is not written down anywhere the
+// scanner can see -- and guessing it (or recording the bare suffix) would be the
+// confidently-wrong answer. Roughly half the reader sites in the real tree are
+// still this shape.
+func TestEnvReaderReadIsResidualWhenThePrefixIsUnknown(t *testing.T) {
+	const src = `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load(prefix string) {
+	reader := env.NewEnvReader(prefix)
+	_, _ = reader.String("API_TARGET")
+	_, _ = reader.OptionalBool("ENABLED")
+}
+`
+	root := writeGoFixture(t, map[string]string{
+		"app/x.go": src,
+		"go.mod":   "module github.com/znasllc-io/memql\n\ngo 1.26.1\n",
+	})
+	out, err := ScanReads(root)
+	if err != nil {
+		t.Fatalf("ScanReads: %v", err)
+	}
+
+	if got := keysOf(out); len(got) != 0 {
+		t.Errorf("reads = %v, want none. The prefix is a PARAMETER, so the full key is not "+
+			"knowable here -- recording the suffix would register a name nothing sets.", got)
+	}
+	if len(out.Unresolvable) != 2 {
+		t.Fatalf("residual = %d site(s), want 2.\nGot: %v\nZERO means the reader form is detected as "+
 			"NOTHING -- neither read nor residual -- which is the class the summary line used to "+
 			"omit while a reader had to find the limitation in a doc comment.",
 			len(out.Unresolvable), out.Unresolvable)
@@ -407,6 +454,75 @@ func load() {
 		if u.File != "app/x.go" || u.Line == 0 {
 			t.Errorf("residual %s is not locatable", u)
 		}
+	}
+}
+
+// An EMPTY constructor prefix means the suffix IS the whole key.
+//
+// This is not an edge case -- 8 of the 32 constructor sites in this tree pass
+// "", which is why their "suffixes" are already spelled as full MEMQL_ names.
+// Eleven previously-invisible variables (the agent turn guards and the planner
+// fairness/watchdog knobs) were exactly this shape.
+func TestEnvReaderEmptyPrefixMakesTheSuffixTheKey(t *testing.T) {
+	const src = `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load() {
+	reader := env.NewEnvReader("")
+	_, _ = reader.OptionalBool("MEMQL_TASK_FAIRNESS_ENABLED")
+}
+`
+	root := writeGoFixture(t, map[string]string{
+		"app/x.go": src,
+		"go.mod":   "module github.com/znasllc-io/memql\n\ngo 1.26.1\n",
+	})
+	out, err := ScanReads(root)
+	if err != nil {
+		t.Fatalf("ScanReads: %v", err)
+	}
+	want := []string{"MEMQL_TASK_FAIRNESS_ENABLED"}
+	if got := keysOf(out); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("reads = %v, want %v. An empty prefix contributes no separator, so the key is "+
+			"the suffix verbatim -- and NOT joining it leaves a live operator knob invisible to "+
+			"the registry.", got, want)
+	}
+}
+
+// A reader REBOUND to a second prefix in the same declaration resolves to
+// NEITHER.
+//
+// Every read after the rebind would be ambiguous and picking either binding
+// would be a guess. Ambiguity is recorded as absence, which lands the sites in
+// the residual -- the same stance the constant resolver takes for a name bound
+// to two values across build tags.
+func TestEnvReaderRebindingMakesThePrefixAmbiguous(t *testing.T) {
+	const src = `package x
+
+import "github.com/znasllc-io/memql/core/env"
+
+func load(flag bool) {
+	reader := env.NewEnvReader("MEMQL_A")
+	reader = env.NewEnvReader("MEMQL_B")
+	_, _ = reader.String("K")
+}
+`
+	root := writeGoFixture(t, map[string]string{
+		"app/x.go": src,
+		"go.mod":   "module github.com/znasllc-io/memql\n\ngo 1.26.1\n",
+	})
+	out, err := ScanReads(root)
+	if err != nil {
+		t.Fatalf("ScanReads: %v", err)
+	}
+	if got := keysOf(out); len(got) != 0 {
+		t.Errorf("reads = %v, want none. Two bindings means the key at this site is not "+
+			"determined; MEMQL_A_K and MEMQL_B_K are both plausible and recording either is a "+
+			"guess presented as a measurement.", got)
+	}
+	if len(out.Unresolvable) == 0 {
+		t.Error("an ambiguous prefix produced no residual either, so the site vanished from " +
+			"both the count and the gap report")
 	}
 }
 
@@ -426,6 +542,12 @@ func TestEnvReaderReceiverShapes(t *testing.T) {
 		name          string
 		src           string
 		wantResiduals int
+		// wantReads is how many KEYS the case resolves. Detection is the
+		// property under test, and since memql#3834 a detected reader read
+		// lands as a read when its constructor prefix folds and as a residual
+		// when it does not -- so a case asserting zero of both is asserting the
+		// receiver was not recognised at all.
+		wantReads int
 	}{
 		{
 			name: "local assigned from the constructor",
@@ -435,7 +557,10 @@ import "github.com/znasllc-io/memql/core/env"
 
 func load() { r := env.NewEnvReader("P"); _, _ = r.String("K") }
 `,
-			wantResiduals: 1,
+			// Detected AND resolved: the prefix is a literal in the same
+			// declaration, so the key is P_K.
+			wantResiduals: 0,
+			wantReads:     1,
 		},
 		{
 			name: "parameter declared with the type",
@@ -467,7 +592,10 @@ import "github.com/znasllc-io/memql/core/env"
 
 func load() { _, _ = env.NewEnvReader("P").String("K") }
 `,
-			wantResiduals: 1,
+			// The constructor is in the expression itself, so the prefix is
+			// known without any binding to trace.
+			wantResiduals: 0,
+			wantReads:     1,
 		},
 		{
 			// The negative case, and the reason the rule is type-anchored: a
@@ -503,8 +631,11 @@ func (g *geo) lookup() (string, bool) { return g.reader.String("NOT_AN_ENV_VAR")
 				t.Errorf("reader residuals = %d, want %d (all residuals: %v)",
 					readerSites, tc.wantResiduals, out.Unresolvable)
 			}
-			if got := keysOf(out); len(got) != 0 {
-				t.Errorf("reads = %v, want none", got)
+			if got := keysOf(out); len(got) != tc.wantReads {
+				t.Errorf("reads = %v (%d), want %d. A reader read resolves when its "+
+					"constructor prefix folds and is a residual when it does not; zero of "+
+					"BOTH means the receiver was not recognised as a reader at all, which is "+
+					"what this test exists to catch.", got, len(got), tc.wantReads)
 			}
 		})
 	}
