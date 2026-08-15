@@ -296,43 +296,6 @@ func (c *Client) DurablePromoteBundle(ctx context.Context, sources string, opts 
 	}, nil
 }
 
-// protoConceptDiffs adapts the wire classification into the SDK form. Lives here
-// (unexported) so no memqlv1 type leaks across the package boundary, exactly
-// like protoDiagnostics -- and it copies field for field, deriving nothing: the
-// engine already decided what is breaking and counted the rows, and an SDK that
-// recomputed either would be a second authority on the same question.
-func protoConceptDiffs(in []*memqlv1.ConceptSchemaDiff) []ConceptSchemaDiff {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]ConceptSchemaDiff, 0, len(in))
-	for _, d := range in {
-		changes := make([]ConceptSchemaChange, 0, len(d.GetChanges()))
-		for _, c := range d.GetChanges() {
-			changes = append(changes, ConceptSchemaChange{
-				Concept:       c.GetConcept(),
-				Field:         c.GetField(),
-				Kind:          c.GetKind(),
-				Breaking:      c.GetBreaking(),
-				Was:           c.GetWas(),
-				Now:           c.GetNow(),
-				RowsAffected:  c.GetRowsAffected(),
-				RowCountKnown: c.GetRowCountKnown(),
-				ReferencedBy:  c.GetReferencedBy(),
-				Detail:        c.GetDetail(),
-			})
-		}
-		out = append(out, ConceptSchemaDiff{
-			Concept:    d.GetConcept(),
-			Breaking:   d.GetBreaking(),
-			Overridden: d.GetOverridden(),
-			Changes:    changes,
-			Summary:    d.GetSummary(),
-		})
-	}
-	return out
-}
-
 // DemoteOutcomeRetired / DemoteOutcomeRemoved are the two values
 // DemoteOutcome.Outcome takes. Compare against these rather than the string
 // literals: they are the SDK's own copy of the engine vocabulary, which is what
@@ -370,6 +333,43 @@ type DemoteOutcome struct {
 	// concept, across every owner -- the evidence that chose the outcome. Always
 	// 0 for a non-concept kind, which has no rows of its own.
 	RowCount int64
+}
+
+// protoConceptDiffs adapts the wire classification into the SDK form. Lives here
+// (unexported) so no memqlv1 type leaks across the package boundary, exactly
+// like protoDiagnostics -- and it copies field for field, deriving nothing: the
+// engine already decided what is breaking and counted the rows, and an SDK that
+// recomputed either would be a second authority on the same question.
+func protoConceptDiffs(in []*memqlv1.ConceptSchemaDiff) []ConceptSchemaDiff {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ConceptSchemaDiff, 0, len(in))
+	for _, d := range in {
+		changes := make([]ConceptSchemaChange, 0, len(d.GetChanges()))
+		for _, c := range d.GetChanges() {
+			changes = append(changes, ConceptSchemaChange{
+				Concept:       c.GetConcept(),
+				Field:         c.GetField(),
+				Kind:          c.GetKind(),
+				Breaking:      c.GetBreaking(),
+				Was:           c.GetWas(),
+				Now:           c.GetNow(),
+				RowsAffected:  c.GetRowsAffected(),
+				RowCountKnown: c.GetRowCountKnown(),
+				ReferencedBy:  c.GetReferencedBy(),
+				Detail:        c.GetDetail(),
+			})
+		}
+		out = append(out, ConceptSchemaDiff{
+			Concept:    d.GetConcept(),
+			Breaking:   d.GetBreaking(),
+			Overridden: d.GetOverridden(),
+			Changes:    changes,
+			Summary:    d.GetSummary(),
+		})
+	}
+	return out
 }
 
 // DemoteResult is the response from DurableDemoteBundle, the inverse of
