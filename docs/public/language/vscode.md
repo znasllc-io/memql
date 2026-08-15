@@ -20,6 +20,12 @@ iterate on the syntax itself.
 > generic concept browser against a live cluster. See
 > [VS Code Runtime Panel](vscode-runtime-panel.md).
 
+> Connected to a cluster, the extension additionally reports each construct's
+> **training state** -- whether the cluster knows it, knows an older version of
+> it, or has never heard of it -- and offers dry-run, try-in-session, promote
+> and demote. That surface, and the seeded-versus-trained model underneath it,
+> is [Training Constructs Into a Running Cluster](training.md).
+
 Sense stays the single language-intelligence component serving both the Cockpit
 and VS Code (see [Sense & the DSL Spec](./sense.md)). This extension adds a new
 *delivery mechanism* -- an offline language server -- on top of the existing
