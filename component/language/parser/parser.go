@@ -519,14 +519,58 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 			if !p.check(TokenIdentifier) {
 				return nil, newParseErrorf(&p.current, "expected imported name in `use %s.{ ... }`, got %q", path, p.current.Literal)
 			}
-			decl.Names = append(decl.Names, p.current.Literal)
+			source := p.current.Literal
+			decl.Names = append(decl.Names, source)
 			p.advance()
+
+			// `<source> as <local>` -- the per-name alias (memql#3802).
+			//
+			// It is what lets one file reference two same-named concepts. Without
+			// it, importing a foreign `plan` captured every bare `plan` in the
+			// file, including the constructs that wanted their own domain's, and
+			// bound them to the foreign id with OK=true and no diagnostic.
+			//
+			// Declared on `use` generally rather than on concepts specifically, so
+			// it already works the day another construct kind becomes namespaced.
+			if p.check(TokenKeywordAs) {
+				p.advance()
+				if !p.check(TokenIdentifier) {
+					return nil, newParseErrorf(&p.current, "expected an alias name after `as` in `use %s.{ %s as ... }`, got %q", path, source, p.current.Literal)
+				}
+				local := p.current.Literal
+				if local == source {
+					return nil, newParseErrorf(&p.current, "`%s as %s` in `use %s.{ ... }` aliases a name to itself -- drop the `as` clause", source, local, path)
+				}
+				if decl.Aliases == nil {
+					decl.Aliases = map[string]string{}
+				}
+				decl.Aliases[source] = local
+				p.advance()
+			}
 		}
 		if err := p.expect(TokenBraceClose); err != nil {
 			return nil, err
 		}
 		if len(decl.Names) == 0 {
 			return nil, newParseErrorf(&p.current, "`use %s.{ ... }` must list at least one imported name", path)
+		}
+		// Two DIFFERENT sources cannot land on the same LOCAL binding. Without
+		// this, `{ plan, task as plan }` would silently give one of them the
+		// name and the other nothing -- the capture aliasing exists to fix,
+		// reproduced inside a single clause.
+		//
+		// A repeated identical name (`{ oder, oder }`) is NOT that: it imports
+		// one thing twice, which is redundant rather than ambiguous, and the
+		// loader has always tolerated it (it flags an unknown id once, not
+		// twice). Refusing it here would turn a harmless repeat into a parse
+		// error and take the more useful diagnostic away with it.
+		seen := map[string]string{}
+		for _, source := range decl.Names {
+			local := decl.LocalNameFor(source)
+			if prior, dup := seen[local]; dup && prior != source {
+				return nil, newParseErrorf(&p.current, "`use %s.{ ... }` binds %q twice in local scope (from %q and %q) -- alias one of them to a different name", path, local, prior, source)
+			}
+			seen[local] = source
 		}
 		return decl, nil
 	}
@@ -535,7 +579,7 @@ func (p *Parser) parseUseDeclaration() (*UseDeclaration, error) {
 	// single-binding shape was retired in the import-model pivot --
 	// every `use` clause must now be Form B `use <path>.{ names }`.
 	if p.check(TokenKeywordAs) {
-		return nil, newParseErrorf(&p.current, "`use %s as <alias>` is retired -- use Form B `use <module>.{ <name> }` instead (alias support removed; rename the construct at source if names collide)", path)
+		return nil, newParseErrorf(&p.current, "`use %s as <alias>` is retired -- the alias goes INSIDE the brace list now: `use <module>.{ <name> as <alias> }` (memql#3802)", path)
 	}
 	// A bare `use <ns>.<concept>` (no `.{` body, no `as`) is also Form
 	// A and similarly rejected.
