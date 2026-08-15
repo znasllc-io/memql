@@ -1369,13 +1369,82 @@ type UseDeclaration struct {
 	Alias string
 	// Parts are the split components: ["cognition", "concepts"].
 	Parts []string
-	// Names is the imported-construct list from Form B. Empty for
-	// Form A imports.
+	// Names is the imported-construct list from Form B, as the SOURCE
+	// module spells them. Empty for Form A imports.
+	//
+	// SOURCE, not local: an aliased import `{ plan as harnessPlan }` puts
+	// "plan" here and records the local binding in Aliases. Keeping this the
+	// source name is what lets every "does the target module export this?"
+	// check stay correct without knowing about aliases; the checks that need
+	// the name IN SCOPE go through LocalNameFor / LocalNames.
 	Names []string
+	// Aliases maps a SOURCE name to the LOCAL name it is bound to, for
+	// `use harness.concepts.{ plan as harnessPlan }` -> {"plan": "harnessPlan"}
+	// (memql#3802). Nil or absent for an unaliased import, where the local
+	// name IS the source name.
+	//
+	// WHY ALIASING EXISTS. The import hint is per-name and file-scoped, and
+	// step 1 of signature-concept resolution is not scope-gated -- correctly,
+	// since that is how a foreign reference is authorized. The consequence was
+	// that importing a foreign concept CAPTURED every bare use of that short
+	// name in the file, including constructs that wanted their own domain's,
+	// and did so SILENTLY: both compiled, both bound to the foreign id, OK=true.
+	// An alias is what lets a file mean both.
+	//
+	// It is declared on `use` generally rather than on concepts specifically,
+	// so it works the day any other construct kind becomes namespaced. It is
+	// INERT for the twelve flat kinds today -- their registries are keyed by
+	// bare name with a load-time uniqueness gate, so two same-named constructs
+	// cannot coexist and there is nothing to alias between.
+	Aliases map[string]string
 	// ResolvedId is filled by the concept resolver: "v1:cognition:participant".
 	// Only meaningful for Form A; Form B resolves per-Name through the
 	// loader's import index.
 	ResolvedId string
+}
+
+// LocalNameFor returns the name `source` is bound to in local scope: its alias
+// when one was written, otherwise the source name itself.
+func (u *UseDeclaration) LocalNameFor(source string) string {
+	if u == nil {
+		return source
+	}
+	if local, ok := u.Aliases[source]; ok && local != "" {
+		return local
+	}
+	return source
+}
+
+// SourceNameFor returns the SOURCE name behind a name as written at a use site,
+// and whether this declaration binds it at all.
+//
+// It is the inverse of LocalNameFor and the lookup every resolver wants: a use
+// site writes `harnessPlan`, and what has to be resolved against the registry
+// is `plan` under the `harness` namespace.
+func (u *UseDeclaration) SourceNameFor(local string) (string, bool) {
+	if u == nil {
+		return "", false
+	}
+	for _, source := range u.Names {
+		if u.LocalNameFor(source) == local {
+			return source, true
+		}
+	}
+	return "", false
+}
+
+// LocalNames returns every name this declaration puts into local scope, in
+// declaration order. Use it for "is this import referenced?" questions, which
+// must ask about the name a body can actually write.
+func (u *UseDeclaration) LocalNames() []string {
+	if u == nil {
+		return nil
+	}
+	out := make([]string, 0, len(u.Names))
+	for _, source := range u.Names {
+		out = append(out, u.LocalNameFor(source))
+	}
+	return out
 }
 
 func (*UseDeclaration) node() {}
