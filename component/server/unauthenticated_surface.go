@@ -408,7 +408,7 @@ func surfaceDeclaredBy(routeForms []string, declarations []string) bool {
 //
 // BOTH forms are kept rather than reducing to one. An earlier version stripped
 // the base from declarations as well as routes, which silently broke whenever
-// the base was a path-prefix of a declared path: with SERVER_PUBLIC_PATH=/memql
+// the base was a path-prefix of a declared path: with MEMQL_SERVER_PUBLIC_PATH=/memql
 // the declaration "/memql/ws" reduced to "/ws" while the registered route
 // "/memql/memql/ws" reduced to "/memql/ws", so they no longer matched and the
 // identity binary fatally refused to boot. Comparing every form against every

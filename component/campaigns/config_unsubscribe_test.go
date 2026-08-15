@@ -26,7 +26,7 @@ func TestRequireUnsubscribeValidatesBaseURL(t *testing.T) {
 		{name: "https origin", baseURL: "https://api.example.com"},
 		{name: "https origin with trailing slash", baseURL: "https://api.example.com/"},
 		{
-			// SERVER_PUBLIC_PATH deployments legitimately serve under a path,
+			// MEMQL_SERVER_PUBLIC_PATH deployments legitimately serve under a path,
 			// and unsubscribeURL preserves it.
 			name:    "https origin with base path",
 			baseURL: "https://api.example.com/app",

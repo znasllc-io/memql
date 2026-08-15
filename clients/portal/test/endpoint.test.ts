@@ -20,7 +20,7 @@ describe("bridgePathFor", () => {
   });
 
   it("preserves a deployment base path in front of the mount", () => {
-    // SERVER_PUBLIC_PATH=/memql registers /memql/portal/ and /memql/memql/ws
+    // MEMQL_SERVER_PUBLIC_PATH=/memql registers /memql/portal/ and /memql/memql/ws
     // together, so the prefix has to survive.
     expect(bridgePathFor("/memql/portal/")).toBe("/memql/memql/ws");
   });

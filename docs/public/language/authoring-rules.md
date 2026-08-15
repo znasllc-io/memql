@@ -1927,9 +1927,9 @@ unmarked list query slips past authoring, the engine applies an implicit
 `paginate` and no `sort` — so nothing pulls unbounded. A query that
 paginates / sorts states its own window and is unaffected; an
 `@unbounded("reason")` query is rewritten to an explicit large paginate
-and bypasses the 50-cap (still clamped to `MEMORY_ENGINE_MAX_WINDOW`).
-The cap is tunable via `MEMORY_ENGINE_DEFAULT_LIST_CAP` (clamped to
-`<= MEMORY_ENGINE_MAX_RESULTS`). Lives in
+and bypasses the 50-cap (still clamped to `MEMQL_MEMORY_ENGINE_MAX_WINDOW`).
+The cap is tunable via `MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP` (clamped to
+`<= MEMQL_MEMORY_ENGINE_MAX_RESULTS`). Lives in
 `component/memql/engine.go` (`defaultListLimit`) +
 `component/memql/config.go`.
 

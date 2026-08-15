@@ -67,7 +67,7 @@ const BRIDGE_PATH = "/memql/ws";
 // baseUrl is "/" in production and the /portal/-stripping below is a no-op
 // (the trailing-slash trim after it already reduces "/" to ""). It is left
 // general rather than hardcoded to "" because the SAME function still has
-// to handle a SERVER_PUBLIC_PATH-prefixed deployment or a `vite dev` base
+// to handle a MEMQL_SERVER_PUBLIC_PATH-prefixed deployment or a `vite dev` base
 // override, and because how /memql/ws itself is reached through the edge's
 // same-origin API surface is Task 7's concern (memql#3712), not this one's.
 export function bridgePathFor(baseUrl: string): string {

@@ -518,7 +518,7 @@ func (c Config) RequireUnsubscribe() string {
 //     already carries one produces a URL with two.
 //
 // A trailing PATH is allowed and preserved. UnsubscribePaths() composes
-// through pathsWithBase(), so a deployment served under SERVER_PUBLIC_PATH
+// through pathsWithBase(), so a deployment served under MEMQL_SERVER_PUBLIC_PATH
 // legitimately has one; `https://host/app` yields
 // `https://host/app/unsubscribe`.
 func validateUnsubscribeBaseURL(raw string) string {
