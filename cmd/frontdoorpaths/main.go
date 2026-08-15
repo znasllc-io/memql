@@ -113,7 +113,7 @@ const (
 // depend on the operator's shell -- and the staleness gate would then fail or
 // pass according to an environment variable rather than according to the tree.
 // Same purpose as arch-model's --reproducible flag.
-const serverPublicPathEnv = "SERVER_PUBLIC_PATH"
+const serverPublicPathEnv = "MEMQL_SERVER_PUBLIC_PATH"
 
 // grpcSurface is the h2c backend's own surface, subtracted from the emitted set.
 //

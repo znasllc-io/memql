@@ -8,7 +8,7 @@ import (
 // DefaultConceptBrowsePageSize is the keyset page size BrowseConcept uses
 // when the caller doesn't specify one. A concept registry can hold far more
 // than the engine's implicit unmarked-list backstop (50 rows, the
-// MEMORY_ENGINE_DEFAULT_LIST_CAP), so the concept-browse query MUST declare
+// MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP), so the concept-browse query MUST declare
 // sort + paginate to opt into a keyset window + a continuation cursor --
 // otherwise it silently truncates at the backstop with no way to page past
 // it (memql#2008). 200 is a single comfortable page for the cockpit's row
@@ -79,7 +79,7 @@ func (qc *QueryClient) BrowseConcept(ctx context.Context, conceptId string) (*Re
 //
 // The query declares `sort` + `paginate` so it opts into a bounded keyset
 // window + a next-page cursor instead of hitting the engine's implicit
-// unmarked-list backstop (the MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows) with
+// unmarked-list backstop (the MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP, 50 rows) with
 // no continuation (memql#2008). The cursor rides ExecuteQueryMsg.cursor and
 // is bound to this query's sort ordering; it resolves on any replica.
 func (qc *QueryClient) BrowseConceptPage(ctx context.Context, conceptId, cursor string, pageSize int) (*PageResult, error) {

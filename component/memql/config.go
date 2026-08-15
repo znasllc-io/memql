@@ -17,7 +17,7 @@ const (
 	// than this many rows. A query that paginates / sorts states its own
 	// window and is unaffected; a query marked `@unbounded("reason")` is
 	// rewritten to an explicit paginate and likewise bypasses the cap.
-	// Override via MEMORY_ENGINE_DEFAULT_LIST_CAP. Tunable but always
+	// Override via MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP. Tunable but always
 	// clamped to <= MaxResults (it is a tighter default, never a wider
 	// one).
 	defaultListCap            = 50
@@ -61,11 +61,11 @@ const (
 	defaultWebhookTimeoutSeconds = 30
 	maxWebhookTimeoutSeconds     = 600
 
-	envMaxResults           = "MEMORY_ENGINE_MAX_RESULTS"
-	envMaxWindow            = "MEMORY_ENGINE_MAX_WINDOW"
-	envDefaultListCap       = "MEMORY_ENGINE_DEFAULT_LIST_CAP"
-	envCacheSize            = "MEMORY_ENGINE_CACHE_MAX_ITEMS"
-	envCacheMaxTTL          = "CACHE_MAX_TTL"
+	envMaxResults           = "MEMQL_MEMORY_ENGINE_MAX_RESULTS"
+	envMaxWindow            = "MEMQL_MEMORY_ENGINE_MAX_WINDOW"
+	envDefaultListCap       = "MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP"
+	envCacheSize            = "MEMQL_MEMORY_ENGINE_CACHE_MAX_ITEMS"
+	envCacheMaxTTL          = "MEMQL_CACHE_MAX_TTL"
 	envAICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
 	envAICacheMaxSeconds    = "MEMQL_SI_CACHE_MAX_SECONDS"
 	// Canonical names for the unified tool-loop knobs. The agent

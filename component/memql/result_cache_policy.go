@@ -39,7 +39,7 @@ const (
 	// worst-case staleness; invalidation (5.4 + the cache.invalidate.*
 	// broadcast channel) normally evicts long before this lapses, so the
 	// TTL is a safety backstop, not the primary freshness mechanism.
-	// Clamped to the global CACHE_MAX_TTL when that is configured.
+	// Clamped to the global MEMQL_CACHE_MAX_TTL when that is configured.
 	defaultResultCacheTTLSeconds = 60
 )
 

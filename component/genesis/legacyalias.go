@@ -22,6 +22,22 @@ import (
 // they are documented as deprecated registry aliases (manifest.yaml
 // legacy-alias section) and resolved here via the loop variable.
 var LegacyAliases = map[string]string{
+	// The six PRE-CONVENTION names (memql#3831). They are a different
+	// vintage from the Epic 7.3 block below: 7.3 renamed vars that already
+	// had a MEMQL_ prefix or a component prefix, whereas these six never
+	// carried one at all -- which is why they could not be REGISTERED
+	// (TestOwnedVarsArePrefixed refuses a non-MEMQL_ entry that is not an
+	// alias) and therefore could not be seen by the drift gate either. They
+	// are aliases now, so both gates can hold at once.
+	"MEMQL_CACHE_MAX_TTL":                  "CACHE_MAX_TTL",
+	"MEMQL_MEMORY_ENGINE_CACHE_MAX_ITEMS":  "MEMORY_ENGINE_CACHE_MAX_ITEMS",
+	"MEMQL_MEMORY_ENGINE_DEFAULT_LIST_CAP": "MEMORY_ENGINE_DEFAULT_LIST_CAP",
+	"MEMQL_MEMORY_ENGINE_MAX_RESULTS":      "MEMORY_ENGINE_MAX_RESULTS",
+	"MEMQL_MEMORY_ENGINE_MAX_WINDOW":       "MEMORY_ENGINE_MAX_WINDOW",
+	"MEMQL_SERVER_PUBLIC_PATH":             "SERVER_PUBLIC_PATH",
+
+	// Epic 7.3 (memql#2106).
+
 	"MEMQL_AI_ANTHROPIC_API_KEY":                            "MEMQL_SI_ANTHROPIC_API_KEY",
 	"MEMQL_AI_OPENAI_API_KEY":                               "MEMQL_SI_OPENAI_API_KEY",
 	"MEMQL_AI_OPENAI_PROJECT_ID":                            "MEMQL_SI_OPENAI_PROJECT_ID",
