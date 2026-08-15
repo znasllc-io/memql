@@ -174,12 +174,27 @@ func TestSignatureAmbientBind_QueryFilterIsGated(t *testing.T) {
 // reference (#2617's discipline), so the scope check must not apply to it --
 // otherwise every legitimate cross-domain signature binding in the tree breaks,
 // which is 528 of them.
+//
+// NARROWED BY memql#3802, and only for the COLLIDING case. This fixture is the
+// one shape where "the import wins outright" is not a safe reading: the
+// importing domain declares `widget` TOO, so an unaliased import silently takes
+// the name away from every construct in the file that wanted the local one --
+// binding the wrong concept and reporting OK=true, on the path that derives row
+// ids and compiles filters. There is no way to guess which was meant, so the
+// import is now refused and the ALIAS is how the author says.
+//
+// The 528 legitimate cross-domain bindings are untouched: their domains declare
+// no concept of that name, so nothing is being captured and no alias is needed.
+// The alias below preserves exactly what this test was written to protect --
+// that an explicit import beats the ambient domain -- while making which
+// `widget` is meant something the file states rather than something the reader
+// has to know the resolution order to work out.
 func TestSignatureAmbientBind_ExplicitImportStillWins(t *testing.T) {
 	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents:widget"}}
 
-	src := `use tools.concepts.{ widget }
+	src := `use tools.concepts.{ widget as toolsWidget }
 
-mutate widget probeWrite {
+mutate toolsWidget probeWrite {
   args {
     widgetId string @required
   }

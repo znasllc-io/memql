@@ -60,6 +60,7 @@ import {
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
+import { entryActionFor, probeClaimState, setupUrl } from './clusters/claimState.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
@@ -757,6 +758,37 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       const target = node ?? (await pickCluster(clustersPath));
       if (target === undefined || target.cluster.name === '') {
         return;
+      }
+      // WHICH OF THREE STATES IS THIS CLUSTER IN (memql#3885). A cluster is
+      // claimed by its FIRST sign-in -- that sign-in is what creates the owner
+      // -- so offering sign-in to an unclaimed one asks the operator to
+      // authenticate against an account that does not exist. The browser flow
+      // times out and the device-code fallback cannot complete either.
+      //
+      // The probe is RE-DERIVED at the moment of use rather than read from a
+      // stored flag: the operator may have claimed the cluster in a browser
+      // this extension never saw, and acting on a stale "unclaimed" would send
+      // them to a wizard that has since sealed. It fails toward sign-in, which
+      // is the previous behaviour, so a cluster it cannot read loses nothing.
+      const claimState = await probeClaimState(target.cluster.issuer, { fetch: globalThis.fetch });
+      if (entryActionFor(claimState) === 'claim') {
+        const wizard = setupUrl(target.cluster.issuer);
+        const choice = await window.showInformationMessage(
+          `memQL: "${displayLabel(target.cluster)}" has no owner yet. A cluster is claimed by its first sign-in, so there is no account to sign in to -- claim it first.`,
+          'Claim this cluster',
+          'Sign in anyway'
+        );
+        if (choice === 'Claim this cluster') {
+          // asExternalUri first, for the same reason the enrolment opener
+          // does it: under Remote-SSH or Codespaces the wizard runs on the
+          // REMOTE host, and the operator's browser is local.
+          const external = (await env.asExternalUri(Uri.parse(wizard))).toString(true);
+          await env.openExternal(Uri.parse(external));
+          return;
+        }
+        if (choice !== 'Sign in anyway') {
+          return;
+        }
       }
       await signInToCluster(target.cluster, {
         clustersPath,
