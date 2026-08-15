@@ -53,6 +53,8 @@ import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/
 import {
   deleteReceipt,
   readReceipt,
+  recordedDomain,
+  recordedOwner,
   recordedProvider,
   recordedProviderKeyFile,
   recordedStackTag,
@@ -1051,6 +1053,33 @@ export class AddClusterPanel {
     if (recordedVendor !== "" && SUPPORTED_PROVIDERS.some((p) => p === recordedVendor)) {
       this.state.setInput("provider", recordedVendor);
     }
+
+    // THE DOMAIN AND THE OWNER, which a repair needs and did not have
+    // (znasllc-io#3888). `seedBootstrap` takes five values and refuses a partial
+    // set; `domain` was collected and `registration-mode` has a default, so the
+    // three owner fields were the whole of what was missing -- and the run died
+    // at `exit 2` naming values this page gave the operator no way to supply.
+    //
+    // Each is filled only when the box is EMPTY, so a value the operator has
+    // just typed to correct a bad recorded one is never overwritten by the bad
+    // one. That is the same rule the provider key path above follows, and it is
+    // what makes pre-filling safe on the very run whose purpose is to change an
+    // answer.
+    const recordedHost = recordedDomain(receipt);
+    if (this.state.inputs.domain === "" && recordedHost !== "") {
+      this.state.setInput("domain", recordedHost);
+    }
+    const owner = recordedOwner(receipt);
+    if (this.state.inputs.ownerEmail === "" && owner.email !== "") {
+      this.state.setInput("ownerEmail", owner.email);
+    }
+    if (this.state.inputs.ownerFirstName === "" && owner.firstName !== "") {
+      this.state.setInput("ownerFirstName", owner.firstName);
+    }
+    if (this.state.inputs.ownerLastName === "" && owner.lastName !== "") {
+      this.state.setInput("ownerLastName", owner.lastName);
+    }
+
     this.render();
   }
 

@@ -349,7 +349,24 @@ export function requiredFields(action: AddClusterAction): InputField[] {
       //
       // Nobody retypes a good path: the panel pre-fills both from the receipt.
       // What changes is that the value is now in a box that can be edited.
-      return ["domain", "provider", "providerKeyFile"];
+      //
+      // THE OWNER FIELDS ARE HERE FOR THE SAME REASON, and their absence was a
+      // hard failure rather than a missing convenience (znasllc-io#3888).
+      // `seedBootstrap` refuses a partial bootstrap set on purpose -- a partial
+      // seed writes a Secret that looks healthy and leaves the operator at a
+      // login page for an account that was never created -- so a repair that
+      // collected none of them and pre-filled none of them died at `exit 2`
+      // naming three values the wizard offered no way to supply. Every other
+      // param on that step reached it: `domain` was collected, and
+      // `registration-mode` has a default. Only the owner had neither.
+      return [
+        "domain",
+        "ownerFirstName",
+        "ownerLastName",
+        "ownerEmail",
+        "provider",
+        "providerKeyFile",
+      ];
     case "uninstall":
     case "connect":
       return [];

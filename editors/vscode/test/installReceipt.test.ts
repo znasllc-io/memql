@@ -28,11 +28,13 @@ import {
   entryFor,
   parseReceipt,
   readReceipt,
+  recordedOwner,
   removalParams,
   serializeReceipt,
   type Receipt,
   type ReceiptEntry,
 } from "../src/install/receipt.js";
+import { requiredFields } from "../src/state/addCluster.js";
 
 async function tempDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), "memql-receipt-"));
@@ -449,4 +451,98 @@ test("a binary never falls back to its --dest directory", () => {
     null,
     "the param is the directory the binary goes IN; removing that is not removing the binary",
   );
+});
+
+// -----------------------------------------------------------------------------
+// What a REPAIR has to recover before it can run (znasllc-io#3888)
+//
+// `seedBootstrap` takes five values and refuses a partial set, deliberately: a
+// partial seed writes a Secret that looks healthy, brings the cluster up green,
+// and leaves the operator at a login page for an account that was never
+// created. On a repair, `domain` was collected on the form and
+// `registration-mode` has a default -- so the three OWNER fields were the whole
+// of what was missing, and the run died at `exit 2` naming values the wizard
+// gave the operator no way to supply.
+// -----------------------------------------------------------------------------
+
+/** A receipt shaped like the one a completed install leaves behind. */
+async function receiptWithOwner(
+  params: Record<string, string>,
+  stepId = "seedBootstrap",
+): Promise<string> {
+  const dir = await tempDir();
+  const file = path.join(dir, "install-receipt.json");
+  await appendReceiptEntry(file, "install", {
+    stepId,
+    script: `install.${stepId}`,
+    receipt: "",
+    preExisting: false,
+    params,
+    result: {},
+    changed: true,
+    recordedAt: "2026-08-15T00:00:00.000Z",
+  });
+  return file;
+}
+
+test("the owner a previous run bootstrapped is recoverable", async () => {
+  const file = await receiptWithOwner({
+    domain: "memql.localhost",
+    "owner-email": "owner@example.com",
+    "owner-first-name": "Ada",
+    "owner-last-name": "Lovelace",
+    "registration-mode": "invite_only",
+  });
+  const owner = recordedOwner(await readReceipt(file));
+  assert.deepEqual(owner, {
+    email: "owner@example.com",
+    firstName: "Ada",
+    lastName: "Lovelace",
+  });
+});
+
+test("the owner is found on whatever entry carries it, not one named step", async () => {
+  // A repair after a run that failed BEFORE seedBootstrap still has the
+  // operator's answers on the entries that did complete. Reading one named step
+  // would find nothing in exactly the case a repair exists for.
+  const file = await receiptWithOwner(
+    { "owner-email": "owner@example.com", "owner-first-name": "Ada", "owner-last-name": "Lovelace" },
+    "clusterUp",
+  );
+  assert.equal(recordedOwner(await readReceipt(file)).email, "owner@example.com");
+});
+
+test("the three owner fields are recovered independently", async () => {
+  // A run that recorded two and not the third should leave the operator
+  // retyping one box, not three.
+  const file = await receiptWithOwner({
+    "owner-email": "owner@example.com",
+    "owner-first-name": "Ada",
+  });
+  assert.deepEqual(recordedOwner(await readReceipt(file)), {
+    email: "owner@example.com",
+    firstName: "Ada",
+    lastName: "",
+  });
+});
+
+test("no receipt, and a receipt with no owner, both yield blanks rather than throwing", async () => {
+  assert.deepEqual(recordedOwner(null), { email: "", firstName: "", lastName: "" });
+  const file = await receiptWithOwner({ domain: "memql.localhost" });
+  assert.deepEqual(recordedOwner(await readReceipt(file)), {
+    email: "",
+    firstName: "",
+    lastName: "",
+  });
+});
+
+test("a repair collects every value seedBootstrap refuses to run without", () => {
+  // THE REGRESSION. `requiredFields("repair")` returned
+  // ["domain", "provider", "providerKeyFile"], so the owner was neither
+  // collected nor pre-filled and seedBootstrap got three empty strings.
+  const repair = requiredFields("repair");
+  for (const field of ["ownerEmail", "ownerFirstName", "ownerLastName"] as const) {
+    assert.ok(repair.includes(field), `a repair must collect ${field}`);
+  }
+  assert.ok(repair.includes("domain"), "and the domain it already collected");
 });

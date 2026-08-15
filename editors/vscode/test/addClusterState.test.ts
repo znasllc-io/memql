@@ -126,11 +126,27 @@ test("an install needs everything up front; a repair needs what it can get wrong
     "version",
   ]);
   assert.deepEqual(requiredFields("installGuided"), requiredFields("install"));
-  // A REPAIR DOES NOT COLLECT IT. The receipt replays the version the cluster
-  // was installed at (memql#3605); a field here would invite an operator to
-  // silently upgrade a cluster they meant to repair -- which is the defect
-  // #3605 fixed, offered back as a control.
-  assert.deepEqual(requiredFields("repair"), ["domain", "provider", "providerKeyFile"]);
+  // A REPAIR DOES NOT COLLECT THE VERSION. The receipt replays the version the
+  // cluster was installed at (memql#3605); a field here would invite an
+  // operator to silently upgrade a cluster they meant to repair -- which is the
+  // defect #3605 fixed, offered back as a control.
+  //
+  // IT DOES COLLECT THE OWNER (znasllc-io#3888), by the argument this test
+  // already makes about the key path. `seedBootstrap` refuses a partial
+  // bootstrap set on purpose, and a repair collected none of the three and
+  // pre-filled none of them -- so it reached that step with three empty strings
+  // and died at `exit 2` naming values the wizard offered no box for. They are
+  // exactly "what the receipt can be wrong about": the common case is still no
+  // typing, because the panel pre-fills them, and what changed is that they are
+  // reachable.
+  assert.deepEqual(requiredFields("repair"), [
+    "domain",
+    "ownerFirstName",
+    "ownerLastName",
+    "ownerEmail",
+    "provider",
+    "providerKeyFile",
+  ]);
   assert.deepEqual(requiredFields("uninstall"), []);
   assert.deepEqual(requiredFields("connect"), []);
 });
