@@ -51,6 +51,13 @@ var docNamedTests = []string{
 	"TestClusterOwnerTierInjectsTheAdminGate",
 	"TestFilteredReadPathAppliesTheRowGate",
 	"TestGraphExpansionAppliesTheTraversalGateBeforeItEmitsTheRow",
+	// memql#3982. The doc enumerates the reads that row admission is the ONLY
+	// mechanism for, and that enumeration was short by one: a top-level builtin
+	// call short-circuits executeWith before both mechanisms. It is cited here
+	// for the same reason as the three above -- so the claim stays checkable --
+	// and because a security seam whose only test can be deleted without
+	// breaking anything is a seam that will be.
+	"TestTopLevelBuiltinAppliesTheRowGate",
 }
 
 func TestRowAuthzDocDoesNotClaimEnforcementIsInert(t *testing.T) {

@@ -280,15 +280,16 @@ visible. The full model is in
 
 The language server owns the state. It parses the document, hashes each
 construct's source, compares against the cluster's catalog, and reports one of
-`untrained` / `drifted` / `trained` / `seeded` / `unknown`. The extension
+`untrained` / `drifted` / `trained` / `staged` / `seeded` / `unknown`. The extension
 renders; it never computes a state, because a client re-deriving drift would be
 a second opinion about the one question the surface exists to answer.
 
-**A gutter icon** beside each construct's signature. Three marks, not five,
+**A gutter icon** beside each construct's signature. Three marks, not six,
 because the gutter answers one question -- *does what I am looking at match
 what runs?* -- and that question has three answers: `untrained`, `drifted`, and
-live (`trained` and `seeded` both). They are distinguishable without relying on
-colour.
+live (`trained`, `staged` and `seeded` alike). They are distinguishable without
+relying on colour. Who can CALL a live construct is a question about actions,
+and the lens is where it is answered.
 
 `unknown` gets **no mark at all**. Not a grey icon, not a question mark: at
 sixteen pixels, a mark meaning "we do not know" is indistinguishable from one
@@ -299,11 +300,15 @@ problem with your file.
 offering what can be done about it:
 
 ```
-untrained   Dry-run   Try in session   Promote
-drifted     Dry-run   Try in session   Promote (updates the trained version)
+untrained   Dry-run   Try in session   Stage   Promote
+drifted     Dry-run   Try in session   Stage   Promote (updates the trained version)
+staged      Re-stage   Train (make it live for everyone)   Demote
 trained     Demote
 seeded      (no action -- changing it needs a rollout)
 ```
+
+The order on the first two rows is the **escalation**: a session that ends, a
+private one that does not, and one everybody gets.
 
 The state label is not a command. It is a fact about the construct, and making
 it clickable would leave a developer wondering what clicking it does. A
@@ -320,14 +325,24 @@ stop reading, and it would take the warning with it. Its hover is where
 extension already holds that line for runs, and a promotion is a strictly
 larger commitment than a run.
 
-### The four actions
+### The five actions
 
 | Action | What it does | Scope |
 |---|---|---|
 | **Dry-run** | compiles and binds in the engine's sandbox against a read-only clone of the live registry | nothing is mutated; safe against production |
 | **Try in session** | makes the construct callable by name | this connection only, dropped at disconnect |
+| **Stage** | persists it and registers it into your own durable tier | you only; survives restart and reconnect; owner-or-developer |
 | **Promote** | persists it, registers it cluster-wide, propagates to every node | durable; survives restart; owner-only |
-| **Demote** | withdraws it | owner-only |
+| **Demote** | withdraws it, from whichever tier it is in | owner-only for a trained construct |
+
+**Train is Promote.** The lens over a staged construct labels it *Train (make
+it live for everyone)* because that is the consequence, but there is no separate
+command: the engine sees the construct is staged for you and flips the same
+persisted row rather than writing a second one.
+
+**A concept cannot be staged**, and the refusal names it. A concept registers
+into the one shared concept registry, so there is no owner-scoped form of it --
+train the concept, then stage the constructs bound to it.
 
 Dry-run diagnostics land **at the construct**, and clear on the next run.
 
@@ -337,7 +352,9 @@ before it is committed.
 
 **Try in session is visibly temporary**, in the confirmation and in the lens.
 Mistaking it for a promote is the most expensive confusion this surface can
-cause, because the difference between the two is the whole design.
+cause, because the difference between the two is the whole design. **Stage** is
+the durable answer to that temporariness: same owner-scoping, same invisibility
+to everyone else, and it does not die with the connection.
 
 For a **concept**, two outcomes render structurally rather than as an error
 string: a demote reports whether the concept was *retired* (rows exist) or
@@ -367,7 +384,7 @@ a core name. The editor explains; the engine enforces.
 With no connected cluster, every file stays editable -- there is no "what the
 cluster runs" for an edit to fail to change.
 
-Full rationale: [the construct-training design](https://github.com/znasllc-io/memql/blob/main/docs/superpowers/specs/2026-08-14-construct-training-design.md).
+Full rationale: [Training Constructs Into a Running Cluster](https://github.com/znasllc-io/memql/blob/main/docs/public/language/training.md).
 
 ## Data
 

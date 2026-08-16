@@ -80,7 +80,8 @@ README suggestion.
 
 memQL is built on an append-only, time-series **memory graph**
 (PostgreSQL + TimescaleDB). Every node carries its own history; the
-primary key is `(partition, id, createdAt)`. That means provenance and
+primary key is `(id, createdAt)`, so a write never overwrites its
+predecessor — it adds a version alongside it. That means provenance and
 replay are free — you can ask what was true at a point in time, not
 just what is true now. Retrieval blends semantic similarity with
 recency, and the harness consolidates episodic rows into durable
