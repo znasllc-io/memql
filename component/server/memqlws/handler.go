@@ -385,7 +385,29 @@ func (s *session) readLoop() error {
 				return err
 			}
 		} else {
-			if err := protojson.Unmarshal(data, clientMsg); err != nil {
+			// DiscardUnknown makes the JSON branch agree with the binary one a
+			// few lines up. proto.Unmarshal already retains an unrecognised
+			// field as an unknown and returns no error -- that is protobuf's
+			// forward-compatibility contract, and the whole reason adding a
+			// field is an ADDITIVE change. protojson's default is the opposite,
+			// so one wire decoded in two encodings had two different answers to
+			// "may a client be newer than me", and only the encoding every
+			// browser and Node client uses said no.
+			//
+			// The cost was not a rejected message: readLoop returns the decode
+			// error, and returning from readLoop ENDS THE SESSION. So an
+			// unrecognised field severed the stream, took every in-flight
+			// request with it, and reached the client as "stream closed" --
+			// naming neither the field nor the skew. A VS Code plugin built
+			// past v0.18.0 disconnected on every Run, because it sends
+			// AuthoringValidateBundleMsg.origin (memql#3800) and every engine
+			// released so far predates that field.
+			//
+			// Ignoring the field leaves the request to be answered by the
+			// engine that actually exists -- for `origin`, the documented
+			// dir=="" degrade and a legible per-construct diagnostic, which is
+			// a far better answer than a dead connection.
+			if err := (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, clientMsg); err != nil {
 				return err
 			}
 		}

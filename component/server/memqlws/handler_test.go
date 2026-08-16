@@ -135,6 +135,95 @@ func TestHandlerAllowsAnyAuthenticatedUser(t *testing.T) {
 	require.NotEqual(t, http.StatusForbidden, rr.Code)
 }
 
+// TestHandlerIgnoresUnknownClientMessageFields locks the forward-compatibility
+// contract on the JSON half of the bridge: a field this engine's proto does not
+// declare is IGNORED, and the session carries on.
+//
+// The bridge decodes one wire in two encodings, and they disagreed. The binary
+// branch calls proto.Unmarshal, which retains an unrecognised field as an
+// unknown and returns no error -- protobuf's forward-compat contract, the whole
+// reason a new field is an additive change. The JSON branch called protojson
+// with default options, which is STRICT, so the same message was a hard error;
+// readLoop returned it, and returning from readLoop ends the session.
+//
+// So the cost of one unrecognised field was not a rejected message but a
+// severed stream, taking every in-flight request with it and reaching the
+// client as "stream closed" -- naming neither the field nor the version skew
+// that produced it. That is how a VS Code plugin built past v0.18.0 disconnected
+// on every Run: it sends AuthoringValidateBundleMsg.origin (memql#3800, landed
+// six hours after the v0.18.0 tag), and every released engine refuses it.
+//
+// The assertion is deliberately in two halves -- the odd message is still
+// honoured for the fields the engine DOES know, and a later message still
+// crosses -- because "did not sever the session" is the half that was broken.
+func TestHandlerIgnoresUnknownClientMessageFields(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	grpcServer := grpc.NewServer()
+	testSvc := &stubMemqlService{}
+	memqlv1.RegisterMemqlServiceServer(grpcServer, testSvc)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	defer grpcServer.Stop()
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler, err := New(Options{
+		Logger:   logger,
+		Endpoint: lis.Addr().String(),
+	})
+	require.NoError(t, err)
+
+	app := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		claims := map[string]any{"role": "admin", "sub": "tester"}
+		handler.ServeHTTP(w, r.WithContext(auth.ContextWithClaims(r.Context(), claims)))
+	}))
+	defer app.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(app.URL, "http")
+	conn, _, err := websocket.Dial(ctx, wsURL+"/memql/ws", nil)
+	require.NoError(t, err)
+	defer conn.Close(websocket.StatusNormalClosure, "done")
+
+	// A field no version of this proto declares -- a stand-in for any field a
+	// client newer than this engine sends. A real name (`origin`) would not do:
+	// it exists on HEAD, so the test would pass without the fix.
+	unknownFieldId := uuid.NewString()
+	require.NoError(t, wsjson.Write(ctx, conn, map[string]any{
+		"messageId": unknownFieldId,
+		"executeQuery": map[string]any{
+			"requestId":                           unknownFieldId,
+			"query":                               "concept==v1:demo",
+			"fieldFromAClientNewerThanThisEngine": "planner/queries.memql",
+		},
+	}))
+
+	var response map[string]any
+	require.NoError(t, wsjson.Read(ctx, conn, &response), "session was severed by an unknown field")
+	resultPayload, ok := response["queryResult"].(map[string]any)
+	require.True(t, ok, "expected a queryResult, got %v", response)
+	require.Equal(t, unknownFieldId, resultPayload["requestId"], "known fields must survive the unknown one")
+
+	// The session must still be usable afterwards.
+	secondId := uuid.NewString()
+	require.NoError(t, wsjson.Write(ctx, conn, map[string]any{
+		"messageId": secondId,
+		"executeQuery": map[string]any{
+			"requestId": secondId,
+			"query":     "concept==v1:demo",
+		},
+	}))
+	require.NoError(t, wsjson.Read(ctx, conn, &response), "session did not survive to the next message")
+	resultPayload, ok = response["queryResult"].(map[string]any)
+	require.True(t, ok, "expected a queryResult, got %v", response)
+	require.Equal(t, secondId, resultPayload["requestId"])
+}
+
 type stubMemqlService struct {
 	memqlv1.UnimplementedMemqlServiceServer
 	mu       sync.Mutex
