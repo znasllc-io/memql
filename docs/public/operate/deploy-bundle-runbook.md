@@ -28,7 +28,7 @@ SPA) deploys from its own repo's release track -- see
 2. **The target database DSN** in `MEMQL_DATABASE_DSN` -- the deploy
    runtime boots DB-backed and persists the deployment timeline there.
    For development this is the k3d postgres
-   (`kubectl port-forward -n memql svc/postgres 5432:5432`, then
+   (`kubectl port-forward -n memql svc/memql-db-rw 5432:5432`, then
    `postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable`).
 3. **A workdir that is a git clone** of the memql repo. The clone step
    fetches + checks out the requested ref IN this tree; it does not
