@@ -5,6 +5,8 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+
+	"github.com/znasllc-io/memql/core/buildinfo"
 )
 
 func testLogger() *slog.Logger {
@@ -49,15 +51,27 @@ func TestConfigImplementsDependency(t *testing.T) {
 func TestLoadFromEnv(t *testing.T) {
 	// Set a test env var
 	t.Setenv("MEMQL_DEMO_MODE", "false")
-	t.Setenv("VERSION", "test-v1.0")
 
 	snap := loadFromEnv()
 
 	if snap.DemoMode {
 		t.Error("expected DemoMode=false")
 	}
-	if snap.Version != "test-v1.0" {
-		t.Errorf("expected Version=test-v1.0, got %q", snap.Version)
+	if snap.Version != buildinfo.Version() {
+		t.Errorf("expected Version=%q, got %q", buildinfo.Version(), snap.Version)
+	}
+}
+
+// TestVersionIgnoresTheEnvironment pins the half of memql#3998 that is easy to
+// undo by accident. `Version` read a `VERSION` env var, which meant a
+// deployment could tell a node to claim a release it was not built from -- and
+// a version a running process can be TOLD is not a version. The release is a
+// build fact now, and the environment has no say in it.
+func TestVersionIgnoresTheEnvironment(t *testing.T) {
+	t.Setenv("VERSION", "v9.9.9-not-this-build")
+
+	if got := loadFromEnv().Version; got != buildinfo.Version() {
+		t.Errorf("Version=%q -- the environment overrode the link-time stamp %q", got, buildinfo.Version())
 	}
 }
 

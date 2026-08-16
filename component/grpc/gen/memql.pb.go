@@ -3206,9 +3206,33 @@ func (x *ClientHello) GetSdkVersion() string {
 }
 
 type ServerHello struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	NodeId string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	// The WIRE PROTOCOL version -- the literal "v1". It is not the engine's
+	// release and never was, which is why engine_version below is a separate
+	// field rather than a change of meaning for this one: a client that reads
+	// `version` today is reading "which protocol do you speak", and quietly
+	// handing it a release tag instead would break that reading.
+	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	// The RELEASE this engine binary was cut from (memql#3998) -- e.g.
+	// "v0.18.1" -- or "dev" when it was not cut from a release. Stamped at link
+	// time (core/buildinfo); see that package for why there is no runtime
+	// override.
+	//
+	// ADDITIVE, and additive in the direction that is safe. The incident behind
+	// epic memql#3989 was a CLIENT-to-server field an older server refused:
+	// component/server/memqlws decodes client frames with plain
+	// protojson.Unmarshal (DiscardUnknown off), so an unknown field errors out of
+	// readLoop and severs the session. This field travels the other way. Older
+	// clients decode it into a struct that has no such field -- Go's proto
+	// runtime keeps it as an unknown field, and the TS SDK's hand-mirrored
+	// envelope (sdk/ts/src/client/wire.ts) is a plain interface over parsed JSON,
+	// which has never rejected extra keys.
+	//
+	// Only clusters cut AFTER this ships can answer. It cannot teach v0.18.0 to
+	// introduce itself, which is why the plugin's recorded-version chain exists
+	// and why this is one source in it rather than the whole feature.
+	EngineVersion string `protobuf:"bytes,3,opt,name=engine_version,json=engineVersion,proto3" json:"engine_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3253,6 +3277,13 @@ func (x *ServerHello) GetNodeId() string {
 func (x *ServerHello) GetVersion() string {
 	if x != nil {
 		return x.Version
+	}
+	return ""
+}
+
+func (x *ServerHello) GetEngineVersion() string {
+	if x != nil {
+		return x.EngineVersion
 	}
 	return ""
 }
@@ -18836,10 +18867,11 @@ const file_memql_proto_rawDesc = "" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12\x19\n" +
 	"\bsdk_name\x18\x02 \x01(\tR\asdkName\x12\x1f\n" +
 	"\vsdk_version\x18\x03 \x01(\tR\n" +
-	"sdkVersion\"@\n" +
+	"sdkVersion\"g\n" +
 	"\vServerHello\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x18\n" +
-	"\aversion\x18\x02 \x01(\tR\aversion\":\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
+	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\":\n" +
 	"\fHeartbeatMsg\x12*\n" +
 	"\x02ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x02ts\"2\n" +
 	"\x06AckMsg\x12(\n" +

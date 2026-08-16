@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	busv1 "github.com/znasllc-io/memql/component/bus/gen"
+	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -116,8 +117,12 @@ func loadFromEnv() *busv1.ConfigSnapshot {
 		// Runtime-mutable
 		DemoMode: envBool("MEMQL_DEMO_MODE"),
 
-		// Version
-		Version: envStr("VERSION"),
+		// Version -- the release this binary was cut from, or "dev". It comes
+		// from the link-time stamp and never from the environment (memql#3998):
+		// this used to read a `VERSION` env var, which let a deployment tell a
+		// node to claim a release it was not built from. There is one answer to
+		// "which version is this binary" in the process, and this is it.
+		Version: buildinfo.Version(),
 
 		// Partition is no longer env-driven. Defaults to "default" in
 		// the engine; per-request override comes via the gRPC

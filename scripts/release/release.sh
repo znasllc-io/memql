@@ -226,6 +226,11 @@ function build_image() {
         --platform "${BUILD_PLATFORM:-linux/amd64}"
         -f "${REPO_ROOT}/${DOCKERFILE}"
         -t "$IMAGE_REF"
+        # The release goes into the BINARY as well as onto the image
+        # (memql#3998), so the node can state it on ServerHello.engine_version
+        # rather than reporting a build stamp derived from a stale file. Same
+        # value as the tag and the version label -- one release, stated once.
+        --build-arg "MEMQL_RELEASE=${VERSION}"
         --label "org.opencontainers.image.version=${VERSION}"
         --label "org.opencontainers.image.revision=${SHORT_SHA}"
         "${REPO_ROOT}"

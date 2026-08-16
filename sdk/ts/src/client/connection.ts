@@ -79,7 +79,13 @@ export class Connection {
 
   // Server-stamped identity from ServerHello.
   nodeId = "";
+  // The wire protocol version the node speaks ("v1"), not its release.
   serverVersion = "";
+  // The release the node's binary was cut from -- "v0.18.1", or "dev" when it
+  // was not cut from a release (memql#3998). Stays "" against a node that
+  // predates the field, which is how a caller tells "older than this contract"
+  // apart from "not a release build".
+  engineVersion = "";
 
   private readonly socket: WebSocket;
   private readonly logger: DispatcherOptions["logger"];
@@ -288,6 +294,7 @@ export class Connection {
       if (payload?.kind === "serverHello") {
         this.nodeId = payload.value.nodeId ?? "";
         this.serverVersion = payload.value.version ?? "";
+        this.engineVersion = payload.value.engineVersion ?? "";
       }
     } finally {
       clearTimeout(timer);

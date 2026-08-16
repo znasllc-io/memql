@@ -19,6 +19,12 @@ ARG BUILD_TAGS=""
 # 451-livekit-go-room-participation.md, Caveat 1).
 ARG CGO_ENABLED=0
 
+# MEMQL_RELEASE is the release tag this image is being cut at -- e.g. "v0.18.1".
+# It is linked into the binary (core/buildinfo) and is the ONLY way a node can
+# learn which release it is; unset means the node reports "dev" (memql#3998).
+# scripts/release/release.sh passes its --version here.
+ARG MEMQL_RELEASE=""
+
 # Install build dependencies
 RUN apk add --no-cache git gcc musl-dev bash curl
 
@@ -77,7 +83,7 @@ RUN bash scripts/identity/build-css.sh
 # The -installsuffix cgo flag is only meaningful for static (CGO-free)
 # builds, so it is omitted; CGO_ENABLED is the build arg (0 for default node
 # types, 1 for the voice node).
-RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w" -o memql .
+RUN CGO_ENABLED=${CGO_ENABLED} GOOS=linux go build -tags "${BUILD_TAGS}" -a -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE}" -o memql .
 
 # Build the health check binary (always CGO-free, for distroless containers)
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o healthcheck ./cmd/healthcheck
@@ -95,7 +101,6 @@ COPY --from=builder /build/healthcheck .
 # on-disk copy is kept only so MEMQL_DSL_PATH overrides work from
 # inside the container if anyone wants them.
 COPY --from=builder /build/dsl ./dsl
-COPY --from=builder /build/VERSION ./VERSION
 
 # Expose ports
 EXPOSE 8085 50051
@@ -116,7 +121,6 @@ WORKDIR /app
 COPY --from=builder /build/memql .
 COPY --from=builder /build/healthcheck .
 COPY --from=builder /build/dsl ./dsl
-COPY --from=builder /build/VERSION ./VERSION
 
 EXPOSE 8085 50051
 

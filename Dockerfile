@@ -52,6 +52,18 @@ ARG BUILD_TAGS=""
 # passes CGO_ENABLED=1 alongside BUILD_TAGS=voice.
 ARG CGO_ENABLED=0
 
+# MEMQL_RELEASE is the release tag this image is being cut at -- e.g. "v0.18.1".
+# It is linked into the binary (core/buildinfo) and is the ONLY way a node can
+# learn which release it is, so a node reports "dev" when this is unset
+# (memql#3998).
+#
+# Set it ONLY when the build genuinely is a release: build-engine-images.yml
+# passes the release tag it was dispatched with, and release.sh passes its
+# --version. `make dev` deliberately does not, because a laptop build off a
+# branch is not a release and must not name one -- a version a client believes
+# and cannot verify is worse than one it knows it cannot compare.
+ARG MEMQL_RELEASE=""
+
 WORKDIR /app
 
 # When CGO is on (the voice node) we need the C toolchain headers for libopus,
@@ -175,13 +187,23 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     go run github.com/a-h/templ/cmd/templ generate -path component/identity/web/templ
 RUN bash scripts/identity/build-css.sh
 
-# Stamp VERSION file with build timestamp
-RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
-    echo "${prefix:-0.0.0}-$(date +%s)" > VERSION
-
+# The release goes into the BINARY, via the linker, and nowhere else
+# (memql#3998). What used to be here instead was:
+#
+#   RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
+#       echo "${prefix:-0.0.0}-$(date +%s)" > VERSION
+#
+# -- which read a checked-in file that had said 0.15.0 at every tag since
+# v0.16.1 and wrote back `0.15.0-<epoch>`, a form VERSIONING.md forbids in as
+# many words ("No -<epoch> suffixes"). Every released image therefore shipped a
+# version that was release-shaped, unrelated to the release it was cut at, and
+# freshly re-stamped on each build so it looked deliberate. The binary no longer
+# reads a VERSION file at all, so neither runtime stage copies one.
+#
 # The CGO-free node types keep -ldflags="-s -w" for a stripped static binary.
 # The voice node links against libopus dynamically; -s -w still applies. The
-# healthcheck is always CGO-free.
+# healthcheck is always CGO-free -- and takes no release stamp, because it is a
+# probe that never introduces itself to a client.
 #
 # GOARCH follows TARGETARCH (the BuildKit-provided target-platform arch) rather
 # than a hardcoded amd64, so the CGO voice node builds NATIVELY for the host:
@@ -193,7 +215,7 @@ RUN prefix=$(head -n1 VERSION | cut -d- -f1) && \
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
-    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w" -o /app/bin/memql .
+    CGO_ENABLED=${CGO_ENABLED} GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -tags "${BUILD_TAGS}" -ldflags="-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE}" -o /app/bin/memql .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
@@ -251,7 +273,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
-COPY --from=builder /app/VERSION ./VERSION
 # DSL files (concepts, mutations, queries, specs, automations, prompts,
 # providers, shapes, tools, policies) are //go:embed-baked into the
 # binary at compile time. The on-disk copy is only needed if
@@ -287,7 +308,6 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/memql ./memql
 COPY --from=builder /app/bin/healthcheck ./healthcheck
-COPY --from=builder /app/VERSION ./VERSION
 # Same portal copy as the distroless runtime above. Present in BOTH stages
 # deliberately: the release workflow builds the CGO-free node types with no
 # --target, which resolves to the LAST stage -- this one -- so a copy only in

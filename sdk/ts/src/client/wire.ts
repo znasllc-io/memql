@@ -516,7 +516,13 @@ type ClientPayload =
 
 export interface ServerHelloPayload {
   nodeId?: string;
+  // The WIRE PROTOCOL version the node speaks ("v1"), not its release.
   version?: string;
+  // The release the node's binary was cut from -- e.g. "v0.18.1" -- or "dev"
+  // when it was not cut from a release (memql#3998). Absent when the node
+  // predates the field, which says the cluster is older than this contract
+  // rather than that it has no version.
+  engineVersion?: string;
 }
 
 export interface QueryResultPayload {
