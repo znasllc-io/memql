@@ -20,6 +20,8 @@ import { classifyToken } from "../connection/credentials.js";
 import { identityBaseUrlFor } from "../connection/endpoint.js";
 import type { ConnectionState } from "../connection/manager.js";
 import type { ClusterConfig } from "./model.js";
+import { describeVersion } from "../version/describe.js";
+import type { ReleaseListing } from "../version/releaseCache.js";
 import { clusterRowStatus, type ClusterRowIcon } from "./status.js";
 
 /** One label/value line on the page. */
@@ -39,6 +41,15 @@ export interface ConnectionViewInput {
   expiresAtEpochSeconds?: number;
   /** Now, in epoch milliseconds. Injected so the duration is testable. */
   nowMs: number;
+  /**
+   * The release listing, when one has been fetched (memql#3992).
+   *
+   * Optional because ACTIVATION DOES NO NETWORK WORK: the first render of this
+   * page happens before anything has been fetched, and an absent listing is an
+   * ordinary state that renders as "we do not know what exists" rather than as
+   * an error or, worse, as "up to date".
+   */
+  listing?: ReleaseListing;
 }
 
 export interface ConnectionView {
@@ -54,6 +65,7 @@ export function connectionView(input: ConnectionViewInput): ConnectionView {
   const { cluster, state } = input;
   const status = clusterRowStatus(cluster, state);
   const active = state.status !== "disconnected" && state.clusterName === cluster.name;
+  const version = describeVersion({ recorded: cluster.version, listing: input.listing });
 
   const connection: ConnectionFact[] = [
     {
@@ -79,6 +91,21 @@ export function connectionView(input: ConnectionViewInput): ConnectionView {
         cluster.local === true
           ? "uninstalling it is a Deployments action, not a Clusters one"
           : "",
+    },
+    {
+      key: "version",
+      // ALWAYS PRESENT, including with nothing recorded (memql#3995). On a tree
+      // row "unknown" on every cluster would be noise; here it is the answer to
+      // a question the operator asked by opening the page, and the alternative
+      // -- omitting the fact -- reads as "this cluster has no version" rather
+      // than "nobody has learned one".
+      //
+      // Read off clusters.yaml, so it answers with the cluster DISCONNECTED.
+      // That is the property this surface exists for: the motivating incident
+      // happened on a session that had just been severed, and a version only a
+      // live connection could report would have been missing exactly then.
+      value: version.state === "unknown" ? "unknown" : (cluster.version ?? "").trim(),
+      note: version.sentence,
     },
   ];
 

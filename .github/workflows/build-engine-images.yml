@@ -206,10 +206,19 @@ jobs:
           platforms: linux/amd64
           provenance: false
           target: ${{ matrix.target }}
+          # MEMQL_RELEASE is the release this image IS, linked into the binary
+          # so the node can state it on ServerHello.engine_version and
+          # memqlVersion() (memql#3998). It is the SAME value as the image tag
+          # and the OCI version label below: this workflow is the one place that
+          # knows the release, and it now tells the binary as well as the
+          # registry. Before this, a released node reported a build stamp
+          # derived from a checked-in file that had been stale since v0.16.1,
+          # so no installed cluster could say which release it was running.
           build-args: |
             BUILD_TAGS=${{ matrix.node }}
             CGO_ENABLED=${{ matrix.cgo }}
             PORTAL_DIST_STAGE=${{ matrix.portal }}
+            MEMQL_RELEASE=${{ inputs.version }}
           tags: |
             ${{ env.ACR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}
             ${{ env.GHCR_LOGIN_SERVER }}/memql-${{ matrix.node }}:${{ inputs.version }}

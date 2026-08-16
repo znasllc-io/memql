@@ -37,11 +37,12 @@ The version of a memQL build is the **git tag** it was cut from
 (`vX.Y.Z` on `main`), not a number embedded in a file.
 
 - The in-repo `VERSION` file carries the **plain semver** the next
-  release will be cut at (`0.14.0` today). It is a convenience for
-  tooling (`make version`, `make release` defaulting) — never a build
-  stamp, never suffixed. It is deliberately **unprefixed**: it feeds
-  the `memql:X.Y.Z` image tag, where a leading `v` does not belong.
-  The `v` lives on the git tag only.
+  release will be cut at. It is a convenience for tooling (`make
+  version`, `make release` defaulting) — never a build stamp, never
+  suffixed, and since memql#3998 **never read by the binary**. It is
+  deliberately **unprefixed**: it feeds the `memql:X.Y.Z` image tag,
+  where a leading `v` does not belong. The `v` lives on the git tag
+  only.
 - **No `-<epoch>` suffixes.** Dev builds are identified by their git
   SHA (`scripts/release/release.sh` stamps
   `org.opencontainers.image.revision=<short-sha>` on every image, and
@@ -51,6 +52,58 @@ The version of a memQL build is the **git tag** it was cut from
   `make release VERSION=X.Y.Z ...` builds the immutable
   `memql:X.Y.Z` image from that commit. See
   docs/public/operate/deployment-strategy.md (see the product pack repo's docs/operate/deployment-strategy.md).
+
+## How a running binary states its release (memql#3998)
+
+**The release is linked into the binary, and that is the only way it
+gets there.** The image build passes the release it is cutting as the
+`MEMQL_RELEASE` docker build arg, and the Dockerfile turns it into a
+linker flag:
+
+```
+go build -ldflags "-s -w -X github.com/znasllc-io/memql/core/buildinfo.release=${MEMQL_RELEASE}" .
+```
+
+`core/buildinfo.Version()` is then the single answer for the whole
+process: `resolveServiceVersion` in `main.go` returns it (so it reaches
+`app.RunConfig.Version` and the engine's `memqlVersion()` builtin), and
+`component/grpc` reads it for the `ServerHello.engine_version` field a
+client sees on connect.
+
+A build that was **not** cut from a release — `go build .`, `make dev`,
+any branch image — leaves the stamp empty and reports `dev`. That is
+deliberate. `dev` parses as no release tag at all, so a client comparing
+versions lands on "cannot compare" instead of a confident wrong answer.
+
+There is no environment variable and no file. Both existed and both were
+removed rather than demoted:
+
+- `resolveServiceVersion` read the `VERSION` **file**, which had said
+  `0.15.0` at every tag from `v0.16.1` onward, and the image build
+  rewrote it as `0.15.0-<epoch>` — the suffix form forbidden two
+  sections up. Every released node therefore reported a number that was
+  release-*shaped*, unrelated to its release, and re-stamped on each
+  build so it looked intentional.
+- A `VERSION` **env var** could override all of it at deploy time. A
+  version a running process can be *told* is not a version; the reason
+  the engine could not state its release honestly is that it had two
+  ways to be told what to say and no way to know.
+
+`TestEveryEngineImageLinksTheReleaseIntoTheBinary` and the guards beside
+it (`release_stamp_test.go`) hold this in place, because `-X` is
+**silently ignored** when its target does not resolve: a renamed
+variable or a typo'd import path breaks nothing visible and quietly
+turns every subsequent release into `dev`.
+
+**This only helps clusters cut after it ships.** It cannot teach
+`v0.18.0` — or anything older — to introduce itself, because the binary
+that cannot say its version is the one already installed. That is why
+version awareness in the VS Code plugin does not rest on this alone: the
+plugin records a cluster's version in `clusters.yaml` at install time
+and refreshes it from every trustworthy source (the install receipt, the
+ArgoCD `targetRevision`, deploy-control status, `memqlVersion()`). This
+change makes the engine the most trustworthy of those sources once it
+exists; it does not make it the only one.
 
 ## Tag form: `vX.Y.Z`, and the unprefixed stretch
 

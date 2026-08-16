@@ -122,6 +122,9 @@ import {
   DEPLOYMENT_NODE_SPEC_CONCEPT,
 } from './state/deploymentHistory.js';
 import { resolveInstallRoot } from './install/root.js';
+import { ClusterVersionRefresher } from './version/learners.js';
+import { createVersionCollector } from './version/collectors.js';
+import { releaseCache } from './version/releaseCache.js';
 import {
   AutomationRunner,
   type AutomationRunEngine,
@@ -328,7 +331,50 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     storeDeps
   );
 
-  const clustersTree = new ClustersTreeProvider(clustersPath, connections);
+  // The version machinery (epic memql#3989). Constructed here, driven by the
+  // tree: nothing below does any work until getChildren asks it to, which is
+  // what keeps activation offline.
+  //
+  // ONE refresher and the ONE shared release cache. Both are shared on purpose
+  // -- the cache's single-flight is only meaningful across callers, and the
+  // refresher holds the per-cluster supersession guards that stop two
+  // overlapping refreshes of the same cluster from racing each other onto disk.
+  const clusterVersions = new ClusterVersionRefresher({
+    collect: createVersionCollector({
+      // Lazy: only the local-cluster status source needs it, and resolving it
+      // at activation would make startup depend on a path nothing has asked for.
+      repoRoot: () => resolveInstallRoot(context.extensionPath),
+      readReceipt: () => readReceipt(defaultReceiptPath()).catch(() => null),
+      runCapability: runCapabilityScript,
+      // The two live sources are closures rather than clients, so the
+      // collector module stays free of connection plumbing. Both return
+      // nothing unless this editor happens to be connected to the very
+      // cluster being refreshed -- asking a live connection about a DIFFERENT
+      // cluster would record one cluster's version against another.
+      deployStatus: async (cluster) => {
+        if (!connectedTo(connections, cluster.name)) return null;
+        const status = await deploymentStatusForThisCluster(connections);
+        return status === null
+          ? null
+          : { version: status.version ?? '', engineVersion: status.engineVersion ?? '' };
+      },
+      liveVersion: async (cluster) => {
+        if (!connectedTo(connections, cluster.name)) return '';
+        const query = connections?.query;
+        if (query === undefined) return '';
+        const result = await query.executeNamed('memqlVersion', 'memqlVersion()');
+        return readReportedVersion(result.rows());
+      },
+    }),
+    write: (name, version) => upsertCluster(clustersPath, { name, version }),
+  });
+
+  const clustersTree = new ClustersTreeProvider(
+    clustersPath,
+    connections,
+    releaseCache,
+    clusterVersions
+  );
   context.subscriptions.push(
     window.registerTreeDataProvider('memqlClusters', clustersTree)
   );
@@ -718,6 +764,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
 
   context.subscriptions.push(
     commands.registerCommand('memql.clusters.refresh', () => clustersTree.refresh()),
+    // The escape hatch out of the release listing's ten-minute TTL
+    // (memql#3992). An operator who has just cut a release should not have to
+    // wait out a timer to see it offered.
+    commands.registerCommand('memql.clusters.refreshReleases', () =>
+      clustersTree.refreshReleases()
+    ),
     commands.registerCommand('memql.clusters.disconnect', async () => {
       await connections?.disconnect();
       clustersTree.refresh();
@@ -1740,9 +1792,14 @@ function clustersRegistryChanged(clustersTree: ClustersTreeProvider): void {
 // file-watcher callback registered before the run surface exists) can reach it.
 let runOrchestrator: RunOrchestrator | undefined;
 
-// currentRunCluster resolves the selected cluster down to the three facts a run
+// currentRunCluster resolves the selected cluster down to the few facts a run
 // needs. Deliberately NOT the whole ClusterConfig: the PAT must never travel
 // into the orchestrator, and from there into a webview or a log.
+//
+// The recorded version joined that set in memql#4000. It is safe to carry for
+// the same reason the others are -- it is a release tag, not a credential --
+// and it is what lets a severed session say the cluster is older than the
+// plugin instead of only "stream closed".
 function currentRunCluster(
   clustersPath: string,
   conns: ConnectionManager
@@ -1761,6 +1818,10 @@ function currentRunCluster(
     name: cluster.name,
     label: cluster.displayName !== undefined && cluster.displayName !== '' ? cluster.displayName : cluster.name,
     local: cluster.local === true,
+    // The recorded release, so a severed session can say whether this cluster
+    // is older than the plugin (memql#4000). Undefined stays undefined -- an
+    // unlearned version produces no hint rather than a guess.
+    version: cluster.version,
   };
 }
 
@@ -2797,4 +2858,67 @@ function resolveOnPath(name: string): string | undefined {
 
 function binaryName(): string {
   return process.platform === 'win32' ? 'memql-lsp.exe' : 'memql-lsp';
+}
+
+// -----------------------------------------------------------------------------
+// Version learning: the two sources that need a live cluster (memql#3993)
+// -----------------------------------------------------------------------------
+
+/**
+ * Whether this editor's live session is on THIS cluster.
+ *
+ * Both live sources below are gated on it, and the gate is not a nicety:
+ * asking the open connection about a cluster it is not connected to would
+ * record one cluster's version against another -- a confidently wrong answer,
+ * written to disk, that nothing downstream could detect.
+ */
+function connectedTo(connections: ConnectionManager | undefined, name: string): boolean {
+  const state = connections?.state;
+  return state?.status === 'connected' && state.clusterName === name;
+}
+
+/**
+ * `GetDeploymentStatus` for the cluster this editor is connected to.
+ *
+ * THE ONE ADAPTER OVER THE ENV-SHAPED DEPLOY SURFACE. Epic memql#3943 is
+ * collapsing `deploycontrol` to a single target and deleting this parameter;
+ * until it lands the RPC still takes one, and there is no environment to name
+ * here -- the question is "what is the cluster I am talking to running", which
+ * is exactly the question the post-collapse signature asks with no argument at
+ * all. So the empty string is passed, deliberately, and this function is the
+ * single line that changes when the parameter goes.
+ *
+ * No new env-shaped parameter is introduced anywhere for this epic, per #3989.
+ *
+ * A refusal here is an ORDINARY outcome, not a problem: the RPC is owner/admin
+ * gated, so a reader legitimately cannot call it, and the collector treats the
+ * failure as "this source had nothing to say".
+ */
+async function deploymentStatusForThisCluster(
+  connections: ConnectionManager | undefined,
+): Promise<{ version?: string; engineVersion?: string } | null> {
+  const dispatcher = connections?.dispatcher;
+  if (dispatcher === undefined) return null;
+  // Rebuilt per call from the LIVE dispatcher rather than cached, matching the
+  // deploy surface's own reasoning: the ConnectionManager drops it the moment
+  // the socket dies, and a cached client would go on writing into a dead stream.
+  return await new DeployControlClient(dispatcher).getDeploymentStatus('');
+}
+
+/**
+ * The version out of a `memqlVersion()` result.
+ *
+ * Defensive about the row shape rather than asserting one: this is a builtin
+ * whose projection is not pinned by any contract this extension owns, and a
+ * version refresh is opportunistic background work. An unrecognised shape is
+ * "nothing learned", never a thrown error in front of an operator.
+ */
+function readReportedVersion(rows: readonly unknown[]): string {
+  const first = rows[0];
+  if (typeof first !== 'object' || first === null) return '';
+  for (const key of ['version', 'serviceVersion', 'engineVersion', 'value']) {
+    const found = (first as Record<string, unknown>)[key];
+    if (typeof found === 'string' && found.trim() !== '') return found.trim();
+  }
+  return '';
 }

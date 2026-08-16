@@ -295,6 +295,10 @@
       {
         "command": "memql.training.showList",
         "title": "memQL: Show Untrained And Drifted Constructs"
+      },
+      {
+        "command": "memql.clusters.refreshReleases",
+        "title": "memQL: Check For New Releases"
       }
     ],
     "menus": {

@@ -36,6 +36,7 @@ import (
 	"github.com/znasllc-io/memql/component/polyphon"
 	"github.com/znasllc-io/memql/component/provenance"
 	healthsrv "github.com/znasllc-io/memql/component/server"
+	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/grpctls"
 	"github.com/znasllc-io/memql/core/id"
@@ -1749,8 +1750,19 @@ func (s *streamSession) handleClientHello(envelope *memqlv1.MemqlClientMessage, 
 		return nil
 	}
 	response := &memqlv1.ServerHello{
-		NodeId:  string(ComponentName),
+		NodeId: string(ComponentName),
+		// Version is the WIRE PROTOCOL version and stays "v1". Repurposing it
+		// as the release would silently change what every existing client
+		// reads out of this field.
 		Version: "v1",
+		// EngineVersion is the release this binary was cut from (memql#3998),
+		// read straight from the link-time stamp rather than plumbed through
+		// the Server. That is deliberate: a build fact has no reason to travel
+		// as a constructor argument, and a value the process can be handed at
+		// runtime is exactly the thing the epic is trying to stop trusting.
+		// resolveServiceVersion() in main.go returns the same call, so the
+		// answer here and the answer memqlVersion() gives cannot disagree.
+		EngineVersion: buildinfo.Version(),
 	}
 	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
 		Payload: &memqlv1.MemqlServerMessage_ServerHello{

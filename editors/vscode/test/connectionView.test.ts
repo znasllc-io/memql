@@ -261,3 +261,93 @@ test("nothing to compose from yields nothing, not https:///", () => {
   assert.equal(composePortalUrl({ name: "x", endpoint: "" }), "");
   assert.equal(portalTarget({ name: "x", endpoint: "" }, []).url, "");
 });
+
+// -----------------------------------------------------------------------------
+// The recorded version (memql#3995)
+// -----------------------------------------------------------------------------
+//
+// The page says the version WORD-FOR-WORD where the tree row can only hint at
+// it. In particular it says "unknown" out loud: on the row that would be noise
+// on every cluster, and here it is the answer to a question the operator asked
+// by opening the page.
+
+const RELEASES = { tags: ["v0.18.0", "v0.17.0"], fetchedAt: 1000 };
+
+test("the page always carries a version fact, even with nothing recorded", () => {
+  const view = connectionView({
+    cluster: cluster(),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: RELEASES,
+  });
+  const fact = factOf(view.connection, "version");
+  assert.match(fact.value, /unknown/i);
+});
+
+test("a recorded version behind the newest release offers the upgrade", () => {
+  const view = connectionView({
+    cluster: cluster({ version: "v0.17.0" }),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: RELEASES,
+  });
+  const fact = factOf(view.connection, "version");
+  assert.equal(fact.value, "v0.17.0");
+  assert.match(fact.note, /v0\.18\.0/, "the note names the release that is available");
+});
+
+test("a current cluster's note says so without offering anything", () => {
+  const view = connectionView({
+    cluster: cluster({ version: "v0.18.0" }),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: RELEASES,
+  });
+  const fact = factOf(view.connection, "version");
+  assert.equal(fact.value, "v0.18.0");
+  assert.match(fact.note, /newest release/i);
+});
+
+test("a DISCONNECTED cluster reports its version -- no session required", () => {
+  // The property this whole surface exists for: the motivating incident
+  // happened on a session that had just been severed.
+  const view = connectionView({
+    cluster: cluster({ version: "v0.17.0" }),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: RELEASES,
+  });
+  assert.equal(factOf(view.connection, "version").value, "v0.17.0");
+});
+
+test("an unfetched listing leaves the version shown and claims nothing", () => {
+  const view = connectionView({
+    cluster: cluster({ version: "v0.17.0" }),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: undefined,
+  });
+  const fact = factOf(view.connection, "version");
+  assert.equal(fact.value, "v0.17.0");
+  assert.doesNotMatch(fact.note, /available/i);
+  assert.doesNotMatch(fact.note, /newest release/i);
+});
+
+test("a version that is not a release is shown verbatim and not compared", () => {
+  const view = connectionView({
+    cluster: cluster({ version: "0.15.0-1737072000" }),
+    state: DISCONNECTED,
+    nowMs: NOW,
+    listing: RELEASES,
+  });
+  const fact = factOf(view.connection, "version");
+  assert.equal(fact.value, "0.15.0-1737072000");
+  assert.match(fact.note, /does not name a release/i);
+});
+
+test("the page works with no listing supplied at all", () => {
+  // Activation does no network work, so the first render of this page happens
+  // before anything has been fetched.
+  const view = connectionView({ cluster: cluster({ version: "v0.17.0" }), state: DISCONNECTED, nowMs: NOW });
+  assert.equal(factOf(view.connection, "version").value, "v0.17.0");
+});

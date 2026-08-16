@@ -173,10 +173,15 @@ var coverageAllowList = map[string]exemption{
 	},
 
 	// --- image build inputs ---
-	"docker/**": {
-		reason: "the retired compose stack's build inputs; no lane builds them and no gate " +
-			"reads them. Only docker/init-db.sql and docker/memql.Dockerfile are exempted " +
-			"here -- docker/README.md is already routed by the `**/*.md` glob",
+	// docker/memql.Dockerfile USED to be exempted here under the same reason.
+	// It stopped qualifying the moment release_stamp_test.go (memql#3998)
+	// began asserting on its build line, and this check said so -- which is
+	// what it is for. The file is routed to `gates` in ci.yml now, beside the
+	// root Dockerfile it is asserted alongside. docker/README.md was never
+	// exempted here; the `**/*.md` glob already routes it.
+	"docker/init-db.sql": {
+		reason: "the retired compose stack's database seed; no lane builds it and no gate " +
+			"reads it",
 		mentionedBy: map[string]string{
 			".github/workflows/ci.yml": "two comments on the db-tests service container note " +
 				"that its `CREATE EXTENSION` lines mirror docker/init-db.sql. The lane types " +

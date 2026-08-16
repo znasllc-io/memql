@@ -114,6 +114,7 @@ shape instance instanceFull {
   dbPreset
   provisionedAt
   suspendedAt
+  trialEndsAt
   lastActivityAt
   maxLlmCalls
   maxLlmCostUsd
