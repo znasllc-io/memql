@@ -1,0 +1,52 @@
+# TOP tier -- three instances across three zones (epic memql#3842, task memql#3851).
+#
+#   instances   3
+#   resources   4 vCPU / 16 GiB
+#   storage     256 GiB data + 64 GiB WAL
+#   HA          ON, spread across availability zones
+#
+# ZONE SPREAD IS THE POINT OF THE THIRD INSTANCE. Two instances survive a NODE
+# loss; three across three zones survive a ZONE loss, which is the failure a
+# cloud region actually has. The spread is expressed as a topology constraint on
+# `topology.kubernetes.io/zone` with `DoNotSchedule`, so a cluster that cannot
+# honour it leaves the third instance Pending rather than quietly placing two
+# instances in one zone and calling itself zone-redundant.
+#
+# THE STORAGE CLASS IS NOT SET HERE. Premium SSD v2 is LRS/zonal-only, which is
+# CORRECT for this topology -- zone redundancy comes from Postgres replication,
+# not from disk replication, and paying for ZRS disks under a replicated
+# database buys the same property twice. But the class NAME is cloud-specific,
+# so it belongs to the overlay.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Cluster
+      name: memql-db
+    patch: |
+      - { op: replace, path: /spec/instances, value: 3 }
+      - { op: replace, path: /spec/enablePDB, value: true }
+      - { op: replace, path: /spec/storage/size, value: 256Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 64Gi }
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: { cpu: "4", memory: 16Gi }
+          limits:   { memory: 16Gi }
+      - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "400" }
+      - op: add
+        path: /spec/affinity
+        value:
+          enablePodAntiAffinity: true
+          topologyKey: topology.kubernetes.io/zone
+          podAntiAffinityType: required
+      - op: add
+        path: /spec/topologySpreadConstraints
+        value:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            whenUnsatisfiable: DoNotSchedule
+            labelSelector:
+              matchLabels:
+                cnpg.io/cluster: memql-db

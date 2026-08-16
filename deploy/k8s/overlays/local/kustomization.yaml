@@ -9,26 +9,29 @@
 #   3. Replicas -- 1 per node type (multi-node is exercised via #2067).
 #
 # LOCAL INFRASTRUCTURE (defined here, absent in base)
-#   - database.yaml      -- CloudNativePG Cluster + ObjectStore + Database +
-#                           ScheduledBackup (epic memql#3842 / #3846). The same
-#                           four kinds staging and production declare, carrying
-#                           smaller numbers -- one instance, 10Gi, Azurite
-#                           instead of Azure Blob. It replaced a hand-rolled
-#                           `postgres` Deployment that was the one place the
-#                           parity doctrine bent.
 #   - azurite.yaml       -- Azure Blob emulator (replaces Azure Blob Storage),
-#                           and now also the backup destination the ObjectStore
-#                           archives WAL and base backups to
+#                           and now also the backup destination the database's
+#                           ObjectStore archives WAL and base backups to
 #   - db-pool-local.yaml -- looser pool bounds for local Postgres (not Tiger Cloud)
 #
+# THE DATABASE IS A COMPONENT, not a local manifest (epic memql#3842 /
+# #3846 / #3851). `components: ../../components/cnpg-db` brings the same four
+# resources -- Cluster, Database, ObjectStore, ScheduledBackup -- that staging,
+# production and every tenant deployment compose; the patches further down
+# supply local's VALUES (10Gi, Azurite, a 7-day retention). It replaced a
+# hand-rolled `postgres` Deployment that was the one place the parity doctrine
+# bent: no operator, no WAL archiving, no backups.
+#
 # SECRETS (created by `make secrets`, NOT committed)
-#   - memql-secrets         -- main app envelope (genesis, DB DSN, blob conn string)
-#   - livekit-secrets       -- LiveKit API key+secret for local livekit server
-#   - telephony-secrets     -- stub (telephony disabled locally)
-#   - memql-local-db-creds  -- Postgres credentials for the in-cluster DB. A
-#                              kubernetes.io/basic-auth Secret (username /
-#                              password), which is the shape CNPG's
-#                              bootstrap.initdb.secret reads.
+#   - memql-secrets      -- main app envelope (genesis, DB DSN, blob conn string)
+#   - livekit-secrets    -- LiveKit API key+secret for local livekit server
+#   - telephony-secrets  -- stub (telephony disabled locally)
+#   - memql-db-app-creds -- Postgres credentials for the in-cluster DB. A
+#                           kubernetes.io/basic-auth Secret (username /
+#                           password), which is the shape CNPG's
+#                           bootstrap.initdb.secret reads. The NAME is the
+#                           component's contract -- local seeds it here, the
+#                           cloud syncs it from Key Vault through ESO.
 # See scripts/k3d/seed-secrets.sh for the creation logic.
 #
 # IMAGE AUTHORITY
@@ -68,7 +71,6 @@ resources:
   - edge-front-door.yaml
   - ../../base
   # Local-only infrastructure (absent in base/staging/prod)
-  - database.yaml
   - azurite.yaml
 
 # ---------------------------------------------------------------------------
@@ -612,6 +614,38 @@ patches:
       kind: ConfigMap
       name: memql-db-pool
 
+  # -------------------------------------------------------------------------
+  # DATABASE -- local VALUES over the cnpg-db component (memql#3846 / #3851)
+  # -------------------------------------------------------------------------
+  # Everything below is a number or an endpoint. The SHAPE -- four resources,
+  # the preloaded library, the plugin archiver, the declared extensions -- comes
+  # from the component and is identical in staging, production and every tenant.
+  - target: { kind: Cluster, name: memql-db }
+    patch: |
+      # k3d imports the image into containerd; nothing pushes it to a registry.
+      - { op: add, path: /spec/imagePullPolicy, value: IfNotPresent }
+      # Laptop-sized. The component's defaults are already the smallest sane
+      # shape, so these differ only in storage.
+      - { op: replace, path: /spec/storage/size, value: 10Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 2Gi }
+
+  - target: { kind: ObjectStore, name: memql-db-backup }
+    patch: |
+      # AN EMULATOR DESTINATION IS A FULL HTTP URL INCLUDING THE ACCOUNT, not
+      # the `azure://<container>/` form staging uses against real Blob. barman
+      # refuses the scheme form here outright --
+      #   "emulated storage URL azure://memql-db-backups/ is malformed"
+      # -- and it surfaces as ContinuousArchivingFailing on a Cluster that still
+      # reports Ready, with an exit status naming neither the URL nor the shape.
+      # This is a property of Azurite, not of the environment, which is why it
+      # is the one line where local's value differs in kind rather than degree.
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "http://azurite:10000/devstoreaccount1/memql-db-backups"
+      # A week, not thirty days: local is a rehearsal of the mechanism, not an
+      # archive.
+      - { op: replace, path: /spec/retentionPolicy, value: "7d" }
+
 # ---------------------------------------------------------------------------
 # Image tags for local builds
 # Local images are built with `make dev-build` and imported into k3d.
@@ -619,6 +653,12 @@ patches:
 # NO @sha256 digest here -- that is intentional and exempted from CI gate.
 # ---------------------------------------------------------------------------
 images:
+  # The database operand image, built by `make db-image` and imported into k3d.
+  # The tag MUST start with the PostgreSQL major -- CNPG parses it off
+  # spec.imageName and refuses what it cannot read (deploy/db-image/README.md).
+  - name: memql-db
+    newName: memql-db
+    newTag: 16-dev
   - name: acrmemql.azurecr.io/memql-bff
     newName: memql-bff
     newTag: local
@@ -649,3 +689,9 @@ images:
 
 components:
   - ../../components/engine-bff
+  # The database, as the SAME component staging, production and every tenant
+  # deployment composes (epic memql#3842 / #3851). Local supplies its own values
+  # rather than a tier preset: the presets describe what a customer buys, and a
+  # developer laptop is not a tier -- entry alone would ask for 1 vCPU / 4 GiB
+  # and 48 GiB of disk on a machine that also runs the whole mesh.
+  - ../../components/cnpg-db

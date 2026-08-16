@@ -1,0 +1,39 @@
+# Where WAL segments and base backups land (epic memql#3842, task memql#3851).
+#
+# EVERY CONSUMING OVERLAY MUST PATCH `destinationPath`. It is a required field
+# on the CRD, so this component cannot simply omit it -- hence the placeholder
+# below, and hence the gate: TestNoOverlayShipsThePlaceholderBackupDestination
+# fails on any rendered overlay that still contains it. An unpatched destination
+# would not error; it would archive nowhere while the Cluster reported Ready,
+# which is the failure mode this whole layer exists to prevent.
+#
+# THE FORM DIFFERS BETWEEN A REAL ACCOUNT AND AN EMULATOR, and that is a
+# property of the emulator rather than of the environment:
+#
+#   real Azure Blob   azure://<container>/
+#   Azurite (local)   http://azurite:10000/<account>/<container>
+#
+# barman rejects the `azure://` form against an emulator as "malformed", and the
+# only symptom is ContinuousArchivingFailing on a healthy-looking Cluster.
+#
+# CREDENTIALS are a connection string read from a Secret. The NAME below is the
+# contract; locally `make secrets` writes it, in the cloud ESO syncs it from Key
+# Vault. An overlay whose cluster identity uses workload identity instead
+# replaces this block with `inheritFromAzureAD: true`.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: memql-db-backup
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+spec:
+  configuration:
+    destinationPath: "PATCH-ME-IN-THE-OVERLAY"
+    azureCredentials:
+      connectionString:
+        name: memql-secrets
+        key: AZURE_BLOB_CONNECTION_STRING
+  # 30 days of PITR. Presets and overlays may shorten it -- local keeps a week,
+  # because local is a rehearsal of the mechanism rather than an archive.
+  retentionPolicy: "30d"

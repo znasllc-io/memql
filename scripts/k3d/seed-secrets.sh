@@ -14,7 +14,7 @@
 #                             MEMQL_IDENTITY_SIGNING_KEY_B64,
 #                             MEMQL_NODE_BOOTSTRAP_TOKEN, DATABASE_DSN, ...)
 #   livekit-secrets        -- LiveKit API key + secret for local livekit
-#   memql-local-db-creds   -- Postgres credentials for the in-cluster DB
+#   memql-db-app-creds   -- Postgres credentials for the in-cluster DB
 #
 # Called by `make secrets` and by `make up` on first boot.
 # Safe to re-run: uses `kubectl apply` (idempotent, creates or updates).
@@ -909,7 +909,7 @@ function seed_internal_ca() {
 #=============================================================================
 
 function seed_db_creds() {
-    info "seeding memql-local-db-creds (Postgres credentials for in-cluster DB)..."
+    info "seeding memql-db-app-creds (Postgres credentials for in-cluster DB)..."
     # A kubernetes.io/basic-auth Secret, because that is the shape CNPG's
     # `bootstrap.initdb.secret` reads (memql#3846). It replaced the
     # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB triple the retired
@@ -922,7 +922,7 @@ function seed_db_creds() {
     # created with one password and connected to with another -- a failure that
     # presents as an authentication error against a database that just came up
     # clean.
-    kubectl create secret generic memql-local-db-creds \
+    kubectl create secret generic memql-db-app-creds \
         --namespace="$NAMESPACE" \
         --type=kubernetes.io/basic-auth \
         --from-literal="username=$LOCAL_DB_USER" \
@@ -930,7 +930,7 @@ function seed_db_creds() {
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
-    info "memql-local-db-creds seeded."
+    info "memql-db-app-creds seeded."
 }
 
 #=============================================================================
