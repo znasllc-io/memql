@@ -55,9 +55,19 @@ the source `big-corp` reads `MEMQL_INBOUND_SOURCE_BIG_CORP_*`:
 | `..._SIGNATURE_PREFIX` | no | stripped before decoding, e.g. `sha256=` |
 | `..._TIMESTAMP_HEADER` | no | turns on the replay window |
 | `..._DEDUPE_HEADER` | no | the sender's own idempotency key |
+| `..._ELEMENT_SEPARATOR` | no | the header is a `k=v` list; this is what separates the entries |
+| `..._SIGNATURE_ELEMENT` | with a separator | which element carries the digest |
+| `..._TIMESTAMP_ELEMENT` | no | which element carries the timestamp |
 
 There is no vendor list. A source names the *encoding* its signature uses, so a
 new sender is a config change rather than a release.
+
+The last three describe a **composite header** -- one header carrying several
+`k=v` elements rather than a single value. That is the same kind of fact as the
+scheme: how the bytes are laid out, not who sent them. They are all-or-nothing,
+and a partial configuration is refused at boot rather than at request time,
+because both halves of a partial one fail as the same flat `401` from a
+configuration that looks more complete than the one that would work.
 
 A GitHub-shaped sender:
 
@@ -68,6 +78,22 @@ MEMQL_INBOUND_SOURCE_GH_SIGNATURE_HEADER=X-Hub-Signature-256
 MEMQL_INBOUND_SOURCE_GH_SIGNATURE_PREFIX=sha256=
 MEMQL_INBOUND_SOURCE_GH_SECRET=<shared secret>
 ```
+
+A Stripe-shaped one, whose single header carries both the timestamp and the
+digest (`Stripe-Signature: t=1614556800,v1=<hex>`):
+
+```bash
+MEMQL_INBOUND_SOURCE_STRIPE_SIGNATURE_SCHEME=hmac-sha256-hex
+MEMQL_INBOUND_SOURCE_STRIPE_SIGNATURE_HEADER=Stripe-Signature
+MEMQL_INBOUND_SOURCE_STRIPE_ELEMENT_SEPARATOR=,
+MEMQL_INBOUND_SOURCE_STRIPE_SIGNATURE_ELEMENT=v1
+MEMQL_INBOUND_SOURCE_STRIPE_TIMESTAMP_ELEMENT=t
+MEMQL_INBOUND_SOURCE_STRIPE_SECRET=<shared secret>
+```
+
+Note there is no `..._SIGNATURE_PREFIX` here and it would not help: `v1=` is not
+a *leading* prefix, because `t=<unix>,` comes first. That is precisely the shape
+the element vars exist for.
 
 A Shopify-shaped one:
 

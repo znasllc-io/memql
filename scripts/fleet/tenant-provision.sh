@@ -49,6 +49,8 @@ cap_spec_param "ha"                  "compose the HA add-on component (true|fals
 cap_spec_param "engineTag"           "engine image tag every node of this tenant runs"
 cap_spec_param "dbImageTag"          "database operand image tag (must begin with the PostgreSQL major)"
 cap_spec_param "backupDestination"   "ObjectStore destinationPath for this tenant's WAL + base backups"
+cap_spec_param_required "maxLlmCalls" "cumulative LLM-call ceiling this tenant boots with (the tier's structural backstop)"
+cap_spec_param_required "maxLlmCostUsd" "cumulative estimated-USD ceiling this tenant boots with"
 cap_spec_param "repoUrl"             "git repository ArgoCD reconciles the tenant from"
 cap_spec_param "targetRevision"      "git revision ArgoCD reconciles the tenant at"
 cap_spec_param "outputRoot"          "repository root to render into (defaults to this checkout)"
@@ -75,6 +77,25 @@ function validate_tenant_slug() {
     esac
 }
 
+# validate_ceiling -- a spend ceiling must be a POSITIVE number.
+#
+# Zero is refused, and that refusal is the whole point of the parameter being
+# required. The guard reads 0 as UNLIMITED (docs/public/ai/llm-cost-control.md),
+# so a caller that computed a ceiling of zero -- a tier row with an unset field,
+# an arithmetic slip, an empty string coerced -- would render a tenant with NO
+# ceiling while every line of the configuration looked deliberate. Failing here
+# costs a provisioning run; the alternative costs a bill.
+function validate_ceiling() {
+    local name="$1" value="$2"
+    if [[ ! "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        cap_fail 2 "${name} must be a number (got '${value}')"
+    fi
+    # A bare numeric comparison, since the value may carry a decimal point.
+    if ! awk -v v="$value" 'BEGIN { exit !(v > 0) }'; then
+        cap_fail 2 "${name}=${value} is not positive; the LLM guard reads 0 as UNLIMITED, so this would provision a tenant with no spend ceiling at all"
+    fi
+}
+
 function validate_enum() {
     local name="$1" value="$2" allowed="$3"
     case " ${allowed} " in
@@ -97,6 +118,8 @@ function render_file() {
     content="${content//__ENGINE_TAG__/$ENGINE_TAG}"
     content="${content//__DB_IMAGE_TAG__/$DB_IMAGE_TAG}"
     content="${content//__BACKUP_DESTINATION__/$BACKUP_DESTINATION}"
+    content="${content//__MAX_LLM_CALLS__/$MAX_LLM_CALLS}"
+    content="${content//__MAX_LLM_COST_USD__/$MAX_LLM_COST_USD}"
     content="${content//__REPO_URL__/$REPO_URL}"
     content="${content//__TARGET_REVISION__/$TARGET_REVISION}"
     content="${content//__HA_COMPONENT_LINE__/$HA_LINE}"
@@ -121,6 +144,8 @@ function main() {
     ENGINE_TAG="$(cap_param engineTag "latest")"
     DB_IMAGE_TAG="$(cap_param dbImageTag "16")"
     BACKUP_DESTINATION="$(cap_param backupDestination "")"
+    MAX_LLM_CALLS="$(cap_param maxLlmCalls "")"
+    MAX_LLM_COST_USD="$(cap_param maxLlmCostUsd "")"
     REPO_URL="$(cap_param repoUrl "https://github.com/znasllc-io/memql.git")"
     TARGET_REVISION="$(cap_param targetRevision "main")"
     out_root="$(cap_param outputRoot "$REPO_ROOT")"
@@ -130,10 +155,14 @@ function main() {
     cap_require domain   "$DOMAIN"
     cap_require profile  "$PROFILE"
     cap_require dbPreset "$DB_PRESET"
+    cap_require maxLlmCalls   "$MAX_LLM_CALLS"
+    cap_require maxLlmCostUsd "$MAX_LLM_COST_USD"
 
     validate_tenant_slug "$TENANT"
     validate_enum profile  "$PROFILE"   "solo standard dedicated"
     validate_enum dbPreset "$DB_PRESET" "entry mid top"
+    validate_ceiling maxLlmCalls   "$MAX_LLM_CALLS"
+    validate_ceiling maxLlmCostUsd "$MAX_LLM_COST_USD"
 
     # A tenant whose backups go nowhere looks perfectly healthy. The cnpg-db
     # component ships the PATCH-ME-IN-THE-OVERLAY placeholder precisely so this
@@ -169,7 +198,7 @@ function main() {
     mkdir -p "$overlay_dir" "$(dirname "$app_file")"
 
     local changed=0 f
-    for f in kustomization.yaml environment.yaml domain.yaml domain-envfrom.yaml; do
+    for f in kustomization.yaml environment.yaml domain.yaml domain-envfrom.yaml allowance.yaml allowance-envfrom.yaml; do
         if render_file "${TEMPLATE_DIR}/${f}" "${overlay_dir}/${f}"; then
             changed=1
             cap_info "rendered ${overlay_dir}/${f}"
@@ -184,6 +213,8 @@ function main() {
     cap_result_set domain       "$DOMAIN"
     cap_result_set profile      "$PROFILE"
     cap_result_set dbPreset     "$DB_PRESET"
+    cap_result_set_raw maxLlmCalls   "$MAX_LLM_CALLS"
+    cap_result_set_raw maxLlmCostUsd "$MAX_LLM_COST_USD"
     cap_result_set overlayPath  "deploy/k8s/tenants/${TENANT}"
     cap_result_set applicationPath "deploy/argocd/tenants/${TENANT}.yaml"
     cap_result_set_raw haComposed "$([[ -n "$HA_LINE" ]] && echo true || echo false)"

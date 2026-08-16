@@ -50,6 +50,7 @@ shape subscription subscriptionFull {
   graceEndsAt
   stripeSubscriptionId
   stripePriceId
+  billingEmail
   cancelAt
   row.createdAt
 }
@@ -114,6 +115,8 @@ shape instance instanceFull {
   provisionedAt
   suspendedAt
   lastActivityAt
+  maxLlmCalls
+  maxLlmCostUsd
   notifyEmail
   lastError
   row.createdAt

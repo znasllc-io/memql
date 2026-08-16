@@ -1,0 +1,81 @@
+# The tenant's SPEND CEILING, rendered from the tier it bought
+# (epic memql#3852, task memql#3854).
+#
+# Rendered by scripts/fleet/tenant-provision.sh; the tokens are substituted.
+#
+# =============================================================================
+#   Why a ConfigMap and not a meter
+# =============================================================================
+#
+# There are two layers of allowance in memQL Cloud, and they answer different
+# questions.
+#
+#   THE METER (v1:fleet:usageMeter, on the mothership) is the ACCOUNTING truth:
+#   what was consumed this period, what it costs, what Stripe is told. It is
+#   reconstructed from reports a tenant sends over the outbound -> inbound path,
+#   so it lags, and a lost report under-bills by that report.
+#
+#   THIS FILE is the STRUCTURAL backstop: the tier's ceiling, enforced inside
+#   the tenant's own processes, since boot, with no network and no graph read
+#   (docs/public/ai/llm-cost-control.md). A tenant cannot exceed it if the
+#   mothership is unreachable, if metering is broken, or if the fleet bundle has
+#   a bug in it.
+#
+# The second one is what makes the epic's launch gate -- "NO unbounded-spend
+# path exists" -- a claim about STRUCTURE rather than a hope about our own
+# correctness. Every metering design has a failure mode where the meter stops
+# and the model keeps being called; the only defence that survives that is a
+# ceiling on the other side of the boundary, which is here.
+#
+# =============================================================================
+#   The trial is the case this exists for
+# =============================================================================
+#
+# A trial's card has been authorized and never charged. An unbounded trial is
+# therefore an unbounded gift, available to anyone who can complete a checkout
+# form -- which is the single most expensive thing that can go wrong with this
+# product, and the one an attacker would look for first.
+#
+# So the trial tier is the one whose `overagePolicy` is `throttle` rather than
+# `meter`, and it is the one where this ceiling is not merely prudent but load-
+# bearing. A paid tier's ceiling is set well above its allowance: the customer
+# has a card we charge, overage is billable and profitable, and cutting off a
+# paying customer mid-sentence to save money we would have made is the wrong
+# trade. A trial's ceiling IS its allowance.
+#
+# =============================================================================
+#   What the numbers mean
+# =============================================================================
+#
+# MEMQL_LLM_MAX_TOTAL_CALLS is cumulative admitted LLM calls SINCE THE PROCESS
+# BOOTED -- not per period. That mismatch is deliberate and worth understanding
+# rather than "fixing":
+#
+#   - it is a BACKSTOP, not an accountant. The meter does periods; this does
+#     runaways.
+#   - a since-boot latch resets on a rollout, which is the correct failure
+#     direction for a backstop: the worst case is that a runaway gets a second
+#     chance rather than a paying customer being permanently locked out by a
+#     counter nobody can see.
+#   - it is per PROCESS, so on the `solo` profile (one replica of each node,
+#     which is what trial and Node run) it is close to per-tenant. On a wider
+#     profile it is per-replica and therefore looser -- which is fine, because
+#     the tiers that run wide profiles are the ones with a card behind them.
+#
+# MEMQL_LLM_MAX_TOTAL_COST_USD is the same idea denominated in money, using the
+# guard's deliberately CONSERVATIVE upper-bound estimate (it sees the request,
+# never the response, so it over-estimates -- which latches sooner, never
+# later). Both are set: calls bound a loop, dollars bound a small number of very
+# expensive calls, and a runaway can be either shape.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: memql-allowance
+  namespace: __TENANT__
+  labels:
+    app.kubernetes.io/name: memql-allowance
+    app.kubernetes.io/part-of: memql
+data:
+  MEMQL_LLM_KILL_SWITCH_ENABLED: "true"
+  MEMQL_LLM_MAX_TOTAL_CALLS: "__MAX_LLM_CALLS__"
+  MEMQL_LLM_MAX_TOTAL_COST_USD: "__MAX_LLM_COST_USD__"

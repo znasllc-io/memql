@@ -71,6 +71,8 @@ automation provisionInstanceOnCreate {
     instanceProfile any
     dbPreset        any
     haEnabled       any
+    maxLlmCalls     any
+    maxLlmCostUsd   any
     status          any
   }
 
@@ -80,7 +82,7 @@ automation provisionInstanceOnCreate {
   step render {
     switch steps.command.result {
       case "provision" {
-        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, dryRun: false)
+        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, maxLlmCalls: maxLlmCalls, maxLlmCostUsd: maxLlmCostUsd, dryRun: false)
       }
       default { }
     }
@@ -114,6 +116,8 @@ automation reRenderInstanceOnShapeChange {
     instanceProfile any
     dbPreset        any
     haEnabled       any
+    maxLlmCalls     any
+    maxLlmCostUsd   any
     status          any
   }
 
@@ -123,7 +127,7 @@ automation reRenderInstanceOnShapeChange {
   step render {
     switch steps.command.result {
       case "provision" {
-        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, dryRun: false)
+        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, maxLlmCalls: maxLlmCalls, maxLlmCostUsd: maxLlmCostUsd, dryRun: false)
       }
       default { }
     }

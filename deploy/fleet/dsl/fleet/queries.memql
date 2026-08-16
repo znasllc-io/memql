@@ -154,3 +154,70 @@ query usageMeter myUsageHistory {
   filter    ownerUserId==actor.userId && when(args.subscriptionId) { subscriptionId==args.subscriptionId } && when(args.metric) { metric==args.metric }
   shape     usageMeterFull
 }
+
+// =============================================================================
+//   Internal sweeps -- @serverOnly, deliberately unscoped
+// =============================================================================
+//
+// These are the reads a SCHEDULED SWEEP or a WEBHOOK HANDLER makes, and they
+// are the one place in this file where "gate on the caller" is the wrong answer.
+//
+// There is no caller. A scheduled automation runs with no actor at all, and its
+// whole purpose is to see rows belonging to everybody -- "find every trial that
+// expired today" is not a question a caller-scoped read can answer, and
+// constraining it to actor.userId would return nothing while looking perfectly
+// scoped. That is the same reasoning `usersInDeletionCooldown` records in the
+// identity domain, and the same two annotations carry it:
+//
+//   @serverOnly   refuses a client-originated call outright. Without it these
+//                 would be exactly the memql#2883 hole -- an unconstrained
+//                 projection of every subscriber's rows, reachable from a
+//                 browser, with no predicate to narrow it.
+//   @unbounded    declares that reading all rows is the intent, with the reason
+//                 recorded, so the pagination gate does not silently truncate a
+//                 sweep to its first page and leave the tail of the fleet
+//                 unswept.
+//
+// Their only legitimate callers are automation logics, which reach them with
+// OriginInternal stamped by the step executor.
+
+/// Every subscription in a given lifecycle state, for the scheduled sweeps: trial expiry, grace
+/// expiry, dunning. @serverOnly -- see the section header for why caller-scoping is the wrong answer
+/// here and what stands in for it.
+@serverOnly
+@unbounded("fleet lifecycle sweep -- an internal sweep over every subscription in one state")
+query subscription subscriptionsByStatus {
+  args {
+    status  string!
+  }
+  filter  status==args.status
+  shape   subscriptionFull
+}
+
+/// One subscription by its Stripe id -- the join every inbound Stripe webhook needs, since an event
+/// names a `sub_...` and nothing else. @serverOnly: reachable only from the automation that handles
+/// a SIGNATURE-VERIFIED delivery, never from a caller, who could otherwise read any subscription in
+/// the fleet by guessing an id.
+///
+/// Bounded to one row by construction -- a Stripe subscription id maps to at most one fleet row --
+/// so the @unbounded reason is about the ABSENCE of a caller predicate rather than about volume.
+@serverOnly
+@unbounded("Stripe webhook join -- one row, keyed by an id only Stripe issues")
+query subscription subscriptionByStripeId {
+  args {
+    stripeSubscriptionId  string!
+  }
+  filter  stripeSubscriptionId==args.stripeSubscriptionId
+  shape   subscriptionFull
+}
+
+/// Every instance in a given lifecycle state, for the hibernation and teardown sweeps. @serverOnly.
+@serverOnly
+@unbounded("fleet lifecycle sweep -- an internal sweep over every instance in one state")
+query instance instancesByStatus {
+  args {
+    status  string!
+  }
+  filter  status==args.status
+  shape   instanceFull
+}

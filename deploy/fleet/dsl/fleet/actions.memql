@@ -34,6 +34,12 @@ use capabilities.shell.{ script }
 /// templates, and adopt it into ArgoCD. Idempotent: re-running with unchanged inputs rewrites
 /// byte-identical files and reports changed=false, which is what makes a redelivered provisioning
 /// event harmless.
+///
+/// `maxLlmCalls` / `maxLlmCostUsd` are REQUIRED, and their requiredness is the launch gate
+/// (memql#3854). They render the tenant's own spend ceiling, enforced in-process by the LLM guard
+/// with no network and no graph read -- which is what makes "no unbounded-spend path exists" a
+/// property of the deployment rather than a hope about our metering being correct. The script
+/// refuses a zero, because the guard reads zero as UNLIMITED.
 action provisionTenant {
   args {
     tenant            string!
@@ -44,6 +50,8 @@ action provisionTenant {
     engineTag         string
     dbImageTag        string
     backupDestination string
+    maxLlmCalls       string!
+    maxLlmCostUsd     string!
     repoUrl           string
     targetRevision    string
     dryRun            boolean
@@ -58,6 +66,8 @@ action provisionTenant {
     engineTag:         args.engineTag,
     dbImageTag:        args.dbImageTag,
     backupDestination: args.backupDestination,
+    maxLlmCalls:       args.maxLlmCalls,
+    maxLlmCostUsd:     args.maxLlmCostUsd,
     repoUrl:           args.repoUrl,
     targetRevision:    args.targetRevision,
     dryRun:            args.dryRun

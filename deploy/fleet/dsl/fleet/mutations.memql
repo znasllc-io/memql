@@ -138,9 +138,10 @@ mutate subscription createSubscription {
     billingPeriod   string   @enum("monthly", "annual")
     status          string!  @enum("trialing", "active", "past_due", "paused", "cancelled")
     trialEndsAt     datetime
+    billingEmail    string!
   }
   insert {
-    accept { subscriberId, tier, status, trialEndsAt }
+    accept { subscriberId, tier, status, trialEndsAt, billingEmail }
     stamp {
       id: args.subscriptionId
       ownerUserId: actor.userId
@@ -317,9 +318,11 @@ mutate instance createInstance {
     dbPreset         string!  @enum("entry", "mid", "top")
     haEnabled        bool!
     notifyEmail      string!
+    maxLlmCalls      string!
+    maxLlmCostUsd    string!
   }
   insert {
-    accept { subscriptionId, subscriberId, name, domain, tier, instanceProfile, dbPreset, haEnabled, notifyEmail }
+    accept { subscriptionId, subscriberId, name, domain, tier, instanceProfile, dbPreset, haEnabled, notifyEmail, maxLlmCalls, maxLlmCostUsd }
     stamp {
       id: args.instanceId
       ownerUserId: actor.userId
@@ -420,6 +423,8 @@ mutate instance setInstanceShape {
     instanceProfile  string!  @enum("solo", "standard", "dedicated")
     dbPreset         string!  @enum("entry", "mid", "top")
     haEnabled        bool!
+    maxLlmCalls      string!
+    maxLlmCostUsd    string!
   }
   update {
     id: args.instanceId
@@ -428,6 +433,8 @@ mutate instance setInstanceShape {
     instanceProfile: args.instanceProfile
     dbPreset: args.dbPreset
     haEnabled: args.haEnabled
+    maxLlmCalls: args.maxLlmCalls
+    maxLlmCostUsd: args.maxLlmCostUsd
   }
 }
 
