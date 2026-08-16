@@ -255,6 +255,24 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 		return fmt.Errorf("authoring: durable promote %s %q: construct is not compiled (define it first)", c.Kind, c.Name)
 	}
 
+	// TRAINING IS A PROMOTE OVER A STAGED CONSTRUCT (memql#3928), and this is
+	// where that routing lives.
+	//
+	// There is no separate train message and no separate engine entry point,
+	// because there is no separate ACT: a staged construct becoming shared is
+	// the same operation as a session construct becoming shared, differing only
+	// in the row already existing. Routing here rather than adding a verb means
+	// a client never has to know which tier a construct is in before it can pick
+	// one -- promote is the answer either way.
+	//
+	// The transition flips the EXISTING row rather than writing a second one
+	// below, which is the whole reason it cannot simply fall through: two rows,
+	// one staged and one active, would both be replayed by the boot walk and the
+	// construct would register twice -- once owner-scoped, once shared.
+	if _, staged := e.lookupStaged(owner, c.Kind, c.Name); staged {
+		return e.trainStagedConstructWithStore(ctx, e.stagedRowStoreOrDefault(), owner, c.Kind, c.Name)
+	}
+
 	// Register into the shared registry FIRST (core-first, never-shadow). This is
 	// the existing process-shared promote -- identical call-by-name semantics --
 	// and the authoritative gate, so a refused promotion never persists.

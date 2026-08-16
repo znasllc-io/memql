@@ -122,6 +122,15 @@ type MemQLEngine struct {
 	// directly as a struct literal (tests, BuildOfflineSense), and a field only
 	// New initializes is a field that is nil on half the engines in the tree.
 	stagedOnce sync.Once
+	// stagedRows is the row store the staged tier's TRANSITIONS write through.
+	// Nil means the production store (engineStagedStore over this engine).
+	//
+	// A seam, not a configuration knob -- the same shape and for the same reason
+	// as conceptRowCount above: nothing sets it outside a test. It exists because
+	// TRAINING IS A PROMOTE OVER A STAGED CONSTRUCT, so the promote path routes
+	// into the staged transition, and that routing has to be exercisable by the
+	// promote tests, which run against a fake store and no database at all.
+	stagedRows stagedRowStore
 	// conceptRowCount counts the rows stored under a concept, which is what
 	// chooses between the two outcomes of a concept DEMOTE (memql#3756): rows
 	// exist -> retire (still registered, rows readable, new writes refused);

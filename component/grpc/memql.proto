@@ -341,6 +341,12 @@ message MemqlClientMessage {
     ListConstructsMsg list_constructs = 106;
     // 107 (promote_site) retired with the environment concept, epic
     // memql#3943; the number is reserved at the message level above.
+
+    // StageBundleMsg -- the DURABLE, OWNER-SCOPED middle tier between
+    // AuthoringSessionDefineBundle (owner-scoped, dies with the connection)
+    // and DurablePromoteBundle (persisted, shared, broadcast) -- epic
+    // memql#3928. See StageBundleMsg.
+    StageBundleMsg stage_bundle = 108;
   }
 }
 
@@ -504,6 +510,9 @@ message MemqlServerMessage {
     ListConstructsResult list_constructs_result = 128;
     // 129 (promote_site_result) retired with the environment concept, epic
     // memql#3943; the number is reserved at the message level above.
+
+    // Staged-tier reply (see StageBundleMsg, memql#3928).
+    StageBundleResult stage_bundle_result = 130;
   }
 }
 
@@ -1778,6 +1787,57 @@ message DurableDemoteBundleResult {
   // loop from one slice, so they cannot disagree; `demoted` stays the identity
   // list, `outcomes` is what a client renders.
   repeated DurableDemoteOutcome outcomes = 6;
+}
+
+// StageBundleMsg requests the DURABLE, OWNER-SCOPED staging of a plain authored
+// bundle (epic memql#3928) -- the middle tier between the two surfaces above it.
+//
+// A construct had two conditions and nothing between them:
+// AuthoringSessionDefineBundle is owner-scoped but dies with the connection, and
+// DurablePromoteBundle is persisted, shared, broadcast and replayed at boot.
+// Nothing let an author keep a construct that works for them alone. Staging
+// runs the SAME Gate-1 sandbox and the SAME row writes a promote does, and then
+// omits exactly one step -- the cross-node broadcast -- registering the compiled
+// construct into an owner-scoped registry instead of the shared one. THE
+// OMISSION IS THE TIER.
+//
+// THERE IS NO `TrainBundleMsg`, and its absence is deliberate. Training a staged
+// construct IS DurablePromoteBundleMsg: the engine sees the construct is staged
+// for this owner, flips the SAME persisted row to active, registers it shared,
+// and fires the same broadcast. A separate message would have been a second name
+// for one operation, and a client would have had to know which tier a construct
+// was in before it could pick a verb.
+//
+// OWNER-OR-DEVELOPER, matching AuthoringSessionDefineBundle rather than the
+// owner-only promote: staging registers nothing shared and broadcasts nothing,
+// so its blast radius is a database row rather than a change to what the cluster
+// runs. Promote stays owner-only, because that is the act that changes what
+// everyone runs.
+//
+// A CONCEPT IN THE BUNDLE IS REFUSED, by name, before anything is staged. A
+// concept registers into the one shared concept registry and its merge rebuilds
+// relationship state cluster-wide, so there is no owner-scoped form of it to
+// stage -- a staged concept would persist a row and register an entry nothing
+// ever reads. There is no allow_breaking here for the same reason: with no
+// concept, there is no schema classification to override.
+message StageBundleMsg {
+  string request_id = 1;
+  string sources = 2;  // .memql bundle source
+
+  // origin is the bundle's TREE-RELATIVE path, exactly as on
+  // AuthoringValidateBundleMsg and DurablePromoteBundleMsg (memql#3800). A stage
+  // runs the SAME Gate-1 sandbox, so omitting it would leave stage refusing
+  // source that validates -- the half-fix that produces "it validates but will
+  // not stage".
+  string origin = 3;
+}
+
+message StageBundleResult {
+  string request_id = 1;
+  bool ok = 2;  // true only when validation passed and every stageable construct staged
+  repeated AuthoringConstruct staged = 3;       // constructs now callable BY THEIR AUTHOR
+  repeated AuthoringDiagnostic diagnostics = 4; // per-construct compile/bind diagnostics
+  string error = 5;  // non-empty when the bundle was rejected (validation, a concept, or a stage failure)
 }
 
 // -----------------------------------------------------------------------------

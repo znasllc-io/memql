@@ -236,6 +236,72 @@ func (s *streamSession) handleDurableDemoteBundle(envelope *memqlv1.MemqlClientM
 	})
 }
 
+// handleStageBundle validates the bundle via the Gate-1 sandbox, then durably
+// STAGES every stageable construct into the engine's OWNER-SCOPED staged
+// registry (epic memql#3928): persisted, reviewable, replayed at boot, and
+// callable by its author and by nobody else.
+//
+// It follows the durable-promote handler's order exactly -- nil body, role gate,
+// owner, engine -- because every one of those checks is answering the same
+// question in the same sequence, and a surface that asked them in a different
+// order would report a different error for the same request.
+//
+// The ONE difference is the gate: OWNER-OR-DEVELOPER (requireAuthoringRole, the
+// bar the session-define surface uses) rather than the promote surface's
+// owner-only. Staging registers nothing shared and broadcasts nothing, so its
+// blast radius is a database row rather than a change to what the cluster runs
+// -- the same blast radius `define` already has, made durable. Promote stays
+// owner-only because that is the act that changes what everyone runs.
+//
+// TRAINING A STAGED CONSTRUCT IS NOT HANDLED HERE. It is
+// handleDurablePromoteBundle: the engine notices the construct is staged for
+// this owner and flips the same persisted row rather than writing a second one.
+// A train handler would have been a second name for one operation.
+func (s *streamSession) handleStageBundle(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.StageBundleMsg) error {
+	if msg == nil {
+		return s.sendQueryError("", envelope.GetMessageId(), codes.InvalidArgument, "stage_bundle: request body missing")
+	}
+	requestId := s.normalizeRequestId(envelope, msg.GetRequestId())
+
+	if allowed, err := s.requireAuthoringRole(requestId, envelope.GetMessageId()); !allowed {
+		return err
+	}
+
+	// Owner is the authenticated caller; every staged construct is keyed to it,
+	// so one author's staged construct can never resolve for another.
+	ac := s.ensureAccess(s.stream.Context())
+	owner := ""
+	if ac != nil {
+		owner = strings.TrimSpace(ac.UserId)
+	}
+	if owner == "" {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unauthenticated,
+			"stage_bundle: an authenticated owner is required to stage a bundle")
+	}
+
+	if s.service == nil || s.service.engine == nil {
+		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.Unavailable,
+			"stage_bundle: engine unavailable on this node")
+	}
+	res, err := s.service.engine.StageBundleDurable(s.stream.Context(), owner, msg.GetSources(), msg.GetOrigin())
+
+	result := &memqlv1.StageBundleResult{
+		RequestId:   requestId,
+		Ok:          res.OK,
+		Staged:      authoringConstructsToProto(res.Staged),
+		Diagnostics: authoringDiagnosticsToProto(res.Diagnostics),
+	}
+	if err != nil {
+		result.Ok = false
+		result.Error = err.Error()
+	}
+	return s.sendServerMessage(envelope.GetMessageId(), &memqlv1.MemqlServerMessage{
+		Payload: &memqlv1.MemqlServerMessage_StageBundleResult{
+			StageBundleResult: result,
+		},
+	})
+}
+
 // durableDemoteOutcomesToProto maps the engine-side per-construct demote
 // outcomes onto the wire form (memql#3756) -- retired vs removed, with the row
 // count that chose it for a concept. Kept structured all the way to the wire so

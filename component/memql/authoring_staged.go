@@ -391,7 +391,16 @@ func (e *MemQLEngine) recompileAndStageRow(_ context.Context, row AuthoringConst
 // wiring the replay gate in would silently disable the memql#3757 classifier the
 // moment the staged set grew.
 func (e *MemQLEngine) TrainStagedConstruct(ctx context.Context, owner, kind, name string) error {
-	return e.trainStagedConstructWithStore(ctx, &engineStagedStore{engine: e}, owner, kind, name)
+	return e.trainStagedConstructWithStore(ctx, e.stagedRowStoreOrDefault(), owner, kind, name)
+}
+
+// stagedRowStoreOrDefault resolves the staged tier's row store: the test seam
+// when one is set, the production store over this engine otherwise.
+func (e *MemQLEngine) stagedRowStoreOrDefault() stagedRowStore {
+	if e.stagedRows != nil {
+		return e.stagedRows
+	}
+	return &engineStagedStore{engine: e}
 }
 
 // trainStagedConstructWithStore is the store-driven core, split out so it is
