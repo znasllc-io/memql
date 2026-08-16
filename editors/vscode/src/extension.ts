@@ -61,7 +61,12 @@ import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCl
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
 import { probeClaimState, setupUrl } from './clusters/claimState.js';
-import { receiptNamesAnotherCluster, resolveOwnershipRoute } from './clusters/ownershipRoute.js';
+import {
+  isFirstCredentialPending,
+  receiptNamesAnotherCluster,
+  resolveOwnershipRoute,
+  type OwnershipRoute,
+} from './clusters/ownershipRoute.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
@@ -754,6 +759,32 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       await connections?.connect(dialing);
       const state = connections?.state;
+      // THE END OF A SUCCESSFUL INSTALL COMES THROUGH HERE (memql#3909).
+      //
+      // The install hand-off selects the cluster it just registered, and this
+      // command dials -- so a cluster built thirty seconds ago, whose owner
+      // account by design holds no human credential, arrived at the error
+      // branch below every single time. It told the operator to hand-edit
+      // clusters.yaml with a JWT and offered them Sign in, which cannot work.
+      //
+      // That is not a failure to report; it is the one step left. Offered as
+      // information rather than an error, and wired to the action that
+      // actually completes it -- which then chains on to sign-in and the
+      // portal by itself.
+      if (state?.status === 'error' && isFirstCredentialPending(state.reason, await ownershipRouteFor(dialing))) {
+        const choice = await window.showInformationMessage(
+          `memQL: "${displayLabel(dialing)}" is ready. Its owner account has no way to sign in yet -- set up a passkey to finish.`,
+          'Set up a passkey',
+          'Not now'
+        );
+        if (choice === 'Set up a passkey') {
+          await commands.executeCommand('memql.clusters.takeOwnership', {
+            cluster: dialing,
+            selected: true,
+          });
+        }
+        return;
+      }
       if (state?.status === 'error') {
         // A failure the CREDENTIAL causes now has a first-class recovery in the
         // editor, so it is offered as the primary action rather than described
@@ -807,23 +838,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // So local evidence -- the receipt's recorded owner, and whether a
       // credential is stored -- is consulted first, and the network only for
       // what it cannot settle. `claim` is then reachable only on a real 200.
-      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
-      const route = await resolveOwnershipRoute(
-        {
-          local: target.cluster.local === true,
-          // The receipt is one file and the cluster list is many, so its owner
-          // is evidence only about the cluster whose domain it names.
-          ownerRecorded:
-            recordedOwner(receipt).email !== '' &&
-            !receiptNamesAnotherCluster(target.cluster.domain ?? '', recordedDomain(receipt)),
-          credentialMissing: needsAuth(target.cluster),
-        },
-        // RE-DERIVED at the moment of use rather than read from a stored flag:
-        // the operator may have claimed the cluster in a browser this extension
-        // never saw, and acting on a stale "unclaimed" would send them to a
-        // wizard that has since sealed.
-        () => probeClaimState(target.cluster.issuer, { fetch: globalThis.fetch })
-      );
+      const route = await ownershipRouteFor(target.cluster);
 
       if (route === 'claim') {
         const wizard = setupUrl(target.cluster.issuer);
@@ -2364,6 +2379,40 @@ interface SignInDeps {
   clustersPath: string;
   store: SignInTokenStore;
   clustersTree: ClustersTreeProvider;
+}
+
+/**
+ * What this cluster needs next: enrol a first credential, claim it, or sign in.
+ *
+ * ONE COMPUTATION, TWO CALLERS (memql#3909). `memql.clusters.signIn` asks it to
+ * decide what to offer, and `memql.clusters.select` asks it to decide whether a
+ * failed dial is a fault or an unfinished install. Two copies would answer the
+ * same question differently on the day one of them was edited, and the
+ * disagreement would be an operator told to set up a passkey by one surface and
+ * to edit clusters.yaml by the other.
+ *
+ * The receipt is read at the moment of use, not cached: an install or repair
+ * can rewrite it between two clicks, and the owner it names is the value the
+ * mint will carry.
+ */
+async function ownershipRouteFor(cluster: ClusterConfig): Promise<OwnershipRoute> {
+  const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+  return resolveOwnershipRoute(
+    {
+      local: cluster.local === true,
+      // The receipt is one file and the cluster list is many, so its owner is
+      // evidence only about the cluster whose domain it names.
+      ownerRecorded:
+        recordedOwner(receipt).email !== '' &&
+        !receiptNamesAnotherCluster(cluster.domain ?? '', recordedDomain(receipt)),
+      credentialMissing: needsAuth(cluster),
+    },
+    // RE-DERIVED at the moment of use rather than read from a stored flag: the
+    // operator may have claimed the cluster in a browser this extension never
+    // saw, and acting on a stale "unclaimed" would send them to a wizard that
+    // has since sealed.
+    () => probeClaimState(cluster.issuer, { fetch: globalThis.fetch })
+  );
 }
 
 // signInToCluster is the editor half of memql#3403's sign-in: progress,
