@@ -94,6 +94,13 @@ export interface ClusterConfig {
   // carries the matching `Version string` with `yaml:"version,omitempty"`
   // (memql#3994); unlike `local` there is no false-must-be-absent rule to
   // negotiate, because a string has no third state to collapse.
+  //
+  // That matching field is REQUIRED, not a courtesy. The cockpit's
+  // `cli/config.SaveClusters` is a `yaml.Marshal` of the whole struct, so its
+  // next write rewrites the file from the struct alone and DROPS any key it
+  // does not model -- a documented limitation, not a bug. Shipping `version`
+  // here alone would give an operator a field that works until the next
+  // cockpit command silently erases it.
   version?: string;
 }
 

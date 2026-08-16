@@ -111,28 +111,49 @@ Without that rule, an install receipt naming `v0.18.0` would be replaced
 by a live connection reporting the build stamp `0.15.0-1737072000` -- a
 strictly worse record, written by a strictly more recent observation.
 
-## Preservation guarantees
+## Preservation guarantees: the two tools differ
 
-Both tools read-modify-write this file as a YAML *document*, not by
-serialising a struct over it. Two properties follow, and both are
-enforced by tests:
+**They do not write this file the same way, and the difference is the
+whole reason a shared key needs coordinating.**
 
-- **Comments survive.** An operator's comments are part of their file.
-- **Unmodelled keys survive.** A key written by a newer version of the
-  other tool is left untouched.
+**The plugin** read-modify-writes the file as a YAML *document*, not by
+serialising a struct over it. Two properties follow, both enforced by
+tests in `clustersFile.test.ts`:
 
-The version learners write far more often than any human edit does, so a
-write path that stripped either would destroy an operator's file quickly
-rather than slowly.
+- **Comments survive** a plugin write. An operator's comments are part of
+  their file.
+- **Unmodelled keys survive** a plugin write. A key written by a newer
+  cockpit is left untouched.
 
-## Coordination history
+That matters more for this key than for a hand-edited one, because the
+version learners write far more often than any human edit does.
 
-This key follows the same cross-tool coordination as its neighbours: the
-`token` rename (which fixed a field advertising a credential class the
-bff structurally rejects) and the `local` flag both went through it. Add
-a key to one tool's model and the other's next write is the hazard --
-which is why the cockpit's `Version string` lands as part of the same
-change rather than after it.
+**The cockpit does not.** `cli/config.SaveClusters` is a
+`yaml.Marshal` of the whole `ClustersFile` struct, so its next write
+rewrites the file from the struct alone. Comments are lost and **any key
+it does not model is dropped**. This is a known, asserted limitation
+rather than a bug to route around.
+
+The consequence is the rule:
+
+> **Every key in `clusters.yaml` must be modelled on BOTH sides.**
+> Adding one to a single tool means the other silently deletes it on its
+> next write.
+
+## Coordination is a requirement, not a courtesy
+
+This key goes through the same cross-tool coordination as its
+neighbours -- the `token` rename (which fixed a field advertising a
+credential class the bff structurally rejects) and the `local` flag.
+
+Given the asymmetry above, that coordination is **load-bearing**. If the
+cockpit preserved unmodelled keys, the plugin could ship `version` alone
+and nothing would need coordinating at all; because it does not, the
+cockpit's matching `Version string` has to land as part of the same
+change rather than after it. A recorded version that the operator's next
+cockpit command silently erased would be worse than no version at all --
+it would be a field that works until it does not, for reasons nothing on
+screen could explain.
 
 ## Related
 
