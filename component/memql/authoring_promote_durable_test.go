@@ -16,6 +16,7 @@ package memql
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -59,6 +60,21 @@ func (s *fakePromoteStore) CreatePromoteConstruct(ctx context.Context, construct
 		}
 	}
 	return nil
+}
+
+// StageConstructConceptData records the memql#3974 staged-DATA stamp against the
+// row it names, so a test can assert BOTH halves of the tier -- the in-memory
+// marker and the durable flag the boot fold actually reads. A fake that only
+// counted the call could not tell "stamped the right row" from "stamped a row",
+// and the row is what a restart resolves the concept's visibility from.
+func (s *fakePromoteStore) StageConstructConceptData(_ context.Context, constructId string) error {
+	for i := range s.constructs {
+		if s.constructs[i].Id == constructId {
+			s.constructs[i].ConceptDataStaged = true
+			return nil
+		}
+	}
+	return fmt.Errorf("fakePromoteStore: no construct row %q to stamp", constructId)
 }
 
 // authorOneSpec authors a single session spec into reg under owner and returns

@@ -12058,6 +12058,28 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	return b.String()
 }
 
+// StageConstructConceptData -- Mark a promoted CONCEPT construct row's DATA staged (epic memql#3974): the concept stays REGISTERED and resolvable and keeps accepting writes, and only the VISIBILITY of the rows under it is withheld until it is trained. status is deliberately left alone, and for the same reason retireConstructConcept leaves it alone: a status-retired row is SKIPPED by the boot re-hydration, so the concept would not re-register at all and its staged rows would be unreadable rather than staged. It is equally deliberately not `status: staged`, which belongs to the construct-staging tier (memql#3928) and means the opposite kind of thing -- resolution scoped to one author -- on a kind (`concept`) that tier refuses outright. There is no inverse mutation here yet: the staged -> live transition is memql#3986, and until it lands the un-staging path is the same one conceptRetired uses, a re-promote writing a NEW construct row with this false, which the `a live row wins` fold resolves as live.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["stageConstructConceptData"] in generated_concepts.go).
+type StageConstructConceptDataArgs struct {
+	ConstructId string
+}
+
+// StageConstructConceptData calls the engine mutation stageConstructConceptData.
+func (qc *QueryClient) StageConstructConceptData(ctx context.Context, args StageConstructConceptDataArgs) (*Result, error) {
+	call := StageConstructConceptDataBuild(args)
+	return qc.executeNamed(ctx, "stageConstructConceptData", call)
+}
+
+func StageConstructConceptDataBuild(args StageConstructConceptDataArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation stageConstructConceptData(")
+	b.WriteString("constructId: ")
+	b.WriteString(quoteMemQL(args.ConstructId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // StageInboundRequest -- Stage a verified inbound delivery (memql#2957): insert a v1:platform:inboundRequest row with status='received' for a product automation to drain. Called by the engine inbound receiver once the source allowlist and signature check have passed; the signing secret is never part of the row. Idempotent by requestId: a redelivery preserves the product-owned handling state (@createOnly) instead of replaying it.
 //
 // Bound concept: v1:platform:inboundRequest (machine-readable: BoundConcepts["stageInboundRequest"] in generated_concepts.go).
