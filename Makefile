@@ -365,6 +365,32 @@ scale:
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
+.PHONY: db-image
+
+## Build the DATABASE OPERAND image locally: PostgreSQL 16 + TimescaleDB
+## Community + pgvector, the container CloudNativePG runs as a Postgres
+## instance (epic memql#3842 / #3844).
+##
+## LOCAL DEVELOPMENT ONLY. Deployable images are cut on the GitHub build
+## server (.github/workflows/build-db-image.yml), never on an operator
+## machine -- but both paths drive the SAME Dockerfile and the SAME smoke
+## test, which is what makes this a faithful stand-in rather than a lookalike.
+##
+## The smoke test runs by default and is worth the ~40s: it asserts the
+## Community/TSL license mode, the three TSL features the schema requires
+## (continuous aggregates, compression, retention), and the N-1 -> N upgrade
+## choreography that the two bundled .so files exist for.
+##   make db-image                 # build + smoke test
+##   make db-image IMPORT=1        # also import into the local k3d cluster
+##   make db-image SMOKE=0         # skip the smoke test (fast rebuild)
+##   make db-image TAG=probe       # tag it something other than dev
+db-image:
+	@bash scripts/db-image/build.sh \
+		$${TAG:+--tag=$${TAG}} \
+		$${IMPORT:+--import=true} \
+		$${SMOKE:+--smokeTest=$${SMOKE}} \
+		$${CLUSTER:+--cluster=$${CLUSTER}}
+
 # ---------------------------------------------------------------------------
 # Test targets
 # ---------------------------------------------------------------------------
