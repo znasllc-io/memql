@@ -28,74 +28,94 @@ bug, not a feature.
 
 ---
 
-## 1. Database — **Tiger Cloud is the only supported provider today**
+## 1. Database — **self-hosted CloudNativePG**
 
 memQL stores everything (the time-series memory graph + the observability
-hypertables) in **PostgreSQL 16 + the TimescaleDB extension**. For a real
-deployment that means a **managed Tiger Cloud** service (`TIMESCALEDB` type).
-Tiger Cloud is the **only DB provider we support right now** — the engine
-assumes TimescaleDB (hypertables + continuous aggregates back `code_invocation`
-observability), and the deploy tooling, connection model, and runbooks are all
-written against Tiger. A vanilla self-managed Postgres is **not** a supported
-target yet.
+hypertables) in **PostgreSQL 16 + TimescaleDB Community + pgvector**, run
+**inside the cluster** by the CloudNativePG operator (epic memql#3842). The
+same operator, the same operand image and the same four resource kinds run in
+local k3d, staging and production; only the numbers and endpoints differ.
+
+> **This replaced "Tiger Cloud is the only supported provider today."** It was
+> true, and it was the source of the constraint the rest of this page used to
+> be organised around: a per-tier `max_connections` ceiling of ~59 usable
+> slots, a control-plane pool that could not be terminated, and $0.883/GB-month
+> storage against a schema that never evicts. Self-hosting removed all three.
+>
+> Azure's managed PostgreSQL is still **not** an option, and for an unrelated
+> reason: the schema requires TimescaleDB **Community** features — continuous
+> aggregates, compression policies, retention policies — and hyperscalers ship
+> the Apache build. That is why this is self-hosted rather than moved to
+> another managed provider.
 
 ### Minimum DB checklist
 
-- [ ] A Tiger Cloud service, **PostgreSQL 16 + TimescaleDB**.
-- [ ] Sized so the **connection budget** fits the mesh (see below) — start at
-      **1 CPU / 4 GB** and **`max_connections` = 500** for a small staging mesh.
-- [ ] The **transaction pooler enabled** (PgBouncer, transaction mode).
+- [ ] The **CNPG operator stack** reconciled by ArgoCD: CloudNativePG + the
+      Barman Cloud plugin + cert-manager (`deploy/cnpg`, `deploy/cert-manager`).
+- [ ] The **operand image** built on the build server and pinned by digest in
+      the overlay (`.github/workflows/build-db-image.yml`). The tag must begin
+      with the PostgreSQL major — CNPG parses it.
+- [ ] A `Cluster` composed from the `cnpg-db` component with a tier preset
+      (`entry` / `mid` / `top`), sized so the **connection budget** fits the
+      mesh (see below).
+- [ ] An **object store for backups**: its own resource group, ZRS + Cool,
+      versioning and soft delete on, and the cluster identity granted
+      **write but not purge**.
 - [ ] **Two** connection strings wired into `memql-secrets`:
-      `MEMQL_DATABASE_DSN` → the **pooler**, and
-      `MEMORY_NODES_DATABASE_DIRECT_DSN` → the **direct** endpoint.
+      `MEMQL_DATABASE_DSN` and `MEMORY_NODES_DATABASE_DIRECT_DSN`. Both point
+      at the `-rw` Service today — see below for why they are still two.
 
-### Why two endpoints? — the connection model (epic [#1925](https://github.com/znasllc-io/memql/issues/1925))
+Provisioning detail, alerts, and the failover/restore drills:
+[Database platform](database-platform.md).
 
-The whole mesh (≈10 node-types × replicas) shares **one** database. Tiger caps
-direct `max_connections` per tier (25–500 on the 0.5–4 CPU range) and reserves
-~17 for superuser/ops, so the *direct* budget is small and fixed — and a deploy
-**surge** (blue-green + rolling restart briefly doubles pods) used to blow past
-it → `SQLSTATE 53300` ("remaining connection slots…") storms that wedged a
-roll. Tiger's intended answer to "many connections" is the **connection
-pooler**, not a bigger `max_connections`.
+### Why two endpoints? — the connection model
 
-So memQL runs a **hybrid endpoint split**:
+The whole mesh (≈10 node-types × replicas) shares **one** database.
 
-- **Bulk traffic** (all queries + mutations, every pod) rides
-  `MEMQL_DATABASE_DSN` → the **transaction pooler**. Client connections
-  decouple from Postgres backends, so a deploy surge no longer maps 1:1 to
-  slots (transaction-pool ceiling ≈ `(max_connections − 17) × 20`).
+`max_connections` is now **ours to set** — 200 local, 400 staging and
+production — so the ceiling is a sizing decision rather than a tier limit. It
+is still a ceiling: every Postgres backend is a process with its own memory, so
+raising it trades RAM for headroom, which is why the budget below is still
+enforced by a deploy gate.
+
+**There is no pooler in the path today**, and the two DSNs both resolve to
+`memql-db-rw`. The split is kept because it is about *transaction-mode pooling
+breaking session state*, not about Tiger:
+
+- **Bulk traffic** (the bun pool — all queries and mutations, every mesh pod)
+  rides `MEMQL_DATABASE_DSN`.
 - **Session-stateful work** — session-scoped advisory locks (cognition
   dispatch/greet/feedback gates, cron leader, topology reconciler, planner
-  admission) **and migrations** — rides `MEMORY_NODES_DATABASE_DIRECT_DSN` →
-  the **direct** endpoint. A transaction-mode pooler recycles a server backend
-  *between statements*, which would silently drop a held session lock; these
-  few, bounded connections take a real slot instead.
+  admission) **and migrations** — rides `MEMORY_NODES_DATABASE_DIRECT_DSN`. A
+  transaction-mode pooler recycles a server backend *between statements*, which
+  would silently drop a held session lock.
+
+So when a pooler is eventually enabled (`cnpg-db/optional/pooler`, ready but
+not composed), only the first DSN moves. `MEMQL_DB_SEARCH_PATH` is a session
+GUC and **is** the staging/production boundary, so it must never ride a
+transaction-pooled connection.
 
 In code: `Database.DirectBunDB()` returns the direct pool when `DIRECT_DSN` is
-set, else falls back to the main pool — so **local/dev without a pooler is
-unaffected** (single pool, identical behaviour). bun's `pgdriver` speaks the
-simple query protocol (no server-side prepared statements), so transaction
-pooling is safe.
+set, else falls back to the main pool — so a single-pool deployment is
+unaffected. bun's `pgdriver` speaks the simple query protocol (no server-side
+prepared statements), so transaction pooling is safe when it arrives.
 
 ### Sizing the budget
 
 ```
-peak_direct ≈ Σ(session-stateful holders) + migrate(1) + live FOREIGN backends
-REQUIRE:  peak_direct ≤ max_connections − reserved(~17)
+peak_connections ≈ Σ_over_node_types(replicas × MAX_OPEN_CONNS) + rollSurge
+REQUIRE:  peak_connections ≤ max_connections − reserved
 ```
 
-- **Foreign backends are real and must be budgeted.** Tiger's own control-plane
-  process (`application_name=deployer`, the `postgres` superuser) holds a pool
-  of connections you **cannot** terminate (#1822). Size `max_connections` with
-  headroom above it (this is why staging runs 500, not 105).
-- Bulk pods do **not** count against the direct budget — they multiplex through
-  the pooler.
+- **Reserved is now small and knowable**: Postgres's own
+  `superuser_reserved_connections` plus CNPG's instance-manager and monitoring
+  connections. There is no un-terminable control-plane pool to budget around —
+  that was Tiger's (#1822), and it went with the provider.
+- `max_connections` is set on the `Cluster` in
+  `deploy/k8s/components/cnpg-db`, not in a vendor console.
 
 Full detail, the budget formula, the pre-deploy gate, and the monitor:
-[DB connection budget & graceful deploy](db-connection-budget.md). Tiger CLI /
-service management: [Database Setup](database-setup.md). `max_connections` is
-set in the **Tiger console → Common parameters** (not the CLI/SQL).
+[DB connection budget & graceful deploy](db-connection-budget.md).
 
 ---
 
@@ -104,7 +124,9 @@ set in the **Tiger console → Common parameters** (not the CLI/SQL).
 - A **Kubernetes** cluster. We run and test on **Azure Kubernetes Service**
   (`aks-memql-staging`); any conformant cluster should work, but AKS is the
   exercised path. See [Infrastructure](infrastructure.md).
-- **No database pod** — the DB is the managed Tiger service above.
+- **The database runs here too** — a CNPG `Cluster`, not an external service.
+  It wants a dedicated node pool: Postgres is memory- and IO-sensitive, so a
+  noisy neighbour costs latency on every query.
 - The engine mesh node-types (each a `Deployment`, 2 replicas for HA):
   `identity`, `cognition`, `voice`, `agent`, `planner`, `workbench`, `mcp`,
   plus `livekit` and the `voice-agent`. Manifests: `deploy/k8s/base`. A
@@ -194,7 +216,7 @@ contract.
 | Component | Minimum |
 |-----------|---------|
 | Go | 1.26.1+ (to build) |
-| PostgreSQL | 16 + TimescaleDB (Tiger Cloud) |
+| PostgreSQL | 16 + TimescaleDB Community + pgvector (self-hosted, CloudNativePG) |
 | Kubernetes | a recent conformant cluster (AKS is the exercised target) |
 | Argo CD / Rollouts | required for the GitOps + blue-green path |
 
@@ -203,7 +225,8 @@ contract.
 ## See also
 
 - [DB connection budget & graceful deploy](db-connection-budget.md) — the budget formula, pooler split, monitor + gate.
-- [Database Setup](database-setup.md) — Tiger CLI, service management.
+- [Database platform](database-platform.md) — the CNPG operator stack, what an
+  operator must provision, alerts, and the failover / restore drills.
 - Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md) — release/lockfile/promote/GitOps.
 - [Infrastructure](infrastructure.md) — the AKS cluster.
 - [Environment Variables](env-vars.md) — the full env surface.

@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Script: teardown-staging.sh
-# Purpose: Shut down the memQL STAGING environment to stop Azure + Tiger
-#          Cloud charges. Tiered + dry-run-first + typed-confirmation.
+# Purpose: Shut down the memQL STAGING environment to stop Azure charges.
+#          Tiered + dry-run-first + typed-confirmation.
 #
 # This is the recorded "full nuke" procedure (first authored 2026-06-24).
 # Rebuild path: docs/internal/ops/staging-teardown-rebuild.md
@@ -11,17 +11,27 @@ set -euo pipefail
 # WHAT BILLS IN STAGING (eastus, sub Pay-As-You-Go 19f85801-...):
 #   - AKS aks-memql-staging  node pool 4x Standard_B2s (autoscale 2-5)  <- dominant
 #   - 5x Standard public IPs (in the MC_ node RG, deleted with the cluster)
-#   - Tiger Cloud TimescaleDB service xahn9ru4v6 (memql-staging)        <- dominant
 #   - minor: storage stmemqlstaging, Log Analytics workspace, empty CAE
+#
+# THE DATABASE IS NO LONGER A SEPARATE BILL (epic memql#3842 / #3848). It was
+# a managed Tiger Cloud service and its own dominant line item; it is now a
+# CloudNativePG cluster INSIDE the AKS cluster, so `--compute` takes it with
+# the nodes and there is nothing separate to deprovision. That is also why the
+# `--database` tier is gone rather than repointed.
+#
+# WHAT SURVIVES A TEARDOWN, AND MUST: the database BACKUPS. They live in their
+# own storage account in their own resource group -- deliberately not
+# rg-memql-staging, and deliberately not deletable by the cluster identity --
+# so tearing staging down destroys the running database and keeps every
+# recovery point. Rebuild restores from them; see database-platform.md.
 #   - KEPT by default (rebuild-critical, low cost): ACR acrmemql, KV kv-memql-staging
 #
 # Tiers (compose with flags):
 #   --compute    delete the AKS cluster (nodes, IPs, LBs, disks, ArgoCD, ESO)
-#   --database   deprovision the Tiger Cloud DB service (PURGES all data)
 #   --ancillary  delete storage account + Log Analytics workspace + empty CAE
 #   --registry   ALSO delete the ACR (DESTROYS all release images) -- off by default
 #   --keyvault   ALSO purge the Key Vault (DESTROYS sealed secrets) -- off by default
-#   --all        == --compute --database --ancillary  (NOT registry/keyvault)
+#   --all        == --compute --ancillary  (NOT registry/keyvault)
 #
 # Safety: prints a plan and requires --confirm-name='<env>' (or --yes) before
 # executing. Always dry-runs unless --confirm is passed. Non-interactive by
@@ -35,7 +45,6 @@ SUBSCRIPTION_ID="19f85801-7000-47ef-88d0-2a4ccf4482b8"
 RESOURCE_GROUP="rg-memql-staging"
 AKS_CLUSTER="aks-memql-staging"
 NODE_RG="MC_rg-memql-staging_aks-memql-staging_eastus"
-TIGER_SERVICE_ID="xahn9ru4v6"
 STORAGE_ACCOUNT="stmemqlstaging"
 LOG_ANALYTICS="workspace-rgmemqlstagingm904"
 CAE_NAME="cae-memql-staging"
@@ -57,11 +66,10 @@ destructive confirmation is an explicit param, never a blocking prompt.
 Tiers:
     --compute     Delete the AKS cluster ($AKS_CLUSTER): nodes, public IPs,
                   LoadBalancers, disks, ArgoCD, ESO. Stops the dominant compute charge.
-    --database    Deprovision the Tiger Cloud DB ($TIGER_SERVICE_ID). PURGES ALL DATA.
     --ancillary   Delete storage ($STORAGE_ACCOUNT) + Log Analytics + empty CAE.
     --registry    ALSO delete ACR ($ACR_NAME) -- DESTROYS all release images.
     --keyvault    ALSO delete Key Vault ($KEY_VAULT) -- DESTROYS sealed secrets.
-    --all         == --compute --database --ancillary (keeps ACR + Key Vault).
+    --all         == --compute --ancillary (keeps ACR + Key Vault).
 
 Modes:
     --confirm         Actually execute (default is DRY-RUN -- prints what it would do).
@@ -73,23 +81,22 @@ Modes:
 Examples:
     $0 --all                                       # dry-run the full nuke
     $0 --all --confirm --confirm-name=$ENV_NAME    # execute it (explicit confirm)
-    $0 --compute --database --confirm --yes        # CI/non-interactive
+    $0 --compute --confirm --yes                   # CI/non-interactive
 EOF
 }
 
 function parse_arguments() {
-    DO_COMPUTE=false; DO_DATABASE=false; DO_ANCILLARY=false
+    DO_COMPUTE=false; DO_ANCILLARY=false
     DO_REGISTRY=false; DO_KEYVAULT=false
     CONFIRM=false; ASSUME_YES=false; CONFIRM_NAME="${CONFIRM_NAME:-}"
     [ $# -eq 0 ] && { show_help; exit 0; }
     while [[ $# -gt 0 ]]; do
         case $1 in
             --compute)        DO_COMPUTE=true; shift ;;
-            --database)       DO_DATABASE=true; shift ;;
             --ancillary)      DO_ANCILLARY=true; shift ;;
             --registry)       DO_REGISTRY=true; shift ;;
             --keyvault)       DO_KEYVAULT=true; shift ;;
-            --all)            DO_COMPUTE=true; DO_DATABASE=true; DO_ANCILLARY=true; shift ;;
+            --all)            DO_COMPUTE=true; DO_ANCILLARY=true; shift ;;
             --confirm)        CONFIRM=true; shift ;;
             --confirm-name=*) CONFIRM_NAME="${1#*=}"; shift ;;
             --yes)            ASSUME_YES=true; shift ;;
@@ -101,9 +108,6 @@ function parse_arguments() {
 
 function check_prerequisites() {
     command -v az >/dev/null    || { echo "ERROR: az CLI not found"; exit 1; }
-    if [ "$DO_DATABASE" = true ]; then
-        command -v tiger >/dev/null || { echo "ERROR: tiger CLI not found"; exit 1; }
-    fi
     az account set --subscription "$SUBSCRIPTION_ID"
 }
 
@@ -114,7 +118,7 @@ function print_plan() {
     echo "  mode:         $([ "$CONFIRM" = true ] && echo EXECUTE || echo DRY-RUN)"
     echo "-----------------------------------------"
     echo "  [compute]    AKS $AKS_CLUSTER + node RG ...... $DO_COMPUTE"
-    echo "  [database]   Tiger DB $TIGER_SERVICE_ID (PURGE)  $DO_DATABASE"
+    echo "  [database]   in-cluster CNPG -- goes with [compute]; BACKUPS SURVIVE"
     echo "  [ancillary]  storage + log-analytics + CAE .. $DO_ANCILLARY"
     echo "  [registry]   ACR $ACR_NAME (DESTROY images) .. $DO_REGISTRY"
     echo "  [keyvault]   KV $KEY_VAULT (DESTROY secrets).. $DO_KEYVAULT"
@@ -148,9 +152,15 @@ function teardown_compute() {
 }
 
 function teardown_database() {
-    [ "$DO_DATABASE" = true ] || return 0
-    echo "INFO: deprovisioning Tiger Cloud DB service $TIGER_SERVICE_ID (PURGES all data)..."
-    run tiger service delete "$TIGER_SERVICE_ID" --confirm
+    # THE DATABASE GOES WITH THE COMPUTE (epic memql#3842 / #3848). It is a
+    # CloudNativePG cluster inside AKS, so deleting the cluster deletes it --
+    # there is no separate service to deprovision, and no separate bill.
+    #
+    # Its BACKUPS are in another resource group this script never touches, and
+    # the cluster identity cannot purge them. That separation is the whole
+    # point: a teardown must be able to destroy the running database without
+    # being able to destroy the ability to bring it back.
+    return 0
 }
 
 function teardown_ancillary() {
@@ -189,7 +199,7 @@ function main() {
     echo ""
     if [ "$CONFIRM" = true ]; then
         echo "DONE: teardown executed. Verify with:"
-        echo "  az aks list -o table ; tiger service list ; az resource list -g $RESOURCE_GROUP -o table"
+        echo "  az aks list -o table ; az resource list -g $RESOURCE_GROUP -o table"
     else
         echo "DRY-RUN complete. Re-run with --confirm to execute."
     fi

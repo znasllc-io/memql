@@ -4,12 +4,21 @@ Kubernetes manifests for the memQL multi-node mesh, deployed to AKS
 (epic [znasllc-io/memql#522](https://github.com/znasllc-io/memql/issues/522)
 -- pivot from ACA, which can't host the per-node multi-port mesh).
 
-## No database pod
+## The database is a COMPONENT, not a base resource
 
-Staging/prod use the managed **Tiger Cloud** DB (`xahn9ru4v6`, Azure East
-US 2). There is **no postgres/pgadmin/nginx/livekit** in this directory --
-only the 7 memQL node-types. Every node connects to Tiger via the
-`MEMQL_DATABASE_DSN` key in the `memql-secrets` Secret.
+Every environment runs a self-hosted **CloudNativePG** cluster (epic
+memql#3842). It is not in this directory, and that is deliberate: the database
+is composed by each overlay from `deploy/k8s/components/cnpg-db` with a tier
+preset, so a deployment picks its own size without a per-environment manifest.
+
+Base carries only the memQL node-types. Every node reaches the database through
+the `MEMQL_DATABASE_DSN` / `MEMORY_NODES_DATABASE_DIRECT_DSN` keys in the
+`memql-secrets` Secret, which point at CNPG's `-rw` Service -- the one that
+follows the current primary across a failover.
+
+> This replaced "Staging/prod use the managed Tiger Cloud DB (xahn9ru4v6)".
+> Tiger is gone (memql#3848); the connection model is unchanged, and the
+> endpoint behind it is now ours.
 
 ## Mesh = cluster DNS
 
@@ -114,7 +123,7 @@ reconnect.
 
 ## Migrations run once
 
-The shared Tiger DB must not be migrated by 7 racing nodes. Only the
+The shared database must not be migrated by 7 racing nodes. Only the
 **identity** node sets `MEMORY_NODES_DATABASE_MIGRATE_ON_START=true`;
 every other node has it `false`.
 
@@ -150,7 +159,7 @@ manifest change). See `secret.example.yaml` for the imperative
 ### Hybrid connection-pool endpoint split (epic [#1925](https://github.com/znasllc-io/memql/issues/1925))
 
 To kill the deploy-time connection storm (SQLSTATE 53300), bulk traffic rides
-the Tiger **transaction pooler** (PgBouncer) and only session-stateful work
+a **transaction pooler** (PgBouncer, opt-in) and only session-stateful work
 takes a direct backend:
 
 - `MEMQL_DATABASE_DSN` -> the **transaction pooler** (db
@@ -213,7 +222,7 @@ kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
   --from-literal=MEMQL_IDENTITY_SIGNING_KEY_B64="$MEMQL_IDENTITY_SIGNING_KEY_B64" \
   --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
-  --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+  --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
 
 # 3. All node Deployments + Services (digest-pinned overlay, #699)
 kubectl apply -k deploy/k8s/overlays/staging
