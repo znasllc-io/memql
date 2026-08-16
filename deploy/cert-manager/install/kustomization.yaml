@@ -1,0 +1,37 @@
+# cert-manager install (epic memql#3842, task memql#3845).
+#
+# WHY THIS EXISTS NOW. cert-manager was already a DEPENDENCY of this repository
+# and was installed nowhere in it. deploy/external-secrets/install ships a
+# `cert-manager.io/v1` Issuer for the ESO webhook cert, and eso-values.yaml says
+# plainly "cert-manager (already installed on this cluster)" -- an assumption
+# held together by whoever installed it by hand. The front-door manifests carry
+# ClusterIssuers on the same footing.
+#
+# The Barman Cloud plugin (../../cnpg/install) is what forced the issue: its
+# manifest contains Certificate and Issuer objects for the plugin<->operator
+# mTLS, so on a cluster without cert-manager's CRDs that Application does not
+# degrade, it fails to apply. Making the dependency real -- pinned, reconciled,
+# and identical in every environment -- is cheaper than a fourth consumer
+# discovering it the same way.
+#
+# NOT INSTALLED FOR LOCAL TLS. The local front door uses mkcert
+# (scripts/lib/localtls.sh), and that stays true; this install is here so the
+# CRDs and the controller exist for the workloads that need them.
+#
+# UPGRADES. cert-manager supports roughly the two most recent minors. Bump the
+# tag below, let ArgoCD sync, and confirm the three Deployments in the
+# cert-manager namespace roll cleanly. CRD changes ride the same manifest --
+# which is why this is pinned to an exact tag and never to `latest`.
+#
+# Reconciled by deploy/argocd/apps/cert-manager.yaml, which carries a sync-wave
+# ahead of the CNPG stack so the CRDs land before anything references them.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # cert-manager v1.21.1, upstream static install (controller + webhook +
+  # cainjector + CRDs). Ships its own `cert-manager` Namespace, so this
+  # kustomization deliberately declares no `namespace:` -- setting one would
+  # rewrite the cluster-scoped and cross-namespace references the manifest
+  # makes to itself.
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.21.1/cert-manager.yaml

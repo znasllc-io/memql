@@ -124,6 +124,7 @@ ARGOCD_TIMEOUT="${MEMQL_K3D_ARGOCD_TIMEOUT:-300}"
 # Outcome tracking (result envelope + idempotency reporting).
 CLUSTER_CREATED=false
 ARGOCD_READY=false
+OPERATOR_STACK_READY=false
 WORKLOADS_READY=false
 IMAGE_REGISTRY=""
 IMAGE_TAG=""
@@ -596,6 +597,86 @@ function kustomize_source_block() {
 }
 
 
+#=============================================================================
+# OPERATOR STACK (cert-manager + CloudNativePG)
+#=============================================================================
+
+# _register_operator_app -- apply one committed operator Application manifest.
+#
+# The manifest is the single source of truth (deploy/argocd/apps/<app>.yaml);
+# this only overrides its targetRevision so a branch that bumps an operator pin
+# is testable locally, which is exactly the treatment the mesh Application
+# already gets. A downstream stack points --repo-url at its OWN repo, where
+# these manifests do not exist, so in that case the committed `main` is left
+# alone -- that is a statement about which REPO owns the operator stack, not an
+# environment branch.
+function _register_operator_app() {
+    local app="$1"
+    kubectl apply -f "${REPO_ROOT}/deploy/argocd/apps/${app}.yaml" >&2
+    if [[ "${REPO_URL}" == "https://github.com/znasllc-io/memql.git" ]]; then
+        kubectl -n "${ARGOCD_NAMESPACE}" patch application "${app}" --type=merge \
+            -p "{\"spec\":{\"source\":{\"targetRevision\":\"${TARGET_REVISION}\"}}}" >&2
+    fi
+}
+
+# _wait_for_operator <namespace> <deployment...> -- wait for ArgoCD to have
+# created the Deployments AND for them to be available.
+#
+# Two waits, not one, because they fail for different reasons and `kubectl
+# rollout status` cannot express the first: until ArgoCD syncs, the Deployment
+# does not exist, and `rollout status` on a missing object errors immediately
+# rather than waiting. Polling for existence first turns "Argo has not synced
+# yet" into a wait instead of a spurious failure.
+function _wait_for_operator() {
+    local ns="$1"
+    shift
+    local timeout="${MEMQL_K3D_OPERATOR_TIMEOUT:-300}"
+    local d deadline
+    deadline=$((SECONDS + timeout))
+
+    for d in "$@"; do
+        while ! kubectl get deployment "$d" -n "$ns" &>/dev/null; do
+            if ((SECONDS >= deadline)); then
+                cap_fail 5 "timed out after ${timeout}s waiting for ArgoCD to create deployment/${d} in ${ns} (check: kubectl -n ${ARGOCD_NAMESPACE} get application)"
+            fi
+            sleep 3
+        done
+    done
+    for d in "$@"; do
+        kubectl rollout status "deployment/${d}" -n "$ns" --timeout="${timeout}s" >&2 \
+            || cap_fail 5 "deployment/${d} in ${ns} did not become available"
+    done
+    info "  ${ns}: $* ready"
+}
+
+# install_operator_stack -- register cert-manager and CloudNativePG, in that
+# order, and wait for each.
+#
+# WHY THE ORDER IS ENFORCED HERE AND NOT LEFT TO SYNC-WAVES. The waves on the
+# two Application manifests (-2 and -1) express the dependency declaratively for
+# the cloud app-of-apps. Locally the Applications are applied directly, so the
+# waves do not order them; and the failure they prevent is not cosmetic -- the
+# Barman Cloud plugin's manifest declares Certificate and Issuer objects, so
+# without cert-manager's CRDs already served the CNPG Application does not
+# degrade, it fails to apply. Waiting turns a retry loop that eventually
+# converges into a bring-up that either works or says why.
+#
+# The stack is reconciled by ArgoCD in every environment, from the same two
+# directories; this function is bootstrap, not a second install path.
+function install_operator_stack() {
+    section "Registering the cluster operator stack (cert-manager + CloudNativePG)"
+
+    info "cert-manager -> deploy/cert-manager/install"
+    _register_operator_app cert-manager
+    _wait_for_operator cert-manager cert-manager cert-manager-cainjector cert-manager-webhook
+
+    info "CloudNativePG + Barman Cloud plugin -> deploy/cnpg/install"
+    _register_operator_app cnpg-operator
+    _wait_for_operator cnpg-system cnpg-controller-manager barman-cloud
+
+    OPERATOR_STACK_READY=true
+}
+
 function apply_argocd_app() {
     section "Registering Application '${APP_NAME}' in ArgoCD"
 
@@ -918,6 +999,12 @@ function main() {
     fi
 
     seed_repo_credential
+    # BEFORE the mesh Application, because the overlay it registers declares
+    # Cluster CRs that the CNPG operator has to exist to reconcile (memql#3846).
+    # An overlay applied first does not fail -- the Cluster object is simply
+    # rejected as an unknown kind, and the mesh then waits on a database that is
+    # never created.
+    install_operator_stack
     apply_argocd_app
     # GATE, THEN WAIT (memql#3585). The gate has to come after the Application --
     # the Deployments it scales do not exist until ArgoCD has created them -- and
@@ -936,6 +1023,7 @@ function main() {
     cap_result_set_raw clusterCreated "$CLUSTER_CREATED"
     cap_result_set     domain         "$DOMAIN"
     cap_result_set_raw argocdReady    "$ARGOCD_READY"
+    cap_result_set_raw operatorStack  "$OPERATOR_STACK_READY"
     cap_result_set_raw workloadsReady "$WORKLOADS_READY"
     cap_result_set_raw secretsSeeded  "$SECRETS_SEEDED"
     cap_ok
