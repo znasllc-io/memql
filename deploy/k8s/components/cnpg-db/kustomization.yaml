@@ -1,0 +1,66 @@
+# Reusable kustomize Component: the memQL database, on CloudNativePG.
+#
+# Epic memql#3842, task memql#3851. The seam a deployment composes its database
+# from -- a client cluster today, a memQL Cloud tenant later -- mirroring the way
+# the `dsl-bundle` component delivers product DSL.
+#
+# ONE SHAPE, VALUES PER OVERLAY. Every environment gets the SAME four resources:
+#
+#   Cluster          the Postgres instances themselves
+#   Database         declarative extension management (timescaledb + vector)
+#   ObjectStore      where WAL and base backups land
+#   ScheduledBackup  the nightly base backup
+#
+# What an overlay changes is numbers and endpoints: how many instances, how big,
+# which object store, which image digest. That is the parity doctrine applied to
+# the database -- and it is the whole reason this is a component rather than
+# three near-identical manifests that drift.
+#
+# USAGE (in an overlay):
+#
+#   components:
+#     - ../../components/cnpg-db
+#     - ../../components/cnpg-db/presets/mid      # optional, see presets/README
+#
+#   patches:
+#     - target: { kind: ObjectStore, name: memql-db-backup }
+#       patch: |
+#         - op: replace
+#           path: /spec/configuration/destinationPath
+#           value: "azure://memql-staging-db-backups/"
+#
+#   images:
+#     - name: memql-db
+#       newName: acrmemql.azurecr.io/memql-db
+#       digest: sha256:...
+#
+# TWO THINGS AN OVERLAY *MUST* SUPPLY, because there is no sane default for
+# either and a wrong one is worse than a missing one:
+#
+#   1. `destinationPath` on the ObjectStore. It is a REQUIRED field on the CRD,
+#      so this component ships the placeholder below; a rendered overlay that
+#      still contains it would archive nowhere.
+#      TestNoOverlayShipsThePlaceholderBackupDestination refuses that.
+#   2. The image. This component names `memql-db` with no tag, so an overlay
+#      that forgets the `images:` entry fails to pull rather than silently
+#      running some other Postgres.
+#
+# CREDENTIALS. `bootstrap.initdb.secret` names `memql-db-app-creds`, a
+# kubernetes.io/basic-auth Secret. Local seeds it with `make secrets`;
+# staging and production sync it from Key Vault through ESO. The NAME is the
+# contract, so the component can stay ignorant of where the value came from.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - cluster.yaml
+  - database.yaml
+  - objectstore.yaml
+  - scheduledbackup.yaml
+
+# Teaches the `images:` transformer that a CNPG Cluster names its image at
+# spec/imageName. Without it an overlay's `images:` entry for memql-db is a
+# SILENT no-op -- the render succeeds with an untagged image and the failure
+# lands at apply or pull time. See kustomizeconfig/images.yaml.
+configurations:
+  - kustomizeconfig/images.yaml

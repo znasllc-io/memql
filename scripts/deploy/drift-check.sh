@@ -116,10 +116,20 @@ function parse_arguments() {
 # RENDER
 #=============================================================================
 
-# Render the overlay; emit one "name@digest-or-tag" per container image line.
+# Render the overlay; emit one "name@digest-or-tag" per image line.
+#
+# TWO KEYS, NOT ONE (memql#3847). `image:` is the container field every core
+# workload kind uses. `imageName:` is where a CloudNativePG Cluster names its
+# operand image -- a CustomResource is free to put it anywhere, and CNPG does.
+#
+# Matching only `image:` left the DATABASE image outside this gate: the most
+# sensitive image in the deployment would have been the one image allowed to
+# float on a mutable tag, while every stateless node was held to a digest. The
+# omission would not have shown up as a failure here -- it would have shown up
+# as this check passing over an overlay it had not read.
 function rendered_images() {
     kubectl kustomize "$OVERLAY_DIR" 2>/dev/null \
-        | awk '/^[[:space:]]+image:[[:space:]]/ { sub(/^[[:space:]]+image:[[:space:]]*/, ""); gsub(/"/, ""); print }' \
+        | awk '/^[[:space:]]+image(Name)?:[[:space:]]/ { sub(/^[[:space:]]+image(Name)?:[[:space:]]*/, ""); gsub(/"/, ""); print }' \
         | sort -u
 }
 

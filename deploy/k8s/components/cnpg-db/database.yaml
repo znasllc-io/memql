@@ -1,0 +1,41 @@
+# Declarative extension management (epic memql#3842, task memql#3851).
+#
+# The extensions are DECLARED rather than created by a migration, which is what
+# makes the TimescaleDB upgrade choreography the operator's job: moving
+# `version` below is what runs ALTER EXTENSION, and it is deliberately the
+# SECOND of the two PRs an upgrade takes. The first moves the image, so every
+# instance is already running a binary that carries both the old and the new
+# library. deploy/db-image/README.md has the full sequence.
+#
+# THIS IS ALSO A RACE THE BRING-UP HAS TO RESPECT. A Cluster reports Ready as
+# soon as Postgres accepts connections; these extensions are reconciled
+# afterwards. A migration in between finds a database that connects and has no
+# timescaledb in it, and fails on the first create_hypertable with an error
+# naming a missing function. Wait for `status.applied` on THIS resource, not
+# only for the Cluster (scripts/k3d/bringup.sh does).
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: memql-db-memql
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+spec:
+  cluster:
+    name: memql-db
+  name: memql
+  owner: memql
+  extensions:
+    # Pinned, and pinned to the CURRENT half of the image's version pair. An
+    # unpinned extension would follow whatever the image happens to carry, which
+    # is the opposite of a choreographed upgrade.
+    #
+    # deploy/k8s/overlays/local's render gate asserts this matches the
+    # Dockerfile's TIMESCALEDB_VERSION, because a version the image does not
+    # carry is not a render error -- it is CNPG running ALTER EXTENSION to a
+    # library that is not there, against a database that is otherwise up.
+    - name: timescaledb
+      version: "2.29.1"
+      ensure: present
+    - name: vector
+      ensure: present

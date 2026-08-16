@@ -1,0 +1,80 @@
+# The Postgres instances (epic memql#3842, task memql#3851).
+#
+# The values here are the SMALLEST sane shape -- one instance, modest storage --
+# so an overlay that forgets to apply a preset gets a working single-instance
+# database rather than something that fails to schedule. Presets and overlay
+# patches move the numbers; nothing here is meant to be a recommendation.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: memql-db
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+spec:
+  instances: 1
+
+  # No tag, deliberately. Every overlay pins this through `images:` -- by digest
+  # in the cloud, by the locally-built tag in k3d -- so an overlay that forgets
+  # fails to pull instead of quietly running a different Postgres.
+  #
+  # THE TAG MUST BEGIN WITH THE POSTGRESQL MAJOR wherever it is pinned: CNPG's
+  # webhook parses it to derive the major version and rejects what it cannot
+  # read. deploy/db-image/README.md carries the measured table.
+  imageName: memql-db
+
+  # Single-instance clusters MUST disable the PDB: CNPG's default permits zero
+  # disruptions at one instance, so any node drain blocks forever on a pod
+  # nothing can safely evict, with no error naming the cause. The HA presets
+  # turn it back on, which is the one thing `instances: 1 -> 2` does not do by
+  # itself.
+  enablePDB: false
+
+  postgresql:
+    # TimescaleDB is a preload library, not merely an extension. Without this
+    # the CREATE EXTENSION below fails with a message naming the library rather
+    # than the cause.
+    shared_preload_libraries:
+      - timescaledb
+    parameters:
+      # OURS TO SET NOW. Tiger Cloud's per-tier ceiling (~59 usable slots) is
+      # what the connection-budget standard was written around and what produced
+      # the 53300 storm; self-hosting removes it. Presets raise this with the
+      # instance size.
+      max_connections: "200"
+
+  bootstrap:
+    initdb:
+      database: memql
+      owner: memql
+      # A kubernetes.io/basic-auth Secret. The NAME is the contract; where the
+      # value comes from (make secrets locally, ESO from Key Vault in the cloud)
+      # is the overlay's business.
+      secret:
+        name: memql-db-app-creds
+
+  storage:
+    size: 10Gi
+
+  # A SEPARATE WAL VOLUME, in every environment including local. WAL sharing a
+  # volume with data means a WAL-archiving stall fills the data disk and stops
+  # the database -- which is precisely the failure the archiving alert exists to
+  # catch, and an environment without the split rehearses a different topology.
+  walStorage:
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+  # Backups ride the Barman Cloud PLUGIN, not the deprecated in-tree
+  # `barmanObjectStore` stanza -- which is also why the operand image is built
+  # on CNPG's `standard` base rather than the `system` base carrying the in-tree
+  # binaries. Picking one without the other fails at the first backup rather
+  # than at apply. See deploy/cnpg/README.md.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: memql-db-backup

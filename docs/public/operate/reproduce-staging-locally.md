@@ -197,7 +197,7 @@ following in order:
 1. Creates a k3d cluster (default name `memql`).
 2. Installs ArgoCD v2.13.3 (same version as staging) via
    `kubectl apply -k deploy/argocd/bootstrap`.
-3. Seeds k8s Secrets (`memql-secrets`, `memql-local-db-creds`,
+3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`,
    `livekit-secrets`, `telephony-secrets`) via `scripts/k3d/seed-secrets.sh`.
 4. Applies the ArgoCD Application `memql-local` pointing at
    `deploy/k8s/overlays/local` on the current git branch.

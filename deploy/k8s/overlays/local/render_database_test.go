@@ -162,8 +162,8 @@ func TestLocalClusterLoadsTimescaleAndSeparatesWAL(t *testing.T) {
 			"data volume and stop the database, which is the failure the separate volume exists to bound")
 	}
 
-	if c.Spec.Bootstrap.InitDB.Secret.Name != "memql-local-db-creds" {
-		t.Errorf("bootstrap.initdb.secret is %q, want memql-local-db-creds -- the Secret `make secrets` seeds, "+
+	if c.Spec.Bootstrap.InitDB.Secret.Name != "memql-db-app-creds" {
+		t.Errorf("bootstrap.initdb.secret is %q, want memql-db-app-creds -- the Secret `make secrets` seeds, "+
 			"and the one whose username/password the DSN is built from",
 			c.Spec.Bootstrap.InitDB.Secret.Name)
 	}
@@ -364,7 +364,7 @@ func TestSeedSecretsPointsAtTheRenderedCluster(t *testing.T) {
 	// CNPG reads, not the POSTGRES_USER/POSTGRES_PASSWORD pair the old
 	// Deployment consumed as container env.
 	if !strings.Contains(body, "--type=kubernetes.io/basic-auth") {
-		t.Error("memql-local-db-creds is not seeded as a kubernetes.io/basic-auth Secret; that is the shape " +
+		t.Error("memql-db-app-creds is not seeded as a kubernetes.io/basic-auth Secret; that is the shape " +
 			"CNPG's bootstrap.initdb.secret reads, and initdb fails without it")
 	}
 }

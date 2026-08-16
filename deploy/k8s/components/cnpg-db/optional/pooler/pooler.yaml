@@ -1,0 +1,57 @@
+# PgBouncer in front of the primary (epic memql#3842, task memql#3847).
+#
+# Opt-in. See the kustomization next to this file for why it is not composed by
+# any overlay today, and for the signal that should change that.
+apiVersion: postgresql.cnpg.io/v1
+kind: Pooler
+metadata:
+  name: memql-db-pooler
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+spec:
+  cluster:
+    name: memql-db
+
+  # `rw` -- the pooler follows the PRIMARY. There is deliberately no `ro`
+  # sibling here: read-replica routing in the app is explicitly out of scope for
+  # this epic, and a pooler pointed at replicas with nothing configured to use
+  # it would be a service nothing dials.
+  type: rw
+
+  # Two, for the same reason the database has two: a single pooler instance
+  # turns the thing that was supposed to improve availability into a new single
+  # point of failure in front of an HA database.
+  instances: 2
+
+  pgbouncer:
+    # TRANSACTION mode, and this is the constraint the DSN split exists for. A
+    # transaction-pooled connection is not a session: prepared statements,
+    # session GUCs, advisory locks, LISTEN/NOTIFY and temp tables do not survive
+    # between transactions.
+    #
+    # memQL holds session state in two places that matter -- the migrations
+    # (which take advisory locks) and `MEMQL_DB_SEARCH_PATH`, a session GUC that
+    # IS the environment boundary. Both must go through
+    # MEMORY_NODES_DATABASE_DIRECT_DSN on `memql-db-rw`, never through here.
+    # Pooling the search path would mean a staging query landing on a connection
+    # still set to production's schema, which is the one failure this
+    # architecture has no second line of defence against.
+    poolMode: transaction
+    parameters:
+      # The point of the pooler: many client connections, few server ones.
+      max_client_conn: "1000"
+      # Per (user, database) pair. Kept well under the Cluster's max_connections
+      # so the pooler cannot itself exhaust the ceiling it exists to protect --
+      # with 2 pooler instances this reserves 2 x 25 server connections.
+      default_pool_size: "25"
+      # Bounded so a burst cannot open unlimited server connections while
+      # waiting for the pool to drain.
+      reserve_pool_size: "5"
+      reserve_pool_timeout: "3"
+
+  monitoring:
+    # Scraped by the same PodMonitor selector the instances use, so pool
+    # saturation is visible next to the database's own metrics rather than in a
+    # separate place nobody looks.
+    enablePodMonitor: true

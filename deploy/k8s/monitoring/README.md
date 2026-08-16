@@ -22,6 +22,28 @@ Alert rules (prometheus-operator CRDs):
   - **MemqlAuthRejectUnknownKid** -- unknown-kid rejects > 0.05/s for 5m (signing-key skew).
   - **MemqlJWKSIncoherent** -- identity replicas' `memql_jwks_keyset_fingerprint` diverge for 10m.
   - **MemqlJWKSEmpty** -- an identity replica serves 0 keys for 5m.
+- `prometheusrule-database.yaml` (epic memql#3842 / #3847) -- the self-hosted
+  database. Every rule here shares one property: the database keeps **serving
+  traffic perfectly** while the condition is true, so nothing else surfaces it
+  until the moment it matters -- when you need a backup or a failover.
+  - **MemqlDatabaseWALArchivingFailing** -- the archiver failed more recently
+    than it succeeded, 5m. This one loses DATA rather than availability.
+  - **MemqlDatabaseWALNeverArchived** -- a 30-minute-old cluster that has never
+    archived. The day-one case a wrong `destinationPath` produces, which the
+    rule above cannot see (neither timestamp is set).
+  - **MemqlDatabaseVolumeFillingUp / AlmostFull** -- under 20% / 10% free.
+    Postgres stops rather than degrades when a volume fills.
+  - **MemqlDatabaseReplicaLagging** -- over 5m behind for 10m: the failover
+    target is worse than it looks.
+  - **MemqlDatabaseReplicaNotStreaming** -- in recovery with the WAL receiver
+    down. Not lagging, NOT REPLICATING; lag reads flat, so the rule above
+    cannot catch it.
+
+  Scraped by `podmonitor-database.yaml`, which is separate from the app
+  PodMonitor because CNPG's instance manager serves its own metrics on :9187 --
+  different selectors, different port, different metric namespace. Operator
+  guide, including the Grafana dashboard import:
+  [database-platform.md](../../../docs/public/operate/database-platform.md).
 - `prometheusrule-rollouts.yaml`
   - **MemqlRolloutPausedTooLong** -- a Rollout sits `phase=Paused` (BlueGreenPause / unpromoted) > 15m.
   - **MemqlRolloutDegraded** -- a Rollout is `phase=Degraded` > 5m.

@@ -1,0 +1,174 @@
+# PrometheusRule: the three database failures that are otherwise SILENT
+# (epic memql#3842, task memql#3847).
+#
+# WHY THESE THREE AND NOT A LONGER LIST. Every documented way a CloudNativePG
+# deployment gets hurt is a monitoring gap first. The three below share one
+# property that makes them worth paging on: the database keeps serving traffic
+# perfectly while they are true, so nothing else -- not a readiness probe, not
+# the Cluster's phase, not a user report -- surfaces them until the moment they
+# matter, which is the moment you need a backup or a failover.
+#
+#   1. WAL archiving failing        no backups, healthy-looking cluster
+#   2. a volume filling             Postgres stops when it hits the wall
+#   3. replica not replicating      no failover target; HA that isn't
+#
+# CNPG's own sample rules cover a wider set (long transactions, deadlocks, xid
+# age). Those are useful and are deliberately NOT duplicated here: they are
+# workload symptoms an operator investigates, not silent losses of a property
+# the deployment was bought for.
+#
+# ASSUMES a prometheus-operator whose Prometheus CR selects PrometheusRules (the
+# `release` label must match its ruleSelector) and Alertmanager routing, exactly
+# as for the auth rules next to this file. Metrics come from CNPG's instance
+# manager via podmonitor-database.yaml; the volume metrics come from kubelet.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: memql-database
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    release: kube-prometheus-stack
+spec:
+  groups:
+    - name: memql-database-archiving
+      rules:
+        # (1) WAL ARCHIVING FAILING.
+        #
+        # The CNPG idiom: the archiver records the last time it succeeded and
+        # the last time it failed, so "failed more recently than it succeeded"
+        # is the crisp statement of "archiving is broken right now" -- and it
+        # stays true until a success, rather than flapping with the failure
+        # rate.
+        #
+        # This is the one that loses DATA rather than availability. The cluster
+        # serves every query correctly with no recovery point behind it, and the
+        # first sign in the absence of this alert is a restore that cannot go
+        # back far enough.
+        - alert: MemqlDatabaseWALArchivingFailing
+          expr: |
+            (cnpg_pg_stat_archiver_last_failed_time - cnpg_pg_stat_archiver_last_archived_time) > 0
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL database WAL archiving is failing ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: >
+              The WAL archiver has failed more recently than it has succeeded for
+              5 minutes. The database is still serving, and is accumulating an
+              unbacked-up write history: point-in-time recovery cannot pass this
+              window. Check the barman-cloud sidecar
+              (kubectl logs -n {{ $labels.namespace }} {{ $labels.pod }} -c plugin-barman-cloud)
+              and the ObjectStore's destination + credentials.
+
+        # A never-archived cluster is a distinct case: the subtraction above is
+        # useless when neither timestamp has ever been set, so a brand-new
+        # cluster whose archiving has NEVER worked would stay silent under (1)
+        # alone. That is exactly the state a misconfigured destinationPath
+        # produces on day one.
+        - alert: MemqlDatabaseWALNeverArchived
+          expr: |
+            cnpg_pg_stat_archiver_last_archived_time == 0
+          for: 30m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL database has never archived a WAL segment ({{ $labels.namespace }})"
+            description: >
+              This cluster has been up for 30 minutes and has never successfully
+              archived a WAL segment, so it has no backups at all. The usual
+              cause is a wrong or unpatched ObjectStore destinationPath, or
+              credentials the sidecar cannot use.
+
+    - name: memql-database-storage
+      rules:
+        # (2) VOLUME FILL -- data or WAL.
+        #
+        # Two alerts on the same shape because the volumes fail differently and
+        # the WAL one is the sharper trap: a stalled archiver means WAL is
+        # RETAINED rather than recycled, so a broken (1) turns into (2) within
+        # hours. That is also why the WAL threshold fires earlier.
+        #
+        # Postgres does not degrade when a volume fills; it stops. On the WAL
+        # volume it can stop in a way that needs manual intervention to restart.
+        - alert: MemqlDatabaseVolumeFillingUp
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"memql-db.*"}
+              /
+              kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"memql-db.*"}
+            ) < 0.20
+          for: 15m
+          labels:
+            severity: warning
+            team: memql
+          annotations:
+            summary: "memQL database volume {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} free"
+            description: >
+              Under 20% free for 15 minutes. PVC expansion is online for the
+              storage classes in use, so this is a resize rather than an outage --
+              provided it is done before the volume is full. If this is the WAL
+              volume, check WAL archiving first: a stalled archiver retains WAL
+              instead of recycling it, and resizing without fixing that only
+              buys time.
+
+        - alert: MemqlDatabaseVolumeAlmostFull
+          expr: |
+            (
+              kubelet_volume_stats_available_bytes{persistentvolumeclaim=~"memql-db.*"}
+              /
+              kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~"memql-db.*"}
+            ) < 0.10
+          for: 5m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL database volume {{ $labels.persistentvolumeclaim }} is nearly full ({{ $value | humanizePercentage }} free)"
+            description: >
+              Under 10% free. Postgres stops rather than degrades when a volume
+              fills. Expand the PVC now.
+
+    - name: memql-database-replication
+      rules:
+        # (3) REPLICA LAG / RESTORE-LOOP SYMPTOMS.
+        #
+        # A lagging replica is not a performance problem, it is an HA problem:
+        # promotion loses everything the replica had not caught up on, so this
+        # alert is really "your failover target is worse than you think".
+        - alert: MemqlDatabaseReplicaLagging
+          expr: |
+            cnpg_pg_replication_lag > 300
+          for: 10m
+          labels:
+            severity: warning
+            team: memql
+          annotations:
+            summary: "memQL database replica lag {{ $value | humanizeDuration }} ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: >
+              A replica has been more than 5 minutes behind the primary for 10
+              minutes. A promotion now would lose that window. Common causes are
+              a saturated WAL volume, a slow network, or a replica busy with a
+              long query.
+
+        # The restore-loop / broken-streaming symptom, and the reason it needs
+        # its own rule: an instance IN RECOVERY whose WAL receiver is DOWN is
+        # not lagging, it is not replicating at all. Lag would be flat or
+        # missing rather than large, so the rule above cannot see it.
+        - alert: MemqlDatabaseReplicaNotStreaming
+          expr: |
+            cnpg_pg_replication_in_recovery > cnpg_pg_replication_is_wal_receiver_up
+          for: 10m
+          labels:
+            severity: critical
+            team: memql
+          annotations:
+            summary: "memQL database replica is not streaming ({{ $labels.namespace }}/{{ $labels.pod }})"
+            description: >
+              This instance is in recovery but its WAL receiver is down, so it is
+              not replicating -- the cluster has no usable failover target even
+              though it reports the configured number of instances. Frequently a
+              restore loop: check the instance's logs and whether it can reach
+              both the primary and the object store.

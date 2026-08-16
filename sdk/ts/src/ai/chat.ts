@@ -226,7 +226,7 @@ function toWireMessage(m: AiChatMessage): AiChatMessageWire {
   };
 }
 
-function fromWireMessage(m: AiChatMessageWire | undefined): AiChatMessage {
+function fromWireMessage(m: AiChatMessageWire | null | undefined): AiChatMessage {
   return {
     role: m?.role ?? "",
     content: m?.content ?? "",

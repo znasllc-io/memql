@@ -1,0 +1,59 @@
+# MID tier -- two instances, HA (epic memql#3842, task memql#3851).
+#
+#   instances   2
+#   resources   2 vCPU / 8 GiB
+#   storage     128 GiB data + 32 GiB WAL
+#   HA          ON (automatic failover, PDB, anti-affinity)
+#
+# THE HA TOGGLE IS `instances: 1 -> 2` PLUS THE PDB, and the second half is easy
+# to forget. Raising the count alone leaves `enablePDB: false` inherited from
+# the component's single-instance default, so a node drain could take the
+# primary and its only replica together -- which is the one thing a second
+# instance was bought to prevent.
+#
+# SPREAD ACROSS ZONES, PREFERRED. The topology key is the zone rather than the
+# host, because the failure worth surviving at this tier is a zone going away --
+# two instances on two hosts in ONE zone survive a node loss and nothing more.
+#
+# `preferred` rather than `required` is the deliberate half. This preset is also
+# what a tenant cluster composes, and plenty of those are single-zone or
+# single-node; a required rule there leaves the replica permanently Pending, and
+# a database that cannot schedule its replica is strictly worse off than one
+# whose replica shares a zone. `top` (3 instances, a cloud region) makes it
+# required, where the cluster is known to have three zones to spread over.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Cluster
+      name: memql-db
+    patch: |
+      - { op: replace, path: /spec/instances, value: 2 }
+      - { op: replace, path: /spec/enablePDB, value: true }
+      - { op: replace, path: /spec/storage/size, value: 128Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 32Gi }
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: { cpu: "2", memory: 8Gi }
+          limits:   { memory: 8Gi }
+      - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "400" }
+      - op: add
+        path: /spec/affinity
+        value:
+          enablePodAntiAffinity: true
+          topologyKey: topology.kubernetes.io/zone
+          podAntiAffinityType: preferred
+      - op: add
+        path: /spec/topologySpreadConstraints
+        value:
+          - maxSkew: 1
+            topologyKey: topology.kubernetes.io/zone
+            # ScheduleAnyway, matching the `preferred` anti-affinity above and
+            # for the same reason: a single-zone tenant must still get its
+            # replica scheduled.
+            whenUnsatisfiable: ScheduleAnyway
+            labelSelector:
+              matchLabels:
+                cnpg.io/cluster: memql-db

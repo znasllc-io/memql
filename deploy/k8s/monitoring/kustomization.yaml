@@ -23,3 +23,9 @@ resources:
   - podmonitor.yaml
   - prometheusrule-auth.yaml
   - prometheusrule-rollouts.yaml
+  # The self-hosted database (epic memql#3842 / #3847). A separate PodMonitor
+  # because CNPG's instance manager serves its own metrics on :9187 -- a
+  # different surface from the app metrics on the node pods' :8085, with
+  # different selectors and a different metric namespace.
+  - podmonitor-database.yaml
+  - prometheusrule-database.yaml
