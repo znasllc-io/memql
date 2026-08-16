@@ -72,7 +72,7 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 		return fmt.Errorf("memory node concept is required")
 	}
 
-	// ON CONFLICT DO NOTHING on the (partition, id, createdAt) PK.
+	// ON CONFLICT DO NOTHING on the (id, "createdAt") PK.
 	// Two simultaneous mutations with the same deterministic id can
 	// land at the same microsecond -- React StrictMode in dev fires
 	// effects twice, and concurrent autoJoin / dailySpace ensure

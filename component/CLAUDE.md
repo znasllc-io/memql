@@ -88,7 +88,14 @@ component/
 **Purpose:** PostgreSQL + TimescaleDB connection and migrations
 
 **What It Does:**
-- Partition-isolated data storage (PK: partition, id, createdAt)
+- Append-only row storage in `"MemoryNodes"` / `"SecretMemoryNodes"`, keyed
+  `PRIMARY KEY (id, "createdAt")` and partitioned as a hypertable on
+  `"createdAt"`. There is no `partition` column and no partition isolation
+  here: the dimension was retired in memql#56 phase 3, and caller isolation
+  is now enforced a layer up, by the per-row authz predicates every
+  user-scoped DSL query and mutation carries
+  (`docs/public/operate/auth/per-row-authz-audit.md`). Storage sees rows,
+  not tenants
 - Database connection pooling
 - Automatic migrations
 - Health checks
