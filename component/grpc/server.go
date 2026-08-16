@@ -1074,6 +1074,22 @@ func (s *streamSession) authoredSessionRegistry() *memqlengine.AuthoredRuntimeRe
 	return s.authoredSession
 }
 
+// authoredSessionRegistryIfAny returns this stream's authored registry WITHOUT
+// creating one, or nil when the stream has defined nothing.
+//
+// The read-side accessor, and the distinction matters on the hot path: the
+// lazy constructor above would hand every query a non-nil empty registry, and a
+// caller that treated "a registry exists" as "there is something to resolve"
+// would then build an overlay -- copying every core function and every core
+// spec -- once per query, forever, for a stream that never authored anything.
+// The engine guards that per-OWNER as well, so this is belt and braces; it is
+// also the honest answer to the question being asked.
+func (s *streamSession) authoredSessionRegistryIfAny() *memqlengine.AuthoredRuntimeRegistry {
+	s.authoredSessionMu.Lock()
+	defer s.authoredSessionMu.Unlock()
+	return s.authoredSession
+}
+
 func newStreamSession(svc *service, stream memqlv1.MemqlService_StreamServer, identity auth.UserIdentity) *streamSession {
 	sess := &streamSession{
 		service:    svc,
@@ -1949,7 +1965,7 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		// owner comes off the resolved AccessContext already on ctx, so a stream
 		// with no identity gets exactly the plain Execute it got before.
 		result, err := s.service.executeQueryAuthored(ctx, query, clientId, msg.GetCursor(),
-			s.authoredOwner(ctx), s.authoredSessionRegistry())
+			s.authoredOwner(ctx), s.authoredSessionRegistryIfAny())
 		if err != nil {
 			// Extract structured metadata if available
 			var metadata map[string]string

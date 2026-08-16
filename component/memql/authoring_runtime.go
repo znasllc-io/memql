@@ -270,6 +270,30 @@ func (r *AuthoredRuntimeRegistry) ListForOwner(owner string) []*AuthoredConstruc
 	return out
 }
 
+// HasOwner reports whether this owner has ANY registered construct.
+//
+// It exists to keep the execute path off the overlay builders, which copy every
+// core function and every core spec into a fresh registry before layering the
+// authored ones on top. That copy is fine when there is something to layer and
+// pure waste when there is not -- and "there is not" is the case for essentially
+// every query on a cluster where one person has staged one construct.
+//
+// No allocation and no clone: it answers a boolean, so it must be cheaper than
+// the ListForOwner it is guarding against.
+func (r *AuthoredRuntimeRegistry) HasOwner(owner string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for key := range r.constructs {
+		if key.owner == owner {
+			return true
+		}
+	}
+	return false
+}
+
 // ListAll returns every registered construct across ALL owners, sorted by
 // (owner, kind, name) for stable output. Returns clones.
 //
