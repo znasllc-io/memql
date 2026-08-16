@@ -1,0 +1,54 @@
+# PodMonitor: scrape the CloudNativePG instance pods (epic memql#3842, task
+# memql#3847).
+#
+# CNPG's instance manager serves Prometheus metrics on port 9187 of every
+# database pod -- replication lag, archiver state, backend counts, xid age. That
+# is a DIFFERENT surface from the app metrics in podmonitor.yaml, which come
+# from component/metrics on the node pods' :8085, so it needs its own scrape:
+# the selectors, the port and the metric namespace all differ.
+#
+# A PodMonitor rather than a ServiceMonitor for the same reason as the app one:
+# CNPG fronts these pods with three Services (-rw, -ro, -r), and a
+# ServiceMonitor would scrape the primary up to three times over.
+#
+# BOTH ENVIRONMENTS ARE NAMED. staging and production are two namespaces in one
+# cluster (epic memql#3748), and a namespaceSelector naming only one would
+# monitor half the estate while looking complete. `memql` is the local/product
+# namespace and stays listed so a single-environment cluster is covered too.
+#
+# ASSUMES a prometheus-operator whose Prometheus CR selects PodMonitors; the
+# `release` label must match its podMonitorSelector, exactly as for the app
+# PodMonitor next to this file.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: memql-database
+  namespace: memql
+  labels:
+    app.kubernetes.io/part-of: memql
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - memql
+      - memql-staging
+      - memql-prod
+  selector:
+    matchLabels:
+      # The label CNPG stamps on every instance pod it owns.
+      cnpg.io/cluster: memql-db
+  podMetricsEndpoints:
+    - port: metrics # CNPG's instance-manager metrics port, 9187
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+      relabelings:
+        # Promote the instance role (primary / replica) onto a metric label so
+        # an alert can say WHICH instance is unhealthy. Replication lag on a
+        # replica and on the primary mean different things.
+        - sourceLabels: [__meta_kubernetes_pod_label_cnpg_io_instanceRole]
+          targetLabel: role
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: instance
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: environment

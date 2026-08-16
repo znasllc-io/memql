@@ -212,6 +212,39 @@ func TestPresetsMatchTheirDocumentedTiers(t *testing.T) {
 	}
 }
 
+// TestOptionalPoolerStillComposes renders the opt-in pooler path.
+//
+// No overlay composes it today -- self-hosting removed the per-tier connection
+// ceiling that made a pooler mandatory, so it ships READY rather than ENABLED.
+// That is exactly the condition under which a component rots: nothing builds
+// it, so nothing notices when a CRD field it uses is renamed or removed, and
+// the first person to need it discovers that under load.
+//
+// Also asserts the two properties that make it safe to put in the path at all.
+func TestOptionalPoolerStillComposes(t *testing.T) {
+	rendered := renderPreset(t, "mid-pooler")
+
+	if !strings.Contains(rendered, "kind: Pooler") {
+		t.Fatal("the pooler example renders no Pooler")
+	}
+	// The database is still there: a pooler REPLACES nothing.
+	if _, ok := findCluster(t, rendered); !ok {
+		t.Error("composing the pooler dropped the Cluster")
+	}
+	// TRANSACTION mode is the whole reason MEMORY_NODES_DATABASE_DIRECT_DSN
+	// exists. Session mode would make the pooler pointless (one server
+	// connection per client); transaction mode is what makes the DSN split
+	// load-bearing rather than decorative.
+	if !strings.Contains(rendered, "poolMode: transaction") {
+		t.Error("the pooler is not in transaction mode; in session mode it pools nothing worth pooling")
+	}
+	// Pointed at the primary. A pooler on `ro` would be a Service nothing
+	// dials, since read-replica routing is out of scope for this epic.
+	if !strings.Contains(rendered, "type: rw") {
+		t.Error("the pooler is not type: rw")
+	}
+}
+
 // TestNoOverlayShipsThePlaceholderBackupDestination is the required-value gate.
 //
 // `destinationPath` is a REQUIRED field on the ObjectStore CRD, so the component

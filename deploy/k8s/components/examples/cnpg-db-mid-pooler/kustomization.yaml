@@ -1,0 +1,25 @@
+# Composition example: the `mid` tier PLUS the optional PgBouncer pooler
+# (epic memql#3842 / #3847).
+#
+# No overlay composes the pooler today -- self-hosting removed the per-tier
+# connection ceiling that made one mandatory. This example exists so the opt-in
+# path is RENDERED rather than merely described: an optional component nothing
+# builds is an optional component that has quietly stopped working, and the
+# first person to need it would find that out under load.
+#
+# See cnpg-db/optional/pooler/ for when to reach for it, and for why the
+# transaction-mode pooler must never carry the migrations or the search path.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cnpg-db-example
+
+components:
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/mid
+  - ../../cnpg-db/optional/pooler
+
+# A real overlay supplies these two as well; the examples omit them so the
+# component's own defaults stay visible to the preset assertions.
+#   patches: ObjectStore /spec/configuration/destinationPath
+#   images:  memql-db -> <registry>/memql-db@sha256:...
