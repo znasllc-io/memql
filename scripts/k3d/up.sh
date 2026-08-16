@@ -544,7 +544,7 @@ function kustomize_image_overrides() {
 #
 # WHY ONLY THESE TWO. Everything else the domain touches is process config and
 # reaches the pods through the memql-domain ConfigMap, derived by
-# component/genesis/domain.go. An Ingress host is a Kubernetes API object, so it
+# component/envregistry/domain.go. An Ingress host is a Kubernetes API object, so it
 # has to be in the render.
 #
 # ONLY WHEN OVERRIDDEN. The overlay commits OVERLAY_DEFAULT_DOMAIN as its

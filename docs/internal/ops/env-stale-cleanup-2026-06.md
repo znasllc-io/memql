@@ -25,7 +25,7 @@ which were **defined/set** somewhere in the deploy/config surface but
    - the registry names in `scripts/secrets/manifest.yaml` (288
      entries).
    - the 90 legacy-alias VALUES in
-     `component/genesis/legacyalias.go`.
+     `component/envregistry/legacyalias.go`.
 3. `defined MINUS used` produced 88 raw candidates.
 4. Reviewed each candidate against the full read surface --
    crucially including the **prefix-composed** readers that

@@ -41,6 +41,7 @@ use (
 	./component/config
 	./component/database
 	./component/deploycontrol
+	./component/envregistry
 	./component/events
 	./component/fileprocessor
 	./component/frontdoor

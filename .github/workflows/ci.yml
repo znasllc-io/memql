@@ -175,7 +175,7 @@ jobs:
             #   integrations/*.json           -> integrations/embed.go
             #
             # The remaining pinned packages (component/architecture/embedded,
-            # component/genesis, docs) are already covered by entries above.
+            # component/envregistry, docs) are already covered by entries above.
             #
             # Over-matching here is close to free: RUN_GATES fires only when
             # `ci` and `go` are BOTH false, so every Go file these trees also
@@ -267,7 +267,7 @@ jobs:
               #                  TestBundleImageCopiesTheBundle reads it.
               - 'deploy/fleet/**'
               - 'scripts/secrets/manifest.yaml'
-              - 'component/genesis/manifest.yaml'
+              - 'component/envregistry/manifest.yaml'
               - 'component/architecture/embedded/**'
               - 'scripts/**'
               # every path embed_inventory_test.go pins -- see above
@@ -731,7 +731,7 @@ jobs:
         # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/genesis/... ./scripts/... ./test/dslconformance/... ./examples/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./component/genesis/... ./scripts/... ./test/dslconformance/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #
@@ -1357,7 +1357,7 @@ jobs:
       - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./component/identity/recoverykey/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
           echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the

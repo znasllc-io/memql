@@ -17,7 +17,7 @@ import (
 //
 // `repoCorpus` ingests every `*.yaml` under the root, and the registry exists
 // in TWO copies with identical rows: the authored scripts/secrets/manifest.yaml
-// and the //go:embed snapshot component/genesis/manifest.yaml, kept byte-equal
+// and the //go:embed snapshot component/envregistry/manifest.yaml, kept byte-equal
 // by scripts/secrets/sync-embedded-manifest.sh and TestEmbeddedManifestInSync.
 // Every registered name therefore had a corpus floor of 2 from the manifests
 // alone, and the condition was `strings.Count(corpus, e.Name) < 2` with the
@@ -78,7 +78,7 @@ func newDriftFixture(t *testing.T, names []string, read []string) string {
 
 	manifest := fixtureManifest(names...)
 	writeFixtureFile(t, root, "scripts/secrets/manifest.yaml", manifest)
-	writeFixtureFile(t, root, "component/genesis/manifest.yaml",
+	writeFixtureFile(t, root, "component/envregistry/manifest.yaml",
 		"# GENERATED SNAPSHOT -- do not edit\n"+manifest)
 
 	var body strings.Builder
@@ -178,8 +178,8 @@ func TestMissingRegistryFileFailsLoudlyRatherThanGoingSilent(t *testing.T) {
 	// Move the embedded snapshot out of its registered path while leaving its
 	// CONTENT in the tree -- the exact shape of an un-updated rename, and the
 	// one that would otherwise restore the entry's self-reference.
-	from := filepath.Join(root, "component", "genesis", "manifest.yaml")
-	to := filepath.Join(root, "component", "genesis", "manifest.snapshot.yaml")
+	from := filepath.Join(root, "component", "envregistry", "manifest.yaml")
+	to := filepath.Join(root, "component", "envregistry", "manifest.snapshot.yaml")
 	if err := os.Rename(from, to); err != nil {
 		t.Fatalf("rename snapshot: %v", err)
 	}
@@ -190,7 +190,7 @@ func TestMissingRegistryFileFailsLoudlyRatherThanGoingSilent(t *testing.T) {
 			"The moved copy is still in the corpus, so it supplies the self-reference that made " +
 			"memql#2971 unsatisfiable -- and the gate would report clean forever.")
 	}
-	if !strings.Contains(err.Error(), "component/genesis/manifest.yaml") {
+	if !strings.Contains(err.Error(), "component/envregistry/manifest.yaml") {
 		t.Errorf("error does not name the registry file that went missing, so the operator cannot "+
 			"act on it: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestRegistryFilesExistInThisRepo(t *testing.T) {
 // the short one looking referenced forever.
 //
 // Measured on the real tree: removing one alias from
-// component/genesis/legacyalias.go left that name with zero genuine
+// component/envregistry/legacyalias.go left that name with zero genuine
 // references, and the substring build still reported `no drift`, exit 0. The
 // whole-word build reports it and exits 1.
 //

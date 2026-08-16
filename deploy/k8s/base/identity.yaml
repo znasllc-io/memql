@@ -11,9 +11,16 @@
 # the server + clients at them. MEMQL_IDENTITY_SIGNING_KEY_B64 (the Ed25519
 # signing seed, #550), MEMQL_IDENTITY_KEY_ENCRYPTION_KEY and
 # MEMQL_NODE_BOOTSTRAP_TOKEN are NOT declared as `env:` below -- they arrive
-# through the memql-secrets Secret this Deployment envFroms, either as a key
-# on that Secret or inside the sealed genesis envelope it carries
-# (MEMQL_GENESIS_B64, autoloaded set-if-absent at boot).
+# as KEYS on the memql-secrets Secret this Deployment envFroms. ONE delivery
+# path, and it is now true rather than aspirational (memql#3960):
+# deploy/external-secrets/externalsecret-memql.yaml declares both in Key Vault,
+# and scripts/k3d/seed-secrets.sh writes both directly on a local cluster.
+#
+# This used to end "either as a key on that Secret OR INSIDE THE SEALED GENESIS
+# ENVELOPE it carries (MEMQL_GENESIS_B64, autoloaded set-if-absent at boot)".
+# The second arm read as belt-and-braces and was in fact the only declared
+# cloud path for the seed, which is what made deleting the envelope a latent
+# memql#3400 rather than a cleanup.
 #
 # HA (#550): the signing seed is env-provided (same seed on every pod ->
 # identical JWKS), so there is NO single-writer key PVC and identity runs 2
@@ -114,26 +121,28 @@ spec:
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
             - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             # Signing key (#550): MEMQL_IDENTITY_SIGNING_KEY_B64 arrives via the
-            # memql-secrets envFrom above (as a key on the Secret, or inside the
-            # sealed genesis envelope), so every replica derives the SAME Ed25519
-            # key + kid + JWKS. No on-disk MEMQL_IDENTITY_KEY_DIR / RWO PVC ->
-            # identity scales to >=2 replicas.
+            # memql-secrets envFrom above, as a KEY on that Secret and by no
+            # other route (memql#3960), so every replica derives the SAME
+            # Ed25519 key + kid + JWKS. No on-disk MEMQL_IDENTITY_KEY_DIR / RWO
+            # PVC -> identity scales to >=2 replicas.
             #
             # ROTATION (memql#3381): impossible from inside the running system
             # in this mode -- KeyManager.RotationSupported() is false, so the
             # 90-day MEMQL_IDENTITY_KEY_ROTATION_DAYS scheduler is INERT here
-            # and there is no rotate control anywhere. Rotate by re-sealing a
-            # new seed and rolling. That path never populates the JWKS overlap
-            # window, so it is a HARD SWAP: every unexpired access token, mesh
-            # node token, service-account JWT and voice-agent JWT dies at once
-            # (opaque credentials -- refresh tokens, PATs, worker tokens --
-            # survive). Follow the procedure and the blast-radius table in
+            # and there is no rotate control anywhere. Rotate by writing a new
+            # seed to the Key Vault entry the ExternalSecret names and rolling.
+            # That path never populates the JWKS overlap window, so it is a HARD
+            # SWAP: every unexpired access token, mesh node token,
+            # service-account JWT and voice-agent JWT dies at once (opaque
+            # credentials -- refresh tokens, PATs, worker tokens -- survive).
+            # Follow the procedure and the blast-radius table in
             # docs/public/operate/auth/identity-service.md#rotating-the-signing-key.
             #
-            # Seal MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT (RFC3339, the date the
+            # Set MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT (RFC3339, the date the
             # seed was minted) alongside the seed and re-stamp it on every
-            # re-seal. A bare seed carries no date, so without it key age reads
-            # as pod uptime and the overdue-rotation alert can never fire.
+            # rotation -- it is its own Key Vault entry (memql#3960). A bare
+            # seed carries no date, so without it key age reads as pod uptime
+            # and the overdue-rotation alert can never fire.
             # Internal TLS: serve https + trust the cluster CA.
             - { name: MEMQL_HTTP_TLS_CERT_FILE, value: "/etc/memql/tls/tls.crt" }
             - { name: MEMQL_HTTP_TLS_KEY_FILE, value: "/etc/memql/tls/tls.key" }

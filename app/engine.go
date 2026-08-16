@@ -9,8 +9,8 @@ import (
 	automationSteps "github.com/znasllc-io/memql/component/automations/steps"
 	"github.com/znasllc-io/memql/component/bus"
 	"github.com/znasllc-io/memql/component/campaigns"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/events"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/memql"
 	nodeMetadata "github.com/znasllc-io/memql/component/metadata"
 	"github.com/znasllc-io/memql/component/observe"
@@ -285,7 +285,7 @@ func (a *App) engineAndBus() {
 	// check + deterministic-id upserts make racing replicas converge on
 	// one row without clobbering an operator edit. Failures stay logged
 	// and never crash boot.
-	if manifest, mErr := genesis.LoadManifest(""); mErr != nil {
+	if manifest, mErr := envregistry.LoadManifest(""); mErr != nil {
 		a.Logger.Warn("default injection skipped: could not load env-var registry manifest",
 			"component", "memql.defaultInjector", "error", mErr)
 	} else if di := memql.NewDefaultInjector(a.engine, manifest); di != nil {

@@ -1,82 +1,33 @@
-// Package genesis owns the .env -> genesis.znas orchestration: reads
-// a developer's .env, validates it against memql's manifest, and seals
-// the result into an encrypted envelope under MEMQL_MASTER_KEY.
+// Package genesis owns the .env -> genesis.znas ENVELOPE: it reads a
+// developer's .env, validates it against memql's manifest, and seals the
+// result into an encrypted blob under MEMQL_MASTER_KEY that a node autoloads
+// into its own environment at boot.
 //
-// The package is shared between memql-cockpit (which drives it from
-// the first-launch wizard) and any other binary that wants to create
-// / update / decrypt a genesis envelope without depending on a
-// running cluster -- notably the identity service, which reads
-// genesis.znas in bootstrap setups.
+// THE REGISTRY HALF HAS MOVED (memql#3963). The manifest, boot-time
+// validation, domain derivations, the legacy-alias shim and the repo-root
+// `.env` override now live in component/envregistry, which is the half that
+// survives. This package is the envelope and nothing else, and it is being
+// deleted outright (memql#3966): once config has one delivery path -- the
+// memql-secrets Secret -- the sealing CLI, the decrypt tool, the autoload
+// hook, the eleven-Deployment kustomize patch and the .znas file format all
+// stop earning their keep.
 //
-// See docs/planning/genesis-implementation-plan.md for the full design.
+// Do not add to this package. Anything durable belongs in envregistry.
 package genesis
 
 import (
-	"bufio"
-	"fmt"
-	"io"
-	"os"
 	"strings"
+
+	"github.com/znasllc-io/memql/component/envregistry"
 )
 
-// EnvEntry is one parsed line: a key, its value, and the original
-// source line number (used in validation error messages). Order is
-// preserved as the file is read; SerializeEntries re-emits in the
-// same order.
-type EnvEntry struct {
-	Name  string
-	Value string
-	Line  int
-}
+// EnvEntry is re-exported from envregistry so this package's own surface
+// stays readable while it lives out its remaining days. The type is the
+// registry's -- there is exactly one EnvEntry in the tree.
+type EnvEntry = envregistry.EnvEntry
 
-// ParseEnvFile reads a .env file from disk. Skips comments and blank
-// lines; tolerates an optional `export ` prefix; strips matching
-// single or double quotes around the value. Returns a typed error
-// for malformed input (missing `=`, empty key).
-func ParseEnvFile(path string) ([]EnvEntry, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("envfile: open %s: %w", path, err)
-	}
-	defer f.Close()
-	return parseEnv(f, path)
-}
-
-func parseEnv(r io.Reader, label string) ([]EnvEntry, error) {
-	var out []EnvEntry
-	scanner := bufio.NewScanner(r)
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasPrefix(line, "export ") {
-			line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
-		}
-		eq := strings.IndexByte(line, '=')
-		if eq < 0 {
-			return nil, fmt.Errorf("envfile: %s:%d: line lacks '=': %q", label, lineNo, line)
-		}
-		name := strings.TrimSpace(line[:eq])
-		value := line[eq+1:]
-		if name == "" {
-			return nil, fmt.Errorf("envfile: %s:%d: empty key", label, lineNo)
-		}
-		if len(value) >= 2 {
-			first, last := value[0], value[len(value)-1]
-			if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-				value = value[1 : len(value)-1]
-			}
-		}
-		out = append(out, EnvEntry{Name: name, Value: value, Line: lineNo})
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("envfile: %s: scan: %w", label, err)
-	}
-	return out, nil
-}
+// ParseEnvFile is re-exported from envregistry for the same reason.
+var ParseEnvFile = envregistry.ParseEnvFile
 
 // SerializeEntries renders entries in the same shape ParseEnvFile
 // expects to read back: one `KEY=VALUE\n` per entry, in input order.

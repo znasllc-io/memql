@@ -1243,8 +1243,8 @@ func TestNamesSharedTestDB(t *testing.T) {
 		"postgres://direct",                            // ditto
 		"postgres://tiger-cloud-prod",                  // component/genesis/autoload_test.go
 		"postgres://local-dev",                         // ditto
-		"postgres://x",                                 // component/genesis/bootvalidate_test.go
-		"postgres://legacy",                            // component/genesis/legacyalias_test.go
+		"postgres://x",                                 // component/envregistry/bootvalidate_test.go
+		"postgres://legacy",                            // component/envregistry/legacyalias_test.go
 		"postgres://u:sup3rs3cret@h:5432/d",            // a SafeDSN redaction fixture
 		"mysql://memql:memql_dev@localhost:3306/memql", // not postgres at all
 		"", // not a URI

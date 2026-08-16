@@ -17,7 +17,7 @@
 //
 // So: read the row when there is a connection to read it over, and compose only
 // when there is not. The composed answer is not a guess -- it is the same rule
-// `component/genesis/domain.go` composes the portal's redirect URI and CORS
+// `component/envregistry/domain.go` composes the portal's redirect URI and CORS
 // origin from -- but it is the older of the two answers, and the cluster's own
 // row outranks it.
 //
@@ -91,7 +91,7 @@ function systemOwnedHostname(rows: readonly Row[]): string {
  * gives. `/portal/` has no Ingress rule of its own, so it falls through to the
  * `/` catch-all, which forwards h2c to the bff's gRPC edge -- an HTTP/1.1
  * request handed to an h2c backend. The engine-side rule this now mirrors is
- * `component/genesis/domain.go`, which composes the same `https://portal` +
+ * `component/envregistry/domain.go`, which composes the same `https://portal` +
  * site suffix for the portal's OAuth redirect URI and CORS origin.
  *
  * WHY THIS MATTERED MORE THAN THE ROW PATH SUGGESTS. `portalTarget` prefers the

@@ -187,6 +187,7 @@ var requiredAreas = []string{
 	"component/deploycontrol",
 	"component/events",
 	"component/fileprocessor",
+	"component/envregistry",
 	"component/genesis",
 	"component/grpc",
 	"component/harness",

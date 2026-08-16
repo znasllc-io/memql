@@ -120,7 +120,7 @@ spec:
             # WWW-Authenticate resource_metadata hint. AuthServerURL falls back
             # to MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER set below.
             #
-            # Not pinned here (memql#3704): component/genesis/domain.go derives
+            # Not pinned here (memql#3704): component/envregistry/domain.go derives
             # it set-if-absent as "https://mcp." + MEMQL_DOMAIN, the same
             # mechanism the identity URLs below rely on. A deployment that sets
             # MEMQL_DOMAIN gets this for free; one that sets neither MEMQL_DOMAIN

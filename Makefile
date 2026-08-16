@@ -806,8 +806,8 @@ tag-submodules:
 .PHONY: install-deps genesis-seal env-registry-sync env-registry-check
 .PHONY: setup-agents verify-agents
 
-## Regenerate the embedded genesis manifest snapshot
-## (component/genesis/manifest.yaml) from the authored registry
+## Regenerate the embedded env-registry manifest snapshot
+## (component/envregistry/manifest.yaml) from the authored registry
 ## (scripts/secrets/manifest.yaml). Run after editing the authored file;
 ## TestEmbeddedManifestInSync fails CI otherwise. (Epic 7 / memql#2104)
 env-registry-sync:

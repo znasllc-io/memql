@@ -19,7 +19,7 @@
 - **Stage files by explicit path.** `git add <file>` only — never `git add -A` or `git add .`. Other sessions share this working tree.
 - **Pre-release: no backwards-compat shims.** When a contract changes, change both sides and delete what is no longer needed. No legacy adapters, no "keep working while we migrate" layers.
 - **Capability-script contract** for every script under `scripts/`: non-interactive, `--flag=value` params via `cap_param`, exactly one JSON envelope on stdout, human logs to stderr, exit codes 0 ok / 2 bad param / 3 refused / 4 prerequisite missing / 5 op failed. See `docs/internal/design/capability-script-contract.md`.
-- **New env vars must be registered** in BOTH `component/genesis/manifest.yaml` (embedded) and `scripts/secrets/manifest.yaml`, or the envscan drift gate fails CI.
+- **New env vars must be registered** in BOTH `component/envregistry/manifest.yaml` (embedded) and `scripts/secrets/manifest.yaml`, or the envscan drift gate fails CI.
 - **The default domain is `memql.localhost`.** The apex plus `cockpit.` and `identity.` subdomains.
 - **The TLS secret is renamed** `local-znas-tls` -> `memql-front-door-tls` everywhere in the same task that touches its consumers.
 - **Cluster verification is not available on the authoring machine.** Do not claim a cluster-gated check passed. Tasks that need one say so and stop.
@@ -30,8 +30,8 @@
 
 | File | Responsibility |
 |---|---|
-| `component/genesis/domain.go` | Derive every domain-shaped env var from `MEMQL_DOMAIN`, set-if-absent, at boot |
-| `component/genesis/domain_test.go` | Table tests for the derivation and explicit-wins |
+| `component/envregistry/domain.go` | Derive every domain-shaped env var from `MEMQL_DOMAIN`, set-if-absent, at boot |
+| `component/envregistry/domain_test.go` | Table tests for the derivation and explicit-wins |
 | `scripts/lib/resolve.sh` | The one resolver ladder (getent/dig/host), shared by the hosts probe and the front-door verifier |
 | `deploy/k8s/overlays/local/patches/domain-envfrom.yaml` | JSON 6902 append of `configMapRef: memql-domain` to every node's `envFrom` |
 | `deploy/k8s/overlays/local/render_domain_test.go` | Renders the overlay and asserts no domain leaked and every node is wired |
@@ -41,7 +41,7 @@
 | File | Change |
 |---|---|
 | `main.go:77`, `subcommand_env.go:43` | Call `genesis.ApplyDomainDerivations` after the legacy-alias shim |
-| `component/genesis/manifest.yaml`, `scripts/secrets/manifest.yaml` | Register three new env vars |
+| `component/envregistry/manifest.yaml`, `scripts/secrets/manifest.yaml` | Register three new env vars |
 | `component/identity/config.go:989` | Narrow `isSingleProcessHost`; add the two extras |
 | `deploy/k8s/overlays/local/kustomization.yaml` | Drop eight inline issuer patches; add the two new patch files |
 | `deploy/k8s/overlays/local/patches/identity-local-config.yaml` | Strip six domain-bearing env vars; add the two extras |
@@ -62,9 +62,9 @@
 ### Task 1: Derive every domain-shaped env var from `MEMQL_DOMAIN`
 
 **Files:**
-- Create: `component/genesis/domain.go`
-- Test: `component/genesis/domain_test.go`
-- Modify: `main.go:77`, `subcommand_env.go:43`, `component/genesis/manifest.yaml`, `scripts/secrets/manifest.yaml`
+- Create: `component/envregistry/domain.go`
+- Test: `component/envregistry/domain_test.go`
+- Modify: `main.go:77`, `subcommand_env.go:43`, `component/envregistry/manifest.yaml`, `scripts/secrets/manifest.yaml`
 
 **Interfaces:**
 - Consumes: nothing.
@@ -75,7 +75,7 @@
 
 - [ ] **Step 1: Write the failing test**
 
-Create `component/genesis/domain_test.go`:
+Create `component/envregistry/domain_test.go`:
 
 ```go
 package genesis
@@ -184,7 +184,7 @@ Expected: FAIL — `undefined: DomainDerivations`.
 
 - [ ] **Step 3: Write the implementation**
 
-Create `component/genesis/domain.go`:
+Create `component/envregistry/domain.go`:
 
 ```go
 package genesis
@@ -329,7 +329,7 @@ In `subcommand_env.go`, immediately after `genesis.ApplyLegacyEnvAliases(nil)` (
 
 - [ ] **Step 6: Register the new env var**
 
-In BOTH `component/genesis/manifest.yaml` and `scripts/secrets/manifest.yaml`, add an entry in the alphabetically correct position (the file is sorted by `name`):
+In BOTH `component/envregistry/manifest.yaml` and `scripts/secrets/manifest.yaml`, add an entry in the alphabetically correct position (the file is sorted by `name`):
 
 ```yaml
   - name: MEMQL_DOMAIN
@@ -339,7 +339,7 @@ In BOTH `component/genesis/manifest.yaml` and `scripts/secrets/manifest.yaml`, a
     description: "The cluster's domain. Every domain-shaped identity value (base URL, expected issuer, discovery endpoint, CORS origins, OAuth redirect URIs) is derived from it set-if-absent at boot; an explicitly configured value always wins."
 ```
 
-Find the position with `grep -n "name: MEMQL_D" component/genesis/manifest.yaml`.
+Find the position with `grep -n "name: MEMQL_D" component/envregistry/manifest.yaml`.
 
 - [ ] **Step 7: Run the drift gate and the full genesis suite**
 
@@ -360,8 +360,8 @@ Expected: no output.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add component/genesis/domain.go component/genesis/domain_test.go \
-        component/genesis/manifest.yaml scripts/secrets/manifest.yaml \
+git add component/envregistry/domain.go component/envregistry/domain_test.go \
+        component/envregistry/manifest.yaml scripts/secrets/manifest.yaml \
         main.go subcommand_env.go
 git commit -m "Issue #3593: derive every domain-shaped env var from MEMQL_DOMAIN"
 ```
@@ -500,7 +500,7 @@ git commit -m "Issue #3593: a .localhost front door is not one process"
 **Files:**
 - Modify: `component/identity/config.go` (near `envStringList` / `envRegisteredClients` at lines 698-708)
 - Test: `component/identity/config_test.go`
-- Modify: `component/genesis/manifest.yaml`, `scripts/secrets/manifest.yaml`
+- Modify: `component/envregistry/manifest.yaml`, `scripts/secrets/manifest.yaml`
 
 **Interfaces:**
 - Consumes: `genesis.DomainDerivations` (Task 1) indirectly, via the environment.
@@ -642,7 +642,7 @@ Expected: PASS.
 
 ```bash
 git add component/identity/config.go component/identity/config_test.go \
-        component/genesis/manifest.yaml scripts/secrets/manifest.yaml
+        component/envregistry/manifest.yaml scripts/secrets/manifest.yaml
 git commit -m "Issue #3593: domain-free CORS and client extras"
 ```
 
@@ -1265,7 +1265,7 @@ Create `deploy/k8s/overlays/local/patches/domain-envfrom.yaml`:
 # given. It carries exactly ONE key, MEMQL_DOMAIN, from which the engine derives
 # identity's base URL, the issuer every node verifies against, the discovery
 # endpoint, the CORS origins and the OAuth redirect URIs
-# (component/genesis/domain.go).
+# (component/envregistry/domain.go).
 #
 # WHY APPEND RATHER THAN A STRATEGIC MERGE: `envFrom` has no patch merge key, so
 # a strategic-merge patch REPLACES the whole list -- which would silently drop
@@ -1292,7 +1292,7 @@ In `deploy/k8s/overlays/local/kustomization.yaml`, delete the eight inline `MEMQ
   #
   # Every node's expected issuer used to be pinned here, eight times, each a
   # separate copy of one fact. They are now DERIVED from the memql-domain
-  # ConfigMap by component/genesis/domain.go, so this overlay states the
+  # ConfigMap by component/envregistry/domain.go, so this overlay states the
   # relationship and never the value.
   #
   # Two patches because they need different mechanisms: envFrom has no merge key
@@ -1345,7 +1345,7 @@ In `deploy/k8s/overlays/local/patches/identity-local-config.yaml`, delete the `M
 # Everything domain-shaped -- base URL, expected issuer, bootstrap domain,
 # discovery endpoint, CORS origins, OAuth redirect URIs -- used to be pinned
 # here and is now derived from the memql-domain ConfigMap at boot
-# (component/genesis/domain.go). What is left is genuinely local and carries no
+# (component/envregistry/domain.go). What is left is genuinely local and carries no
 # domain: the vite dev-server origins, and running migrations on start because
 # local Postgres begins empty.
 apiVersion: apps/v1
@@ -1525,7 +1525,7 @@ In `scripts/k3d/seed-secrets.sh`, add a `--domain` param with the same default, 
 
 ```bash
 # The domain, as ONE key. Everything domain-shaped is derived from it at boot
-# (component/genesis/domain.go), so this is the whole of what the cluster is
+# (component/envregistry/domain.go), so this is the whole of what the cluster is
 # told about its own hostname.
 kubectl create configmap memql-domain -n "${NAMESPACE}" \
     --from-literal=MEMQL_DOMAIN="${DOMAIN}" \

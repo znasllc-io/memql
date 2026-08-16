@@ -229,6 +229,7 @@ const undeclared3406PasskeyReason = "memql#3406 -- passkey reads (one self-scope
 // `workerPairingCodeByHash` above, and it is a bound, not a measurement --
 // which is why the entries are here.
 const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lookups; the polling read is pre-actor and approvedByUserId is empty when the page read runs, so no owner tier fits"
+
 // undeclared3408EnrolmentReason covers enrolmentTokenByHash, the /enroll
 // redeem lookup memql#3408 added.
 //
@@ -250,6 +251,39 @@ const undeclared3410DeviceCodeReason = "memql#3410 -- device-grant credential lo
 // equality on a SHA-256 digest of 32 CSPRNG bytes, so the read resolves to at
 // most one row and only for a caller who already holds the plaintext.
 const undeclared3408EnrolmentReason = "memql#3408 -- /enroll redeem lookup; pre-actor by construction (the token IS the credential), so no owner tier can be compared against"
+
+// undeclared3964RecoveryKeyReason covers the two reads memql#3964 added for the
+// owner recovery key.
+//
+// It is deliberately the SAME argument as undeclared3408EnrolmentReason above,
+// because it is the same situation one step further out. An enrolment token
+// exists so a person with no credential can obtain their first one; a recovery
+// key exists so a cluster OWNER who has lost every sign-in route can obtain
+// another. In both cases the presented secret IS the credential and the read
+// that validates it runs before any actor exists, so `actor.userId` is the
+// empty string at lookup time and an owner tier would compare the row's userId
+// against "" and match nothing.
+//
+// WHAT THAT FAILURE LOOKS LIKE IS WHY IT IS WORTH RESTATING. It is not an
+// authorization error anybody would notice: every redemption would simply
+// report "invalid", indistinguishable from a typo. A break-glass credential
+// that has quietly never worked is only discovered on the one day it is needed,
+// so the cost of getting this wrong is paid entirely at the worst moment.
+//
+// `activeRecoveryKeys` is here for the sibling reason: its caller is the
+// identity node's own first-boot mint invariant (memql#3965), running under the
+// system actor in the same pre-actor window as activeUsers and
+// signInIdentitiesForUser. A self-scoped filter would report every cluster as
+// having no recovery key and the invariant would mint a duplicate on every
+// boot -- which the advisory lock would then be preventing for the wrong
+// reason.
+//
+// Both ALSO carry @serverOnly, which is a second and narrower statement: no
+// client belongs on this surface at all, so neither appears in the generated
+// SDK. That does not discharge the tier debt, and the entries are here rather
+// than relying on the gate's serverOnly short-circuit so the position is
+// stated.
+const undeclared3964RecoveryKeyReason = "memql#3964 -- owner break-glass recovery-key reads; the redeem lookup is pre-actor (the key IS the credential) and the mint invariant runs under the system actor at boot, so no owner tier can be compared against"
 
 // undeclared3409SignInRoutesReason covers the one construct memql#3409 added
 // for the passkey management surface.
@@ -520,6 +554,8 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"patIdentityById":            {"v1:identity:identity", undeclaredGrandfatherReason},
 	"passkeyByCredentialId":      {"v1:identity:identity", undeclared3406PasskeyReason},
 	"passkeysForSelf":            {"v1:identity:identity", undeclared3406PasskeyReason},
+	"recoveryKeyByHash":          {"v1:identity:identity", undeclared3964RecoveryKeyReason},
+	"activeRecoveryKeys":         {"v1:identity:identity", undeclared3964RecoveryKeyReason},
 	"signInIdentitiesForSelf":    {"v1:identity:identity", undeclared3409SignInRoutesReason},
 	"signInIdentitiesForUser":    {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
 	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},

@@ -2,11 +2,11 @@
 # Sync the embedded genesis manifest snapshot from the authored registry.
 #
 # scripts/secrets/manifest.yaml is the source of truth (Epic 7 / memql#2104).
-# component/genesis/manifest.yaml is a //go:embed snapshot baked into the
+# component/envregistry/manifest.yaml is a //go:embed snapshot baked into the
 # binary as the last-resort fallback (loader priority 4). The two must carry
 # identical secrets/variables; this script regenerates the snapshot so they
 # can't drift. Run it after any edit to the authored manifest.
-# TestEmbeddedManifestInSync (component/genesis) fails CI if they diverge.
+# TestEmbeddedManifestInSync (component/envregistry) fails CI if they diverge.
 set -euo pipefail
 
 #=============================================================================
@@ -15,7 +15,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SOURCE="$REPO_ROOT/scripts/secrets/manifest.yaml"
-SNAPSHOT="$REPO_ROOT/component/genesis/manifest.yaml"
+SNAPSHOT="$REPO_ROOT/component/envregistry/manifest.yaml"
 
 #=============================================================================
 # FUNCTIONS

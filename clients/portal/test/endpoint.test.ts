@@ -54,7 +54,7 @@ describe("portalRedirectPathFor", () => {
   });
 
   // The production value since memql#3711 -- see bridgePathFor's root-mount
-  // case above. This is the exact string component/genesis/domain.go now
+  // case above. This is the exact string component/envregistry/domain.go now
   // registers as the portal client's redirect_uri (https://portal.<d>/auth/callback).
   it("derives the callback path from a root mount", () => {
     expect(portalRedirectPathFor("/")).toBe("/auth/callback");

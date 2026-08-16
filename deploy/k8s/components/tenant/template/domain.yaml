@@ -5,7 +5,7 @@
 #
 # ONE KEY, and six things derive from it: identity's base URL, the issuer every
 # node in this tenant verifies against, the discovery endpoint, the CORS
-# origins, and the OAuth redirect URIs (component/genesis/domain.go). Those used
+# origins, and the OAuth redirect URIs (component/envregistry/domain.go). Those used
 # to be pinned separately, and missing one is not a visible failure -- memql#3315
 # was a single forgotten CORS origin, and it presented as sign-in dying with an
 # empty identity log.

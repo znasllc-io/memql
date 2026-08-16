@@ -492,13 +492,19 @@ one) in the Extension Development Host, and work through:
 
     docs/public/language/vscode-runtime-panel-verification.md
 
-Two cluster defects worth knowing before you start:
+One cluster defect worth knowing before you start:
 
-  * Keep identity at ONE replica (memql#3400). Each replica self-generates a
-    signing key, so scaling identity breaks roughly half of all auth and
-    reports it as "invalid or expired token".
   * If sign-in suddenly redirects to /setup, restart the identity pod
     (memql#3415) -- it repairs itself on boot.
+
+The "keep identity at ONE replica (memql#3400)" advice that used to sit here is
+gone, and multi-replica is the topology to verify against. Each replica
+self-generating its own signing key was the defect, not the reason to run one
+pod: 'make secrets' seeds a single MEMQL_IDENTITY_SIGNING_KEY_B64 onto
+memql-secrets and every replica derives the same key + kid + JWKS from it. The
+cloud declares that key in Key Vault the same way (memql#3960). 'make status'
+checks it directly -- it fails when two identity replicas publish different
+keysets.
 
 EOF
 }

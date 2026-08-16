@@ -2460,3 +2460,179 @@ mutate enrolmentToken revokeEnrolmentToken {
     }
   }
 }
+
+// ---- mutations/v1/identity/createRecoveryKeyIdentity.memql ----
+
+// createRecoveryKeyIdentity
+// =========================
+//
+// Persists a freshly-minted owner recovery key (memql#3964). Takes the HASH,
+// never the plaintext -- the signature is the enforcement, exactly as in
+// createEnrolmentToken: a caller cannot hand this mutation a plain key even by
+// mistake, because there is no parameter for one.
+//
+// EVERY ARG IS @required, INCLUDING rotatedFrom, and that is the memql#3617
+// lesson applied rather than rediscovered. `credentials` is rebuilt here as an
+// object literal and an absent optional arg omits its leaf, so on an insert
+// with a caller-chosen id a second write read-merges and replaces the WHOLE
+// object -- destroying leaves the second call did not pass. @mergeFields is a
+// load-time error on an insert, so the destroying call is made unspellable
+// instead. Nothing is lost: the mint path has every value by construction, and
+// an empty rotatedFrom on the first mint is a legal value passed explicitly.
+
+/// Persist a minted owner recovery key. Stores only the SHA-256 digest; the plaintext is revealed
+/// once at claim time and never persisted.
+///
+/// Why actor.userId scoping is not the fix: the mint invariant runs at identity boot under the
+/// system actor, so actor.userId is empty and a self-scoped filter would refuse the only caller
+/// there is. And scoping to the CALLER would be actively wrong here rather than merely useless --
+/// it would legitimise a caller minting a recovery key for themselves, which is the escalation
+/// this construct must not offer at all. @serverOnly bars it from the generated SDK; the memql#2513
+/// credential-actor guard rejects a non-system actor writing the row even over a raw ExecuteQuery.
+/// Both, because either alone leaves a route: the SDK is not the only way to name a mutation.
+@serverOnly
+mutate identity createRecoveryKeyIdentity {
+  args {
+    identityId        string!
+    userId            string!
+    label             string!
+    keyHash           string!
+    boundOwnerUserId  string!
+    mintedBy          string!
+    rotatedFrom       string!
+  }
+  insert {
+    id: args.identityId
+    args.userId
+    identityType: "recovery_key"
+    credentials: {
+        keyHash: args.keyHash,
+        boundOwnerUserId: args.boundOwnerUserId,
+        mintedBy: args.mintedBy,
+        claimedAt: "",
+        claimedFromIP: "",
+        redeemedAt: "",
+        redeemedFromIP: "",
+        rotatedFrom: args.rotatedFrom
+      }
+    args.label
+    usableByAgents: false
+    active: true
+  }
+}
+
+// ---- mutations/v1/identity/claimRecoveryKey.memql ----
+
+// claimRecoveryKey
+// ================
+//
+// Stamps the moment an operator was shown the plaintext (memql#3969). The key
+// stays usable afterwards -- claiming is not spending -- but it stops being
+// re-mintable, because from here on somebody holds it.
+//
+// @mergeFields("credentials") makes this nested write MERGE-SEMANTIC. Without
+// it the two stamped leaves would be the whole `credentials` object and
+// keyHash itself would be destroyed, which is a bricked credential rather than
+// a lost field: nothing could ever resolve the row again, and the break-glass
+// route would be silently gone until somebody needed it.
+
+/// Stamp claimedAt / claimedFromIP after revealing a recovery key's plaintext exactly once.
+///
+/// Why actor.userId scoping is not the fix: the sole caller is `memql recovery-key claim`, running
+/// inside the identity pod under the system actor with no human actor at all -- claiming exists for
+/// the operator who cannot sign in, so actor.userId is empty and a self-scoped filter would match
+/// nothing. @serverOnly keeps it off the wire entirely, which is the stronger statement: no client
+/// has any business touching a recovery-key row.
+@serverOnly
+@mergeFields("credentials")
+mutate identity claimRecoveryKey {
+  args {
+    identityId     string!
+    claimedAt      string!
+    claimedFromIP  string!
+  }
+  update {
+    id: args.identityId
+    credentials: {
+        claimedAt: args.claimedAt,
+        claimedFromIP: args.claimedFromIP
+      }
+  }
+}
+
+// ---- mutations/v1/identity/redeemRecoveryKey.memql ----
+
+// redeemRecoveryKey
+// =================
+//
+// Spends the key (memql#3968). Stamps the redemption and DEACTIVATES the row
+// in the same write.
+//
+// THE `active: false` IS THE SINGLE-USE GUARANTEE AND MUST NOT BE SPLIT OUT.
+// Redemption and deactivation in one mutation means there is no window in
+// which a redeemed key is still resolvable as live -- a second presentation of
+// the same plaintext during that window would enrol a second passkey against
+// an owner who by definition is not watching. Two mutations would also let a
+// caller do the first and forget the second, which is a standing
+// owner-equivalent password created by omission.
+//
+// The successor is minted by the standing invariant (memql#3965) rather than
+// here, so the cluster is never left without a break-glass route.
+//
+// @mergeFields("credentials") for the same reason as claimRecoveryKey: the two
+// stamped leaves must not become the whole object.
+
+/// Spend a recovery key: stamp redeemedAt / redeemedFromIP and deactivate the row in one write.
+///
+/// Why actor.userId scoping is not the fix: redemption is PRE-ACTOR by construction -- the whole
+/// point is an owner with no sign-in route, so actor.userId is empty and a self-scoped filter would
+/// refuse every redemption. The row is selected by an id the ceremony resolved ITSELF, from the
+/// keyHash it just verified, never from a caller argument; the caller proves possession of a
+/// 256-bit secret, which is the authorization. @serverOnly bars it from the wire.
+@serverOnly
+@mergeFields("credentials")
+mutate identity redeemRecoveryKey {
+  args {
+    identityId      string!
+    redeemedAt      string!
+    redeemedFromIP  string!
+  }
+  update {
+    id: args.identityId
+    credentials: {
+        redeemedAt: args.redeemedAt,
+        redeemedFromIP: args.redeemedFromIP
+      }
+    active: false
+  }
+}
+
+// ---- mutations/v1/identity/deactivateRecoveryKey.memql ----
+
+// deactivateRecoveryKey
+// =====================
+//
+// The rotation path's half of "mint a replacement, retire the predecessor"
+// (memql#3970). Distinct from redeemRecoveryKey because the two are different
+// events with different audit meanings: a redeemed key was USED, a
+// deactivated one was REPLACED without ever being used, and collapsing them
+// would make the audit trail unable to tell a break-glass event from
+// routine hygiene.
+
+/// Retire a recovery key without spending it -- the predecessor half of an owner-driven rotation.
+///
+/// Why actor.userId scoping is not the fix: the recovery key's `userId` is the bound cluster owner,
+/// and rotation is reachable by an ADMIN as well as by that owner (the adminops owner/admin gate),
+/// so actor.userId==userId would refuse the admin half of the surface it exists for. The owner/admin
+/// check runs in component/identity/adminops before this is ever called, and the post-redemption
+/// successor path calls it under the system actor with no human actor at all.
+@serverOnly
+mutate identity deactivateRecoveryKey {
+  args {
+    identityId  string!
+  }
+  update {
+    id: args.identityId
+    active: false
+  }
+}

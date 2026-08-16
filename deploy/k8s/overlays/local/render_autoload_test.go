@@ -50,13 +50,42 @@ import (
 // for which autoload is redundant. Infrastructure pods (postgres, azurite) do not
 // mount it and are correctly out of scope.
 
+// THE KIND FILTER IS GONE (memql#3961), AND THE SKIP IS WHY THAT WAS NOT
+// ENOUGH ON ITS OWN. This test used to begin `if !strings.Contains(doc, "kind:
+// Deployment") { continue }`, which is how a Job carrying the flag went
+// unnoticed. Widening it, though, fixes nothing by itself: the Job in question
+// is not a kustomization resource and never enters this render at all -- see
+// applied_autoload_test.go, which reads manifests off disk for exactly that
+// reason, and which unlike this file runs without a renderer installed. Keep
+// both. This one asserts over the overlay's rendered truth, including whatever
+// the patches did; that one asserts over what the bring-up actually applies.
 var (
-	deploymentName = regexp.MustCompile(`(?m)^  name: (\S+)`)
+	// The object's OWN name, read out of the top-level metadata block.
+	//
+	// This used to be `(?m)^  name: (\S+)` searched over the whole document,
+	// which is correct for a rendered Deployment and wrong the moment the kind
+	// filter comes off: a CronJob nests a second metadata under
+	// spec.jobTemplate, and any two-space `name:` appearing earlier in the doc
+	// wins on position alone.
+	topLevelMetadataDoc = regexp.MustCompile(`(?m)^metadata:\n((?:[ \t]+[^\n]*\n)+)`)
+	metadataName        = regexp.MustCompile(`(?m)^  name:\s*(\S+)`)
+	renderedKind        = regexp.MustCompile(`(?m)^kind:\s*(\S+)`)
 	// The rendered form is two lines: `- name: MEMQL_GENESIS_AUTOLOAD` followed
 	// by its `value:`. Matching them together is what makes this read the
 	// variable's own value rather than some neighbouring entry's.
 	autoloadValue = regexp.MustCompile(`name: MEMQL_GENESIS_AUTOLOAD\s*\n\s*value: "?([A-Za-z]+)"?`)
 )
+
+func renderedName(doc string) string {
+	m := topLevelMetadataDoc.FindStringSubmatch(doc)
+	if m == nil {
+		return ""
+	}
+	if n := metadataName.FindStringSubmatch(m[1]); n != nil {
+		return n[1]
+	}
+	return ""
+}
 
 // TestEveryNodeReadingMemqlSecretsHasAutoloadOff is the regression test for the
 // issue, and the gate that keeps the hand-enumerated list honest from here on.
@@ -65,26 +94,39 @@ func TestEveryNodeReadingMemqlSecretsHasAutoloadOff(t *testing.T) {
 
 	var checked int
 	for _, doc := range strings.Split(rendered, "\n---\n") {
-		if !strings.Contains(doc, "kind: Deployment") {
+		// Kind-agnostic (memql#3961). A workload is a thing that runs
+		// containers, whatever its Kind; Services and ConfigMaps naming the
+		// Secret run no process that could read an envelope.
+		if !strings.Contains(doc, "containers:") {
 			continue
 		}
 		if !strings.Contains(doc, "name: memql-secrets") {
 			continue // infrastructure pod; the envelope is not its business
 		}
-		m := deploymentName.FindStringSubmatch(doc)
-		if m == nil {
-			t.Error("a rendered Deployment mounting memql-secrets has no parseable name")
+		kind := "workload"
+		if k := renderedKind.FindStringSubmatch(doc); k != nil {
+			kind = k[1]
+		}
+		name := renderedName(doc)
+		if name == "" {
+			t.Errorf("a rendered %s mounting memql-secrets has no parseable "+
+				"top-level metadata.name", kind)
 			continue
 		}
-		name := m[1]
 		checked++
 
 		v := autoloadValue.FindStringSubmatch(doc)
 		if v == nil {
-			t.Errorf("%s mounts memql-secrets but declares no MEMQL_GENESIS_AUTOLOAD at all.\n"+
-				"The base manifests set it true, so an absent entry here means the local "+
-				"overlay's patch does not reach this node -- add it to "+
-				"patches/genesis-autoload-off.yaml (memql#3797).", name)
+			// ABSENT IS SAFE, and saying so is a correction (memql#3961). This
+			// branch used to be an error on the reasoning that "the base
+			// manifests set it true, so an absent entry means the patch did not
+			// reach this node" -- but a patch that does not reach a node leaves
+			// the base's `true` in the render, which the next branch catches.
+			// Absence means the base does not set it, and AutoloadFromEnv needs
+			// the literal "true" while memql-secrets carries no such key for an
+			// envFrom to supply. So there is nothing here to fail, and failing
+			// it would block deleting the flag from a manifest that must not
+			// carry it (deploy/k8s/base/migrate-job.yaml).
 			continue
 		}
 		if v[1] != "false" {
@@ -103,12 +145,16 @@ func TestEveryNodeReadingMemqlSecretsHasAutoloadOff(t *testing.T) {
 	// measuring nothing at all -- the failure mode this whole file exists to
 	// prevent, arrived at from the other side.
 	if checked == 0 {
-		t.Fatal("no rendered Deployment mounts memql-secrets; the check matched nothing " +
+		t.Fatal("no rendered workload mounts memql-secrets; the check matched nothing " +
 			"and therefore proved nothing")
 	}
+	// A LOWER BOUND, and the wording matters now the filter is kind-agnostic
+	// (memql#3961): `nodes` lists the ten node Deployments, so this says "at
+	// least the node types are covered" and stays true as other Kinds join the
+	// count. It never says the render contains ONLY node types.
 	if checked < len(nodes) {
-		t.Errorf("only %d Deployments mounting memql-secrets were found, but the local mesh "+
-			"runs %d node types (%s) -- the render is incomplete, so a node could be "+
+		t.Errorf("only %d workloads mounting memql-secrets were found, but the local mesh "+
+			"runs %d node types (%s) -- the render is incomplete, so a workload could be "+
 			"missing from this check rather than passing it",
 			checked, len(nodes), strings.Join(nodes, ", "))
 	}

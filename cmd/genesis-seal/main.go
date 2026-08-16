@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/genesis"
 )
 
@@ -62,11 +63,11 @@ func main() {
 		os.Exit(2)
 	}
 
-	entries, err := genesis.ParseEnvFile(*envFile)
+	entries, err := envregistry.ParseEnvFile(*envFile)
 	if err != nil {
 		fail("parse env file: %v", err)
 	}
-	manifest, err := genesis.LoadManifest(*manifestPath)
+	manifest, err := envregistry.LoadManifest(*manifestPath)
 	if err != nil {
 		fail("load manifest: %v", err)
 	}

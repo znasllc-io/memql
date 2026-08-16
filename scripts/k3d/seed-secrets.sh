@@ -459,17 +459,24 @@ function resolve_master_key() {
 #=============================================================================
 
 # WHY THIS EXISTS. deploy/k8s/base/identity.yaml runs identity at `replicas: 2`
-# and says why it can: "the signing key comes from the envelope (same seed on
-# every pod -> identical JWKS), so there is NO single-writer key PVC". Nothing
-# supplied that seed locally, so KeyManager.Load() fell through to
+# and says why it can: the seed arrives as a KEY on memql-secrets, so every pod
+# derives the same key + kid + JWKS and there is NO single-writer key PVC.
+# Nothing supplied that seed locally, so KeyManager.Load() fell through to
 # generateAndWriteCurrent() and EVERY POD MINTED ITS OWN Ed25519 keypair. Two
 # replicas behind one Service published two different `kid`s; a token minted by
 # one is structurally unverifiable by any node that fetched JWKS from the other,
 # so `make scale N=2` -- the documented multi-node command -- produced coin-flip
-# auth failures. This is the local analogue of the ESO/Key Vault delivery
-# staging uses, exactly as the master key and the front-door TLS pair already
+# auth failures. This is the local analogue of the ESO/Key Vault delivery the
+# cloud uses, exactly as the master key and the front-door TLS pair already
 # are: the SHAPE (one shared seed, delivered through memql-secrets, read by
 # every replica via envFrom) is identical everywhere; only the VALUE is local.
+#
+# THE QUOTATION ABOVE WAS STALE AND IS NOW FIXED (memql#3960). It used to read
+# "the signing key comes from the ENVELOPE (same seed on every pod -> identical
+# JWKS)" -- accurate when written, and false since the envelope stopped being a
+# delivery path for this seed in any environment. The cloud declares it in Key
+# Vault (deploy/external-secrets/externalsecret-memql.yaml) exactly as this
+# script writes it locally, which is the whole point: one shape, one path.
 #
 # The runtime requires base64-std of EXACTLY 32 bytes -- ed25519.SeedSize, see
 # component/identity/keys.go NewKeyManagerFromSeed and the same rule in
@@ -821,7 +828,7 @@ function child_reports_true() {
 # yet (a first bring-up).
 #
 # Read from the memql-domain ConfigMap this script itself seeds, which is the
-# cluster's own statement of its domain (component/genesis/domain.go derives
+# cluster's own statement of its domain (component/envregistry/domain.go derives
 # every issuer, CORS origin and redirect URI from it). Unreadable or absent is
 # the ordinary first-boot case and falls through quietly -- this is a default,
 # not a guard, and nothing irreplaceable rests on it.
@@ -839,7 +846,7 @@ function resolve_domain_default() {
 # seed_domain_configmap -- the cluster's domain, as ONE key.
 #
 # Everything domain-shaped is derived from it at boot by
-# component/genesis/domain.go: identity's base URL, the issuer every node
+# component/envregistry/domain.go: identity's base URL, the issuer every node
 # verifies against, the discovery endpoint, the CORS origins and the OAuth
 # redirect URIs. So this ConfigMap is the whole of what the cluster is told
 # about its own hostname (memql#3593).
