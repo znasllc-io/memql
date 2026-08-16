@@ -442,7 +442,18 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 // applies to trained constructs too), so listing both would put two entries
 // under one registry key -- and every consumer of this list, the language
 // server's catalog index among them, keys by (kind, name) and would pick between
-// them arbitrarily.
+// them arbitrarily. The same dedupe applies between two owners' staged
+// constructs of one name, with the caller's own kept.
+//
+// Residual, and deliberately left: a CLUSTER OWNER editing a file whose
+// construct only somebody ELSE has staged reads it as `staged` in the editor and
+// is offered Train and Demote on it. Both are safe -- the engine's staged lookup
+// is owner-keyed, so Train performs an ordinary fresh promote of the operator's
+// own local text and Demote is refused by name -- and the label is not false
+// either: the cluster does hold a staged construct of that name. Narrowing it
+// would need the catalog to carry a per-caller resolution answer rather than a
+// per-cluster inventory, which is a different question from the one this
+// function answers.
 func (e *MemQLEngine) ConstructCatalogForOwner(owner string, isClusterOwner bool) []ConstructCatalogEntry {
 	out := e.ConstructCatalog()
 	if e == nil || e.stagedAuthored == nil {
@@ -458,9 +469,18 @@ func (e *MemQLEngine) ConstructCatalogForOwner(owner string, isClusterOwner bool
 		shared[entry.Kind+"\x00"+entry.Name] = true
 	}
 
+	// The CALLER'S OWN first, then everybody else's for a cluster owner. The
+	// order decides which entry survives the (kind, name) dedupe below, and the
+	// caller's own is the one that resolves for them -- so an operator who has
+	// staged `recentOrders` themselves sees theirs rather than whichever of two
+	// authors the registry's map happened to order first.
 	staged := e.stagedAuthored.ListForOwner(owner)
 	if isClusterOwner {
-		staged = e.stagedAuthored.ListAll()
+		for _, c := range e.stagedAuthored.ListAll() {
+			if c != nil && c.OwnerUserId != owner {
+				staged = append(staged, c)
+			}
+		}
 	}
 	added := false
 	for _, c := range staged {

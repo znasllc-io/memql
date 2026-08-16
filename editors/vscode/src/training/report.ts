@@ -191,6 +191,47 @@ export function promotePrompt(
 }
 
 /**
+ * stagePrompt: the confirmation for Stage.
+ *
+ * SAYS WHO CAN CALL IT, and that is the whole of what distinguishes this modal
+ * from the promote one. Staging is durable -- persisted, replayed at boot,
+ * surviving the connection -- which is most of what a developer reads "this is
+ * real now" from, so the sentence that has to land is the OTHER half: nobody
+ * else on this cluster can call it until it is trained.
+ *
+ * SHOWS THE CLOSURE, for promotePrompt's reason. A staged construct still has to
+ * bind, so a dependency the cluster does not have goes with it or the stage
+ * lands something that cannot resolve.
+ *
+ * NO OWNER-ONLY SENTENCE. Staging takes the same owner-or-developer bar as Try
+ * in session, so telling a developer they may be refused would be wrong. It says
+ * what staging is instead.
+ */
+export function stagePrompt(
+  cluster: TrainingCluster,
+  name: string,
+  bundle: TrainingBundle,
+  display: (path: string) => string,
+): TrainingPrompt {
+  const dependencies = dependencyMembers(bundle);
+  const detail = [
+    `"${name}" becomes durable on ${cluster.label}: persisted, replayed when the cluster restarts, and callable BY YOU AND BY NOBODY ELSE until you train it.`,
+    "",
+    dependencies.length === 0
+      ? "This stages:"
+      : `This stages "${name}" together with ${dependencies.length} dependency file(s) the cluster does not have. All of it goes, or none of it does:`,
+    ...closureLines(bundle, display),
+    "",
+    "A concept cannot be staged. If the closure declares one the engine refuses the whole bundle and names it -- train the concept, then stage the constructs bound to it.",
+  ].join("\n");
+  return {
+    message: `Stage "${name}" on ${cluster.label}?`,
+    detail,
+    confirmLabel: "Stage",
+  };
+}
+
+/**
  * demotePrompt: the confirmation for Demote.
  *
  * STATES THE CONCEPT RULE UNCONDITIONALLY, without trying to predict which side
