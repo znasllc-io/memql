@@ -2979,9 +2979,8 @@ func CreateCapabilityBuild(args CreateCapabilityArgs) string {
 //
 // Bound concept: v1:cluster:cluster (machine-readable: BoundConcepts["createCluster"] in generated_concepts.go).
 type CreateClusterArgs struct {
-	Name        string
-	Region      string
-	Environment string
+	Name   string
+	Region string
 	// Enum: bootstrapping | healthy | degraded | shutting_down
 	Status             string
 	DatabaseId         string
@@ -3008,11 +3007,6 @@ func CreateClusterBuild(args CreateClusterArgs) string {
 		b.WriteString("region: ")
 		b.WriteString(quoteMemQL(args.Region))
 	}
-	if b.Len() > 23 {
-		b.WriteString(", ")
-	}
-	b.WriteString("environment: ")
-	b.WriteString(quoteMemQL(args.Environment))
 	if args.Status != "" {
 		if b.Len() > 23 {
 			b.WriteString(", ")
@@ -3456,12 +3450,10 @@ func CreateDelegationBuild(args CreateDelegationArgs) string {
 type CreateDeploymentArgs struct {
 	DeploymentId string
 	// Enum: pending | in_progress | succeeded | failed | superseded | rolled_back
-	Status      string
-	Version     string
-	ImageDigest string
-	Provider    string
-	// Enum: development | staging | production
-	Environment          string
+	Status               string
+	Version              string
+	ImageDigest          string
+	Provider             string
 	Region               string
 	ClusterId            string
 	TriggeredBy          string
@@ -3508,13 +3500,6 @@ func CreateDeploymentBuild(args CreateDeploymentArgs) string {
 		}
 		b.WriteString("provider: ")
 		b.WriteString(quoteMemQL(args.Provider))
-	}
-	if args.Environment != "" {
-		if b.Len() > 26 {
-			b.WriteString(", ")
-		}
-		b.WriteString("environment: ")
-		b.WriteString(quoteMemQL(args.Environment))
 	}
 	if args.Region != "" {
 		if b.Len() > 26 {
@@ -4365,7 +4350,6 @@ type CreateNodeArgs struct {
 	Labels       map[string]any
 	DeploymentId string
 	Provider     string
-	Environment  string
 	Region       string
 }
 
@@ -4435,13 +4419,6 @@ func CreateNodeBuild(args CreateNodeArgs) string {
 		}
 		b.WriteString("provider: ")
 		b.WriteString(quoteMemQL(args.Provider))
-	}
-	if args.Environment != "" {
-		if b.Len() > 20 {
-			b.WriteString(", ")
-		}
-		b.WriteString("environment: ")
-		b.WriteString(quoteMemQL(args.Environment))
 	}
 	if args.Region != "" {
 		if b.Len() > 20 {
