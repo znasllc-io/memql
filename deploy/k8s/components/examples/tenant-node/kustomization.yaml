@@ -1,0 +1,34 @@
+# Composition example for the tenant component -- the NODE tier (epic memql#3852,
+# task memql#3853).
+#
+# What a per-tenant overlay writes, reduced to the shape. Committed rather than
+# generated inside the test for the reason its cnpg-db siblings are: kustomize
+# refuses an absolute component path and detects a CYCLE if the example lives
+# inside the component it references, so a Go `testdata/` directory next to the
+# test cannot work here.
+#
+# component_test.go renders each of these and asserts the replica counts against
+# the tier table in ../../tenant/README.md, which is what stops the table from
+# becoming folklore. They are also the usage documentation, and being rendered
+# is what stops them drifting from it.
+#
+# THE REAL THING HAS THREE MORE PIECES, and they are omitted here so the
+# component's own behaviour stays visible to the assertions:
+#   resources: environment.yaml + domain.yaml   (the tenant's environment + domain)
+#   patches:   ObjectStore destinationPath      (where its backups land)
+#   images:    the engine tag + the db operand  (what version it runs)
+# scripts/fleet/tenant-provision.sh renders all of it from
+# ../../tenant/template/, and tenant_render_test.go covers that path.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tenant-node-example
+
+resources:
+  - ../../../base
+
+components:
+  - ../../engine-bff
+  - ../../tenant/presets/solo
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/entry

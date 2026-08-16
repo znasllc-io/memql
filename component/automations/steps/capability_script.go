@@ -101,6 +101,27 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.enrolmentLink":     "scripts/install/enrolment-link.sh",
 	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
 
+	// Tenant lifecycle (epic memql#3852, task memql#3853). The deterministic
+	// backends behind the fleet control plane's provisioning actions.
+	//
+	// REGISTERED HERE, THOUGH THE ACTIONS THAT CALL THEM ARE NOT IN THIS REPO.
+	// The fleet DSL is a product bundle (deploy/fleet/dsl/) mounted at
+	// MEMQL_DSL_PATH, deliberately not compiled in -- memQL Cloud is a product
+	// and the engine is product-neutral. These four scripts are the other half
+	// of that split and belong on this side of it: they take a tenant name, a
+	// profile and a domain, render an overlay, and talk to ArgoCD. They know
+	// nothing about subscriptions, tiers or money. An operator provisioning an
+	// instance for anyone would want them, which is what makes them platform.
+	//
+	// This map is the SECURITY BOUNDARY, so registration is also what makes them
+	// reachable at all: an unregistered script still runs fine from a human
+	// shell, but the runner rejects its id before exec -- so the capability is
+	// silently inert on the engine path while looking healthy everywhere else.
+	"fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
+	"fleet.tenantSuspend":   "scripts/fleet/tenant-suspend.sh",
+	"fleet.tenantResume":    "scripts/fleet/tenant-resume.sh",
+	"fleet.tenantTeardown":  "scripts/fleet/tenant-teardown.sh",
+
 	// install.e2eBaseline is CI's INSTRUMENT rather than a step of any install
 	// graph: it fingerprints the four surfaces an install touches so the
 	// round-trip workflow can prove the machine came back byte-identical

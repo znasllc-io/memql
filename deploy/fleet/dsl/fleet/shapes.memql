@@ -1,0 +1,138 @@
+// fleet domain -- row projections.
+//
+// One "Full" shape per concept. Every consumer of these rows today -- Orbit's
+// dashboard, the fleet operations console, the pricing page -- wants the whole
+// row, and a narrower shape would only mean the console had to fetch twice.
+//
+// The one exception is `tierPublic`, and it is the interesting one: the price
+// list is read UNAUTHENTICATED by the pricing page, so its projection is
+// hand-picked rather than complete. `dbPreset` and `instanceProfile` are
+// operational facts about what we run for a tier, not facts a prospective
+// customer needs, and publishing our infrastructure shape to the open internet
+// is a free reconnaissance gift. The narrow shape is the enforcement; a comment
+// asking callers to be careful is not.
+//
+// `subscriberFull` carries the @pii billing address, which is why every query
+// binding it names ownerUserId==actor.userId as a top-level conjunct -- the
+// projection gate (memql#2883) requires a caller constraint from any query
+// projecting a PII-marked field, whatever the filter otherwise says.
+
+use fleet.concepts.{ instance, subscriber, subscription, tierSpec, usageMeter }
+
+/// Full subscriber projection. Carries the @pii billing email, so every query binding it gates on
+/// the caller. Backs Orbit's account settings and the fleet operations console's account view.
+@row
+shape subscriber subscriberFull {
+  row.id
+  ownerUserId
+  companyName
+  billingEmail
+  stripeCustomerId
+  status
+  row.createdAt
+}
+
+/// Full subscription projection: what they bought, what state it is in, and the two clocks (trial
+/// and grace) the lifecycle automations key off. Backs Orbit's plan panel.
+@row
+shape subscription subscriptionFull {
+  row.id
+  ownerUserId
+  subscriberId
+  tier
+  billingPeriod
+  status
+  voiceAddOn
+  haAddOn
+  currentPeriodStart
+  currentPeriodEnd
+  trialEndsAt
+  graceEndsAt
+  stripeSubscriptionId
+  stripePriceId
+  cancelAt
+  row.createdAt
+}
+
+/// Full tier projection -- everything including the operational fields. For AUTHENTICATED surfaces
+/// only: Orbit's upgrade picker (which needs to know whether HA is available on the target tier)
+/// and the provisioning automations (which need the profile and the preset). The public pricing
+/// page binds `tierPublic` instead.
+@row
+shape tierSpec tierFull {
+  row.id
+  tier
+  displayName
+  monthlyPriceUsd
+  messageCredits
+  voiceMinutes
+  overageMessagesUsdPer1k
+  overageVoiceUsdPerMinute
+  overagePolicy
+  instanceProfile
+  dbPreset
+  haIncluded
+  haAvailable
+  status
+}
+
+/// The price list as the public pricing page sees it: prices, allowances, overage rates and the HA
+/// availability flag -- and nothing about how we run it. See the file header for why the narrowing
+/// is the enforcement rather than a convention.
+@row
+shape tierSpec tierPublic {
+  row.id
+  tier
+  displayName
+  monthlyPriceUsd
+  messageCredits
+  voiceMinutes
+  overageMessagesUsdPer1k
+  overageVoiceUsdPerMinute
+  haIncluded
+  haAvailable
+  status
+}
+
+/// Full instance projection: what is running, where, at what shape, and how the last transition
+/// went. Backs Orbit's instance dashboard and the fleet operations console.
+@row
+shape instance instanceFull {
+  row.id
+  ownerUserId
+  subscriptionId
+  subscriberId
+  name
+  domain
+  tier
+  instanceProfile
+  haEnabled
+  status
+  argoApplication
+  namespace
+  dbPreset
+  provisionedAt
+  suspendedAt
+  lastActivityAt
+  notifyEmail
+  lastError
+  row.createdAt
+}
+
+/// Full usage-meter projection: the period, the allowance, and the three counters. Backs Orbit's
+/// "usage vs allowance" strip and the Stripe usage-record push.
+@row
+shape usageMeter usageMeterFull {
+  row.id
+  ownerUserId
+  subscriptionId
+  metric
+  periodStart
+  periodEnd
+  included
+  consumed
+  overage
+  reportedToStripe
+  status
+  row.createdAt
+}

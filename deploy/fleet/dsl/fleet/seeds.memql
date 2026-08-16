@@ -1,0 +1,149 @@
+// fleet domain -- the memQL Cloud price list, as seeded rows.
+//
+// THIS FILE IS THE PRICE LIST. It is the single place the numbers live, and
+// three surfaces read them from here rather than restating them: the public
+// pricing page (task memql#3857), Orbit's upgrade picker (task memql#3855),
+// and the allowance enforcement that decides whether a turn is billable (task
+// memql#3854). A price that lives in three places is a price that is wrong in
+// at least one of them the first time it moves.
+//
+// SEEDS RATHER THAN A MUTATION, and mutations.memql records the reasoning at
+// length: a bundle has no Go, so an "owner/admin only" tier mutation would be
+// reachable by any authenticated caller, on a publicly-readable concept, whose
+// `messageCredits` field is the allowance that same caller would then be
+// serving under. Seeding makes a price change a reviewed, deployed, revertible
+// change instead. Materialized by the SeedMaterializer at engine startup;
+// idempotent.
+//
+// WHERE THE NUMBERS COME FROM (the 2026-08-14 pricing analysis, epic memql#3852):
+// market-anchored against the per-seat AI-agent products (Chatbase, CustomGPT,
+// Lindy) and the hosted-instance products, with AI cost of goods computed from
+// official OpenAI and Anthropic list rates. The margin targets the epic commits
+// to are >=21% on Node at launch (rising to ~48% once the condensed instance
+// profile lands, task memql#3856), >=35% on Graph and >=40% on Mesh, each
+// measured at FULL allowance consumption -- which is the only measurement that
+// matters, because the customers who exhaust their allowance are the ones who
+// renew.
+//
+// THE TWO ASYMMETRIES worth understanding before touching a number:
+//
+//   Voice is not bundled on Node. A voice minute costs roughly two orders of
+//   magnitude more than a text turn, so bundling even a small allowance into a
+//   $199 entry price makes the entry price wrong for the majority who never
+//   speak to it. It is a $99 add-on that carries its own 300 minutes.
+//
+//   Overage is priced ABOVE blended marginal cost, not at it. An allowance that
+//   costs us money to exceed is an incentive to under-serve exactly the
+//   customers who like the product most. $30 per 1,000 credits against a $199 /
+//   2,000-credit base is a deliberate premium on unplanned consumption.
+//
+// TRIAL IS 'throttle', NOT 'meter', and this is the load-bearing line in the
+// file. A trial with metered overage is an unbounded spend path attached to a
+// card that has been authorized but never charged. Every other tier meters.
+
+use fleet.concepts.{ tierSpec }
+
+/// Trial: 14 days, card required, Graph-level FEATURES on Node-shaped pooled infrastructure. Priced
+/// at zero and capped hard -- 500 message credits and 60 voice minutes, then throttled. The caps
+/// are what bound a trial's cost of goods to roughly $30-40; the throttle (rather than metered
+/// overage) is what makes that a bound rather than an estimate.
+@description("memQL Cloud trial -- 14 days, card required, hard-capped and throttled at the ceiling.")
+seed tierSpec cloudTrial {
+  tier:                     "trial"
+  displayName:              "Trial"
+  monthlyPriceUsd:          0
+  messageCredits:           500
+  voiceMinutes:             60
+  overageMessagesUsdPer1k:  0
+  overageVoiceUsdPerMinute: 0
+  overagePolicy:            "throttle"
+  instanceProfile:          "solo"
+  dbPreset:                 "entry"
+  haIncluded:               false
+  haAvailable:              false
+  status:                   "available"
+}
+
+/// Node -- the entry tier. $199/mo, 2,000 message credits, no bundled voice, HA available as a paid
+/// add-on. Runs the condensed 'solo' instance profile (task memql#3856), which is what takes entry
+/// cost of goods from roughly $143 to roughly $90 and the margin from >=21% to ~48%.
+@description("memQL Cloud Node -- the entry tier: a private instance, 2,000 message credits, voice and HA available as add-ons.")
+seed tierSpec cloudNode {
+  tier:                     "node"
+  displayName:              "Node"
+  monthlyPriceUsd:          199
+  messageCredits:           2000
+  voiceMinutes:             0
+  overageMessagesUsdPer1k:  30
+  overageVoiceUsdPerMinute: 0.15
+  overagePolicy:            "meter"
+  instanceProfile:          "solo"
+  dbPreset:                 "entry"
+  haIncluded:               false
+  haAvailable:              true
+  status:                   "available"
+}
+
+/// Graph -- the featured tier. $949/mo, 10,000 message credits, 1,000 voice minutes, and HA is
+/// INCLUDED rather than optional: the tier promises every service replicated, and a tier that
+/// promises replication while running one replica is a promise the cluster does not keep. Full mesh
+/// on the shared cluster, `mid` database preset (two instances, PDB on).
+@description("memQL Cloud Graph -- the featured tier: full mesh, HA included, 10,000 message credits and 1,000 voice minutes.")
+seed tierSpec cloudGraph {
+  tier:                     "graph"
+  displayName:              "Graph"
+  monthlyPriceUsd:          949
+  messageCredits:           10000
+  voiceMinutes:             1000
+  overageMessagesUsdPer1k:  30
+  overageVoiceUsdPerMinute: 0.15
+  overagePolicy:            "meter"
+  instanceProfile:          "standard"
+  dbPreset:                 "mid"
+  haIncluded:               true
+  haAvailable:              true
+  status:                   "available"
+}
+
+/// Mesh -- the top listed tier. $2,999/mo, 50,000 message credits, 5,000 voice minutes, a dedicated
+/// cluster and a three-zone database (`top` preset). Zone redundancy comes from Postgres replication
+/// rather than from disk replication, which is why `top` sets no storage class -- see the cnpg-db
+/// component README.
+@description("memQL Cloud Mesh -- dedicated cluster, three-zone database, 50,000 message credits and 5,000 voice minutes.")
+seed tierSpec cloudMesh {
+  tier:                     "mesh"
+  displayName:              "Mesh"
+  monthlyPriceUsd:          2999
+  messageCredits:           50000
+  voiceMinutes:             5000
+  overageMessagesUsdPer1k:  30
+  overageVoiceUsdPerMinute: 0.15
+  overagePolicy:            "meter"
+  instanceProfile:          "dedicated"
+  dbPreset:                 "top"
+  haIncluded:               true
+  haAvailable:              true
+  status:                   "available"
+}
+
+/// Enterprise -- quoted, not listed. Present in the catalog with a zero price and Mesh-shaped
+/// infrastructure so that the pricing page can render a fourth card and an enterprise subscription
+/// has a tier row to point at; the actual commercial terms live in a contract, and the allowances
+/// on the subscription's meters are set from that contract at period open rather than from here.
+/// `hidden` keeps it out of the self-serve picker -- there is no checkout path that ends here.
+@description("memQL Cloud Enterprise -- custom terms; present in the catalog so the pricing page and enterprise subscriptions have a tier to name.")
+seed tierSpec cloudEnterprise {
+  tier:                     "enterprise"
+  displayName:              "Enterprise"
+  monthlyPriceUsd:          0
+  messageCredits:           0
+  voiceMinutes:             0
+  overageMessagesUsdPer1k:  30
+  overageVoiceUsdPerMinute: 0.15
+  overagePolicy:            "meter"
+  instanceProfile:          "dedicated"
+  dbPreset:                 "top"
+  haIncluded:               true
+  haAvailable:              true
+  status:                   "hidden"
+}

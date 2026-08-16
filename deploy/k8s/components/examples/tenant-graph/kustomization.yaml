@@ -1,0 +1,21 @@
+# Composition example for the tenant component -- the GRAPH tier (epic
+# memql#3852, task memql#3853).
+#
+# The featured tier: the full mesh at two replicas of everything, the voice lane
+# on, and the `mid` database preset. HA is not composed as an add-on here
+# because at Graph it is not one -- the `standard` profile already carries it,
+# and composing `optional/ha` on top would be a no-op that implies the tier's
+# replication were optional.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tenant-graph-example
+
+resources:
+  - ../../../base
+
+components:
+  - ../../engine-bff
+  - ../../tenant/presets/standard
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/mid

@@ -1,0 +1,29 @@
+# Composition example for the tenant component -- the NODE tier WITH the HA
+# add-on (epic memql#3852, task memql#3853).
+#
+# The only example that composes two profile components, and it is here because
+# the ordering is the thing that has to be right: `optional/ha` comes AFTER
+# `presets/solo`, so its 2 wins over solo's 1. Reversed, the render is silently
+# a plain Node -- every replica back at one, the customer billed for HA, and a
+# rendered manifest that looks entirely reasonable.
+#
+# NOTE THE SECOND HALF OF THE PURCHASE: the database preset moves from `entry`
+# (1 instance, no PDB) to `mid` (2 instances, PDB on). Buying HA and getting a
+# doubled mesh in front of a single-instance database is the more expensive half
+# of the promise unkept -- the mesh survives a node drain and then has nothing
+# to talk to. ../../tenant/optional/ha/kustomization.yaml says the same thing at
+# the other end.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tenant-node-ha-example
+
+resources:
+  - ../../../base
+
+components:
+  - ../../engine-bff
+  - ../../tenant/presets/solo
+  - ../../tenant/optional/ha
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/mid
