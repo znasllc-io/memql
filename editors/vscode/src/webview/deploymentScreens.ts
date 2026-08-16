@@ -18,6 +18,29 @@ import { instanceRowStatus, runRowStatus } from "../state/deploymentsCatalog.js"
 import type { PipelineState } from "../deploy/pipelineState.js";
 import type { TagListing } from "../install/tags.js";
 import type { PlannedStepView } from "../state/upgradePlan.js";
+import { latestRelease, type ReleaseListing } from "../version/releaseCache.js";
+
+/**
+ * The `latest` fact, beside the instance's own `version` (memql#3996).
+ *
+ * UNCONDITIONAL, including when nothing has been fetched, and that is the same
+ * call the page already makes about `version`: an operator opened this page to
+ * ask what this cluster is, so a fact that vanished when the answer was
+ * "we do not know" would read as "there is nothing newer" -- which is the one
+ * reading this epic exists to prevent. `not fetched` says which of the two it
+ * is, and the reason sits in the lede above, where the version sentence names
+ * the fetch failure.
+ *
+ * The row's availability clause is NOT repeated here. It is already in the
+ * lede, and a page that said "v0.19.0 available" twice would be arguing with
+ * itself about which one the operator should read.
+ */
+function latestFact(releases: ReleaseListing | undefined): string {
+  const latest = latestRelease(releases);
+  return `<div class="fact"><span class="fact-key">latest</span><span class="fact-value">${escapeHtml(
+    latest ?? "not fetched",
+  )}</span></div>`;
+}
 
 export interface OverviewInput {
   instance: Instance;
@@ -26,11 +49,13 @@ export interface OverviewInput {
   nowMs: number;
   /** A failure this page produced, as opposed to one a step reported. */
   error: string;
+  /** The release listing, or undefined when nothing has been fetched. */
+  releases: ReleaseListing | undefined;
 }
 
 export function renderInstanceOverview(input: OverviewInput): string {
   const { instance } = input;
-  const status = instanceRowStatus(instance);
+  const status = instanceRowStatus(instance, input.releases);
 
   const actions = input.actions
     .map(
@@ -70,6 +95,7 @@ ${error}
   <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
     displayVersion(instance.version),
   )}</span></div>
+  ${latestFact(input.releases)}
   <div class="fact"><span class="fact-key">domain</span><span class="fact-value">${escapeHtml(
     instance.domain ?? "not recorded",
   )}</span></div>
@@ -108,13 +134,20 @@ export interface ChooseTagInput {
 export function renderChooseTag(input: ChooseTagInput): string {
   const current = displayVersion(input.instance.version);
 
+  // MARKED, NOT SELECTED (memql#3996). The list arrives newest-first
+  // (install/tags.ts), so the newest is simply the first -- and saying which
+  // one it is costs nothing, while selecting it would make the field arrive
+  // already answered. The empty first option stays first and stays the
+  // selected one until the operator picks: a version the page chose silently
+  // is not a version they can be held to.
+  const newest = input.listing.tags[0];
   const options = [`<option value=""${input.target === "" ? " selected" : ""}></option>`]
     .concat(
       input.listing.tags.map(
         (tag) =>
           `<option value="${escapeHtml(tag)}"${
             tag === input.target ? " selected" : ""
-          }>${escapeHtml(tag)}</option>`,
+          }>${escapeHtml(tag)}${tag === newest ? " (newest)" : ""}</option>`,
       ),
     )
     .join("");
@@ -195,6 +228,8 @@ export interface RemoteOverviewInput {
   outcome: string;
   /** A failure this page produced, as opposed to one the engine reported. */
   error: string;
+  /** The release listing, or undefined when nothing has been fetched. */
+  releases: ReleaseListing | undefined;
 }
 
 /**
@@ -209,7 +244,7 @@ export interface RemoteOverviewInput {
  */
 export function renderRemoteInstance(input: RemoteOverviewInput): string {
   const { instance, pipeline } = input;
-  const status = instanceRowStatus(instance);
+  const status = instanceRowStatus(instance, input.releases);
 
   const actions =
     pipeline.actions.length === 0
@@ -272,6 +307,7 @@ ${outcome}
   <div class="fact"><span class="fact-key">version</span><span class="fact-value">${escapeHtml(
     displayVersion(instance.version),
   )}</span></div>
+  ${latestFact(input.releases)}
   <div class="fact"><span class="fact-key">domain</span><span class="fact-value">${escapeHtml(
     instance.domain ?? "not recorded",
   )}</span></div>
