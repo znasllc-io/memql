@@ -38,7 +38,6 @@ function deployment(over: Partial<DeploymentHistoryView> = {}): DeploymentHistor
   return {
     id: "d-100",
     version: "2026.6.21",
-    environment: "staging",
     provider: "azure",
     status: "succeeded",
     current: false,
@@ -170,8 +169,7 @@ test("history rows reuse the vk-row contract so existing click delegation works"
   const html = renderToHtml(renderDeploymentHistory([deployment()]));
   assert.match(html, /<li class="vk-row" data-row-id="d-100">/);
   assert.match(html, /class="vk-row-primary">2026\.6\.21</);
-  assert.match(html, /class="vk-row-secondary">staging</);
-  assert.match(html, /class="vk-row-tertiary">azure</);
+  assert.match(html, /class="vk-row-secondary">azure</);
   assert.match(html, /class="vk-row-status" data-status="succeeded">succeeded</);
 });
 

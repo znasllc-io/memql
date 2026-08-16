@@ -66,7 +66,6 @@ function deployment(over: Partial<DeploymentRecord> = {}): DeploymentRecord {
     deploymentId: "d1",
     status: "succeeded",
     version: "v0.9.2",
-    environment: "staging",
     provider: "azure",
     region: "eastus",
     imageDigest: "sha256:abcdef0123456789",

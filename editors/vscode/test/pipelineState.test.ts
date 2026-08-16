@@ -38,7 +38,7 @@ function read(over: Partial<StatusRead> = {}): StatusRead {
 
 test("a status that answered is the pipeline being present", () => {
   const state = pipelineState(
-    read({ status: { environment: "staging" } as never, reason: "ok" }),
+    read({ status: { version: "2026.8.1" } as never, reason: "ok" }),
     OWNER,
   );
   assert.equal(state.kind, "present");
