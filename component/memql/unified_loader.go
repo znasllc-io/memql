@@ -213,9 +213,14 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 //
 // A WARNING, not an error, and deliberately so: the escalation to a
 // load error is a later phase, once the codemod has been run and the
-// tree is clean. Until then a concept with no `@rowAuthz(...)` still
-// loads and still returns exactly the rows it always did -- Phase 1
-// changes no behaviour.
+// tree is clean. An UNDECLARED concept still loads and still returns
+// exactly the rows it always did, because there is no tier to AND in
+// -- and that is now the whole COST of leaving one undeclared, since a
+// DECLARED tier is enforced on the read path (Phase 3, memql#3172) and
+// on the write path (memql#3174). This comment generalised that to
+// "Phase 1 changes no behaviour", which stopped being true with those
+// issues (swept in memql#3987) and mattered here more than in most
+// places: the hint below is read by operators off a boot log.
 //
 // Emitted ONCE with the full list rather than once per concept. The
 // list is the actionable part -- it is precisely what a Phase 2
@@ -240,7 +245,9 @@ func warnUndeclaredRowAuthz(logger *slog.Logger, concepts map[string]*memoryNode
 		"concepts", strings.Join(undeclared, ", "),
 		"hint", `declare a tier with @rowAuthz(public|clusterOwner|owner="<field>"|via="<spec>"), `+
 			"or run `memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql` to seed the ones an "+
-			"existing query filter can prove. Nothing is enforced yet (memql#2920).")
+			"existing query filter can prove. A declared tier IS enforced -- on reads "+
+			"(memql#3172) and on writes (memql#3174) -- so declaring one changes what that "+
+			"concept returns. Adjudicate each; do not bulk-annotate.")
 }
 
 // firstPathSegment returns the leading path component of a unified-tree

@@ -84,8 +84,8 @@ func agentAuthzDecl(t *testing.T) *langparser.RowAuthzDecl {
 	t.Helper()
 	decl := declFor(t, agentAuthzConcept)
 	if decl == nil {
-		t.Fatalf("%s declares no @rowAuthz tier. Without it memql#3174's write guard is inert "+
-			"on this concept and any caller who knows an authId can revoke or rewrite a "+
+		t.Fatalf("%s declares no @rowAuthz tier. Without it memql#3174's write guard does not "+
+			"engage on this concept and any caller who knows an authId can revoke or rewrite a "+
 			"stranger's standing grant (memql#3129).", agentAuthzConcept)
 	}
 	return decl

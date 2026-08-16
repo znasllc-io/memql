@@ -656,10 +656,17 @@ sets; unknown annotations are rejected at load time:
   `actor.*` term every filter over it must remember to carry. Exactly
   one tier; `owner=` must name a field the concept declares, or the
   literal `id` for a self-owned concept whose owner is the row itself
-  (memql#3029). PHASE 1 IS
-  INERT (memql#2920) -- the tier is parsed, validated and carried, and
-  nothing reads it at query time, so no result set changes. Undeclared
-  is a boot warning, not yet an error. See
+  (memql#3029). **The tier is ENFORCED, so declaring one CHANGES WHAT
+  READS RETURN** -- its predicate is ANDed into the plan of every read
+  with a bound concept, every emitted row is separately admitted against
+  the tier its own concept declares (the only mechanism a raw
+  client-supplied query string or a graph expansion leaves available),
+  and a read carrying no actor is refused rather than compared against
+  `""` (memql#3172); `update` / `delete` refuse when the target row's
+  declared owner is not the actor (memql#3174). Choose a tier as an
+  authorization decision, not as metadata. Undeclared is a boot warning,
+  not yet an error -- and an undeclared concept is the one that still
+  returns what it always did. See
   [per-row-authz-audit.md](../operate/auth/per-row-authz-audit.md).
   `@version` is strict
   semver and absent means 1.0.0 (#2613) -- annotate only genuine
