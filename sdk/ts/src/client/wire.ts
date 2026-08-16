@@ -522,9 +522,9 @@ export interface ServerHelloPayload {
 export interface QueryResultPayload {
   requestId: string;
   result?: {
-    bundle?: GraphBundleWire;
+    bundle?: GraphBundleWire | null;
     data?: unknown[];
-    meta?: ResultMetaWire;
+    meta?: ResultMetaWire | null;
   };
   done?: boolean;
 }
@@ -562,14 +562,14 @@ export interface ConceptInfoWire {
   entity?: string;
   description?: string;
   type?: string;
-  displayCard?: DisplayCardWire;
+  displayCard?: DisplayCardWire | null;
 }
 
 export interface MyAccessResultPayload {
   requestId?: string;
   userId?: string;
   primaryEmail?: string;
-  clusterRole?: UserRoleWire;
+  clusterRole?: UserRoleWire | null;
 }
 
 export interface RotateAuthResultPayload {
@@ -602,7 +602,7 @@ export interface AiTranscribeStreamCompletePayload {
 // deltas and lands a terminal AiChatResult with the assembled message).
 export interface AiChatResultPayload {
   requestId: string;
-  message?: AiChatMessageWire;
+  message?: AiChatMessageWire | null;
 }
 
 export interface AiSpeechResultPayload {
@@ -786,9 +786,9 @@ export interface DeploymentStatusWire {
   validatedAt?: string;
   gate?: string;
   components?: DeployComponentDigestWire[];
-  argocd?: DeployArgoStatusWire;
+  argocd?: DeployArgoStatusWire | null;
   rollouts?: DeployRolloutStatusWire[];
-  gateResult?: DeployGateResultWire;
+  gateResult?: DeployGateResultWire | null;
 }
 
 export interface SuggestNextVersionResultWire {
@@ -822,9 +822,9 @@ export interface DeployControlResultPayload {
   // runs before the gate and writes no event) and on a transport failure.
   // The permitted path keeps its id on action.auditEventId.
   auditEventId?: string;
-  deploymentStatus?: DeploymentStatusWire;
-  nextVersion?: SuggestNextVersionResultWire;
-  action?: DeployActionResultWire;
+  deploymentStatus?: DeploymentStatusWire | null;
+  nextVersion?: SuggestNextVersionResultWire | null;
+  action?: DeployActionResultWire | null;
 }
 
 // Identity-administration reply (memql#3324). Same envelope-carried status as
@@ -857,9 +857,9 @@ export interface IdentityAdminResultPayload {
 export interface AutomationRunEventPayload {
   requestId?: string;
   runId?: string;
-  accepted?: AutomationRunAcceptedWire;
-  step?: AutomationRunStepWire;
-  complete?: AutomationRunCompleteWire;
+  accepted?: AutomationRunAcceptedWire | null;
+  step?: AutomationRunStepWire | null;
+  complete?: AutomationRunCompleteWire | null;
 }
 
 export interface AutomationRunAcceptedWire {
@@ -1067,7 +1067,7 @@ export interface ConstructInfoWire {
   sourceHash?: string;
   source?: string;
   /** Automation only; absent for every other kind. */
-  trigger?: ConstructTriggerWire;
+  trigger?: ConstructTriggerWire | null;
 }
 
 export interface ListConstructsResultPayload {
