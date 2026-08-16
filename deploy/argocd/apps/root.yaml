@@ -6,8 +6,15 @@
 # ENGINE-ONLY (decoupling P3): the PRODUCT Applications (the product's own bff /
 # SPA / rollouts surface) live in the downstream product pack's app-of-apps --
 # the pack owns reconciling those. What is listed below is the ENGINE's own
-# estate: the AppProject, this root, and the two environment Applications added
-# by epic memql#3748 / #3766.
+# estate: the AppProject, this root, the two environment Applications added by
+# epic memql#3748 / #3766, and the cluster OPERATOR stack added by epic
+# memql#3842 / #3845 (cert-manager and CloudNativePG + the Barman Cloud plugin).
+#
+# The operator Applications carry sync-waves -- cert-manager at -2, CNPG at -1 --
+# so the CRDs land before anything declares a Certificate against them, and both
+# before the environment Applications whose Cluster CRs need the operator to
+# exist. They run on `project: default` rather than `memql`; each file's header
+# says why, and it is the same reason this root does.
 #
 # THE INCLUDE GLOB IS THE REGISTRATION, and it is easy to miss. `directory.include`
 # is a hardcoded brace list, so a manifest dropped into this directory is simply
@@ -29,7 +36,7 @@ spec:
     path: deploy/argocd/apps
     directory:
       recurse: true
-      include: '{project.yaml,root.yaml,memql-prod.yaml,memql-staging.yaml}'
+      include: '{project.yaml,root.yaml,memql-prod.yaml,memql-staging.yaml,cert-manager.yaml,cnpg-operator.yaml}'
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
