@@ -299,6 +299,32 @@ test("the Clusters context menu changes nothing on the machine", () => {
   }
 });
 
+test("taking ownership reaches a LOCAL cluster row (memql#3906)", () => {
+  // The gap this closes. `memql.clusters.takeOwnership` was contributed to the
+  // palette only, so an operator who closed the install wizard -- or whose run
+  // predated it -- had no route to the one action that gives a bootstrapped
+  // owner its first credential. The cluster sits in front of them in the tree
+  // and right-clicking it offered sign-in, which cannot work.
+  const entries = entriesFor("memql.clusters.takeOwnership");
+  assert.ok(entries.length > 0, "no take-ownership entry in view/item/context");
+  assert.ok(
+    entries.some((entry) => matches(entry, LOCAL_ROW)),
+    "take ownership does not reach a memqlLocalCluster row"
+  );
+});
+
+test("taking ownership is NOT offered on a remote cluster", () => {
+  // Minting needs `kubectl exec` into the identity pod, so it can only be done
+  // from the machine hosting the cluster. `mintOwnershipLink` refuses a remote
+  // one by name (`notLocal`); offering the action anyway would put a button in
+  // front of an operator whose only outcome is that refusal.
+  assert.deepEqual(
+    entriesFor("memql.clusters.takeOwnership").filter((entry) => matches(entry, REMOTE_ROW)),
+    [],
+    "take ownership reached a remote cluster, where there is no pod to mint in"
+  );
+});
+
 test("remove is offered on both row kinds", () => {
   const entries = entriesFor("memql.clusters.remove");
   assert.ok(entries.length > 0, "no remove entry in view/item/context");
