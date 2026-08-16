@@ -217,3 +217,53 @@ func TestSoloAndStandardActuallyDiffer(t *testing.T) {
 		t.Fatal("the solo and standard profiles render identically -- a tier that costs $199 and a tier that costs $949 are buying the same infrastructure")
 	}
 }
+
+// TestSoloSavesTheVoiceLane pins the pod-count claim published in
+// docs/public/operate/memql-cloud-trials.md (task memql#3856).
+//
+// That page says `solo` renders 8 running Deployments against the mesh's 13,
+// and that the five it saves are the whole voice lane. Numbers in a runbook go
+// stale silently -- and this particular number is the entry tier's cost of
+// goods, which the tier's margin is computed from.
+//
+// It is deliberately the POD COUNT and not a dollar figure. The epic models
+// ~$143 -> ~$90; confirming that needs a running cluster and a month of
+// billing, and publishing a modelled number as a measured one would be the same
+// class of error as the stale provider costs this epic already had to fix.
+func TestSoloSavesTheVoiceLane(t *testing.T) {
+	solo, _ := renderExample(t, "tenant-node")
+	full, _ := renderExample(t, "tenant-graph")
+
+	running := func(m map[string]int) int {
+		var n int
+		for _, v := range m {
+			if v > 0 {
+				n++
+			}
+		}
+		return n
+	}
+
+	const (
+		wantSolo = 8
+		wantFull = 13
+	)
+	if got := running(solo); got != wantSolo {
+		t.Errorf("the solo profile runs %d Deployments, and memql-cloud-trials.md says %d", got, wantSolo)
+	}
+	if got := running(full); got != wantFull {
+		t.Errorf("the full mesh runs %d Deployments, and memql-cloud-trials.md says %d", got, wantFull)
+	}
+
+	// And the saving is the voice lane specifically -- not some other five pods
+	// that happen to add up. A tier that quietly stopped running `agent` would
+	// hit the same arithmetic and be a very different product.
+	for _, node := range voiceLane {
+		if solo[node] != 0 {
+			t.Errorf("%s is running under the solo profile; the documented saving is the voice lane, and this is not it", node)
+		}
+		if full[node] == 0 {
+			t.Errorf("%s is NOT running under the full mesh, so the difference between the two profiles is not what the runbook says it is", node)
+		}
+	}
+}

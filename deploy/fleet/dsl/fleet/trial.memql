@@ -1,0 +1,230 @@
+// fleet domain -- the TRIAL CLOCK and IDLE HIBERNATION (epic memql#3852, task
+// memql#3856).
+//
+// Five scheduled sweeps. Together they are the entire lifecycle of a customer
+// who never pays: nudged at day 7 and day 12, suspended at day 14, offered
+// their data back for 14 more, and then torn down.
+//
+// =============================================================================
+//   Why these are sweeps at all, and how they are allowed to read
+// =============================================================================
+//
+// Everything else in this domain reacts to a row that changed. A clock cannot:
+// nothing writes a row when a date passes. So these five are `@trigger(schedule=)`
+// and they READ -- which is the one thing this domain's automations otherwise
+// never do, because an automation's actor is not the row's owner and a
+// caller-scoped read from inside one returns nothing while looking correct.
+//
+// What makes it legal is the pair of annotations on the queries they call
+// (queries.memql, "Internal sweeps"): `@serverOnly` refuses a client-originated
+// call outright, and `@unbounded` declares that reading every row is the intent
+// -- with the reason recorded, so the pagination gate does not silently truncate
+// a sweep to its first page and leave the tail of the fleet unswept. That is the
+// same shape `usersInDeletionCooldown` has carried in the identity domain, and
+// deploy/fleet/authz_test.go checks BOTH annotations are present, because either
+// alone is a defect wearing the other's clothes.
+//
+// =============================================================================
+//   Every sweep reads exactly ONE concept, and that is why the clocks are
+//   denormalised
+// =============================================================================
+//
+// A sweep cannot join. So the clock a sweep reads has to be on the row it
+// sweeps: `instance.trialEndsAt` is copied from the subscription, and
+// `instance.suspendedAt` is the grace clock on the DATA rather than on the
+// billing relationship.
+//
+// That is not duplication for convenience -- it is what makes the sweeps
+// possible at all, and it is the same reason `notifyEmail`, `billingEmail`, the
+// two spend ceilings and the shape fields are denormalised. The cost is that a
+// clock moved on the subscription must be re-stamped on the instance; the
+// benefit is that no sweep in this file can be silently returning nothing.
+//
+// =============================================================================
+//   The windowing lives in the loop, not in the filter
+// =============================================================================
+//
+// A filter cannot call `addDuration`, so "trialEndsAt is between 7 and 8 days
+// away" is computed per row inside the `forEach`. The bracket is one day wide
+// and the sweep fires daily, which is what makes each nudge fire EXACTLY ONCE
+// per instance -- no duplicates from a wide bracket, no gaps from a narrow one.
+// Identity's deletion reminders use the same construction for the same reason.
+//
+// =============================================================================
+//   What a trial costs, and what bounds it
+// =============================================================================
+//
+// A trial runs Graph-level FEATURES on Node-shaped infrastructure (the `solo`
+// profile, `entry` database) with the tier's hard caps: 500 message credits, 60
+// voice minutes, `overagePolicy: throttle`. Roughly $30-40 of cost of goods.
+//
+// The caps are enforced in the tenant's own process by the spend ceiling
+// (task memql#3854), not by these sweeps. That distinction matters: a sweep runs
+// once a day, and a runaway does not wait for it. What these do is bound the
+// trial in TIME; what bounds it in SPEND is a limit on the other side of the
+// boundary that needs no network and no clock.
+
+use fleet.logic.{ runningInstances, suspendedInstances, trialingSubscriptions }
+use fleet.mutations.{ endSubscription, requestInstanceSuspend, requestInstanceTeardown }
+use platform.mutations.{ stageOutboundRequest }
+
+// =============================================================================
+//   Day 7 and day 12 -- the nudges
+// =============================================================================
+
+/// Daily 09:00 UTC: tell every trial that is a week from ending. The first of two nudges; the second
+/// is two days out (below), which is when somebody who meant to buy actually acts.
+///
+/// The email is keyed on the instance AND the milestone, so the two nudges are different outbound
+/// rows and neither suppresses the other -- `stageOutboundRequest` is idempotent by requestId, so a
+/// shared key would mean the day-12 message silently never sent.
+@trigger(schedule="0 0 9 * * *")
+automation trialNudgeDay7 {
+  step decide {
+    logic runningInstances ( event )
+  }
+  step notify {
+    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P7D") && item.payload.trialEndsAt <= addDuration(now, "P8D") {
+      stageOutboundRequest {
+        requestId:   concat("fleet-trial-nudge-7-", item.id),
+        medium:      "email",
+        target:      item.payload.notifyEmail,
+        subject:     "One week left on your memQL Cloud trial",
+        body:        concat("Your trial instance at https://", item.payload.domain, " has a week to run. Add a plan in Orbit to keep it -- nothing is lost if you decide later, but the instance pauses when the trial ends."),
+        requestedBy: "fleet.trialNudgeDay7"
+      }
+    }
+  }
+}
+
+/// Daily 09:00 UTC: the two-days-out nudge. Deliberately a different message from the day-7 one --
+/// this is the last one before the instance pauses, and it says what happens next rather than
+/// repeating the invitation.
+@trigger(schedule="0 0 9 * * *")
+automation trialNudgeDay12 {
+  step decide {
+    logic runningInstances ( event )
+  }
+  step notify {
+    forEach item in decide.result where item.payload.tier == "trial" && item.payload.trialEndsAt > addDuration(now, "P2D") && item.payload.trialEndsAt <= addDuration(now, "P3D") {
+      stageOutboundRequest {
+        requestId:   concat("fleet-trial-nudge-12-", item.id),
+        medium:      "email",
+        target:      item.payload.notifyEmail,
+        subject:     "Your memQL Cloud trial ends in two days",
+        body:        concat("Your trial instance at https://", item.payload.domain, " pauses in two days. Your data stays exactly where it is for 14 days after that, and adding a plan in Orbit brings it straight back."),
+        requestedBy: "fleet.trialNudgeDay12"
+      }
+    }
+  }
+}
+
+// =============================================================================
+//   Day 14 -- the trial ends
+// =============================================================================
+
+/// Daily 02:00 UTC: pause every trial instance whose clock has run out. Scale-to-zero, data intact
+/// -- which is the whole shape of the offer: a trial that ends does not destroy anything, it stops
+/// costing us compute.
+///
+/// The instance and the subscription are closed by two separate sweeps, because neither can read the
+/// other. They are eventually consistent with each other, and the order does not matter: a paused
+/// instance whose subscription is still `trialing` for a few hours is a customer who cannot use a
+/// service they are not paying for, which is the intended state either way.
+@trigger(schedule="0 0 2 * * *")
+automation trialExpirySuspend {
+  step decide {
+    logic runningInstances ( event )
+  }
+  step suspend {
+    forEach item in decide.result where item.payload.tier == "trial" && exists(item.payload.trialEndsAt) && item.payload.trialEndsAt < now {
+      requestInstanceSuspend {
+        instanceId: item.id
+      }
+    }
+  }
+}
+
+/// Daily 02:00 UTC: close out every subscription whose trial has ended, and start the 14-day clock
+/// on the data.
+///
+/// `paused`, not `cancelled`. The customer did not cancel -- they ran out of trial, which is a
+/// different fact about the same person and the one that decides whether "convert" or "resubscribe"
+/// is the right word in every message that follows.
+@trigger(schedule="0 0 2 * * *")
+automation trialExpiryClose {
+  step decide {
+    logic trialingSubscriptions ( event )
+  }
+  step close {
+    forEach item in decide.result where exists(item.payload.trialEndsAt) && item.payload.trialEndsAt < now {
+      endSubscription {
+        subscriptionId: item.id,
+        status:         "paused",
+        graceEndsAt:    addDuration(now, "P14D")
+      }
+    }
+  }
+}
+
+// =============================================================================
+//   Hibernation -- an instance nobody is using
+// =============================================================================
+
+/// Daily 03:00 UTC: scale to zero any instance that has served nothing for 14 days.
+///
+/// THIS APPLIES TO EVERY TIER, not just trials, and that is deliberate. A paying customer's idle
+/// instance costs us exactly as much as an idle trial's, and resuming is a scale-up rather than a
+/// restore -- the data never moved. What a paid tier buys is not "always warm", it is capacity when
+/// they use it; a tier that genuinely needs zero cold starts is a product decision with a price
+/// attached, not a default.
+///
+/// `lastActivityAt` is stamped by the TENANT's own heartbeat, because the control plane cannot see
+/// the tenant's traffic. An instance that has never reported activity therefore has an empty field
+/// and is skipped rather than hibernated -- fail-safe in the direction that costs money rather than
+/// the one that surprises a customer.
+@trigger(schedule="0 0 3 * * *")
+automation hibernateIdleInstances {
+  step decide {
+    logic runningInstances ( event )
+  }
+  step suspend {
+    forEach item in decide.result where exists(item.payload.lastActivityAt) && addDuration(item.payload.lastActivityAt, "P14D") < now {
+      requestInstanceSuspend {
+        instanceId: item.id
+      }
+    }
+  }
+}
+
+// =============================================================================
+//   The end of the grace period
+// =============================================================================
+
+/// Daily 04:00 UTC: tear down instances that have been suspended for 14 days.
+///
+/// This is the only automation in the fleet that destroys data, and it is a SWEEP rather than a
+/// reaction for exactly that reason: nothing a customer or an operator does in one action reaches
+/// it. The path is pause, then fourteen days, then this.
+///
+/// The capability script takes a final backup before deleting anything and ABORTS if that backup
+/// fails, so a teardown that could not preserve the data does not happen. The instance is left in
+/// `tearing_down` in that case -- a state that says what was being attempted, which is what an
+/// operator needs and what a row that looked finished would deny them.
+///
+/// `suspendedAt` is the clock, and it is the instance's OWN field rather than the subscription's
+/// `graceEndsAt`. The two normally agree; where they do not, this one is the honest one -- it
+/// measures how long the data has actually been cold, which is the thing the grace period is about.
+@trigger(schedule="0 0 4 * * *")
+automation teardownAfterGrace {
+  step decide {
+    logic suspendedInstances ( event )
+  }
+  step destroy {
+    forEach item in decide.result where exists(item.payload.suspendedAt) && addDuration(item.payload.suspendedAt, "P14D") < now {
+      requestInstanceTeardown {
+        instanceId: item.id
+      }
+    }
+  }
+}
