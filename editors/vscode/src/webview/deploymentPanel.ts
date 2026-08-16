@@ -707,11 +707,8 @@ export class DeploymentPanel {
       this.render();
       return;
     }
-    const env = this.deps.deployEnv?.(target.instanceName) ?? target.instanceName;
-
     const cut = await runDeployAction(port, {
       id: "cutVersion",
-      env,
       bump: "patch",
       // The version is NAMED rather than left to the engine's suggestion. The
       // operator confirmed a specific release; cutting whatever comes next

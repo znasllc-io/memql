@@ -67,7 +67,7 @@ test("an action's details survive to the outcome", () => {
         details: { deploymentId: "dep-abc", version: "v0.19.0", imageDigest: "sha256:beef" },
       }),
     }),
-    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+    { id: "cutVersion", bump: "patch", version: "v0.19.0" },
   ).then((outcome) => {
     assert.equal(outcome.kind, "success");
     assert.equal(outcome.details.deploymentId, "dep-abc");
@@ -78,7 +78,7 @@ test("an action's details survive to the outcome", () => {
 test("a failed action still carries whatever details it returned", async () => {
   const outcome = await runDeployAction(
     port({ cutVersion: async () => ({ ...OK, ok: false, message: "duplicate version", details: { version: "v0.19.0" } }) }),
-    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+    { id: "cutVersion", bump: "patch", version: "v0.19.0" },
   );
   assert.equal(outcome.kind, "error");
   assert.equal(outcome.details.version, "v0.19.0");
