@@ -57,7 +57,7 @@ type Deps = Parameters<typeof createVersionCollector>[0];
 
 function collector(over: Partial<Deps>): (c: ClusterConfig) => Promise<VersionCandidate[]> {
   return createVersionCollector({
-    repoRoot: "/repo",
+    repoRoot: () => "/repo",
     readReceipt: noReceipt,
     runCapability: noScript,
     ...over,

@@ -35,8 +35,15 @@ export interface DeployVersionStatus {
 }
 
 export interface VersionCollectorDeps {
-  /** The checkout the capability scripts live in. */
-  repoRoot: string;
+  /**
+   * The checkout the capability scripts live in.
+   *
+   * A FUNCTION, not a string: resolving it touches the extension's install
+   * root, and this collector is constructed at activation while the only
+   * source that needs the value runs much later, for a local cluster only.
+   * Calling it eagerly made activation depend on a path nothing had asked for.
+   */
+  repoRoot: () => string;
   /** The install receipt on THIS machine, or null when there is none. */
   readReceipt: () => Promise<Receipt | null>;
   /** Runs a capability script. Bound to `runCapabilityScript` by the caller. */
@@ -98,7 +105,7 @@ async function fromArgocd(
   if (cluster.local !== true) return "";
   return quietly(async () => {
     const outcome = await deps.runCapability({
-      scriptPath: capabilityScriptPath(STATUS_CAPABILITY, deps.repoRoot),
+      scriptPath: capabilityScriptPath(STATUS_CAPABILITY, deps.repoRoot()),
       params: {},
       capability: STATUS_CAPABILITY,
       timeoutMs: STATUS_TIMEOUT_MS,

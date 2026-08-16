@@ -21,6 +21,8 @@ import {
   wrongTokenClassMessage,
 } from "../connection/credentials.js";
 import type { ConnectionState } from "../connection/manager.js";
+import { describeVersion } from "../version/describe.js";
+import type { ReleaseListing } from "../version/releaseCache.js";
 import { needsAuth, type ClusterConfig } from "./model.js";
 
 export type ClusterRowIcon =
@@ -88,4 +90,48 @@ export function clusterRowStatus(
     return { icon: "credential", tooltip: missingCredentialMessage(cluster.name) };
   }
   return { icon: "idle", tooltip: cluster.endpoint };
+}
+
+/** The two pieces of text a Clusters-tree row renders beside its icon. */
+export interface ClusterRowText {
+  /** The dimmed text after the cluster's name. */
+  description: string;
+  tooltip: string;
+}
+
+/**
+ * The row's words: what this editor is dialling, and what release it is
+ * (memql#3995).
+ *
+ * THIS IS THE SURFACE THAT MAKES A DISCONNECTED OR NEVER-DIALLED CLUSTER'S
+ * VERSION VISIBLE AT ALL. Every other place a version could appear needs a live
+ * session; this one is read off clusters.yaml, so it answers with the cluster
+ * switched off -- which is the situation the motivating incident happened in,
+ * and the reason memql#3990 records the version rather than observing it.
+ *
+ * Two decisions are COMPOSED here rather than taken here: the connection
+ * verdict above, and the version verdict in `version/describe.ts`. Keeping the
+ * composition in this module is what leaves views/clustersTree.ts as a mapping
+ * onto VS Code's icon vocabulary.
+ *
+ * An unknown version adds NOTHING. A row that appended "unknown" to every
+ * cluster on a fresh install would be noise, and the connection page says the
+ * word where there is room to explain it.
+ */
+export function clusterRowText(
+  cluster: ClusterConfig,
+  state: ConnectionState,
+  listing: ReleaseListing | undefined,
+): ClusterRowText {
+  const status = clusterRowStatus(cluster, state);
+  const version = describeVersion({ recorded: cluster.version, listing });
+  return {
+    description:
+      version.short === "" ? cluster.endpoint : `${cluster.endpoint} - ${version.short}`,
+    // The connection verdict stays FIRST. It is what an operator opened the
+    // tooltip for; the version is context beneath it, and a tooltip that led
+    // with the version would bury the reason the row is red.
+    tooltip:
+      version.state === "unknown" ? status.tooltip : `${status.tooltip}\n${version.sentence}`,
+  };
 }

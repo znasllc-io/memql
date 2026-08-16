@@ -14,7 +14,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { clusterRowStatus } from "../src/clusters/status.js";
+import { clusterRowStatus, clusterRowText } from "../src/clusters/status.js";
 import type { ConnectionState } from "../src/connection/manager.js";
 
 const CLUSTER = { name: "local", endpoint: "api.memql.localhost:443", token: "eyJ.a.b" };
@@ -116,4 +116,89 @@ test("a cluster with an endpoint and no token asks for a JWT, not for a PAT", ()
   assert.equal(view.icon, "credential");
   assert.match(view.tooltip, /JWT access token/);
   assert.doesNotMatch(view.tooltip, /memQL Cockpit first/);
+});
+
+// -----------------------------------------------------------------------------
+// The recorded version on the row (memql#3995)
+// -----------------------------------------------------------------------------
+//
+// THIS IS THE SURFACE THAT MAKES A DISCONNECTED OR NEVER-DIALLED CLUSTER'S
+// VERSION VISIBLE AT ALL. Every other place a version could appear needs a live
+// session; the row is read off clusters.yaml, so it answers with the cluster
+// switched off -- which is the situation the motivating incident happened in.
+//
+// The row COMPOSES two decisions that are taken elsewhere: the connection
+// verdict (clusterRowStatus, above) and the version verdict (describeVersion).
+// Composing them here rather than in the tree is what keeps the tree a mapping
+// onto ThemeIcons.
+
+const LISTING = { tags: ["v0.18.0", "v0.17.0"], fetchedAt: 1000 };
+
+test("a row shows the endpoint alone when no version is recorded", () => {
+  // The ordinary case on a fresh install. Appending "unknown" to every row
+  // would be noise; the connection page says the word where there is room.
+  const text = clusterRowText(CLUSTER, { status: "disconnected" }, LISTING);
+  assert.equal(text.description, "api.memql.localhost:443");
+});
+
+test("a row shows the recorded version beside the endpoint", () => {
+  const text = clusterRowText(
+    { ...CLUSTER, version: "v0.18.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.match(text.description, /api\.memql\.localhost:443/);
+  assert.match(text.description, /v0\.18\.0/);
+});
+
+test("a row behind the newest release carries the availability clause", () => {
+  const text = clusterRowText(
+    { ...CLUSTER, version: "v0.17.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.match(text.description, /v0\.17\.0/);
+  assert.match(text.description, /v0\.18\.0/);
+});
+
+test("a DISCONNECTED cluster still shows its version -- the whole point", () => {
+  const text = clusterRowText(
+    { ...CLUSTER, version: "v0.17.0" },
+    { status: "disconnected" },
+    LISTING,
+  );
+  assert.match(text.description, /v0\.17\.0/, "no session is needed to read this");
+});
+
+test("the tooltip carries the version sentence beneath the connection verdict", () => {
+  const text = clusterRowText(
+    { ...CLUSTER, version: "v0.17.0" },
+    { status: "connected", clusterName: "local", nodeId: "bff-0" },
+    LISTING,
+  );
+  assert.match(text.tooltip, /Connected \(node bff-0\)/, "the connection verdict stays first");
+  assert.match(text.tooltip, /v0\.18\.0/, "and the version sentence follows");
+});
+
+test("the tooltip is unchanged when nothing is known about the version", () => {
+  // A row that grew a paragraph saying "we know nothing" on every cluster
+  // would make the tooltip worth less, not more.
+  const text = clusterRowText(CLUSTER, { status: "disconnected" }, undefined);
+  assert.equal(text.tooltip, clusterRowStatus(CLUSTER, { status: "disconnected" }).tooltip);
+});
+
+test("an unfetched listing does not make a known version disappear", () => {
+  const text = clusterRowText(
+    { ...CLUSTER, version: "v0.17.0" },
+    { status: "disconnected" },
+    undefined,
+  );
+  assert.match(text.description, /v0\.17\.0/);
+  assert.doesNotMatch(text.description, /available/i, "and claims nothing about what exists");
+});
+
+test("the error row's description is left entirely alone", () => {
+  // The synthetic row clusters.yaml-failed produces has no cluster to version.
+  const text = clusterRowText({ name: "", endpoint: "" }, { status: "disconnected" }, LISTING);
+  assert.equal(text.description, "");
 });
