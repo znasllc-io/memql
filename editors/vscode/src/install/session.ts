@@ -43,7 +43,7 @@ import {
   type Step,
 } from "./graph.js";
 import { entryFor, readReceipt, removalParams, type Receipt } from "./receipt.js";
-import { capabilityScriptPath, type RunScript } from "./runner.js";
+import { capabilityScriptPath, withInstalledTools, type RunScript } from "./runner.js";
 import {
   DEFAULT_CAROOT_DIR,
   DEFAULT_IMAGE_REGISTRY,
@@ -521,15 +521,20 @@ function execute(
  * has ever heard of, and the very next steps (mkcert -install, k3d cluster
  * create) look them up on PATH. Prepending the directory for the child
  * processes is what makes the graph's own ordering mean anything.
+ *
+ * DELEGATED, NOT COPIED (memql#3911). The composition itself belongs to the
+ * spawner now, because a capability script run by anything OTHER than this
+ * session used to get a bare `process.env` and fail to find kubectl -- which is
+ * exactly what happened to `mintOwnershipLink`. What stays here is the one
+ * thing this session knows and the runner does not: an operator-chosen
+ * `toolDir`.
+ *
+ * The overlay is applied BEFORE the PATH composition so an `opts.env` naming
+ * its own PATH is still given the tool directory, rather than silently losing
+ * it to a spread ordering.
  */
 function childEnv(opts: SessionOptions): NodeJS.ProcessEnv {
-  const home = process.env.HOME ?? "";
-  const toolDir = opts.toolDir ?? path.join(home, ".memql", "bin");
-  return {
-    ...process.env,
-    PATH: `${toolDir}${path.delimiter}${process.env.PATH ?? ""}`,
-    ...(opts.env ?? {}),
-  };
+  return withInstalledTools({ ...process.env, ...(opts.env ?? {}) }, opts.toolDir);
 }
 
 /**
