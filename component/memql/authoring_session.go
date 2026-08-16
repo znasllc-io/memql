@@ -486,15 +486,23 @@ func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Sp
 // every query through it unconditionally.
 func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
 	// The STAGED registry makes this call non-trivial for an owner with no
-	// session registry (memql#3932), which is why the short-circuit now asks
-	// about both. A caller holding no session registry -- an HTTP-side execute,
-	// an automation firing under its author -- still has to resolve that
-	// author's staged constructs, and returning plain Execute would report their
-	// own durable construct as an unknown name.
-	staged := e.stagedAuthored
-	if strings.TrimSpace(owner) == "" || (reg == nil && staged == nil) {
+	// session registry (memql#3932), which is why the short-circuit asks about
+	// both. A caller holding no session registry -- an HTTP-side execute, an
+	// automation firing under its author -- still has to resolve that author's
+	// staged constructs, and returning plain Execute would report their own
+	// durable construct as an unknown name.
+	//
+	// IT ASKS PER OWNER, not per registry, and that is a hot-path property
+	// rather than a nicety. Both overlay builders copy EVERY core function and
+	// EVERY core spec into a fresh registry before layering anything on top, so
+	// a short-circuit keyed on "is a registry present" would pay that copy on
+	// every query from every caller as soon as one person on the node staged one
+	// construct -- or, on the gRPC stream, as soon as a session registry was
+	// lazily created. HasOwner answers a boolean without allocating.
+	if !authoredResolutionNeeded(owner, e.stagedAuthored, reg) {
 		return e.Execute(ctx, query)
 	}
+	staged := e.stagedAuthored
 	overlay := e.buildAuthoredFunctionOverlay(owner, staged, reg)
 	specOverlay := e.buildAuthoredSpecOverlay(owner, staged, reg)
 	ctx = ensureAuthorEnvelope(ctx, owner)
@@ -512,13 +520,27 @@ func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, 
 func (e *MemQLEngine) ExecuteInline(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
 	fns := e.functions
 	var specOverlay map[string]*Spec
-	staged := e.stagedAuthored
-	if (reg != nil || staged != nil) && strings.TrimSpace(owner) != "" {
+	if authoredResolutionNeeded(owner, e.stagedAuthored, reg) {
+		staged := e.stagedAuthored
 		fns = e.buildAuthoredFunctionOverlay(owner, staged, reg)
 		specOverlay = e.buildAuthoredSpecOverlay(owner, staged, reg)
 		ctx = ensureAuthorEnvelope(ctx, owner)
 	}
 	return e.executeWith(ctx, query, fns, specOverlay, true)
+}
+
+// authoredResolutionNeeded reports whether this owner has anything in either
+// authored layer, and therefore whether an overlay is worth building.
+//
+// ONE PREDICATE FOR BOTH EXECUTE PATHS, so they cannot answer it differently --
+// which they would, since ExecuteInline reached the same conclusion by a
+// differently-shaped condition and the two drifted the moment a third layer
+// arrived.
+func authoredResolutionNeeded(owner string, staged, session *AuthoredRuntimeRegistry) bool {
+	if strings.TrimSpace(owner) == "" {
+		return false
+	}
+	return staged.HasOwner(owner) || session.HasOwner(owner)
 }
 
 // ensureAuthorEnvelope stamps the author's AccessContext onto ctx when none is

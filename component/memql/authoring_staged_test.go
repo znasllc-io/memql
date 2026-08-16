@@ -475,6 +475,49 @@ func TestDemoteStagedConstruct_RetiresTheRowAndRegistersNothingShared(t *testing
 	}
 }
 
+// TestExecuteAuthoredSkipsTheOverlayWhenTheOwnerHasNothing pins the hot path.
+//
+// Both overlay builders copy EVERY core function and EVERY core spec into a
+// fresh registry before layering anything on top. That copy is fine when there
+// is something to layer and pure waste when there is not -- and "there is not"
+// is essentially every query on a cluster where one person has staged one
+// construct, or (on the gRPC stream) every query at all, since the session
+// registry is created lazily and is therefore non-nil after the first touch.
+//
+// A short-circuit keyed on "is a registry present" would pay that copy every
+// time. This asserts it is keyed on the OWNER.
+func TestExecuteAuthoredSkipsTheOverlayWhenTheOwnerHasNothing(t *testing.T) {
+	staged := NewAuthoredRuntimeRegistry()
+	mustRegister(t, staged, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "mine", Status: AuthoredActive,
+		Compiled: &Function{Name: "mine", FunctionKind: "query", Enabled: true}})
+	// A session registry that EXISTS and is empty -- exactly what the stream's
+	// lazy accessor hands over for a caller who has defined nothing.
+	empty := NewAuthoredRuntimeRegistry()
+
+	for _, tc := range []struct {
+		name    string
+		owner   string
+		session *AuthoredRuntimeRegistry
+		want    bool
+	}{
+		{"the author, with a staged construct", "owner-1", nil, true},
+		{"the author, plus an empty session registry", "owner-1", empty, true},
+		{"another owner, with a non-nil but empty session registry", "owner-2", empty, false},
+		{"another owner, no session registry", "owner-2", nil, false},
+		{"no owner at all", "", empty, false},
+	} {
+		if got := authoredResolutionNeeded(tc.owner, staged, tc.session); got != tc.want {
+			t.Errorf("%s: authoredResolutionNeeded = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+
+	// And the nil-registry case, which is what a node that has staged nothing
+	// holds: no allocation, no overlay, for anybody.
+	if authoredResolutionNeeded("owner-1", nil, nil) {
+		t.Error("an owner with no layers at all still asked for an overlay")
+	}
+}
+
 func namesOf(entries []ConstructCatalogEntry) map[string]bool {
 	out := map[string]bool{}
 	for _, e := range entries {
