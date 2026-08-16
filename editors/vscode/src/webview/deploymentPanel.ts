@@ -639,7 +639,7 @@ export class DeploymentPanel {
   /**
    * The button, end to end: refuse, or confirm once and run.
    *
-   * ONE CONFIRMATION covers the whole move, including the remote path\'s two
+   * ONE CONFIRMATION covers the whole move, including the remote path's two
    * RPCs. Prompting twice would turn a single decision into a sequence the
    * operator can be halfway through, and there is no coherent state to be
    * halfway into: a cut version with nothing shipped is a pending record they
@@ -717,7 +717,7 @@ export class DeploymentPanel {
       id: "cutVersion",
       env,
       bump: "patch",
-      // The version is NAMED rather than left to the engine\'s suggestion. The
+      // The version is NAMED rather than left to the engine's suggestion. The
       // operator confirmed a specific release; cutting whatever comes next
       // would ship a version nobody agreed to.
       version: target.to,
