@@ -176,3 +176,40 @@ export async function resolveOwnershipRoute(
 export function routeForClaimState(state: ClaimState): OwnershipRoute {
   return state === "unclaimed" ? "claim" : "signIn";
 }
+
+/**
+ * Whether a failed dial is really "this cluster has no FIRST credential yet"
+ * (memql#3909).
+ *
+ * A SUCCESSFUL INSTALL USED TO END IN A RED ERROR. `completeInstallHandoff`
+ * finishes by selecting the cluster it just registered, and the selection
+ * command dials -- while `runAuthenticated` resolves credentials BEFORE
+ * touching the network. So a cluster built thirty seconds ago, whose owner
+ * account by design holds nothing a person can sign in with, resolved as
+ * `missingCredential` without a dial ever being attempted. Guaranteed, on every
+ * clean install.
+ *
+ * What the operator was told was to hand-edit `clusters.yaml` with a JWT minted
+ * by curling `/oauth/token` -- the exact terminal round-trip memql#3906 exists
+ * to remove -- and the button offered was Sign in, which cannot succeed against
+ * an account with no passkey and no magic-link identity. The original dead end,
+ * reached from a new direction.
+ *
+ * So: when the reason is a missing credential and this machine can mint the
+ * first one, that is not a fault to report. It is the next step, and the editor
+ * has the action for it.
+ *
+ * NARROW ON PURPOSE, both halves. Only `missingCredential` -- an expired,
+ * revoked, wrong-class or unreachable failure is a real problem and must keep
+ * reading as one, because "set up a passkey" would be a confidently wrong
+ * remedy for every one of them. And only `enrol`, which already carries the
+ * checks that there is a pod here to mint in and an owner account to mint
+ * against; without it this would offer an action whose only outcome is a
+ * refusal.
+ */
+export function isFirstCredentialPending(
+  reason: string,
+  route: OwnershipRoute,
+): boolean {
+  return reason === "missingCredential" && route === "enrol";
+}

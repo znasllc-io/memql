@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { ClaimState } from "../src/clusters/claimState.js";
 import {
   evidenceSettlesIt,
+  isFirstCredentialPending,
   receiptNamesAnotherCluster,
   resolveOwnershipRoute,
   routeForClaimState,
@@ -163,4 +164,47 @@ test("an installed cluster is never sent to the sealed wizard", async () => {
     const got = await resolveOwnershipRoute(installed, probeReturning(state));
     assert.equal(got, "enrol", `local evidence must win over a ${state} probe`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// a missing FIRST credential is not a fault (memql#3909)
+// ---------------------------------------------------------------------------
+
+test("an installed cluster with no credential is an offer, not an error", () => {
+  // THE REPORTED BUG. `completeInstallHandoff` selects the cluster it just
+  // registered, the selection command dials, and `runAuthenticated` resolves
+  // credentials BEFORE touching the network -- so a cluster built thirty
+  // seconds ago resolved as `missingCredential` every single time. A
+  // successful install ended in a red toast telling the operator to hand-edit
+  // clusters.yaml with a JWT, offering Sign in, which cannot work.
+  assert.equal(isFirstCredentialPending("missingCredential", "enrol"), true);
+});
+
+test("a REAL auth failure keeps reading as one", () => {
+  // "Set up a passkey" would be a confidently wrong remedy for every one of
+  // these: the credential exists and is expired, revoked, of a class the mesh
+  // rejects, or the cluster is simply down.
+  for (const reason of [
+    "credentialExpired",
+    "reauthenticationRequired",
+    "wrongTokenClass",
+    "notConfigured",
+    "unreachable",
+    "lost",
+  ]) {
+    assert.equal(
+      isFirstCredentialPending(reason, "enrol"),
+      false,
+      `${reason} must not be answered with "set up a passkey"`,
+    );
+  }
+});
+
+test("a cluster this machine cannot enrol keeps the plain error", () => {
+  // `enrol` is what carries the checks that there is a pod here to mint in and
+  // an owner account to mint against. Without it the offer would be a button
+  // whose only outcome is a refusal -- which is the thing the tree menu guard
+  // refuses to ship for the same reason.
+  assert.equal(isFirstCredentialPending("missingCredential", "signIn"), false);
+  assert.equal(isFirstCredentialPending("missingCredential", "claim"), false);
 });
