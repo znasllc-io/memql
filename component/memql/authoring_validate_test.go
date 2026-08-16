@@ -92,7 +92,7 @@ func TestSessionDefine_CallableAndNeverShadowsCore(t *testing.T) {
 	}
 
 	// Net-new construct is callable by name via the owner's overlay.
-	overlay := e.buildAuthoredFunctionOverlay("owner-1", reg)
+	overlay := e.buildAuthoredFunctionOverlay("owner-1", nil, reg)
 	if got, _ := overlay.Get("mutationCreateMcpWidget"); got == nil {
 		t.Error("session-defined construct is not callable by name in the owner overlay")
 	}
@@ -103,13 +103,13 @@ func TestSessionDefine_CallableAndNeverShadowsCore(t *testing.T) {
 		OwnerUserId: "owner-1", Kind: "query", Name: "sharedName", Version: 1, Status: AuthoredActive,
 		Compiled: &Function{Name: "sharedName", FunctionKind: "query", Enabled: true, ExprSource: "authored"},
 	})
-	overlay = e.buildAuthoredFunctionOverlay("owner-1", reg)
+	overlay = e.buildAuthoredFunctionOverlay("owner-1", nil, reg)
 	if got, _ := overlay.Get("sharedName"); got == nil || got.ExprSource != "core" {
 		t.Errorf("session construct must NOT shadow core; overlay sharedName = %+v", got)
 	}
 
 	// A different owner never resolves owner-1's session constructs.
-	otherOverlay := e.buildAuthoredFunctionOverlay("owner-2", reg)
+	otherOverlay := e.buildAuthoredFunctionOverlay("owner-2", nil, reg)
 	if got, _ := otherOverlay.Get("mutationCreateMcpWidget"); got != nil {
 		t.Error("another owner must not resolve owner-1's session-defined construct")
 	}

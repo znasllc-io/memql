@@ -80,12 +80,39 @@ const (
 	ConstructKindSeed       = "seed"
 )
 
-// Construct origins. Exactly three, derived by deriveConstructOrigin.
+// Construct origins. Exactly four, derived by deriveConstructOrigin.
+//
+// A CLOSED VOCABULARY THAT CROSSES THE WIRE AS A BARE STRING, and every
+// consumer of it DEGRADES on an unrecognised value rather than failing:
+// sdk/ts's originFromWire collapses anything unknown to "core", and the
+// language server's trainingStateFor routes anything that is not "promoted"
+// to `seeded`, the one state with no actions. Both degrades are deliberate
+// and both are invisible -- which is why ConstructOriginVocabulary below
+// exists and is gated (memql#3934). Adding a constant here without adding it
+// there, and there without adding it to the two clients, produces a surface
+// that silently shows the wrong thing.
 const (
 	ConstructOriginCore     = "core"
 	ConstructOriginBundle   = "bundle"
 	ConstructOriginPromoted = "promoted"
+	// ConstructOriginStaged is the memql#3928 fourth value: durable, persisted,
+	// re-hydrated at boot -- and registered OWNER-SCOPED, so it is callable by
+	// its author and by nobody else. It is a sibling of `promoted` rather than a
+	// qualifier on it: the two differ in WHO can call the construct, which is
+	// the question every consumer of this field is asking.
+	ConstructOriginStaged = "staged"
 )
+
+// ConstructOriginVocabulary is the origin set, exported so the parity gate and
+// any client-side vocabulary check read the same list the derivation writes.
+// Order is the tier order -- sealed, shipped, shared, private -- not
+// alphabetical, because that is the order the docs present them in.
+var ConstructOriginVocabulary = []string{
+	ConstructOriginCore,
+	ConstructOriginBundle,
+	ConstructOriginPromoted,
+	ConstructOriginStaged,
+}
 
 // runnableConstructKinds is the five-kind runnable set, keyed by the kind this
 // catalog reports (so `mutation`, not the authored keyword `mutate`).
@@ -243,6 +270,17 @@ type ConstructCatalogEntry struct {
 	// already serves that file, and shipping every construct body on every
 	// catalog read would cost megabytes to duplicate a better path.
 	Source string
+	// Owner is the v1:identity:user.id a STAGED construct belongs to, and is
+	// empty for every other origin (memql#3928).
+	//
+	// It exists for the cluster-owner view, which is the only caller that can
+	// see more than one owner's staged constructs and therefore the only one for
+	// which the name alone is ambiguous: two authors may each stage `recentOrders`,
+	// and an operator auditing the tier needs to know whose is whose. A caller
+	// seeing only their own gets their own id back, which is redundant and
+	// harmless -- the alternative, populating it conditionally, would make the
+	// field mean different things to different callers.
+	Owner string
 }
 
 // promotedMarker is the value stored in MemQLEngine.promotedAuthored.
@@ -358,7 +396,7 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 				entry.Namespace = treeDomainOf(src.path)
 			}
 		}
-		entry.Origin = deriveConstructOrigin(entry.OriginPath, promoted, domains)
+		entry.Origin = deriveConstructOrigin(entry.OriginPath, promoted, false, domains)
 		entry.Runnable = runnableConstructKinds[entry.Kind]
 		entry.Args = catalogArgs(entry.Kind, entry.Name, entry.Runnable, source)
 		out = append(out, entry)
@@ -375,16 +413,133 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 	e.catalogSeeds(add)
 	e.catalogAutomations(add)
 
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Kind != out[j].Kind {
-			return out[i].Kind < out[j].Kind
-		}
-		if out[i].Namespace != out[j].Namespace {
-			return out[i].Namespace < out[j].Namespace
-		}
-		return out[i].Name < out[j].Name
-	})
+	sortConstructCatalog(out)
 	return out
+}
+
+// ConstructCatalogForOwner is ConstructCatalog plus the STAGED constructs the
+// caller may see (memql#3928), sorted by the same (kind, namespace, name).
+//
+// ConstructCatalog itself is UNCHANGED and stays owner-blind, deliberately. It
+// answers "what does this cluster run", every existing caller reads it as that,
+// and quietly making that answer depend on who is asking would change what a
+// shipped surface means without changing its name. Staged constructs are not
+// what the cluster runs -- they are what one author runs -- so they arrive
+// through a different door.
+//
+// WHO SEES WHAT. An ordinary caller sees the shared catalog plus their OWN
+// staged constructs, which is exactly the set that resolves for them at
+// execution time, so the catalog and the resolver cannot disagree. A CLUSTER
+// OWNER additionally sees every other owner's, each attributed on Owner: the
+// staged tier is durable state on their cluster, and an operator who cannot
+// enumerate it cannot audit it. That is a wider read than the resolver -- a
+// cluster owner cannot CALL another author's staged construct, and nothing here
+// makes them able to.
+//
+// A staged entry whose (kind, name) the shared catalog already reports is
+// DROPPED rather than listed twice. The shared registration is what actually
+// resolves for everyone, including the staged construct's own author (core-first
+// applies to trained constructs too), so listing both would put two entries
+// under one registry key -- and every consumer of this list, the language
+// server's catalog index among them, keys by (kind, name) and would pick between
+// them arbitrarily.
+func (e *MemQLEngine) ConstructCatalogForOwner(owner string, isClusterOwner bool) []ConstructCatalogEntry {
+	out := e.ConstructCatalog()
+	if e == nil || e.stagedAuthored == nil {
+		return out
+	}
+	owner = strings.TrimSpace(owner)
+	if owner == "" && !isClusterOwner {
+		return out
+	}
+
+	shared := make(map[string]bool, len(out))
+	for _, entry := range out {
+		shared[entry.Kind+"\x00"+entry.Name] = true
+	}
+
+	staged := e.stagedAuthored.ListForOwner(owner)
+	if isClusterOwner {
+		staged = e.stagedAuthored.ListAll()
+	}
+	added := false
+	for _, c := range staged {
+		if c == nil || c.Status != AuthoredActive {
+			continue
+		}
+		entry, ok := stagedCatalogEntry(c)
+		if !ok || shared[entry.Kind+"\x00"+entry.Name] {
+			continue
+		}
+		out = append(out, entry)
+		added = true
+	}
+	if !added {
+		return out
+	}
+	sortConstructCatalog(out)
+	return out
+}
+
+// stagedCatalogEntry projects one staged registry entry into a catalog entry.
+//
+// Everything it reports comes off the construct's own compiled form and source
+// -- there is no file to consult and no shared registry to look it up in, which
+// is the same position a promoted construct is in and is why Source is carried
+// inline here too.
+func stagedCatalogEntry(c *AuthoredConstruct) (ConstructCatalogEntry, bool) {
+	entry := ConstructCatalogEntry{
+		Name:       c.Name,
+		Owner:      c.OwnerUserId,
+		Origin:     ConstructOriginStaged,
+		SourceHash: sense.ConstructSourceHash(c.Source),
+		Source:     c.Source,
+	}
+	switch compiled := c.Compiled.(type) {
+	case *Function:
+		if compiled == nil {
+			return ConstructCatalogEntry{}, false
+		}
+		entry.Kind = functionCatalogKind(compiled)
+		entry.Description = compiled.Description
+		entry.BoundConcept = compiled.BoundConcept
+	case *Spec:
+		if compiled == nil {
+			return ConstructCatalogEntry{}, false
+		}
+		entry.Kind = ConstructKindSpec
+		if compiled.IsTrait {
+			entry.Kind = ConstructKindTrait
+		}
+		entry.Description = compiled.Description
+		entry.BoundConcept = compiled.BoundName
+	default:
+		// Nothing else is stageable. A registry entry of another shape is a bug
+		// upstream of here, and omitting it is better than reporting a construct
+		// with no kind that would sort ahead of the whole catalog.
+		return ConstructCatalogEntry{}, false
+	}
+	if entry.Kind == "" {
+		return ConstructCatalogEntry{}, false
+	}
+	entry.Runnable = runnableConstructKinds[entry.Kind]
+	entry.Args = catalogArgs(entry.Kind, entry.Name, entry.Runnable, c.Source)
+	return entry, true
+}
+
+// sortConstructCatalog is the catalog's stable (kind, namespace, name) order,
+// factored out so the owner-scoped pass re-sorts by the same comparison rather
+// than by a second copy of it.
+func sortConstructCatalog(entries []ConstructCatalogEntry) {
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Kind != entries[j].Kind {
+			return entries[i].Kind < entries[j].Kind
+		}
+		if entries[i].Namespace != entries[j].Namespace {
+			return entries[i].Namespace < entries[j].Namespace
+		}
+		return entries[i].Name < entries[j].Name
+	})
 }
 
 // deriveConstructOrigin is THE derivation of a construct's origin. Every caller
@@ -393,7 +548,17 @@ func (e *MemQLEngine) ConstructCatalog() []ConstructCatalogEntry {
 // A construct with no file and no promotion marker is core: the engine registers
 // a handful of constructs from Go rather than from the tree, and they ship
 // inside the engine binary, which is what core means.
-func deriveConstructOrigin(originPath string, promoted bool, domains map[string]string) string {
+//
+// `staged` is checked FIRST and is mutually exclusive with the rest by
+// construction: a staged construct is not in any shared registry, so nothing
+// that walks one can reach this with staged=true, and the owner-scoped catalog
+// pass that does set it never sets promoted. The ordering still matters as a
+// statement -- if the two ever did collide, the shared registration is what
+// actually resolves, so reporting `staged` would be the lie.
+func deriveConstructOrigin(originPath string, promoted, staged bool, domains map[string]string) string {
+	if staged {
+		return ConstructOriginStaged
+	}
 	if promoted {
 		return ConstructOriginPromoted
 	}

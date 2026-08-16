@@ -270,6 +270,35 @@ func (r *AuthoredRuntimeRegistry) ListForOwner(owner string) []*AuthoredConstruc
 	return out
 }
 
+// ListAll returns every registered construct across ALL owners, sorted by
+// (owner, kind, name) for stable output. Returns clones.
+//
+// Owner isolation is a RESOLUTION property, not a storage one: ListForOwner is
+// what every resolution path calls, and nothing here changes that. This exists
+// for the one caller entitled to a wider read than it can resolve -- the
+// cluster-owner construct catalog (memql#3934), auditing durable state on its
+// own cluster. Keep it that way: a resolver reaching for this instead of
+// ListForOwner would silently make one author's constructs callable by another.
+func (r *AuthoredRuntimeRegistry) ListAll() []*AuthoredConstruct {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	out := make([]*AuthoredConstruct, 0, len(r.constructs))
+	for _, entry := range r.constructs {
+		out = append(out, entry.clone())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OwnerUserId != out[j].OwnerUserId {
+			return out[i].OwnerUserId < out[j].OwnerUserId
+		}
+		if out[i].Kind != out[j].Kind {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
 // Count returns the total number of registered constructs across all owners
 // (active + paused). Used by tests and management telemetry.
 func (r *AuthoredRuntimeRegistry) Count() int {

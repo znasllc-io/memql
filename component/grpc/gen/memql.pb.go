@@ -8657,11 +8657,17 @@ type ConstructInfo struct {
 	// promoted construct, which has no file and whose target namespace the
 	// shared registries do not carry.
 	Namespace string `protobuf:"bytes,3,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	// origin is "core" | "bundle" | "promoted", DERIVED SERVER-SIDE in one
-	// place: core when the construct's file resolves inside the embedded tree,
-	// bundle when it resolves under a runtime-mounted product domain (what
+	// origin is "core" | "bundle" | "promoted" | "staged", DERIVED SERVER-SIDE
+	// in one place: core when the construct's file resolves inside the embedded
+	// tree, bundle when it resolves under a runtime-mounted product domain (what
 	// MEMQL_DSL_PATH registers), promoted when the engine holds an
-	// authored-promotion marker for it. No client re-derives this.
+	// authored-promotion marker for it, staged when it is durable but registered
+	// OWNER-SCOPED and therefore callable by its author alone (memql#3928). No
+	// client re-derives this.
+	//
+	// A CLOSED VOCABULARY that every client degrades on rather than rejects, so
+	// adding a value here is a coordinated change: see
+	// memql.ConstructOriginVocabulary and the parity gate over it.
 	Origin string `protobuf:"bytes,4,opt,name=origin,proto3" json:"origin,omitempty"`
 	// origin_path is the construct's file relative to the DSL tree root
 	// ("cognition/queries.memql"). EMPTY for a promoted construct -- it has no
@@ -8728,7 +8734,17 @@ type ConstructInfo struct {
 	// ONE automation form, from the LSP when the .memql file is open and from
 	// this catalog when it is not. TestRunnableTriggerMatchesConstructTrigger
 	// pins the two.
-	Trigger       *ConstructTrigger `protobuf:"bytes,12,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	Trigger *ConstructTrigger `protobuf:"bytes,12,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	// owner is the v1:identity:user.id a STAGED construct belongs to, and is
+	// EMPTY for every other origin (memql#3928).
+	//
+	// A caller sees the shared catalog plus their own staged constructs; a
+	// CLUSTER OWNER additionally sees every other author's, which is the only
+	// case where the name alone is ambiguous -- two authors may each stage
+	// `recentOrders`, and an operator auditing the tier needs to know whose is
+	// whose. Populated unconditionally for a staged construct rather than only
+	// for the cluster-owner read, so the field means one thing to every caller.
+	Owner         string `protobuf:"bytes,13,opt,name=owner,proto3" json:"owner,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -8845,6 +8861,13 @@ func (x *ConstructInfo) GetTrigger() *ConstructTrigger {
 		return x.Trigger
 	}
 	return nil
+}
+
+func (x *ConstructInfo) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
 }
 
 // ConstructTrigger is an automation's trigger, projected exactly as the
@@ -19073,7 +19096,7 @@ const file_memql_proto_rawDesc = "" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12?\n" +
 	"\n" +
 	"constructs\x18\x02 \x03(\v2\x1f.znasllc.memql.v1.ConstructInfoR\n" +
-	"constructs\"\x9c\x03\n" +
+	"constructs\"\xb2\x03\n" +
 	"\rConstructInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x1c\n" +
@@ -19089,7 +19112,8 @@ const file_memql_proto_rawDesc = "" +
 	" \x01(\tR\n" +
 	"sourceHash\x12\x16\n" +
 	"\x06source\x18\v \x01(\tR\x06source\x12<\n" +
-	"\atrigger\x18\f \x01(\v2\".znasllc.memql.v1.ConstructTriggerR\atrigger\"^\n" +
+	"\atrigger\x18\f \x01(\v2\".znasllc.memql.v1.ConstructTriggerR\atrigger\x12\x14\n" +
+	"\x05owner\x18\r \x01(\tR\x05owner\"^\n" +
 	"\x10ConstructTrigger\x12\x18\n" +
 	"\aconcept\x18\x01 \x01(\tR\aconcept\x12\x14\n" +
 	"\x05event\x18\x02 \x01(\tR\x05event\x12\x1a\n" +

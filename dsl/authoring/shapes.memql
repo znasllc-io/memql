@@ -39,6 +39,13 @@ shape construct constructFull {
   name
   targetNamespace
   source
+  // grammarVersion is stamped at create by the durable promote/stage write path
+  // and read by explainStaleGrammarStamp, which turns a recompile failure into
+  // the named memqlmigrate command instead of a raw parse error. It was MISSING
+  // from this list until memql#3929, so AuthoringConstructRow.GrammarVersion was
+  // always empty and that diagnosis could never fire -- the same class of defect
+  // the conceptRetired note below records, on the field that explains failures.
+  grammarVersion
   compiledForm
   status
   // conceptRetired is what the boot re-hydration reads to replay a demoted

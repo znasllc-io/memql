@@ -224,8 +224,15 @@ type promoteStore interface {
 	// promotion (status "active", marked via the durable-promote prefix/title).
 	CreatePromoteBundle(ctx context.Context, bundleId, title, summary string) error
 	// CreatePromoteConstruct persists a v1:authoring:construct row capturing the
-	// promoted construct's kind + name + source (status "active").
-	CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source string) error
+	// promoted construct's kind + name + source at the given lifecycle status.
+	//
+	// The status is a PARAMETER rather than the hard-coded "active" it was
+	// before memql#3930, because the staged tier writes the identical row at a
+	// different status -- the row write is the same act, the tier is data on it.
+	// Giving the staged path a store method of its own would have been a second
+	// copy of one mutation call, and the two would drift the first time either
+	// gained a field.
+	CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error
 }
 
 // promoteConstructDurableWithStore is the store-driven core, split out so it is
@@ -272,7 +279,7 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 		return fmt.Errorf("authoring: persist promote bundle: %w", err)
 	}
 	targetNamespace := promoteTargetNamespace(c)
-	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source); err != nil {
+	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source, string(BundleActive)); err != nil {
 		return fmt.Errorf("authoring: persist promote construct: %w", err)
 	}
 
@@ -401,6 +408,13 @@ type RehydrateResult struct {
 	// reserved, nothing registered), neither re-hydrated nor failed
 	// (memql#2643).
 	SkippedDisabled int `json:"skippedDisabled,omitempty"`
+	// Staged counts rows that came back OWNER-SCOPED rather than shared
+	// (memql#3928). They are counted in Rehydrated too, because they were
+	// re-registered; this says how many of them resolve for their author alone,
+	// which is the difference an operator reading the boot log needs to see --
+	// a staged construct is not callable by the cluster, and a boot log that
+	// reported "12 re-hydrated" with no split would say it was.
+	Staged int `json:"staged,omitempty"`
 	// ConceptsRetired counts promoted concepts that came back REGISTERED BUT
 	// RETIRED (memql#3756) -- readable, closed to new writes. They are counted in
 	// Rehydrated too, because they were re-registered; this says how many of them
@@ -425,12 +439,9 @@ type promoteRehydrateStore interface {
 // rehydratePromotedConstructsWithStore is the store-driven core, split out so it
 // is unit testable with a fake promoteRehydrateStore (no live DB).
 func rehydratePromotedConstructsWithStore(ctx context.Context, store promoteRehydrateStore, opts ...rehydrateOption) (RehydrateResult, error) {
-	cfg := rehydrateConfig{promote: nil}
-	for _, o := range opts {
-		o(&cfg)
-	}
-	if cfg.promote == nil {
-		return RehydrateResult{}, fmt.Errorf("authoring: re-hydration requires a recompile-and-promote step")
+	cfg, err := newRehydrateConfig(opts...)
+	if err != nil {
+		return RehydrateResult{}, err
 	}
 	bundles, err := store.LoadPromotedBundles(ctx)
 	if err != nil {
@@ -447,27 +458,52 @@ func rehydratePromotedConstructsWithStore(ctx context.Context, store promoteRehy
 			if !isDurablePromotableKind(row.Kind) {
 				continue
 			}
-			if isRetiredConstructStatus(row.Status) {
-				// A demoted (retired) construct must NOT re-register after a
-				// restart -- skip it so the demote survives the boot walk.
-				continue
-			}
-			result.Seen++
-			if perr := cfg.promote(ctx, row); perr != nil {
-				if errors.Is(perr, errRehydrateSkippedDisabled) {
-					// Intentional skip (#2607/#2643): the stored row is
-					// @disabled -- name reserved, nothing registered, and
-					// deliberately NOT a Failed entry.
-					result.SkippedDisabled++
-					continue
-				}
-				result.Failed = append(result.Failed, row.Kind+":"+row.Name)
-				continue
-			}
-			result.Rehydrated++
+			cfg.rehydrateRow(ctx, row, &result)
 		}
 	}
 	return result, nil
+}
+
+// rehydrateRow is THE three-way route (memql#3928), shared by the boot walk and
+// the live single-bundle propagation walk so the two cannot disagree about what
+// a status means:
+//
+//	retired -> skip, so a demote survives the restart;
+//	staged  -> register OWNER-SCOPED, resolvable for its author alone;
+//	active  -> promote into the shared registry, callable by every session.
+//
+// It was a two-way check -- retired or not -- in both walks. The staged tier
+// turns "not retired" from an answer into a question, and answering it in one
+// place is what keeps a construct from coming back shared on the node that
+// re-hydrated it at boot and owner-scoped on the peer that received the
+// broadcast.
+func (cfg rehydrateConfig) rehydrateRow(ctx context.Context, row AuthoringConstructRow, result *RehydrateResult) {
+	if isRetiredConstructStatus(row.Status) {
+		// A demoted (retired) construct must NOT re-register after a
+		// restart -- skip it so the demote survives the boot walk.
+		return
+	}
+	staged := isStagedConstructStatus(row.Status)
+	step := cfg.promote
+	if staged {
+		step = cfg.stage
+	}
+	result.Seen++
+	if perr := step(ctx, row); perr != nil {
+		if errors.Is(perr, errRehydrateSkippedDisabled) {
+			// Intentional skip (#2607/#2643): the stored row is
+			// @disabled -- name reserved, nothing registered, and
+			// deliberately NOT a Failed entry.
+			result.SkippedDisabled++
+			return
+		}
+		result.Failed = append(result.Failed, row.Kind+":"+row.Name)
+		return
+	}
+	result.Rehydrated++
+	if staged {
+		result.Staged++
+	}
 }
 
 // rehydrateConfig + rehydrateOption let the engine inject its
@@ -475,12 +511,42 @@ func rehydratePromotedConstructsWithStore(ctx context.Context, store promoteRehy
 // testable.
 type rehydrateConfig struct {
 	promote func(ctx context.Context, row AuthoringConstructRow) error
+	// stage is the owner-scoped counterpart, taken for a row whose status is
+	// "staged" (memql#3928). REQUIRED, not optional-with-a-fallback: a walk
+	// missing it would route a staged row to the shared promote, which is the
+	// one outcome the tier exists to prevent, and it would do so silently.
+	stage func(ctx context.Context, row AuthoringConstructRow) error
 }
 
 type rehydrateOption func(*rehydrateConfig)
 
 func withRehydratePromote(fn func(ctx context.Context, row AuthoringConstructRow) error) rehydrateOption {
 	return func(c *rehydrateConfig) { c.promote = fn }
+}
+
+func withRehydrateStage(fn func(ctx context.Context, row AuthoringConstructRow) error) rehydrateOption {
+	return func(c *rehydrateConfig) { c.stage = fn }
+}
+
+// newRehydrateConfig applies the options and refuses a walk that cannot take
+// every branch of the three-way route.
+func newRehydrateConfig(opts ...rehydrateOption) (rehydrateConfig, error) {
+	var cfg rehydrateConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
+	// The partially-built cfg comes back alongside the error, not a zero value:
+	// the propagation walk reports a MISSING PROMOTE step under its own sentinel
+	// (errAuthoringPromoteNoRecompile, which its subscriber matches on), and it
+	// can only tell that case from a missing stage step by reading the config it
+	// asked for.
+	if cfg.promote == nil {
+		return cfg, fmt.Errorf("authoring: re-hydration requires a recompile-and-promote step")
+	}
+	if cfg.stage == nil {
+		return cfg, fmt.Errorf("authoring: re-hydration requires a recompile-and-stage step")
+	}
+	return cfg, nil
 }
 
 // explainStaleGrammarStamp decorates a recompile failure with the
@@ -759,7 +825,7 @@ func (s *enginePromoteStore) CreatePromoteBundle(ctx context.Context, bundleId, 
 	return nil
 }
 
-func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source string) error {
+func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
 	if _, err := s.engine.Execute(ctx, mutationCall("createAuthoringConstruct",
 		[2]string{"constructId", constructId},
 		[2]string{"bundleId", bundleId},
@@ -773,10 +839,13 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 	)); err != nil {
 		return err
 	}
-	// Flip the construct to active so it reads as a live promoted record.
+	// Flip the construct off "draft" -- to "active" for a promote, "staged" for
+	// a stage. createAuthoringConstruct writes every row draft; this is the
+	// single place the tier lands on the row, which is why the parameter is here
+	// rather than a second mutation call in the staged path.
 	if _, err := s.engine.Execute(ctx, mutationCall("setConstructStatus",
 		[2]string{"constructId", constructId},
-		[2]string{"status", "active"},
+		[2]string{"status", status},
 	)); err != nil {
 		return err
 	}
@@ -846,5 +915,7 @@ func (s *enginePromoteRehydrateStore) LoadConstructsForBundle(ctx context.Contex
 // rehydratePromotedNow is the engine-bound invocation used at boot: it wires the
 // engine's recompileAndPromoteRow into the store-driven walk.
 func (e *MemQLEngine) rehydratePromotedNow(ctx context.Context, store promoteRehydrateStore) (RehydrateResult, error) {
-	return rehydratePromotedConstructsWithStore(ctx, store, withRehydratePromote(e.recompileAndPromoteRow))
+	return rehydratePromotedConstructsWithStore(ctx, store,
+		withRehydratePromote(e.recompileAndPromoteRow),
+		withRehydrateStage(e.recompileAndStageRow))
 }

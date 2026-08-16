@@ -647,6 +647,12 @@ var catalogFieldsDeliberatelyNotRead = map[string]string{
 	"args":         "the argument form; memql/runnableConstructs owns it for an open document",
 	"boundConcept": "part of the construct's signature, which the buffer already states",
 	"source":       "carried only for a construct with no file; the hash is what a comparison needs",
+	"owner": "which USER staged a construct (memql#3928). Training state answers what the CALLER's " +
+		"relationship to a construct is, and `origin` already carries that -- `staged` means staged " +
+		"for whoever asked, because the catalog a caller receives is scoped to them. `owner` " +
+		"distinguishes two staged constructs FROM EACH OTHER, which only the cluster-owner catalog " +
+		"view has more than one of, and which no state rule reads. Reading it here would need the " +
+		"server to know the connected user's id, which it has no other reason to hold",
 }
 
 // TestCatalogConstructMatchesConstructInfo pins the pushed catalog entry to the

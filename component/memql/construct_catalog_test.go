@@ -432,7 +432,7 @@ func TestDeriveConstructOrigin(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := deriveConstructOrigin(tc.path, tc.promoted, domains); got != tc.want {
+			if got := deriveConstructOrigin(tc.path, tc.promoted, false, domains); got != tc.want {
 				t.Errorf("deriveConstructOrigin(%q, %v) = %q, want %q", tc.path, tc.promoted, got, tc.want)
 			}
 		})

@@ -124,7 +124,7 @@ func TestBuildAuthoredFunctionOverlay_CoreFirst(t *testing.T) {
 	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "query", Name: "ownPrivate", Version: 1, Status: AuthoredActive,
 		Compiled: &Function{Name: "ownPrivate", FunctionKind: "query", Enabled: true}})
 
-	overlay := e.buildAuthoredFunctionOverlay("owner-1", reg)
+	overlay := e.buildAuthoredFunctionOverlay("owner-1", nil, reg)
 
 	// Collision: core wins.
 	if got, _ := overlay.Get("sharedName"); got == nil || got.ExprSource != "core" {
@@ -207,7 +207,7 @@ func TestBuildAuthoredSpecOverlay_CoreFirst(t *testing.T) {
 	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessRowSpec", Version: 1, Status: AuthoredActive,
 		Compiled: &Spec{Name: "mcpSessRowSpec", Kind: SpecKindRow, Expr: rowComparison("kind", "widget")}})
 
-	overlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+	overlay := e.buildAuthoredSpecOverlay("owner-1", nil, reg)
 
 	// Collision: core wins (the session redefinition is dropped, not applied).
 	got := overlay["specIsActiveRecord"]
@@ -223,7 +223,7 @@ func TestBuildAuthoredSpecOverlay_CoreFirst(t *testing.T) {
 	}
 
 	// A different owner can NOT see owner-1's session spec.
-	otherOverlay := e.buildAuthoredSpecOverlay("owner-2", reg)
+	otherOverlay := e.buildAuthoredSpecOverlay("owner-2", nil, reg)
 	if otherOverlay["mcpSessRowSpec"] != nil {
 		t.Error("owner-2 must not resolve owner-1's session spec")
 	}
@@ -245,7 +245,7 @@ func TestResolveAuthoredSpecOverlay_InlineAndNeverShadow(t *testing.T) {
 	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "shared", Version: 1, Status: AuthoredActive,
 		Compiled: &Spec{Name: "shared", Kind: SpecKindRow, Expr: rowComparison("session", true)}})
 
-	overlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+	overlay := e.buildAuthoredSpecOverlay("owner-1", nil, reg)
 
 	// (1) A reference to the session spec inlines its body.
 	resolved, err := e.resolveAuthoredSpecOverlay(&SpecReferenceExpression{Name: "mcpSessRowSpec"}, overlay)
@@ -310,8 +310,8 @@ func TestParseWithFunctions_SessionSpecInAuthoredQueryFilter(t *testing.T) {
 	mustRegister(t, reg, &AuthoredConstruct{OwnerUserId: "owner-1", Kind: "spec", Name: "mcpSessRowSpec", Version: 1, Status: AuthoredActive,
 		Compiled: &Spec{Name: "mcpSessRowSpec", Kind: SpecKindRow, Expr: rowComparison("kind", "widget")}})
 
-	fnOverlay := e.buildAuthoredFunctionOverlay("owner-1", reg)
-	specOverlay := e.buildAuthoredSpecOverlay("owner-1", reg)
+	fnOverlay := e.buildAuthoredFunctionOverlay("owner-1", nil, reg)
+	specOverlay := e.buildAuthoredSpecOverlay("owner-1", nil, reg)
 
 	// Authored path: the session spec is inlined; no SpecReferenceExpression survives.
 	plan, err := e.parseWithFunctions("querySessionWidgets()", fnOverlay, specOverlay, false)

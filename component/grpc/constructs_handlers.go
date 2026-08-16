@@ -31,7 +31,16 @@ func (s *streamSession) handleListConstructs(envelope *memqlv1.MemqlClientMessag
 		return s.sendQueryError(requestId, envelope.GetMessageId(), codes.FailedPrecondition, "list_constructs: engine is not available on this node")
 	}
 
-	entries := s.service.engine.ConstructCatalog()
+	// Owner-aware (memql#3928): the shared catalog PLUS the staged constructs
+	// this caller may see -- their own, and for a cluster owner every author's.
+	// The stream's resolved access context is the only input; an unauthenticated
+	// stream resolves to no owner and gets the shared catalog unchanged, which is
+	// what ConstructCatalog returned for everyone before the staged tier existed.
+	owner, isClusterOwner := "", false
+	if ac := s.ensureAccess(s.stream.Context()); ac != nil {
+		owner, isClusterOwner = ac.UserId, ac.IsClusterOwner()
+	}
+	entries := s.service.engine.ConstructCatalogForOwner(owner, isClusterOwner)
 	out := make([]*memqlv1.ConstructInfo, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, toConstructInfo(e))
@@ -85,5 +94,6 @@ func toConstructInfo(e memqlengine.ConstructCatalogEntry) *memqlv1.ConstructInfo
 		SourceHash:   e.SourceHash,
 		Source:       e.Source,
 		Trigger:      trigger,
+		Owner:        e.Owner,
 	}
 }

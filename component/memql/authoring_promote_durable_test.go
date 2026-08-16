@@ -18,6 +18,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/znasllc-io/memql/component/auth"
 )
 
 // fakePromoteStore records the bundle/construct rows the durable promote
@@ -32,10 +34,30 @@ func (s *fakePromoteStore) CreatePromoteBundle(_ context.Context, bundleId, titl
 	return nil
 }
 
-func (s *fakePromoteStore) CreatePromoteConstruct(_ context.Context, constructId, bundleId, kind, name, targetNamespace, source string) error {
+// CreatePromoteConstruct records the row, INCLUDING the status it was written
+// at. The status is what tells a promote from a stage (memql#3930) -- the two
+// paths write the identical row through this one call -- so a fake that dropped
+// it could not tell the tiers apart, which is the only thing a staged test is
+// asking about.
+//
+// The owner comes off the context because that is where it comes from in
+// production: the caller stamps the author's envelope and the #954 mutation
+// reads actor.userId. Recording it here keeps the fake's rows usable by the
+// owner-filtering walks the staged transitions run.
+func (s *fakePromoteStore) CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error {
+	owner := ""
+	if ac, ok := auth.AccessFromContext(ctx); ok && ac != nil {
+		owner = ac.UserId
+	}
 	s.constructs = append(s.constructs, AuthoringConstructRow{
-		Id: constructId, BundleId: bundleId, Kind: kind, Name: name, TargetNamespace: targetNamespace, Source: source,
+		Id: constructId, OwnerUserId: owner, BundleId: bundleId, Kind: kind, Name: name,
+		TargetNamespace: targetNamespace, Source: source, Status: status,
 	})
+	for i := range s.bundles {
+		if s.bundles[i].Id == bundleId {
+			s.bundles[i].OwnerUserId = owner
+		}
+	}
 	return nil
 }
 
@@ -107,7 +129,7 @@ func TestPromoteConstructDurable_PromotedFunctionCallableInFreshSession(t *testi
 	// A FRESH session (a different owner, empty registry) sees the promoted
 	// construct through the core-first overlay -- it is in the shared registry.
 	freshReg := NewAuthoredRuntimeRegistry()
-	overlay := e.buildAuthoredFunctionOverlay("owner-2", freshReg)
+	overlay := e.buildAuthoredFunctionOverlay("owner-2", nil, freshReg)
 	if got, _ := overlay.Get("promotedDurableQuery"); got == nil {
 		t.Error("promoted construct not callable by a fresh session")
 	}

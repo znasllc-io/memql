@@ -150,14 +150,16 @@ mutate bundle retireAuthoringBundle {
   }
 }
 
-/// Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The
-/// authored runtime flips constructs to active on bundle activation and retired on bundle
-/// retirement.
+/// Set a construct's lifecycle status (draft / staged / active / retired), following its parent
+/// bundle. The authored runtime flips constructs to active on bundle activation and retired on
+/// bundle retirement. `staged` is the owner-scoped middle tier (memql#3928): the durable stage path
+/// writes it, and training flips the SAME row staged -> active rather than writing a second one, so
+/// a trained construct has one lifecycle rather than two rows disagreeing about which tier it is in.
 @actor
 mutate construct setConstructStatus {
   args {
     constructId  string!
-    status       enum("draft", "active", "retired")!
+    status       enum("draft", "staged", "active", "retired")!
   }
   update {
     id: args.constructId
