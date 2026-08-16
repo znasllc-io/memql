@@ -34,6 +34,8 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { readClustersFileSafe } from "../clusters/file.js";
 import type { PresenceResult, PresenceVerdict } from "../clusters/presence.js";
 import { defaultReceiptPath, readReceipt, type Receipt } from "../install/receipt.js";
+import { describeVersion } from "../version/describe.js";
+import type { ReleaseListing } from "../version/releaseCache.js";
 import {
   LOCAL_INSTANCE_NAME,
   displayVersion,
@@ -233,7 +235,17 @@ export interface InstanceRowStatus {
   tooltip: string;
 }
 
-export function instanceRowStatus(instance: Instance): InstanceRowStatus {
+/**
+ * @param listing the release listing, or undefined when nothing has been
+ * fetched. REQUIRED rather than optional: a caller with no listing is making a
+ * decision ("render without availability"), and an optional parameter would let
+ * a new call site make it by omission -- which presents as the availability
+ * clause silently never appearing on one surface.
+ */
+export function instanceRowStatus(
+  instance: Instance,
+  listing: ReleaseListing | undefined,
+): InstanceRowStatus {
   if (instance.presence === "absent") {
     return {
       icon: "absent",
@@ -247,21 +259,38 @@ export function instanceRowStatus(instance: Instance): InstanceRowStatus {
   // The version is ALWAYS printed, and printed as the word "unknown" when it
   // could not be resolved. A blank reads as a fact about the instance ("it has
   // no version") when it is a fact about the read.
+  //
+  // WHICH IS WHY `short` IS NOT USED ON ITS OWN (memql#3996). describeVersion
+  // returns "" for an unrecorded version, because a Clusters-tree row that
+  // appended "unknown" to every cluster on a fresh install would be noise.
+  // These rows made the opposite call first and it still holds here: this row
+  // already prints a version for every instance, so falling silent for one
+  // instance would read as a fact about that instance.
   const version = displayVersion(instance.version);
+  const described = describeVersion({ recorded: instance.version, listing });
+  // `short` carries the availability clause in the one state that has one --
+  // `v0.18.0 - v0.19.0 available` -- and is otherwise just the version. Taking
+  // the wording from there rather than re-composing it is what keeps this row
+  // and the Clusters tree from saying "available" two different ways.
+  const versionText = described.short === "" ? version : described.short;
+  // The presence verdict stays FIRST in the tooltip. It is what an operator
+  // opened the row for; the version is context beneath it, and a tooltip that
+  // led with the version would bury the reason the row is amber.
   if (instance.presence === "installed-unreachable") {
     return {
       icon: "unreachable",
-      description: `not answering - ${version}`,
+      description: `not answering - ${versionText}`,
       tooltip:
-        instance.kind === "local"
+        (instance.kind === "local"
           ? `A local cluster is installed but is not answering. Version ${version}.`
-          : `${instance.name} is not answering. Version ${version}.`,
+          : `${instance.name} is not answering. Version ${version}.`) +
+        `\n${described.sentence}`,
     };
   }
   return {
     icon: "healthy",
-    description: `healthy - ${version}`,
-    tooltip: `${instance.name} is healthy. Version ${version}.`,
+    description: `healthy - ${versionText}`,
+    tooltip: `${instance.name} is healthy. Version ${version}.\n${described.sentence}`,
   };
 }
 

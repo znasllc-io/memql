@@ -429,6 +429,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     clustersPath,
     receiptPath: defaultReceiptPath(),
     presence: () => presence.get(),
+    // The SHARED cache the Clusters tree uses (memql#3996). Single-flight, so
+    // both trees open still cost one `git ls-remote`; constructing a second one
+    // here would double the work and let the two surfaces disagree about what
+    // the newest release is.
+    releases: releaseCache,
     connection: () => {
       const state = connections?.state;
       if (state === undefined || state.status === 'disconnected') return undefined;
@@ -473,6 +478,10 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           receiptPath: defaultReceiptPath(),
           presence: () => presence.get(),
         },
+        // Same shared cache as the two trees (memql#3996): the page's `latest`
+        // fact and the row's availability clause are the same claim, and they
+        // must not be able to differ.
+        releases: releaseCache,
         // The same two thunks the tree takes, for the same reason: a remote
         // instance's version AND its history are the connected cluster's rows,
         // and the connection changes without this page being told.
