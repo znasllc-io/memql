@@ -58,6 +58,7 @@ import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { installSessionOptions, runInstall, type SessionHooks } from "../install/session.js";
 import { listReleaseTags, tagProblem, type TagListing } from "../install/tags.js";
+import type { ReleaseCache } from "../version/releaseCache.js";
 import {
   DEFAULT_INPUTS,
   AddClusterState,
@@ -101,6 +102,21 @@ export interface DeploymentPanelDeps {
   runScript?: SessionHooks["run"];
   /** Injected by tests; the real `git ls-remote` when absent. */
   listTags?: (cwd: string) => Promise<TagListing>;
+  /**
+   * The release listing, for the `latest` fact and the availability clause
+   * (memql#3996).
+   *
+   * The SHARED cache instance, not one built here: it is single-flight, so a
+   * page open beside the two trees still costs one `git ls-remote`. Optional
+   * for the reason the trees make it optional -- a test gets a page that
+   * renders versions and nothing else rather than one it cannot construct.
+   *
+   * Distinct from `listTags` above, deliberately. That one lists the tags of
+   * THIS cluster's checkout, which is what the operator is choosing among; this
+   * one answers "what has the project released", which is a question about the
+   * project. They are usually the same set and are not the same question.
+   */
+  releases?: ReleaseCache;
 
   // --- the remote half (memql#3740) ---
 
@@ -401,6 +417,9 @@ export class DeploymentPanel {
     const cwd = this.deps.installRoot;
     const list = this.deps.listTags ?? ((dir: string) => listReleaseTags({ cwd: dir }));
     this.listing = await list(cwd);
+    // Warmed in the same async phase, so the page paints once with both
+    // answers rather than twice. `render` below reads it back through peek().
+    await this.deps.releases?.get();
     if (this.disposed) return;
     this.render();
   }
@@ -693,6 +712,8 @@ export class DeploymentPanel {
             nowMs: Date.now(),
             outcome: this.outcome,
             error: this.error,
+            // peek(), never get(): bodyHtml is synchronous. loadTags warms it.
+            releases: this.deps.releases?.peek(),
           });
         }
         return renderInstanceOverview({
@@ -701,6 +722,7 @@ export class DeploymentPanel {
           actions: instanceActions(instance),
           nowMs: Date.now(),
           error: this.error,
+          releases: this.deps.releases?.peek(),
         });
     }
   }

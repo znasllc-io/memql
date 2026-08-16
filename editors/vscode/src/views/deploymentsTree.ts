@@ -41,6 +41,7 @@ import {
   type InstanceRowIcon,
   type RunRowIcon,
 } from "../state/deploymentsCatalog.js";
+import type { ReleaseCache } from "../version/releaseCache.js";
 
 /**
  * A row.
@@ -65,6 +66,15 @@ export type DeploymentsTreeDeps = Omit<CatalogInputs, "connection" | "readDeploy
   readDeployments: () => CatalogInputs["readDeployments"];
   /** Injectable clock, so relative times are testable. */
   now?: () => number;
+  /**
+   * The release listing, for the availability clause on each instance row
+   * (memql#3996).
+   *
+   * Optional so a caller that does not want it -- a test, a stripped build --
+   * gets a tree that renders versions and nothing else, rather than one that
+   * cannot be constructed. Same call views/clustersTree.ts makes.
+   */
+  releases?: ReleaseCache;
 };
 
 export class DeploymentsTreeProvider implements vscode.TreeDataProvider<DeploymentNode> {
@@ -88,6 +98,11 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
     if (element === undefined) {
       const catalog = await this.load();
       if (catalog.error !== undefined) return [{ kind: "error", message: catalog.error }];
+      // Fire-and-forget, exactly as views/clustersTree.ts does it: THIS is what
+      // triggers the first release fetch, so activation stays offline and the
+      // work is caused by somebody actually looking at the tree. Not awaited,
+      // because the rows must render now from what is already known.
+      void this.learnReleases();
       return catalog.instances.map((instance) => ({ kind: "instance", instance }));
     }
     if (element.kind !== "instance") return [];
@@ -106,13 +121,38 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
       : runItem(node.run, (this.deps.now ?? Date.now)());
   }
 
+  /**
+   * Fetch the release listing, then repaint IF IT CHANGED.
+   *
+   * The conditional repaint is what makes this terminate: a repaint calls
+   * getChildren, which calls this again, so firing unconditionally would be an
+   * infinite loop. On the second pass the listing is inside its TTL, nothing
+   * changed, and nothing fires.
+   *
+   * The cache is single-flight and shared with the Clusters tree, so a user
+   * with both views open still pays for one `git ls-remote` -- which is the
+   * reason to import the shared instance rather than construct one here.
+   */
+  private async learnReleases(): Promise<void> {
+    const releases = this.deps.releases;
+    if (releases === undefined) return;
+    const before = releases.peek();
+    // Compared on the two fields that describe the ANSWER rather than on object
+    // identity: get() hands back a fresh snapshot every call.
+    const after = await releases.get();
+    if (before?.fetchedAt !== after.fetchedAt || before?.error !== after.error) {
+      this.changed.fire(undefined);
+    }
+  }
+
   private async load(): Promise<Catalog> {
     if (this.catalog !== undefined) return this.catalog;
     // The two thunks are RESOLVED here and dropped from what is passed on, so
     // the catalog receives values rather than the functions that produce them.
     // `now` goes with them: it is this view's clock for relative times, not a
-    // catalog input.
-    const { connection, readDeployments, now: _now, ...rest } = this.deps;
+    // catalog input. So is `releases` -- it decides how a row READS, and the
+    // catalog is what a row reads ABOUT.
+    const { connection, readDeployments, now: _now, releases: _releases, ...rest } = this.deps;
     const resolvedConnection = connection();
     const resolvedReadDeployments = readDeployments();
     this.catalog = await buildCatalog({
@@ -136,7 +176,10 @@ export class DeploymentsTreeProvider implements vscode.TreeDataProvider<Deployme
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.None,
     );
-    const status = instanceRowStatus(instance);
+    // `peek()`, never `get()`: this is a synchronous render path, and fetching
+    // here would put a subprocess behind every repaint. The fetch is triggered
+    // by getChildren instead, which repaints when it learns something.
+    const status = instanceRowStatus(instance, this.deps.releases?.peek());
     item.description = status.description;
     item.tooltip = status.tooltip;
     item.iconPath = instanceIcon(status.icon);

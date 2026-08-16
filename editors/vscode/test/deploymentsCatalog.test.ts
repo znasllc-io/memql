@@ -282,7 +282,7 @@ test("an instance row always prints a version, and unknown is a word", async () 
     kind: "remote",
     presence: "installed-healthy",
     connected: true,
-  });
+  }, undefined);
   assert.equal(healthy.description, "healthy - unknown");
   assert.equal(healthy.icon, "healthy");
 
@@ -292,7 +292,7 @@ test("an instance row always prints a version, and unknown is a word", async () 
     presence: "installed-healthy",
     version: "v0.17.0",
     connected: false,
-  });
+  }, undefined);
   assert.equal(versioned.description, "healthy - v0.17.0");
 });
 
@@ -303,7 +303,7 @@ test("an unreachable instance says so and keeps its version", () => {
     presence: "installed-unreachable",
     version: "v0.16.1",
     connected: false,
-  });
+  }, undefined);
   assert.equal(status.icon, "unreachable");
   assert.equal(status.description, "not answering - v0.16.1");
 });
@@ -314,7 +314,7 @@ test("an absent instance says not installed rather than an unknown version", () 
     kind: "local",
     presence: "absent",
     connected: false,
-  });
+  }, undefined);
   assert.equal(status.icon, "absent");
   assert.equal(status.description, "not installed");
 });
