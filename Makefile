@@ -208,8 +208,11 @@ identity-signing-key:
 cluster-e2e:
 	bash scripts/test/cluster-e2e.sh
 
-## Connect to the development database (after `make up`, via the k3d
-## postgres port-forward on :5432).
+## Connect to the development database (after `make up`, via a port-forward
+## to the CloudNativePG primary on :5432):
+##   kubectl port-forward -n memql svc/memql-db-rw 5432:5432 &
+## `-rw` follows the current primary across a failover, which is why the
+## forward targets it rather than a pod.
 db:
 	psql postgres://memql:memql_dev@localhost:5432/memql
 
