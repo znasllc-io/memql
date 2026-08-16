@@ -46,7 +46,14 @@ type fakeEngine struct {
 	authoredReg   *memql.AuthoredRuntimeRegistry
 	promoted      *memql.AuthoredConstruct
 	durableOwner  string // owner threaded into PromoteConstructDurable (memql#1557)
-	inlineCalled  bool
+	// staged / stagedOwner are the STAGED tier's counterparts (memql#3928), kept
+	// SEPARATE from promoted / durableOwner rather than reusing them. The whole
+	// difference between the two tools is which registry a construct lands in,
+	// so a fake that recorded both into one field could not tell them apart --
+	// and a `stage` that mistakenly called PromoteConstructDurable would pass.
+	staged       *memql.AuthoredConstruct
+	stagedOwner  string
+	inlineCalled bool
 
 	// @mcp promotion fakes (Phase 4 #1534)
 	promotedFnTools []map[string]any
@@ -95,6 +102,12 @@ func (e *fakeEngine) PromoteAuthoredConstruct(ctx context.Context, c *memql.Auth
 func (e *fakeEngine) PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
 	e.promoted = c
 	e.durableOwner = owner
+	return nil
+}
+
+func (e *fakeEngine) StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
+	e.staged = c
+	e.stagedOwner = owner
 	return nil
 }
 
