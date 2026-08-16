@@ -30,7 +30,6 @@ from [`template/`](template/), and looks like this:
 namespace: acme
 resources:
   - ../../base
-  - environment.yaml            # MEMQL_ENVIRONMENT / MEMQL_DB_SEARCH_PATH / MEMQL_HOST_LABEL
   - domain.yaml                 # MEMQL_DOMAIN — the tenant's own hostname
 components:
   - ../../components/engine-bff

@@ -81,15 +81,6 @@ spec:
             # mesh stays under max_connections during a rollout (memql#1858).
             - configMapRef:
                 name: memql-db-pool
-            # The environment, delivered as a VALUE and never as a branch
-            # (epic memql#3748). Carries MEMQL_ENVIRONMENT and the schema
-            # search path that IS the boundary between staging and production.
-            # `optional` because a single-environment cluster -- every local
-            # one -- ships no such ConfigMap and must come up exactly as it
-            # did before this existed.
-            - configMapRef:
-                name: memql-environment
-                optional: true
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }

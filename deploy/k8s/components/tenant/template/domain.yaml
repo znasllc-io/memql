@@ -17,7 +17,7 @@
 # git state ArgoCD reconciles -- and it is not secret: it is the hostname the
 # customer types into a browser.
 #
-# NOT `optional` on the mount, unlike memql-environment. A node with no domain
+# NOT `optional` on the mount. A node with no domain
 # derives nothing, falls back to the base manifests' placeholder issuer, boots,
 # forms a mesh, and rejects every token with an error naming neither the domain
 # nor this ConfigMap. Refusing to start is the honest failure.

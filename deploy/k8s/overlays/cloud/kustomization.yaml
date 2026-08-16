@@ -1,28 +1,23 @@
-# PRODUCTION overlay -- ENGINE-ONLY (decoupling P3).
+# CLOUD overlay -- ENGINE-ONLY (decoupling P3).
 #
-# ONE CLUSTER, ONE ArgoCD, ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766).
-# This overlay and deploy/k8s/overlays/staging are the same file with different
-# numbers in it. Diff them: the differences are the namespace, the environment
-# ConfigMap's two values, and the image digests -- nothing structural, because
-# there is nothing structural left to differ. (Even the replica counts match
-# today; they are stated separately so either may move without the other.) Staging and
-# production run the SAME engine images reconciled from the SAME base by the
-# same ArgoCD, and the only thing that separates their DATA is the schema search
-# path that arrives through environment.yaml.
+# ONE CLUSTER, ONE ArgoCD, ONE BASE, ONE OVERLAY (epic memql#3943). This is the
+# only cloud overlay: memQL ships one installation shape, and an operator who
+# wants a second environment installs a second instance, with its own domain and
+# its own ArgoCD. There was briefly a second overlay beside this one --
+# a second cloud overlay, the same file with different numbers in it -- and it
+# is gone along with the environment concept that motivated it.
 #
-# That satisfies CLAUDE.md's parity standard MORE completely than the
-# arrangement it replaces, not less: two overlay trees maintained in parallel
-# were the drift risk the standard exists to prevent, and one base with two
-# value sets is the standard's own prescription ("is this the shape of the
-# system (-> base/component, everywhere) or a value (-> overlay, per env)?").
+# Everything here is a VALUE over deploy/k8s/base: the namespace, the replica
+# counts, the image digests, the database sizes. That is CLAUDE.md's parity
+# standard as written ("is this the shape of the system (-> base/component,
+# everywhere) or a value (-> overlay, per env)?"), with one fewer value set to
+# keep honest.
 #
-# PROD IS STILL A PLACEHOLDER. There is no prod cluster yet, so the values below
-# that can only come from real prod infrastructure -- the livekit LB address,
-# the mcp image digest -- are documented fail-closed placeholders rather than
-# plausible-looking guesses. They are PRESENT, so the two overlays stay
-# structurally identical and a promote is a value edit; they are UNROUTABLE, so
-# reconciling this overlay before those values are real fails loudly instead of
-# half-working. Set them, and pin real digests, when prod is stood up.
+# SOME VALUES ARE STILL PLACEHOLDERS. Values that can only come from real cloud
+# infrastructure -- the livekit LB address, the database identity client id --
+# are documented fail-closed placeholders rather than plausible-looking guesses.
+# They are UNROUTABLE, so reconciling this overlay before they are real fails
+# loudly instead of half-working. Set them when the cluster is stood up.
 #
 # A product runs on this engine surface via a downstream product overlay that
 # adds the deploy/k8s/components/dsl-bundle component and pins the {bundle
@@ -32,40 +27,29 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# The namespace is a VALUE, and kustomize's namespace transformer is what makes
-# one base serve two environments for free: it rewrites `metadata.namespace` on
-# every namespaced resource AND `metadata.name` on the Namespace object that
-# base/namespace.yaml declares. Nothing in base names a namespace in a string
-# it does not own -- every intra-mesh address is a bare Service name
-# (`identity:50061`, `bff-active:50058`), which resolves inside the pod's own
-# namespace -- so the two environments form two independent meshes with no
-# cross-talk and no per-environment manifest.
-namespace: memql-prod
+# The namespace is a VALUE. kustomize's namespace transformer rewrites
+# `metadata.namespace` on every namespaced resource AND `metadata.name` on the
+# Namespace object base/namespace.yaml declares. Nothing in base names a
+# namespace in a string it does not own -- every intra-mesh address is a bare
+# Service name (`identity:50061`, `bff-active:50058`), which resolves inside the
+# pod's own namespace.
+namespace: memql
 
 resources:
   - ../../base
-  # The three values that make this namespace an environment.
-  - environment.yaml
-  # The front door, GENERATED from the role x environment product by
+  # The front door, GENERATED from the role set and the domain by
   # cmd/frontdoorhosts (memql#3767) -- run `make frontdoor`, never edit it.
-  # It reads the host label out of environment.yaml above, which is what makes
-  # a third environment a value change: a new overlay directory with a new
-  # label in it generates its own front door with no edit to the generator.
   - front-door.generated.yaml
 
 patches:
-  # Replica counts, stated rather than inherited. Prod's numbers happen to match
-  # base's for most nodes, and restating them anyway is the point: the two
-  # overlays must differ only in VALUES, so a count that is inherited here and
-  # overridden there would be a structural difference wearing a number's
-  # clothes. Read this block against the staging twin -- same nodes, same order,
-  # and today the same integers, because staging is deliberately prod-shaped
-  # while up and parked at zero while idle (see the COST SHAPE note there).
+  # Replica counts, STATED rather than inherited. Most match base's, and
+  # restating them anyway is the point: an inherited count is a number nobody
+  # decided, and the reconcile that establishes it reads as an accident when
+  # somebody later asks why this cluster is that wide.
   #
-  # ArgoCD ignores /spec/replicas on both Applications (see
-  # deploy/argocd/apps/memql-prod.yaml), so `make scale N=<n> ENV=prod` is a
-  # runtime override selfHeal will not revert, and these are the counts a
-  # reconcile returns to.
+  # ArgoCD ignores /spec/replicas on the Application (see
+  # deploy/argocd/apps/memql.yaml), so `make scale N=<n>` is a runtime override
+  # selfHeal will not revert, and these are the counts a reconcile returns to.
   - target: { kind: Deployment, name: identity }
     patch: |
       - { op: replace, path: /spec/replicas, value: 2 }
@@ -102,10 +86,9 @@ patches:
     patch: |
       - { op: replace, path: /spec/replicas, value: 1 }
   # The self-hosted LiveKit server advertises this address to WebRTC clients.
-  # PLACEHOLDER: there is no prod livekit-rtc LoadBalancer, so there is no
-  # address to name. 0.0.0.0 is unroutable by design -- it keeps this overlay
-  # structurally identical to staging while making a premature reconcile fail
-  # visibly, which a plausible-looking wrong IP would not.
+  # PLACEHOLDER: there is no livekit-rtc LoadBalancer yet, so there is no
+  # address to name. 0.0.0.0 is unroutable by design -- it makes a premature
+  # reconcile fail visibly, which a plausible-looking wrong IP would not.
   - target: { kind: Deployment, name: livekit }
     patch: |
       - op: add
@@ -116,7 +99,7 @@ patches:
 
 
   # -------------------------------------------------------------------------
-  # DATABASE -- production VALUES over the cnpg-db component (memql#3847 / #3850)
+  # DATABASE -- cloud VALUES over the cnpg-db component (memql#3847 / #3850)
   # -------------------------------------------------------------------------
   # Everything here is an endpoint or a class name. The SHAPE -- four
   # resources, the preloaded library, the plugin archiver, the declared
@@ -138,10 +121,6 @@ patches:
       # than on its own workload. The taint is what makes the pool dedicated --
       # a nodeSelector alone only says "put it there", not "keep others out".
       #
-      # ONE POOL SERVES BOTH ENVIRONMENTS, which is the same choice the cluster
-      # already makes everywhere else (epic memql#3748: one cluster, two
-      # namespaces). Sized for production; staging's smaller database lands on
-      # it too and spends most of its life scaled to zero anyway.
       - op: add
         path: /spec/affinity/nodeSelector
         value:
@@ -167,13 +146,13 @@ patches:
               # database ServiceAccount. Granted Storage Blob Data Contributor
               # on the backup account and NOT granted delete/purge -- see the
               # ObjectStore note below.
-              azure.workload.identity/client-id: "REPLACE-WITH-PROD-DB-IDENTITY-CLIENT-ID"
+              azure.workload.identity/client-id: "REPLACE-WITH-DB-IDENTITY-CLIENT-ID"
 
   - target: { kind: ObjectStore, name: memql-db-backup }
     patch: |
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://memql-prod-db-backups/"
+        value: "azure://memql-db-backups/"
       # inheritFromAzureAD replaces the connection string entirely: the sidecar
       # uses the pod's federated identity. This is what "no storage keys
       # in-cluster" means concretely.
@@ -220,11 +199,10 @@ images:
     digest: sha256:c68b33dd6fcd736a920b981555821f84498f2ec970d7a90692bb651568be9f9c
   - name: acrmemql.azurecr.io/memql-workbench
     digest: sha256:d3d849354d5615534ad74a090a42fa4b693727b9cd3dc6561aa890b5e92118d0
-  # memql-mcp (epic memql#1550) is in base, so this overlay must pin it too. The
-  # MCP node is a STAGING-only rollout for now -- this all-zeros digest keeps
-  # the digest-pin gate green and fails closed if ever reconciled. When prod is
-  # stood up, decide whether to expose MCP in prod (separate review) and pin a
-  # real digest.
+  # memql-mcp (epic memql#1550) is in base, so this overlay must pin it too.
+  # This all-zeros digest keeps the digest-pin gate green and fails closed if
+  # ever reconciled. Decide whether to expose MCP (separate review) and pin a
+  # real digest when it ships.
   - name: acrmemql.azurecr.io/memql-mcp
     digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
   # Self-hosted LiveKit server (memql#1043) -- upstream OSS image, digest-pinned.
@@ -242,9 +220,8 @@ images:
 
 components:
   - ../../components/engine-bff
-  # THE DATABASE (epic memql#3842 / #3847 / #3850). The same component staging
-  # composes, with the `top` preset's numbers: 3 instances across 3 zones,
-  # 4 vCPU / 16 GiB, 256 + 64 GiB. Diff this block against the staging twin --
-  # it names a different preset and nothing else.
+  # THE DATABASE (epic memql#3842 / #3847 / #3850), with the `top` preset's
+  # numbers: 3 instances across 3 zones, 4 vCPU / 16 GiB, 256 + 64 GiB. The
+  # SHAPE comes from the component; the preset supplies only sizes.
   - ../../components/cnpg-db
   - ../../components/cnpg-db/presets/top

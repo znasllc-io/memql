@@ -7,10 +7,7 @@ import (
 	"github.com/znasllc-io/memql/component/frontdoor"
 )
 
-// tlsSecret is the one front-door certificate per namespace. Named identically
-// in every environment: a Kubernetes Secret is namespaced, so two environments
-// naming it the same is not a collision, and naming it differently would be a
-// per-environment value with nothing to decide.
+// tlsSecret is the cluster's one front-door certificate.
 const tlsSecret = "memql-front-door-tls"
 
 // clusterIssuer is the cert-manager ClusterIssuer that signs it. Managed
@@ -19,8 +16,8 @@ const tlsSecret = "memql-front-door-tls"
 // deploy/k8s/base/livekit.yaml already references it.
 //
 // IT MUST RESOLVE DNS-01. A wildcard SAN cannot be issued over HTTP-01 -- ACME
-// has no way to serve a challenge for a name that does not exist yet -- and
-// every environment here requests at least one. An issuer configured for
+// has no way to serve a challenge for a name that does not exist yet -- and the
+// certificate here requests one. An issuer configured for
 // HTTP-01 alone does not fail at apply time; the Certificate sits Pending, the
 // Secret is never created, and the Ingresses serve the controller's default
 // certificate, which presents as a name-mismatch warning in a browser rather
@@ -38,47 +35,28 @@ const clusterIssuer = "letsencrypt-prod"
 // the annotations below change together and nothing else here does.
 const ingressClass = "nginx"
 
-// manifest renders one environment's whole front door.
+// manifest renders the cloud overlay's whole front door.
 //
 // The order is: certificate first (nothing else works without it), then the
 // roles in the order component/frontdoor declares them, then the sites
 // wildcard. Stable, because a reordering would show up as a diff in a generated
 // file and cost a review round for nothing.
-func manifest(env environment, domain, pathBlock string) string {
+func manifest(domain, pathBlock string) string {
 	var b strings.Builder
-	b.WriteString(header(env, domain))
-	b.WriteString(certificate(env, domain))
-	b.WriteString(apiIngress(env, domain, pathBlock))
-	b.WriteString(apiGRPCIngress(env, domain))
-	b.WriteString(identityIngress(env, domain))
-	b.WriteString(mcpIngress(env, domain))
-	b.WriteString(edgeIngress(env, domain))
+	b.WriteString(header(domain))
+	b.WriteString(certificate(domain))
+	b.WriteString(apiIngress(domain, pathBlock))
+	b.WriteString(apiGRPCIngress(domain))
+	b.WriteString(identityIngress(domain))
+	b.WriteString(mcpIngress(domain))
+	b.WriteString(edgeIngress(domain))
 	return b.String()
 }
 
-func header(env environment, domain string) string {
-	hosts := frontdoor.Hosts(env.label, domain)
+func header(domain string) string {
 	var rows strings.Builder
-	for _, h := range hosts {
+	for _, h := range frontdoor.Hosts(domain) {
 		fmt.Fprintf(&rows, "#   %-12s %s\n", h.Role, h.Name)
-	}
-
-	labelNote := "# This environment carries NO host label, so its hosts are the unprefixed ones\n" +
-		"# and it owns the apex. Exactly one environment may be in that position: the bare\n" +
-		"# domain has no label for a second claimant to occupy.\n"
-	if env.label != "" {
-		labelNote = fmt.Sprintf(
-			"# This environment's label is %q. Its ROLE hosts hyphenate (api-%s.<domain>) so the\n"+
-				"# cluster's existing *.<domain> wildcard certificate still covers them -- a TLS\n"+
-				"# wildcard matches exactly ONE label, and api.%s.<domain> would need a certificate\n"+
-				"# of its own. Its SITES cannot do that, because a site's own name already occupies\n"+
-				"# that label, so they nest and this environment requests ONE additional wildcard,\n"+
-				"# *.%s.<domain> -- one certificate for all of its sites, not one per site.\n"+
-				"#\n"+
-				"# A site here lives under the CLUSTER's domain: the host for shop.acme.com is\n"+
-				"# shop.%s.<clusterdomain>, never shop.%s.acme.com. This environment is the\n"+
-				"# operator's own surface and must not require DNS the operator may not control.\n",
-			env.label, env.label, env.label, env.label, env.label, env.label)
 	}
 
 	return "" +
@@ -86,14 +64,16 @@ func header(env environment, domain string) string {
 		"# Run `make frontdoor` (hosts, then paths). Hand edits are reverted by the generator\n" +
 		"# and TestFrontDoorHostsAreNotStale fails the build until they are.\n" +
 		"#\n" +
-		"# The front door for the `" + env.dir + "` overlay (" + env.name + "), as the product of\n" +
-		"# ROLE x ENVIRONMENT (epic memql#3748 / memql#3767). The host COUNT is allowed to grow\n" +
-		"# with environments -- a closed set the operator chooses -- and never with customers,\n" +
-		"# apps or sites, which is what the sites wildcard is for (memql#3700).\n" +
+		"# The front door for the `cloud` overlay, derived from the closed ROLE set\n" +
+		"# (memql#3767). The host COUNT never grows with customers, apps or sites, which is\n" +
+		"# what the sites wildcard is for (memql#3700).\n" +
 		"#\n" +
 		rows.String() +
 		"#\n" +
-		labelNote +
+		"# Every host is a SINGLE label under the domain, so the one *.<domain> wildcard\n" +
+		"# certificate covers all of them -- a TLS wildcard matches exactly one label. The apex\n" +
+		"# is the exception and is requested explicitly, since the bare domain has no label to\n" +
+		"# match.\n" +
 		"#\n" +
 		"# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/\n" +
 		"# names a real domain: the domain is a value on the memql-domain ConfigMap, which every\n" +
@@ -101,8 +81,8 @@ func header(env environment, domain string) string {
 		"# (component/genesis/domain.go, threaded through component/frontdoor so the hosts below\n" +
 		"# and the hosts the nodes believe in cannot disagree). An Ingress host is a Kubernetes\n" +
 		"# API object, so it has to be in the render; an install overrides these through the\n" +
-		"# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so an\n" +
-		"# environment reconciled before its domain is set fails visibly rather than half-working.\n" +
+		"# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so a\n" +
+		"# cluster reconciled before its domain is set fails visibly rather than half-working.\n" +
 		"#\n" +
 		"# NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx\n" +
 		"# resolves server_name by specificity in its own core -- an exact name beats a leading\n" +
@@ -113,24 +93,18 @@ func header(env environment, domain string) string {
 		"# does, and Ingress-level priority is what flattened the api host's path ordering.\n"
 }
 
-func certificate(env environment, domain string) string {
+func certificate(domain string) string {
 	var sans strings.Builder
-	for _, s := range frontdoor.CertificateSANs(env.label, domain) {
+	for _, s := range frontdoor.CertificateSANs(domain) {
 		fmt.Fprintf(&sans, "    - %q\n", s)
 	}
 
 	return "---\n" +
 		"# The front-door certificate for this namespace.\n" +
 		"#\n" +
-		"# ONE PER NAMESPACE, and the SAN sets overlap deliberately. A Kubernetes Secret cannot\n" +
-		"# be referenced across namespaces, so a certificate shared between the environments is\n" +
-		"# not expressible -- two orders for the same wildcard is the price of the namespace\n" +
-		"# isolation the whole epic rests on, and it is paid once per renewal, not per site.\n" +
-		"#\n" +
-		"# *.<domain> is present in EVERY environment, and that is what the hyphenated role hosts\n" +
-		"# buy: a labelled environment adds exactly one SAN for its sites and needs none for its\n" +
-		"# api / identity / mcp hosts. The apex is a separate SAN because no wildcard covers it --\n" +
-		"# *.<domain> matches one label and the bare domain has none.\n" +
+		"# TWO SANs, and the second is why: *.<domain> matches exactly ONE label, so it covers\n" +
+		"# every role host and every site host, but NOT the bare domain, which has no label to\n" +
+		"# match. One order, one renewal, however many sites the cluster serves.\n" +
 		"apiVersion: cert-manager.io/v1\n" +
 		"kind: Certificate\n" +
 		"metadata:\n" +
@@ -147,8 +121,8 @@ func certificate(env environment, domain string) string {
 
 // apiIngress carries the bff's HTTP surface. It does NOT carry the h2c
 // catch-all -- apiGRPCIngress does, and the split is forced.
-func apiIngress(env environment, domain, pathBlock string) string {
-	host := frontdoor.RoleHost(frontdoor.RoleAPI, env.label, domain)
+func apiIngress(domain, pathBlock string) string {
+	host := frontdoor.RoleHost(frontdoor.RoleAPI, domain)
 
 	return "---\n" +
 		"# The API edge's HTTP half.\n" +
@@ -189,8 +163,8 @@ func apiIngress(env environment, domain, pathBlock string) string {
 		endMarker + "\n"
 }
 
-func apiGRPCIngress(env environment, domain string) string {
-	host := frontdoor.RoleHost(frontdoor.RoleAPI, env.label, domain)
+func apiGRPCIngress(domain string) string {
+	host := frontdoor.RoleHost(frontdoor.RoleAPI, domain)
 
 	return "---\n" +
 		"# The API edge's gRPC half: the h2c catch-all, on the same host.\n" +
@@ -216,8 +190,8 @@ func apiGRPCIngress(env environment, domain string) string {
 		pathRule("/", "bff", 50051)
 }
 
-func identityIngress(env environment, domain string) string {
-	host := frontdoor.RoleHost(frontdoor.RoleIdentity, env.label, domain)
+func identityIngress(domain string) string {
+	host := frontdoor.RoleHost(frontdoor.RoleIdentity, domain)
 
 	return "---\n" +
 		"# The identity service: /login, the WebAuthn ceremonies, the OAuth endpoints,\n" +
@@ -245,8 +219,8 @@ func identityIngress(env environment, domain string) string {
 		pathRule("/", "identity", 8085)
 }
 
-func mcpIngress(env environment, domain string) string {
-	host := frontdoor.RoleHost(frontdoor.RoleMCP, env.label, domain)
+func mcpIngress(domain string) string {
+	host := frontdoor.RoleHost(frontdoor.RoleMCP, domain)
 
 	return "---\n" +
 		"# The MCP Streamable HTTP protocol head.\n" +
@@ -271,40 +245,35 @@ func mcpIngress(env environment, domain string) string {
 		pathRule("/", "mcp", 8090)
 }
 
-func edgeIngress(env environment, domain string) string {
-	wildcard := frontdoor.SitesWildcard(env.label, domain)
-	apex := frontdoor.Apex(env.label, domain)
+func edgeIngress(domain string) string {
+	wildcard := frontdoor.SitesWildcard(domain)
+	apex := frontdoor.Apex(domain)
 
-	hosts := []string{wildcard}
+	hosts := []string{wildcard, apex}
 	rules := "" +
-		"    # Every hosted site in this environment: the portal, and every SPA or website the\n" +
-		"    # operator creates a v1:platform:site row for. ONE rule, forever -- the edge node\n" +
-		"    # resolves the request Host against the graph, so a new site is an upload plus a row\n" +
-		"    # write and the number of Kubernetes objects does not grow with it.\n" +
+		"    # Every hosted site: the portal, and every SPA or website the operator creates a\n" +
+		"    # v1:platform:site row for. ONE rule, forever -- the edge node resolves the request\n" +
+		"    # Host against the graph, so a new site is an upload plus a row write and the number\n" +
+		"    # of Kubernetes objects does not grow with it.\n" +
 		"    - host: " + fmt.Sprintf("%q", wildcard) + "\n" +
 		"      http:\n" +
 		"        paths:\n" +
+		pathRule("/", "edge", 8085) +
+		"    # The apex, and it is NOT a special case: for a customer cluster the bare domain IS\n" +
+		"    # their main website, so it is a site row like any other -- it just happens to be the\n" +
+		"    # one whose hostname is the domain itself. Same Service; the edge cannot tell the two\n" +
+		"    # rules apart.\n" +
+		"    - host: " + apex + "\n" +
+		"      http:\n" +
+		"        paths:\n" +
 		pathRule("/", "edge", 8085)
-	if apex != "" {
-		hosts = append(hosts, apex)
-		rules += "" +
-			"    # The apex, and it is NOT a special case: for a customer cluster the bare domain IS\n" +
-			"    # their main website, so it is a site row like any other -- it just happens to be the\n" +
-			"    # one whose hostname has no label in front of it. Same Service; the edge cannot tell\n" +
-			"    # the two rules apart. Only the unprefixed environment has one, because the bare\n" +
-			"    # domain has no label for a second environment to occupy.\n" +
-			"    - host: " + apex + "\n" +
-			"      http:\n" +
-			"        paths:\n" +
-			pathRule("/", "edge", 8085)
-	}
 
 	return "---\n" +
 		"# The site edge -- the last front-door rules that will ever be added.\n" +
 		"#\n" +
 		"# Everything after this is a graph row. That is the whole of memql#3700's \"a site is\n" +
-		"# data, not infrastructure\": the host count grows with ENVIRONMENTS, which are a closed\n" +
-		"# set, and never with sites, which are not.\n" +
+		"# data, not infrastructure\": the host count is fixed by the closed ROLE set and never\n" +
+		"# grows with sites.\n" +
 		"#\n" +
 		"# The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here\n" +
 		"# -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https\n" +

@@ -11,20 +11,19 @@ import (
 
 // apiFrontDoors is every file carrying a generated bff HTTP path block.
 //
-// THREE FILES, not one. This gate used to live in the local package and check
+// TWO FILES, not one. This gate used to live in the local package and check
 // only that overlay, which was correct while local was the only overlay with a
-// front door. It is not any more: a path routed in one environment and not
-// another is the same missing rule as a path routed nowhere, discovered later
-// and only by whoever happens to dial it there.
+// front door. It is not any more: a path routed in local and not in the cloud
+// is the same missing rule as a path routed nowhere, discovered later and only
+// by whoever happens to dial it there.
 //
-// Listed rather than discovered, deliberately and unlike cmd/frontdoorhosts'
-// own overlay scan: the failure worth catching here is an api front door
-// arriving somewhere and nobody wiring it into the path generator, which
-// discovery would wave through by finding no markers and asserting nothing.
+// Listed rather than discovered: the failure worth catching here is an api
+// front door arriving somewhere and nobody wiring it into the path generator,
+// which discovery would wave through by finding no markers and asserting
+// nothing.
 var apiFrontDoors = []string{
 	filepath.Join("local", "api-front-door.yaml"),
-	filepath.Join("prod", "front-door.generated.yaml"),
-	filepath.Join("staging", "front-door.generated.yaml"),
+	filepath.Join(cloudOverlay, "front-door.generated.yaml"),
 }
 
 // TestFrontDoorPathsAreNotStale asserts each checked-in path block equals what
@@ -66,16 +65,16 @@ func TestFrontDoorPathsAreNotStale(t *testing.T) {
 	}
 }
 
-// TestFrontDoorHostsAreNotStale asserts each generated front door equals what
+// TestFrontDoorHostsAreNotStale asserts the generated front door equals what
 // cmd/frontdoorhosts produces right now (memql#3767).
 //
 // Two drifts, and neither announces itself. A host EDITED by hand is reverted
 // by the next generator run, so a reviewer approves a change that will vanish.
 // A host the generator would now produce and the file does not carry -- because
-// somebody changed the label, the role set or the composition rule and did not
-// regenerate -- is an environment reachable at a name nothing serves, while the
-// engine derives and advertises the new one (component/genesis/domain.go reads
-// the same label through the same package).
+// somebody changed the role set or the composition rule and did not regenerate
+// -- is a cluster reachable at a name nothing serves, while the engine derives
+// and advertises the new one (component/genesis/domain.go composes it through
+// the same package).
 //
 // `--check` writes nothing, so a failing CI run leaves the tree untouched.
 func TestFrontDoorHostsAreNotStale(t *testing.T) {

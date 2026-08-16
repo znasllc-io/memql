@@ -23,7 +23,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "deploy.notify" "Post a deploy status notification."
-cap_spec_param "env"          "target environment the deploy ran against"
 cap_spec_param "status"       "deploy outcome (succeeded/failed)"
 cap_spec_param "deploymentId" "deployment id the notification refers to"
 cap_spec_param "dryRun"       "log only; do not POST to a webhook"
@@ -31,18 +30,15 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local env status deploymentId dry webhook
-    env="$(cap_param env "")"
+    local status deploymentId dry webhook
     status="$(cap_param status "")"
     deploymentId="$(cap_param deploymentId "")"
     dry="$(cap_param dryRun "true")"
     webhook="${MEMQL_DEPLOY_NOTIFY_WEBHOOK:-}"
-    cap_require env "$env"
     cap_require status "$status"
     cap_require deploymentId "$deploymentId"
 
-    cap_info "deploy ${deploymentId} on ${env}: ${status}"
-    cap_result_set env          "$env"
+    cap_info "deploy ${deploymentId}: ${status}"
     cap_result_set status       "$status"
     cap_result_set deploymentId "$deploymentId"
 
@@ -52,7 +48,7 @@ function main() {
         fi
         cap_info "Posting notification to webhook..."
         curl -fsS -X POST -H 'Content-Type: application/json' \
-            --data "{\"env\":\"${env}\",\"status\":\"${status}\",\"deploymentId\":\"${deploymentId}\"}" \
+            --data "{\"status\":\"${status}\",\"deploymentId\":\"${deploymentId}\"}" \
             "$webhook" >&2 || cap_fail 5 "notify webhook POST failed"
         cap_changed
         cap_result_set_raw notified true

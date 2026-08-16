@@ -108,16 +108,16 @@ logic engineNodeTypes {
 // Conditional shaping note: an inline `if cond { a } else { b }` value is NOT
 // expressible today -- a conditional binding's branch bodies must be function
 // calls / builtins (see `bootstrapCluster` in dsl/cluster/logic.memql), not
-// bare literals. So an env->overlay-path decision is written by routing through
-// a builtin or by binding call-bodied branches, e.g.:
+// bare literals. So a provider->overlay-path decision is written by routing
+// through a builtin or by binding call-bodied branches, e.g.:
 //
-//   @description("Pick the k8s overlay path for a deployment environment.")
-//   logic overlayPathForEnv {
-//     args { env string @required @enum("development", "staging", "production") }
+//   @description("Pick the k8s overlay path for a deploy target.")
+//   logic overlayPathForProvider {
+//     args { provider string @required @enum("docker-local", "azure") }
 //     body {
-//       // chosen := if args.env == "development" { builtin localOverlay() } else { builtin envOverlay(env: args.env) }
+//       // chosen := if args.provider == "docker-local" { builtin localOverlay() } else { builtin cloudOverlay() }
 //       // return chosen
-//       return builtin overlayPathFor(env: args.env)   // read-only builtin does the mapping
+//       return builtin overlayPathFor(provider: args.provider)   // read-only builtin does the mapping
 //     }
 //   }
 

@@ -29,7 +29,6 @@ namespace: __TENANT__
 
 resources:
   - ../../base
-  - environment.yaml
   - domain.yaml
   - allowance.yaml
 

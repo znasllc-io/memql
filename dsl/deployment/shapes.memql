@@ -9,7 +9,7 @@
 
 /// Deployment record projection (#1872). Carries the full lifecycle row: stable deploymentId,
 /// current status, the version + image digest being shipped, the deploy target
-/// (provider/environment/region), the target clusterId, the operator (triggeredBy), the
+/// (provider/region), the target clusterId, the operator (triggeredBy), the
 /// supersession back-pointer, and both timestamps (row.createdAt = deploy start, payload.updatedAt
 /// = last transition). Backs the cockpit Deployments view. NOTE: a query returns only the latest row per id, so this is a current-state projection, not a timeline -- #2880.
 @row
@@ -20,7 +20,6 @@ shape deployment deploymentFull {
   version
   imageDigest
   provider
-  environment
   region
   clusterId
   triggeredBy

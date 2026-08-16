@@ -25,11 +25,11 @@ import (
 // they carry the measured reasoning for a priority ranking that broke the API
 // once already (memql#3810). Hand-authored is not the same as unchecked. This
 // binds them to the same derivation the generator uses, so local's committed
-// defaults cannot drift from what every other environment serves -- which is
-// what would make the local cluster stop proving anything about the cloud ones.
+// defaults cannot drift from what the cloud overlay serves -- which is what
+// would make the local cluster stop proving anything about the cloud one.
 var frontDoorHosts = func() []string {
 	var out []string
-	for _, h := range frontdoor.Hosts("", "memql.localhost") {
+	for _, h := range frontdoor.Hosts("memql.localhost") {
 		out = append(out, h.Name)
 	}
 	return out

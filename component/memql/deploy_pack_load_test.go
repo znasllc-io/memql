@@ -48,7 +48,6 @@ func TestDeployPackBuiltinsLoad(t *testing.T) {
 	for _, name := range []string{
 		"deployCommitOverlay",
 		"deployArgoSync",
-		"deployRunPromote",
 		"deployRecordBack",
 		"deployObserveReconciledState", // E2.4 Model A read leg
 	} {
@@ -62,7 +61,7 @@ func TestDeployPackBuiltinsLoad(t *testing.T) {
 // the deploy pack's ENTIRE dsl/ tree (builtins + the lifecycle automation +
 // its logic) under the deploypack domain and run the SAME full engine Init the
 // cluster runs at boot. It verifies:
-//   - the pack's effect builtins (deployRunPromote, ...) register via their
+//   - the pack's effect builtins (deployObserveReconciledState, ...) register via their
 //     @executor wiring, AND
 //   - the CORE cross-namespace mutation `updateDeploymentStatus` the port
 //     transitions through resolves.
@@ -127,7 +126,6 @@ func TestDeployPackLifecycleAutomationLoads(t *testing.T) {
 	// as functions after Init, and so must the core cross-namespace mutation.
 	fns := eng.Functions()
 	for _, name := range []string{
-		"deployRunPromote",          // the azure effect the lifecycle logic fires
 		"updateDeploymentStatus",    // the core mutation the automations persist through
 		"driveDeploymentInProgress", // the lifecycle logic itself (#2400: never parsed before)
 		"recordReconciledState",     // the record-back logic (#2400: never parsed before)

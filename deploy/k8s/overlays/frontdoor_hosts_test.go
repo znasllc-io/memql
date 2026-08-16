@@ -1,24 +1,22 @@
-// Package overlays -- the front-door half of the environment gates (memql#3767).
+// Package overlays -- the front-door render gates (memql#3767).
 //
-// WHY A TEST AND NOT A REVIEW. The host set is a PRODUCT -- three roles plus
-// the sites wildcard, times however many environments the cluster carries --
-// and the failure a product has that a list does not is asymmetry. A host
-// missing from ONE environment is an environment nothing can reach, while its
-// manifest looks complete because the other environment's copy of the same rule
-// is right there beside it in the diff. Nothing fails to build, nothing fails
-// to reconcile, and the symptom arrives whenever somebody first dials that host.
+// WHY A TEST AND NOT A REVIEW. The host set is a DERIVATION -- three roles plus
+// the sites wildcard plus the apex -- written into ~390 lines of Ingress and
+// Certificate by a generator. A host missing a rule is a service nothing can
+// reach at the name every client was told to dial: nothing fails to build,
+// nothing fails to reconcile, and the symptom arrives whenever somebody first
+// dials it.
 //
-// The certificate half is worse, because it fails at a distance. A SAN missing
-// from one environment does not stop the Ingress from existing; the request
-// reaches TLS termination, the controller serves whatever default certificate
-// it has, and the browser reports a name mismatch at a host nobody thinks is
-// new. So the SANs are checked against the hosts, by the one-label wildcard
-// rule rather than by string containment.
+// The certificate half is worse, because it fails at a distance. A missing SAN
+// does not stop the Ingress from existing; the request reaches TLS termination,
+// the controller serves whatever default certificate it has, and the browser
+// reports a name mismatch at a host nobody thinks is new. So the SANs are
+// checked against the hosts, by the one-label wildcard rule rather than by
+// string containment.
 package overlays
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -30,8 +28,8 @@ import (
 // committedDomain is the default cmd/frontdoorhosts writes, and the same one
 // the local overlay commits. No file under deploy/ names a REAL domain
 // (memql#3593) -- an install overrides these hosts through the ArgoCD
-// Application's kustomize.patches, and `.localhost` is unroutable so an
-// environment reconciled before its domain is set fails visibly.
+// Application's kustomize.patches, and `.localhost` is unroutable so a cluster
+// reconciled before its domain is set fails visibly.
 const committedDomain = "memql.localhost"
 
 // hostsIn returns every Ingress rule host in a rendered stream. Parsed by line
@@ -53,110 +51,55 @@ func hostsIn(rendered string) map[string]bool {
 	return out
 }
 
-// TestEveryGeneratedHostRuleIsServedInBothOverlays is the acceptance criterion
-// in test form: "the render gate asserts every expected rule is present in both
-// overlays".
+// TestEveryGeneratedHostRuleIsServed is the acceptance criterion in test form.
 //
-// The expectation is COMPUTED from component/frontdoor rather than listed, and
-// that is the point -- a listed expectation would have to be edited by whoever
-// adds an environment, which is the hand-maintenance this whole change removes.
-// What stops the computation from being circular is the table in
-// environments_test.go: the LABEL each environment carries is stated there
-// independently, so a wrong label in an overlay's environment.yaml fails rather
-// than being adopted as the expectation.
-func TestEveryGeneratedHostRuleIsServedInBothOverlays(t *testing.T) {
-	for _, env := range environments {
-		t.Run(env.dir, func(t *testing.T) {
-			served := hostsIn(render(t, env.dir))
-
-			for _, h := range frontdoor.Hosts(env.hostLabel, committedDomain) {
-				if !served[h.Name] {
-					t.Errorf("the %s role's host %q is not served: this environment is unreachable at it, "+
-						"and the manifest looks complete because the other environment's copy of the rule is beside it",
-						h.Role, h.Name)
-				}
-			}
-		})
+// The expectation is COMPUTED from component/frontdoor rather than listed, so
+// the generator and the gate cannot disagree about what the host set is -- and
+// a listed expectation would have to be edited by whoever changes the role set,
+// which is the hand-maintenance this whole arrangement removes.
+func TestEveryGeneratedHostRuleIsServed(t *testing.T) {
+	served := hostsIn(render(t, cloudOverlay))
+	for _, h := range frontdoor.Hosts(committedDomain) {
+		if !served[h.Name] {
+			t.Errorf("the cloud overlay does not serve %q (role %s); served: %v",
+				h.Name, h.Role, sortedHosts(render(t, cloudOverlay)))
+		}
 	}
 }
 
-// TestNoEnvironmentServesAnotherEnvironmentsHost is the other direction, and it
-// is the one that fails LOUDLY in production rather than quietly.
-//
-// Two Ingress rules for one hostname in two namespaces do not conflict at apply
-// time. The controller resolves it by whichever it saw first, so traffic for a
-// host lands in whichever environment happened to reconcile earlier -- which is
-// a coin flip between staging and production, re-flipped on every controller
-// restart.
-func TestNoEnvironmentServesAnotherEnvironmentsHost(t *testing.T) {
-	for i, env := range environments {
-		other := environments[(i+1)%len(environments)]
-		t.Run(env.dir, func(t *testing.T) {
-			served := hostsIn(render(t, env.dir))
-			mine := map[string]bool{}
-			for _, h := range frontdoor.Hosts(env.hostLabel, committedDomain) {
-				mine[h.Name] = true
-			}
-			for _, h := range frontdoor.Hosts(other.hostLabel, committedDomain) {
-				if mine[h.Name] {
-					continue // the product gives them no shared host; belt and braces
-				}
-				if served[h.Name] {
-					t.Errorf("%s serves %q, which belongs to %s -- two rules for one host in two "+
-						"namespaces resolve by whichever the ingress controller saw first",
-						env.dir, h.Name, other.dir)
-				}
-			}
-		})
+// TestTheApexIsServedAndCertificated. The bare domain is the one host no
+// wildcard covers -- `*.<domain>` matches exactly one label and the apex has
+// none -- so it needs both its own Ingress rule and its own SAN. Missing either
+// is a main website that answers with the controller's default certificate.
+func TestTheApexIsServedAndCertificated(t *testing.T) {
+	rendered := render(t, cloudOverlay)
+	if !hostsIn(rendered)[committedDomain] {
+		t.Errorf("the apex %q has no Ingress rule; for a customer cluster the bare domain IS their main website", committedDomain)
+	}
+	sans := certificateSANs(t, rendered)
+	var found bool
+	for _, s := range sans {
+		if s == committedDomain {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the apex %q is not a requested SAN (requested: %v); no wildcard covers it", committedDomain, sans)
 	}
 }
 
-// TestOnlyOneEnvironmentClaimsTheApex. The bare domain has no label in front of
-// it, so there is nothing for a second environment to distinguish itself with.
-// frontdoor.Apex returns "" for a labelled environment; this asserts the render
-// agrees.
-func TestOnlyOneEnvironmentClaimsTheApex(t *testing.T) {
-	var claimants []string
-	for _, env := range environments {
-		if hostsIn(render(t, env.dir))[committedDomain] {
-			claimants = append(claimants, env.dir)
-		}
+// TestTheWildcardCertificateIsRequested is the second half, and the reason
+// every front-door host is a single label: `*.<domain>` covers all of them with
+// one order and one renewal, however many sites the cluster serves.
+func TestTheWildcardCertificateIsRequested(t *testing.T) {
+	sans := certificateSANs(t, render(t, cloudOverlay))
+	if len(sans) == 0 {
+		t.Fatal("the cloud overlay requests no front-door certificate at all, so every host in it " +
+			"terminates TLS with whatever default the controller has")
 	}
-	if len(claimants) != 1 {
-		t.Errorf("the apex %q is claimed by %v, want exactly one environment", committedDomain, claimants)
-	}
-}
-
-// TestBothWildcardCertificatesAreRequested is the second half of the acceptance
-// criterion, and the reason the role hosts hyphenate.
-//
-// `*.<domain>` covers every environment's api / identity / mcp host because
-// they are single-label by construction. A labelled environment's SITES cannot
-// be single-label -- the site's own name occupies that label -- so it needs one
-// more wildcard, and exactly one: `*.<label>.<domain>`, for all of its sites.
-func TestBothWildcardCertificatesAreRequested(t *testing.T) {
-	requested := map[string][]string{} // SAN -> environments requesting it
-
-	for _, env := range environments {
-		sans := certificateSANs(t, render(t, env.dir))
-		if len(sans) == 0 {
-			t.Errorf("%s requests no front-door certificate at all, so every host in it terminates "+
-				"TLS with whatever default the controller has", env.dir)
-			continue
-		}
-		want := frontdoor.CertificateSANs(env.hostLabel, committedDomain)
-		if strings.Join(sans, ",") != strings.Join(want, ",") {
-			t.Errorf("%s requests SANs %v, want %v", env.dir, sans, want)
-		}
-		for _, s := range sans {
-			requested[s] = append(requested[s], env.dir)
-		}
-	}
-
-	for _, wildcard := range []string{"*." + committedDomain, "*.staging." + committedDomain} {
-		if len(requested[wildcard]) == 0 {
-			t.Errorf("no environment requests the %q certificate", wildcard)
-		}
+	want := frontdoor.CertificateSANs(committedDomain)
+	if strings.Join(sans, ",") != strings.Join(want, ",") {
+		t.Errorf("requests SANs %v, want %v", sans, want)
 	}
 }
 
@@ -166,135 +109,18 @@ func TestBothWildcardCertificatesAreRequested(t *testing.T) {
 // wildcard rule is misread. The rule is ONE label, and it is applied here rather
 // than assumed.
 func TestEveryServedHostIsCoveredByARequestedSAN(t *testing.T) {
-	for _, env := range environments {
-		t.Run(env.dir, func(t *testing.T) {
-			rendered := render(t, env.dir)
-			sans := certificateSANs(t, rendered)
-
-			for _, h := range frontdoor.Hosts(env.hostLabel, committedDomain) {
-				if !wildcardCovers(h.Name, sans) {
-					t.Errorf("%q is served but covered by none of the requested SANs %v -- TLS "+
-						"termination succeeds with the controller's default certificate, so this "+
-						"presents as a browser name mismatch and names nothing", h.Name, sans)
-				}
-			}
-		})
-	}
-}
-
-// TestAThirdEnvironmentIsAValueChange is the third acceptance criterion, and it
-// is proved by rendering one rather than by asserting about the two that exist.
-//
-// The whole test runs against a throwaway overlay OUTSIDE this repository. If
-// adding an environment needed a code change, this could not pass without one --
-// so a green run is the claim: a new environment is a directory with a label in
-// it, and its entire front door follows.
-func TestAThirdEnvironmentIsAValueChange(t *testing.T) {
-	const label = "e2"
-
-	root := t.TempDir()
-	dir := filepath.Join(root, "hypothetical")
-	if err := os.Mkdir(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// The litmus, captured BEFORE the generator runs so it measures this test's
-	// effect rather than whatever the working tree happened to look like.
-	before := worktreeState(t)
-
-	// The ONLY input: the same three values the two committed overlays carry.
-	write(t, filepath.Join(dir, "environment.yaml"), `apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: memql-environment
-  namespace: memql
-data:
-  MEMQL_ENVIRONMENT: development
-  MEMQL_DB_SEARCH_PATH: "memql_e2, public"
-  MEMQL_HOST_LABEL: "`+label+`"
-`)
-
-	// Deliberately self-contained -- it does not reference ../../base. What is
-	// under test is that the generator produces this environment's whole front
-	// door from its label, not that a temp directory can reach the base.
-	write(t, filepath.Join(dir, "kustomization.yaml"), `apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: memql-hypothetical
-resources:
-  - environment.yaml
-  - front-door.generated.yaml
-`)
-
-	out, err := exec.Command("go", "run", "../../../cmd/frontdoorhosts", "--overlays="+root).CombinedOutput()
-	if err != nil {
-		t.Fatalf("the generator refused a new environment, so adding one is NOT a value change: %v\n%s", err, out)
-	}
-
-	rendered := render(t, dir)
-	served := hostsIn(rendered)
-
-	for _, h := range frontdoor.Hosts(label, committedDomain) {
-		if !served[h.Name] {
-			t.Errorf("a third environment does not serve %q (%s)", h.Name, h.Role)
+	sans := certificateSANs(t, render(t, cloudOverlay))
+	for _, h := range frontdoor.Hosts(committedDomain) {
+		if !wildcardCovers(h.Name, sans) {
+			t.Errorf("%q is served but covered by none of the requested SANs %v -- TLS "+
+				"termination succeeds with the controller's default certificate, so this "+
+				"presents as a browser name mismatch and names nothing", h.Name, sans)
 		}
 	}
-	// The properties the design is emphatic about, restated for a label nobody
-	// wrote code for: roles stay single-label, sites nest, no apex.
-	for _, want := range []string{
-		"api-e2." + committedDomain,
-		"identity-e2." + committedDomain,
-		"mcp-e2." + committedDomain,
-		"*.e2." + committedDomain,
-	} {
-		if !served[want] {
-			t.Errorf("a third environment does not serve %q", want)
-		}
-	}
-	if served[committedDomain] {
-		t.Error("a third environment claims the apex, which belongs to the unprefixed environment alone")
-	}
-
-	sans := certificateSANs(t, rendered)
-	if want := []string{"*." + committedDomain, "*.e2." + committedDomain}; strings.Join(sans, ",") != strings.Join(want, ",") {
-		t.Errorf("a third environment requests SANs %v, want %v -- one additional wildcard, for its sites", sans, want)
-	}
-
-	// And the litmus: nothing in the repository moved to make that work. The
-	// whole environment was generated and rendered from three lines of YAML in
-	// a throwaway directory -- no manifest edited, no generator taught a new
-	// name, no test list extended.
-	if after := worktreeState(t); after != before {
-		t.Errorf("generating a third environment changed the working tree, so it is not a value change.\nbefore:\n%s\nafter:\n%s",
-			before, after)
-	}
 }
 
-// worktreeState is `git status --porcelain` over the whole repository. Compared
-// before and against after rather than asserted to be empty: this suite runs on
-// a branch mid-change, and an empty-tree assertion would fail for reasons that
-// have nothing to do with what it is measuring.
-func worktreeState(t *testing.T) string {
-	t.Helper()
-	out, err := exec.Command("git", "status", "--porcelain").Output()
-	if err != nil {
-		t.Skipf("git is unavailable, so the no-code-change litmus cannot run: %v", err)
-	}
-	return string(out)
-}
-
-func write(t *testing.T, path, body string) {
-	t.Helper()
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// certificateSANs reads the front-door Certificate's dnsNames out of a rendered
-// stream, in order.
-//
-// Text-scanned for the same reason hostsIn is: the stream carries many kinds,
-// and here the block is unambiguous -- `dnsNames:` followed by a list. A decoder
-// would need a cert-manager schema this package has no reason to depend on.
+// certificateSANs returns the dnsNames of every Certificate in a rendered
+// stream.
 func certificateSANs(t *testing.T, rendered string) []string {
 	t.Helper()
 
@@ -349,80 +175,31 @@ func TestWildcardCoversRefusesAMultiLabelMatch(t *testing.T) {
 // TestTheGeneratedFrontDoorIsReconciled closes the silent-failure hole one
 // level up from the manifests: a generated file no kustomization lists is a
 // file, not a front door. Nothing fails -- the overlay renders, the mesh comes
-// up, and the environment is simply not reachable from outside.
+// up, and the cluster is simply not reachable from outside.
 func TestTheGeneratedFrontDoorIsReconciled(t *testing.T) {
-	for _, env := range environments {
-		raw, err := os.ReadFile(filepath.Join(env.dir, "kustomization.yaml"))
-		if err != nil {
-			t.Fatalf("reading %s's kustomization: %v", env.dir, err)
-		}
-		if !strings.Contains(string(raw), "front-door.generated.yaml") {
-			t.Errorf("%s's kustomization does not list front-door.generated.yaml, so the generated "+
-				"front door is a file rather than a reconciled resource and the environment is "+
-				"unreachable from outside", env.dir)
-		}
+	raw, err := os.ReadFile(filepath.Join(cloudOverlay, "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("reading the cloud kustomization: %v", err)
+	}
+	if !strings.Contains(string(raw), "front-door.generated.yaml") {
+		t.Error("the cloud kustomization does not list front-door.generated.yaml, so the generated " +
+			"front door is a file rather than a reconciled resource and the cluster is " +
+			"unreachable from outside")
 	}
 }
 
-// TestEveryEnvironmentDeclaresItsHostLabel checks the input the generator reads
-// against the table this package states independently.
-//
-// Without it the host expectations above would be circular -- computed from the
-// same value the manifests were generated from, so a wrong label would be
-// adopted as the expectation and every gate would pass.
-func TestEveryEnvironmentDeclaresItsHostLabel(t *testing.T) {
-	for _, env := range environments {
-		t.Run(env.dir, func(t *testing.T) {
-			var found bool
-			for _, r := range parse(t, render(t, env.dir)) {
-				if r.Kind != "ConfigMap" || r.Metadata.Name != "memql-environment" {
-					continue
-				}
-				found = true
-				got, declared := r.Data["MEMQL_HOST_LABEL"]
-				if !declared {
-					t.Fatal("no MEMQL_HOST_LABEL: an environment with a namespace and a schema but no " +
-						"host label has data isolation and no front door, which is an environment " +
-						"nothing can reach")
-				}
-				if got != env.hostLabel {
-					t.Errorf("MEMQL_HOST_LABEL is %q, want %q", got, env.hostLabel)
-				}
-			}
-			if !found {
-				t.Error("no memql-environment ConfigMap rendered")
-			}
-		})
+// TestGeneratedFrontDoorIsNotHandEdited. The generated file carries the marker
+// every other generated artifact in this tree carries, so a reader who opens it
+// is told before they read it. TestFrontDoorHostsAreNotStale is what enforces
+// it; this is what makes the enforcement discoverable from the file.
+func TestGeneratedFrontDoorIsNotHandEdited(t *testing.T) {
+	path := filepath.Join(cloudOverlay, "front-door.generated.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
 	}
-}
-
-// TestHostLabelsAreDistinct. Two environments on one label generate identical
-// hostnames in two namespaces; see TestNoEnvironmentServesAnotherEnvironmentsHost
-// for why that resolves by coin flip rather than by error.
-func TestHostLabelsAreDistinct(t *testing.T) {
-	seen := map[string]string{}
-	for _, env := range environments {
-		if prior, dup := seen[env.hostLabel]; dup {
-			t.Errorf("%s and %s both use host label %q", prior, env.dir, env.hostLabel)
-		}
-		seen[env.hostLabel] = env.dir
-	}
-}
-
-// TestGeneratedFrontDoorsAreNotHandEdited. The generated files carry the marker
-// every other generated artifact in this tree carries, so a reader who opens one
-// is told before they read it. TestFrontDoorHostsAreNotStale is what enforces it;
-// this is what makes the enforcement discoverable from the file.
-func TestGeneratedFrontDoorsAreNotHandEdited(t *testing.T) {
-	for _, env := range environments {
-		path := filepath.Join(env.dir, "front-door.generated.yaml")
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatalf("reading %s: %v", path, err)
-		}
-		if !strings.HasPrefix(string(raw), "# GENERATED by cmd/frontdoorhosts -- DO NOT EDIT.") {
-			t.Errorf("%s does not open with the generated marker", path)
-		}
+	if !strings.HasPrefix(string(raw), "# GENERATED by cmd/frontdoorhosts -- DO NOT EDIT.") {
+		t.Errorf("%s does not open with the generated marker", path)
 	}
 }
 
@@ -446,22 +223,18 @@ func sortedHosts(rendered string) []string {
 // signaling Ingress is a separate plane, documented as such in
 // docs/public/operate/front-door.md.
 func TestRenderedHostsAreExactlyTheProduct(t *testing.T) {
-	for _, env := range environments {
-		t.Run(env.dir, func(t *testing.T) {
-			rendered := render(t, env.dir)
+	rendered := render(t, cloudOverlay)
 
-			want := map[string]bool{}
-			for _, h := range frontdoor.Hosts(env.hostLabel, committedDomain) {
-				want[h.Name] = true
-			}
-			for _, got := range sortedHosts(rendered) {
-				if want[got] || strings.HasPrefix(got, "livekit.") {
-					continue
-				}
-				t.Errorf("%s serves %q, which is not in the role x environment product and is not "+
-					"the media plane -- a sixth host rule is a design change, not a configuration "+
-					"change (docs/public/operate/front-door.md)", env.dir, got)
-			}
-		})
+	want := map[string]bool{}
+	for _, h := range frontdoor.Hosts(committedDomain) {
+		want[h.Name] = true
+	}
+	for _, got := range sortedHosts(rendered) {
+		if want[got] || strings.HasPrefix(got, "livekit.") {
+			continue
+		}
+		t.Errorf("the cloud overlay serves %q, which is not one of the five derived hosts and is "+
+			"not the media plane -- a sixth host rule is a design change, not a configuration "+
+			"change (docs/public/operate/front-door.md)", got)
 	}
 }

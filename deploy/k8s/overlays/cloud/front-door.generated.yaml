@@ -2,26 +2,20 @@
 # Run `make frontdoor` (hosts, then paths). Hand edits are reverted by the generator
 # and TestFrontDoorHostsAreNotStale fails the build until they are.
 #
-# The front door for the `staging` overlay (staging), as the product of
-# ROLE x ENVIRONMENT (epic memql#3748 / memql#3767). The host COUNT is allowed to grow
-# with environments -- a closed set the operator chooses -- and never with customers,
-# apps or sites, which is what the sites wildcard is for (memql#3700).
+# The front door for the `cloud` overlay, derived from the closed ROLE set
+# (memql#3767). The host COUNT never grows with customers, apps or sites, which is
+# what the sites wildcard is for (memql#3700).
 #
-#   api          api-staging.memql.localhost
-#   identity     identity-staging.memql.localhost
-#   mcp          mcp-staging.memql.localhost
-#   sites        *.staging.memql.localhost
+#   api          api.memql.localhost
+#   identity     identity.memql.localhost
+#   mcp          mcp.memql.localhost
+#   sites        *.memql.localhost
+#   sites        memql.localhost
 #
-# This environment's label is "staging". Its ROLE hosts hyphenate (api-staging.<domain>) so the
-# cluster's existing *.<domain> wildcard certificate still covers them -- a TLS
-# wildcard matches exactly ONE label, and api.staging.<domain> would need a certificate
-# of its own. Its SITES cannot do that, because a site's own name already occupies
-# that label, so they nest and this environment requests ONE additional wildcard,
-# *.staging.<domain> -- one certificate for all of its sites, not one per site.
-#
-# A site here lives under the CLUSTER's domain: the host for shop.acme.com is
-# shop.staging.<clusterdomain>, never shop.staging.acme.com. This environment is the
-# operator's own surface and must not require DNS the operator may not control.
+# Every host is a SINGLE label under the domain, so the one *.<domain> wildcard
+# certificate covers all of them -- a TLS wildcard matches exactly one label. The apex
+# is the exception and is requested explicitly, since the bare domain has no label to
+# match.
 #
 # THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/
 # names a real domain: the domain is a value on the memql-domain ConfigMap, which every
@@ -29,8 +23,8 @@
 # (component/genesis/domain.go, threaded through component/frontdoor so the hosts below
 # and the hosts the nodes believe in cannot disagree). An Ingress host is a Kubernetes
 # API object, so it has to be in the render; an install overrides these through the
-# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so an
-# environment reconciled before its domain is set fails visibly rather than half-working.
+# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so a
+# cluster reconciled before its domain is set fails visibly rather than half-working.
 #
 # NO ROUTER-PRIORITY ANNOTATIONS, unlike the local overlay's traefik front door. nginx
 # resolves server_name by specificity in its own core -- an exact name beats a leading
@@ -42,15 +36,9 @@
 ---
 # The front-door certificate for this namespace.
 #
-# ONE PER NAMESPACE, and the SAN sets overlap deliberately. A Kubernetes Secret cannot
-# be referenced across namespaces, so a certificate shared between the environments is
-# not expressible -- two orders for the same wildcard is the price of the namespace
-# isolation the whole epic rests on, and it is paid once per renewal, not per site.
-#
-# *.<domain> is present in EVERY environment, and that is what the hyphenated role hosts
-# buy: a labelled environment adds exactly one SAN for its sites and needs none for its
-# api / identity / mcp hosts. The apex is a separate SAN because no wildcard covers it --
-# *.<domain> matches one label and the bare domain has none.
+# TWO SANs, and the second is why: *.<domain> matches exactly ONE label, so it covers
+# every role host and every site host, but NOT the bare domain, which has no label to
+# match. One order, one renewal, however many sites the cluster serves.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -63,7 +51,7 @@ spec:
     kind: ClusterIssuer
   dnsNames:
     - "*.memql.localhost"
-    - "*.staging.memql.localhost"
+    - "memql.localhost"
 ---
 # The API edge's HTTP half.
 #
@@ -95,10 +83,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "api-staging.memql.localhost"
+        - "api.memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    - host: api-staging.memql.localhost
+    - host: api.memql.localhost
       http:
         paths:
           # BEGIN generated bff HTTP paths -- make frontdoor-paths
@@ -268,10 +256,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "api-staging.memql.localhost"
+        - "api.memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    - host: api-staging.memql.localhost
+    - host: api.memql.localhost
       http:
         paths:
           - path: /
@@ -301,10 +289,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "identity-staging.memql.localhost"
+        - "identity.memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    - host: identity-staging.memql.localhost
+    - host: identity.memql.localhost
       http:
         paths:
           - path: /
@@ -331,10 +319,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "mcp-staging.memql.localhost"
+        - "mcp.memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    - host: mcp-staging.memql.localhost
+    - host: mcp.memql.localhost
       http:
         paths:
           - path: /
@@ -348,8 +336,8 @@ spec:
 # The site edge -- the last front-door rules that will ever be added.
 #
 # Everything after this is a graph row. That is the whole of memql#3700's "a site is
-# data, not infrastructure": the host count grows with ENVIRONMENTS, which are a closed
-# set, and never with sites, which are not.
+# data, not infrastructure": the host count is fixed by the closed ROLE set and never
+# grows with sites.
 #
 # The edge serves plain HTTP on :8085, so no backend-protocol annotation is needed here
 # -- unlike the api host, which carries h2c for gRPC, and unlike identity, which is https
@@ -363,14 +351,29 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - "*.staging.memql.localhost"
+        - "*.memql.localhost"
+        - "memql.localhost"
       secretName: memql-front-door-tls
   rules:
-    # Every hosted site in this environment: the portal, and every SPA or website the
-    # operator creates a v1:platform:site row for. ONE rule, forever -- the edge node
-    # resolves the request Host against the graph, so a new site is an upload plus a row
-    # write and the number of Kubernetes objects does not grow with it.
-    - host: "*.staging.memql.localhost"
+    # Every hosted site: the portal, and every SPA or website the operator creates a
+    # v1:platform:site row for. ONE rule, forever -- the edge node resolves the request
+    # Host against the graph, so a new site is an upload plus a row write and the number
+    # of Kubernetes objects does not grow with it.
+    - host: "*.memql.localhost"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: edge
+                port:
+                  number: 8085
+    # The apex, and it is NOT a special case: for a customer cluster the bare domain IS
+    # their main website, so it is a site row like any other -- it just happens to be the
+    # one whose hostname is the domain itself. Same Service; the edge cannot tell the two
+    # rules apart.
+    - host: memql.localhost
       http:
         paths:
           - path: /

@@ -7,40 +7,37 @@
 # images: transformer replaces them with the pinned digest.
 #
 # NO database resource HERE, and that is a composition choice rather than an
-# absence (epic memql#3842 / #3848). Every environment runs a self-hosted
-# CloudNativePG cluster, composed by its overlay from
+# absence (epic memql#3842 / #3848). The cluster runs a self-hosted
+# CloudNativePG database, composed by the overlay from
 # deploy/k8s/components/cnpg-db with a tier preset -- so a deployment picks its
-# own size without a per-environment manifest. Nodes reach it through the
+# own size without a bespoke manifest. Nodes reach it through the
 # MEMQL_DATABASE_DSN + MEMORY_NODES_DATABASE_DIRECT_DSN keys in memql-secrets
 # (#1925), both pointing at CNPG's -rw Service.
 #
-# ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766). The `namespace: memql`
-# below is only the base's default; each overlay overrides it -- `overlays/prod`
-# to `memql-prod`, `overlays/staging` to `memql-staging` -- and kustomize's
-# namespace transformer rewrites both `metadata.namespace` on every resource
-# here AND `metadata.name` on namespace.yaml. That is why two environments need
-# no per-environment manifest.
+# THE NAMESPACE IS A VALUE. The `namespace: memql` below is the base's default
+# and an overlay may override it; kustomize's namespace transformer rewrites
+# both `metadata.namespace` on every resource here AND `metadata.name` on
+# namespace.yaml, so no overlay needs a namespace-bearing manifest of its own.
 #
 # WHAT THIS BUYS ONLY IF NOTHING BREAKS IT: every intra-mesh address below is a
 # BARE Service name (`identity:50061`, `bff-active:50058`), resolved by
 # same-namespace cluster DNS. A fully-qualified `<svc>.memql.svc.cluster.local`
-# anywhere in this base would still RESOLVE -- to the other environment's node
-# -- so it fails silently and in the worst direction. There is a render gate on
-# it (deploy/k8s/overlays/environments_test.go).
+# anywhere in this base would pin the mesh to one namespace and resolve ACROSS
+# an install boundary if a second one ever shared the cluster -- so it fails
+# silently and in the worst direction. There is a render gate on it
+# (deploy/k8s/overlays/render_cloud_test.go).
 #
 # The `memql-secrets` Secret is intentionally NOT listed here -- it carries
 # real values and is created out-of-band (see secret.example.yaml), PER
 # NAMESPACE. Create it BEFORE applying an overlay so the pods can mount it.
-# $POOLER_DSN is now the same -rw address (no pooler in the path today); the
-# per-environment schema search path is NOT in this Secret -- it is a
-# committed, non-secret value in the overlay's environment.yaml.
+# $POOLER_DSN is now the same -rw address (no pooler in the path today).
 #
-#   kubectl create secret generic memql-secrets -n memql-staging \
+#   kubectl create secret generic memql-secrets -n memql \
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
 #     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
 #     --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
 #     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
-#   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699); creates the namespace
+#   kubectl apply -k deploy/k8s/overlays/cloud   # digest-pinned (#699); creates the namespace
 #
 # identity comes up first (runs the one-time migration + serves JWKS); the
 # other nodes' verifiers retry JWKS non-fatally until it is ready.

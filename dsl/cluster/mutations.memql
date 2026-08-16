@@ -8,7 +8,6 @@ mutate cluster createCluster {
   args {
     name                string!
     region              string
-    environment         string!
     status              enum("bootstrapping", "healthy", "degraded", "shutting_down")
     databaseId          string
     identityProviderId  string
@@ -18,7 +17,6 @@ mutate cluster createCluster {
   insert {
     args.name
     args.region
-    args.environment
     seedNodeTypes: ["bff", "cognition", "planner"]
     status: args.status ?? "healthy"
     args.databaseId
@@ -89,7 +87,6 @@ mutate node createNode {
     labels        object
     deploymentId  string
     provider      string
-    environment   string
     region        string
   }
   insert {
@@ -109,7 +106,6 @@ mutate node createNode {
     labels: args.labels ?? {}
     deploymentId: args.deploymentId ?? ""
     provider: args.provider ?? ""
-    environment: args.environment ?? ""
     region: args.region ?? ""
   }
 }

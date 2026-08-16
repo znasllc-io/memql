@@ -53,8 +53,6 @@ readonly MODULE_PATH="github.com/znasllc-io/memql"
 readonly DB_GATED_TREES=(
 	"component/memql"
 	"component/automations"
-	"component/database"
-	"component/edge"
 	"component/grpc"
 	"integrations/cognition"
 	"integrations/planner"

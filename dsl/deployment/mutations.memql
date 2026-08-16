@@ -41,10 +41,9 @@
 // is requiresOwnerOrAdmin in dsl/deployment/specs.memql.
 //
 // Every field is bound with an explicit key + coalesce to a valid value
-// (mirroring createNode #1643/#1671): status defaults to
-// "pending" and environment to "development" so the enum columns always
-// receive a member of their value set; the plain string fields coalesce
-// to "" when the caller omits them.
+// (mirroring createNode #1643/#1671): status defaults to "pending" so the enum
+// column always receives a member of its value set; the plain string fields
+// coalesce to "" when the caller omits them.
 /// Create a v1:cluster:deployment record at deploy start (status defaults to pending). Uses
 /// deploymentId as the concept id so status transitions append to one timeline. #1872.
 mutate deployment createDeployment {
@@ -54,7 +53,6 @@ mutate deployment createDeployment {
     version              string
     imageDigest          string
     provider             string
-    environment          enum("development", "staging", "production")
     region               string
     clusterId            string
     triggeredBy          string
@@ -69,7 +67,6 @@ mutate deployment createDeployment {
     version: args.version ?? ""
     imageDigest: args.imageDigest ?? ""
     provider: args.provider ?? ""
-    environment: args.environment ?? "development"
     region: args.region ?? ""
     clusterId: args.clusterId ?? ""
     triggeredBy: args.triggeredBy ?? ""
@@ -84,7 +81,7 @@ mutate deployment createDeployment {
 
 // Transition a deployment's status (#1872). Read-merge update form
 // (mirrors updateNodeHealth): only status + updatedAt change;
-// every other field (version/imageDigest/provider/environment/region/
+// every other field (version/imageDigest/provider/region/
 // clusterId/triggeredBy/notes/changelog/previousDeploymentId) inherits
 // from the persisted row, so a status-only transition never wipes the
 // deploy metadata stamped at create time. The append writes a new row
