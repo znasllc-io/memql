@@ -1264,6 +1264,14 @@ func (s *streamSession) badgeGate(envelope *memqlv1.MemqlClientMessage) badgeGat
 		*memqlv1.MemqlClientMessage_ResendGuestInviteEmail,
 		*memqlv1.MemqlClientMessage_DurablePromoteBundle,
 		*memqlv1.MemqlClientMessage_DurableDemoteBundle,
+		// Staging (memql#3928) joins its two siblings rather than sitting
+		// with the session-define surface it shares a ROLE gate with. The
+		// gate asks who may author; this list asks what outlives the grant's
+		// TTL containment, and a staged construct is durable graph state that
+		// a restart brings back -- the same answer a promote gives. That it
+		// is callable by one author narrows who it affects, not how long it
+		// lasts, and a walked-away kiosk holding an author's grant must not be
+		// able to leave a construct behind on their identity.
 		*memqlv1.MemqlClientMessage_NodeMaintenance,
 		// Deploy control (memql#3311) sits in the same bucket as
 		// NodeMaintenance: cutting a version, shipping, or rolling back is
@@ -1333,6 +1341,51 @@ func badgePayloadRequestId(envelope *memqlv1.MemqlClientMessage) string {
 		return p.CreateAccountToken.GetRequestId()
 	case *memqlv1.MemqlClientMessage_RevokeAccountToken:
 		return p.RevokeAccountToken.GetRequestId()
+	// Staging (memql#3928). Listed here BECAUSE it is listed in badgeGate:
+	// the two lists have to be added to together. A payload the gate can
+	// reject but this cannot name loses its inner request_id, and a
+	// stream-keyed client dispatcher routes by request_id -- so the
+	// rejection reaches no listener and the caller hangs instead of being
+	// refused, which is a worse outcome than not gating it at all.
+	case *memqlv1.MemqlClientMessage_StageBundle:
+		return p.StageBundle.GetRequestId()
+
+	// The twelve below were RESTRICTED BY badgeGate AND ABSENT FROM HERE,
+	// every one of them, until the gate that now enforces the pairing was
+	// written (memql#3935). That is the failure this function's own doc
+	// comment describes, shipped: a badge session sending any of them got a
+	// PermissionDenied correlated to the envelope messageId alone, which a
+	// stream-keyed dispatcher does not route, so the caller hung.
+	//
+	// They are listed together rather than filed beside their features
+	// because they were found together and because the list is the point --
+	// TestEveryBadgeRestrictedPayloadCanNameItsRequestId walks the client
+	// oneof from the descriptor and fails on the next omission, so this is
+	// the last time anyone has to find them by reading.
+	case *memqlv1.MemqlClientMessage_SendGuestInvite:
+		return p.SendGuestInvite.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CancelGuestInvite:
+		return p.CancelGuestInvite.GetRequestId()
+	case *memqlv1.MemqlClientMessage_ResendGuestInviteEmail:
+		return p.ResendGuestInviteEmail.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeCurrentSession:
+		return p.RevokeCurrentSession.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeAllSessions:
+		return p.RevokeAllSessions.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CreateWorkerToken:
+		return p.CreateWorkerToken.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeWorkerToken:
+		return p.RevokeWorkerToken.GetRequestId()
+	case *memqlv1.MemqlClientMessage_NodeMaintenance:
+		return p.NodeMaintenance.GetRequestId()
+	case *memqlv1.MemqlClientMessage_DurablePromoteBundle:
+		return p.DurablePromoteBundle.GetRequestId()
+	case *memqlv1.MemqlClientMessage_DurableDemoteBundle:
+		return p.DurableDemoteBundle.GetRequestId()
+	case *memqlv1.MemqlClientMessage_CreateBadge:
+		return p.CreateBadge.GetRequestId()
+	case *memqlv1.MemqlClientMessage_RevokeBadge:
+		return p.RevokeBadge.GetRequestId()
 	}
 	return ""
 }
@@ -1636,6 +1689,12 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// registry (owner-gated, live cross-node propagation; memql#2163).
 	case *memqlv1.MemqlClientMessage_DurableDemoteBundle:
 		return s.handleDurableDemoteBundle(envelope, payload.DurableDemoteBundle)
+	// Durable OWNER-SCOPED staging: persisted and replayed at boot like a
+	// promote, callable by its author alone because the cross-node broadcast is
+	// omitted (epic memql#3928). Training a staged construct is the promote
+	// message above, not a third verb.
+	case *memqlv1.MemqlClientMessage_StageBundle:
+		return s.handleStageBundle(envelope, payload.StageBundle)
 	// DSL spec export -- portable language-intelligence surface (memql#2125 / A4)
 	case *memqlv1.MemqlClientMessage_DslSpec:
 		return s.handleDslSpec(envelope, payload.DslSpec)

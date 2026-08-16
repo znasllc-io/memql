@@ -256,6 +256,120 @@ func AllowBreaking() PromoteOption {
 	}
 }
 
+// WithPromoteOrigin supplies the bundle's TREE-RELATIVE path, e.g.
+// "planner/queries.memql".
+//
+// It is the AMBIENT DOMAIN the engine resolves an unimported bare concept name
+// against, and the domain an unannotated concept declaration assembles its
+// canonical id under (memql#3800). Without it the engine runs its no-domain
+// degrade, which refuses any construct naming a concept short name more than one
+// domain declares -- `plan`, `request`, `call`, `invocation` today.
+//
+// It exists on BOTH halves of the staged lifecycle deliberately (see
+// WithStageOrigin). Offering it on stage alone would have built the exact trap
+// the engine-side comment warns about, one level up: a bundle that stages
+// cleanly and then refuses to train, on identical source.
+func WithPromoteOrigin(path string) PromoteOption {
+	return PromoteOption{
+		apply: func(msg *memqlv1.DurablePromoteBundleMsg) { msg.Origin = path },
+	}
+}
+
+// StageResult is the outcome of a durable STAGE (epic memql#3928).
+//
+// Staged names the constructs now callable BY THEIR AUTHOR -- a different field
+// from PromoteResult.Promoted on purpose, so a caller reading a result cannot
+// mistake one tier for the other by reaching for the field they expected.
+//
+// There is no ConceptDiffs, and its absence is structural: a bundle declaring a
+// concept is refused outright, so there is never a schema classification here.
+type StageResult struct {
+	OK          bool
+	Staged      []Construct
+	Diagnostics []Diagnostic
+	Error       string
+}
+
+// StageOption adjusts one StageBundle call.
+//
+// OPAQUE ON PURPOSE, the same shape and for the same reason as PromoteOption
+// (memql#3874): the struct WRAPS its mutator rather than being one, so a
+// consumer can hold a StageOption and pass it along but cannot build one. A
+// `func(*memqlv1.StageBundleMsg)` underlying type would be an escape hatch
+// straight past the boundary this package exists to hold. The zero value is
+// inert.
+type StageOption struct {
+	apply func(*memqlv1.StageBundleMsg)
+}
+
+// WithStageOrigin supplies the bundle's TREE-RELATIVE path, exactly as
+// WithPromoteOrigin does for a promote and for the same reason: a stage runs
+// the SAME Gate-1 sandbox a validate does, so omitting it here would refuse
+// source that validates.
+func WithStageOrigin(path string) StageOption {
+	return StageOption{
+		apply: func(msg *memqlv1.StageBundleMsg) { msg.Origin = path },
+	}
+}
+
+// StageBundle validates the bundle, then durably STAGES every stageable
+// construct (query / mutation / logic / spec / trait) into the caller's OWN
+// tier: persisted, reviewable, replayed at boot -- and resolvable for the
+// author and for nobody else (epic memql#3928).
+//
+// THE MIDDLE TIER. SessionDefineBundle is owner-scoped and dies with the
+// stream; DurablePromoteBundle is persisted, shared and broadcast to every
+// node. Staging is the second of those with one step omitted -- the cross-node
+// broadcast -- and the omission is the tier.
+//
+// OWNER-OR-DEVELOPER, the same bar ValidateBundle and SessionDefineBundle take
+// rather than the durable pair's owner-only. Staging registers nothing shared,
+// so its blast radius is a database row rather than a change to what the
+// cluster runs.
+//
+// TO TRAIN A STAGED CONSTRUCT, CALL DurablePromoteBundle WITH THE SAME SOURCE.
+// There is no TrainBundle, and its absence is the design: the engine sees the
+// construct is staged for this owner and flips the same persisted row rather
+// than writing a second one, so a caller never has to know which tier a
+// construct is in before it can pick a verb.
+//
+// A CONCEPT IN THE BUNDLE IS REFUSED, by name, and NOTHING is staged -- not even
+// the constructs that would have been fine. A concept registers into the one
+// shared concept registry and its merge rebuilds relationship state
+// cluster-wide, so there is no owner-scoped form of it to stage.
+//
+// The Go error return is reserved for wire-level failures; a bundle the engine
+// rejected comes back as OK=false with a populated Error + diagnostics.
+func (c *Client) StageBundle(ctx context.Context, sources string, opts ...StageOption) (*StageResult, error) {
+	body := &memqlv1.StageBundleMsg{Sources: sources}
+	for _, opt := range opts {
+		if opt.apply != nil {
+			opt.apply(body)
+		}
+	}
+	msg := &memqlv1.MemqlClientMessage{
+		Payload: &memqlv1.MemqlClientMessage_StageBundle{StageBundle: body},
+	}
+	resp, err := c.dispatcher.SendAndWait(ctx, msg)
+	if err != nil {
+		return nil, fmt.Errorf("authoring.stageBundle: %w", err)
+	}
+	result := resp.GetStageBundleResult()
+	if result == nil {
+		return nil, fmt.Errorf("authoring.stageBundle: empty response")
+	}
+	staged := make([]Construct, 0, len(result.GetStaged()))
+	for _, s := range result.GetStaged() {
+		staged = append(staged, Construct{Kind: s.GetKind(), Name: s.GetName()})
+	}
+	return &StageResult{
+		OK:          result.GetOk(),
+		Staged:      staged,
+		Diagnostics: protoDiagnostics(result.GetDiagnostics()),
+		Error:       result.GetError(),
+	}, nil
+}
+
 // DurablePromoteBundle validates the bundle, then durably promotes every plain
 // construct (query / mutation / logic / spec / trait) into the SHARED engine
 // registry. The promoted constructs are persisted (reviewable + restart-durable),

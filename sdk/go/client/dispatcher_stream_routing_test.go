@@ -119,6 +119,7 @@ var unroutedFamilies = map[string]string{
 	"dsl_spec_result":                        "single-reply",
 	"durable_promote_bundle_result":          "single-reply",
 	"durable_demote_bundle_result":           "single-reply",
+	"stage_bundle_result":                    "single-reply",
 	"create_badge_result":                    "single-reply",
 	"revoke_badge_result":                    "single-reply",
 	"deploy_control_result":                  "single-reply",

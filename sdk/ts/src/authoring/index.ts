@@ -4,6 +4,10 @@
 // DURABLE pair, promote and demote (memql#3760), which is how a construct
 // stops being one caller's buffer and becomes something the whole cluster
 // serves.
+//
+// And, between the two, STAGING (epic memql#3928): durable and replayed at
+// boot like a promote, resolvable for its author alone like a session define.
+// Training a staged construct is `durablePromoteBundle`, not a fourth verb.
 
 export {
   AuthoringClient,
@@ -20,5 +24,6 @@ export {
   type DurablePromoteBundleOptions,
   type DurablePromoteBundleResult,
   type SessionDefineBundleResult,
+  type StageBundleResult,
   type ValidateBundleResult,
 } from "./authoring.js";

@@ -365,6 +365,33 @@ export interface DurableDemoteBundlePayload {
   sources: string;
 }
 
+// The DURABLE, OWNER-SCOPED middle tier (epic memql#3928). Same `sources`
+// bundle string again, and the effect sits precisely between the two above:
+// the constructs are persisted and replayed at boot like a promote, and
+// registered into an owner-scoped registry instead of the shared one, so they
+// are callable by their author and by nobody else.
+//
+// OWNER-OR-DEVELOPER, matching validate/session-define rather than the
+// owner-only durable pair -- staging registers nothing shared and broadcasts
+// nothing, so its blast radius is a database row rather than a change to what
+// the cluster runs.
+//
+// THERE IS NO `trainBundle`. Training a staged construct is
+// `durablePromoteBundle` over the same source: the engine sees the construct is
+// staged for this owner and flips the same persisted row rather than writing a
+// second one. A separate message would have forced a caller to know which tier
+// a construct was in before it could pick a verb.
+//
+// No `allowBreaking`, and its absence is structural rather than an omission: a
+// bundle declaring a CONCEPT is refused outright, so there is never a schema
+// classification here to override.
+export interface StageBundlePayload {
+  requestId: string;
+  sources: string;
+  /** Tree-relative bundle path; supplies the ambient domain (memql#3800). */
+  origin?: string;
+}
+
 // ListConstructs asks a cluster what constructs it has actually LOADED, at
 // registry grain (memql#3749). No filters: the surface that consumes it groups
 // client-side, and a filter parameter would put the kind vocabulary in a
@@ -498,6 +525,7 @@ type ClientPayload =
   | { authoringSessionDefineBundle: AuthoringSessionDefineBundlePayload }
   | { durablePromoteBundle: DurablePromoteBundlePayload }
   | { durableDemoteBundle: DurableDemoteBundlePayload }
+  | { stageBundle: StageBundlePayload }
   | { listConstructs: ListConstructsPayload }
   | { listTools: ListToolsPayload }
   | { callTool: CallToolPayload }
@@ -1011,6 +1039,18 @@ export interface DurableDemoteBundleResultPayload {
   outcomes?: DurableDemoteOutcomeWire[];
 }
 
+// The staged-tier reply (epic memql#3928). `staged` names the constructs now
+// callable BY THEIR AUTHOR -- deliberately a different field name from
+// `promoted`, so a caller reading a reply cannot mistake one tier for the other
+// by destructuring the field it expected.
+export interface StageBundleResultPayload {
+  requestId?: string;
+  ok?: boolean;
+  staged?: AuthoringConstructWire[];
+  diagnostics?: AuthoringDiagnosticWire[];
+  error?: string;
+}
+
 // ConstructArgWire is the catalog's argument shape. Field for field the
 // language server's `RunnableArg` (cmd/memql-lsp/runnable.go), because the
 // extension generates ONE argument form from both -- from the LSP when the
@@ -1221,6 +1261,7 @@ type ServerPayload =
   | { authoringSessionDefineBundleResult: AuthoringSessionDefineBundleResultPayload }
   | { durablePromoteBundleResult: DurablePromoteBundleResultPayload }
   | { durableDemoteBundleResult: DurableDemoteBundleResultPayload }
+  | { stageBundleResult: StageBundleResultPayload }
   | { listConstructsResult: ListConstructsResultPayload }
   | { listToolsResult: ListToolsResultPayload }
   | { callToolResult: CallToolResultPayload }
@@ -1264,6 +1305,7 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "authoringSessionDefineBundleResult"; value: AuthoringSessionDefineBundleResultPayload }
   | { kind: "durablePromoteBundleResult"; value: DurablePromoteBundleResultPayload }
   | { kind: "durableDemoteBundleResult"; value: DurableDemoteBundleResultPayload }
+  | { kind: "stageBundleResult"; value: StageBundleResultPayload }
   | { kind: "listConstructsResult"; value: ListConstructsResultPayload }
   | { kind: "listToolsResult"; value: ListToolsResultPayload }
   | { kind: "callToolResult"; value: CallToolResultPayload }
@@ -1359,6 +1401,11 @@ export function readServerPayload(msg: ServerMessage):
     return {
       kind: "durableDemoteBundleResult",
       value: m.durableDemoteBundleResult as DurableDemoteBundleResultPayload,
+    };
+  if (m.stageBundleResult)
+    return {
+      kind: "stageBundleResult",
+      value: m.stageBundleResult as StageBundleResultPayload,
     };
   if (m.listConstructsResult)
     return {

@@ -72,6 +72,7 @@ import type {
   ConceptSchemaDiffWire,
   DurableDemoteOutcomeWire,
   DurablePromoteBundlePayload,
+  StageBundlePayload,
 } from "../client/wire.js";
 
 // -----------------------------------------------------------------------------
@@ -301,6 +302,26 @@ export interface DurableDemoteBundleResult {
   error: string;
 }
 
+/**
+ * Staged-tier outcome (epic memql#3928).
+ *
+ * `staged` names the constructs now callable BY THEIR AUTHOR, and the field is
+ * deliberately not called `promoted`: the two tiers differ in who can call the
+ * construct, which is exactly what a caller destructuring the reply needs to be
+ * unable to confuse.
+ */
+export interface StageBundleResult {
+  ok: boolean;
+  /** The constructs now durable and resolvable for their author alone. */
+  staged: AuthoringConstruct[];
+  diagnostics: AuthoringDiagnostic[];
+  /**
+   * Non-empty when the bundle was REJECTED -- a failed validation, a failed
+   * stage, or a CONCEPT in the source, which staging refuses by name.
+   */
+  error: string;
+}
+
 export interface AuthoringCallOptions {
   signal?: AbortSignal;
   /**
@@ -484,6 +505,62 @@ export class AuthoringClient {
       diagnostics: (payload.value.diagnostics ?? []).map(diagnosticFromWire),
       error: payload.value.error ?? "",
       conceptDiffs: (payload.value.conceptDiffs ?? []).map(conceptDiffFromWire),
+    };
+  }
+
+  /**
+   * DURABLY STAGE the bundle's constructs into the caller's OWN tier (epic
+   * memql#3928): persisted, reviewable, replayed at boot -- and resolvable for
+   * the author and for nobody else.
+   *
+   * The middle tier. `sessionDefineBundle` is owner-scoped and dies with the
+   * connection; `durablePromoteBundle` is persisted, shared and broadcast to
+   * every node. Staging is the second of those with one step omitted -- the
+   * cross-node broadcast -- and THE OMISSION IS THE TIER.
+   *
+   * OWNER-OR-DEVELOPER, the same bar as `validateBundle` and
+   * `sessionDefineBundle` rather than the durable pair's owner-only. Staging
+   * registers nothing shared, so its blast radius is a database row rather than
+   * a change to what the cluster runs.
+   *
+   * TO TRAIN A STAGED CONSTRUCT, CALL `durablePromoteBundle` WITH THE SAME
+   * SOURCE. There is no `trainBundle`, and its absence is the design: the
+   * engine sees the construct is staged for this owner and flips the same
+   * persisted row rather than writing a second one, so a caller never has to
+   * know which tier a construct is in before it can pick a verb.
+   *
+   * A CONCEPT IN THE BUNDLE IS REFUSED, by name, and nothing is staged -- not
+   * even the constructs that would have been fine. A concept registers into the
+   * one shared concept registry and its merge rebuilds relationship state
+   * cluster-wide, so there is no owner-scoped form of it to stage. Train the
+   * concept and stage the constructs bound to it.
+   *
+   * A rejected bundle resolves normally with `ok: false` and the `error`; it
+   * does not throw, on the same terms as the promote.
+   */
+  async stageBundle(
+    sources: string,
+    opts: AuthoringCallOptions = {},
+  ): Promise<StageBundleResult> {
+    const requestId = newShortId();
+    const body: StageBundlePayload = { requestId, sources };
+    // Same ambient-domain contract as validate and promote: a stage runs the
+    // SAME Gate-1 sandbox, so omitting the origin here would validate and then
+    // refuse (memql#3800).
+    if (opts.origin !== undefined) body.origin = opts.origin;
+    const reply = await this.dispatcher.sendAndWait({ stageBundle: body }, opts.signal);
+    const payload = readServerPayload(reply);
+    if (payload?.kind === "queryError") {
+      throw new Error(`stageBundle: ${payload.value.error?.message ?? "(no message)"}`);
+    }
+    if (payload?.kind !== "stageBundleResult") {
+      throw new Error("stageBundle: unexpected reply envelope");
+    }
+    return {
+      ok: payload.value.ok === true,
+      staged: (payload.value.staged ?? []).map(constructFromWire),
+      diagnostics: (payload.value.diagnostics ?? []).map(diagnosticFromWire),
+      error: payload.value.error ?? "",
     };
   }
 
