@@ -525,3 +525,50 @@ export function recordedDomain(receipt: Receipt | null): string {
   }
   return "";
 }
+
+/** The cluster owner a previous run bootstrapped. Empty strings when unrecorded. */
+export interface RecordedOwner {
+  email: string;
+  firstName: string;
+  lastName: string;
+}
+
+/**
+ * The OWNER a previous run bootstrapped this cluster with (znasllc-io#3888).
+ *
+ * WHY A REPAIR NEEDS THIS. `seedBootstrap` refuses a partial bootstrap set --
+ * correctly and on purpose, because a partial seed writes a Secret that looks
+ * healthy, brings the cluster up green, and leaves the operator at a login page
+ * for an account that was never created. But `requiredFields("repair")` does
+ * not collect the three owner fields, and `prefillFromReceipt` restored only
+ * the provider and its key path, so a repair reached that step with all three
+ * empty and died at `exit 2` naming values the wizard had given it no way to
+ * supply. The refusal was right; the caller was wrong -- the same shape as
+ * memql#3568 and memql#3560 before it.
+ *
+ * SCANNED ACROSS EVERY ENTRY rather than read off `seedBootstrap` by name, for
+ * the reason `recordedDomain` gives just above: which entries carry which
+ * params depends on how far the recorded run got, and a repair after a run that
+ * failed BEFORE seedBootstrap still has the operator's answers on the entries
+ * that did complete. Reading one named step would find nothing in exactly the
+ * case a repair is for.
+ *
+ * The three are read INDEPENDENTLY. A run that recorded two of them and not the
+ * third should surface as two pre-filled boxes and one empty one, not as three
+ * empty boxes because the set was incomplete -- the operator then retypes what
+ * is missing instead of all of it.
+ */
+export function recordedOwner(receipt: Receipt | null): RecordedOwner {
+  const find = (key: string): string => {
+    for (const entry of receipt?.entries ?? []) {
+      const value = entry.params[key];
+      if (typeof value === "string" && value.trim() !== "") return value.trim();
+    }
+    return "";
+  };
+  return {
+    email: find("owner-email"),
+    firstName: find("owner-first-name"),
+    lastName: find("owner-last-name"),
+  };
+}

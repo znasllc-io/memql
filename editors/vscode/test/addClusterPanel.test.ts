@@ -365,6 +365,27 @@ test("a repair reads the key path back off the receipt and does reach wave 2", a
           changed: false,
           recordedAt: "2026-08-01T00:00:00Z",
         },
+        {
+          // The bootstrap answers, which a real install records and a repair
+          // has to recover (znasllc-io#3888). Without them the repair now stops
+          // on the form asking for the owner -- correctly, since reaching
+          // `seedBootstrap` without them is an `exit 2` nine minutes in -- and
+          // this case would stop testing what it is about.
+          stepId: "seedBootstrap",
+          script: "install.seedBootstrap",
+          receipt: "",
+          preExisting: false,
+          params: {
+            domain: "memql.localhost",
+            "owner-email": "owner@example.com",
+            "owner-first-name": "Ada",
+            "owner-last-name": "Lovelace",
+            "registration-mode": "invite_only",
+          },
+          result: {},
+          changed: true,
+          recordedAt: "2026-08-01T00:00:00Z",
+        },
       ],
     },
   });

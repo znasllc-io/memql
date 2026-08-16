@@ -49,14 +49,22 @@ test("a repair can be started without typing anything, once the receipt is in", 
   // The key path is the one that cannot be defaulted HERE: this module has no
   // receipt and no filesystem. What it can pin is that the path is the only
   // thing standing between a fresh state and a startable repair.
+  //
+  // The OWNER joins the key path in that category (znasllc-io#3888): three more
+  // values this module cannot default, which the panel pre-fills from the
+  // receipt before the operator sees the form. A repair that reached
+  // `seedBootstrap` without them died at `exit 2` naming values no box offered.
   const state = new AddClusterState();
   state.chooseAction("repair");
   assert.deepEqual(
     state.validate().map((e) => e.field),
-    ["providerKeyFile"],
-    "the domain and the vendor are already defaulted; only the path is missing",
+    ["ownerFirstName", "ownerLastName", "ownerEmail", "providerKeyFile"],
+    "the domain and the vendor are defaulted; the owner and the path are not",
   );
 
+  state.setInput("ownerFirstName", "Ada");
+  state.setInput("ownerLastName", "Lovelace");
+  state.setInput("ownerEmail", "owner@example.com");
   state.setInput("providerKeyFile", "/home/someone/.memql/key");
   assert.deepEqual(state.validate(), []);
   assert.equal(state.beginRun(), true);
