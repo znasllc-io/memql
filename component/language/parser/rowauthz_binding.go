@@ -12,14 +12,30 @@ import (
 // place of the `actor.*` term an author must remember to type into
 // every filter over it (#2803).
 //
-// PHASE 1 IS INERT BY CONSTRUCTION. This file parses, validates, and
-// rewrites the declaration. Nothing reads the resulting tier at query
-// time -- no predicate is injected, no filter compilation changes, and
-// a construct that returned N rows before the annotation landed returns
-// the same N rows after. The predicate column in the table below is
-// documented so the vocabulary is DESIGNED against its eventual use,
-// not so it gets applied now. `TestRowAuthzIsInert` (in the
-// memory-nodes package) is the gate that keeps it that way.
+// THIS FILE IS THE DECLARATION SURFACE, AND THE TIER IT PRODUCES IS
+// ENFORCED. Parsing, validating and rewriting is all that happens
+// here, which is easy to mistake for the whole story -- it WAS the
+// whole story in Phase 1 (#2920), and this header went on saying so
+// for months after it stopped being true (swept in memql#3987). Phase
+// 3 ended it. component/memql/rowauthz_enforce.go ANDs the tier's
+// predicate into the plan of every read with a bound concept, admits
+// each emitted row against the tier its own concept declares (the only
+// mechanism available to a raw client-supplied query string or to
+// graph expansion, neither of which has a filter to AND anything
+// into), and REFUSES a read carrying no actor rather than comparing
+// against ""; memql#3174 added the write guard. So a construct over a
+// declared concept does NOT return the same N rows it returned before
+// the annotation landed, and the predicate column in the table below
+// describes what gets applied rather than what the vocabulary was
+// designed against.
+//
+// The build-time gate is TestRowAuthzEnforcementLandGate
+// (component/memql/rowauthz_enforce_gate_test.go), which re-derives
+// that no construct's result set narrows silently. It replaced the
+// Phase 1 gate this header used to cite as live; that retirement is
+// recorded once, in
+// component/database/memory-nodes/concept_rowauthz_test.go, where the
+// deleted test stood.
 //
 // The detector and the codemod live in one file for the #2621 reason:
 // the loader-side validator (component/database/memory-nodes) and the
@@ -43,13 +59,16 @@ const RowAuthzAnnotation = "rowAuthz"
 // places is how they drift into disagreeing about one annotation -- the same
 // reason the detector and the codemod share this file.
 //
-// The owner-field provenance gate is the deliberate exception: it asks "can a
-// caller write the row's id?" but compares the LITERAL "id", because naming
-// this symbol would put that file on the row-authz surface and
-// TestRowAuthzIsInert would then demand an allow-list entry for it. That gate
-// is a safety property about ENFORCEMENT, and a static analyzer a test drives
-// does not belong on its list. Noted here so the exception is visible from
-// the constant rather than only from the file that makes it.
+// The owner-field provenance gate (component/memql/rowauthz_owner_provenance.go)
+// asks "can a caller write the row's id?" and compares the LITERAL "id" instead
+// of naming this symbol -- and the reason for that has EXPIRED. Phase 1 policed
+// the row-authz surface with an allow-list of the files permitted to touch it at
+// all, so importing this constant there would have demanded an entry, and a
+// static analyzer a test drives did not belong on a list about ENFORCEMENT.
+// memql#3172 retired that allow-list in the commit that landed enforcement. The
+// duplicated literal is therefore leftover rather than a deliberate exception
+// (memql#3987); it is named here in prose so the two spellings remain findable
+// from each other, not because an argument still holds it apart.
 const RowAuthzSelfOwnedField = "id"
 
 // RowAuthzTier is the declared row-authorization tier of a concept.
@@ -60,19 +79,23 @@ const RowAuthzSelfOwnedField = "id"
 type RowAuthzTier string
 
 const (
-	// RowAuthzOwned -- rows belong to a user. Will eventually inject
-	// `<Owner> == actor.userId`.
+	// RowAuthzOwned -- rows belong to a user. Injects
+	// `<Owner>==actor.userId` (`row.id==actor.userId` for the
+	// self-owned form), and a read carrying no actor is REFUSED
+	// rather than compared against "".
 	RowAuthzOwned RowAuthzTier = "owned"
-	// RowAuthzClusterOwner -- rows are administrative. Will
-	// eventually inject `actor.isClusterOwner == true`.
+	// RowAuthzClusterOwner -- rows are administrative. Injects
+	// `actor.isClusterOwner==true`.
 	RowAuthzClusterOwner RowAuthzTier = "clusterOwner"
 	// RowAuthzPublic -- rows are globally readable by intent. Injects
 	// nothing, and must be spelled explicitly: "no annotation" and
 	// "declared public" are different states, which is the whole
 	// point of the tier existing (#2803).
 	RowAuthzPublic RowAuthzTier = "public"
-	// RowAuthzGranted -- visibility comes from a relationship. Will
-	// eventually inject the named spec, gated on actor.userId.
+	// RowAuthzGranted -- visibility comes from a relationship.
+	// Injects the named spec, gated on actor.userId. Zero concepts
+	// declare it today, so it has no live callers -- which is a fact
+	// about the corpus, not about the mechanism.
 	RowAuthzGranted RowAuthzTier = "granted"
 )
 

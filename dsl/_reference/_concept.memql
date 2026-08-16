@@ -64,10 +64,16 @@ use identity.concepts.{ user }
 //                                tier that is FALSE.
 //   @rowAuthz(via="<spec>")      A relationship spec grants visibility.
 //
-// PHASE 1 IS INERT (memql#2920): the tier is parsed, validated and carried on
-// the concept, and nothing reads it at query time -- no predicate is injected
-// and no query returns a different row set. A concept with no declaration
-// still loads; it produces a boot warning, not an error. Seed the ones an
+// THE TIER IS ENFORCED (memql#3172), so declaring one CHANGES WHAT READS
+// RETURN: its predicate is ANDed into the plan of every read with a bound
+// concept, every emitted row is separately admitted against the tier its own
+// concept declares, and a read carrying no actor is refused rather than
+// compared against "". update/delete refuse when the target row's declared
+// owner is not the actor (memql#3174). Pick a tier as an authorization
+// decision, not as metadata -- getting it wrong hides rows from the people who
+// should see them, or shows them to the people who should not.
+// A concept with no declaration still loads; it produces a boot warning, not
+// an error, and returns what it always did. Seed the ones an
 // existing query filter can prove with
 // `memqlmigrate --rewrite=row-authz -w dsl/*/concepts.memql`.
 // See docs/public/operate/auth/per-row-authz-audit.md.

@@ -85,9 +85,16 @@ const (
 	ShadowPathGraphExpansion = "graph-expansion"
 )
 
-// InjectedPredicate renders the term a tier would AND into every access
-// of the concept, in the spelling an author would have written by hand.
-// It is rendered, never applied.
+// InjectedPredicate renders the term a tier ANDs into every access of the
+// concept, in the spelling an author would have written by hand.
+//
+// It used to add "rendered, never applied", which was true of Phase 2 shadow
+// mode and stopped being true when Phase 3 landed: rowAuthzPredicateExpr
+// parses THIS output and injects the result (memql#3172; swept in
+// memql#3987). So the rendering is not a report about a hypothetical -- it is
+// the predicate, and a wrong spelling here is a wrong authorization outcome
+// rather than a wrong log line. That is why the self-owned arm below labours
+// over `row.id` versus a bare `id`.
 func InjectedPredicate(decl *langparser.RowAuthzDecl) string {
 	if decl == nil {
 		return ""
