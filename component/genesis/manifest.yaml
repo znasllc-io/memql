@@ -128,13 +128,6 @@ secrets:
 
   # --- database ---
 
-  - name: MEMQL_DB_SEARCH_PATH
-    component: database
-    scope: global
-    kind: integration
-    optional: true
-    description: "Per-environment Postgres schema search path, e.g. 'memql_prod, public' (epic memql#3748). THE environment boundary: memQL has no tenancy dimension in the actor envelope, so isolation is the connection rather than a filter. The FIRST schema is where every write lands and may not be public -- an unset or mistyped value falls back to \"$user\", public, and an environment living there is what a configuration slip would silently resolve to. Keep public on the path but empty of tables: the TimescaleDB extension's functions live in it. Unset means one environment, which is every local cluster."
-
   - name: MEMQL_DATABASE_DSN
     component: database
     scope: global
@@ -719,13 +712,6 @@ variables:
     scope: node
     optional: true
     description: "On-disk root of ADDITIONAL product-DSL domains mounted into the unified tree at boot (dsl.MountRuntimeDomainsFromEnv, accessor core/dslfs.PathFromEnv). This is the mechanism by which a product-agnostic engine image runs a product's DSL with zero compiled-in product code (memql#2472): a data-only bundle image's init-container copies the .memql tree into a shared volume and the node reads it here. One sub-directory per product namespace. It ADDS domains -- a directory whose name collides with a core embedded domain is skipped, and directories starting with _ or . are skipped. The mounted tree loads through the same strict-boot gate as the embedded one, so a malformed construct refuses boot. Unset is a no-op (embedded tree only)."
-
-  - name: MEMQL_ENVIRONMENT
-    component: engine
-    scope: node
-    default: "development"
-    optional: true
-    description: "Environment label stamped on system.startup events and metadata enrichment."
 
   - name: MEMQL_GENESIS_AUTOLOAD
     component: engine
@@ -1554,12 +1540,6 @@ variables:
     scope: node
     optional: true
     description: "The cluster's domain. Every domain-shaped identity value (base URL, expected issuer, bootstrap domain, discovery endpoint, CORS origins, OAuth redirect URIs) is derived from it set-if-absent at boot by component/genesis/domain.go; an explicitly configured value always wins. Delivered to local pods as the single key of the memql-domain ConfigMap (memql#3593)."
-
-  - name: MEMQL_HOST_LABEL
-    component: platform
-    scope: node
-    optional: true
-    description: "The DNS label distinguishing this environment's front-door hosts (memql#3767). Empty -- the default, and every single-environment cluster including every local one -- means the unprefixed hosts api.<domain> / identity.<domain> / mcp.<domain> / *.<domain> plus the apex. A label folds in at two positions that are NOT interchangeable: a ROLE host hyphenates (api-staging.<domain>) so the cluster's existing *.<domain> wildcard certificate still covers it, since a wildcard matches exactly one label; a SITE host nests (portal.staging.<domain>) because its own name already occupies that label, which is why a labelled environment requests one additional wildcard for its sites. Composed through component/frontdoor by BOTH consumers -- cmd/frontdoorhosts, which reads it from the overlay's environment.yaml and generates the Ingress rules, and component/genesis/domain.go, which composes this node's issuer / CORS origins / redirect URIs / MCP public URL with it -- so the hosts the front door serves and the hosts the nodes believe in cannot disagree. Delivered alongside MEMQL_ENVIRONMENT and MEMQL_DB_SEARCH_PATH on the memql-environment ConfigMap. It is a VALUE and never a branch: the engine learns what its own hosts are called, not which environment it is."
 
   - name: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
     component: identity

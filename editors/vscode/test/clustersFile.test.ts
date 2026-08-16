@@ -35,9 +35,9 @@ clusters:
     endpoint: api.memql.localhost:443
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
-    domain: staging.example.com
-    endpoint: api.staging.example.com:443
-    issuer: https://identity.staging.example.com
+    domain: example.com
+    endpoint: api.example.com:443
+    issuer: https://identity.example.com
     client_id: cockpit
 selected_cluster: local
 `;
@@ -151,7 +151,7 @@ test("upsertCluster renames a cluster in place rather than adding a second entry
   const f = await tempFile(SAMPLE);
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.example.com:443" },
     "staging",
   );
   const parsed = await readClustersFile(f);
@@ -182,7 +182,7 @@ test("a rename leaves a selection pointing at a DIFFERENT cluster alone", async 
   const f = await tempFile(SAMPLE); // selected_cluster: local
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.example.com:443" },
     "staging",
   );
   assert.equal((await readClustersFile(f)).selectedCluster, "local");
@@ -194,7 +194,7 @@ test("a rename preserves unknown keys and comments on the renamed node", async (
   );
   await upsertCluster(
     f,
-    { name: "staging-eu", endpoint: "api.staging.example.com:443" },
+    { name: "staging-eu", endpoint: "api.example.com:443" },
     "staging",
   );
   const raw = await fs.readFile(f, "utf8");

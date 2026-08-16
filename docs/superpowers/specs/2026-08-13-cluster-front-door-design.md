@@ -498,7 +498,7 @@ a trailing phase.
 | `docs/public/operate/environment-parity.md` | Connection-model diagram and the parity table both name `cockpit.<domain>` |
 | `CLAUDE.md` (root) | Endpoint-protocol table (the D10 exception), local-cluster section, node-type list, build tags |
 | `docs/public/build/build-tags.md` | The `edge` tag |
-| `docs/public/operate/reproduce-staging-locally.md` | Hostnames, ports, runbook |
+| `docs/public/operate/reproduce-the-cloud-locally.md` | Hostnames, ports, runbook |
 | `docs/public/operate/portal.md` | The portal's own origin |
 | `clients/README.md` | "Served by a Go package at a sub-path" becomes "a site row served by the edge" |
 | `component/portal/doc.go` | Its no-`go:embed` rationale becomes the edge's general case |

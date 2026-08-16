@@ -61,15 +61,6 @@ spec:
             # mesh stays under max_connections during a rollout (memql#1858).
             - configMapRef:
                 name: memql-db-pool
-            # The environment, delivered as a VALUE and never as a branch
-            # (epic memql#3748). Carries MEMQL_ENVIRONMENT and the schema
-            # search path that IS the boundary between staging and production.
-            # `optional` because a single-environment cluster -- every local
-            # one -- ships no such ConfigMap and must come up exactly as it
-            # did before this existed.
-            - configMapRef:
-                name: memql-environment
-                optional: true
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: SERVICE_NAME, value: "memQL" }
@@ -98,7 +89,7 @@ spec:
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
             # Deployment-specific placeholder; a product stack's overlay patches the real host.
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.example.com" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             # SSL_CERT_DIR covers 0.9.0 images; MEMQL_HTTP_TLS_CA_FILE the explicit path at 0.9.1+.

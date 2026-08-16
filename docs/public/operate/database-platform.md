@@ -10,7 +10,7 @@ owner: znas
 # Database platform (CloudNativePG)
 
 memQL runs its own PostgreSQL 16 + TimescaleDB Community + pgvector, managed by
-**CloudNativePG**, in every environment — local k3d, staging, and production.
+**CloudNativePG**, on every deploy target — local k3d and the cloud alike.
 One operator, one operand image, one set of manifests; what differs per
 environment is numbers and endpoints.
 
@@ -26,7 +26,7 @@ Epic memql#3842.
 | Monitoring | [`deploy/k8s/monitoring/`](../../../deploy/k8s/monitoring/README.md) | PodMonitor on :9187 + the alerts below |
 
 Local dev, including taking a backup and restoring into a scratch cluster:
-[reproduce-staging-locally.md](reproduce-staging-locally.md#database-backups-and-a-restore-drill-local).
+[reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md#database-backups-and-a-restore-drill-local).
 
 ---
 
@@ -42,7 +42,7 @@ None of this can live in a manifest, and each item is load-bearing.
 | Access tier | **Cool** | backups are written once and read almost never. Retrieval is ~$0.01/GB, which is worth stating explicitly so nobody economises on restore drills |
 | Blob versioning | **on** | an overwrite is recoverable |
 | Soft delete (blobs + containers) | **on**, ≥ 30 days | a delete is recoverable, and matches the PITR window |
-| Container | `memql-staging-db-backups` / `memql-prod-db-backups` | one per environment; the overlays name these |
+| Container | `memql-db-backups` | the overlay names it |
 
 **The cluster identity gets write, not purge.** Grant the federated managed
 identity `Storage Blob Data Contributor` on this account and **do not** grant
@@ -57,7 +57,7 @@ an intruder cannot remove".
 
 ### 2. A Premium SSD v2 StorageClass named `managed-csi-premium-v2`
 
-AKS ships no PSSDv2 class by default; the staging and production overlays name
+AKS ships no PSSDv2 class by default; the cloud overlay names
 this one for both the data and WAL volumes.
 
 **PSSDv2 is LRS/zonal-only, and that is correct here rather than a compromise.**
@@ -81,7 +81,7 @@ has never been cut on the build server. Before the first deploy:
 2. replace the tag with the `@sha256:` its run summary prints —
    `scripts/deploy/pin-overlay-digests.sh` does it mechanically.
 
-Until then `scripts/deploy/drift-check.sh --rendered --env=staging` **fails**,
+Until then `scripts/deploy/drift-check.sh --rendered ` **fails**,
 which is the correct answer to *"is this deployable?"* — and it can only give
 that answer because memql#3847 taught the checker to read `imageName:` as well
 as `image:`. Before that, the database image was the one image in the estate
@@ -89,17 +89,17 @@ outside the digest gate.
 
 ---
 
-## What is deployed, per environment
+## What is deployed, per target
 
-| | local | staging | production |
-|---|---|---|---|
-| Preset | *(none — see below)* | `mid` | `top` |
-| Instances | 1 | 2 | 3, one per zone |
-| Resources | 100m / 512Mi | 2 vCPU / 8 GiB | 4 vCPU / 16 GiB |
-| Storage (data + WAL) | 10 + 2 GiB | 128 + 32 GiB | 256 + 64 GiB |
-| `max_connections` | 200 | 400 | 400 |
-| Backups | Azurite, 7d | Azure Blob, 30d | Azure Blob, 30d |
-| HA / PDB | off | on | on |
+| | local | cloud |
+|---|---|---|
+| Preset | *(none — see below)* | `top` |
+| Instances | 1 | 3, one per zone |
+| Resources | 100m / 512Mi | 4 vCPU / 16 GiB |
+| Storage (data + WAL) | 10 + 2 GiB | 256 + 64 GiB |
+| `max_connections` | 200 | 400 |
+| Backups | Azurite, 7d | Azure Blob, 30d |
+| HA / PDB | off | on |
 
 Local composes the component but **no preset**: the presets describe what a
 customer buys, and a developer laptop is not a tier.
@@ -149,13 +149,13 @@ watches. Panels are fed by the same `cnpg_*` metrics the alerts use, scraped via
 
 ---
 
-## Cutover from Tiger Cloud (staging)
+## Cutover from Tiger Cloud
 
 The one-time migration off the managed service. Written to be executed rather
 than read: every step has a check, and the rollback is one command until the
 soak ends.
 
-**Why a maintenance-window dump/restore rather than replication.** Staging held
+**Why a maintenance-window dump/restore rather than replication.** The cluster held
 ~78k `MemoryNodes` rows at the last DR rehearsal and production does not exist
 yet, so the data is small enough that a window costs less than the machinery of
 logical replication — and a dump/restore has a rollback that is *doing nothing*,
@@ -166,7 +166,7 @@ which replication does not.
 1. **The new cluster is running and healthy.** `make status` shows the database
    litmus green: phase, extensions applied, archiving OK.
 2. **A backup has completed** on the new cluster, and
-   `make db-restore-drill ENV=staging` passes. Do not migrate onto a database
+   `make db-restore-drill` passes. Do not migrate onto a database
    whose recovery path is unproven.
 3. **Record the source counts** — these are what step 6 compares against:
 
@@ -178,7 +178,7 @@ which replication does not.
 
 ### The window
 
-4. **Quiesce.** `make scale N=0 ENV=staging`. Nothing should be writing while
+4. **Quiesce.** `make scale N=0`. Nothing should be writing while
    the dump runs; a dump taken under writes is a dump whose row counts will not
    match and whose consistency you then have to reason about.
 
@@ -191,12 +191,12 @@ which replication does not.
    # replays the extension's own catalog rows as ordinary data and the
    # hypertables come back as plain tables -- which restores "successfully" and
    # silently loses every hypertable, chunk and continuous aggregate.
-   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+   kubectl exec -n memql memql-db-1 -c postgres -- \
      psql -U postgres -d memql -c "SELECT timescaledb_pre_restore();"
 
    pg_restore --no-owner --no-privileges --dbname "$CNPG_DSN" staging.dump
 
-   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+   kubectl exec -n memql memql-db-1 -c postgres -- \
      psql -U postgres -d memql -c "SELECT timescaledb_post_restore();"
    ```
 
@@ -206,17 +206,13 @@ which replication does not.
 
 7. **Swap the DSNs in Key Vault** — `memory-nodes-database-dsn` and the direct
    DSN — to `memql-db-rw`. ESO propagates on its refresh interval; force it
-   with `kubectl -n memql-staging annotate externalsecret memql-secrets
+   with `kubectl -n memql annotate externalsecret memql-secrets
    force-sync=$(date +%s) --overwrite`.
 
-   **`MEMQL_DB_SEARCH_PATH` travels unchanged.** It is not in the DSN and not in
-   this Secret — it is a committed value in the overlay's `environment.yaml`.
-   Changing the database must not change the schema boundary.
-
 8. **Roll the mesh, identity first.** Pods read their environment once, at
-   start: `kubectl rollout restart deploy/identity -n memql-staging`, wait for
+   start: `kubectl rollout restart deploy/identity -n memql`, wait for
    it, then the rest. Mind that ArgoCD's image sync re-applies replicas —
-   `make scale N=2 ENV=staging` brings the mesh back to its committed width.
+   `make scale N=2` brings the mesh back to its committed width.
 
 9. **Confirm.** `/readyz` green across the mesh; the three database alerts
    quiet; `make status` litmus green.
@@ -243,7 +239,7 @@ counts toward that number. The only way to know is to take the primary away and
 watch.
 
 ```bash
-make db-failover-litmus CONFIRM=kill-the-primary ENV=staging
+make db-failover-litmus CONFIRM=kill-the-primary
 ```
 
 `ENV` defaults to **local** for the same reason it does on `make scale`: this
@@ -280,7 +276,7 @@ and it can reschedule, because the storage is per-instance rather than shared.
 
 **Verification steps.**
 
-1. `kubectl get cluster memql-db -n memql-prod` — expect `2/3 ready` and a
+1. `kubectl get cluster memql-db -n memql` — expect `2/3 ready` and a
    `currentPrimary` in a surviving zone.
 2. Confirm the application recovered: `/readyz` green, no sustained error rate.
 3. `MemqlDatabaseReplicaNotStreaming` should be **quiet** — the two survivors
@@ -310,7 +306,7 @@ nobody measures stops being true quietly.
 
 Verified against live Tiger and Azure pricing on 2026-08-14; the epic's target
 is **≤ ~$460/mo list** for production (~$330 on a savings plan) and **≤ ~$40/mo**
-for staging.
+for the cluster.
 
 Two things to note when checking the actual bill:
 
@@ -339,10 +335,9 @@ backend is a process with its own memory.
 
 If you do enable it, point `MEMQL_DATABASE_DSN` at the pooler and leave
 `MEMORY_NODES_DATABASE_DIRECT_DSN` on `memql-db-rw`. **Transaction-mode pooling
-must never carry the migrations or `MEMQL_DB_SEARCH_PATH`** — the search path is
-a session GUC and *is* the environment boundary, so pooling it would mean a
-staging query landing on a connection still set to production's schema. That is
-the one failure this architecture has no second line of defence against.
+must never carry the migrations** — they take advisory locks, and a lock
+acquired in one transaction and released in another is, on a pooled connection,
+released by whoever holds that backend next.
 
 ---
 

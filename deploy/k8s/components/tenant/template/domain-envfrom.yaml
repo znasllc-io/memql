@@ -8,7 +8,7 @@
 # every node it touched. `add` at `envFrom/-` appends, leaving what is there
 # alone.
 #
-# NOT `optional`, unlike memql-environment: see domain.yaml for why a node with
+# NOT `optional`: see domain.yaml for why a node with
 # no domain is a node that boots and then rejects every token.
 - op: add
   path: /spec/template/spec/containers/0/envFrom/-

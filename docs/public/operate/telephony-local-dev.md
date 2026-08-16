@@ -44,7 +44,7 @@ points at (#2186).
      `MEMQL_TELEPHONY_SIP_EDGE_URI` below),
    - an **Outbound Voice Profile** for `place_call`.
 3. The standard k3d prerequisites (`docker`, `k3d`, `kubectl`) — see
-   [reproduce-staging-locally.md](reproduce-staging-locally.md).
+   [reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md).
 
 ---
 

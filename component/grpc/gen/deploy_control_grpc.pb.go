@@ -20,8 +20,6 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	DeployControlService_GetDeploymentStatus_FullMethodName = "/znasllc.memql.deploycontrol.v1.DeployControlService/GetDeploymentStatus"
-	DeployControlService_DeployStaging_FullMethodName       = "/znasllc.memql.deploycontrol.v1.DeployControlService/DeployStaging"
-	DeployControlService_Promote_FullMethodName             = "/znasllc.memql.deploycontrol.v1.DeployControlService/Promote"
 	DeployControlService_Rollback_FullMethodName            = "/znasllc.memql.deploycontrol.v1.DeployControlService/Rollback"
 	DeployControlService_RolloutAction_FullMethodName       = "/znasllc.memql.deploycontrol.v1.DeployControlService/RolloutAction"
 	DeployControlService_SuggestNextVersion_FullMethodName  = "/znasllc.memql.deploycontrol.v1.DeployControlService/SuggestNextVersion"
@@ -36,39 +34,35 @@ const (
 //
 // DeployControlService is the gRPC surface behind the memQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
-// machinery -- per-env image authority (the kustomize overlays), the
-// release lockfiles, Argo CD app status, Argo Rollouts progressive
-// delivery, and the in-cluster deploy gate -- as a small set of unary
-// RPCs.
+// machinery -- the image authority (the kustomize overlay), the release
+// lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and
+// the in-cluster deploy gate -- as a small set of unary RPCs.
+//
+// Every RPC operates on THIS installation and takes no environment (epic
+// memql#3943): an operator who wants a second environment installs a second
+// instance, which answers on its own address.
 //
 // Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
-// state into typed status. Write RPCs (DeployStaging / Promote /
-// Rollback / RolloutAction) go through the sanctioned action scripts
-// (scripts/release/promote.sh, `git revert`, `kubectl argo rollouts`)
+// state into typed status. Write RPCs (Rollback / RolloutAction) go
+// through the sanctioned actions (`git revert`, `kubectl argo rollouts`)
 // -- never ad-hoc `kubectl set image`. Every write RPC is gated to
 // owner/admin (#728) and emits an audit event (success / failure /
 // blocked).
 type DeployControlServiceClient interface {
-	// GetDeploymentStatus returns the full deployment picture for one
-	// environment: deployed digests, the resolved release lockfile,
-	// Argo CD sync/health, per-rollout progressive-delivery state, and
-	// the latest deploy-gate result. Read-only; not audited per call.
+	// GetDeploymentStatus returns the full deployment picture: deployed
+	// digests, the resolved release lockfile, Argo CD sync/health, per-rollout
+	// progressive-delivery state, and the latest deploy-gate result.
+	// Read-only; not audited per call.
 	GetDeploymentStatus(ctx context.Context, in *GetDeploymentStatusRequest, opts ...grpc.CallOption) (*DeploymentStatus, error)
-	// DeployStaging assembles + applies a release into the staging
-	// overlay via scripts/release/promote.sh --env=staging.
-	DeployStaging(ctx context.Context, in *DeployStagingRequest, opts ...grpc.CallOption) (*ActionResult, error)
-	// Promote copies a validated staging release into the prod overlay
-	// (digest copy, no rebuild) via promote.sh --env=prod.
-	Promote(ctx context.Context, in *PromoteRequest, opts ...grpc.CallOption) (*ActionResult, error)
-	// Rollback reverts the overlay commit identified by commit_sha for
-	// the given environment via `git revert`.
+	// Rollback reverts the overlay commit identified by commit_sha via
+	// `git revert`.
 	Rollback(ctx context.Context, in *RollbackRequest, opts ...grpc.CallOption) (*ActionResult, error)
 	// RolloutAction promotes or aborts an in-flight Argo Rollout via
 	// `kubectl argo rollouts promote|abort`.
 	RolloutAction(ctx context.Context, in *RolloutActionRequest, opts ...grpc.CallOption) (*ActionResult, error)
 	// SuggestNextVersion reads the latest succeeded deployment's version
-	// for an environment (#1877) and proposes the next major / minor /
-	// patch semver. Read-only; owner/admin gated, not audited per call.
+	// (#1877) and proposes the next major / minor / patch semver.
+	// Read-only; owner/admin gated, not audited per call.
 	SuggestNextVersion(ctx context.Context, in *SuggestNextVersionRequest, opts ...grpc.CallOption) (*SuggestNextVersionResult, error)
 	// CutVersion creates a new pending deployment record (#1877) at the
 	// chosen next version (bump the current, or an explicit override) with
@@ -103,26 +97,6 @@ func (c *deployControlServiceClient) GetDeploymentStatus(ctx context.Context, in
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(DeploymentStatus)
 	err := c.cc.Invoke(ctx, DeployControlService_GetDeploymentStatus_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *deployControlServiceClient) DeployStaging(ctx context.Context, in *DeployStagingRequest, opts ...grpc.CallOption) (*ActionResult, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ActionResult)
-	err := c.cc.Invoke(ctx, DeployControlService_DeployStaging_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *deployControlServiceClient) Promote(ctx context.Context, in *PromoteRequest, opts ...grpc.CallOption) (*ActionResult, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ActionResult)
-	err := c.cc.Invoke(ctx, DeployControlService_Promote_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -195,39 +169,35 @@ func (c *deployControlServiceClient) RollbackDeployment(ctx context.Context, in 
 //
 // DeployControlService is the gRPC surface behind the memQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
-// machinery -- per-env image authority (the kustomize overlays), the
-// release lockfiles, Argo CD app status, Argo Rollouts progressive
-// delivery, and the in-cluster deploy gate -- as a small set of unary
-// RPCs.
+// machinery -- the image authority (the kustomize overlay), the release
+// lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and
+// the in-cluster deploy gate -- as a small set of unary RPCs.
+//
+// Every RPC operates on THIS installation and takes no environment (epic
+// memql#3943): an operator who wants a second environment installs a second
+// instance, which answers on its own address.
 //
 // Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
-// state into typed status. Write RPCs (DeployStaging / Promote /
-// Rollback / RolloutAction) go through the sanctioned action scripts
-// (scripts/release/promote.sh, `git revert`, `kubectl argo rollouts`)
+// state into typed status. Write RPCs (Rollback / RolloutAction) go
+// through the sanctioned actions (`git revert`, `kubectl argo rollouts`)
 // -- never ad-hoc `kubectl set image`. Every write RPC is gated to
 // owner/admin (#728) and emits an audit event (success / failure /
 // blocked).
 type DeployControlServiceServer interface {
-	// GetDeploymentStatus returns the full deployment picture for one
-	// environment: deployed digests, the resolved release lockfile,
-	// Argo CD sync/health, per-rollout progressive-delivery state, and
-	// the latest deploy-gate result. Read-only; not audited per call.
+	// GetDeploymentStatus returns the full deployment picture: deployed
+	// digests, the resolved release lockfile, Argo CD sync/health, per-rollout
+	// progressive-delivery state, and the latest deploy-gate result.
+	// Read-only; not audited per call.
 	GetDeploymentStatus(context.Context, *GetDeploymentStatusRequest) (*DeploymentStatus, error)
-	// DeployStaging assembles + applies a release into the staging
-	// overlay via scripts/release/promote.sh --env=staging.
-	DeployStaging(context.Context, *DeployStagingRequest) (*ActionResult, error)
-	// Promote copies a validated staging release into the prod overlay
-	// (digest copy, no rebuild) via promote.sh --env=prod.
-	Promote(context.Context, *PromoteRequest) (*ActionResult, error)
-	// Rollback reverts the overlay commit identified by commit_sha for
-	// the given environment via `git revert`.
+	// Rollback reverts the overlay commit identified by commit_sha via
+	// `git revert`.
 	Rollback(context.Context, *RollbackRequest) (*ActionResult, error)
 	// RolloutAction promotes or aborts an in-flight Argo Rollout via
 	// `kubectl argo rollouts promote|abort`.
 	RolloutAction(context.Context, *RolloutActionRequest) (*ActionResult, error)
 	// SuggestNextVersion reads the latest succeeded deployment's version
-	// for an environment (#1877) and proposes the next major / minor /
-	// patch semver. Read-only; owner/admin gated, not audited per call.
+	// (#1877) and proposes the next major / minor / patch semver.
+	// Read-only; owner/admin gated, not audited per call.
 	SuggestNextVersion(context.Context, *SuggestNextVersionRequest) (*SuggestNextVersionResult, error)
 	// CutVersion creates a new pending deployment record (#1877) at the
 	// chosen next version (bump the current, or an explicit override) with
@@ -260,12 +230,6 @@ type UnimplementedDeployControlServiceServer struct{}
 
 func (UnimplementedDeployControlServiceServer) GetDeploymentStatus(context.Context, *GetDeploymentStatusRequest) (*DeploymentStatus, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDeploymentStatus not implemented")
-}
-func (UnimplementedDeployControlServiceServer) DeployStaging(context.Context, *DeployStagingRequest) (*ActionResult, error) {
-	return nil, status.Error(codes.Unimplemented, "method DeployStaging not implemented")
-}
-func (UnimplementedDeployControlServiceServer) Promote(context.Context, *PromoteRequest) (*ActionResult, error) {
-	return nil, status.Error(codes.Unimplemented, "method Promote not implemented")
 }
 func (UnimplementedDeployControlServiceServer) Rollback(context.Context, *RollbackRequest) (*ActionResult, error) {
 	return nil, status.Error(codes.Unimplemented, "method Rollback not implemented")
@@ -320,42 +284,6 @@ func _DeployControlService_GetDeploymentStatus_Handler(srv interface{}, ctx cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DeployControlServiceServer).GetDeploymentStatus(ctx, req.(*GetDeploymentStatusRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DeployControlService_DeployStaging_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(DeployStagingRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DeployControlServiceServer).DeployStaging(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DeployControlService_DeployStaging_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DeployControlServiceServer).DeployStaging(ctx, req.(*DeployStagingRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _DeployControlService_Promote_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(PromoteRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(DeployControlServiceServer).Promote(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: DeployControlService_Promote_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(DeployControlServiceServer).Promote(ctx, req.(*PromoteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -478,14 +406,6 @@ var DeployControlService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDeploymentStatus",
 			Handler:    _DeployControlService_GetDeploymentStatus_Handler,
-		},
-		{
-			MethodName: "DeployStaging",
-			Handler:    _DeployControlService_DeployStaging_Handler,
-		},
-		{
-			MethodName: "Promote",
-			Handler:    _DeployControlService_Promote_Handler,
 		},
 		{
 			MethodName: "Rollback",

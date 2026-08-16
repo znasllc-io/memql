@@ -10,8 +10,8 @@
 // This package is demoted to what those constructs RESOLVE TO -- the deploy
 // capability implementations:
 //
-//   - Executor (executor.go) -- THE single side-effect boundary (promote.sh /
-//     git / kubectl argo rollouts / kubectl JSON reads). The deploy pack drives
+//   - Executor (executor.go) -- THE single side-effect boundary (git /
+//     kubectl argo rollouts / kubectl JSON reads). The deploy pack drives
 //     these exact effects through the IntegrationProvider layer via the exported
 //     NewExecutor, so the DSL automation layer is ADDITIVE, never a drifting
 //     parallel copy.
@@ -33,15 +33,15 @@
 // (Deploy transitions an existing pending record; RollbackDeployment creates a
 // new in_progress record carrying the historical digest + previousDeploymentId),
 // and return an ack. The in_progress CDC edge is what a deploy-pack automation
-// consumes to run promote + own the terminal transition -- the orchestration
-// lives in the DSL, not here. So an entrypoint NEVER calls promote.sh and NEVER
-// writes a terminal status; the only synchronous write is the kick-off edge.
+// consumes to observe the reconciliation + own the terminal transition -- the
+// orchestration lives in the DSL, not here. So an entrypoint NEVER writes a
+// terminal status; the only synchronous write is the kick-off edge.
 // This invariant is guarded by TestDeployKicksOffWithoutApply +
 // TestRollbackDeploymentKicksOffWithoutApply (deploy_test.go): a regression that
 // re-added a synchronous deploy lifecycle to this package fails those tests.
 //
-// The legacy Deployment Console actions (DeployStaging / Promote / Rollback /
-// RolloutAction / GetDeploymentStatus, service.go, #728) still call the Executor
+// The legacy Deployment Console actions (Rollback / RolloutAction /
+// GetDeploymentStatus, service.go, #728) still call the Executor
 // effects synchronously; retiring those gRPC surfaces in favor of the automation
 // is owner-gated follow-on work (tracked off #2229), not part of I11, because
 // they are consumed cross-repo by the cockpit Deploy Console + the SDK.

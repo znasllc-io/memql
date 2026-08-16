@@ -77,18 +77,6 @@ func Dispatch(ctx context.Context, srv memqlv1.DeployControlServiceServer, msg *
 			return failResult(out, err)
 		}
 		out.Result = &memqlv1.DeployControlResult_NextVersion{NextVersion: res}
-	case *memqlv1.DeployControlMsg_DeployStaging:
-		res, err := srv.DeployStaging(ctx, req.DeployStaging)
-		if err != nil {
-			return failResult(out, err)
-		}
-		out.Result = &memqlv1.DeployControlResult_Action{Action: res}
-	case *memqlv1.DeployControlMsg_Promote:
-		res, err := srv.Promote(ctx, req.Promote)
-		if err != nil {
-			return failResult(out, err)
-		}
-		out.Result = &memqlv1.DeployControlResult_Action{Action: res}
 	case *memqlv1.DeployControlMsg_Rollback:
 		res, err := srv.Rollback(ctx, req.Rollback)
 		if err != nil {

@@ -45,7 +45,7 @@ func TestAuthoredDeployActionResolvesCockpitRunner(t *testing.T) {
 		Registry:   deployRegistry(t, deployActionSrc, "deployment/actions.memql"),
 		Dispatcher: &fakeDispatcher{},
 	}
-	res := runAuthoredStep(t, exec, "syncArgoApp@1", map[string]any{"app": "memql-staging"})
+	res := runAuthoredStep(t, exec, "syncArgoApp@1", map[string]any{"app": "memql"})
 	if res.Status != "success" {
 		t.Fatalf("status = %q (err=%q)", res.Status, res.Error)
 	}

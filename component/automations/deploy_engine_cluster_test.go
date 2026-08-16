@@ -20,16 +20,20 @@ import (
 //
 //   - the deploy.requested trigger on v1:cluster:deployment,
 //   - the decide -> record -> clone -> build -> place -> gate -> finish step
-//     sequence (including the env `switch` and the per-node `forEach` build +
-//     dev k3d import),
+//     sequence (including the provider `switch` and the per-node `forEach`
+//     build + local k3d import),
 //   - the deployment-record lifecycle: createDeployment at the start,
 //     updateDeploymentStatus(succeeded|failed) in the success/failure forks,
-//   - the env split: development takes no GitOps action; staging/production
-//     pin the overlay digests + sync ArgoCD.
+//   - the provider split: docker-local takes no GitOps action; azure pins the
+//     overlay digests + syncs ArgoCD.
+//
+// The switch is on PROVIDER since epic memql#3943 removed "environment" as a
+// product concept. Local-vs-cloud is a deploy TARGET, which survived; it was
+// always a separate field and always outside the environment gate.
 //
 // Compiling (rather than executing) is the deterministic acceptance bar a
 // load-only test can prove without live DB / build-server / ArgoCD infra; the
-// development path is dry-runnable through the no-op capability backends once
+// docker-local path is dry-runnable through the no-op capability backends once
 // the runner is wired (see automations.memql header).
 func TestDeployEngineClusterCompiles(t *testing.T) {
 	if _, err := memql.LoadUnifiedConcepts(nil); err != nil {
@@ -101,7 +105,7 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 	iClone := idx(isAction("cloneRepoAtVersion"), "clone action")
 	iBuild := idx(isForEachDo("buildEngineImage"), "build forEach")
 	iImport := idx(isForEachDo("importImageToK3d"), "importDevImages forEach")
-	iPlace := idx(isSwitchExpr("environment"), "place env switch")
+	iPlace := idx(isSwitchExpr("provider"), "place provider switch")
 	iGate := idx(isAction("runDeployGate"), "gate action")
 	iOutcome := idx(isFn("deployOutcomeLabel"), "outcome logic")
 	iFinalize := idx(isSwitchExpr("outcome"), "finalize switch")
@@ -127,20 +131,20 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 		t.Errorf("build must iterate the event engineNodeTypes set, got source %q", build.ForEach.Source)
 	}
 
-	// importDevImages is the per-node k3d import, gated to the development env.
+	// importDevImages is the per-node k3d import, gated to the local target.
 	imp := auto.Steps[iImport]
-	if !strings.Contains(imp.ForEach.Filter, "development") {
-		t.Errorf("importDevImages must be filtered to the development env, got filter %q", imp.ForEach.Filter)
+	if !strings.Contains(imp.ForEach.Filter, "docker-local") {
+		t.Errorf("importDevImages must be filtered to the docker-local target, got filter %q", imp.ForEach.Filter)
 	}
 
-	// place is the single env switch: development no-ops; staging/production
-	// pin the overlay digests + sync ArgoCD.
+	// place is the single provider switch: docker-local no-ops; azure pins the
+	// overlay digests + syncs ArgoCD.
 	place := auto.Steps[iPlace]
-	if _, ok := place.Switch.Cases["development"]; !ok {
-		t.Errorf("place switch must carry a development case, got cases %v", place.Switch.Cases)
+	if _, ok := place.Switch.Cases["docker-local"]; !ok {
+		t.Errorf("place switch must carry a docker-local case, got cases %v", place.Switch.Cases)
 	}
 	if place.Switch.Default == nil {
-		t.Fatal("place switch must carry a default (staging|production) case")
+		t.Fatal("place switch must carry a default (azure) case")
 	}
 	defRefs := actionRefs(place.Switch.Default.Steps)
 	if !hasPrefix(defRefs, "pinOverlayDigests") || !hasPrefix(defRefs, "argoSync") {
@@ -174,7 +178,7 @@ func TestDeployEngineClusterCompiles(t *testing.T) {
 
 	// The overlay revert moved OUT of the failure case into its own
 	// decide -> switch -> act tail (#2380): rollbackTarget (pure logic;
-	// empty = no rollback -- a passed gate or the development path with no
+	// empty = no rollback -- a passed gate or the docker-local path with no
 	// previousDeploymentId) then a switch that fires revertOverlay only in
 	// the non-empty case.
 	rbt := stepByID(auto.Steps, "rollbackTarget")

@@ -80,9 +80,8 @@ type GateResult struct {
 	RanAt  string
 }
 
-// DeploymentStatus is the aggregate per-env deployment view.
+// DeploymentStatus is the aggregate deployment view for this installation.
 type DeploymentStatus struct {
-	Env           string
 	Version       string
 	EngineVersion string
 	ValidatedAt   string
@@ -113,63 +112,51 @@ type NextVersionSuggestion struct {
 }
 
 // -----------------------------------------------------------------------------
-// Methods (mirror the 5 RPCs)
+// Methods (mirror the RPCs)
 // -----------------------------------------------------------------------------
 
-// GetDeploymentStatus returns the full deployment picture for env
-// ("staging" | "prod").
-func (c *DeployControlClient) GetDeploymentStatus(ctx context.Context, env string) (DeploymentStatus, error) {
-	resp, err := c.grpc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: env})
+// GetDeploymentStatus returns the full deployment picture for this
+// installation.
+func (c *DeployControlClient) GetDeploymentStatus(ctx context.Context) (DeploymentStatus, error) {
+	resp, err := c.grpc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{})
 	if err != nil {
-		return DeploymentStatus{}, fmt.Errorf("deploy console: get status %s: %w", env, err)
+		return DeploymentStatus{}, fmt.Errorf("deploy console: get status: %w", err)
 	}
 	return deploymentStatusFromProto(resp), nil
 }
 
-// DeployStaging deploys the given release version into staging.
-func (c *DeployControlClient) DeployStaging(ctx context.Context, version string) (ActionResult, error) {
-	resp, err := c.grpc.DeployStaging(ctx, &memqlv1.DeployStagingRequest{Version: version})
-	return actionResultFromProto(resp), wrapActionErr("deploy_staging", err)
-}
-
-// Promote copies a validated staging release into prod.
-func (c *DeployControlClient) Promote(ctx context.Context, version string) (ActionResult, error) {
-	resp, err := c.grpc.Promote(ctx, &memqlv1.PromoteRequest{Version: version})
-	return actionResultFromProto(resp), wrapActionErr("promote", err)
-}
-
-// Rollback reverts the overlay commit identified by commitSha for env.
-func (c *DeployControlClient) Rollback(ctx context.Context, env, commitSha string) (ActionResult, error) {
-	resp, err := c.grpc.Rollback(ctx, &memqlv1.RollbackRequest{Env: env, CommitSha: commitSha})
+// Rollback reverts the overlay commit identified by commitSha.
+func (c *DeployControlClient) Rollback(ctx context.Context, commitSha string) (ActionResult, error) {
+	resp, err := c.grpc.Rollback(ctx, &memqlv1.RollbackRequest{CommitSha: commitSha})
 	return actionResultFromProto(resp), wrapActionErr("rollback", err)
 }
 
 // RolloutAction promotes or aborts an Argo Rollout (action ∈
-// {"promote","abort"}).
-func (c *DeployControlClient) RolloutAction(ctx context.Context, env, rollout, action string) (ActionResult, error) {
-	resp, err := c.grpc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: env, Rollout: rollout, Action: action})
+// {"promote","abort"} -- the Argo verb, unrelated to any deploy promote).
+func (c *DeployControlClient) RolloutAction(ctx context.Context, rollout, action string) (ActionResult, error) {
+	resp, err := c.grpc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Rollout: rollout, Action: action})
 	return actionResultFromProto(resp), wrapActionErr("rollout_action", err)
 }
 
-// SuggestNextVersion reads the latest succeeded deployment's version for
-// env ("staging" | "prod") and proposes the next major / minor / patch
-// semver (#1877). Read-only; developer/admin/owner gated server-side.
-func (c *DeployControlClient) SuggestNextVersion(ctx context.Context, env string) (NextVersionSuggestion, error) {
-	resp, err := c.grpc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{Env: env})
+// SuggestNextVersion reads the latest succeeded deployment's version and
+// proposes the next major / minor / patch semver (#1877). Read-only;
+// developer/admin/owner gated server-side.
+func (c *DeployControlClient) SuggestNextVersion(ctx context.Context) (NextVersionSuggestion, error) {
+	resp, err := c.grpc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{})
 	if err != nil {
-		return NextVersionSuggestion{}, fmt.Errorf("deploy console: suggest next version %s: %w", env, err)
+		return NextVersionSuggestion{}, fmt.Errorf("deploy console: suggest next version: %w", err)
 	}
 	return nextVersionSuggestionFromProto(resp), nil
 }
 
 // CutVersion creates a new pending v1:cluster:deployment record (#1877)
-// at the chosen next version for env, with the resolved image digest --
-// ready for Deploy to ship. bump ∈ {"major","minor","patch"} selects the
-// semver part to increment off the current version (empty defaults to
-// patch); version is an optional explicit override (when set, bump is
-// ignored). Developer/admin/owner gated server-side.
-func (c *DeployControlClient) CutVersion(ctx context.Context, env, bump, version string) (ActionResult, error) {
-	resp, err := c.grpc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: env, Bump: bump, Version: version})
+// at the chosen next version, with the resolved image digest -- ready for
+// Deploy to ship. bump ∈ {"major","minor","patch"} selects the semver part
+// to increment off the current version (empty defaults to patch); version
+// is an optional explicit override (when set, bump is ignored).
+// Developer/admin/owner gated server-side.
+func (c *DeployControlClient) CutVersion(ctx context.Context, bump, version string) (ActionResult, error) {
+	resp, err := c.grpc.CutVersion(ctx, &memqlv1.CutVersionRequest{Bump: bump, Version: version})
 	return actionResultFromProto(resp), wrapActionErr("cut_version", err)
 }
 
@@ -244,7 +231,6 @@ func deploymentStatusFromProto(p *memqlv1.DeploymentStatus) DeploymentStatus {
 		return DeploymentStatus{}
 	}
 	out := DeploymentStatus{
-		Env:           p.GetEnv(),
 		Version:       p.GetVersion(),
 		EngineVersion: p.GetEngineVersion(),
 		ValidatedAt:   p.GetValidatedAt(),

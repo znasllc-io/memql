@@ -33,11 +33,6 @@ func (a *App) transportBFF() {
 	// library here, not a node-mounted endpoint, and the edge node itself
 	// has no coherent address for a site-agnostic publish route.
 	a.mountSiteBundleEndpoints(uploader, container)
-	// Cross-schema artifact promotion (PromoteSiteMsg, epic memql#3748 /
-	// memql#3768). Bff-only for the same reason the publish endpoint above is:
-	// a site-agnostic operator action has no coherent address on a node that is
-	// wildcard-routed by site hostname.
-	a.mountSitePromote()
 	// Inbound-delivery receiver (POST /inbound/{source}, memql#2957). The
 	// counterpart to the outbound worker: a third party dials US, so it is HTTP
 	// on the frontend-facing node. Deny-by-default -- with no

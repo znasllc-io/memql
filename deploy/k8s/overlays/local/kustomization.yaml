@@ -2,7 +2,7 @@
 #
 # PURPOSE
 # This overlay runs the full memQL stack on a local k3d cluster via ArgoCD.
-# It differs from staging/prod in three ways only:
+# It differs from the cloud overlay in three ways only:
 #   1. Config -- local DB (in-cluster CNPG Cluster + azurite blob), no Tiger Cloud.
 #   2. Resources -- minimal requests; no limits set so developer laptops aren't
 #      starved.
@@ -16,7 +16,7 @@
 #
 # THE DATABASE IS A COMPONENT, not a local manifest (epic memql#3842 /
 # #3846 / #3851). `components: ../../components/cnpg-db` brings the same four
-# resources -- Cluster, Database, ObjectStore, ScheduledBackup -- that staging,
+# resources -- Cluster, Database, ObjectStore, ScheduledBackup -- that the cloud
 # production and every tenant deployment compose; the patches further down
 # supply local's VALUES (10Gi, Azurite, a 7-day retention). It replaced a
 # hand-rolled `postgres` Deployment that was the one place the parity doctrine
@@ -35,7 +35,7 @@
 # See scripts/k3d/seed-secrets.sh for the creation logic.
 #
 # IMAGE AUTHORITY
-# Unlike staging/prod, local images are NOT pinned by @sha256: digest.
+# Unlike the cloud overlay, local images are NOT pinned by @sha256: digest.
 # They are built locally by `make k3d-build` / the `make k3d-dev` inner loop
 # (#2066) and imported into k3d via `k3d image import`.  The tag `local`
 # is used; imagePullPolicy: IfNotPresent so the cluster never tries to pull
@@ -70,7 +70,7 @@ resources:
   - mcp-front-door.yaml
   - edge-front-door.yaml
   - ../../base
-  # Local-only infrastructure (absent in base/staging/prod)
+  # Local-only infrastructure (absent in base and the cloud overlay)
   - azurite.yaml
 
 # ---------------------------------------------------------------------------
@@ -156,9 +156,9 @@ patches:
   # / bff at the cloud project. The URL + key/secret are sourced from the
   # livekit-secrets Secret that seed-secrets.sh fills from the operator's
   # environment (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET) -- NEVER
-  # hard-coded. Staging/prod stay self-hosted and pull these from ESO/Key Vault;
+  # hard-coded. The cloud stays self-hosted and pulls these from ESO/Key Vault;
   # the no-cloud-leak guard (scripts/deploy/livekit_cloud_guard_test.go) fails
-  # CI if a *.livekit.cloud reference ever lands in a staging/prod overlay.
+  # CI if a *.livekit.cloud reference ever lands in the cloud overlay.
   #
   # Remove the self-hosted media-plane workloads (livekit-server + SIP edge +
   # the LiveKit<->SIP coordination Redis).

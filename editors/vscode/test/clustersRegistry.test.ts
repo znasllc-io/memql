@@ -47,7 +47,7 @@ const SAMPLE = `clusters:
     endpoint: api.memql.localhost:443
     local: true
   - name: staging
-    endpoint: api.staging.example.com:443
+    endpoint: api.example.com:443
 selected_cluster: local
 `;
 

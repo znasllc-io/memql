@@ -285,16 +285,16 @@ own checkout because their laptop went to sleep.
 
 ---
 
-## Every environment is trained separately
+## Every installation is trained separately
 
-A promoted construct is a row in a database, under that environment's schema.
-Staging and production are two namespaces on two schema search paths, so they
-are **trained independently**.
+A promoted construct is a row in a database, so it exists in exactly the
+installation whose database it was written to. memQL ships one installation
+shape (epic memql#3943): a second environment is a second install, with its own
+database, and the two are **trained independently**.
 
-Promoting to staging does not promote to production. There is no propagation
-between them, and this is correct rather than missing: an environment boundary
-in memQL is the connection, not a filter, and a promote follows the connection
-it was made on.
+Promoting on one does not promote on the other. There is no propagation
+between them, and this is correct rather than missing: a promote follows the
+connection it was made on, and two installs share no connection.
 
 If a construct is meant to exist in both, promote it in both — or ship it as a
 seeded construct in the bundle, which is what a rollout is for.

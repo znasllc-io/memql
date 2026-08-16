@@ -123,8 +123,8 @@ test("identityBaseUrlFor falls back to the identity.<domain> convention", () => 
 
 test("identityBaseUrlFor derives from an api.<domain> endpoint when no domain is stored", () => {
   assert.equal(
-    identityBaseUrlFor({ name: "l", endpoint: "api.staging.example.com:443" }),
-    "https://identity.staging.example.com",
+    identityBaseUrlFor({ name: "l", endpoint: "api.example.com:443" }),
+    "https://identity.example.com",
   );
 });
 
@@ -140,7 +140,7 @@ test("identityBaseUrlFor returns undefined when nothing names the identity servi
 // -----------------------------------------------------------------------------
 
 test("composeEndpointFromDomain applies the api.<domain>:443 convention", () => {
-  assert.equal(composeEndpointFromDomain("staging.example.com"), "api.staging.example.com:443");
+  assert.equal(composeEndpointFromDomain("example.com"), "api.example.com:443");
 });
 
 test("composeEndpointFromDomain normalizes what an operator actually types", () => {
@@ -166,10 +166,10 @@ test("the composed endpoint is one the dialer accepts, and identity's sibling ag
   // The composer and the validator are the two halves the registration form
   // leans on, so what one produces the other must accept -- and the endpoint
   // must still name the identity service the sign-in flow POSTs to.
-  const endpoint = composeEndpointFromDomain("staging.example.com");
-  assert.equal(webSocketUrlFor({ name: "s", endpoint }), "wss://api.staging.example.com/memql/ws");
+  const endpoint = composeEndpointFromDomain("example.com");
+  assert.equal(webSocketUrlFor({ name: "s", endpoint }), "wss://api.example.com/memql/ws");
   assert.equal(
     identityBaseUrlFor({ name: "s", endpoint }),
-    "https://identity.staging.example.com",
+    "https://identity.example.com",
   );
 });

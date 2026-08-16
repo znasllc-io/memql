@@ -48,25 +48,11 @@ func TestValidateDeploymentProvider(t *testing.T) {
 	}
 }
 
-func TestConsoleEnvFor(t *testing.T) {
-	cases := map[string]string{
-		"production":  "prod",
-		"staging":     "staging",
-		"development": "",
-		"":            "",
-	}
-	for env, want := range cases {
-		if got := ConsoleEnvFor(env); got != want {
-			t.Errorf("ConsoleEnvFor(%q) = %q, want %q", env, got, want)
-		}
-	}
-}
-
 // --- Deploy: automation-driven kick-off -----------------------------------
 
 // An azure-provider record kicks off the lifecycle: the RPC transitions the
-// record to in_progress and returns an async ack. It does NOT run promote.sh
-// and does NOT write a terminal transition -- the deploy pack's
+// record to in_progress and returns an async ack. It does NOT run a deploy
+// effect and does NOT write a terminal transition -- the deploy pack's
 // driveDeploymentInProgress automation owns those (#2115).
 func TestDeployKicksOffWithoutApply(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
@@ -75,7 +61,7 @@ func TestDeployKicksOffWithoutApply(t *testing.T) {
 			"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
 		}),
 	}}
-	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
+	exec := &fakeExecutor{}
 	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 	res, err := svc.Deploy(ctxWithRole(auth.RoleOwner), &memqlv1.DeployRequest{DeploymentId: "d1"})
@@ -88,10 +74,6 @@ func TestDeployKicksOffWithoutApply(t *testing.T) {
 	// Async ack contract: accepted + kicked off, status in_progress.
 	if res.GetDetails()["async"] != "true" || res.GetDetails()["status"] != "in_progress" {
 		t.Errorf("details = %v, want async=true status=in_progress", res.GetDetails())
-	}
-	// The RPC must NOT have driven promote.sh.
-	if len(exec.promoteCalls) != 0 {
-		t.Errorf("automation-driven Deploy must NOT call promote.sh, got %v", exec.promoteCalls)
 	}
 	// Exactly one in_progress transition; NO terminal transition.
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "in_progress"`); got != 1 {
@@ -122,9 +104,6 @@ func TestDeployDockerLocalProviderRejected(t *testing.T) {
 	if res.GetOk() {
 		t.Error("ok = true, want false for retired docker-local provider")
 	}
-	if len(exec.promoteCalls) != 0 {
-		t.Errorf("retired docker-local deploy must NOT call promote.sh, got %v", exec.promoteCalls)
-	}
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
@@ -149,9 +128,6 @@ func TestDeployUnknownProviderFails(t *testing.T) {
 	if res.GetOk() {
 		t.Error("ok = true, want false on unknown provider")
 	}
-	if len(exec.promoteCalls) != 0 {
-		t.Error("no promote should run for an unknown provider")
-	}
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
 		t.Errorf("failed transition = %d, want 1; queries = %v", got, eng.queries)
 	}
@@ -169,9 +145,6 @@ func TestDeployNotFound(t *testing.T) {
 	}
 	if !strings.Contains(res.GetMessage(), "not found") {
 		t.Errorf("message = %q, want not-found notice", res.GetMessage())
-	}
-	if len(exec.promoteCalls) != 0 {
-		t.Error("no promote should run for a missing deployment")
 	}
 }
 
@@ -214,7 +187,7 @@ func TestRollbackDeploymentKicksOffWithoutApply(t *testing.T) {
 			"region": "eastus", "clusterId": "v1:cluster:cluster:c1",
 		}),
 	}}
-	exec := &fakeExecutor{promoteOut: "SHOULD NOT RUN"}
+	exec := &fakeExecutor{}
 	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 	res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "good1"})
@@ -251,10 +224,6 @@ func TestRollbackDeploymentKicksOffWithoutApply(t *testing.T) {
 	if !strings.Contains(createCall, `status: "in_progress"`) {
 		t.Errorf("new rollback record should start in_progress: %s", createCall)
 	}
-	// The RPC must NOT have driven promote.sh or any terminal transition.
-	if len(exec.promoteCalls) != 0 {
-		t.Errorf("automation-driven rollback must NOT call promote.sh, got %v", exec.promoteCalls)
-	}
 	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "rolled_back"`); got != 0 {
 		t.Errorf("automation-driven rollback must NOT write rolled_back, got %d; queries = %v", got, eng.queries)
 	}
@@ -281,9 +250,6 @@ func TestRollbackDeploymentRejectsNonSucceededTarget(t *testing.T) {
 	}
 	if !strings.Contains(res.GetMessage(), "must be succeeded") {
 		t.Errorf("message = %q, want succeeded-target requirement", res.GetMessage())
-	}
-	if len(exec.promoteCalls) != 0 {
-		t.Error("no promote should run for an invalid rollback target")
 	}
 	if countContaining(eng.queries, "createDeployment(") != 0 {
 		t.Error("rejected rollback must not create a new record")

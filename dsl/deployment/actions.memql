@@ -38,7 +38,7 @@
 // integration-backed action (tagRelease) resolves to an engine tool instead --
 // the same atomic shape.
 //
-// These actions are CONSUMED by the per-environment deploy automations (I10,
+// These actions are CONSUMED by the deploy automation (I10,
 // #2224); this file authors the primitives only.
 
 use capabilities.shell.{ script }
@@ -77,7 +77,7 @@ action buildEngineImage {
 }
 
 // importImageToK3d -- load a built node image into the local k3d cluster (the
-// development-environment placement step). Backend: scripts/k3d/import-image.sh.
+// docker-local placement step). Backend: scripts/k3d/import-image.sh.
 /// Import a built engine node image into the local k3d cluster (development placement) so the
 /// development overlay can run it.
 action importImageToK3d {
@@ -120,22 +120,23 @@ action argoSync {
 // carrying `passed`. The deploy automation (I10) branches success/rollback on
 // logic deployGateGreen, which reads this action's `passed`. Backend:
 // scripts/deploy/deploy-gate.sh.
-/// Execute the post-deploy verification gate for an environment and return a structured pass/fail
-/// result indicating whether the deployment is healthy.
+/// Execute the post-deploy verification gate and return a structured pass/fail result indicating
+/// whether the deployment is healthy. The provider selects the litmus -- docker-local runs the k3d
+/// mesh check, azure runs the in-cluster gate.
 action runDeployGate {
   args {
-    env     string!
-    workdir string!
-    dryRun  boolean
+    provider string!
+    workdir  string!
+    dryRun   boolean
   }
-  capability script(script: "deploy.gate", env: args.env, workdir: args.workdir, dryRun: args.dryRun)
+  capability script(script: "deploy.gate", provider: args.provider, workdir: args.workdir, dryRun: args.dryRun)
 }
 
 // revertOverlay -- roll an overlay back to a previous deployment's pinned
 // digests (owner-only via the deploy automation's spec gate). Backend:
 // scripts/deploy/revert-overlay.sh.
-/// Restore an environment overlay's image digests to those of a prior deployment so ArgoCD rolls
-/// the environment back (rollback).
+/// Restore the overlay's image digests to those of a prior deployment so ArgoCD rolls the cluster
+/// back (rollback).
 action revertOverlay {
   args {
     overlayPath    string!
@@ -152,12 +153,11 @@ action revertOverlay {
 /// reading logs.
 action notifyDeploy {
   args {
-    env          string!
     status       string!
     deploymentId string!
     dryRun  boolean
   }
-  capability script(script: "deploy.notify", env: args.env, status: args.status, deploymentId: args.deploymentId, dryRun: args.dryRun)
+  capability script(script: "deploy.notify", status: args.status, deploymentId: args.deploymentId, dryRun: args.dryRun)
 }
 
 // =============================================================================

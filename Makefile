@@ -4,7 +4,7 @@
 # Usage:
 #   make                   Build all binaries
 #   make help              Show all available targets
-#   make up                Start the staging-parity dev cluster (k3d + ArgoCD)
+#   make up                Start the cloud-parity dev cluster (k3d + ArgoCD)
 #   make test              Run all tests
 
 # ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ ALL_PKGS    := $(MODULE)/...
 # ---------------------------------------------------------------------------
 
 ##@ Build
-##> Staging/prod images are built on the GitHub build server, not here (see CLAUDE.md).
+##> Deployable images are built on the GitHub build server, not here (see CLAUDE.md).
 .PHONY: all build build-all bff voice cognition agent planner workbench mcp edge identity identity-templ identity-tailwind identity-assets identity-build healthcheck
 
 ## Build all binaries (standalone + healthcheck)
@@ -237,16 +237,16 @@ db:
 #   MEMQL_K3D_AGENTS           k3d agent count (default: 0)
 
 ##@ Local cluster (k3d + ArgoCD -- the blessed local topology, #2061)
-##> This IS the GitOps deploy path (same manifests as staging); `make deploy` is break-glass only.
+##> This IS the GitOps deploy path (same manifests as the cloud); `make deploy` is break-glass only.
 .PHONY: up up-refresh down secrets dev status scale
 
 ## Fresh k3d bring-up: cluster + ArgoCD + secrets + images, wait healthy (SERVERS=2 AGENTS=1 for multi-node)
-## install ArgoCD (pinned v2.13.3, same as staging), apply the memql-local
+## install ArgoCD (pinned v2.13.3, same as the cloud), apply the memql-local
 ## Application, seed k8s Secrets, build + import the engine images, and wait
 ## for the mesh to become Available. Idempotent -- safe on an existing cluster.
 ##
 ## This is the GitOps path: the local engine "deploy" IS the ArgoCD sync of the
-## local overlay (the primary deploy path, same as staging). It is NOT the
+## local overlay (the primary deploy path, same as the cloud). It is NOT the
 ## cockpit break-glass path -- `make deploy` is the imperative cockpit-delegated
 ## path (I16, #2227). `make up` stays a cluster-bootstrap launcher so the local
 ## inner loop never depends on the owner-gated cockpit deploy.
@@ -350,21 +350,14 @@ status:
 		$${NAMESPACE:+--namespace=$${NAMESPACE}} \
 		$${APP_NAME:+--app-name="$${APP_NAME}"}
 
-## Scale one environment's app Deployments to N replicas. ENV names the
-## environment and therefore the namespace (local -> memql, staging ->
-## memql-staging, prod -> memql-prod); it DEFAULTS TO local, so a REMOTE
-## environment must be named explicitly -- `make scale N=2` is the inner-loop
-## command typed from memory, and a prod default would point that habit at
-## production. ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal
-## won't revert any of these.
-##   make scale N=2                # local cross-node mesh testing (#2067)
-##   make scale N=0 ENV=staging    # park staging (costs storage, not compute)
-##   make scale N=2 ENV=staging    # bring it back to prod-matching width
-##   make scale N=2 ENV=prod       # prod, named deliberately
+## Scale the app Deployments to N replicas, in namespace `memql` (NAMESPACE
+## overrides). ArgoCD ignoreDifferences excludes /spec/replicas so selfHeal
+## won't revert it.
+##   make scale N=2                # cross-node mesh testing (#2067)
+##   make scale N=0                # park the cluster (costs storage, not compute)
 scale:
 	@bash scripts/k3d/scale.sh \
-		--replicas=$${N:?usage: make scale N=<replicas> [ENV=prod|staging|local]} \
-		$${ENV:+--env=$${ENV}} \
+		--replicas=$${N:?usage: make scale N=<replicas>} \
 		$${CLUSTER:+--cluster=$${CLUSTER}} \
 		$${NAMESPACE:+--namespace=$${NAMESPACE}}
 
@@ -411,24 +404,18 @@ db-image:
 ## DSN, and the scratch cluster archives NOWHERE -- given a WAL archiver it
 ## would write its own timeline into the very store it was restored from, and
 ## that corruption stays invisible until the next real recovery.
-##   make db-restore-drill                 # local
-##   make db-restore-drill ENV=staging
-##   make db-restore-drill ENV=prod KEEP=1 # leave the scratch ns for a post-mortem
-##   make db-restore-drill ENV=staging AT=2026-08-16T04:30:00Z   # point-in-time
+##   make db-restore-drill                 # namespace memql
+##   make db-restore-drill KEEP=1          # leave the scratch ns for a post-mortem
+##   make db-restore-drill AT=2026-08-16T04:30:00Z   # point-in-time
 db-restore-drill:
 	@bash scripts/deploy/db-restore-drill.sh \
-		--sourceNamespace="$(DB_LITMUS_NS)" \
+		--sourceNamespace="$${NAMESPACE:-memql}" \
 		$${CLUSTER_NAME:+--cluster=$${CLUSTER_NAME}} \
 		$${AT:+--recoveryTarget=$${AT}} \
 		$${KEEP:+--keep=$${KEEP}} \
 		$${TIMEOUT:+--timeout=$${TIMEOUT}}
 
 .PHONY: db-failover-litmus
-
-# ENV -> namespace, the same mapping `make scale` uses, and defaulting to local
-# for the same reason: this target deletes a pod, so a remote default would aim
-# a habit at production.
-DB_LITMUS_NS := $(if $(filter prod,$(ENV)),memql-prod,$(if $(filter staging,$(ENV)),memql-staging,memql))
 
 ## DESTRUCTIVE: kill the database primary and assert the cluster promotes a
 ## replica, keeps every committed write, and rebuilds its redundancy
@@ -444,20 +431,15 @@ DB_LITMUS_NS := $(if $(filter prod,$(ENV)),memql-prod,$(if $(filter staging,$(EN
 ## an operator upgrade rolls every database pod, which is exactly when you want
 ## promotion proven rather than assumed.
 ##
-## ENV names the environment and therefore the namespace, and it DEFAULTS TO
-## local for the same reason `make scale` does -- this one deletes a pod, and a
-## remote default would point that at production.
 ## CONFIRM is not a formality: the phrase is typed here AND passed through to
 ## the capability script, so neither layer can be the one that made a
 ## destructive act easy. Same reasoning as `--confirm` in the contract -- a
 ## confirmation is an explicit parameter, never a prompt.
-##   make db-failover-litmus CONFIRM=kill-the-primary               # local
-##   make db-failover-litmus CONFIRM=kill-the-primary ENV=staging
-##   make db-failover-litmus CONFIRM=kill-the-primary ENV=prod      # deliberately
+##   make db-failover-litmus CONFIRM=kill-the-primary            # namespace memql
 db-failover-litmus:
 	@bash scripts/deploy/db-failover-litmus.sh \
-		--confirm="$${CONFIRM:?usage: make db-failover-litmus CONFIRM=kill-the-primary [ENV=prod|staging|local]}" \
-		--namespace="$(DB_LITMUS_NS)" \
+		--confirm="$${CONFIRM:?usage: make db-failover-litmus CONFIRM=kill-the-primary}" \
+		--namespace="$${NAMESPACE:-memql}" \
 		$${CLUSTER_NAME:+--cluster=$${CLUSTER_NAME}} \
 		$${TIMEOUT:+--timeout=$${TIMEOUT}} \
 		$${RECOVERY_TIMEOUT:+--recoveryTimeout=$${RECOVERY_TIMEOUT}}
@@ -533,17 +515,17 @@ arch-model-check:
 ## regeneration never blanks it.
 frontdoor: frontdoor-hosts frontdoor-paths
 
-## Regenerate each cloud overlay's front door from the role x environment
-## product (memql#3767).
+## Regenerate the cloud overlay's front door from the closed role set
+## (memql#3767).
 ##
-## The host set is a PRODUCT, not a list: three roles plus the sites wildcard,
-## times however many environments the cluster carries. Hand-maintaining it
-## means a host missing from ONE environment, which is an environment nothing
-## can reach while its manifest looks complete beside the other's.
+## The host set is DERIVED, not listed: three roles plus the sites wildcard plus
+## the apex, written into ~390 lines of Ingress and Certificate. Hand-maintaining
+## that means a host missing a rule, which is a service nothing can reach at the
+## name every client was told to dial.
 frontdoor-hosts:
 	$(GO) run ./cmd/frontdoorhosts
 
-## CI gate: fail when a generated front door is stale.
+## CI gate: fail when the generated front door is stale.
 frontdoor-hosts-check:
 	$(GO) run ./cmd/frontdoorhosts --check
 
@@ -555,13 +537,12 @@ frontdoor-hosts-check:
 ## and every HTTP path needs its own Ingress rule. Hand-maintaining that list
 ## left /inbound/{source} and /unsubscribe routed by no overlay at all.
 ##
-## EVERY overlay, not just local: a path routed in one environment and not the
-## other is the same missing rule, discovered later and only by whoever happens
-## to dial it there.
+## BOTH overlays, not just local: a path routed in local and not in the cloud is
+## the same missing rule, discovered later and only by whoever happens to dial
+## it there.
 frontdoor-paths:
 	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/local/api-front-door.yaml
-	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/prod/front-door.generated.yaml
-	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/staging/front-door.generated.yaml
+	$(GO) run ./cmd/frontdoorpaths --write deploy/k8s/overlays/cloud/front-door.generated.yaml
 
 ## CI gate: fail when a front door's generated path block is stale. The
 ## drift this catches is a new public HTTP path that nothing routes -- which
@@ -766,7 +747,7 @@ proto-gen-check:
 # ---------------------------------------------------------------------------
 
 ##@ Release (engine image)
-##> Staging is GitOps: bump the digest in deploy/k8s/overlays/staging + merge -> ArgoCD reconciles.
+##> The cloud deploy is GitOps: bump the digest in deploy/k8s/overlays/cloud + merge -> ArgoCD reconciles.
 .PHONY: release tag-submodules
 
 ## Cut an immutable engine release image memql:<VERSION> from VERSION + the
@@ -811,7 +792,7 @@ tag-submodules:
 # The per-node `docker-*` targets (docker / docker-bff / docker-voice /
 # docker-cognition / docker-agent / docker-planner) were removed in #2205:
 # immutable release images come from `make release` (and the GitHub build
-# server for staging/prod), while the local inner loop is `make dev` (build +
+# server for the cloud), while the local inner loop is `make dev` (build +
 # k3d import). A hand-built `docker build` image fed neither path.
 
 # ---------------------------------------------------------------------------
@@ -889,32 +870,29 @@ conn-headroom-check:
 	@bash scripts/deploy/conn-headroom-check.sh
 
 # ===========================================================================
-# BREAK-GLASS -- imperative deploy. ArgoCD OWNS local + staging (deploys =
-# merges; selfHeal reverts out-of-band kubectl applies), so these targets are
-# the escape hatch for when Argo is unavailable, plus the prod path until prod
-# is on ArgoCD (#2207).
+# BREAK-GLASS -- imperative deploy. ArgoCD OWNS the cluster (deploys = merges;
+# selfHeal reverts out-of-band kubectl applies), so this target is the escape
+# hatch for when Argo is unavailable (#2207).
 #
-# THE BLESSED STAGING DEPLOY IS A GIT MERGE, NOT `make deploy`:
-#   bump the image digest in deploy/k8s/overlays/staging + merge to main
+# THE BLESSED DEPLOY IS A GIT MERGE, NOT `make deploy`:
+#   bump the image digest in deploy/k8s/overlays/cloud + merge to main
 #   -> ArgoCD reconciles. Rollback = `git revert` the overlay. See
 #   docs/public/operate/deployment-strategy.md.
 # ===========================================================================
 
-##@ Deploy (break-glass -- ArgoCD owns staging; use only when Argo is unavailable)
+##@ Deploy (break-glass -- ArgoCD owns the cluster; use only when Argo is unavailable)
 .PHONY: deploy
 
 ## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
 ## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
 ## `memql-cockpit deploy`, which embeds the engine automation runtime, loads the
 ## deployment bundle, and runs the PINNED `deployEngineCluster` automation
-## (role-gated + audited + version-pinned) from OUTSIDE the target cluster. The
-## env `switch` lives in that ONE automation -- `make` only forwards ENV.
+## (role-gated + audited + version-pinned) from OUTSIDE the target cluster.
 ## See DEVOPS_DSL_BUNDLE_HANDOFF.md "Execution model".
 ##
-## NOT the normal staging path -- staging is GitOps (digest bump in
-## overlays/staging + merge -> ArgoCD syncs). Use this break-glass path only
-## when ArgoCD is unavailable, or for prod (ENV=production) until prod is on
-## ArgoCD (#2207).
+## NOT the normal path -- the normal path is GitOps (digest bump in
+## overlays/cloud + merge -> ArgoCD syncs). Use this break-glass path only when
+## ArgoCD is unavailable (#2207).
 ##
 ## OWNER-GATED (honest, not a silent failure): the cockpit's in-process engine
 ## carries no database yet, so DB-backed deployment steps cannot complete until
@@ -924,15 +902,14 @@ conn-headroom-check:
 ## (COCKPIT_BIN > PATH > built from the sibling ../memql-cockpit via `make
 ## cockpit`). There is NO fallback to the old script path.
 ##
-## Forwarded knobs: ENV->--env, VERSION->--ref, DRY_RUN->--dry-run, plus the
-## role gate (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->
-## --actor for the audit trail. ARGS passes extra cockpit flags through.
-##   make deploy ENV=production VERSION=0.9.6 ROLE=developer  # prod imperative roll-out
-##   make deploy ENV=development VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
-##   make deploy ENV=staging COCKPIT_BIN=/path/to/memql-cockpit  # pin the binary
+## Forwarded knobs: VERSION->--ref, DRY_RUN->--dry-run, plus the role gate
+## (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->--actor for
+## the audit trail. ARGS passes extra cockpit flags through.
+##   make deploy VERSION=0.9.6 ROLE=developer            # imperative roll-out
+##   make deploy VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
+##   make deploy COCKPIT_BIN=/path/to/memql-cockpit      # pin the binary
 deploy:
 	@COCKPIT_BIN="$${COCKPIT_BIN:-}" bash scripts/deploy/cockpit.sh deploy \
-		--env=$${ENV:-staging} \
 		$${VERSION:+--ref=$$VERSION} \
 		$${ROLE:+--role=$$ROLE} \
 		$${ACTOR:+--actor=$$ACTOR} \

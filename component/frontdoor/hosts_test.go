@@ -7,134 +7,105 @@ import (
 
 const domain = "example.test"
 
-// TestRoleHostsStaySingleLabel is the assertion the whole hyphenation choice
-// exists for.
+// TestEveryHostStaysSingleLabel is the assertion the whole certificate story
+// rests on.
 //
-// A TLS wildcard matches exactly ONE label. If a labelled environment's role
-// host were `api.staging.<domain>` it would not be covered by `*.<domain>`, and
-// standing up an environment would mean issuing a certificate per environment
-// per role. Hyphenating keeps every role host under the wildcard the cluster
-// already has, forever, however many environments there are.
-func TestRoleHostsStaySingleLabel(t *testing.T) {
-	for _, label := range []string{"", "staging", "qa", "eu-west"} {
-		for _, role := range Roles() {
-			host := RoleHost(role, label, domain)
-			prefix := strings.TrimSuffix(host, "."+domain)
-			if prefix == host {
-				t.Fatalf("%q does not end in the cluster domain", host)
-			}
-			if strings.Contains(prefix, ".") {
-				t.Errorf("role host %q has %d labels in front of the domain; a TLS wildcard covers exactly one, so this host is not covered by *.%s",
-					host, strings.Count(prefix, ".")+1, domain)
-			}
+// A TLS wildcard matches exactly ONE label. Every host this package composes is
+// one label under the domain (the apex is zero, and is SAN'd explicitly), so
+// `*.<domain>` covers all of them with one order and one renewal. A host that
+// grew a second label would not be covered and would serve the controller's
+// default certificate -- a browser name mismatch at a host nobody thinks is new.
+func TestEveryHostStaysSingleLabel(t *testing.T) {
+	for _, h := range Hosts(domain) {
+		if h.Name == Apex(domain) {
+			continue // zero labels by construction; SAN'd on its own
+		}
+		prefix := strings.TrimSuffix(h.Name, "."+domain)
+		if prefix == h.Name {
+			t.Fatalf("%q does not end in the cluster domain", h.Name)
+		}
+		if strings.Contains(prefix, ".") {
+			t.Errorf("host %q has %d labels in front of the domain; a TLS wildcard covers exactly one, so this host is not covered by *.%s",
+				h.Name, strings.Count(prefix, ".")+1, domain)
 		}
 	}
 }
 
-func TestRoleHostsSpellTheProduct(t *testing.T) {
-	for _, tc := range []struct{ role, label, want string }{
-		{"api", "", "api.example.test"},
-		{"identity", "", "identity.example.test"},
-		{"mcp", "", "mcp.example.test"},
-		{"api", "staging", "api-staging.example.test"},
-		{"identity", "staging", "identity-staging.example.test"},
-		{"mcp", "staging", "mcp-staging.example.test"},
+func TestRoleHostsSpellTheRoleSet(t *testing.T) {
+	for _, tc := range []struct{ role, want string }{
+		{"api", "api.example.test"},
+		{"identity", "identity.example.test"},
+		{"mcp", "mcp.example.test"},
 	} {
-		if got := RoleHost(Role(tc.role), tc.label, domain); got != tc.want {
-			t.Errorf("RoleHost(%q, %q) = %q, want %q", tc.role, tc.label, got, tc.want)
+		if got := RoleHost(Role(tc.role), domain); got != tc.want {
+			t.Errorf("RoleHost(%q) = %q, want %q", tc.role, got, tc.want)
 		}
 	}
 }
 
-// A site is inherently multi-label under a labelled environment: its own name
-// occupies the label a role would hyphenate into.
-func TestSiteHostsNestUnderTheLabel(t *testing.T) {
-	if got, want := SiteHost("shop", "", domain), "shop.example.test"; got != want {
-		t.Errorf("SiteHost unprefixed = %q, want %q", got, want)
+func TestSiteHostsAreOneLabelToo(t *testing.T) {
+	if got, want := SiteHost("shop", domain), "shop.example.test"; got != want {
+		t.Errorf("SiteHost = %q, want %q", got, want)
 	}
-	if got, want := SiteHost("shop", "staging", domain), "shop.staging.example.test"; got != want {
-		t.Errorf("SiteHost labelled = %q, want %q", got, want)
-	}
-	// The rule the design states in prose: a labelled site lives under the
-	// CLUSTER's domain, never under the customer's.
-	if strings.Contains(SiteHost("shop", "staging", domain), "acme") {
-		t.Error("a labelled site host must be composed from the cluster domain alone")
+	// A site host is composed from the CLUSTER's domain, never from a name the
+	// site itself carries -- the operator must not need DNS they may not
+	// control to stand a site up.
+	if strings.Contains(SiteHost("shop", domain), "acme") {
+		t.Error("a site host must be composed from the cluster domain alone")
 	}
 }
 
 func TestSitesWildcardAndApex(t *testing.T) {
-	if got, want := SitesWildcard("", domain), "*.example.test"; got != want {
-		t.Errorf("SitesWildcard unprefixed = %q, want %q", got, want)
+	if got, want := SitesWildcard(domain), "*.example.test"; got != want {
+		t.Errorf("SitesWildcard = %q, want %q", got, want)
 	}
-	if got, want := SitesWildcard("staging", domain), "*.staging.example.test"; got != want {
-		t.Errorf("SitesWildcard labelled = %q, want %q", got, want)
-	}
-	if got, want := Apex("", domain), domain; got != want {
-		t.Errorf("Apex unprefixed = %q, want %q", got, want)
-	}
-	// Only ONE environment can own the bare domain, and it is the unprefixed
-	// one. A second claimant would be two Ingress rules for one host in two
-	// namespaces, which resolves by whichever the controller saw first.
-	if got := Apex("staging", domain); got != "" {
-		t.Errorf("Apex(labelled) = %q, want empty -- the bare domain belongs to the unprefixed environment", got)
+	if got, want := Apex(domain), domain; got != want {
+		t.Errorf("Apex = %q, want %q", got, want)
 	}
 }
 
-// TestHostsIsTheWholeProduct pins the counts, because the count is the property
-// docs/public/operate/front-door.md is about: it grows with environments (a
-// closed set the operator chooses) and never with sites.
-func TestHostsIsTheWholeProduct(t *testing.T) {
-	unprefixed := Hosts("", domain)
-	if len(unprefixed) != 5 {
-		t.Errorf("unprefixed environment has %d host rules, want 5 (three roles, the sites wildcard, the apex)", len(unprefixed))
-	}
-	labelled := Hosts("staging", domain)
-	if len(labelled) != 4 {
-		t.Errorf("labelled environment has %d host rules, want 4 (three roles, the sites wildcard -- no apex)", len(labelled))
+// TestHostsIsTheWholeSet pins the count, because the count is the property
+// docs/public/operate/front-door.md is about: it is fixed by the closed role
+// set and never grows with sites.
+func TestHostsIsTheWholeSet(t *testing.T) {
+	hosts := Hosts(domain)
+	if len(hosts) != 5 {
+		t.Errorf("Hosts returns %d rules, want 5 (three roles, the sites wildcard, the apex)", len(hosts))
 	}
 
 	seen := map[string]bool{}
-	for _, h := range append(append([]Host{}, unprefixed...), labelled...) {
+	for _, h := range hosts {
 		if seen[h.Name] {
-			t.Errorf("%q is claimed by two environments; two Ingress rules for one host resolve by whichever the controller saw first", h.Name)
+			t.Errorf("%q appears twice; two Ingress rules for one host resolve by whichever the controller saw first", h.Name)
 		}
 		seen[h.Name] = true
 	}
 }
 
-// TestCertificateSANsCoverEveryHost is the gate that makes the hyphenation
-// choice pay: every generated host must fall under a SAN this environment
-// requests, or it serves a certificate error at a host nobody thinks is new.
+// TestCertificateSANsCoverEveryHost is the gate that makes the single-label
+// property pay: every generated host must fall under a requested SAN, or it
+// serves a certificate error at a host nobody thinks is new.
 func TestCertificateSANsCoverEveryHost(t *testing.T) {
-	for _, label := range []string{"", "staging", "qa"} {
-		sans := CertificateSANs(label, domain)
-		for _, h := range Hosts(label, domain) {
-			if !coveredBy(h.Name, sans) {
-				t.Errorf("environment %q serves %q and requests SANs %v, none of which covers it",
-					label, h.Name, sans)
-			}
+	sans := CertificateSANs(domain)
+	for _, h := range Hosts(domain) {
+		if !coveredBy(h.Name, sans) {
+			t.Errorf("%q is served and the requested SANs are %v, none of which covers it", h.Name, sans)
 		}
 	}
 }
 
-// TestLabelledEnvironmentsAddExactlyOneWildcard is the cost statement: standing
-// up an environment costs ONE additional certificate SAN, not one per role and
-// not one per site.
-func TestLabelledEnvironmentsAddExactlyOneWildcard(t *testing.T) {
-	base := CertificateSANs("", domain)   // *.<domain> + apex
-	next := CertificateSANs("qa", domain) // *.<domain> + *.qa.<domain>
-
-	if len(base) != 2 {
-		t.Errorf("the unprefixed environment requests %d SANs, want 2 (the wildcard and the apex)", len(base))
+// TestCertificateIsExactlyTwoSANs is the cost statement: one wildcard for every
+// role host and every site, plus the apex, which no wildcard can cover.
+func TestCertificateIsExactlyTwoSANs(t *testing.T) {
+	sans := CertificateSANs(domain)
+	if len(sans) != 2 {
+		t.Fatalf("CertificateSANs returns %d entries (%v), want 2", len(sans), sans)
 	}
-	if len(next) != 2 {
-		t.Errorf("a labelled environment requests %d SANs, want 2 (the shared wildcard and its own sites wildcard)", len(next))
+	if sans[0] != "*."+domain {
+		t.Errorf("first SAN is %q, want the wildcard that covers every single-label host", sans[0])
 	}
-	if next[0] != "*."+domain {
-		t.Errorf("a labelled environment's first SAN is %q, want the shared *.%s that covers its single-label role hosts", next[0], domain)
-	}
-	if next[1] != "*.qa."+domain {
-		t.Errorf("a labelled environment's second SAN is %q, want its own sites wildcard", next[1])
+	if sans[1] != domain {
+		t.Errorf("second SAN is %q, want the apex -- *.%s matches one label and the bare domain has none", sans[1], domain)
 	}
 }
 
@@ -164,33 +135,20 @@ func TestCoveredByRefusesAMultiLabelMatch(t *testing.T) {
 	if coveredBy("api.staging.example.test", []string{"*.example.test"}) {
 		t.Error("coveredBy accepted a two-label host under a one-label wildcard, so every SAN assertion in this file is vacuous")
 	}
-	if !coveredBy("api-staging.example.test", []string{"*.example.test"}) {
+	if !coveredBy("api.example.test", []string{"*.example.test"}) {
 		t.Error("coveredBy rejected a single-label host under its wildcard")
 	}
 }
 
-func TestValidateLabel(t *testing.T) {
-	for _, ok := range []string{"", "staging", "qa", "eu-west", "e2"} {
-		if err := ValidateLabel(ok); err != nil {
-			t.Errorf("ValidateLabel(%q) = %v, want nil", ok, err)
-		}
+// TestTheSuffixHelperAgreesWithTheHostBuilders keeps genesis's derivation and
+// the generator's rules from drifting: genesis composes many names at once by
+// concatenating this suffix, and the generator calls the builders. Two spellings
+// of the same rule would disagree as an issuer nothing is served at.
+func TestTheSuffixHelperAgreesWithTheHostBuilders(t *testing.T) {
+	if got, want := "api"+DomainDerivationSuffix(domain), RoleHost(RoleAPI, domain); got != want {
+		t.Errorf("DomainDerivationSuffix composes %q, RoleHost gives %q", got, want)
 	}
-	// A dotted label is the dangerous one: it silently turns a role host into
-	// two labels, which the wildcard does not cover.
-	for _, bad := range []string{"a.b", "Staging", "-lead", "trail-", "with space", "under_score", "*"} {
-		if err := ValidateLabel(bad); err == nil {
-			t.Errorf("ValidateLabel(%q) = nil, want an error", bad)
-		}
-	}
-}
-
-func TestSuffixHelpersAgreeWithTheHostBuilders(t *testing.T) {
-	for _, label := range []string{"", "staging", "qa"} {
-		if got, want := "api"+DomainDerivationSuffix(label, domain), RoleHost(RoleAPI, label, domain); got != want {
-			t.Errorf("DomainDerivationSuffix(%q) composes %q, RoleHost gives %q", label, got, want)
-		}
-		if got, want := "portal"+SiteSuffix(label, domain), SiteHost("portal", label, domain); got != want {
-			t.Errorf("SiteSuffix(%q) composes %q, SiteHost gives %q", label, got, want)
-		}
+	if got, want := "portal"+DomainDerivationSuffix(domain), SiteHost("portal", domain); got != want {
+		t.Errorf("DomainDerivationSuffix composes %q, SiteHost gives %q", got, want)
 	}
 }

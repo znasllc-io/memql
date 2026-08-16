@@ -79,9 +79,8 @@ export interface GateResult {
   ranAt: string;
 }
 
-/** The aggregate per-env deployment view. */
+/** The aggregate deployment view for this installation. */
 export interface DeploymentStatus {
-  env: string;
   version: string;
   engineVersion: string;
   validatedAt: string;
@@ -234,67 +233,47 @@ export class DeployControlClient {
     if (!dispatcher) throw new Error("DeployControlClient: dispatcher is required");
   }
 
-  /** The full deployment picture for env ("staging" | "prod"). */
-  async getDeploymentStatus(
-    env: string,
-    opts: DeployControlCallOptions = {},
-  ): Promise<DeploymentStatus> {
-    requireArg("getDeploymentStatus", "env", env);
-    const res = await this.call("get_status", { getDeploymentStatus: { env } }, opts);
+  /** The full deployment picture for this installation. */
+  async getDeploymentStatus(opts: DeployControlCallOptions = {}): Promise<DeploymentStatus> {
+    const res = await this.call("get_status", { getDeploymentStatus: {} }, opts);
     return deploymentStatusFromWire(res.deploymentStatus);
   }
 
   /**
-   * The latest succeeded deployment's version for env plus the next
+   * The latest succeeded deployment's version plus the next
    * major / minor / patch proposals. Read-only, but developer-or-above
    * gated server-side: it is the read companion to cutVersion.
    */
   async suggestNextVersion(
-    env: string,
     opts: DeployControlCallOptions = {},
   ): Promise<NextVersionSuggestion> {
-    requireArg("suggestNextVersion", "env", env);
-    const res = await this.call("suggest_version", { suggestNextVersion: { env } }, opts);
+    const res = await this.call("suggest_version", { suggestNextVersion: {} }, opts);
     return nextVersionFromWire(res.nextVersion);
   }
 
-  /** Deploy a release version into staging. */
-  async deployStaging(version: string, opts: DeployControlCallOptions = {}): Promise<ActionResult> {
-    requireArg("deployStaging", "version", version);
-    return actionFromWire(
-      await this.call("deploy_staging", { deployStaging: { version } }, opts),
-    );
-  }
-
-  /** Copy a validated staging release into prod (digest copy, no rebuild). */
-  async promote(version: string, opts: DeployControlCallOptions = {}): Promise<ActionResult> {
-    requireArg("promote", "version", version);
-    return actionFromWire(await this.call("promote", { promote: { version } }, opts));
-  }
-
-  /** Revert the overlay commit identified by commitSha for env. */
+  /** Revert the overlay commit identified by commitSha. */
   async rollback(
-    env: string,
     commitSha: string,
     opts: DeployControlCallOptions = {},
   ): Promise<ActionResult> {
-    requireArg("rollback", "env", env);
     requireArg("rollback", "commitSha", commitSha);
-    return actionFromWire(await this.call("rollback", { rollback: { env, commitSha } }, opts));
+    return actionFromWire(await this.call("rollback", { rollback: { commitSha } }, opts));
   }
 
-  /** Promote or abort an in-flight Argo Rollout (action: "promote" | "abort"). */
+  /**
+   * Advance or cancel an in-flight Argo Rollout (action: "promote" |
+   * "abort"). This is the ARGO verb; it is unrelated to the
+   * environment-to-environment promote epic memql#3943 removed.
+   */
   async rolloutAction(
-    env: string,
     rollout: string,
     action: string,
     opts: DeployControlCallOptions = {},
   ): Promise<ActionResult> {
-    requireArg("rolloutAction", "env", env);
     requireArg("rolloutAction", "rollout", rollout);
     requireArg("rolloutAction", "action", action);
     return actionFromWire(
-      await this.call("rollout_action", { rolloutAction: { env, rollout, action } }, opts),
+      await this.call("rollout_action", { rolloutAction: { rollout, action } }, opts),
     );
   }
 
@@ -307,18 +286,15 @@ export class DeployControlClient {
    * an explicit override -- when set, bump is ignored.
    */
   async cutVersion(
-    env: string,
     bump = "",
     version = "",
     opts: DeployControlCallOptions = {},
   ): Promise<ActionResult> {
-    requireArg("cutVersion", "env", env);
     return actionFromWire(
       await this.call(
         "cut_version",
         {
           cutVersion: {
-            env,
             ...(bump ? { bump } : {}),
             ...(version ? { version } : {}),
           },
@@ -400,7 +376,6 @@ function requireArg(method: string, name: string, value: string): void {
 
 function deploymentStatusFromWire(w: DeploymentStatusWire | null | undefined): DeploymentStatus {
   return {
-    env: w?.env ?? "",
     version: w?.version ?? "",
     engineVersion: w?.engineVersion ?? "",
     validatedAt: w?.validatedAt ?? "",

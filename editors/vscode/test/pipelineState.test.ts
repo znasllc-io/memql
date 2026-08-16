@@ -38,11 +38,11 @@ function read(over: Partial<StatusRead> = {}): StatusRead {
 
 test("a status that answered is the pipeline being present", () => {
   const state = pipelineState(
-    read({ status: { environment: "staging" } as never, reason: "ok" }),
+    read({ status: { version: "2026.8.1" } as never, reason: "ok" }),
     OWNER,
   );
   assert.equal(state.kind, "present");
-  assert.equal(state.actions.length, 5);
+  assert.equal(state.actions.length, 4);
 });
 
 test("an engine-only cluster reads as no pipeline, in the engine's own words", () => {
@@ -87,7 +87,7 @@ test("a present pipeline draws only what the role holds", () => {
   assert.deepEqual(developer.actions.map((a) => a.id).sort(), ["cutVersion", "deploy"]);
 
   const admin = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility("admin"));
-  assert.equal(admin.actions.some((a) => a.id === "promote"), true);
+  assert.equal(admin.actions.some((a) => a.id === "rolloutAction"), true);
   // Rollback is owner-only in the service, and this mirrors it exactly.
   assert.equal(admin.actions.some((a) => a.id === "rollback"), false);
 
@@ -97,7 +97,7 @@ test("a present pipeline draws only what the role holds", () => {
 
 test("a role that could not be read is offered everything, with the engine deciding", () => {
   const state = pipelineState(read({ status: {} as never, reason: "ok" }), roleVisibility(undefined));
-  assert.equal(state.actions.length, 5);
+  assert.equal(state.actions.length, 4);
   // And the page says so, rather than implying the buttons are permissions.
   assert.match(state.detail, /courtesy/);
 });

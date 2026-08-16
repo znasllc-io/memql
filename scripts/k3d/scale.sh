@@ -3,56 +3,41 @@
 # scripts/k3d/scale.sh
 # ====================
 #
-# Capability: k3d.scale -- scale all memQL app Deployments in ONE environment to
-# a target replica count.
+# Capability: k3d.scale -- scale all memQL app Deployments to a target replica
+# count.
 #
 # Why not use ArgoCD for this?
 # ----------------------------
-# Replica count is a runtime dimension as well as a committed value. Every
-# overlay pins the count a fresh reconcile establishes; scaling away from it --
-# up to 2 for cross-node mesh testing, down to 0 to park staging -- is a runtime
-# override, not a manifest change. Each environment's ArgoCD Application
-# excludes /spec/replicas from drift detection
-# (deploy/argocd/apps/memql-{prod,staging}.yaml), so selfHeal will NOT revert
-# what this writes and no manual repair follows a scale-to-zero.
+# Replica count is a runtime dimension as well as a committed value. The overlay
+# pins the count a fresh reconcile establishes; scaling away from it -- up to 2
+# for cross-node mesh testing, down to 0 to park an idle cluster -- is a runtime
+# override, not a manifest change. The ArgoCD Application excludes
+# /spec/replicas from drift detection (deploy/argocd/apps/memql.yaml), so
+# selfHeal will NOT revert what this writes and no manual repair follows a
+# scale-to-zero.
 #
-# The environment names the namespace (epic memql#3748 / #3766)
-# -------------------------------------------------------------
-# One cluster now carries two environments in two namespaces, so "which
-# Deployments" is no longer answerable without saying which environment:
-#
-#     local    -> memql             the default; the k3d cluster `make up` brings up
-#     staging  -> memql-staging     `make scale N=0 ENV=staging` parks it
-#     prod     -> memql-prod        `make scale N=2 ENV=prod`
-#
-# --env DEFAULTS TO local -- see the CONFIGURATION block below for why the
-# direction of that default is the safety property rather than a convenience.
-# Naming a REMOTE environment is explicit (`ENV=staging` / `ENV=prod`), and an
-# environment absent from the current kubectl context fails with exit 4 naming
-# both the environment and the namespace, so the two can never be confused
-# silently.
-#
-# --namespace still overrides, for a cluster whose namespaces are named
-# something else. MEMQL_K3D_NAMESPACE is honoured for `local` ONLY, because it
-# is the knob `make up` itself uses to decide what to create -- letting it reach
-# the cloud environments would mean an exported shell variable could redirect a
-# production scale, which is exactly the silent confusion above.
+# ONE namespace (epic memql#3943)
+# --------------------------------
+# This took an `--env` naming which of two namespaces to scale, back when one
+# cluster carried two environments. memQL ships one installation shape: the
+# namespace is `memql`, and a cluster whose namespace is named something else
+# passes --namespace. MEMQL_K3D_NAMESPACE is honoured as the default because it
+# is the knob `make up` itself uses to decide what to create.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
 #
 # Usage:
-#   make scale N=2                          # 2 replicas per Deployment in prod
-#   make scale N=1 ENV=staging              # bring staging back up
-#   make scale N=0 ENV=staging              # park staging (costs storage only)
-#   make scale N=2 ENV=local                # local cross-node mesh testing
-#   scripts/k3d/scale.sh --replicas=2 --env=staging
+#   make scale N=2                          # 2 replicas per Deployment
+#   make scale N=0                          # park the cluster (costs storage only)
+#   scripts/k3d/scale.sh --replicas=2
+#   scripts/k3d/scale.sh --replicas=2 --namespace=memql
 #   scripts/k3d/scale.sh --print-spec
 #
 # Exit codes: 0 ok | 2 bad param | 4 prerequisite missing (kubectl/ns absent)
 #
-# Refs: #2067 #2061 #2221 #3766
+# Refs: #2067 #2061 #2221 #3943
 
 set -euo pipefail
 
@@ -60,31 +45,24 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "k3d.scale" "Scale all memQL app Deployments in one environment to a target replica count."
-cap_spec_param "replicas"  "replica count per Deployment (0 parks the environment)"
-cap_spec_param "env"       "environment to scale: local | staging | prod (default: local)"
+cap_init "k3d.scale" "Scale all memQL app Deployments to a target replica count."
+cap_spec_param "replicas"  "replica count per Deployment (0 parks the cluster)"
 cap_spec_param "cluster"   "k3d cluster name"
-cap_spec_param "namespace" "k8s namespace; overrides the one --env resolves to"
+cap_spec_param "namespace" "k8s namespace (default: memql, or MEMQL_K3D_NAMESPACE)"
 #=============================================================================
 # CONFIGURATION
 #=============================================================================
 
 CLUSTER_NAME="${MEMQL_K3D_CLUSTER:-memql}"
 
-# DEFAULTS TO local, and the direction of that default is the safety property.
-# `make scale N=2` is the inner-loop command a developer types from memory
-# (CLAUDE.md documents it for cross-node mesh testing), so the habit is already
-# formed -- and a default of `prod` would silently point that habit at
-# production. Naming a remote environment is one word; mistyping nothing and
-# hitting prod is unrecoverable.
-#
-# memql#3766 originally specified `prod` as the default. Reversed on the repo
-# owner's call while that issue was landing, for the reason above.
-ENVIRONMENT="local"
-NAMESPACE=""
+# The namespace `make up` creates, and the one the cloud overlay reconciles
+# into. There is ONE installation shape (epic memql#3943), so there is no
+# environment to resolve a namespace from -- a cluster whose namespace is named
+# differently passes --namespace.
+NAMESPACE="${MEMQL_K3D_NAMESPACE:-memql}"
 
-# All Deployments the mesh runs, in every environment. Excludes postgres +
-# azurite, which are local-only infrastructure and not part of the mesh.
+# All Deployments the mesh runs. Excludes postgres + azurite, which are
+# local-only infrastructure and not part of the mesh.
 APP_DEPLOYMENTS=(
     identity
     voice
@@ -109,28 +87,6 @@ function warn()  { cap_warn "$*"; }
 function error() { cap_error "$*"; }
 
 #=============================================================================
-# ENVIRONMENT -> NAMESPACE
-#=============================================================================
-
-# namespace_for_env prints the namespace an environment lives in, or nothing
-# when the name is not one. A lookup table, not a decision: the capability
-# contract forbids a script branching on environment to choose BEHAVIOUR, and
-# this chooses no behaviour -- every environment gets the identical `kubectl
-# scale` over the identical Deployment list.
-function namespace_for_env() {
-    case "$1" in
-        prod)    printf 'memql-prod' ;;
-        staging) printf 'memql-staging' ;;
-        # The local k3d cluster keeps the plain `memql` namespace: it is ONE
-        # environment and this epic deliberately did not grow it a second one.
-        # MEMQL_K3D_NAMESPACE is what `make up` reads, so `--env=local` has to
-        # agree with it or a customised local cluster would be unreachable here.
-        local)   printf '%s' "${MEMQL_K3D_NAMESPACE:-memql}" ;;
-        *)       printf '' ;;
-    esac
-}
-
-#=============================================================================
 # PREREQUISITE CHECKS
 #=============================================================================
 
@@ -139,7 +95,7 @@ function check_prerequisites() {
         cap_fail 4 "kubectl is required but not installed."
     fi
     if ! kubectl get namespace "${NAMESPACE}" &>/dev/null; then
-        cap_fail 4 "Environment '${ENVIRONMENT}' lives in namespace '${NAMESPACE}', which does not exist on the current kubectl context. Locally that namespace is created by 'make up' (and is ENV=local); on the cluster it is created by the ArgoCD Application for that environment."
+        cap_fail 4 "Namespace '${NAMESPACE}' does not exist on the current kubectl context. Locally it is created by 'make up'; on a cloud cluster it is created by the ArgoCD Application."
     fi
 }
 
@@ -150,7 +106,7 @@ function check_prerequisites() {
 function scale_all() {
     local n="$1"
 
-    info "Scaling all app Deployments to replicas=${n} in environment '${ENVIRONMENT}' (namespace '${NAMESPACE}')..."
+    info "Scaling all app Deployments to replicas=${n} in namespace '${NAMESPACE}'..."
 
     for deployment in "${APP_DEPLOYMENTS[@]}"; do
         if kubectl get deployment "${deployment}" -n "${NAMESPACE}" &>/dev/null; then
@@ -170,8 +126,8 @@ function scale_all() {
         -o wide 2>/dev/null | head -30 >&2 || true
 
     if [ "${n}" -eq 0 ]; then
-        info "Environment '${ENVIRONMENT}' is parked -- it costs storage, not compute."
-        info "Bring it back with 'make scale N=1 ENV=${ENVIRONMENT}'. ArgoCD ignores /spec/replicas, so nothing scales it back on its own."
+        info "The cluster is parked -- it costs storage, not compute."
+        info "Bring it back with 'make scale N=1'. ArgoCD ignores /spec/replicas, so nothing scales it back on its own."
     fi
     if [ "${n}" -gt 1 ]; then
         info "Multi-node mode active (replicas=${n})."
@@ -188,22 +144,15 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local replicas resolved_ns
+    local replicas
     replicas="$(cap_param replicas "${N:-}")"
-    ENVIRONMENT="$(cap_param env "$ENVIRONMENT")"
     CLUSTER_NAME="$(cap_param cluster "$CLUSTER_NAME")"
-
-    resolved_ns="$(namespace_for_env "$ENVIRONMENT")"
-    if [[ -z "$resolved_ns" ]]; then
-        cap_fail 2 "Unknown environment: '${ENVIRONMENT}'. Valid values are prod, staging, local."
-    fi
-    # --namespace wins, for a cluster whose namespaces are named differently.
-    NAMESPACE="$(cap_param namespace "$resolved_ns")"
+    NAMESPACE="$(cap_param namespace "$NAMESPACE")"
 
     cap_require replicas "$replicas"
-    # ZERO IS A VALID COUNT and used to be rejected here. Parking staging at 0
-    # when it is idle is what makes a second environment cost storage rather
-    # than compute (design memql#3748 §3.5), so the pattern admits it.
+    # ZERO IS A VALID COUNT and used to be rejected here. Parking an idle
+    # cluster at 0 is what makes it cost storage rather than compute, so the
+    # pattern admits it.
     if ! [[ "${replicas}" =~ ^(0|[1-9][0-9]*)$ ]]; then
         cap_fail 2 "Replica count must be a non-negative integer, got: '${replicas}'"
     fi
@@ -213,7 +162,6 @@ function main() {
 
     cap_changed
     cap_result_set_raw replicas "$replicas"
-    cap_result_set     environment "$ENVIRONMENT"
     cap_result_set     namespace "$NAMESPACE"
     cap_result_set_raw deploymentsScaled "$SCALED_COUNT"
     cap_ok

@@ -63,7 +63,6 @@ export interface DeploymentHistoryView {
    *  delegation reads that attribute, so selection needs no new wiring. */
   id: string;
   version: string;
-  environment: string;
   provider: string;
   /** pending | in_progress | succeeded | failed | superseded | rolled_back. */
   status: string;
@@ -211,11 +210,8 @@ export function renderDeploymentHistory(
           text(entry.version === "" ? entry.id : entry.version),
         ]),
       ];
-      if (entry.environment !== "") {
-        children.push(h("span", { class: "vk-row-secondary" }, [text(entry.environment)]));
-      }
       if (entry.provider !== "") {
-        children.push(h("span", { class: "vk-row-tertiary" }, [text(entry.provider)]));
+        children.push(h("span", { class: "vk-row-secondary" }, [text(entry.provider)]));
       }
       if (entry.current) {
         children.push(h("span", { class: "vk-row-flag" }, [text("[current]")]));

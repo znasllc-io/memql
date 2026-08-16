@@ -5,11 +5,10 @@
 
 /// A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
 /// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
-@displayCard(primary="name", secondary="environment", tertiary="region", status="status")
+@displayCard(primary="name", secondary="provider", tertiary="region", status="status")
 concept cluster {
   name              string! @description("Cluster name (e.g., 'development', 'staging-us-central1').")
   region            string  @description("Cloud region (e.g., 'us-central1') or 'local' for development.")
-  environment       enum("development", "staging", "production")! @description("Deployment environment.")
   seedNodeTypes     []string  @description("Required node types for this cluster (e.g., ['bff', 'cognition', 'planner']).")
   status            enum("bootstrapping", "healthy", "degraded", "shutting_down")  @default("bootstrapping") @description("Current cluster health status.")
   databaseId        string  @description("Node ID of the v1:cluster:database record for this cluster's database.")
@@ -77,7 +76,6 @@ concept node {
   labels        object  @description("Arbitrary metadata key-value pairs.")
   deploymentId  string  @description("Stable id of the deployment that created this node (#1873). Injected at registration from the rollout (MEMQL_DEPLOYMENT_ID; downward-API pod/rollout template hash in k8s, 'local' in dev). Plain string FK to v1:cluster:deployment.deploymentId -- a deployment's topology is every node with the same deploymentId, and a node whose deploymentId != the cluster's current deployment is an orphan from a previous deploy (feeds the reaper #1874 + cockpit orphan highlight).")
   provider      string  @description("Cloud provider / deploy target backing this node: 'docker-local' (local Docker) or 'azure' (AKS). Stamped at registration from the system.startup payload (#1873).")
-  environment   string  @description("Deployment environment this node runs in: development / staging / production. Stamped at registration from MEMQL_ENVIRONMENT (#1873).")
   region        string  @description("Cloud region (e.g. 'us-central1') or 'local'. Stamped at registration from MEMQL_REGION (#1873).")
 }
 

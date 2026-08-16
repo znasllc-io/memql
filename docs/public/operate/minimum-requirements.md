@@ -18,7 +18,7 @@ There are two run modes:
 
 | Mode | What it is | How |
 |------|-----------|-----|
-| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce staging locally](reproduce-staging-locally.md). |
+| **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
 | **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against a **managed** TimescaleDB. | The rest of this page. |
 
 Everything below is **environment-agnostic by design**: the architecture is
@@ -230,4 +230,4 @@ contract.
 - Deployment Strategy (see the product pack repo's docs/operate/deployment-strategy.md) — release/lockfile/promote/GitOps.
 - [Infrastructure](infrastructure.md) — the AKS cluster.
 - [Environment Variables](env-vars.md) — the full env surface.
-- [Reproduce staging locally](reproduce-staging-locally.md) — the local dev cluster.
+- [Reproduce the cloud locally](reproduce-the-cloud-locally.md) — the local dev cluster.

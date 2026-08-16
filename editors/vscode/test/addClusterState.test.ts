@@ -583,12 +583,12 @@ function messageFor(s: AddClusterState, field: string): string | undefined {
 test("a complete form produces the entry to write", () => {
   const s = connectForm({
     name: "staging",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
   assert.deepEqual(s.connectDraft(), {
     name: "staging",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
 });
@@ -613,18 +613,18 @@ test("an empty optional field is omitted from the entry, not written as a clear"
 });
 
 test("the endpoint is composed from the domain when the box is left empty", () => {
-  const draft = connectForm({ name: "staging", domain: " staging.example.com. " }).connectDraft();
+  const draft = connectForm({ name: "staging", domain: " example.com. " }).connectDraft();
   assert.deepEqual(draft, {
     name: "staging",
-    domain: "staging.example.com",
-    endpoint: "api.staging.example.com:443",
+    domain: "example.com",
+    endpoint: "api.example.com:443",
   });
 });
 
 test("a typed endpoint wins over the one the domain would compose", () => {
   const draft = connectForm({
     name: "staging",
-    domain: "staging.example.com",
+    domain: "example.com",
     endpoint: "10.0.0.5:50051",
   }).connectDraft();
   assert.equal(draft?.endpoint, "10.0.0.5:50051");
@@ -639,7 +639,7 @@ test("a missing name is refused", () => {
 });
 
 test("a name already in the registry is refused, and the message names the conflict", () => {
-  const s = connectForm({ name: "staging", endpoint: "api.staging.example.com:443" });
+  const s = connectForm({ name: "staging", endpoint: "api.example.com:443" });
   s.setRegistry(registry("local", "staging"));
   assert.equal(s.connectDraft(), undefined);
   assert.equal(
@@ -652,7 +652,7 @@ test("the duplicate check needs a registry, and without one the write-time wall 
   // clusters.yaml is shared with the Cockpit, so no read here stays
   // authoritative -- which is why this check never became the only one. A
   // clusters.yaml that would not parse simply leaves it silent.
-  const s = connectForm({ name: "staging", endpoint: "api.staging.example.com:443" });
+  const s = connectForm({ name: "staging", endpoint: "api.example.com:443" });
   assert.notEqual(s.connectDraft(), undefined);
 });
 
@@ -666,7 +666,7 @@ test("the endpoint is judged by the dialer, and reports what the dialer said", (
   // webSocketUrlFor is the function the connection layer actually calls, so
   // its refusal is the field error -- minus the "cluster \"x\": " prefix it
   // carries for callers with no field to attach a sentence to.
-  const s = connectForm({ name: "staging", endpoint: "https://api.staging.example.com" });
+  const s = connectForm({ name: "staging", endpoint: "https://api.example.com" });
   assert.equal(s.connectDraft(), undefined);
   assert.equal(
     messageFor(s, "endpoint"),
@@ -677,7 +677,7 @@ test("the endpoint is judged by the dialer, and reports what the dialer said", (
 test("a PAT in the token box is refused by name rather than left to fail at the handshake", () => {
   const s = connectForm({
     name: "staging",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
     token: "mql_pat_abcdef",
   });
   assert.equal(s.connectDraft(), undefined);
@@ -687,7 +687,7 @@ test("a PAT in the token box is refused by name rather than left to fail at the 
 test("a token that picked up a line break is refused", () => {
   const s = connectForm({
     name: "staging",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
     token: "eyJhbGciOi\nJSUzI1NiJ9",
   });
   assert.equal(s.connectDraft(), undefined);
@@ -695,7 +695,7 @@ test("a token that picked up a line break is refused", () => {
 });
 
 test("a domain given as a URL is refused, and so is one with a space in it", () => {
-  const scheme = connectForm({ name: "s", domain: "https://staging.example.com" });
+  const scheme = connectForm({ name: "s", domain: "https://example.com" });
   assert.equal(scheme.connectDraft(), undefined);
   assert.match(messageFor(scheme, "domain") ?? "", /drop the scheme/);
 
@@ -709,8 +709,8 @@ test("every field is checked, so all the problems arrive at once", () => {
   // in front of the operator: four wrong answers meant four separate attempts.
   const s = connectForm({
     name: "staging",
-    domain: "https://staging.example.com",
-    endpoint: "https://api.staging.example.com",
+    domain: "https://example.com",
+    endpoint: "https://api.example.com",
     token: "mql_pat_abcdef",
   });
   s.setRegistry(registry("staging"));
@@ -726,7 +726,7 @@ test("every field is checked, so all the problems arrive at once", () => {
 test("a field can be revised after it was refused, and the rest of the form survives", () => {
   const s = connectForm({
     name: "staging",
-    endpoint: "https://api.staging.example.com",
+    endpoint: "https://api.example.com",
     token: FAKE_TOKEN,
   });
   s.setRegistry(registry("staging"));
@@ -735,10 +735,10 @@ test("a field can be revised after it was refused, and the rest of the form surv
   // Fix ONLY the two that were wrong. Everything else is still there -- which
   // is the whole point of a form over a sequence of prompts.
   s.setConnectInput("name", "staging-2");
-  s.setConnectInput("endpoint", "api.staging.example.com:443");
+  s.setConnectInput("endpoint", "api.example.com:443");
   assert.deepEqual(s.connectDraft(), {
     name: "staging-2",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
     token: FAKE_TOKEN,
   });
 });
@@ -762,14 +762,14 @@ test("going back to the cards clears the complaints but keeps what was typed", (
 // --- discarding ---------------------------------------------------------------
 
 test("discarding empties the form and returns to the cards", () => {
-  const s = connectForm({ name: "staging", endpoint: "api.staging.example.com:443" });
+  const s = connectForm({ name: "staging", endpoint: "api.example.com:443" });
   s.discardConnect();
   assert.equal(s.screen, "landing");
   assert.deepEqual(s.connectInputs, { name: "", domain: "", endpoint: "", token: "" });
 });
 
 test("a write refused after the fact is reported without losing the form", () => {
-  const s = connectForm({ name: "staging", endpoint: "api.staging.example.com:443" });
+  const s = connectForm({ name: "staging", endpoint: "api.example.com:443" });
   s.failConnect('a cluster named "staging" already exists; edit it instead of adding it again');
   assert.match(s.connectFailure, /already exists/);
   assert.equal(s.connectInputs.name, "staging");
@@ -788,15 +788,15 @@ test("saving writes the entry, and the written YAML carries no local key", async
 
   const draft = connectForm({
     name: "staging",
-    domain: "staging.example.com",
-    endpoint: "api.staging.example.com:443",
+    domain: "example.com",
+    endpoint: "api.example.com:443",
   }).connectDraft();
   if (draft === undefined) throw new assert.AssertionError({ message: "the form was valid" });
   await addCluster(file, draft);
 
   const written = await readClustersFile(file);
   assert.deepEqual(written.clusters, [
-    { name: "staging", domain: "staging.example.com", endpoint: "api.staging.example.com:443" },
+    { name: "staging", domain: "example.com", endpoint: "api.example.com:443" },
   ]);
   // Not merely absent from the parse -- absent from the bytes, since `local`
   // is what keeps the tree row `memqlCluster` rather than `memqlLocalCluster`.
@@ -820,11 +820,11 @@ test("the second wall still refuses a name the first one could not see", async (
   // addCluster -- and it is caught with the same sentence the form uses.
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-connect-"));
   const file = path.join(dir, "clusters.yaml");
-  await addCluster(file, { name: "staging", endpoint: "api.staging.example.com:443" });
+  await addCluster(file, { name: "staging", endpoint: "api.example.com:443" });
 
   const draft = connectForm({
     name: "staging",
-    endpoint: "api.staging.example.com:443",
+    endpoint: "api.example.com:443",
   }).connectDraft();
   if (draft === undefined) throw new assert.AssertionError({ message: "no registry, no conflict" });
   await assert.rejects(

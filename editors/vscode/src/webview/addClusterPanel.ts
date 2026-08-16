@@ -159,7 +159,7 @@ const CONNECT_LABELS: Record<ConnectField, string> = {
 const CONNECT_HINTS: Record<ConnectField, string> = {
   name: "How this cluster is stored in clusters.yaml, and what every other memQL command calls it.",
   domain:
-    "Optional, e.g. staging.example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
+    "Optional, e.g. example.com. It names the identity service sign-in talks to, and composes the endpoint below when you leave that empty.",
   endpoint:
     "The gRPC front door as host:port -- api.<domain>:443 for a cluster behind the usual ingress.",
   token:

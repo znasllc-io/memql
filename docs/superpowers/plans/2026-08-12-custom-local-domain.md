@@ -1963,7 +1963,7 @@ git commit -m "Issue #3593: the wizard offers a default and validates, instead o
 ### Task 11: Documentation and the operator-run verification
 
 **Files:**
-- Modify: `CLAUDE.md`, `docs/public/operate/reproduce-staging-locally.md`, `docs/public/operate/environment-parity.md`, `docs/public/operate/auth/identity-service.md`, `GLOSSARY.md` (only where they name a hostname or the TLS secret)
+- Modify: `CLAUDE.md`, `docs/public/operate/reproduce-the-cloud-locally.md`, `docs/public/operate/environment-parity.md`, `docs/public/operate/auth/identity-service.md`, `GLOSSARY.md` (only where they name a hostname or the TLS secret)
 
 **Interfaces:**
 - Consumes: everything above.
@@ -1975,7 +1975,7 @@ Run: `grep -rln "local\.znas\.io\|local-znas-tls" --include=*.md . | grep -v nod
 
 - [ ] **Step 2: Update each file**
 
-Replace hostnames with `cockpit.memql.localhost` / `identity.memql.localhost` / `memql.localhost` and the secret with `memql-front-door-tls`. In `docs/public/operate/reproduce-staging-locally.md`, add a section documenting the domain as a parameter:
+Replace hostnames with `cockpit.memql.localhost` / `identity.memql.localhost` / `memql.localhost` and the secret with `memql-front-door-tls`. In `docs/public/operate/reproduce-the-cloud-locally.md`, add a section documenting the domain as a parameter:
 
 ```markdown
 ## Choosing a domain
@@ -2015,7 +2015,7 @@ Expected: PASS.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add CLAUDE.md docs/public/operate/reproduce-staging-locally.md \
+git add CLAUDE.md docs/public/operate/reproduce-the-cloud-locally.md \
         docs/public/operate/environment-parity.md \
         docs/public/operate/auth/identity-service.md GLOSSARY.md
 git commit -m "Issue #3593: document the domain as a parameter"

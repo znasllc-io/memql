@@ -35,8 +35,8 @@ clusters:
     local: true
     token: eyJhbGci.eyJzdWIi.sig
   - name: staging
-    endpoint: api.staging.example.com:443
-    issuer: https://identity.staging.example.com
+    endpoint: api.example.com:443
+    issuer: https://identity.example.com
     future_cockpit_key: preserved
 selected_cluster: local
 `;

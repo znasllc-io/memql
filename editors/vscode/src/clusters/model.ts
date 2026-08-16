@@ -11,7 +11,7 @@ export interface ClusterConfig {
   // displayName is the human-friendly label; falls back to name when empty.
   displayName?: string;
   // domain is the single value the add/edit flow collects (e.g.
-  // "staging.example.com"). endpoint / issuer / clientId are composed from it
+  // "example.com"). endpoint / issuer / clientId are composed from it
   // by convention. Stored so an edit can round-trip the domain instead of
   // reverse-engineering it from the endpoint.
   domain?: string;

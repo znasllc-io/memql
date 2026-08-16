@@ -88,7 +88,7 @@ memql-cockpit deploy --env staging --ref 0.11.2 --role owner --actor "$USER" \
 ```
 
 The emitter resolves real image digests from ACR (printed as INFO
-lines), defaults `overlayPath=deploy/k8s/overlays/staging`, and the
+lines), defaults `overlayPath=deploy/k8s/overlays/cloud`, and the
 bundle's GitOps branch (pinOverlayDigests + argoSync + post-deploy
 gate) runs -- in dry-run reporting mode by default. The LIVE staging
 exercise is deferred to the staging-rebuild decision (memql#2381).

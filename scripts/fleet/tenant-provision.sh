@@ -198,7 +198,7 @@ function main() {
     mkdir -p "$overlay_dir" "$(dirname "$app_file")"
 
     local changed=0 f
-    for f in kustomization.yaml environment.yaml domain.yaml domain-envfrom.yaml allowance.yaml allowance-envfrom.yaml; do
+    for f in kustomization.yaml domain.yaml domain-envfrom.yaml allowance.yaml allowance-envfrom.yaml; do
         if render_file "${TEMPLATE_DIR}/${f}" "${overlay_dir}/${f}"; then
             changed=1
             cap_info "rendered ${overlay_dir}/${f}"

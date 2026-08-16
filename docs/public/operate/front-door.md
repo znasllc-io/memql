@@ -1,5 +1,5 @@
 ---
-title: The cluster front door — five host rules per environment
+title: The cluster front door — five host rules
 audience: public
 status: stable
 area: operate
@@ -7,29 +7,26 @@ sinceVersion: 0.18.0
 owner: znas
 ---
 
-# The cluster front door — five host rules per environment
+# The cluster front door — five host rules
 
 A memQL cluster has **one** door: port 443 on one L7 proxy — the k3s-bundled
 traefik locally, nginx in the cloud — terminating TLS once with a wildcard plus
 apex certificate and routing by hostname. Port 80 exists only to redirect.
 
-Behind that door are **five host rules per environment**, committed to
-`deploy/k8s`, plus a **separate media plane** that does not and cannot go
-through it.
+Behind that door are **five host rules**, committed to `deploy/k8s`, plus a
+**separate media plane** that does not and cannot go through it.
 
-Five is the number per environment, and it stays five no matter how many
-customers, applications or websites the cluster serves. That property is what
-this page is about.
+Five is the number, and it stays five no matter how many customers,
+applications or websites the cluster serves. That property is what this page is
+about.
 
-The host **set** is therefore the product of **role × environment**
-(memql#3767), because one cluster now carries staging and production as two
-namespaces (epic memql#3748). Environment is the one axis the count is allowed
-to grow along: it is a closed set the operator chooses, unlike customers, apps
-and sites.
+The host **set** is DERIVED from the closed **role** set (memql#3767) rather
+than maintained as a list. It grows only when a ROLE is added, which is a design
+change; it never grows with customers, apps or sites.
 
 Related: [environment-parity.md](environment-parity.md) ·
 [install-prerequisites.md](install-prerequisites.md) ·
-[reproduce-staging-locally.md](reproduce-staging-locally.md)
+[reproduce-the-cloud-locally.md](reproduce-the-cloud-locally.md)
 
 ---
 
@@ -43,38 +40,18 @@ Related: [environment-parity.md](environment-parity.md) ·
 | `*.<domain>` | `svc/edge:8085` | http |
 | `<domain>` (apex) | `svc/edge:8085` | http |
 
-Those are the **unprefixed** environment's hosts — production, and every
-single-environment cluster including every local one. An environment carrying a
-host **label** takes the same five rules with the label folded in:
+**Every host is a single label under the domain, and that is a TLS decision,
+not a style one.** A wildcard certificate matches exactly **one** label, so the
+cluster's `*.<domain>` certificate covers every role host and every site — one
+order, one renewal, however many sites there are. The apex is the exception and
+is requested as its own SAN, since the bare domain has no label for a wildcard
+to match.
 
-| Role | unprefixed | labelled `staging` |
-|---|---|---|
-| api | `api.<domain>` | `api-staging.<domain>` |
-| identity | `identity.<domain>` | `identity-staging.<domain>` |
-| mcp | `mcp.<domain>` | `mcp-staging.<domain>` |
-| sites | `*.<domain>`, apex | `*.staging.<domain>` |
-
-**The role hosts hyphenate rather than nest, and that is a TLS decision, not a
-style one.** A wildcard certificate matches exactly **one** label, so
-`*.<domain>` covers `api-staging.<domain>` and does **not** cover
-`api.staging.<domain>`. Keeping every role host to a single label means the
-certificate the cluster already has covers them, however many environments
-there are.
-
-**Sites cannot do that**, because a site's own name already occupies the label a
-role would hyphenate into — `shop.<domain>` under a label is
-`shop.staging.<domain>`, two labels by construction. So a labelled environment
-requests exactly **one** additional wildcard, `*.staging.<domain>`, issued by
-cert-manager exactly as the first one is. One certificate for all of that
-environment's sites; still none per site.
-
-**A labelled environment's site lives under the cluster's own domain.** The
-staging host for `shop.acme.com` is `shop.staging.<clusterdomain>` — never
-`shop.staging.acme.com`. A labelled environment is the operator's own testing
-surface and must not require DNS the operator may not control.
-
-**Only one environment owns the apex**, because the bare domain has no label in
-front of it for a second claimant to occupy.
+(The set was once the product of role × ENVIRONMENT, with a label that
+hyphenated into role hosts — `api-staging.<domain>` — and nested into site
+hosts. Epic memql#3943 removed the environment dimension: memQL ships one
+installation shape, and a second environment is a second install with its own
+domain, so the product has one factor left.)
 
 **`api.<domain>`** is the API edge, and it is named for that role rather than
 for the first client that happened to connect to it. Everything that speaks to
@@ -166,7 +143,7 @@ unusual hostnames — it would be that `api.<domain>/` goes to the site server,
 so **the entire API would be served by the edge**: every SDK, the Cockpit, the
 VS Code extension and every worker dials that host. ingress-nginx ranks
 differently again — longest path, then oldest Ingress — so it would not even
-be the same wrong answer in both environments.
+be the same wrong answer everywhere.
 
 **So precedence is declared, not inherited (memql#3714).** `api-front-door.yaml`,
 `front-door.yaml` (identity) and `mcp-front-door.yaml` each carry an explicit
@@ -176,7 +153,7 @@ identical across the three, so they rank above the wildcard the same way rather
 than coincidentally. `edge-front-door.yaml` (the wildcard and apex rules) carries
 no priority annotation of its own; it does not need one; the declaration on the
 other three is what the ranking depends on. The ingress-nginx side is not yet
-worked out here — this repository's overlays carry no staging/prod Ingress
+worked out here — this repository's overlays carry no cloud Ingress
 definitions at all (the product pack that runs on this engine owns those), so
 the equivalent declaration is that downstream repo's responsibility when it
 stands one up, following the same principle: declare the priority explicitly
@@ -225,7 +202,7 @@ That single fact shapes the whole front door:
   section, and the reason it is generated.
 
 Splitting protocols across Services makes each backend's protocol
-unambiguous, and it is the same shape in every environment. Only which ingress
+unambiguous, and it is the same shape everywhere. Only which ingress
 controller points at it differs, and that is a value rather than architecture.
 
 ## What is generated
@@ -233,13 +210,11 @@ controller points at it differs, and that is a value rather than architecture.
 Two things in the front door are derived rather than authored, by two
 generators that answer different questions and stay separable.
 
-**The HOSTS**, for each cloud environment — `cmd/frontdoorhosts` writes
-`deploy/k8s/overlays/<env>/front-door.generated.yaml` whole: the five Ingress
-rules and the cert-manager `Certificate` with its SANs. Its only per-environment
-input is the `MEMQL_HOST_LABEL` value on that overlay's `environment.yaml`,
-which is what makes **adding a third environment a value change** — a new
-overlay directory with a new label in it, and the front door follows. The
-generator itself names no environment.
+**The HOSTS** — `cmd/frontdoorhosts` writes
+`deploy/k8s/overlays/cloud/front-door.generated.yaml` whole: the five Ingress
+rules and the cert-manager `Certificate` with its SANs. Its whole input is the
+closed role set plus the domain, and it emits ~390 lines from those — which is
+what earns generation for a single target.
 
 **The PATHS** on the api host — `cmd/frontdoorpaths` fills the block between
 markers in every api front door, from `component/server`'s own declarations. The
@@ -254,7 +229,7 @@ re-deriving it; the rest of this section is about that half.
 | Command | What it does |
 |---|---|
 | `make frontdoor` | Both, in order: hosts, then paths |
-| `make frontdoor-hosts` | Regenerates each cloud environment's front door |
+| `make frontdoor-hosts` | Regenerates the cloud overlay's front door |
 | `make frontdoor-hosts-check` | Fails when a generated front door is stale |
 | `make frontdoor-paths` | Regenerates the path block in every api front door |
 | `make frontdoor-paths-check` | Fails when a checked-in block is stale |
@@ -263,9 +238,9 @@ The **local** overlay's four front-door files stay hand-authored: they are
 traefik rather than nginx, and they carry the measured reasoning for a priority
 ranking that broke the API once already
 ([above](#exact-versus-wildcard-precedence-is-declared-not-inherited)). They are
-not unchecked — `TestFrontDoorServesExactlyTheFiveHosts` computes the unprefixed
-host set from the same `component/frontdoor` package the generator uses, so
-local's committed defaults cannot drift from what the cloud environments serve.
+not unchecked — `TestFrontDoorServesExactlyTheFiveHosts` computes the host set
+from the same `component/frontdoor` package the generator uses, so local's
+committed defaults cannot drift from what the cloud overlay serves.
 
 The set is exactly `server.PublicPaths()` ∪ `HandlerAuthorizedPaths()` ∪
 `SelfAuthenticatedPaths()` minus the gRPC surface. Those functions already
@@ -320,7 +295,7 @@ health JSON, `/portal/` returns the portal's `index.html`.
 See [inbound-delivery.md](inbound-delivery.md) and
 [campaign-sending.md](campaign-sending.md) for the two exceptions themselves.
 
-## Why the count is five per environment, and must not grow otherwise
+## Why the count is five, and must not grow
 
 Because **a site is data, not infrastructure.**
 
@@ -347,12 +322,9 @@ a chat message is.
 Two consequences worth stating plainly:
 
 - **Adding a sixth ROLE is a design change, not a configuration change.** If a
-  proposal needs one, the thing being added is probably a site. Adding an
-  ENVIRONMENT is the opposite — a value change, and the whole reason the host
-  set is generated rather than authored: it takes the five rules with it, gets
-  one additional wildcard SAN for its sites, and costs no edit to any generator
-  or manifest. `TestAThirdEnvironmentIsAValueChange` proves that by rendering
-  one.
+  proposal needs one, the thing being added is probably a site.
+  `TestRenderedHostsAreExactlyTheProduct` fails on a sixth host rule that is not
+  one of the five and is not the media plane.
 - **A wildcard DNS record is not a wildcard hosts file.** In the cloud
   `*.<domain>` resolves at the DNS layer and nothing local is involved. On a
   developer machine there is no wildcard in `/etc/hosts`, so each name has to
@@ -364,7 +336,7 @@ Two consequences worth stating plainly:
 Voice is not one of the five hosts and never will be. **WebRTC media is UDP and
 cannot traverse an HTTP front door.**
 
-| Environment | Media plane |
+| Target | Media plane |
 |---|---|
 | Cloud | `livekit.<domain>` for signaling, plus a LoadBalancer carrying UDP 7882 and TCP 7881 for media |
 | Local | LiveKit Cloud (the local overlay deletes the self-hosted livekit workloads) |
@@ -393,20 +365,17 @@ bff). The domain itself is a value too — one `MEMQL_DOMAIN`, from which every
 domain-shaped setting is derived at boot — so no file under `deploy/` names a
 domain except the Ingress hosts, which carry a committed default.
 
-The environment's **host label** is a value of the same kind, and it reaches
-both sides through one derivation: `cmd/frontdoorhosts` composes the Ingress
-hosts with it, and `component/genesis/domain.go` composes the issuer, CORS
-origins, redirect URIs and MCP public URL with it, both through
+The domain reaches both sides through ONE derivation: `cmd/frontdoorhosts`
+composes the Ingress hosts from it, and `component/genesis/domain.go` composes
+the issuer, CORS origins, redirect URIs and MCP public URL from it, both through
 `component/frontdoor`. Two copies of that rule would be two copies that can
 disagree, and the disagreement is an issuer nothing is served at — which fails
 as "sign-in is broken" with every manifest looking correct.
 
-What differs between an unprefixed cloud environment and a labelled one is the
-label and nothing else. What differs between the cloud and local is which of the
-interchangeable parts above is in play — plus that the local overlay's front
-door is hand-authored while the cloud ones are generated, which is a source
-question rather than a shape one: the same five rules either way, gated against
-the same derivation.
+What differs between the cloud and local is which of the interchangeable parts
+above is in play — plus that the local overlay's front door is hand-authored
+while the cloud one is generated, which is a source question rather than a shape
+one: the same five rules either way, gated against the same derivation.
 
 The standard those rows answer to, and the reason the divergences are confined
 to annotations and secret sources, is
@@ -416,7 +385,7 @@ to annotations and secret sources, is
 
 The local cluster maps Postgres on `5432` and that is **not a connection
 path**. It is there so an operator can attach `psql` to a local database. No
-client reaches memQL that way in any environment, nothing in the connection
+client reaches memQL that way anywhere, nothing in the connection
 model depends on it, and a proposal that routes application traffic through it
 is the port-forward-as-architecture anti-pattern
 [environment-parity.md](environment-parity.md) rejects.

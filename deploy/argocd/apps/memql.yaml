@@ -1,0 +1,51 @@
+# The memQL cluster (epic memql#3943).
+#
+# One cluster, one ArgoCD, one repository, one base, ONE Application. It
+# reconciles deploy/k8s/overlays/cloud into namespace `memql`.
+#
+# WHAT CHANGED. This was `memql-prod`, one of two Applications reconciling two
+# overlays into two namespaces, with the second (`memql-staging`) alongside it.
+# memQL ships ONE installation shape: an operator who wants a second environment
+# installs a second instance, with its own cluster or at least its own ArgoCD
+# and its own domain. Both the second Application and the schema-search-path
+# boundary that separated the two namespaces' data are gone; there is one
+# namespace, so there is nothing to separate.
+#
+# MANUAL SYNC IS DELIBERATE AND UNCHANGED. There is no `automated:` block: this
+# is the highest-stakes surface, and an operator triggers every sync explicitly.
+# Promote to `automated: {prune, selfHeal}` once a couple of clean GitOps
+# deploys have happened -- deploy/argocd/README.md carries the flow.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: memql
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: memql
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/k8s/overlays/cloud
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: memql
+  syncPolicy:
+    syncOptions:
+      # The namespace is not a side effect of the sync option -- it is a
+      # resource in the reconciled set. deploy/k8s/base/namespace.yaml declares
+      # it and the overlay's `namespace: memql` keeps that name, which is the
+      # same one-base mechanism as everything else here.
+      - CreateNamespace=false
+  ignoreDifferences:
+    # Replica counts are a RUNTIME dimension as well as a committed value.
+    # `make scale N=<n>` writes /spec/replicas directly. Without this, selfHeal
+    # would fight the scale back within a reconcile interval and the operator
+    # would be left doing manual repair. The committed counts in the overlay
+    # remain what a fresh reconcile establishes; this only stops Argo treating
+    # a deliberate scale as drift.
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

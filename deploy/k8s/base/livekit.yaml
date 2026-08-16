@@ -170,10 +170,10 @@ metadata:
 spec:
   ingressClassName: nginx
   tls:
-    - hosts: [livekit.staging.example.com]
+    - hosts: [livekit.example.com]
       secretName: livekit-staging-tls
   rules:
-    - host: livekit.staging.example.com
+    - host: livekit.example.com
       http:
         paths:
           - { path: /, pathType: Prefix, backend: { service: { name: livekit, port: { number: 7880 } } } }

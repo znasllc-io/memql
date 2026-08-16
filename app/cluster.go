@@ -802,19 +802,14 @@ func (a *App) EmitSystemStartup() {
 		payload["identityProvider"] = idpInfo
 	}
 
-	// Include environment/region.
-	environment := firstNonEmptyStr(os.Getenv("MEMQL_ENVIRONMENT"), os.Getenv("MEMQL_REGION"), "development")
-	payload["environment"] = environment
 	payload["region"] = firstNonEmptyStr(os.Getenv("MEMQL_REGION"), "local")
 
 	// Include the deploy provider / cloud target (#1872) so cluster
-	// bootstrap can stamp it on the v1:cluster:cluster row. Explicit
-	// MEMQL_DEPLOY_PROVIDER wins; otherwise derive from the environment
-	// (local Docker for development, AKS/azure for staging + prod).
-	payload["provider"] = deployProvider(environment)
+	// bootstrap can stamp it on the v1:cluster:cluster row.
+	payload["provider"] = deployProvider()
 
 	// Include the deployment id (#1873) so registerNode can stamp it
-	// (plus provider/environment/region, already on this payload) on the
+	// (plus provider/region, already on this payload) on the
 	// v1:cluster:node row -- tying every node to the deployment that created
 	// it. MEMQL_DEPLOYMENT_ID is injected per-deploy by the rollout (k8s
 	// downward API from the pod/rollout template hash). Falls back to
@@ -920,17 +915,21 @@ func firstNonEmptyStr(vals ...string) string {
 	return ""
 }
 
-// deployProvider resolves the deploy target / cloud provider stamped on
-// the v1:cluster:cluster row and the system.startup payload (#1872).
-// MEMQL_DEPLOY_PROVIDER is the explicit override; otherwise it derives
-// from the environment: local Docker ("docker-local") for development,
-// AKS ("azure") for staging + production.
-func deployProvider(environment string) string {
-	if p := strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_PROVIDER")); p != "" {
-		return p
-	}
-	if strings.EqualFold(strings.TrimSpace(environment), "development") {
-		return "docker-local"
-	}
-	return "azure"
+// deployProvider is the deploy target / cloud provider stamped on the
+// v1:cluster:cluster row and the system.startup payload (#1872).
+//
+// MEMQL_DEPLOY_PROVIDER is the whole input, and an unset value stays EMPTY.
+// It used to be an override with a fallback DERIVED from MEMQL_ENVIRONMENT --
+// development meant local Docker, anything else meant AKS -- and epic
+// memql#3943 removed that variable along with the concept. Local-vs-cloud is
+// what survived it: a deploy TARGET, which the parity standard keeps, and which
+// was always stated separately from the environment.
+//
+// Nothing is guessed in its place. `v1:cluster:cluster.provider` already
+// documents itself as "Empty until stamped by the deploy driver", so an unset
+// value reads as "nobody said" rather than as a claim about where this node
+// runs -- and deploycontrol's own default (azure, deployment_store.go) governs
+// the records that actually gate a deploy.
+func deployProvider() string {
+	return strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_PROVIDER"))
 }

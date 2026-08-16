@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   CHECKLIST_ELEMENT,
@@ -6,7 +6,6 @@ import {
   TABLE_ELEMENT,
   TIMELINE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
-import type { DeployEnv } from "../deploy/useDeployConsole";
 
 import {
   COMPONENT_CONCEPT,
@@ -52,10 +51,7 @@ export function DeploymentsView({
   selectedRowId,
   onSelect,
 }: ViewProps): ReactNode {
-  // Staging first, always. Landing an operator on production is an invitation
-  // to act on it by reflex.
-  const [env, setEnv] = useState<DeployEnv>("staging");
-  const console_ = useDeployConsole(env);
+  const console_ = useDeployConsole();
 
   const { permissions, status, loading, error, actionMessage, actionError, actionAuditEventId, busy } =
     console_;
@@ -68,9 +64,7 @@ export function DeploymentsView({
     <>
       <Band>
         <div className="flex flex-wrap items-center gap-3">
-          <EnvPicker env={env} onChange={setEnv} />
           <ReleaseReading
-            env={env}
             version={status?.version ?? ""}
             engineVersion={status?.engineVersion ?? ""}
             sync={status?.argocd.syncStatus ?? ""}
@@ -87,7 +81,7 @@ export function DeploymentsView({
             mode, under the floor for 13px. */}
         {error ? (
           <div className="mt-3">
-            <ErrorMessage>Could not read {env}: {error}</ErrorMessage>
+            <ErrorMessage>Could not read the deployment: {error}</ErrorMessage>
           </div>
         ) : null}
         {actionError ? (
@@ -158,7 +152,7 @@ export function DeploymentsView({
         >
           {legs.length === 0 ? (
             <p className="text-sm text-subtle">
-              {loading ? "Reading the gate…" : `No gate has run against ${env} yet.`}
+              {loading ? "Reading the gate…" : "No gate has run yet."}
             </p>
           ) : (
             <ViewElement element={CHECKLIST_ELEMENT} rows={legs} concept={GATE_LEG_CONCEPT} />
@@ -175,7 +169,7 @@ export function DeploymentsView({
       )}
 
       {permissions.canView && images.length > 0 ? (
-        <Band title="Images in force" meta={`${env} overlay, resolved digests`} panel>
+        <Band title="Images in force" meta="the cloud overlay, resolved digests" panel>
           <ViewElement element={TABLE_ELEMENT} rows={images} concept={COMPONENT_CONCEPT} />
         </Band>
       ) : null}
@@ -186,7 +180,7 @@ export function DeploymentsView({
         </Band>
       ) : null}
 
-      <Band title="By outcome" meta="every deployment recorded, not just this environment">
+      <Band title="By outcome" meta="every deployment recorded">
         <ViewElement
           element={PROPORTION_BAR_ELEMENT}
           rows={rows}
@@ -207,7 +201,7 @@ export function DeploymentsView({
             bindings: {
               at: "updatedAt",
               label: "version",
-              detail: "environment",
+              detail: "provider",
               status: "status",
             },
           }}
@@ -249,59 +243,11 @@ function RefusalAuditLink({ id }: { id: string }): ReactNode {
   );
 }
 
-// The environment picker. Two literal buttons rather than a loop: there are
-// exactly two deploy targets, the server validates the set, and writing them
-// out keeps this module free of any iteration over data.
-function EnvPicker({
-  env,
-  onChange,
-}: {
-  env: DeployEnv;
-  onChange: (next: DeployEnv) => void;
-}): ReactNode {
-  return (
-    <div
-      role="group"
-      aria-label="Environment"
-      className="flex overflow-hidden rounded border border-line"
-    >
-      <EnvButton value="staging" env={env} onChange={onChange} />
-      <EnvButton value="prod" env={env} onChange={onChange} />
-    </div>
-  );
-}
-
-function EnvButton({
-  value,
-  env,
-  onChange,
-}: {
-  value: DeployEnv;
-  env: DeployEnv;
-  onChange: (next: DeployEnv) => void;
-}): ReactNode {
-  const active = env === value;
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={() => onChange(value)}
-      className={
-        "px-3 py-1 text-xs font-medium " +
-        (active ? "bg-accent text-accent-fg" : "bg-surface text-muted hover:bg-raised")
-      }
-    >
-      {value === "prod" ? "Production" : "Staging"}
-    </button>
-  );
-}
-
 // The headline reading. Deliberately NOT stat tiles: a release is one record,
 // not a population, and the four facts on it are strings -- a version, an
 // engine version, a sync state and a health state. Tiles would render "1
 // deployment" and tell an operator nothing.
 function ReleaseReading({
-  env,
   version,
   engineVersion,
   sync,
@@ -310,7 +256,6 @@ function ReleaseReading({
   loading,
   canView,
 }: {
-  env: DeployEnv;
   version: string;
   engineVersion: string;
   sync: string;
@@ -323,10 +268,10 @@ function ReleaseReading({
     return <p className="text-sm text-subtle">Live state is not visible to your role.</p>;
   }
   if (loading && version === "") {
-    return <p className="text-sm text-muted">Reading {env}…</p>;
+    return <p className="text-sm text-muted">Reading the deployment…</p>;
   }
   if (version === "") {
-    return <p className="text-sm text-subtle">Nothing is pinned in the {env} overlay.</p>;
+    return <p className="text-sm text-subtle">Nothing is pinned in the overlay.</p>;
   }
   return (
     <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">

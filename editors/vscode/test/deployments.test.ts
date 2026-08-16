@@ -66,7 +66,6 @@ function deployment(over: Partial<DeploymentRecord> = {}): DeploymentRecord {
     deploymentId: "d1",
     status: "succeeded",
     version: "v0.9.2",
-    environment: "staging",
     provider: "azure",
     region: "eastus",
     imageDigest: "sha256:abcdef0123456789",
@@ -167,7 +166,7 @@ test("a remote instance is never absent -- only reachable or not", () => {
 test("a remote instance's version is the CURRENT deployment's", () => {
   const instance = remoteInstance({
     name: "staging",
-    domain: "staging.example.com",
+    domain: "example.com",
     reachable: true,
     connected: true,
     deployments: [

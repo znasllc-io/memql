@@ -67,7 +67,7 @@ test("an action's details survive to the outcome", () => {
         details: { deploymentId: "dep-abc", version: "v0.19.0", imageDigest: "sha256:beef" },
       }),
     }),
-    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+    { id: "cutVersion", bump: "patch", version: "v0.19.0" },
   ).then((outcome) => {
     assert.equal(outcome.kind, "success");
     assert.equal(outcome.details.deploymentId, "dep-abc");
@@ -78,7 +78,7 @@ test("an action's details survive to the outcome", () => {
 test("a failed action still carries whatever details it returned", async () => {
   const outcome = await runDeployAction(
     port({ cutVersion: async () => ({ ...OK, ok: false, message: "duplicate version", details: { version: "v0.19.0" } }) }),
-    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+    { id: "cutVersion", bump: "patch", version: "v0.19.0" },
   );
   assert.equal(outcome.kind, "error");
   assert.equal(outcome.details.version, "v0.19.0");
@@ -103,43 +103,37 @@ test("details is an empty map when nothing produced a result", async () => {
 test("each action reaches its own RPC with its own arguments", async () => {
   const calls: string[] = [];
   const p = port({
-    cutVersion: async (env, bump, version) => {
-      calls.push(`cutVersion:${env}:${bump}:${version}`);
+    cutVersion: async (bump, version) => {
+      calls.push(`cutVersion:${bump}:${version}`);
       return OK;
     },
     deploy: async (id) => {
       calls.push(`deploy:${id}`);
       return OK;
     },
-    promote: async (version) => {
-      calls.push(`promote:${version}`);
-      return OK;
-    },
     rollbackDeployment: async (id) => {
       calls.push(`rollback:${id}`);
       return OK;
     },
-    rolloutAction: async (env, rollout, action) => {
-      calls.push(`rollout:${env}:${rollout}:${action}`);
+    rolloutAction: async (rollout, action) => {
+      calls.push(`rollout:${rollout}:${action}`);
       return OK;
     },
   });
 
   const requests: DeployActionRequest[] = [
-    { id: "cutVersion", env: "staging", bump: "patch", version: "" },
+    { id: "cutVersion", bump: "patch", version: "" },
     { id: "deploy", deploymentId: "d-1" },
-    { id: "promote", version: "2026.6.21" },
     { id: "rollback", toDeploymentId: "d-0" },
-    { id: "rolloutAction", env: "prod", rollout: "bff", subAction: "abort" },
+    { id: "rolloutAction", rollout: "bff", subAction: "abort" },
   ];
   for (const request of requests) await runDeployAction(p, request);
 
   assert.deepEqual(calls, [
-    "cutVersion:staging:patch:",
+    "cutVersion:patch:",
     "deploy:d-1",
-    "promote:2026.6.21",
     "rollback:d-0",
-    "rollout:prod:bff:abort",
+    "rollout:bff:abort",
   ]);
 });
 
@@ -185,11 +179,11 @@ test("an action that RAN and FAILED is an error, not a success", async () => {
 test("a failure with no message still says which action failed", async () => {
   const outcome = await runDeployAction(
     port({
-      promote: async () => ({ ok: false, message: "", auditEventId: "", correlationId: "", details: {} }),
+      cutVersion: async () => ({ ok: false, message: "", auditEventId: "", correlationId: "", details: {} }),
     }),
-    { id: "promote", version: "1.0.0" },
+    { id: "cutVersion", bump: "patch", version: "" },
   );
-  assert.equal(outcome.line, "ERROR: promote failed");
+  assert.equal(outcome.line, "ERROR: cut_version failed");
 });
 
 test("a refusal names the role required and is flagged as such", async () => {
@@ -213,14 +207,14 @@ test("a refusal names the role required and is flagged as such", async () => {
   assert.doesNotMatch(outcome.line, /PERMISSION_DENIED/);
 });
 
-test("a promote refusal names owner or admin, not owner alone", async () => {
+test("a rollout-action refusal names owner or admin, not owner alone", async () => {
   const outcome = await runDeployAction(
     port({
-      promote: async () => {
-        throw new DeployControlError("promote", CODE_PERMISSION_DENIED, "requires owner or admin");
+      rolloutAction: async () => {
+        throw new DeployControlError("rollout_action", CODE_PERMISSION_DENIED, "requires owner or admin");
       },
     }),
-    { id: "promote", version: "1.0.0" },
+    { id: "rolloutAction", rollout: "bff", subAction: "abort" },
   );
   assert.match(outcome.line, /requires the owner or admin cluster role/);
 });
@@ -319,7 +313,6 @@ test("a refused status read explains the owner/admin gate and says what still wo
         throw new DeployControlError("get_status", CODE_PERMISSION_DENIED, "requires owner or admin");
       },
     }),
-    "staging",
   );
   assert.equal(result.status, null);
   assert.match(result.message, /requires the owner or admin cluster role/);
@@ -333,17 +326,16 @@ test("a status read failure never throws -- the panel must not fail to load", as
         throw new Error("timeout");
       },
     }),
-    "staging",
   );
   assert.equal(result.status, null);
   assert.match(result.message, /deployment status unavailable: timeout/);
 });
 
 test("a successful status read carries no message", async () => {
-  const status = { env: "staging", version: "1.0.0" } as Awaited<
+  const status = { version: "1.0.0" } as unknown as Awaited<
     ReturnType<DeployControlPort["getDeploymentStatus"]>
   >;
-  const result = await readDeploymentStatus(port({ getDeploymentStatus: async () => status }), "staging");
+  const result = await readDeploymentStatus(port({ getDeploymentStatus: async () => status }));
   assert.equal(result.message, "");
   assert.equal(result.status, status);
 });
@@ -355,7 +347,6 @@ test("a failed version preview degrades to a message, never a dead Cut button", 
         throw new DeployControlError("suggest_version", CODE_PERMISSION_DENIED, "no");
       },
     }),
-    "staging",
   );
   assert.equal(result.suggestion, null);
   assert.match(result.message, /version suggestion requires the owner or admin cluster role/);

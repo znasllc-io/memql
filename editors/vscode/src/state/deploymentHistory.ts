@@ -38,7 +38,6 @@ export interface DeploymentRecord {
   deploymentId: string;
   status: string;
   version: string;
-  environment: string;
   provider: string;
   region: string;
   imageDigest: string;
@@ -311,7 +310,6 @@ function toDeploymentRecord(raw: Row): DeploymentRecord {
     deploymentId: str(row, "deploymentId") || str(row, "id"),
     status: str(row, "status"),
     version: str(row, "version"),
-    environment: str(row, "environment"),
     provider: str(row, "provider"),
     region: str(row, "region"),
     imageDigest: str(row, "imageDigest"),

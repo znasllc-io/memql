@@ -574,7 +574,7 @@ smoke("the remote instance page renders all three pipeline states", async () => 
       }),
       readClusters: async () => ({
         ok: true as const,
-        file: { clusters: [{ name: "staging", endpoint: "api.staging.example.com:443" }], selectedCluster: "staging" },
+        file: { clusters: [{ name: "staging", endpoint: "api.example.com:443" }], selectedCluster: "staging" },
       }),
     },
     installRoot: os.tmpdir(),

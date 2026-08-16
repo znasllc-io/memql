@@ -97,12 +97,11 @@ func TestSemverCompare(t *testing.T) {
 // fakeEngine + newTestServiceWithEngine live in deployment_store_test.go.
 
 // deploymentNode builds a v1:cluster:deployment query-result node with
-// the fields currentVersionForEnv reads.
-func deploymentNode(env, status, version string) *memqlv1.MemoryNode {
+// the fields currentVersion reads.
+func deploymentNode(status, version string) *memqlv1.MemoryNode {
 	st, _ := structpb.NewStruct(map[string]any{
-		"environment": env,
-		"status":      status,
-		"version":     version,
+		"status":  status,
+		"version": version,
 	})
 	return &memqlv1.MemoryNode{Payload: st}
 }
@@ -124,17 +123,17 @@ func mutationsOf(eng *fakeEngine) []string {
 // --- SuggestNextVersion ---------------------------------------------------
 
 func TestSuggestNextVersionFromLatestSucceeded(t *testing.T) {
-	// Highest succeeded prod version is 1.4.2; the 1.5.0 row is failed so
-	// it must NOT be the base.
+	// Highest SUCCEEDED version is 1.4.2; the 1.5.0 row is failed so it must
+	// NOT be the base. There is no environment dimension to partition on
+	// since epic memql#3943 -- one installation, one version series.
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		deploymentNode("production", "succeeded", "1.4.0"),
-		deploymentNode("production", "succeeded", "1.4.2"),
-		deploymentNode("production", "failed", "1.5.0"),
-		deploymentNode("staging", "succeeded", "9.9.9"), // other env -- ignored
+		deploymentNode("succeeded", "1.4.0"),
+		deploymentNode("succeeded", "1.4.2"),
+		deploymentNode("failed", "1.5.0"),
 	}}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
 
-	res, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleOwner), &memqlv1.SuggestNextVersionRequest{Env: "prod"})
+	res, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleOwner), &memqlv1.SuggestNextVersionRequest{})
 	if err != nil {
 		t.Fatalf("SuggestNextVersion: %v", err)
 	}
@@ -151,7 +150,7 @@ func TestSuggestNextVersionFromLatestSucceeded(t *testing.T) {
 
 func TestSuggestNextVersionNoHistorySeedsFromZero(t *testing.T) {
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
-	res, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleAdmin), &memqlv1.SuggestNextVersionRequest{Env: "staging"})
+	res, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleAdmin), &memqlv1.SuggestNextVersionRequest{})
 	if err != nil {
 		t.Fatalf("SuggestNextVersion: %v", err)
 	}
@@ -166,7 +165,7 @@ func TestSuggestNextVersionNoHistorySeedsFromZero(t *testing.T) {
 func TestSuggestNextVersionDeniesNonAdmin(t *testing.T) {
 	audit := &fakeAudit{}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, &fakeEngine{})
-	_, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleWriter), &memqlv1.SuggestNextVersionRequest{Env: "prod"})
+	_, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleWriter), &memqlv1.SuggestNextVersionRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -175,24 +174,16 @@ func TestSuggestNextVersionDeniesNonAdmin(t *testing.T) {
 	}
 }
 
-func TestSuggestNextVersionInvalidEnv(t *testing.T) {
-	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
-	_, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleOwner), &memqlv1.SuggestNextVersionRequest{Env: "dev"})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
-	}
-}
-
 // --- CutVersion -----------------------------------------------------------
 
 func TestCutVersionDefaultsToPatchAndCreatesPending(t *testing.T) {
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		deploymentNode("production", "succeeded", "1.4.2"),
+		deploymentNode("succeeded", "1.4.2"),
 	}}
 	audit := &fakeAudit{}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
 
-	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod"})
+	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{})
 	if err != nil {
 		t.Fatalf("CutVersion: %v", err)
 	}
@@ -222,8 +213,8 @@ func TestCutVersionDefaultsToPatchAndCreatesPending(t *testing.T) {
 	if !strings.Contains(call, `version: "1.4.3"`) {
 		t.Errorf("create should carry version 1.4.3: %s", call)
 	}
-	if !strings.Contains(call, `environment: "production"`) {
-		t.Errorf("create should target production: %s", call)
+	if strings.Contains(call, "environment") {
+		t.Errorf("create must name no environment (epic memql#3943): %s", call)
 	}
 	// One success audit event.
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeSuccess {
@@ -239,9 +230,9 @@ func TestCutVersionMajorMinor(t *testing.T) {
 		{"major", "2.0.0"},
 		{"minor", "1.5.0"},
 	} {
-		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")}}
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("succeeded", "1.4.2")}}
 		svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
-		res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod", Bump: tc.bump})
+		res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Bump: tc.bump})
 		if err != nil {
 			t.Fatalf("bump %s: %v", tc.bump, err)
 		}
@@ -252,9 +243,9 @@ func TestCutVersionMajorMinor(t *testing.T) {
 }
 
 func TestCutVersionExplicitOverride(t *testing.T) {
-	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")}}
+	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("succeeded", "1.4.2")}}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
-	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod", Version: "3.0.0", Bump: "patch"})
+	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Version: "3.0.0", Bump: "patch"})
 	if err != nil {
 		t.Fatalf("CutVersion: %v", err)
 	}
@@ -268,7 +259,7 @@ func TestCutVersionExplicitOverride(t *testing.T) {
 
 func TestCutVersionRejectsInvalidVersion(t *testing.T) {
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
-	_, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod", Version: "not-a-version"})
+	_, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Version: "not-a-version"})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -276,7 +267,7 @@ func TestCutVersionRejectsInvalidVersion(t *testing.T) {
 
 func TestCutVersionRejectsInvalidBump(t *testing.T) {
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
-	_, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod", Bump: "huge"})
+	_, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Bump: "huge"})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
 	}
@@ -286,13 +277,13 @@ func TestCutVersionRejectsDuplicate(t *testing.T) {
 	// 1.4.3 already exists (pending) for prod -> patch-bumping 1.4.2 lands
 	// on 1.4.3, which must be rejected as a duplicate (no new write).
 	eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{
-		deploymentNode("production", "succeeded", "1.4.2"),
-		deploymentNode("production", "pending", "1.4.3"),
+		deploymentNode("succeeded", "1.4.2"),
+		deploymentNode("pending", "1.4.3"),
 	}}
 	audit := &fakeAudit{}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
 
-	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod"})
+	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{})
 	if err != nil {
 		t.Fatalf("CutVersion (duplicate) returned status err = %v, want ActionResult ok=false", err)
 	}
@@ -315,7 +306,7 @@ func TestCutVersionDeniesNonAdminWithBlockedAudit(t *testing.T) {
 	eng := &fakeEngine{}
 	audit := &fakeAudit{}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
-	_, err := svc.CutVersion(ctxWithRole(auth.RoleReader), &memqlv1.CutVersionRequest{Env: "prod"})
+	_, err := svc.CutVersion(ctxWithRole(auth.RoleReader), &memqlv1.CutVersionRequest{})
 	if status.Code(err) != codes.PermissionDenied {
 		t.Fatalf("code = %v, want PermissionDenied", status.Code(err))
 	}
@@ -329,12 +320,12 @@ func TestCutVersionDeniesNonAdminWithBlockedAudit(t *testing.T) {
 
 func TestCutVersionSurfacesWriteFailure(t *testing.T) {
 	eng := &fakeEngine{
-		queryNodes:  []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")},
+		queryNodes:  []*memqlv1.MemoryNode{deploymentNode("succeeded", "1.4.2")},
 		mutationErr: errors.New("db down"),
 	}
 	audit := &fakeAudit{}
 	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
-	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Env: "prod"})
+	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{})
 	if err != nil {
 		t.Fatalf("CutVersion returned status err = %v, want ActionResult ok=false", err)
 	}

@@ -16,9 +16,9 @@ never trigger `SQLSTATE 53300` ("remaining connection slots are reserved …" /
 
 > **What the Tiger cutover changed, and what it did not** (epic memql#3842 /
 > #3848). The database is now self-hosted CloudNativePG in every environment,
-> so **`max_connections` is ours**: 200 local, 400 staging and production, set
+> so **`max_connections` is ours**: 200 local, 400 in the cloud, set
 > in `deploy/k8s/components/cnpg-db`. Tiger's per-tier ceiling — ~59 usable
-> slots on the staging tier, which is the scarcity this whole standard was
+> slots on the managed tier, which is the scarcity this whole standard was
 > written around — is gone, and with it the two scripts that managed it
 > (`conn-surge-watch.sh`, `deployer-pool-reap.sh`, retired) and the leaked
 > managed control-plane `deployer` pool.
@@ -91,7 +91,7 @@ replicas or a pooler.
 - **Watch for non-app client leaks** (memql#1861): the app fleet reaps its own
   idle connections, but a **separate deploy/migrate/promote tool or exporter**
   that opens a pool and never closes it has no such reaper — it will pin idle
-  slots for hours and eat the budget. On staging this showed up as ~28 idle
+  slots for hours and eat the budget. In the cloud this showed up as ~28 idle
   backends stamped `application_name=deployer`, connecting as the `postgres`
   superuser, growing ~1 per 30 min — a **Tiger managed control-plane** artifact
   that no longer exists (memql#3848; `deployer-pool-reap.sh` retired with it).
@@ -117,7 +117,7 @@ replicas or a pooler.
   extra bff color (pods + pools) for an hour. See the product carrier repo's
   `deploy/rollouts/README.md`.
 
-## Graceful deploy runbook (staging/prod)
+## Graceful deploy runbook (cloud)
 
 Ordering and ArgoCD facts that a deploy MUST respect:
 
@@ -132,7 +132,7 @@ Ordering and ArgoCD facts that a deploy MUST respect:
    sequence it, or rely on the per-pod cap + scaleDownDelay so peak stays under
    the ceiling.
 
-### 53300 recovery (when staging is already wedged)
+### 53300 recovery (when the cluster is already wedged)
 
 The fleet has leaked/accumulated connections and every engine pod is `0/1`
 (`/healthz` 503, logs spamming 53300):
@@ -160,11 +160,14 @@ The fleet has leaked/accumulated connections and every engine pod is `0/1`
 > signal to enable it is `cnpg_backends_total` approaching `max_connections` in
 > steady state.
 >
-> **If you do enable it, the direct DSN must stay direct.** `MEMQL_DB_SEARCH_PATH`
-> is a session GUC and *is* the staging/production boundary — pooling it would
-> mean a staging query landing on a connection still set to production's schema.
-> That is the one failure this architecture has no second line of defence
-> against.
+> **If you do enable it, the direct DSN must stay direct.** The migrations take
+> advisory locks, and an advisory lock acquired in one transaction and released
+> in another is, on a transaction-pooled connection, released by whoever holds
+> that backend next.
+>
+> (This paragraph used to add `MEMQL_DB_SEARCH_PATH`, a session GUC that was the
+> staging/production boundary. Epic memql#3943 removed the environment concept
+> and that variable with it: one installation, one schema, the default path.)
 
 
 Right-sizing + `scaleDownDelay` kept the budget under the ceiling at steady
@@ -213,7 +216,7 @@ REQUIRE:  direct_backends + pooler_backends  ≤  max_connections − reserved
 Prove the storm is gone by re-running the 0.9.87 scenario under the pooler and
 watching the instance backend count stay under budget throughout.
 
-1. **Cut staging onto the pooler** (one-time): recreate `memql-secrets` with
+1. **Cut the cluster onto the pooler** (one-time): recreate `memql-secrets` with
    `DSN` → pooler and `DIRECT_DSN` → direct, then roll the pods (identity
    first). Exact command: `deploy/k8s/base/README.md`. With `DIRECT_DSN` unset
    this is a no-op (single-pool fallback), so the cutover is the trigger.
@@ -232,7 +235,7 @@ watching the instance backend count stay under budget throughout.
    Mesh pods stamp `memql-<type>`, the migrate Job `memql-migrate`. Watch the
    total against `max_connections` through the roll; the peak is what matters.
 3. **Trigger a full-stack roll** — the wedging scenario: blue-green bff + the
-   rolling mesh (all node-types). e.g. bump the staging overlay digests / run
+   rolling mesh (all node-types). e.g. bump the cloud overlay digests / run
    the normal deploy so every Deployment rolls and the bff Rollout does its
    blue-green cutover.
 4. **Watch for SQLSTATE 53300** in the pods throughout the roll (the

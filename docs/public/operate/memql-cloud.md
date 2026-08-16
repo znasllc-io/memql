@@ -40,7 +40,7 @@ status.** There is no separate command surface, no queue, and nothing to drain.
 
 It is the same base, the same engine images and the same ArgoCD reconciliation
 as staging and production. Diff a rendered tenant overlay against
-`deploy/k8s/overlays/prod` and what differs is a namespace, a domain, some
+`deploy/k8s/overlays/cloud` and what differs is a namespace, a domain, some
 integers and an object-store path.
 
 That is [environment parity](environment-parity.md) applied to a paying

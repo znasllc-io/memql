@@ -124,7 +124,7 @@ automation registerNodeLonghand {
 //   - `args.<field>` -- the validated map is exposed as `args` (G1).
 //   - bare `<field>` -- resolves loop-var > step name > args field; a typo'd
 //     or shadowed name is a LOAD ERROR, never a silent nil (G2, #2364).
-//   - punned `f(environment)` == `f(environment: environment)` -- a bare
+//   - punned `f(provider)` == `f(provider: provider)` -- a bare
 //     simple identifier in a construct-call arg position (G3, #2365); any
 //     other positional argument on a construct call is rejected.
 // Envelope intrinsics stay prefixed: `event.topic`, `event.kind`,
@@ -136,12 +136,12 @@ automation registerNodeLonghand {
 @description("Full form with a typed args contract (G1).")
 automation deployWithArgs {
   args {
-    environment     enum("development", "staging", "production")!
+    provider        enum("docker-local", "azure")!
     engineNodeTypes []string!
     workdir         string!
   }
   step gate {
-    logic requireForwardDeploy(environment: args.environment, workdir: args.workdir)
+    logic requireForwardDeploy(provider: args.provider, workdir: args.workdir)
   }
 }
 
@@ -194,12 +194,12 @@ automation deployWithArgs {
 //
 //   @enabled
 //   @trigger(event="deploy.requested", concept="v1:cluster:deployment")
-//   @description("Deploy the memQL ENGINE cluster to an environment. No bff / product nodes.")
+//   @description("Deploy the memQL ENGINE cluster. No bff / product nodes.")
 //   automation deployEngineCluster {
 //     step authorize { logic requireForwardDeploy(event: event) }   // requiresDeveloperOrAbove
 //     step record    { mutation createDeployment(                   // ONE write
 //                        deploymentId,          // punned (G3)
-//                        environment,           // punned (G3)
+//                        provider,              // punned (G3)
 //                        triggeredBy:  event.actor.id) }
 //     step clone     { action cloneRepoAtVersion(
 //                        workdir, ref)          // punned (G3)
@@ -208,30 +208,30 @@ automation deployWithArgs {
 //                        action buildEngineImage(
 //                          nodeType, version, workdir) } }  // punned
 //     step place {
-//       switch environment {
-//         case "development" {
+//       switch provider {
+//         case "docker-local" {
 //           forEach nodeType in logic engineNodeTypes() {
 //             action importImageToK3d(nodeType: nodeType, cluster: "memql") }
 //         }
-//         default {  // staging | production -> GitOps (deploys = merges)
+//         default {  // azure -> GitOps (deploys = merges)
 //           action pinOverlayDigests(
-//             overlayPath: logic overlayPathForEnv(env: environment),
+//             overlayPath: logic cloudOverlayPath(),
 //             digests: $steps.build.result)
 //           action argoSync(app: "memql", revision: ref)
 //         }
 //       }
 //     }
 //     step gate { action runDeployGate(
-//                   env: environment, workdir) }
+//                   provider, workdir) }
 //     step finish {
 //       on success when logic deployGatePassed(gate: $steps.gate.result) {
 //         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "succeeded")
-//         action notifyDeploy(env: environment, status: "succeeded")
+//         action notifyDeploy(status: "succeeded")
 //       }
 //       on failure {
-//         action revertOverlay(overlayPath: logic overlayPathForEnv(env: environment))
+//         action revertOverlay(overlayPath: logic cloudOverlayPath())
 //         mutation updateDeploymentStatus(deploymentId,          // punned (G3) status: "failed")
-//         action notifyDeploy(env: environment, status: "failed")
+//         action notifyDeploy(status: "failed")
 //       }
 //     }
 //   }

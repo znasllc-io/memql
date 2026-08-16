@@ -59,7 +59,7 @@ const CONCEPTS: Concept[] = [
   {
     id: DEPLOYMENT, version: "v1", domain: "cluster", entity: "deployment", type: "concept",
     description: "A persisted deployment record",
-    displayCard: { primary: "version", secondary: "environment", tertiary: "deploymentId", status: "status" },
+    displayCard: { primary: "version", secondary: "provider", tertiary: "deploymentId", status: "status" },
   },
   {
     id: AUDIT, version: "v1", domain: "identity", entity: "auditEvent", type: "concept",
@@ -118,11 +118,11 @@ const ROWS: Readonly<Record<string, Row[]>> = {
   ],
   [DEPLOYMENT]: [
     row(DEPLOYMENT, "deploy-1", {
-      deploymentId: "deploy-1", version: "2026.8.1", environment: "staging",
+      deploymentId: "deploy-1", version: "2026.8.1", provider: "azure",
       status: "succeeded", updatedAt: "2026-08-08T07:00:00Z",
     }),
     row(DEPLOYMENT, "deploy-2", {
-      deploymentId: "deploy-2", version: "2026.8.2", environment: "staging",
+      deploymentId: "deploy-2", version: "2026.8.2", provider: "azure",
       status: "failed", updatedAt: "2026-08-08T08:30:00Z",
     }),
   ],
@@ -151,7 +151,6 @@ const ROWS: Readonly<Record<string, Row[]>> = {
 };
 
 const DEPLOYMENT_STATUS = {
-  env: "staging",
   version: "2026.8.2",
   engineVersion: "2026.8.2",
   gate: "pass",
@@ -420,7 +419,7 @@ describe("the Deployments view", () => {
 
   it("says the read failed rather than showing a stale-looking blank", async () => {
     renderView({ role: "owner", deployFails: true }, "/views/deployments");
-    await waitFor(() => expect(screen.getByText(/Could not read staging/)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(/Could not read the deployment/)).toBeTruthy());
   });
 });
 

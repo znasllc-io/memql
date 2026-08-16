@@ -31,9 +31,9 @@ make status      # mesh litmus (unique MEMQL_NODE_ID per pod;
 make up-refresh  # clean slate: nuke + repave (fresh DB), then the same bring-up
 make down        # tear down
 
-# Multi-node mesh testing (2 replicas per Deployment -- staging parity):
+# Multi-node mesh testing (2 replicas per Deployment -- cloud parity):
 make up SERVERS=2 AGENTS=1
-make scale N=2   # ENV names the environment; it DEFAULTS TO local
+make scale N=2
 make status   # verify unique MEMQL_NODE_IDs + shared identity keyset
 
 # Run tests
@@ -178,23 +178,11 @@ memQL/
 ### Development Environment (k3d + ArgoCD)
 
 The k3d + ArgoCD cluster is the local dev topology (memql#2061 /
-E0 -- Argo parity). It mirrors staging (AKS + ArgoCD + the k8s
-overlays in `deploy/k8s/`) so the same manifests and reconciliation
-path run locally and in staging. Multi-node is the default (#2067):
+E0 -- Argo parity). It mirrors the cloud cluster (AKS + ArgoCD + the
+k8s base in `deploy/k8s/`) so the same manifests and reconciliation
+path run locally and in the cloud. Multi-node is the default (#2067):
 use `make up SERVERS=2 + make scale N=2` for full cross-node
 mesh testing.
-
-> **`ENV=` on `make scale` defaults to `local`** (memql#3766). One cloud
-> cluster now carries two environments in two namespaces
-> (`memql-prod` / `memql-staging`), so scaling a REMOTE one has to say
-> which: `ENV=staging` / `ENV=prod`. The default stays `local`
-> (namespace `memql`) because `make scale N=2` is the inner-loop
-> command typed from memory, and a remote default would point that
-> habit at production. An `ENV` that does not exist on the current
-> kubectl context fails with exit 4 naming both the environment and the
-> namespace, so the two can never be confused silently. `make up` is
-> unaffected -- local is still ONE environment and grows no second
-> namespace.
 
 **Prerequisites:** docker, k3d, kubectl (`brew install k3d kubectl`).
 
@@ -208,8 +196,8 @@ make dev                      # rebuild + import + restart ALL app nodes
 make dev NODE=bff             # single node (faster)
 make dev PULL_INFRA=1        # refresh infra images (postgres/azurite/livekit)
 
-# Multi-node scaling (ENV names the environment; it defaults to local):
-make scale N=2      # 2 replicas per Deployment, local cluster
+# Multi-node scaling:
+make scale N=2      # 2 replicas per Deployment
 make status                   # litmus: unique MEMQL_NODE_ID per pod +
                               #         one shared identity signing keyset
 
@@ -221,7 +209,7 @@ make down                     # keep kubeconfig
 make down PURGE=1             # also remove kubeconfig context
 ```
 
-See [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
+See [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md)
 for the full k3d runbook and port-forward reference.
 
 ### Building
@@ -247,7 +235,7 @@ Where a container image is built depends ONLY on where it runs:
 
 - **Local development** -- build images in your **local Docker** and import
   them into k3d via `make dev`. Fast, throwaway, never pushed to ACR.
-- **Deploys to STAGING or PRODUCTION** -- images MUST be built on the **GitHub
+- **Deploys to the CLOUD** -- images MUST be built on the **GitHub
   build server** (GitHub Actions, OIDC -> ACR `acrmemql`), NOT on an operator
   machine. This spans the repos in the project:
   - `memql` -> `.github/workflows/build-engine-images.yml` builds **every**
@@ -261,7 +249,7 @@ Where a container image is built depends ONLY on where it runs:
   (reproducible, native linux/amd64, provenance, no dev-laptop drift).
 
 Do NOT hand-build + push release images locally (`az acr build`,
-`make release`, `docker push`) for a staging/prod deploy -- that path is
+`make release`, `docker push`) for a cloud deploy -- that path is
 superseded by the build server. A release is `{engine version, bundle digest,
 client digest}` pinned in **one overlay** (`deploy/k8s/overlays/<env>`): build
 the engine images, pin those three digests, merge -> ArgoCD reconciles. See
@@ -359,16 +347,16 @@ frontend coordination.
 | **Inner-loop rebuild** | `make dev [NODE=<type>]` | Build image -> k3d import -> kubectl rollout restart |
 | **Clean slate (nuke + repave)** | `make up-refresh` | Tear down + recreate cluster (fresh DB), rebuild images, wait healthy |
 | **Cluster litmus** | `make status` | Verify unique MEMQL_NODE_ID per pod, and that every identity replica publishes the same JWKS keyset (mesh parity check) |
-| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing. `ENV=` names the environment and defaults to `local` (namespace `memql`); `staging` -> `memql-staging`; `prod` -> `memql-prod` (memql#3766) |
+| **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing, in namespace `memql` (`NAMESPACE=` overrides) |
 | **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
 | **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
 | **Run tests** | `go test ./...` | Go tests |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
 | **Regenerate the front door** | `make frontdoor` | Both generators, in order: hosts, then paths |
-| **Regenerate front-door hosts** | `make frontdoor-hosts` | Re-emit each cloud overlay's `front-door.generated.yaml` from the role x environment product (memql#3767). Run after adding an environment or changing its host label |
+| **Regenerate front-door hosts** | `make frontdoor-hosts` | Re-emit the cloud overlay's `front-door.generated.yaml` from the closed role set (memql#3767). Run after changing a role or the composition rule |
 | **Regenerate front-door paths** | `make frontdoor-paths` | Re-emit the bff's HTTP Ingress rules in every api front door from `component/server`'s path declarations. Run after adding an HTTP route |
-| **Front-door gates** | `make frontdoor-hosts-check` / `make frontdoor-paths-check` | Fail when a generated front door or path block is stale. The path drift catches an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703); the host drift catches an environment reachable at a name nothing serves |
+| **Front-door gates** | `make frontdoor-hosts-check` / `make frontdoor-paths-check` | Fail when a generated front door or path block is stale. The path drift catches an HTTP path nothing routes -- which does not 404, it hands HTTP/1.1 to an h2c backend (memql#3703); the host drift catches a service reachable at a name nothing serves |
 
 ---
 
@@ -382,13 +370,18 @@ frontend coordination.
 - **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
 - **Query Language:** MemQL DSL
 
-### Environment Architecture
+### Deploy targets
 
-| Environment | Database | Service | Access |
-|-------------|----------|---------|--------|
-| **Development** | Docker PostgreSQL + TimescaleDB | Docker memQL container | All developers |
-| **Staging** | Tiger Cloud (Timescale Cloud) | Azure Kubernetes Service (`aks-memql-staging`) | All developers |
-| **Production** | Tiger Cloud (separate instance) | Azure Kubernetes Service | Senior/Lead only |
+memQL ships **one installation shape** (epic memql#3943). There is no
+staging-versus-production dimension inside the product: an operator who
+wants a second environment installs a second instance, with its own
+domain and its own ArgoCD. What varies is the deploy TARGET, which is a
+different axis and carries its own field (`provider`):
+
+| Target | Database | Service | Provider |
+|--------|----------|---------|----------|
+| **Local** | CloudNativePG in k3d | k3d + ArgoCD (`make up`) | `docker-local` |
+| **Cloud** | Tiger Cloud (Timescale Cloud) | Azure Kubernetes Service | `azure` |
 
 ### Hardware Requirements
 - **Platform:** macOS (Apple Silicon)
@@ -474,22 +467,18 @@ bidirectional stream. Events bridge across nodes with dedup and TTL.
 
 #### Multi-node is the DEFAULT -- design, implement, AND test for cross-node
 
-The cluster (2 replicas per mesh node) is the runtime in **production** and in
+The cluster (2 replicas per mesh node) is the runtime in the **cloud** and in
 the local **parity cluster**, which is the topology every feature must be
 designed and tested against. Never reason about a feature as if it runs in a
 single process.
 
-> **Staging matches prod's replica counts** (2 per mesh node) and spends most
-> of its life scaled to ZERO (`make scale N=0 ENV=staging`) -- the saving is the
-> idle time, not the width, which is what the design means by "cost storage
-> rather than compute" (§3.5). It was briefly specified as one replica while
-> memql#3766 landed; that would have made staging unable to catch the class
-> below, and the money it saved was the fraction of the time staging is up at
-> all.
+> A cloud cluster spends most of its life scaled to ZERO when idle
+> (`make scale N=0`) -- the saving is the idle time, not the width. Parking it
+> at one replica instead would make it unable to catch the class below, and the
+> money that saves is the fraction of the time it is up at all.
 >
-> The local 2-replica parity cluster (`make up SERVERS=2` + `make scale N=2
-> ENV=local`) is still the blessed repro -- it is the only topology a developer
-> can iterate against. Staging is the second net, not the first.
+> The local 2-replica parity cluster (`make up SERVERS=2` + `make scale N=2`) is
+> the blessed repro -- it is the topology a developer can iterate against.
 
 This has bitten us repeatedly -- a fix ships
 with green single-node tests and silently breaks in the mesh (e.g.
@@ -520,7 +509,7 @@ single-node-assuming code and PASS with the cross-node fix. The blessed
 local repro is the 2-replica parity cluster (`make up SERVERS=2` +
 `make scale N=2`) -- the only topology that reproduces this
 bug class. See
-[docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+[docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
 #### Node image source: product-agnostic engine images + runtime DSL delivery (platform consolidation #2472)
 
@@ -581,9 +570,9 @@ migration sequence: [docs/internal/design/platform-consolidation.md](docs/intern
 
 #### Environment parity -- one topology everywhere (NON-NEGOTIABLE)
 
-local, staging, and production run the **same topology, the same deployment
-process, and the same connection model**. Only **configuration values** and
-**hardware resources** change per environment -- never the shape of the system.
+The local cluster and a cloud cluster run the **same topology, the same
+deployment process, and the same connection model**. Only **configuration
+values** and **hardware resources** differ -- never the shape of the system.
 FIXED everywhere: the node topology, the GitOps base+overlay+ArgoCD deploy path
 (`make up` locally applies the same manifests ArgoCD applies in the cloud), and
 the client connection (ingress -> TLS -> gRPC -> `bff`, dialed as
@@ -591,53 +580,33 @@ the client connection (ingress -> TLS -> gRPC -> `bff`, dialed as
 architecture): image digests/tags, replicas/resources, domain, DNS source
 (hosts vs real), TLS source (mkcert vs cert-manager), ingress controller
 (traefik vs nginx annotations), secrets source. **Reject in review:**
-port-forward-as-connection, env-specific commands (`run-local`), `if
+port-forward-as-connection, target-specific commands (`run-local`), `if
 env=="local"` branches, or a second way to deploy -- the moment local diverges
-in *shape* it stops proving anything about staging/prod. Ask of any change: *is
+in *shape* it stops proving anything about the cloud. Ask of any change: *is
 this the shape of the system (→ base/component, everywhere) or a value (→
-overlay, per env)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
+overlay)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
 
-**Staging and production are TWO NAMESPACES IN ONE CLUSTER (epic memql#3748 /
-memql#3766).** One k3d/AKS cluster, one ArgoCD, one repository, one base, two
-Applications -- `memql-prod` -> ns `memql-prod`, `memql-staging` -> ns
-`memql-staging` -- reconciling overlays that differ **only in values**:
-namespace, the `memql-environment` ConfigMap's two entries, replica counts,
-image digests. Diff `deploy/k8s/overlays/{prod,staging}/kustomization.yaml` and
-that is literally all you find; `TestBothEnvironmentsRenderTheSameSystem` keeps
-it that way. This satisfies the standard above MORE completely than the two
-parallel overlay trees it replaces, which were the drift risk the standard
-exists to prevent.
+**ONE INSTALLATION SHAPE (epic memql#3943).** memQL has no
+staging-versus-production dimension. An operator who wants a second environment
+installs a second instance -- its own cluster or at least its own ArgoCD, its
+own domain, its own database. There is one cloud overlay
+(`deploy/k8s/overlays/cloud`), one ArgoCD Application (`memql`), one namespace
+(`memql`), and everything in that overlay is a VALUE over
+`deploy/k8s/base`. This reverses epic memql#3748, which put two environments in
+two namespaces of one cluster and separated their data with a Postgres schema
+search path.
 
-**The boundary between their DATA is the connection, not a filter.** memQL has
-no tenancy dimension in the actor envelope (memql#3321; the partition dimension
-that once did the job was retired in #56), so an environment boundary cannot be
-a `WHERE` clause -- there is nothing in `actor.*` to filter on and one missed
-conjunct leaks production data. Each namespace's pods are put on a different
-Postgres schema search path (`memql_prod, public` / `memql_staging, public`) by
-`component/database/search_path.go`, on every connection the driver opens. `public`
-stays on the path (TimescaleDB's functions live there) and stays EMPTY of
-tables, so an unset or mistyped path fails loudly instead of silently meaning
-production.
-
-**Therefore: no `if env == "..."` in engine code.** Environment reaches the
-engine as configuration -- a search path, a domain prefix, a replica count --
-and never as a branch, because staging and production run the SAME images from
-the SAME base and a branch that can tell them apart IS the second way to deploy
-this standard rejects. `TestNoEnvironmentBranchingInEngineCode`
+**Therefore: no `if env == "..."` in engine code.** There is no environment for
+a branch to read, and a branch that invented one would be the second way to
+deploy this standard rejects. `TestNoEnvironmentBranchingInEngineCode`
 (`environment_branching_test.go`) fails the build on engine code so much as
-NAMING `prod` / `production` / `staging`, in any form -- comparison, switch
-case or map key. `development` / `local` are deliberately outside that gate:
-they distinguish deploy TARGETS (k3d vs AKS), which the design keeps, and they
-cannot tell staging from production.
+NAMING `prod` / `production` / `staging`, in any form -- comparison, switch case
+or map key -- and its exemption map is now EMPTY, so nothing in the tree is
+excused. `development` / `local` stay outside that gate: they distinguish deploy
+TARGETS (k3d vs AKS), which the design keeps and which carries its own field,
+`provider` (`docker-local` | `azure`).
 
-**Local stays ONE environment.** `make up` grows no second namespace and is
-unchanged by all of the above: the ConfigMap wiring lives in base as
-`optional: true`, the local overlay supplies no such ConfigMap, and an unset
-`MEMQL_DB_SEARCH_PATH` is exactly what "one environment" means to the engine.
-`TestLocalStaysOneEnvironment` asserts it. Development is not staging, and a
-second local environment would make the inner loop slower to prove nothing.
-
-**Local cluster (staging parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors staging along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench/edge) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in staging. Clients (the Cockpit + SDKs) reach the cluster **exactly as in staging/prod** -- through the `api.memql.localhost` traefik front door (TLS on 443 with the mkcert `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.memql.localhost` works the same way. The domain is a VALUE, not the shape of the system (memql#3593): `make up DOMAIN=lab.example.com` serves any domain the operator brings, seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives its issuer, CORS origins and OAuth redirect URIs from at boot (`component/genesis/domain.go`), plus two `kustomize.patches` on the ArgoCD Application for the Ingress hostnames when it differs from the committed default. No file under `deploy/` names a domain. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, `svc/identity 8085`) remain for low-level debugging only -- the host-port mappings for identity (8085) and livekit (7880) were deleted in memql#3702: the first was a second entrance to a service the front door already serves, the second pointed at a Deployment this overlay removes. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md).
+**Local cluster (cloud parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors the cloud along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench/edge) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in the cloud. Clients (the Cockpit + SDKs) reach the cluster **exactly as in the cloud** -- through the `api.memql.localhost` traefik front door (TLS on 443 with the mkcert `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.memql.localhost` works the same way. The domain is a VALUE, not the shape of the system (memql#3593): `make up DOMAIN=lab.example.com` serves any domain the operator brings, seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives its issuer, CORS origins and OAuth redirect URIs from at boot (`component/genesis/domain.go`), plus two `kustomize.patches` on the ArgoCD Application for the Ingress hostnames when it differs from the committed default. No file under `deploy/` names a domain. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, `svc/identity 8085`) remain for low-level debugging only -- the host-port mappings for identity (8085) and livekit (7880) were deleted in memql#3702: the first was a second entrance to a service the front door already serves, the second pointed at a Deployment this overlay removes. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 **Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
 
 #### Client-tool relay (agent → browser, across nodes)
@@ -725,41 +694,36 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 ### The front door's HOST set is generated too (memql#3767)
 
-The host set is the product of **role x environment**, not a list. One cluster
-carries staging and production as two namespaces (epic memql#3748), so:
+The host set is DERIVED from the closed **role** set, not maintained as a list:
 
-| Role | unprefixed | labelled `staging` |
-|---|---|---|
-| api | `api.<domain>` | `api-staging.<domain>` |
-| identity | `identity.<domain>` | `identity-staging.<domain>` |
-| mcp | `mcp.<domain>` | `mcp-staging.<domain>` |
-| sites | `*.<domain>`, apex | `*.staging.<domain>` |
+| Role | Host |
+|---|---|
+| api | `api.<domain>` |
+| identity | `identity.<domain>` |
+| mcp | `mcp.<domain>` |
+| sites | `*.<domain>`, plus the apex |
 
-**Role hosts hyphenate; site hosts nest, and the asymmetry is a TLS fact.** A
-wildcard matches exactly ONE label, so `*.<domain>` covers
-`api-staging.<domain>` and does NOT cover `api.staging.<domain>` -- keeping role
-hosts single-label means the certificate the cluster already has covers every
-environment's. Sites cannot: a site's own name occupies that label, so a
-labelled environment requests ONE more wildcard, `*.<label>.<domain>`, for all
-of its sites. A labelled site also lives under the CLUSTER's domain --
-`shop.staging.<clusterdomain>`, never `shop.staging.acme.com`, because that
-environment is the operator's surface and must not need DNS the operator may not
-control.
+**Every host is a SINGLE label under the domain, and that is a TLS fact.** A
+wildcard matches exactly ONE label, so the one `*.<domain>` certificate covers
+every role host and every site -- one order, one renewal, however many sites the
+cluster serves. The apex is the exception and is requested as its own SAN, since
+the bare domain has no label for a wildcard to match. (The host set was once the
+product of role x ENVIRONMENT, with a label that hyphenated into role hosts and
+nested into site hosts; epic memql#3943 removed the environment dimension, so
+the product has one factor left.)
 
-`cmd/frontdoorhosts` writes `deploy/k8s/overlays/<env>/front-door.generated.yaml`
-from the `MEMQL_HOST_LABEL` value on that overlay's `environment.yaml`, and
+`cmd/frontdoorhosts` writes
+`deploy/k8s/overlays/cloud/front-door.generated.yaml`, and
 `component/genesis/domain.go` composes the node's own issuer / CORS origins /
-redirect URIs from the SAME label through `component/frontdoor`. One derivation,
+redirect URIs from the SAME rule through `component/frontdoor`. One derivation,
 two consumers: a second copy of the rule would disagree, and the disagreement is
 an issuer nothing is served at, which presents as "sign-in is broken" with every
 manifest looking correct.
 
-**Adding an environment is a VALUE change** -- a new overlay directory with a
-new label in it, no generator edit; `TestAThirdEnvironmentIsAValueChange` proves
-it by rendering one. Adding a ROLE is a design change. The LOCAL overlay's four
-front-door files stay hand-authored (traefik, not nginx, and they carry the
-measured priority reasoning from memql#3810), but they are gated against the
-same product, so they cannot drift from it.
+Adding a ROLE is a design change, not a configuration change. The LOCAL
+overlay's four front-door files stay hand-authored (traefik, not nginx, and they
+carry the measured priority reasoning from memql#3810), but they are gated
+against the same derivation, so they cannot drift from it.
 
 Details: [docs/public/operate/front-door.md](docs/public/operate/front-door.md).
 
@@ -981,7 +945,7 @@ operator's credentials (memql#2416): without `LIVEKIT_URL` /
 `make secrets`, voice + voice-agent scale to 0 with a loud warning (the
 binaries fail-fast on the missing env by design, so running them without
 creds is a guaranteed crash-loop). Export the creds and re-run
-`make secrets` to enable. Staging/prod stay self-hosted
+`make secrets` to enable. The cloud stays self-hosted
 (`deploy/k8s/base/livekit.yaml`) via ESO/Key Vault.
 
 `integrations/openai/` on the Go side also serves the `/memql/audio`
@@ -1338,15 +1302,15 @@ headers. They never see the private key.
 [docs/public/operate/auth/identity-service.md](docs/public/operate/auth/identity-service.md) for
 the operator-side narrative.
 
-**Authentication is ON by default in every environment** (local, staging,
-prod alike -- env parity). The master toggle is `MEMQL_IDENTITY_ENABLED`:
+**Authentication is ON by default everywhere** (local and cloud alike -- env
+parity). The master toggle is `MEMQL_IDENTITY_ENABLED`:
 on verifier-consuming nodes it defaults to `true` (auth enforced) and is set
 explicitly `false` ONLY to disable auth for troubleshooting -- the node then
 skips the verifier and admits every stream as a synthetic `local-dev` cluster
 owner (see `component/grpc/local_dev_stream_interceptor.go`), with a loud
 boot-time SECURITY warning and the `memql_auth_enabled` gauge pinned to 0. The
 toggle is a config value present everywhere, never an architecture branch;
-**never set it false in staging/production.** Disabling auth is the toggle, NOT
+**never set it false in a cloud cluster.** Disabling auth is the toggle, NOT
 blanking `MEMQL_IDENTITY_VERIFIER_BASE_URL` (an empty verifier URL fatals the
 node).
 
@@ -2314,15 +2278,19 @@ See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-m
 
 ---
 
-## Environments
+## Deploy targets
 
-| Environment | Database | Application | Developer Access | Purpose |
-|-------------|----------|-------------|------------------|---------|
-| **Development** | Docker (localhost) | Docker | All developers | Local development |
-| **Staging** | Tiger Cloud (Timescale) | Azure Kubernetes Service | All developers | Integration testing |
-| **Production** | Tiger Cloud (separate) | Azure Kubernetes Service | Senior/Lead only | Live system |
+memQL ships ONE installation shape (epic memql#3943). A second environment is a
+second install, with its own domain, its own ArgoCD and its own database. What
+varies within one install is the deploy TARGET:
 
-**Key Principle:** Development environment is completely isolated from staging and production databases.
+| Target | Database | Application | Provider |
+|--------|----------|-------------|----------|
+| **Local** | CloudNativePG in k3d | k3d + ArgoCD (`make up`) | `docker-local` |
+| **Cloud** | Tiger Cloud (Timescale) | Azure Kubernetes Service | `azure` |
+
+**Key Principle:** the local cluster is completely isolated from any cloud
+install's database -- they are separate installations, not environments of one.
 
 ---
 
@@ -2725,7 +2693,7 @@ They `source scripts/lib/capability.sh` (the shared runtime:
 / `--print-spec`). The reference implementation is the `scripts/k3d/*`
 engine-local path; `scripts/lib/capability_contract_test.go` enforces
 the contract on every script that sources the library (and gates
-non-interactivity across `scripts/{k3d,deploy,staging,release}`). The
+non-interactivity across `scripts/{k3d,deploy,release}`). The
 Go effect seam parses the envelope via
 `deploycontrol.ParseCapabilityResult`. Use this contract for any new
 script a DSL `action` will drive.

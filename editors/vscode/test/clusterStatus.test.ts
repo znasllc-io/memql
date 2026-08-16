@@ -81,14 +81,14 @@ test("a dropped connection is a failure, not a credential problem", () => {
 });
 
 test("a row for a DIFFERENT cluster than the connected one shows its own resting state", () => {
-  const other = { name: "staging", endpoint: "api.staging.example.com:443", token: "eyJ.a.b" };
+  const other = { name: "staging", endpoint: "api.example.com:443", token: "eyJ.a.b" };
   const view = clusterRowStatus(other, {
     status: "connected",
     clusterName: "local",
     nodeId: "bff-0",
   });
   assert.equal(view.icon, "idle");
-  assert.equal(view.tooltip, "api.staging.example.com:443");
+  assert.equal(view.tooltip, "api.example.com:443");
 });
 
 test("a cluster with no endpoint is unconfigured, and says so", () => {

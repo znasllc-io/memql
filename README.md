@@ -66,7 +66,7 @@ make up
 # Run tests
 go test ./...
 
-# Deploy to staging (Azure AKS)
+# Break-glass deploy (the blessed path is a digest bump + merge -> ArgoCD)
 make deploy VERSION=X
 ```
 
@@ -107,17 +107,16 @@ make deploy VERSION=X
 - **Access:** All developers
 - **Command:** `make up`
 
-### Staging (Cloud)
-- **Database:** TimescaleDB Cloud (Tiger Cloud)
-- **Service:** Azure Kubernetes Service (AKS, cluster `aks-memql-staging`)
-- **Access:** All developers
-- **Command:** `make deploy VERSION=X`
+### Cloud
+- **Database:** TimescaleDB Cloud (Tiger Cloud), or self-hosted CloudNativePG
+- **Service:** Azure Kubernetes Service (AKS), reconciled by ArgoCD from `deploy/k8s/overlays/cloud`
+- **Access:** per the cluster's own role model (owner / admin / developer / …)
+- **Deploy:** bump the digests in the overlay and merge — ArgoCD reconciles
+  (see docs/public/operate/deploy-bundle-runbook.md)
 
-### Production (Cloud)
-- **Database:** TimescaleDB Cloud (Tiger Cloud) - separate instance
-- **Service:** Azure Kubernetes Service (AKS)
-- **Access:** Senior/Lead developers only
-- **Deploy:** Promote a validated version (see docs/public/operate/deploy-bundle-runbook.md)
+> memQL ships **one installation shape**. An operator who wants a second
+> environment installs a second instance, with its own domain and its own
+> ArgoCD — there is no staging-versus-production dimension inside the product.
 
 **Full details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
@@ -136,7 +135,7 @@ make deploy VERSION=X
 - Go 1.26.1+ (ARM64 build)
 - Docker Desktop for Mac (Apple Silicon)
 - k3d + kubectl (`brew install k3d kubectl`)
-- Azure CLI (`az`) — for staging/prod deploys
+- Azure CLI (`az`) — for cloud deploys
 - git
 
 ### Local Development Workflow
@@ -167,9 +166,9 @@ make deploy VERSION=X
    kubectl logs -n memql deploy/bff -f
    ```
 
-4. **Deploy to staging for integration testing**
+4. **Exercise the 2-replica parity cluster** for anything cross-node
    ```bash
-   make deploy VERSION=X
+   make up SERVERS=2 && make scale N=2 && make status
    ```
 
 5. **Commit to `main`** (focused commits) or open a feature branch + PR
@@ -214,7 +213,7 @@ memQL/
 │   ├── public/            # Published docs (overview, concepts, language, ai,
 │   │                      #      build, operate) -- rendered on memql.io
 │   └── internal/          # Design records, plans, internal runbooks
-├── deploy/k8s/            # Kustomize manifests (base + overlays/local|staging|prod)
+├── deploy/k8s/            # Kustomize manifests (base + overlays/local|cloud)
 └── .claude/               # Configuration
 ```
 
@@ -228,7 +227,7 @@ memQL/
 | **Tear down cluster** | `make down` |
 | **Inner-loop rebuild + reload** | `make dev [NODE=<type>]` |
 | **Run Go test suite** | `go test ./...` |
-| **Deploy to staging** | `make deploy VERSION=X` |
+| **Break-glass deploy** | `make deploy VERSION=X` |
 | **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
 
@@ -245,9 +244,9 @@ service** (`component/identity`):
 - Centralized user / partition-access management at `/admin/`
 
 **Developer access:**
-- **Development:** All developers (own machine)
-- **Staging:** All developers (shared testing)
-- **Production:** Senior/Lead developers only (live system)
+- **Local:** All developers (own machine)
+- **Cloud:** per the cluster's own role model -- deploy and rollback are
+  role-gated and audited (see docs/public/operate/auth/access-model.md)
 
 ---
 
@@ -285,7 +284,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 make down
 ```
 
-**Documentation:** [docs/public/operate/reproduce-staging-locally.md](docs/public/operate/reproduce-staging-locally.md)
+**Documentation:** [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md)
 
 ---
 
@@ -319,22 +318,22 @@ automation autoJoinSI {
 
 ## Deployment
 
-memQL runs on Azure Kubernetes Service (AKS). Deploy to staging with
-`make deploy VERSION=X` (`scripts/deploy/aks-deploy.sh`); production
-promotes a validated version.
+memQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
+`deploy/k8s/overlays/cloud`. The blessed deploy is a GIT MERGE: bump the
+`{engine version, bundle digest, client digest}` in that overlay and merge.
+`make deploy VERSION=X` is break-glass, for when ArgoCD is unavailable.
 
 See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
-for deploy/topology (cluster `aks-memql-staging`, ACR `acrmemql.azurecr.io`,
-Tiger Cloud DB, the migration + smoke gates, and the staging → prod
-promotion flow).
+for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration
++ smoke gates).
 
 ---
 
 ## Contributing
 
 1. Read [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
-2. Make changes and test in development environment (`go test ./...`)
-3. Deploy to staging for integration testing
+2. Make changes and test locally (`go test ./...`)
+3. Exercise the 2-replica parity cluster for anything cross-node
 4. Commit directly to `main` for focused changes, or open a PR when review is useful
 5. Stage files by explicit path (`git add <file>`)
 

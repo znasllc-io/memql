@@ -4,9 +4,9 @@
 // Before this, a deploy left no trace in the data layer -- image
 // digests lived only in releases/*.yaml on disk, and there was no
 // deployment entity, status, or history to query. The console write
-// RPCs (DeployStaging / Promote) now write a record at deploy start
-// (status in_progress) and transition it as the rollout resolves
-// (succeeded on a clean promote, failed on error). Each write appends a
+// RPCs now write a record at deploy start (status in_progress) and transition
+// it as the rollout resolves (succeeded on a clean run, failed on error). Each
+// write appends a
 // new payload version under the SAME concept id (the deploymentId), so
 // the lifecycle is reconstructable asOf any time, and the CDC path emits
 // graph.node.created/updated.<partition>.v1:cluster:deployment -- the
@@ -24,27 +24,16 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-
-	"github.com/znasllc-io/memql/core/id"
 )
 
-// deploymentEnvFor maps a console env ("staging"/"prod") onto the
-// v1:cluster:deployment `environment` enum member.
-func deploymentEnvFor(consoleEnv string) string {
-	switch consoleEnv {
-	case "prod":
-		return "production"
-	case "staging":
-		return "staging"
-	default:
-		return "development"
-	}
-}
-
-// deploymentProviderFor returns the deploy target backing a console
-// env. Staging + prod both run on AKS today, so the provider is
-// "azure"; MEMQL_DEPLOY_PROVIDER overrides for a non-default target.
-func deploymentProviderFor(consoleEnv string) string {
+// deploymentProvider returns the deploy target this installation ships to.
+// The cloud target runs on AKS, so the provider is "azure";
+// MEMQL_DEPLOY_PROVIDER overrides for a non-default target.
+//
+// This is the axis that SURVIVED epic memql#3943: local-vs-cloud is a deploy
+// TARGET, which the parity standard keeps, and it was always separate from the
+// environment concept the epic removed.
+func deploymentProvider() string {
 	if p := strings.TrimSpace(os.Getenv("MEMQL_DEPLOY_PROVIDER")); p != "" {
 		return p
 	}
@@ -82,39 +71,6 @@ func (s *Service) resolveImageDigest(version string) string {
 	return ""
 }
 
-// recordDeployment writes a new v1:cluster:deployment row in the
-// in_progress state and returns the generated deploymentId. Returns ""
-// when no engine is wired or the write fails -- the caller treats ""
-// as "nothing to transition" and skips the follow-up. The deploymentId
-// doubles as the concept row id, so the later transition appends to the
-// same time-series timeline.
-func (s *Service) recordDeployment(ctx context.Context, consoleEnv, version, digest string, act actor) string {
-	if s == nil || s.engine == nil {
-		return ""
-	}
-	deploymentID := id.NewShortId()
-	args := map[string]any{
-		"deploymentId": deploymentID,
-		"status":       "in_progress",
-		"version":      version,
-		"imageDigest":  digest,
-		"provider":     deploymentProviderFor(consoleEnv),
-		"environment":  deploymentEnvFor(consoleEnv),
-		"region":       strings.TrimSpace(os.Getenv("MEMQL_REGION")),
-		"clusterId":    strings.TrimSpace(os.Getenv("MEMQL_CLUSTER_ID")),
-		"triggeredBy":  act.userID,
-	}
-	query := "createDeployment(" + renderDeploymentArgs(args) + ")"
-	if _, err := s.engine.Execute(ctx, query); err != nil {
-		if s.logger != nil {
-			s.logger.Warn("deploycontrol: persist deployment record failed (deploy continues)",
-				"error", err, "env", consoleEnv, "version", version)
-		}
-		return ""
-	}
-	return deploymentID
-}
-
 // transitionDeployment appends a status transition for an existing
 // deployment record. No-op when deploymentID is empty (no record was
 // written) or no engine is wired.
@@ -131,15 +87,6 @@ func (s *Service) transitionDeployment(ctx context.Context, deploymentID, status
 		s.logger.Warn("deploycontrol: persist deployment transition failed",
 			"error", err, "deployment_id", deploymentID, "status", status)
 	}
-}
-
-// transitionStatusForErr maps a write-action's run error onto the
-// terminal deployment status: nil -> succeeded, otherwise failed.
-func transitionStatusForErr(runErr error) string {
-	if runErr == nil {
-		return "succeeded"
-	}
-	return "failed"
 }
 
 // renderDeploymentArgs turns a flat arg map into a MemQL object literal

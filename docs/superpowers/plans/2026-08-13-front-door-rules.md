@@ -394,7 +394,7 @@ Expected: PASS. `clustersRegistry.test.ts` carries `cockpit.memql.localhost:443`
 - [ ] **Step 12: Update the documentation this task changes**
 
 - `docs/public/operate/environment-parity.md` — the connection-model code block and the "The connection model in practice" narrative both name `cockpit.<domain>`.
-- `docs/public/operate/reproduce-staging-locally.md` — hostnames and the port table.
+- `docs/public/operate/reproduce-the-cloud-locally.md` — hostnames and the port table.
 - `docs/public/operate/install-prerequisites.md` — the hosts-block row.
 - `docs/public/overview/quickstart.md` — any front-door URL.
 - `docs/public/operate/campaign-sending.md` — the `MEMQL_CAMPAIGNS_UNSUBSCRIBE_BASE_URL` example and the `List-Unsubscribe` sample both use `cockpit.example.com`.

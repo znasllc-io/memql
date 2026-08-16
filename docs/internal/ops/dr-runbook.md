@@ -25,12 +25,12 @@ commit; Argo CD reconciles the previous digests back.
 **Rehearsal (staging, safe):**
 ```bash
 # Pick the previous good overlay commit:
-git log --oneline -- deploy/k8s/overlays/staging
+git log --oneline -- deploy/k8s/overlays/cloud
 # Revert the bad change and push; Argo reconciles (or apply manually pre-Argo):
 scripts/deploy/aks-rollback.sh --to=<bad-commit>      # prints the exact steps
 git revert --no-edit <bad-commit> && git push
 # Verify convergence:
-scripts/deploy/drift-check.sh --live --env=staging    # -> converged
+scripts/deploy/drift-check.sh --live     # -> converged
 ```
 Recovery time = one reconcile cycle. No image rebuild, no `rollout undo`.
 
@@ -81,7 +81,7 @@ apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
   name: memql-db-recovered
-  namespace: memql-prod
+  namespace: memql
 spec:
   instances: 3
   imageName: <the SAME image the source ran>
@@ -139,7 +139,7 @@ of discovering the restore path is broken during an incident.
 ### Rehearsal — scripted, and safe by construction
 
 ```bash
-make db-restore-drill ENV=staging
+make db-restore-drill
 ```
 
 `scripts/deploy/db-restore-drill.sh` restores the latest backup into a **scratch

@@ -434,7 +434,7 @@ somebody measures it.
 - LAN or public-internet reach (D1). No LAN-IP mode, no port forwarding.
 - Let's Encrypt / cert-manager locally. mkcert stays the local TLS source.
 - Changing a domain in place after install (D6 refuses it; reinstall instead).
-- The staging and prod overlays, and the base's `identity.staging.example.com`
+- The staging and prod overlays, and the base's `identity.example.com`
   placeholder. Both are near-empty stubs in this repo; the real overlays live
   downstream.
 - `nip.io` / `sslip.io`, rejected by D5 of the install-wizard design on router

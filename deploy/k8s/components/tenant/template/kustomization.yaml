@@ -11,7 +11,7 @@
 # into a rendered overlay, so a literal in prose reads to it as a substitution
 # somebody forgot.
 #
-# READ THIS FILE AGAINST deploy/k8s/overlays/prod/kustomization.yaml. Same base,
+# READ THIS FILE AGAINST deploy/k8s/overlays/cloud/kustomization.yaml. Same base,
 # same components, same shape. A namespace, a domain, a profile preset and a
 # database preset are what a customer buys.
 #
@@ -29,7 +29,6 @@ namespace: __TENANT__
 
 resources:
   - ../../base
-  - environment.yaml
   - domain.yaml
   - allowance.yaml
 

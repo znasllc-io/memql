@@ -247,7 +247,7 @@ exact flow this design exists to smooth.
 
 ### D7 — Passkeys are per cluster domain, and this is documented, not fixed
 
-A passkey is bound to its RP ID. A credential for `staging.example.com` does
+A passkey is bound to its RP ID. A credential for `example.com` does
 not work on `memql.localhost`, and reinstalling a local cluster wipes the
 database and orphans its passkeys.
 

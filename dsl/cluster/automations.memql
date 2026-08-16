@@ -71,8 +71,7 @@ automation bootstrapCluster {
   step cluster {
     if steps.decide.result == true {
       mutation createCluster (
-        name:        "development",
-        environment: "development",
+        name:        "memql",
         region:      "local",
         provider:    provider ?? "",
         version:     node.version ?? ""
@@ -122,7 +121,6 @@ automation deregisterNode {
 automation registerNode {
   args {
     deploymentId any
-    environment any
     node any
     provider any
     region any
@@ -137,7 +135,6 @@ automation registerNode {
       address:      node.address ?? "",
       deploymentId: deploymentId ?? "",
       provider:     provider ?? "",
-      environment:  environment ?? "",
       region:       region ?? ""
     )
   }

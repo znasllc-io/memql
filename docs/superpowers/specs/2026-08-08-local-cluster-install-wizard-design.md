@@ -552,7 +552,7 @@ Each of these is a separate project, named here so the boundary is explicit.
 
 - `docs/internal/design/capability-script-contract.md` (#2221)
 - `docs/public/operate/environment-parity.md`
-- `docs/public/operate/reproduce-staging-locally.md`
+- `docs/public/operate/reproduce-the-cloud-locally.md`
 
 **Design session artifacts**
 

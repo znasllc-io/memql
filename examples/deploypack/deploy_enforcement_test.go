@@ -23,32 +23,24 @@ import (
 // TestDeployPackEndToEndLifecycle drives the full deploy lifecycle through the
 // pack effects in the order the chained automations fire them:
 //
-//	in_progress -> runPromote (azure effect) -> succeeded
-//	            -> observeReconciledState (ArgoCD synced/healthy)
+//	in_progress -> observeReconciledState (ArgoCD synced/healthy) -> succeeded
 //	            -> recordBack (append per-node spec)
 //
 // It proves the dogfood deploy is driven end-to-end by automations + effects --
 // the Epic 2 north star -- with NO real cluster (fake Executor + engine).
+//
+// The forward-deploy EFFECT that used to open this chain (runPromote, the
+// staging-to-prod digest pin) went with the environment concept in epic
+// memql#3943: a deploy is now the merge ArgoCD reconciles, so the first leg is
+// the observation rather than an action.
 func TestDeployPackEndToEndLifecycle(t *testing.T) {
 	const syncedHealthy = `{"status":{"sync":{"status":"Synced","revision":"rev1"},"health":{"status":"Healthy"}}}`
 	exec := &fakeExecutor{kubectlJSON: []byte(syncedHealthy)}
 	eng := &fakeEngine{}
 	provider := deploypack.NewProviderWithDeps(exec, eng)
 
-	// 1) Drive leg: runPromote (the azure effect) for a staging deploy.
-	promote, err := callCapability(t, provider, "runPromote",
-		map[string]any{"version": "2026.6.21", "env": "staging"})
-	if err != nil {
-		t.Fatalf("runPromote: %v", err)
-	}
-	if !successOf(t, promote) {
-		t.Fatal("runPromote should report success for the clean fake")
-	}
-	if exec.promoteVersion != "2026.6.21" || exec.promoteEnv != "staging" {
-		t.Fatalf("runPromote -> RunPromote(%q,%q), want (2026.6.21, staging)", exec.promoteVersion, exec.promoteEnv)
-	}
-
-	// 2) Record-back read leg: observe the reconciled ArgoCD state.
+	// 1) Drive leg: observe the reconciled ArgoCD state. This is what decides
+	// the terminal transition now that there is no promote to run.
 	obs, err := callCapability(t, provider, "observeReconciledState", map[string]any{"app": "memql"})
 	if err != nil {
 		t.Fatalf("observeReconciledState: %v", err)
@@ -57,7 +49,7 @@ func TestDeployPackEndToEndLifecycle(t *testing.T) {
 		t.Fatal("observeReconciledState should report synced+healthy for the synced/healthy fixture")
 	}
 
-	// 3) Record-back write leg: append the observed per-node spec + status.
+	// 2) Record-back write leg: append the observed per-node spec + status.
 	if _, err := callCapability(t, provider, "recordBack", map[string]any{
 		"deploymentId": "dep-e2e",
 		"status":       "succeeded",

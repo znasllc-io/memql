@@ -1,5 +1,5 @@
-// Package frontdoor composes the cluster's front-door hostnames from the
-// product of ROLE and ENVIRONMENT.
+// Package frontdoor composes the cluster's front-door hostnames from its role
+// set and its domain.
 //
 // # Why this is a package and not four format strings
 //
@@ -13,53 +13,31 @@
 // origin and presented exactly that way. One derivation cannot drift against
 // itself, so both sides call in here.
 //
-// # The model
+// # There is no environment dimension
 //
-// An environment is a VALUE: a single DNS LABEL, empty for the unprefixed one.
-// Everything else follows from where that label is allowed to land, and the two
-// positions are NOT interchangeable:
+// The host set used to be the product of role x ENVIRONMENT, with an
+// environment carried as a DNS label that hyphenated into a role host
+// (api-staging.<d>) and nested into a site host (shop.staging.<d>). Epic
+// memql#3943 removed "environment" as a product concept: memQL ships ONE
+// installation shape, and an operator who wants a second environment installs a
+// second instance, which brings its own domain and therefore its own host set.
+// So the product has one factor left, and every host here is a single label
+// under the domain.
 //
-//	role host   api    + label -> api-staging.<domain>      ONE label
-//	site host   portal + label -> portal.staging.<domain>   TWO labels
-//
-// # Why role hosts hyphenate instead of nesting
-//
-// A TLS wildcard matches exactly ONE label. `*.<domain>` covers
-// `api-staging.<domain>` and does NOT cover `api.staging.<domain>`. Keeping the
-// role hosts to a single label means every environment's api / identity / mcp
-// host is covered by the certificate the cluster already has, however many
-// environments there are.
-//
-// Sites cannot have that, because a site's own name occupies the label a role
-// would hyphenate into: `shop.<domain>` under a label becomes
-// `shop.staging.<domain>`, which is two labels by construction. So a labelled
-// environment needs one additional wildcard, `*.<label>.<domain>` -- ONE
-// certificate for all of that environment's sites, not one per site, which is
-// the property memql#3700 exists to protect.
-//
-// # A labelled environment's sites live under the CLUSTER's domain
-//
-// The staging host for `shop.acme.com` is `shop.staging.<clusterdomain>` and
-// never `shop.staging.acme.com`. A labelled environment is the OPERATOR's
-// testing surface; requiring DNS under a customer's domain would make standing
-// one up depend on a zone the operator may not control, and would put the
-// operator's test traffic on the customer's name.
+// The TLS consequence is the one worth keeping in mind if a label is ever
+// proposed again: a wildcard matches exactly ONE label, so `*.<domain>` covers
+// `api.<domain>` and would NOT cover `api.<anything>.<domain>`. Every host this
+// package composes stays inside that one wildcard, which is why
+// CertificateSANs is two entries and not one per host.
 package frontdoor
-
-import (
-	"fmt"
-	"regexp"
-	"strings"
-)
 
 // Role is a front-door role: one of the fixed set of services the cluster
 // exposes under its own hostname.
 //
 // The role set is CLOSED and adding to it is a design change, not a
-// configuration change (docs/public/operate/front-door.md). The host COUNT is
-// allowed to grow with environments -- a closed set the operator chooses -- and
-// must never grow with customers, apps or sites, which is what the sites
-// wildcard is for.
+// configuration change (docs/public/operate/front-door.md). The host COUNT must
+// never grow with customers, apps or sites, which is what the sites wildcard is
+// for.
 type Role string
 
 const (
@@ -75,71 +53,20 @@ const (
 // Roles is the closed role set, in the order the generated manifests emit them.
 func Roles() []Role { return []Role{RoleAPI, RoleIdentity, RoleMCP} }
 
-// labelPattern is one DNS label: lowercase alphanumerics and interior hyphens.
-//
-// Strict on purpose. The label is concatenated into a hostname that ends up in
-// a TLS SAN and an Ingress rule, and a label carrying a dot would silently turn
-// a role host into two labels -- which is precisely the case the wildcard
-// certificate does not cover, and which would present as a TLS error at a host
-// nobody thinks is new.
-var labelPattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
+// RoleHost is `<role>.<domain>`.
+func RoleHost(role Role, domain string) string { return string(role) + "." + domain }
 
-// ValidateLabel refuses a label that cannot safely be concatenated. The empty
-// label is valid and means "unprefixed".
-func ValidateLabel(label string) error {
-	if label == "" {
-		return nil
-	}
-	if !labelPattern.MatchString(label) {
-		return fmt.Errorf("environment host label %q is not a single DNS label: "+
-			"it must be lowercase alphanumerics with interior hyphens, and in particular may not "+
-			"contain a dot -- a dotted label makes a role host two labels, which the *.<domain> "+
-			"wildcard certificate does not cover", label)
-	}
-	return nil
-}
-
-// RoleHost is `<role>.<domain>` unprefixed, `<role>-<label>.<domain>` otherwise.
-// Single-label by construction -- see the package comment.
-func RoleHost(role Role, label, domain string) string {
-	if label == "" {
-		return string(role) + "." + domain
-	}
-	return string(role) + "-" + label + "." + domain
-}
-
-// SiteHost is the host a NAMED site is served at: `<name>.<domain>` unprefixed,
-// `<name>.<label>.<domain>` otherwise. Two labels under a labelled environment,
-// which is why SitesWildcard exists.
-func SiteHost(name, label, domain string) string {
-	if label == "" {
-		return name + "." + domain
-	}
-	return name + "." + label + "." + domain
-}
+// SiteHost is the host a NAMED site is served at: `<name>.<domain>`.
+func SiteHost(name, domain string) string { return name + "." + domain }
 
 // SitesWildcard is the one Ingress rule that routes every present and future
-// site in this environment to the edge node.
-func SitesWildcard(label, domain string) string {
-	if label == "" {
-		return "*." + domain
-	}
-	return "*." + label + "." + domain
-}
+// site to the edge node.
+func SitesWildcard(domain string) string { return "*." + domain }
 
-// Apex is the bare domain, and it is served by ONE environment: the unprefixed
-// one. For a customer cluster the apex IS their main website, so it is a site
-// row like any other -- it just happens to be the one whose hostname has no
-// label in front of it. A labelled environment has no apex to claim, because
-// the bare domain is already taken by the environment without a label.
-//
-// Returns "" when the environment is labelled; callers emit no rule for it.
-func Apex(label, domain string) string {
-	if label == "" {
-		return domain
-	}
-	return ""
-}
+// Apex is the bare domain. For a customer cluster the apex IS their main
+// website, so it is a site row like any other -- it just happens to be the one
+// whose hostname is the domain itself.
+func Apex(domain string) string { return domain }
 
 // Host is one generated front-door rule.
 type Host struct {
@@ -155,68 +82,37 @@ type Host struct {
 // SitesRole labels the two host rules that are not one of the closed Roles.
 const SitesRole = "sites"
 
-// Hosts is the whole role x environment product for one environment, in the
-// order the generated manifests emit them.
-func Hosts(label, domain string) []Host {
+// Hosts is the whole front-door host set, in the order the generated manifests
+// emit them.
+func Hosts(domain string) []Host {
 	out := make([]Host, 0, len(Roles())+2)
 	for _, r := range Roles() {
-		out = append(out, Host{Role: string(r), Name: RoleHost(r, label, domain)})
+		out = append(out, Host{Role: string(r), Name: RoleHost(r, domain)})
 	}
-	out = append(out, Host{Role: SitesRole, Name: SitesWildcard(label, domain), Sites: true})
-	if apex := Apex(label, domain); apex != "" {
-		out = append(out, Host{Role: SitesRole, Name: apex, Sites: true})
-	}
+	out = append(out, Host{Role: SitesRole, Name: SitesWildcard(domain), Sites: true})
+	out = append(out, Host{Role: SitesRole, Name: Apex(domain), Sites: true})
 	return out
 }
 
-// CertificateSANs is the SAN set one environment's front-door certificate must
-// carry, in issue order.
+// CertificateSANs is the SAN set the front-door certificate must carry, in
+// issue order.
 //
-// `*.<domain>` is ALWAYS present, including for a labelled environment, and
-// that is the point of hyphenating role hosts: `api-staging.<domain>` is a
-// single label, so it needs no certificate of its own. A labelled environment
-// adds exactly one more SAN, `*.<label>.<domain>`, for its sites.
-//
-// The unprefixed environment additionally carries the apex, which no wildcard
-// covers -- `*.<domain>` matches one label and the bare domain has none.
-//
-// Each environment gets its OWN certificate even though the SAN sets overlap.
-// A Kubernetes Secret is namespaced and cannot be referenced across namespaces,
-// so a shared certificate is not expressible; two orders for the same wildcard
-// is the price of the namespace isolation the whole epic rests on.
-func CertificateSANs(label, domain string) []string {
-	out := []string{"*." + domain}
-	if apex := Apex(label, domain); apex != "" {
-		out = append(out, apex)
-	}
-	if label != "" {
-		out = append(out, SitesWildcard(label, domain))
-	}
-	return out
+// Two entries, and the second is why: `*.<domain>` matches exactly one label,
+// so it covers every role host and every site host but NOT the bare domain,
+// which has no label to match.
+func CertificateSANs(domain string) []string {
+	return []string{"*." + domain, Apex(domain)}
 }
 
-// DomainDerivationSuffix is the hostname suffix a role host carries under this
-// label -- `.<domain>` unprefixed, `-<label>.<domain>` otherwise.
+// DomainDerivationSuffix is the hostname suffix every front-door host carries:
+// `.<domain>`.
 //
-// Exists so a caller composing many role hosts at once (genesis's env
+// Exists so a caller composing many host names at once (genesis's env
 // derivation) can do it with one string concatenation per name and still be
 // using this package's rule rather than its own copy of it.
-func DomainDerivationSuffix(label, domain string) string {
-	if label == "" {
-		return "." + domain
-	}
-	return "-" + label + "." + domain
-}
-
-// SiteSuffix is the site-host counterpart of DomainDerivationSuffix.
-func SiteSuffix(label, domain string) string {
-	if label == "" {
-		return "." + domain
-	}
-	return "." + label + "." + domain
-}
-
-// NormalizeLabel trims a label read from configuration. Whitespace around a
-// value in a ConfigMap or an env var is invisible in every UI that displays it
-// and would otherwise be concatenated into a hostname.
-func NormalizeLabel(label string) string { return strings.TrimSpace(label) }
+//
+// It used to have a site-host counterpart, SiteSuffix, because a labelled
+// environment nested site hosts one label deeper than it hyphenated role hosts.
+// With no label the two returned the identical string, so epic memql#3943
+// collapsed them into this one.
+func DomainDerivationSuffix(domain string) string { return "." + domain }

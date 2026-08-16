@@ -7,7 +7,7 @@
 // who may deploy -- over args + (read-only) builtins. They perform NO writes
 // and call NO actions, so they pass the call-graph contract
 // (test/dslconformance/callgraph_contract_test.go). The WRITES that consume these decisions
-// live in the per-environment deploy automations (I10), which reuse the
+// live in the deploy automation (I10), which reuses the
 // existing createDeployment / updateDeploymentStatus mutations
 // (dsl/deployment/mutations.memql) one-write-per-step.
 
@@ -123,7 +123,7 @@ logic deployRollbackTarget {
 // set the deploy EMITTER (cockpit `deploy --env` / CI) stamps onto the
 // deploy.requested event payload as `engineNodeTypes`; the deployEngineCluster
 // automation (automations.memql) reads the set off the event and fans the
-// per-node build (and the development-environment k3d import) over it with a
+// per-node build (and the docker-local k3d import) over it with a
 // forEach step. (Reading from the event -- not a logic step -- is what keeps
 // the per-node fan-out free of an inter-step dependency so the deploy phases
 // run in the authored order; see the automation header.) An emitter may pass a

@@ -317,8 +317,8 @@ state is not.
 Cluster: staging                        [Open Portal ↗]
 
   Connection
-    endpoint   api.staging.example.com:443   ● reachable
-    issuer     identity.staging.example.com
+    endpoint   api.example.com:443   ● reachable
+    issuer     identity.example.com
     probed     4s ago · 84ms
 
   Identity

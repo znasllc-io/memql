@@ -52,7 +52,6 @@ export type InstanceActionId =
   | "repair"
   | "uninstall"
   | "cutVersion"
-  | "promote"
   | "rolloutAction"
   | "rollback";
 
@@ -156,7 +155,6 @@ const REMOTE_ACTIONS: readonly InstanceAction[] = [
       "Ship the selected pending deployment record. Asynchronous: success means accepted and kicked off, not deployed.",
   }),
   fromDeployAction("cutVersion", "cutVersion"),
-  fromDeployAction("promote", "promote"),
   fromDeployAction("rolloutAction", "rolloutAction"),
   fromDeployAction("rollback", "rollback"),
 ];

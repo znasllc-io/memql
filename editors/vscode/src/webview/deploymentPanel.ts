@@ -145,8 +145,6 @@ export interface DeploymentPanelDeps {
   deployPort?: () => DeployControlPort | undefined;
   /** The caller's cluster role, for deciding which actions to DRAW. */
   readRole?: () => Promise<RoleVisibility>;
-  /** The deploy-console environment this instance maps to. */
-  deployEnv?: (instanceName: string) => string;
   /**
    * Asks the operator to type a phrase back. Injected because a modal is the
    * extension host's, and because a test cannot click one.
@@ -304,7 +302,7 @@ export class DeploymentPanel {
       this.render();
       return;
     }
-    const read = await readDeploymentStatus(port, this.deps.deployEnv?.(name) ?? name);
+    const read = await readDeploymentStatus(port);
     if (this.disposed) return;
     this.pipeline = pipelineState(read, visibility);
     this.render();
@@ -594,9 +592,7 @@ export class DeploymentPanel {
       this.render();
       return;
     }
-    const env = this.deps.deployEnv?.(this.instance.name) ?? this.instance.name;
-
-    const request = await this.deployRequest(spec.id, env);
+    const request = await this.deployRequest(spec.id);
     if (request === undefined) return;
 
     const outcome = await runDeployAction(port, request);
@@ -711,11 +707,8 @@ export class DeploymentPanel {
       this.render();
       return;
     }
-    const env = this.deps.deployEnv?.(target.instanceName) ?? target.instanceName;
-
     const cut = await runDeployAction(port, {
       id: "cutVersion",
-      env,
       bump: "patch",
       // The version is NAMED rather than left to the engine's suggestion. The
       // operator confirmed a specific release; cutting whatever comes next
@@ -769,20 +762,19 @@ export class DeploymentPanel {
    * The parameters an action needs, and the confirmation the destructive ones
    * demand.
    *
-   * THE PHRASE IS THE TARGET, never the word "yes": re-typing the version being
-   * promoted, or the deployment being rolled back to, forces the operator to
-   * look at what they selected. Undefined means "do not run" -- a cancelled
-   * prompt and a mismatched phrase are the same answer.
+   * THE PHRASE IS THE TARGET, never the word "yes": re-typing the deployment
+   * being rolled back to forces the operator to look at what they selected.
+   * Undefined means "do not run" -- a cancelled prompt and a mismatched phrase
+   * are the same answer.
    */
   private async deployRequest(
     id: DeployActionId,
-    env: string,
   ): Promise<DeployActionRequest | undefined> {
     const ask = this.deps.confirm ?? (async () => undefined);
     const current = this.runs[0];
     switch (id) {
       case "cutVersion":
-        return { id, env, bump: "patch", version: "" };
+        return { id, bump: "patch", version: "" };
       case "deploy": {
         const target = current?.id ?? "";
         if (target === "") {
@@ -791,11 +783,6 @@ export class DeploymentPanel {
           return undefined;
         }
         return { id, deploymentId: target };
-      }
-      case "promote": {
-        const version = current?.toVersion ?? "";
-        if (!(await this.confirmed(ask, id, version))) return undefined;
-        return { id, version };
       }
       case "rollback": {
         // The newest run that actually LANDED, which is what a rollback target
@@ -808,10 +795,10 @@ export class DeploymentPanel {
       }
       case "rolloutAction": {
         const subAction = "promote";
-        if (rolloutRequiresConfirmation(subAction) && !(await this.confirmed(ask, id, env))) {
+        if (rolloutRequiresConfirmation(subAction) && !(await this.confirmed(ask, id, this.instance?.name ?? ""))) {
           return undefined;
         }
-        return { id, env, rollout: "", subAction };
+        return { id, rollout: "", subAction };
       }
       default:
         return undefined;
