@@ -13,6 +13,7 @@
 import { escapeHtml } from "@znasllc-io/memql-view-kit";
 
 import type { InstanceAction } from "../deploy/instanceActions.js";
+import type { UpgradeVerdict } from "../deploy/upgrade.js";
 import { displayVersion, type Instance, type Run } from "../state/deployments.js";
 import { instanceRowStatus, runRowStatus } from "../state/deploymentsCatalog.js";
 import type { PipelineState } from "../deploy/pipelineState.js";
@@ -42,6 +43,30 @@ function latestFact(releases: ReleaseListing | undefined): string {
   )}</span></div>`;
 }
 
+/**
+ * The one button that moves this cluster to the newest release (memql#3997).
+ *
+ * DRAWN FOR A REFUSED VERDICT TOO, and that is deliberate. Hiding it would
+ * leave an operator looking at a row that says `v0.19.0 available` beside a
+ * page that offers nothing, with no way to find out why. Pressing it produces
+ * the refusal and the runbook, which is the answer they came for. The refusal
+ * arrives as this page's own error line -- nothing was sent, so there is no
+ * engine outcome and no audit id.
+ *
+ * `data-act`, not `data-choose`: the instance actions validate their id against
+ * instanceActions(), and this is not one of them.
+ */
+function upgradeButton(verdict: UpgradeVerdict): string {
+  if (verdict.kind === "none") return "";
+  const detail =
+    verdict.kind === "offer"
+      ? verdict.confirmation
+      : "This move is not a retag. Press to see what it changes and where the procedure is.";
+  return `<div class="actions"><button class="primary" type="button" data-act="upgrade" title="${escapeHtml(
+    detail,
+  )}">${escapeHtml(verdict.label)}</button></div>`;
+}
+
 export interface OverviewInput {
   instance: Instance;
   runs: readonly Run[];
@@ -51,6 +76,8 @@ export interface OverviewInput {
   error: string;
   /** The release listing, or undefined when nothing has been fetched. */
   releases: ReleaseListing | undefined;
+  /** Whether this instance is offered a move to the newest release. */
+  upgrade: UpgradeVerdict;
 }
 
 export function renderInstanceOverview(input: OverviewInput): string {
@@ -100,6 +127,7 @@ ${error}
     instance.domain ?? "not recorded",
   )}</span></div>
 </div>
+${upgradeButton(input.upgrade)}
 <div class="actions">${actions}</div>
 <h2>Deployments</h2>
 ${runs}`;
@@ -230,6 +258,8 @@ export interface RemoteOverviewInput {
   error: string;
   /** The release listing, or undefined when nothing has been fetched. */
   releases: ReleaseListing | undefined;
+  /** Whether this instance is offered a move to the newest release. */
+  upgrade: UpgradeVerdict;
 }
 
 /**
@@ -312,6 +342,7 @@ ${outcome}
     instance.domain ?? "not recorded",
   )}</span></div>
 </div>
+${upgradeButton(input.upgrade)}
 <h2>${escapeHtml(pipeline.title)}</h2>
 <p class="lede">${escapeHtml(pipeline.detail)}</p>
 ${actions}

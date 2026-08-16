@@ -126,6 +126,9 @@ const OVERVIEW = {
   actions: [],
   nowMs: 0,
   error: "",
+  // The upgrade button is memql#3997 and has its own tests; these are about
+  // what the version says, so every page here draws none.
+  upgrade: { kind: "none", reason: "not under test" },
 } as const;
 
 test("the local instance page carries a latest fact beside version", () => {
@@ -162,6 +165,7 @@ test("the remote instance page carries the same latest fact", () => {
     outcome: "",
     error: "",
     releases: KNOWN,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.match(html, /fact-key">latest<\/span><span class="fact-value">v0\.19\.0/);
 });
