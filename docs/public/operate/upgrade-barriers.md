@@ -18,6 +18,14 @@ Between some pairs of releases it is not a retag. This page lists those pairs,
 says what each one actually changes, and gives the procedure that replaces the
 button.
 
+WARNING: **the procedures on this page are written for a LOCAL cluster.** A
+barrier is a fact about what a release changed, so the plugin refuses the
+crossing on a remote (deploy-control) cluster too — but the steps below assume a
+k3d cluster on the operator's own machine, and one of them offers to destroy and
+rebuild it. See [Crossing a barrier on a remote
+cluster](#crossing-a-barrier-on-a-remote-cluster) before applying any of this to
+staging or production.
+
 **The plugin refuses rather than warns.** When a move crosses a barrier, the
 confirmation dialog becomes a refusal and the button does not run. A warning an
 operator can click past is not a safeguard for a change that can leave a cluster
@@ -27,7 +35,7 @@ running with an empty graph and no error anywhere.
 
 | Moving past | What changes |
 |---|---|
-| `v0.18.0` | The local cluster's database changes from an in-overlay Postgres Deployment to a CloudNativePG cluster, and the cluster gains an operator stack (cert-manager + CloudNativePG). |
+| `v0.18.0` | The database changes from an in-overlay Postgres Deployment to a CloudNativePG cluster, and the cluster gains an operator stack (cert-manager + CloudNativePG). |
 
 The machine-readable copy is `editors/vscode/src/version/barriers.ts`, and it is
 the one the plugin reads. This table is prose for a human; that file is the
@@ -77,8 +85,10 @@ uninstall graph both remove it. Take the dump below **before** either.
 
 ### Procedure A — discard the data and re-install (the usual choice)
 
-A local cluster is a development cluster. If nothing in it needs to survive,
-this is the shortest correct path and the one to prefer.
+LOCAL ONLY. A local cluster is a development cluster. If nothing in it needs to
+survive, this is the shortest correct path and the one to prefer. It destroys
+and re-creates the cluster, so it is not a procedure for anything else -- see
+[Crossing a barrier on a remote cluster](#crossing-a-barrier-on-a-remote-cluster).
 
 - [ ] Uninstall the cluster (the plugin's **Uninstall** action, behind its
       removal preview; or `make down PURGE=1` in the checkout).
@@ -89,6 +99,9 @@ The install graph registers the operator stack and provisions the CNPG cluster
 as part of a normal first install, so there is nothing barrier-specific to do.
 
 ### Procedure B — carry the data across
+
+LOCAL ONLY, for the same reason, and because the commands name a
+`Deployment/postgres` a cloud overlay may not have.
 
 Run this **while the old cluster is still up**. Every name below is read off the
 manifests on each side, but confirm the dump is non-empty before you tear
@@ -137,6 +150,49 @@ the CNPG `Cluster` resource is left behind by an overlay that no longer contains
 it. There is no supported downgrade procedure. If a release after v0.18.0 has to
 be backed out of, do it by re-installing at the older tag from empty, restoring a
 dump you took beforehand.
+
+---
+
+## Crossing a barrier on a remote cluster
+
+**The refusal is right; the procedures above are not the answer.** The plugin
+refuses this crossing on a remote cluster for the same reason it refuses it
+locally — the barrier records what the *release* changed, and that is true
+wherever the release runs. What differs is everything about how you cross it.
+
+What is established, and what is not:
+
+- **Established:** past `v0.18.0` the manifests compose
+  `deploy/k8s/components/cnpg-db` and require the cert-manager + CloudNativePG
+  operators to be registered before they reconcile. That is read off the
+  manifests and holds for any cluster running them.
+- **NOT established here:** what a safe crossing looks like on a cluster
+  reconciled by ArgoCD against a cloud overlay, with a database that has real
+  data and a backup regime. Nobody has written that procedure down, and this
+  page will not invent one — a procedure that has never been run is worse than
+  an admission that none exists, because it reads as though it has.
+
+So, concretely: **do not apply Procedure A or Procedure B to a staging or
+production cluster.** Procedure A destroys and re-creates the cluster, and its
+justification ("a local cluster is a development cluster") is false of yours.
+Procedure B's `kubectl exec deploy/postgres` names a Deployment a cloud overlay
+may not have.
+
+What to do instead:
+
+- [ ] Confirm the operator stack is registered in the target cluster
+      (`cert-manager` and `cnpg-system` namespaces healthy) **before** anything
+      reconciles the new manifests.
+- [ ] Take a backup through the platform's own path and confirm you can restore
+      it, rather than through `pg_dump` against a pod:
+      [database-platform.md](database-platform.md) covers the backup regime and
+      the restore drill.
+- [ ] Cross the barrier as a deliberate, planned migration rather than as a
+      deploy. The plugin's button is not going to become the way to do this, and
+      that is the point of the refusal.
+
+If you carry a remote cluster across this barrier, write down what you did and
+replace this section with it.
 
 ---
 

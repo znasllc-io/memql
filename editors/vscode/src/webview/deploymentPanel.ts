@@ -731,18 +731,29 @@ export class DeploymentPanel {
       return;
     }
 
-    // Re-read so the record just cut is the one shipped. `deploy` takes a
-    // deploymentId and the engine does not hand one back, so the newest record
-    // after the cut is the only way to name it.
-    await this.load();
-    if (this.disposed) return;
-    const record = this.runs[0]?.id ?? "";
+    // THE RECORD THE CUT JUST CREATED, BY ID. cutVersion returns it on
+    // ActionResult.details (component/deploycontrol/cutversion.go stamps
+    // `deploymentId`), so the ship names that row rather than "whatever is
+    // newest now".
+    //
+    // This read the catalog back and took runs[0] until memql#3997 carried
+    // `details` through deploy/controller.ts. That was correct almost always
+    // and wrong for whichever operator lost a race: two cuts against one
+    // cluster inside the reload window and the second ship names the first
+    // one's record. There is no window now, because there is no interval --
+    // the id came back with the cut.
+    const record = cut.details.deploymentId ?? "";
     if (record === "") {
+      // An engine too old to stamp the id. REFUSE rather than fall back to the
+      // catalog: the fallback is the race this replaced, and a pending record
+      // nobody shipped is visible, inert and easy to ship by hand -- while the
+      // wrong record shipped is neither.
       this.outcome = joinOutcomes(
         cut,
-        `ERROR: ${target.to} was cut but no deployment record came back to ship.`,
+        `ERROR: ${target.to} was cut, but the cluster returned no deployment id, so nothing was shipped. ` +
+          `The pending record is on the Deployments list and can be shipped from there.`,
       );
-      this.render();
+      await this.load();
       return;
     }
 
