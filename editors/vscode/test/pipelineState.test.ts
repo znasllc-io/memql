@@ -131,6 +131,7 @@ test("each of the three states renders, and the engine's sentence survives verba
     outcome: "",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   // VERBATIM. The sentence names the role that would have worked, and a
   // paraphrase is one more thing that can be wrong.
@@ -145,6 +146,7 @@ test("each of the three states renders, and the engine's sentence survives verba
     outcome: "",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.match(notConfigured, /No deploy pipeline is configured/);
   assert.doesNotMatch(notConfigured, /data-deploy=/);
@@ -157,6 +159,7 @@ test("each of the three states renders, and the engine's sentence survives verba
     outcome: "",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.match(present, /data-deploy="rollback"/);
 });
@@ -170,6 +173,7 @@ test("an unreachable remote still lists, with its version drawn as unknown", () 
     outcome: "",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   // Listed, not hidden -- and the version says the word rather than nothing,
   // so "we could not work it out" is never read as "it has none".
@@ -201,6 +205,7 @@ test("a remote run's items are labelled Node types, never Steps", () => {
     outcome: "",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.match(html, /Node types/);
   assert.doesNotMatch(html, /&gt;Steps&lt;|>Steps</);
@@ -219,6 +224,7 @@ test("an outcome line is rendered as the engine wrote it, error or not", () => {
     outcome: "ERROR: rollback_deployment requires the owner cluster role (audit ae-1)",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.match(refused, /requires the owner cluster role/);
   assert.match(refused, /audit ae-1/);
@@ -234,6 +240,7 @@ test("everything a remote page draws is escaped", () => {
     outcome: "<b>x</b>",
     error: "",
     releases: undefined,
+    upgrade: { kind: "none", reason: "not under test" },
   });
   assert.doesNotMatch(html, /<\/?script/i);
   assert.doesNotMatch(html, /<img /);

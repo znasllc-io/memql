@@ -197,6 +197,25 @@ export function instanceActions(
   );
 }
 
+/**
+ * Which machinery moves THIS instance to a version (memql#3997).
+ *
+ * Read off the "Create deployment" rows above rather than restated, because
+ * that is the claim: the upgrade button is not a fourth way to move a cluster,
+ * it is the existing move with the target already decided. A second copy of
+ * this mapping is how an upgrade would one day route a local instance into the
+ * full install graph -- the one mistake the InstanceActionFlow doc calls out.
+ *
+ * `absent` has no answer and callers must not ask: nothing is installed, so
+ * there is nothing to move. It returns the local flow rather than throwing,
+ * and upgradeVerdict refuses on presence before it ever reaches here.
+ */
+export function moveFlowFor(instance: Instance): InstanceActionFlow {
+  return instance.kind === "local"
+    ? CREATE_LOCAL_INSTALLED.flow
+    : (REMOTE_ACTIONS.find((a) => a.id === "createDeployment")?.flow ?? "deployControl");
+}
+
 /** Whether an instance offers a given action in its current state. */
 export function offersAction(
   instance: Instance,

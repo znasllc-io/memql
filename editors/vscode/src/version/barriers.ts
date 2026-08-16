@@ -76,11 +76,18 @@ export interface UpgradeBarrier {
 export const UPGRADE_BARRIERS: readonly UpgradeBarrier[] = [
   {
     afterVersion: "v0.18.0",
+    // PATH-NEUTRAL WORDING, and it has to be (memql#3997). A crossing is
+    // refused on the remote path too, so a staging operator reads this
+    // sentence -- and the first draft said "the local cluster's database" and
+    // "moving the checkout does not carry the data across", which are
+    // stackCheckout/clusterUp concepts that mean nothing to a deploy-control
+    // move. A barrier is a fact about what a RELEASE changed; the machinery
+    // that would have crossed it belongs to the caller, and the runbook.
     summary:
-      "The local cluster's database changes from an in-overlay Postgres Deployment to a " +
-      "CloudNativePG cluster, and the cluster gains an operator stack (cert-manager + " +
-      "CloudNativePG) that must be registered before the overlay reconciles. Moving the " +
-      "checkout does not carry the data in the old Deployment's volume across.",
+      "The database changes from a plain Postgres Deployment to a CloudNativePG cluster, " +
+      "and the cluster gains an operator stack (cert-manager + CloudNativePG) that must be " +
+      "registered before the manifests reconcile. The data in the old Deployment's volume " +
+      "does not come across on its own.",
     docHref: "docs/public/operate/upgrade-barriers.md",
   },
 ];
