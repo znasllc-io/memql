@@ -201,10 +201,10 @@ function siteRow(payload: Record<string, unknown>): Row {
   return { id: `v1:platform:site:${String(payload["hostname"])}`, concept: "v1:platform:site", payload };
 }
 
-test("the cluster's OWN site row outranks the composed path", () => {
-  // Reading the row is what keeps this correct when memql#3711 moves the portal
-  // to its own origin -- a hard-coded path would be silently wrong from the day
-  // that lands, on every cluster that had already moved.
+test("the cluster's OWN site row outranks the composed host", () => {
+  // Reading the row is what keeps this correct across a move like memql#3711.
+  // It is not sufficient on its own, though -- see the composition tests below,
+  // which are what a first run actually reaches.
   const target = portalTarget(cluster(), [
     siteRow({ hostname: "shop.example.com", systemOwned: false }),
     siteRow({ hostname: "console.staging.example.com", systemOwned: true }),
@@ -218,25 +218,46 @@ test("systemOwned is what identifies it, not a name", () => {
   // "portal".
   const target = portalTarget(cluster(), [siteRow({ hostname: "portal.example.com", systemOwned: false })]);
   assert.equal(target.fromSiteRow, false);
-  assert.equal(target.url, "https://api.staging.example.com/portal/");
+  assert.equal(target.url, "https://portal.staging.example.com/");
 });
 
-test("no connection means no rows, and the composed path answers", () => {
+test("the composed portal is its OWN origin, not a path on the api front door", () => {
+  // memql#3711 moved the portal to site #1 at portal.<domain>; this composition
+  // did not follow until memql#3906. The old address does not 404 -- `/portal/`
+  // has no Ingress rule of its own, so it falls through to the `/` h2c
+  // catch-all and answers 415, an HTTP/1.1 request handed to a gRPC backend.
   const target = portalTarget(cluster(), []);
-  assert.equal(target.url, "https://api.staging.example.com/portal/");
+  assert.equal(target.url, "https://portal.staging.example.com/");
   assert.equal(target.fromSiteRow, false);
+  assert.doesNotMatch(target.url, /\/portal\/$/, "the sub-path form is what 415s");
 });
 
-test("a cluster registered by endpoint alone still has a front door", () => {
+test("an api.<domain> endpoint implies its portal sibling", () => {
   assert.equal(
     composePortalUrl({ name: "x", endpoint: "api.lab.example.com:50051" }),
-    // The port is dropped: the portal is served over 443 whatever the gRPC
+    // Same derivation identityBaseUrlFor makes for identity.<domain>: the
+    // endpoint IS the api front door, so stripping that label names the domain.
+    // The port is dropped -- the portal is served over 443 whatever the gRPC
     // endpoint names.
-    "https://api.lab.example.com/portal/",
+    "https://portal.lab.example.com/",
+  );
+  // The shared endpoint parser, not a second `split(":")`: a scheme-prefixed
+  // endpoint used to compose `https://https/portal/`.
+  assert.equal(
+    composePortalUrl({ name: "x", endpoint: "https://api.lab.example.com:443" }),
+    "https://portal.lab.example.com/",
   );
 });
 
-test("nothing to compose from yields nothing, not https:///portal/", () => {
+test("an endpoint that names no api front door composes nothing", () => {
+  // The portal is a DIFFERENT host from the gRPC endpoint now, so there is no
+  // host left to reuse. Opening the endpoint's own hostname would point a
+  // browser at an address nobody nominated.
+  assert.equal(composePortalUrl({ name: "x", endpoint: "grpc.lab.example.com:50051" }), "");
+  assert.equal(composePortalUrl({ name: "x", endpoint: "[::1]:50051" }), "");
+});
+
+test("nothing to compose from yields nothing, not https:///", () => {
   assert.equal(composePortalUrl({ name: "x", endpoint: "" }), "");
   assert.equal(portalTarget({ name: "x", endpoint: "" }, []).url, "");
 });

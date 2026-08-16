@@ -496,9 +496,14 @@
           "group": "auth@1"
         },
         {
+          "command": "memql.clusters.takeOwnership",
+          "when": "view == memqlClusters && viewItem == memqlLocalCluster",
+          "group": "auth@2"
+        },
+        {
           "command": "memql.clusters.signOut",
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
-          "group": "auth@2"
+          "group": "auth@3"
         },
         {
           "command": "memql.deployments.createDeployment",

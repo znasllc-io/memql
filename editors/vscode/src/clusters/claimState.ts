@@ -123,16 +123,21 @@ export async function probeClaimState(
   return "unknown";
 }
 
-/**
- * What the entry point should offer, given what the probe found.
- *
- * `unknown` maps to `signIn` deliberately: it is today's behaviour, and the
- * cluster this issue is about answers 200, so an unreadable cluster is not the
- * one being fixed. Sending it to the wizard instead would take a working
- * sign-in away from every cluster behind a proxy that hides a 404.
- */
-export type EntryAction = "claim" | "signIn";
-
-export function entryActionFor(state: ClaimState): EntryAction {
-  return state === "unclaimed" ? "claim" : "signIn";
-}
+// WHAT THE ENTRY POINT DOES WITH THIS ANSWER LIVES NEXT DOOR (memql#3906).
+//
+// `entryActionFor` used to be here, mapping unclaimed -> claim and everything
+// else -> sign-in. That mapping survives verbatim as `routeForClaimState` in
+// clusters/ownershipRoute.ts; it moved because it is one branch of a three-way
+// decision rather than the whole of one, and leaving a second function that
+// answers two thirds of the same question is how the two come to disagree.
+//
+// This module's job stops at reading the status code.
+//
+// ONE LIMIT WORTH KNOWING BEFORE TRUSTING AN ANSWER FROM HERE. `probeClaimState`
+// binds to the caller's `fetch`, and Node's verifies against its OWN bundled
+// roots rather than the OS/NSS store the local installer puts its mkcert CA
+// into. So a cluster on the machine that installed it answers `unknown` --
+// UNABLE_TO_VERIFY_LEAF_SIGNATURE, caught above -- not because its ownership is
+// unreadable but because the handshake never completed. That is why
+// ownershipRoute.ts asks the install receipt first and reaches this only for
+// the clusters local evidence cannot speak for.

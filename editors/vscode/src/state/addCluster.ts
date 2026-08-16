@@ -421,12 +421,19 @@ export class AddClusterState {
   private connectFailureMessage = "";
   private registry: ClustersFile | undefined;
   private handoffResult: HandoffResult | undefined;
-  // The enrolment link the run minted, held on the HOST side only. It carries
-  // a single-use bearer in its query string, so it is never rendered into the
-  // webview -- the done screen shows a button, and the host opens the URL. The
-  // state keeps it so the screen survives a re-render without re-reading the
-  // execution report.
-  private enrolmentLink = "";
+  // Whether the run established that this cluster has an OWNER ACCOUNT.
+  //
+  // A FACT, NOT A CREDENTIAL (memql#3906). This field used to hold the
+  // enrolment link the run minted, so the done screen could replay it. That
+  // link is single-use and expires in fifteen minutes, so the button was dead
+  // by the time an operator who had walked away came back to it -- and a run
+  // that minted none offered no route at all, leaving a terminal as the only
+  // way in. The button now mints a FRESH link when clicked, which needs no
+  // stored URL, and this boolean is all that is left to remember.
+  //
+  // The pleasant side effect is that no credential is held in panel state at
+  // all any more.
+  private ownerAccountExists = false;
   // The magic link the run RECOVERED, held under exactly the same rules and for
   // a more dangerous credential -- it authenticates as the cluster OWNER
   // (memql#3884). On a FRESH install this is the one that exists and the
@@ -516,23 +523,19 @@ export class AddClusterState {
   }
 
   /**
-   * Whether the run produced a passkey enrolment link (memql#3408).
+   * Whether there is an owner account on this cluster to enrol against
+   * (memql#3408, memql#3906).
    *
-   * A boolean, not the link: the done screen only needs to know whether to
-   * offer the button, and the URL is a credential that has no business
-   * crossing into the webview.
+   * The done screen's question. It is durable -- an account does not expire
+   * between the run finishing and the operator clicking -- which is exactly
+   * what the link it replaced was not.
    */
-  get hasEnrolmentLink(): boolean {
-    return this.enrolmentLink !== "";
+  get canEnrol(): boolean {
+    return this.ownerAccountExists;
   }
 
-  /** The link itself, for the host-side opener only. */
-  get enrolmentUrl(): string {
-    return this.enrolmentLink;
-  }
-
-  setEnrolmentUrl(url: string): void {
-    this.enrolmentLink = url;
+  setOwnerAccountExists(exists: boolean): void {
+    this.ownerAccountExists = exists;
   }
 
   /** Whether the run recovered a magic link, so the cluster can be claimed. */
@@ -559,20 +562,23 @@ export class AddClusterState {
    *
    * The order is the operator's own dependency order, not a preference:
    *
-   *  - `enrol` when the cluster already has an owner and the run minted a
-   *    passkey link. Best outcome, and it means somebody has signed in before.
-   *  - `claim` when it did not, and a magic link was recovered. This IS the
-   *    fresh-install case: a cluster is claimed by its first sign-in, so no
-   *    passkey can exist yet and this is the only route in.
-   *  - `signIn` only when neither link is available -- a re-run against a
-   *    cluster whose owner exists and whose log window no longer holds a link.
-   *    Leading with it in the `claim` case is what sent an operator to
-   *    authenticate against an account that had never been created.
+   *  - `enrol` when the cluster HAS an owner account. That is every cluster
+   *    this installer builds -- `seedBootstrap` creates the owner from the
+   *    seeded values -- and the account holds no human credential, so an
+   *    enrolment link is the only route to a first one. It no longer depends on
+   *    the run having produced a link (memql#3906): the button mints its own.
+   *  - `claim` when it does NOT, and a magic link was recovered. This is the
+   *    hand-rolled case, a cluster brought up with no bootstrap env: nobody
+   *    owns it, so signing in once is what creates the account.
+   *  - `signIn` only when neither applies -- a re-run against a cluster whose
+   *    owner exists and whose log window no longer holds a link. Leading with
+   *    it in the `claim` case is what sent an operator to authenticate against
+   *    an account that had never been created.
    */
   get primaryHandoffAction(): "enrol" | "claim" | "signIn" | "none" {
     const handoff = this.handoffResult;
     if (handoff === undefined || !handoff.ok) return "none";
-    if (this.hasEnrolmentLink) return "enrol";
+    if (this.canEnrol) return "enrol";
     if (this.hasClaimLink) return "claim";
     return handoff.canSignIn ? "signIn" : "none";
   }
@@ -698,9 +704,11 @@ export class AddClusterState {
     this.didSucceed = false;
     // A second run must not show the first run's outcome while it is going.
     this.handoffResult = undefined;
-    // Nor the first run's enrolment link: it is single-use, so offering a
-    // spent one is worse than offering nothing.
-    this.enrolmentLink = "";
+    // Nor the first run's finding about the owner account: a repair that has
+    // not reached seedBootstrap yet has established nothing, and carrying the
+    // previous run's answer through would offer enrolment while the cluster is
+    // mid-rebuild.
+    this.ownerAccountExists = false;
     return true;
   }
 

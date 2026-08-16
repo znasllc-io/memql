@@ -60,7 +60,8 @@ import {
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
-import { entryActionFor, probeClaimState, setupUrl } from './clusters/claimState.js';
+import { probeClaimState, setupUrl } from './clusters/claimState.js';
+import { resolveOwnershipRoute } from './clusters/ownershipRoute.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
@@ -786,19 +787,41 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
-      // WHICH OF THREE STATES IS THIS CLUSTER IN (memql#3885). A cluster is
-      // claimed by its FIRST sign-in -- that sign-in is what creates the owner
-      // -- so offering sign-in to an unclaimed one asks the operator to
-      // authenticate against an account that does not exist. The browser flow
-      // times out and the device-code fallback cannot complete either.
+      // WHICH OF THREE STATES IS THIS CLUSTER IN (memql#3885, memql#3906).
       //
-      // The probe is RE-DERIVED at the moment of use rather than read from a
-      // stored flag: the operator may have claimed the cluster in a browser
-      // this extension never saw, and acting on a stale "unclaimed" would send
-      // them to a wizard that has since sealed. It fails toward sign-in, which
-      // is the previous behaviour, so a cluster it cannot read loses nothing.
-      const claimState = await probeClaimState(target.cluster.issuer, { fetch: globalThis.fetch });
-      if (entryActionFor(claimState) === 'claim') {
+      //   nobody owns it            -> /setup, which mints the first owner
+      //   owner exists, nothing
+      //     stored here             -> an enrolment link, the first passkey
+      //   credential in hand        -> sign in
+      //
+      // THE ORDER THESE ARE ASKED IN IS THE FIX. #3885 probed `/setup` first
+      // and mapped everything else to sign-in, which is right for a cluster
+      // this machine knows nothing about and wrong for every cluster this
+      // machine INSTALLED: `seedBootstrap` has already created the owner, so
+      // `/setup` is sealed (verified: 404), and sign-in cannot work either
+      // because that owner holds no human credential. Worse, the probe cannot
+      // even reach a local cluster -- Node's `fetch` does not trust the mkcert
+      // CA, so it throws `UNABLE_TO_VERIFY_LEAF_SIGNATURE` and every local
+      // cluster answers `unknown`.
+      //
+      // So local evidence -- the receipt's recorded owner, and whether a
+      // credential is stored -- is consulted first, and the network only for
+      // what it cannot settle. `claim` is then reachable only on a real 200.
+      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const route = await resolveOwnershipRoute(
+        {
+          local: target.cluster.local === true,
+          ownerRecorded: recordedOwner(receipt).email !== '',
+          credentialMissing: needsAuth(target.cluster),
+        },
+        // RE-DERIVED at the moment of use rather than read from a stored flag:
+        // the operator may have claimed the cluster in a browser this extension
+        // never saw, and acting on a stale "unclaimed" would send them to a
+        // wizard that has since sealed.
+        () => probeClaimState(target.cluster.issuer, { fetch: globalThis.fetch })
+      );
+
+      if (route === 'claim') {
         const wizard = setupUrl(target.cluster.issuer);
         const choice = await window.showInformationMessage(
           `memQL: "${displayLabel(target.cluster)}" has no owner yet. A cluster is claimed by its first sign-in, so there is no account to sign in to -- claim it first.`,
@@ -817,23 +840,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           return;
         }
       }
-      // CLAIMED, AND THIS OPERATOR STILL HOLDS NOTHING (znasllc-io#3905).
+
+      // THE STATE A LOCAL INSTALL ACTUALLY LEAVES BEHIND (znasllc-io#3905).
       //
-      // `entryActionFor` answers a question about the CLUSTER -- has anyone
-      // claimed it -- and that is the right question for the branch above. It is
-      // not the whole state space. A cluster whose owner account exists but who
-      // holds no human credential falls through here to sign-in, and sign-in
-      // cannot succeed: the account was created by `seedBootstrap` from seeded
-      // values and has no passkey and no magic-link identity, so there is
-      // nothing to authenticate WITH and no route in the editor to make one.
-      //
-      // That is the state a local install actually leaves behind, and it is the
-      // one an operator reads as "the plugin will not let me in". So when the
-      // cluster is one this machine installed and no credential is stored, the
-      // two routes are offered side by side. The plugin cannot know whether the
-      // operator already registered a passkey somewhere -- they can -- so it
-      // asks rather than guessing.
-      if (target.cluster.local === true && needsAuth(target.cluster)) {
+      // The owner account exists and has no passkey and no magic-link identity,
+      // so there is nothing to authenticate WITH. An operator reads that as
+      // "the plugin will not let me in". Both routes are offered rather than
+      // one chosen, because this side cannot know whether the operator already
+      // registered a passkey on another machine -- they may have -- so it asks.
+      if (route === 'enrol') {
         const choice = await window.showInformationMessage(
           `memQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
             'Enrol a passkey if this is your first time on this machine; sign in if you already have one.',
@@ -889,18 +904,47 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         return;
       }
       try {
-        // The same opener the install's done screen uses, so the link is
-        // validated (https, `/enroll?code=`) before a browser is pointed at it.
+        // The one place a minted link is validated (https, `/enroll?code=`)
+        // before a browser is pointed at it. Every route into ownership -- this
+        // command, the install's done screen, the Clusters tree -- arrives here.
         await openEnrolmentLink(url, {
           resolveExternalUri: async (u) => (await env.asExternalUri(Uri.parse(u))).toString(true),
           openExternal: async (u) => await env.openExternal(Uri.parse(u)),
         });
-        window.showInformationMessage(
-          'memQL: enrol the passkey in your browser, then sign in. The link is single-use and expires in 2 hours.'
-        );
       } catch (err) {
         const detail = err instanceof EnrolmentError ? err.message : String(err);
         window.showErrorMessage(`memQL: ${detail}`);
+        return;
+      }
+      // THE REST OF THE WALK, offered rather than assumed (memql#3906).
+      //
+      // Enrolling a passkey is a browser ceremony this side cannot observe --
+      // an OS prompt, a security key, a fingerprint -- so there is no event to
+      // wait on and no way to know when it finished. What the editor CAN do is
+      // leave the next step one click away instead of leaving the operator on a
+      // notification that congratulates them and stops.
+      //
+      // THE ORDER IS FORCED, not chosen. The portal authenticates like every
+      // other surface, so it cannot be the page that grants the first
+      // credential; sign-in cannot work until the passkey exists. Each step is
+      // therefore only offered once the one before it can succeed.
+      const enrolled = await window.showInformationMessage(
+        `memQL: finish enrolling the passkey in your browser, then sign in to "${displayLabel(target.cluster)}".`,
+        'Sign in'
+      );
+      if (enrolled !== 'Sign in') return;
+      const signedIn = await signInToCluster(target.cluster, {
+        clustersPath,
+        store: signInStore,
+        clustersTree,
+      });
+      if (!signedIn) return;
+      const next = await window.showInformationMessage(
+        `memQL: you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
+        'Open portal'
+      );
+      if (next === 'Open portal') {
+        await commands.executeCommand('memql.clusters.openPortal', target);
       }
     }),
     // The counterpart: forget this cluster's session. The store owns what that

@@ -915,33 +915,52 @@ function landed(canSignIn = true) {
   return s;
 }
 
-test("a fresh install leads with CLAIM, not sign-in", () => {
-  // THE REPORTED BUG. A cluster is claimed by its first sign-in, so on a fresh
-  // install `enrolmentLink` correctly mints nothing -- there is no account to
-  // enrol a passkey for yet -- and only the magic link exists. Leading with
-  // "Sign in as owner" sent the operator to authenticate against an account
-  // that had never been created; it timed out and fell back to a device code
-  // that could not complete either.
+test("a cluster with NO owner leads with CLAIM, not sign-in", () => {
+  // THE REPORTED BUG, and it is the hand-rolled case: a cluster brought up with
+  // no bootstrap env has no owner, so `enrolmentLink` correctly mints nothing
+  // and only the magic link exists. Leading with "Sign in as owner" sent the
+  // operator to authenticate against an account that had never been created; it
+  // timed out and fell back to a device code that could not complete either.
   const s = landed();
   s.setClaimUrl("https://identity.memql.localhost/auth/complete?ml=abc");
-  s.setEnrolmentUrl("");
+  s.setOwnerAccountExists(false);
   assert.equal(s.primaryHandoffAction, "claim");
 });
 
-test("a passkey link outranks a magic link when both exist", () => {
-  // Means somebody has already signed in, so the account exists and the better
-  // credential is available.
+test("an existing owner account outranks a magic link", () => {
+  // Which is every cluster the installer builds -- `seedBootstrap` creates the
+  // owner -- so this is the common path, not the exception. It no longer
+  // depends on the run having produced a LINK (memql#3906): the button mints
+  // its own, so a repair whose magicLink step reported `linkState=none` still
+  // leads with the route that works.
   const s = landed();
   s.setClaimUrl("https://identity.memql.localhost/auth/complete?ml=abc");
-  s.setEnrolmentUrl("https://identity.memql.localhost/enroll?code=mql_enr_x");
+  s.setOwnerAccountExists(true);
   assert.equal(s.primaryHandoffAction, "enrol");
 });
 
-test("sign-in leads only when there is no link of either kind", () => {
-  // A re-run against a claimed cluster whose log window no longer holds a link.
-  // Here sign-in is correct, and it is the ONLY case where it is.
+test("sign-in leads only when there is neither an owner nor a magic link", () => {
+  // A re-run whose enrolment step established nothing and whose log window no
+  // longer holds a link. Here sign-in is correct, and it is the ONLY case where
+  // it is.
   const s = landed();
   assert.equal(s.primaryHandoffAction, "signIn");
+});
+
+test("a second run does not carry the first run's owner finding", () => {
+  // A repair that has not reached seedBootstrap yet has established nothing,
+  // and offering enrolment mid-rebuild would point at a cluster that is down.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.localhost");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  s.setInput("providerKeyFile", "/home/ada/.anthropic-key");
+  s.setOwnerAccountExists(true);
+
+  assert.equal(s.beginRun(), true);
+  assert.equal(s.canEnrol, false);
 });
 
 test("no hand-off means no action to lead with", () => {
