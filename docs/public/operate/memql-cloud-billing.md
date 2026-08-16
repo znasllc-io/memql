@@ -191,8 +191,19 @@ Stated rather than implied.
   creating the matching Stripe objects is a manual step until a catalog-sync
   capability lands.
 - **The Stripe event → fleet row resolution is not wired.**
-  `claimStripeDelivery` stamps the delivery `processing` and stops. The reason
-  is worth stating precisely, because the obvious guess is wrong.
+  `claimStripeDelivery` stamps the delivery **`failed`, with the reason on the
+  row**, and stops.
+
+  `failed` rather than `processing` is deliberate: `processing` means "a product
+  automation has this in hand", so every Stripe delivery would sit there forever
+  and `inboundRequestsByStatus("processing")` would show a pile nothing was
+  working. **A status that claims a worker which does not exist is worse than no
+  handler at all — it is a backlog that reads as progress.** `failed` is
+  queryable, carries `lastError` naming the missing piece, and stays
+  re-drainable, since the engine never retries product-side handling itself.
+
+  The reason is worth stating precisely, because the obvious guess about it is
+  wrong.
 
   It is **not** the lookup. `subscriptionByStripeId` resolves a `sub_...` to a
   fleet row perfectly well — `@serverOnly` + `@unbounded` is exactly the shape an
