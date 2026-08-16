@@ -44,7 +44,20 @@ spec:
           image: mcr.microsoft.com/azure-storage/azurite:3.34.0
           imagePullPolicy: IfNotPresent
           # Start only the blob service; queue/table services not needed.
-          command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000"]
+          #
+          # --skipApiVersionCheck is REQUIRED for the database backups
+          # (memql#3846). Azurite refuses any request whose x-ms-version it
+          # does not recognise, and barman-cloud's Azure SDK sends a newer one
+          # than 3.34.0 knows:
+          #
+          #   ErrorCode: InvalidHeaderValue
+          #   The API version 2026-06-06 is not supported by Azurite.
+          #
+          # That reaches the operator as `ContinuousArchivingFailing` and an
+          # `exit status 2` in the WAL sidecar -- pointing at barman, not at
+          # the emulator. The flag is Azurite's own documented remedy, and it
+          # is a LOCAL-only concern: real Azure Blob accepts the version.
+          command: ["azurite-blob", "--blobHost", "0.0.0.0", "--blobPort", "10000", "--skipApiVersionCheck"]
           ports:
             - { name: blob, containerPort: 10000 }
           resources:

@@ -401,6 +401,64 @@ function check_secrets() {
 }
 
 #=============================================================================
+# DATABASE (CloudNativePG)
+#=============================================================================
+
+# check_database -- the database litmus (memql#3846).
+#
+# Reports the three things that can be independently wrong on a CNPG cluster and
+# that a pod listing does NOT distinguish:
+#
+#   1. the Cluster's own phase -- is Postgres serving, and which pod is primary;
+#   2. whether the declared EXTENSIONS applied. A Cluster reports Ready as soon
+#      as Postgres accepts connections, which happens BEFORE the Database CR
+#      reconciles timescaledb and vector. A cluster that is Ready with no
+#      timescaledb looks entirely healthy and fails the first create_hypertable;
+#   3. whether WAL archiving is working. This is the one that fails SILENTLY --
+#      the database serves traffic perfectly with no backups behind it, and the
+#      only place it shows is this condition.
+function check_database() {
+    section "Database litmus: CloudNativePG cluster health"
+
+    if ! kubectl get crd clusters.postgresql.cnpg.io &>/dev/null; then
+        echo "  (CNPG CRDs absent -- the operator stack is not installed)" >&2
+        return 0
+    fi
+    if ! kubectl get cluster memql-db -n "${NAMESPACE}" &>/dev/null; then
+        echo "  (no memql-db Cluster in namespace '${NAMESPACE}')" >&2
+        return 0
+    fi
+
+    local phase primary instances ready
+    phase="$(kubectl get cluster memql-db -n "${NAMESPACE}" -o jsonpath='{.status.phase}' 2>/dev/null)"
+    primary="$(kubectl get cluster memql-db -n "${NAMESPACE}" -o jsonpath='{.status.currentPrimary}' 2>/dev/null)"
+    instances="$(kubectl get cluster memql-db -n "${NAMESPACE}" -o jsonpath='{.status.instances}' 2>/dev/null)"
+    ready="$(kubectl get cluster memql-db -n "${NAMESPACE}" -o jsonpath='{.status.readyInstances}' 2>/dev/null)"
+    echo "  cluster:    memql-db -- ${ready:-0}/${instances:-0} ready, primary=${primary:-<none>}" >&2
+    echo "  phase:      ${phase:-<unknown>}" >&2
+
+    local applied
+    applied="$(kubectl get database memql-db-memql -n "${NAMESPACE}" -o jsonpath='{.status.applied}' 2>/dev/null)"
+    if [[ "$applied" == "true" ]]; then
+        local exts
+        exts="$(kubectl get database memql-db-memql -n "${NAMESPACE}" \
+            -o jsonpath='{range .status.extensions[*]}{.name}={.applied} {end}' 2>/dev/null)"
+        echo "  extensions: applied -- ${exts}" >&2
+    else
+        echo "  extensions: NOT APPLIED (a migration now would fail on a missing timescaledb)" >&2
+    fi
+
+    local archiving
+    archiving="$(kubectl get cluster memql-db -n "${NAMESPACE}" \
+        -o jsonpath='{range .status.conditions[?(@.type=="ContinuousArchiving")]}{.status}{end}' 2>/dev/null)"
+    case "$archiving" in
+        True)  echo "  archiving:  OK (WAL reaching the object store)" >&2 ;;
+        False) echo "  archiving:  FAILING -- the database is serving with no backups behind it" >&2 ;;
+        *)     echo "  archiving:  <no condition yet>" >&2 ;;
+    esac
+}
+
+#=============================================================================
 # ENTRY POINT
 #=============================================================================
 
@@ -416,6 +474,7 @@ function main() {
     check_argocd
     check_pods
     check_secrets
+    check_database
     check_node_ids
     check_identity_keysets
 

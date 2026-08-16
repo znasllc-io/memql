@@ -910,11 +910,23 @@ function seed_internal_ca() {
 
 function seed_db_creds() {
     info "seeding memql-local-db-creds (Postgres credentials for in-cluster DB)..."
+    # A kubernetes.io/basic-auth Secret, because that is the shape CNPG's
+    # `bootstrap.initdb.secret` reads (memql#3846). It replaced the
+    # POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB triple the retired
+    # `postgres` Deployment consumed as container env; nothing else read those
+    # keys, and the database name now lives in the Cluster CR's
+    # bootstrap.initdb.database rather than in a credential.
+    #
+    # This Secret and the DSN in memql-secrets are written from the SAME two
+    # variables a few lines below, which is what stops the database being
+    # created with one password and connected to with another -- a failure that
+    # presents as an authentication error against a database that just came up
+    # clean.
     kubectl create secret generic memql-local-db-creds \
         --namespace="$NAMESPACE" \
-        --from-literal="POSTGRES_USER=$LOCAL_DB_USER" \
-        --from-literal="POSTGRES_PASSWORD=$LOCAL_DB_PASSWORD" \
-        --from-literal="POSTGRES_DB=$LOCAL_DB_NAME" \
+        --type=kubernetes.io/basic-auth \
+        --from-literal="username=$LOCAL_DB_USER" \
+        --from-literal="password=$LOCAL_DB_PASSWORD" \
         --dry-run=client -o yaml \
         | kubectl apply -f - >&2
     SEEDED_COUNT=$((SEEDED_COUNT + 1))
@@ -957,10 +969,17 @@ function seed_memql_secrets() {
     signing_key="$RESOLVED_SIGNING_KEY_B64"
     signing_key_created_at="$RESOLVED_SIGNING_KEY_CREATED_AT"
     node_bootstrap_token="$RESOLVED_NODE_BOOTSTRAP_TOKEN"
-    # Database DSN: local in-cluster Postgres.
-    # The connection string uses 'disable' sslmode because the local Postgres
-    # container does not have TLS configured (dev only).
-    db_dsn="postgres://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@postgres:5432/${LOCAL_DB_NAME}?sslmode=disable"
+    # Database DSN: the local CloudNativePG cluster (memql#3846).
+    #
+    # `memql-db-rw` is the Service CNPG maintains pointing at the CURRENT
+    # PRIMARY -- it follows a failover, which is the whole reason to address the
+    # cluster by it rather than by a pod. There is a `-ro` sibling for replicas
+    # and a `-r` for any instance; the app uses `-rw` because it writes, and
+    # read-replica routing is deliberately out of scope (epic memql#3842).
+    #
+    # sslmode=disable: intra-cluster traffic to a database that terminates no
+    # TLS of its own. Unchanged from the Deployment this replaced.
+    db_dsn="postgres://${LOCAL_DB_USER}:${LOCAL_DB_PASSWORD}@memql-db-rw:5432/${LOCAL_DB_NAME}?sslmode=disable"
     # For local, the direct DSN is the same as the pooler DSN (no PgBouncer).
     db_direct_dsn="$db_dsn"
 

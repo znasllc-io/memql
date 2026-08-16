@@ -54,7 +54,7 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
-| Database | local Postgres + TimescaleDB (postgres pod) | Tiger Cloud | config only |
+| Database | CloudNativePG Cluster (`memql-db`), 1 instance, WAL + base backups to Azurite | Tiger Cloud | config only -- **same operator + manifests since memql#3846**; only instances/sizes/backup destination differ |
 | Connection pooler | not present locally (single db-pool pod, direct) | Tiger Cloud managed PgBouncer | config only |
 | Blob storage | Azurite emulator | Azure Blob | config only |
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
@@ -371,6 +371,95 @@ the two values a re-run must never silently rotate: `MEMQL_MASTER_KEY`
 minted mesh node token). Both are read back from the cluster and preserved.
 Use it if you've
 torn down and recreated the cluster, or if you've rotated the dev secret values.
+
+## Database: backups and a restore drill (local)
+
+The local database is a **CloudNativePG Cluster** (`memql-db`), not a bare
+`postgres` pod — the same operator, the same operand image and the same four
+resource kinds staging and production run, with smaller numbers in them
+(memql#3846). It archives WAL and takes base backups to the in-cluster
+**Azurite**, so the backup path is exercised locally rather than only in the
+cloud.
+
+```bash
+make status          # includes the database litmus: phase, extensions, archiving
+```
+
+The litmus reports three things a pod listing cannot distinguish:
+
+| Line | Why it is separate |
+|---|---|
+| `cluster:` / `phase:` | is Postgres serving, and which pod is primary |
+| `extensions:` | a Cluster reports **Ready** as soon as Postgres accepts connections — *before* the `Database` CR reconciles `timescaledb` and `vector`. A Ready cluster with no timescaledb looks healthy and fails the first `create_hypertable`. |
+| `archiving:` | the one that fails **silently** — the database serves traffic perfectly with no backups behind it |
+
+### Take a backup
+
+```bash
+kubectl apply -n memql -f - <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: { name: manual-backup }
+spec:
+  cluster: { name: memql-db }
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+    parameters: { barmanObjectName: memql-db-backup }
+YAML
+
+kubectl get backup manual-backup -n memql -w   # -> phase: completed
+```
+
+A nightly `ScheduledBackup` runs the same path unattended.
+
+### Restore into a scratch Cluster
+
+Recovery is a **new Cluster** bootstrapped from the object store — never an
+in-place operation on the running one:
+
+```bash
+kubectl apply -n memql -f - <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata: { name: memql-db-scratch }
+spec:
+  instances: 1
+  imageName: memql-db:16-dev
+  imagePullPolicy: IfNotPresent
+  enablePDB: false
+  postgresql:
+    shared_preload_libraries: [timescaledb]
+  storage: { size: 2Gi }
+  bootstrap:
+    recovery:
+      source: origin
+  externalClusters:
+    - name: origin
+      plugin:
+        name: barman-cloud.cloudnative-pg.io
+        parameters:
+          barmanObjectName: memql-db-backup
+          serverName: memql-db
+YAML
+
+kubectl wait --for=condition=Ready cluster/memql-db-scratch -n memql --timeout=480s
+kubectl exec -n memql memql-db-scratch-1 -c postgres -- \
+  psql -U postgres -d memql -c "SELECT count(*) FROM timescaledb_information.hypertables;"
+kubectl delete cluster memql-db-scratch -n memql       # tear the scratch copy down
+```
+
+Add `bootstrap.recovery.recoveryTarget.targetTime: "<RFC3339>"` to restore to a
+point in time rather than to the latest backup.
+
+> **Two local-only settings make this work, and both look like noise.** The
+> `ObjectStore`'s `destinationPath` is a full HTTP URL including the account
+> (`http://azurite:10000/devstoreaccount1/...`) rather than the `azure://`
+> form staging uses — barman rejects the scheme form against an emulator as
+> *"malformed"*. And the azurite Deployment passes `--skipApiVersionCheck`,
+> because Azurite refuses the `x-ms-version` barman's SDK sends. Without either
+> one there are simply no backups, and **the Cluster still reports Ready** —
+> which is why `TestLocalBackupsCanActuallyReachAzurite` asserts both.
 
 ## Tear down
 

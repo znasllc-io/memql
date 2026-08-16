@@ -91,8 +91,8 @@ need, then probe them:
 kubectl port-forward -n memql svc/identity 8085:8085 &
 curl -v http://localhost:8085/.well-known/jwks.json
 
-# Database (via the postgres port-forward; `make db` opens a psql shell)
-kubectl port-forward -n memql svc/postgres 5432:5432 &
+# Database (via the CNPG primary's -rw Service; `make db` opens a psql shell)
+kubectl port-forward -n memql svc/memql-db-rw 5432:5432 &
 psql postgres://memql:memql_dev@localhost:5432/memql -c "SELECT version();"
 ```
 
@@ -111,7 +111,7 @@ services are reached with a debugging port-forward:
 | **Identity service** | `svc/identity 8085:8085` | Magic-link auth, OAuth, JWKS, /admin, /pair/* -- debug only; the connection path is the `identity.memql.localhost` front door, not this |
 | **BFF (raw gRPC, debug)** | `svc/bff 50051:50051` | low-level gRPC access; the Cockpit connects via the `api.memql.localhost` front door, not this |
 | **MCP head** | `svc/mcp 50051:50051` | the MCP-protocol node (on demand) |
-| **PostgreSQL** | `svc/postgres 5432:5432` | `make db` opens a psql shell |
+| **PostgreSQL** | `svc/memql-db-rw 5432:5432` | `make db` opens a psql shell. `-rw` is the CloudNativePG Service that follows the current primary; `-ro` serves replicas |
 
 A downstream product's client SPA is not part of the engine overlay; it
 ships from its own repo. A product's bff is a plain engine node fronting
@@ -252,8 +252,9 @@ kubectl logs -n memql deploy/mcp -f                                  # check nod
 ### Database connection errors
 
 ```bash
-kubectl exec -n memql deploy/postgres -- pg_isready -U memql
-psql postgres://memql:memql_dev@localhost:5432/memql   # needs the postgres port-forward (make db)
+kubectl get cluster -n memql memql-db                  # CNPG cluster status + primary
+kubectl cnpg status -n memql memql-db                  # if the kubectl-cnpg plugin is installed
+psql postgres://memql:memql_dev@localhost:5432/memql   # needs the port-forward above (make db)
 ```
 
 ### Concepts not loading

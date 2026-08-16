@@ -1,0 +1,207 @@
+# The local database, on CloudNativePG (epic memql#3842, task memql#3846).
+#
+# Replaces the hand-rolled `postgres` Deployment + PVC + Service this overlay
+# used to carry. That Deployment was the ONE place the environment-parity
+# doctrine bent: local ran a single container with no backups, no WAL
+# archiving and no operator, while staging rented a managed service with a
+# different backup model, a different connection model and different tier
+# limits. "Parity" that skipped the database proved less than it looked like.
+#
+# Now local runs the SAME operator, the SAME operand image and the SAME four
+# resource kinds as staging and production. What differs is the numbers in
+# them -- one instance instead of two or three, 10Gi instead of 128Gi, Azurite
+# instead of Azure Blob. Values, not shape.
+#
+# IMAGE: memql-db:16-dev, built by `make db-image` and imported into k3d. The
+# local overlay intentionally uses a mutable tag (the digest-pin gate is
+# skipped for `local`, see scripts/deploy/drift-check.sh); staging and
+# production pin the same image by digest.
+#
+# THE TAG MUST START WITH THE POSTGRESQL MAJOR -- CNPG's webhook PARSES it to
+# derive the major version and refuses `memql-db:dev` outright with "invalid
+# version tag". That is why it reads `16-dev` rather than `dev`; the full
+# measured table is in deploy/db-image/README.md.
+#
+# It carries PostgreSQL 16 +
+# TimescaleDB Community + pgvector -- see deploy/db-image/README.md, including
+# why the previous TimescaleDB minor ships alongside the current one.
+#
+# CREDENTIALS: `memql-local-db-creds`, seeded by `make secrets`. CNPG reads it
+# as the initdb owner credential, and scripts/k3d/seed-secrets.sh writes the
+# SAME username/password into the DSN it puts in memql-secrets, so the two
+# cannot disagree.
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: memql-db
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  instances: 1
+  imageName: memql-db:16-dev
+  imagePullPolicy: IfNotPresent
+
+  # SINGLE INSTANCE MUST DISABLE THE PDB. CNPG's default PodDisruptionBudget
+  # permits zero disruptions when there is one instance, so any node drain --
+  # `kubectl drain`, a k3d node restart, an AKS node-pool upgrade -- blocks
+  # FOREVER on a pod nothing can safely evict, with no error that points here.
+  # Staging and production run 2-3 instances and leave it on.
+  enablePDB: false
+
+  postgresql:
+    # TimescaleDB is a preload library, not merely an extension: without this
+    # the CREATE EXTENSION below fails with a message that names the library
+    # rather than the cause.
+    shared_preload_libraries:
+      - timescaledb
+    parameters:
+      # OURS TO SET NOW. Tiger Cloud's per-tier connection ceiling (~59 usable
+      # slots) is what the connection-budget standard in
+      # docs/public/operate/db-connection-budget.md was written around, and what
+      # produced the 53300 storm. Self-hosting removes the ceiling; 200 is
+      # generous for a local mesh and still bounded.
+      max_connections: "200"
+
+  bootstrap:
+    initdb:
+      database: memql
+      owner: memql
+      # A basic-auth Secret (username/password), seeded by `make secrets`.
+      secret:
+        name: memql-local-db-creds
+
+  storage:
+    size: 10Gi
+  # A SEPARATE WAL VOLUME, even locally. It is one of the few things that has
+  # to be the same shape everywhere to be worth anything: WAL sharing a volume
+  # with data means a WAL-archiving stall fills the data disk and stops the
+  # database, which is the failure the staging/prod split exists to prevent. A
+  # local overlay that skipped it would be rehearsing a different topology.
+  walStorage:
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+
+  # Backups ride the Barman Cloud PLUGIN, not the deprecated in-tree
+  # `barmanObjectStore` stanza -- which is also why the operand image is built
+  # on CNPG's `standard` base rather than the `system` base that carries the
+  # in-tree binaries. See deploy/cnpg/README.md.
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: memql-db-backup
+
+---
+# The object store WAL segments and base backups land in.
+#
+# Azurite is the local Azure Blob emulator this overlay already runs, speaking
+# the real Blob protocol -- so the manifests here and in staging differ only in
+# the connection string and the container name, and the local backup path
+# exercises the same code the cloud one does rather than a stub.
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: memql-db-backup
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  configuration:
+    # AN EMULATOR DESTINATION IS SPELLED AS A FULL HTTP URL INCLUDING THE
+    # ACCOUNT, not as `azure://<container>/`. Against Azurite, barman rejects
+    # the scheme form outright:
+    #
+    #   ERROR: Barman cloud WAL archive check exception:
+    #          emulated storage URL azure://memql-db-backups/ is malformed
+    #
+    # which surfaces as `ContinuousArchivingFailing` on the Cluster and an
+    # `exit status 4` in the sidecar -- neither of which names the URL shape as
+    # the cause. Staging and production, talking to real Azure Blob, use the
+    # `azure://<container>/` form; this is the one line where local's VALUE
+    # differs in kind rather than degree, and it is a property of the emulator
+    # rather than of the environment.
+    destinationPath: "http://azurite:10000/devstoreaccount1/memql-db-backups"
+    azureCredentials:
+      # The same AZURE_BLOB_CONNECTION_STRING every node already reads, carrying
+      # Azurite's well-known dev account and its BlobEndpoint
+      # (http://azurite:10000/devstoreaccount1) -- which is what points barman
+      # at the emulator without a second endpoint setting to keep in step.
+      #
+      # barman CREATES the container on first archive, so nothing needs to
+      # pre-provision `memql-db-backups`.
+      connectionString:
+        name: memql-secrets
+        key: AZURE_BLOB_CONNECTION_STRING
+  # Local keeps a short window deliberately: it is a rehearsal of the mechanism,
+  # not an archive. Staging and production carry 30d.
+  retentionPolicy: "7d"
+
+---
+# Declarative extension management.
+#
+# The extensions are DECLARED here rather than created by a migration, which is
+# what makes the TimescaleDB upgrade choreography the operator's job: moving
+# `version` below is what runs ALTER EXTENSION, and it is deliberately the
+# SECOND of the two PRs an upgrade takes (the first moves the image, so every
+# instance is already running a binary that carries both the old and new
+# libraries). deploy/db-image/README.md has the full sequence.
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: memql-db-memql
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  cluster:
+    name: memql-db
+  name: memql
+  owner: memql
+  extensions:
+    # Pinned, and pinned to the CURRENT half of the image's pair. An unpinned
+    # extension would follow whatever the image happens to carry, which is the
+    # opposite of a choreographed upgrade.
+    - name: timescaledb
+      version: "2.29.1"
+      ensure: present
+    - name: vector
+      ensure: present
+
+---
+# A nightly base backup, so the local path exercises the same scheduled-backup
+# machinery staging runs rather than only the continuous WAL archiving.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: memql-db-nightly
+  namespace: memql
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+    memql/role: local-infra
+spec:
+  # Six fields: CNPG's schedule is a Go cron spec with a SECONDS field, unlike
+  # Kubernetes CronJob's five. A five-field spec here is not rejected -- it is
+  # interpreted, one field over, so a nightly backup silently becomes something
+  # else.
+  schedule: "0 0 3 * * *"
+  immediate: true
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+    parameters:
+      barmanObjectName: memql-db-backup
+  cluster:
+    name: memql-db
