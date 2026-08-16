@@ -22,7 +22,7 @@
 ## Quick Start
 
 ```bash
-# --- k3d + ArgoCD (NEW primary local run path, E0 / #2061) ---
+# --- k3d + ArgoCD (the local run path) ---
 # Prerequisites: docker, k3d, kubectl (brew install k3d kubectl)
 make up          # fresh bring-up: cluster + ArgoCD + secrets + images, wait healthy
 make dev         # inner-loop: rebuild images -> import -> restart pods
@@ -63,11 +63,14 @@ memQL/
 │   └── adapters.go    Engine adapter types
 ├── dsl/               Consolidated MemQL DSL tree (every .memql file),
 │   │                  flattened to per-namespace per-construct files
-│   ├── <namespace>/   One directory per namespace (agents, cluster,
-│   │   │              cognition, common, curriculum, data, identity,
-│   │   │              knowledge, memql, observability, planner,
-│   │   │              platform, policies, providers, router, safety,
-│   │   │              workbench, worker)
+│   ├── <namespace>/   One directory per namespace (actions, agents,
+│   │   │              authoring, calendar, campaigns, capabilities,
+│   │   │              cluster, cognition, common, data, deployment,
+│   │   │              forge, harness, healing, identity, install,
+│   │   │              integrations, knowledge, library, memql, notes,
+│   │   │              observability, planner, platform, policies,
+│   │   │              portalviews, providers, rbac, router, safety,
+│   │   │              telephony, todos, workbench, worker)
 │   │   ├── concepts.memql     Concept definitions (schemas)
 │   │   ├── mutations.memql    Mutation functions
 │   │   ├── queries.memql      Query functions
@@ -95,18 +98,19 @@ memQL/
 │   ├── bus/           Channel-based inter-component communication (Go)
 │   ├── config/        Centralized env var loading (Go)
 │   ├── node/          Distributed node system (identity, peer mesh, bootstrap)
-│   ├── memql/dslfs/   MEMQL_DSL_PATH on-disk override / embedded FS picker
 │   ├── architecture/  Auto-generated architecture model (UML/C4 from source)
 │   ├── observe/       Per-invocation observability runtime (FQN-keyed)
 │   ├── genesis/       Sealed env envelope + repo-root .env override (localenv.go)
-│   └── ...            (memql, grpc, events, database, server, auth, etc.)
+│   └── ...            (memql, grpc, events, database, server, auth, edge, etc.)
 ├── core/              Shared utilities (logger, env, id)
-├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate, admin-preview)
-├── scripts/           Database and migration scripts
-├── infra/             Infrastructure configuration
-│   └── cluster/       (legacy GCP configs removed; AKS manifests live in deploy/k8s/)
+│   └── dslfs/         MEMQL_DSL_PATH on-disk override / embedded FS picker
+├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate,
+│                      memqllint, frontdoorhosts, frontdoorpaths, admin-preview)
+├── deploy/k8s/        GitOps manifests: base + components + per-env overlays
+├── scripts/           Shell scripts (k3d bring-up, deploy, release, install,
+│                      migrations) + `lib/capability.sh`, the capability runtime
 ├── docs/              Documentation
-├── docker/            Full Docker stack + cluster mode
+├── docker/            Dockerfile + db init + nginx assets
 └── .claude/           Claude Code project state. This repo is PUBLIC, so
     │                   .gitignore ignores `.claude/*` and negates back only
     │                   what should travel with the project (memql#3344)
@@ -260,11 +264,7 @@ the engine images, pin those three digests, merge -> ArgoCD reconciles. See
 ## Branch Workflow
 
 memQL uses a single long-lived branch: `main`. Core engine, wire
-protocol, and product-specific DSL (concepts, queries, mutations,
-shapes, automations, tools, prompts under `dsl/cognition/concepts.memql`,
-`dsl/cognition/tools/`, etc.) all live here. A separate
-product-pack branch was retired on 2026-04-20 once the dual-branch
-overhead stopped paying for itself.
+protocol, and DSL all live here.
 
 **Rules of engagement:**
 
@@ -305,23 +305,10 @@ overhead stopped paying for itself.
    Worth stating because the failure is silent in a specific way: a
    watcher looking only for merged / failed / clean cannot see `DIRTY`
    at all, and its silence is indistinguishable from "still queued".
-
-   > This rule previously read "Commit directly to `main`", which had
-   > not been true since the ruleset landed. It survived because every
-   > change large enough to notice was already being branched; the
-   > first thing to actually hit it was a one-line commit somebody
-   > reasonably expected to push straight up.
-   >
-   > The `merge_queue` half was missing for the same shape of reason:
-   > the enumeration above named four of the ruleset's five members, and
-   > "merge" was written as though it were a thing you do rather than a
-   > queue you join. Nobody hit it while every merge was performed by
-   > whoever had just watched CI, one PR at a time.
 2. **Pre-release -- no backwards-compat shims or deprecation windows.**
-   When a contract changes, fix both memQL and the consumer (typically
-   the product pack/SPA) at once and delete what is no longer needed. Do not add
-   legacy adapters, fallback code paths, or "keep working while we
-   migrate" layers.
+   When a contract changes, fix both memQL and the consumer at once and
+   delete what is no longer needed. Do not add legacy adapters, fallback
+   code paths, or "keep working while we migrate" layers.
 3. **Stage files by explicit path** (`git add <file>`) -- never
    `git add -A` or `git add .`. The repo owner runs multiple Claude
    sessions against this working tree and untracked files from another
@@ -366,7 +353,7 @@ frontend coordination.
 - **Language:** Go 1.26.1+
 - **Database:** PostgreSQL 16 + TimescaleDB
 - **API:** gRPC (`MemqlService.Stream` is the primary surface) + HTTP for the documented exceptions (OAuth, health, file uploads, Polyphon room tokens) + WebSocket bridge to the gRPC stream for browsers (`/memql/ws`)
-- **AI:** Centralized provider system (OpenAI, Anthropic). All AI ops on gRPC; HTTP path retired.
+- **AI:** Centralized provider system (OpenAI, Anthropic). All AI ops on gRPC.
 - **Auth:** in-house identity service (magic-link + JWT, JWKS-published)
 - **Query Language:** MemQL DSL
 
@@ -383,48 +370,44 @@ different axis and carries its own field (`provider`):
 | **Local** | CloudNativePG in k3d | k3d + ArgoCD (`make up`) | `docker-local` |
 | **Cloud** | Tiger Cloud (Timescale Cloud) | Azure Kubernetes Service | `azure` |
 
+**Key Principle:** the local cluster is completely isolated from any cloud
+install's database -- they are separate installations, not environments of one.
+
 ### Hardware Requirements
-- **Platform:** macOS (Apple Silicon)
-- **Devices:** MacBook Pro or MacBook Air (M1/M2/M3 chips)
-- **Reason:** Standardized development environment
+Development is standardized on macOS / Apple Silicon.
 
 **Full tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
 ### System Architecture
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  HTTP/WebSocket API                 │
-│           (Nginx LB: 8080 / gRPC: 50050)           │
+│   Front door (TLS 443) -> bff gRPC :50051 (h2c)     │
+│                        -> bff-http :8085 (exceptions)│
 ├─────────────────────────────────────────────────────┤
-│                                                     │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐ │
-│  │   MemQL      │  │ Automations  │  │ Functions│ │
-│  │   Engine     │◄─┤   System     │◄─┤  System  │ │
-│  └──────┬───────┘  └──────────────┘  └──────────┘ │
-│         │                                          │
-│    ┌────┴────────┐ ┌──────────────┐               │
-│    │ AI Provider │ │ Integrations │ ┌──────────┐ │
-│    │  Registry   │ │ (Cognition,  │ │ NemoClaw │ │
-│    │(OpenAI,     │ │  Audio, etc) │ │ (Coding  │ │
-│    │ Anthropic)  │ └──────────────┘ │  Agent)  │ │
-│    │             │                   └──────────┘ │
-│    └────┬────────┘                                │
-│         │                                          │
-│    ┌────┴────────────────────┐  ┌──────────────┐ │
-│    │  AI gRPC Messages       │  │ MemQL Sense  │ │
-│    │  (MemqlService.Stream): │  │ (Language     │ │
-│    │  AiChatMsg, AiSpeechMsg,│  │  Intelligence)│ │
-│    │  AiTranscribeMsg,       │  │ Tokenize,     │ │
-│    │  AiSuggestMsg (space /  │  │ Complete,     │ │
-│    │  group / agent)         │  │ Diagnose,     │ │
-│    └─────────────────────────┘  │ Hover,        │ │
-│                                  │ Signature     │ │
-│                                  └──────────────┘ │
-│                                                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐   │
+│  │   MemQL      │  │ Automations  │  │ Functions│   │
+│  │   Engine     │◄─┤   System     │◄─┤  System  │   │
+│  └──────┬───────┘  └──────────────┘  └──────────┘   │
+│         │                                            │
+│    ┌────┴────────┐ ┌──────────────┐                  │
+│    │ AI Provider │ │ Integrations │                  │
+│    │  Registry   │ │ (Cognition,  │                  │
+│    │(OpenAI,     │ │  Audio, etc) │                  │
+│    │ Anthropic)  │ └──────────────┘                  │
+│    └────┬────────┘                                   │
+│         │                                            │
+│    ┌────┴────────────────────┐  ┌──────────────┐     │
+│    │  AI gRPC Messages       │  │ MemQL Sense  │     │
+│    │  (MemqlService.Stream): │  │ (Language    │     │
+│    │  AiChatMsg, AiSpeechMsg,│  │ Intelligence)│     │
+│    │  AiTranscribeMsg,       │  │ Tokenize,    │     │
+│    │  AiSuggestMsg (space /  │  │ Complete,    │     │
+│    │  group / agent)         │  │ Diagnose,    │     │
+│    └─────────────────────────┘  │ Hover, Sig.  │     │
+│                                 └──────────────┘     │
 ├─────────────────────────────────────────────────────┤
 │          PostgreSQL + TimescaleDB                   │
-│   (Partition-isolated time-series memory nodes)     │
-│   PK: (partition, id, createdAt)                    │
+│   (time-series memory nodes; PK: (id, createdAt))   │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -560,11 +543,9 @@ client; a release = `{engine version, bundle digest, client digest}`):
    DSL bundle (product)     +     client (SPA)      ← the only per-product artifacts
 ```
 
-The compile-time `RegisterTree` carrier model (a `<product>-carrier` Go repo
-building the mesh node images with the product DSL statically linked) is
-**superseded** by this. Genuinely-bespoke product Go (rare) becomes a thin
-optional `bff/` plugin module in the product repo. Full rationale + the
-migration sequence: [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
+Genuinely-bespoke product Go (rare) becomes a thin optional `bff/` plugin
+module in the product repo. Full rationale:
+[docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
 
 **Build tag reference:** [docs/public/build/build-tags.md](docs/public/build/build-tags.md)
 
@@ -606,8 +587,50 @@ excused. `development` / `local` stay outside that gate: they distinguish deploy
 TARGETS (k3d vs AKS), which the design keeps and which carries its own field,
 `provider` (`docker-local` | `azure`).
 
-**Local cluster (cloud parity -- THE blessed local topology, memql#2061 / Epic 0):** `make up` (k3d + ArgoCD + the local overlay at `deploy/k8s/overlays/local` + seeded secrets); `make dev [NODE=<type>]` rebuilds an image, imports it into k3d, and rolls the Deployment after Go/MemQL source edits; `make down` tears it down. The cluster mirrors the cloud along the **mesh-delivery path** (memql#1212) by running the same k8s manifests and ArgoCD reconciliation as AKS: scale to 2 replicas per mesh node (bff/cognition/voice/agent/planner/workbench/edge) with `make up SERVERS=2` + `make scale N=2`, each pod carrying a unique `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in the cloud. Clients (the Cockpit + SDKs) reach the cluster **exactly as in the cloud** -- through the `api.memql.localhost` traefik front door (TLS on 443 with the mkcert `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC to `svc/bff:50051`), the local analog of the cloud nginx ingress; `identity.memql.localhost` works the same way. The domain is a VALUE, not the shape of the system (memql#3593): `make up DOMAIN=lab.example.com` serves any domain the operator brings, seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap that every node derives its issuer, CORS origins and OAuth redirect URIs from at boot (`component/genesis/domain.go`), plus two `kustomize.patches` on the ArgoCD Application for the Ingress hostnames when it differs from the committed default. No file under `deploy/` names a domain. This is **env parity, non-negotiable** -- there is NO local-only port-forward in the connection path (the standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)). Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`, `svc/identity 8085`) remain for low-level debugging only -- the host-port mappings for identity (8085) and livekit (7880) were deleted in memql#3702: the first was a second entrance to a service the front door already serves, the second pointed at a Deployment this overlay removes. Engine-only overlays opt into one **product-agnostic `bff`** via the `deploy/k8s/components/engine-bff` component (the Cockpit / ops edge, no bundle, #2472 Decision 5) -- it is a component, NOT the base, so a product cluster that brings its OWN `bff-<product>` (same engine image + the `dsl-bundle` component mounting its bundle, plus its SPA) never collides with a base-shipped bff. Multiple bffs coexist in the one mesh. `make status` prints the per-pod node ids and checks that every identity replica publishes the same JWKS keyset (parity litmus -- divergent keysets fail ~half of all auth, memql#3400). Reach for the cluster whenever a change can touch cross-node delivery, replica fan-out, or node lifecycle. See the runbook: [docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
-**Previous Compose-based local stack -- RETIRED (memql#2068 / #2088):** the old cluster compose file, the single-node `full.yml`, and the `nemoclaw` overlay are fully removed. The k3d + ArgoCD cluster above is the only supported local run path; a single-node stack structurally cannot reproduce the resilient-mesh class of bugs.
+**Local cluster (cloud parity -- THE blessed local topology, memql#2061 /
+Epic 0).** `make up` brings up k3d + ArgoCD + the local overlay at
+`deploy/k8s/overlays/local` + seeded secrets; `make dev [NODE=<type>]`
+rebuilds an image, imports it into k3d, and rolls the Deployment after
+Go/MemQL source edits; `make down` tears it down. It is the ONLY supported
+local run path -- a single-node stack structurally cannot reproduce the
+resilient-mesh class of bugs. What makes it parity rather than a lookalike:
+
+- **Same manifests, same reconciliation as AKS** -- it mirrors the cloud
+  along the **mesh-delivery path** (memql#1212). Scale to 2 replicas per
+  mesh node (bff/cognition/voice/agent/planner/workbench/edge) with
+  `make up SERVERS=2` + `make scale N=2`; each pod carries a unique
+  `MEMQL_NODE_ID` via `fieldRef: metadata.name` exactly as in the cloud.
+- **Clients connect exactly as in the cloud.** The Cockpit and SDKs reach
+  the `api.memql.localhost` traefik front door (TLS on 443 with the mkcert
+  `*.memql.localhost` wildcard `memql-front-door-tls`, forwarding h2c gRPC
+  to `svc/bff:50051`) -- the local analog of the cloud nginx ingress.
+  `identity.memql.localhost` works the same way. This is **env parity,
+  non-negotiable**: there is NO local-only port-forward in the connection
+  path (the standard:
+  [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md)).
+  Raw kubectl port-forwards (postgres `:5432`, `svc/bff 50051`,
+  `svc/identity 8085`) remain for low-level debugging only.
+- **The domain is a VALUE, not the shape of the system** (memql#3593).
+  `make up DOMAIN=lab.example.com` serves any domain the operator brings,
+  seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap
+  that every node derives its issuer, CORS origins and OAuth redirect URIs
+  from at boot (`component/genesis/domain.go`), plus two
+  `kustomize.patches` on the ArgoCD Application for the Ingress hostnames
+  when it differs from the committed default. **No file under `deploy/`
+  names a domain.**
+- **The engine bff is a COMPONENT, not the base.** Engine-only overlays opt
+  into one product-agnostic `bff` via `deploy/k8s/components/engine-bff`
+  (the Cockpit / ops edge, no bundle, #2472 Decision 5), so a product
+  cluster bringing its OWN `bff-<product>` (same engine image + the
+  `dsl-bundle` component mounting its bundle, plus its SPA) never collides
+  with a base-shipped bff. Multiple bffs coexist in the one mesh.
+- **`make status` is the litmus.** Per-pod node ids, plus a check that
+  every identity replica publishes the same JWKS keyset -- divergent
+  keysets fail roughly half of all auth (memql#3400).
+
+Reach for the cluster whenever a change can touch cross-node delivery,
+replica fan-out, or node lifecycle. Runbook:
+[docs/public/operate/reproduce-the-cloud-locally.md](docs/public/operate/reproduce-the-cloud-locally.md).
 
 #### Client-tool relay (agent → browser, across nodes)
 
@@ -631,7 +654,7 @@ this via the graph event bus:
    `AgentForwarder.ForwardContinuation` so the agent's
    service-scoped waiter fires and the parked tool loop returns.
 
-Shipped; the relay lives in `integrations/cognition/client_tool_relay.go`. The product SPA mounts its consumer bridges (operator client-tool, relay, delegate-takeover) on its main page and rides the same protocol.
+The relay lives in `integrations/cognition/client_tool_relay.go`. A client SPA mounts its consumer bridges (operator client-tool, relay, delegate-takeover) on its main page and rides the same protocol.
 
 ### Component Bus (Channel-Based Communication)
 
@@ -650,7 +673,7 @@ symmetry with the distributed gRPC model.
                                                               Automations
 ```
 
-- **Protobuf messages** -- All inter-component messages defined in `component/bus/bus.proto` (27 types)
+- **Protobuf messages** -- All inter-component messages defined in `component/bus/bus.proto`
 - **ReplyTo pattern** -- Request-response over channels via embedded reply channel
 - **Default buffer** -- 64 items per channel, configurable via `ChannelConfig`
 - **Telemetry hooks** -- Channel fill-level, send/drop counters for future dynamic sizing
@@ -684,7 +707,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 
 | Category | Endpoints | Reason |
 |----------|-----------|--------|
-| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP |
+| **Auth (identity service)** | `/login`, `/auth/magic-link`, `/auth/complete`, `/auth/logout`, `/oauth/token`, `/auth/refresh`, `/.well-known/jwks.json`, `POST /auth/webauthn/register/{begin,finish}`, `POST /auth/webauthn/login/{begin,finish}`, `POST /device/code`, `GET+POST /device`, `GET /enroll` | OAuth 2.0 / magic-link flow requires HTTP redirects, browser form posts, and JWKS publishing. The four `/auth/webauthn/*` endpoints (register memql#3406, login memql#3407) are the same category: WebAuthn is a **browser API** -- the ceremony is `navigator.credentials.create()` / `.get()` running in the page, and the bytes it produces have to reach a server the browser can POST to. There is no gRPC form of "the user touched their security key". RP id derives from `MEMQL_IDENTITY_BASE_URL`, never from the request Host. The login pair is UNAUTHENTICATED by nature (it IS the authentication) and ends in the same OAuth auth code `/auth/complete` produces. The two `/device*` routes are the RFC 8628 device authorization grant (memql#3410): the RFC is **defined over HTTP** -- a device with no browser polls `/oauth/token`, and the human approves at a URL typed into a second device's browser. `/device` is a rendered page, so it is a browser-loads-its-own-UI case like identity's other web pages; `POST /device/code` is the grant's request half and belongs with `/oauth/token`, which it redeems against. `GET /enroll` (memql#3408) is a **page a person opens from a link** -- the one request shape that cannot be anything but HTTP, since it arrives before any application code exists to speak a protocol and exists precisely for someone holding no credential yet. Its single-use `mql_enr_` token is the authorization (`Authorization: Enrolment <token>` on the ceremony that follows, mirroring `/pair/redeem`); HTTPS required on issue AND redeem, per-IP rate-limited, every outcome audited with SourceIP |
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
@@ -781,10 +804,10 @@ gate. Do not hand-edit the block, and do not "simplify" the generator back to th
 three aggregates -- its package comment says why, at length, because both changes
 look like cleanups.
 
-### gRPC-Only Endpoints (HTTP Retired)
+### gRPC-Only Endpoints
 
-The legacy AI and Polyphon HTTP paths have been removed. Everything lives
-on `MemqlService.Stream` now; cross-node proxying rides `AiForwardRouter`.
+Everything below lives on `MemqlService.Stream`; cross-node proxying rides
+`AiForwardRouter`.
 
 | Category | gRPC Message Types | Handler |
 |----------|--------------------|---------|
@@ -949,8 +972,7 @@ creds is a guaranteed crash-loop). Export the creds and re-run
 (`deploy/k8s/base/livekit.yaml`) via ESO/Key Vault.
 
 `integrations/openai/` on the Go side also serves the `/memql/audio`
-WebSocket path for voice-first creation modals. The earlier Python voice-agent (LiveKit Agents 1.5)
-and the legacy Go Bridge Agent have both been retired.
+WebSocket path for voice-first creation modals.
 
 **Canonical voice catalog (`integrations/voice/voices.go`).** Every
 agent carries a canonical voice name (alto / soprano / tenor /
@@ -1062,7 +1084,7 @@ the agent used no trained sources, citations is an empty array.
   - Per-agent workspaces at `/workspaces/{agentId}/`
   - AI calls routed through memQL's centralized provider system
 - **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
-- **Development:** the standalone nemoclaw overlay was retired (memql#1311); a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
+- **Development:** a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
 - **Cloud:** runs as a sidecar container alongside the agent node on AKS
 - **Agent capability:** `claw` flag on agent concept enables coding tools
 - **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
@@ -1071,20 +1093,17 @@ the agent used no trained sources, citations is an empty array.
 
 The "workers" feature lets agents drive the user's own machine
 via a tool surface: shell exec, filesystem, HTTP fetch, and (under
-the computer-use build) mouse + keyboard + screenshot. All seven phases of
-the implementation plan have shipped (see
-[docs/public/operate/workers-runbook.md](docs/public/operate/workers-runbook.md)); the plan
-document itself is gone per the no-stale-docs convention.
+the computer-use build) mouse + keyboard + screenshot. Runbook:
+[docs/public/operate/workers-runbook.md](docs/public/operate/workers-runbook.md).
 
-The legacy umbrella slug `computer_use` was split into two
-mode-specific slugs on 2026-05-17 so the headless slice (shell /
-fs / http on the user's machine) and the embodied slice (computer-use on
-the user's machine) can be granted independently. Authorization
-(scope grants, kill switch, knowledge domain) stays unified --
-both modes act on the user's machine, so the consent is one
-decision. See `component/memql/operator_caps.go` for the slug
-expansion map. The sandboxed first-choice surface for headless
-work is the Workbench, documented in the next section.
+The capability is split into two mode-specific slugs so the headless
+slice (shell / fs / http) and the embodied slice (mouse / keyboard /
+screenshot) can be granted independently. Authorization (scope grants,
+kill switch, knowledge domain) stays unified -- both modes act on the
+user's machine, so the consent is one decision. See
+`component/memql/operator_caps.go` for the slug expansion map. The
+sandboxed first-choice surface for headless work is the Workbench,
+documented in the next section.
 
 - **Agent capabilities (split slugs):**
   - `computer_use_headless` -- expands to `workerHost` + the
@@ -1115,7 +1134,7 @@ work is the Workbench, documented in the next section.
 - **Per-user routing:** every worker is owned by exactly one
   v1:identity:user; agents in that user's sessions are the only
   callers admitted by the registry.
-- **Permission model (Q9):** three layers checked BEFORE dispatch
+- **Permission model:** three layers checked BEFORE dispatch
   -- agent capability flag, standing scope on
   `v1:agents:agentAuthorization.computerUseScope` (observe /
   interact / full), per-Plan kill switch on
@@ -1151,9 +1170,8 @@ is the FALLBACK for headless work the workbench cannot do
 computer).
 
 See [docs/public/operate/workbench-runbook.md](docs/public/operate/workbench-runbook.md) for the
-MVP test path and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-production.md)
-for the cluster-mode deployment plan (deferred until
-production cutover).
+test path and [docs/internal/ops/workbench-production.md](docs/internal/ops/workbench-production.md)
+for the cluster-mode deployment detail.
 
 - **Agent capability:** `workbench_use` slug. Universal --
   injected into every role's `lockedToolSlugs` so newly-created
@@ -1162,9 +1180,9 @@ production cutover).
   directory tree.
 - **Tools:** `workbenchHost` (discriminated by `action`: exec /
   fs_read / fs_write / fs_list / fs_stat / http_fetch). Lives in
-  the pack's tools file; the wire path goes through the
-  `workbenchDispatchHost` builtin in `dsl/workbench/builtins.memql`
-  to `integration.workbench.dispatchHost`.
+  a product DSL bundle (`MEMQL_DSL_PATH`), not the engine tree; the wire
+  path goes through the `workbenchDispatchHost` builtin in
+  `dsl/workbench/builtins.memql` to `integration.workbench.dispatchHost`.
 - **Per-Plan workspace:** filesystem state lives under
   `MEMQL_WORKBENCH_ROOT/{planId}/` (default
   `/var/lib/memql/workbenches/`). Lazy-provisioned on first call.
@@ -1174,33 +1192,26 @@ production cutover).
   `workbenchTeardownDirectory` builtin.
 - **Concept:** `v1:workbench:workspace` -- per-Plan row carrying
   status (provisioned / released), storageRoot, lifecycle
-  timestamps. Defined in `dsl/workbench/concepts.memql`. The
-  current MVP integration does not write the concept row from Go
-  (lifecycle tracking is in-process + on-disk); the cross-node
-  version exercises it.
+  timestamps. Defined in `dsl/workbench/concepts.memql`.
 - **Modes:**
-  - **Single-node (MVP, default):** the agent node runs the
-    workbench integration in-process. Workspaces live on the agent
-    container's disk. Toggle: `MEMQL_WORKBENCH_REMOTE` unset or
-    falsy.
-  - **Cluster mode (future production):** a dedicated `workbench`
-    node-type binary (`make workbench`) hosts the workspaces.
-    Agent nodes route via `NodeService.Stream`
-    (`WorkbenchForwardRequest` / `WorkbenchForwardResponse`).
-    Toggle: `MEMQL_WORKBENCH_REMOTE=1` on agent nodes +
-    `MEMQL_WORKER_PEERS=workbench=<addr>` for the dialer. See
-    `docs/internal/ops/workbench-production.md`.
-    **The remote flag is an ASSERTION, not a preference (memql#3506):**
-    with it set and no reachable workbench peer, a workbench call is
-    REFUSED (`no_workbench_peer`) rather than run on the agent's own
-    disk. It used to degrade silently, which is why memql#3450 -- the
-    peer seed being dropped at parse time, so every call ran on the
-    agent pod -- was invisible for its whole life. The old behaviour
-    survives as its own opt-in, `MEMQL_WORKBENCH_LOCAL_FALLBACK=1`, so
-    "run this remotely" and "run it here if you must" are spelled
-    differently.
-- **Routing preference:** the agent's prompt template
-  (the pack's agent-reply template) and the workbench
+  - **Cluster mode (the deployed default).** A dedicated `workbench`
+    node-type binary (`make workbench`, `deploy/k8s/base/workbench.yaml`)
+    hosts the workspaces; agent nodes route via `NodeService.Stream`
+    (`WorkbenchForwardRequest` / `WorkbenchForwardResponse`). Base sets
+    `MEMQL_WORKBENCH_REMOTE=1` on the agent; the dialer needs
+    `MEMQL_WORKER_PEERS=workbench=<addr>`.
+    **The remote flag is an ASSERTION, not a preference:** with it set
+    and no reachable workbench peer, a workbench call is REFUSED
+    (`no_workbench_peer`) rather than run on the agent's own disk. It
+    used to degrade silently, which is how a dropped peer seed -- every
+    call running on the agent pod -- stayed invisible for its whole life.
+  - **In-process fallback.** `MEMQL_WORKBENCH_REMOTE` unset or falsy runs
+    the integration on the agent node itself, with workspaces on that
+    container's disk. Under the remote flag the same behaviour is its own
+    explicit opt-in, `MEMQL_WORKBENCH_LOCAL_FALLBACK=1`, so "run this
+    remotely" and "run it here if you must" are spelled differently.
+- **Routing preference:** the agent's reply template
+  (`dsl/cognition/prompts/cognitionReply.tmpl`) and the workbench
   knowledge domain (5 chunks in
   `integrations/knowledge/seed.go`) instruct the agent to prefer
   workbench over computer-use whenever both are available, and
@@ -1276,18 +1287,16 @@ node-type binary (`make identity`) and owns:
 - A public web UI (`/login`, `/auth/complete`, `/setup`,
   `/legal/*`, `/me/*`).
 - What remains of the admin web app at `/admin/*`: the sign-in pages,
-  and an `/admin/` root that answers `410 Gone`. Six screens moved into
-  the memQL portal (memql#3324) along with their writes, whose
-  owner/admin gate now lives in `component/identity/adminops` and
-  rides `IdentityAdminMsg` on `MemqlService.Stream`. Deployments
-  followed in memql#3380: `DeployControlService` still shells out
-  against an on-disk overlay checkout and so exists only on the identity
-  node, but a bff now FORWARDS the deploy RPCs here over
-  `NodeService.Stream` (`DeployControlForwardRequest` / `Response`),
-  carrying the caller as a verified `ForwardedAuthority` so the
-  owner-only rollback gate runs against the originating human rather
-  than the relaying node. The forward's two halves live in
-  `component/grpc/deploy_control_forward.go`.
+  and an `/admin/` root that answers `410 Gone`. The admin screens live
+  in the memQL portal; their owner/admin gate is
+  `component/identity/adminops`, riding `IdentityAdminMsg` on
+  `MemqlService.Stream`. `DeployControlService` shells out against an
+  on-disk overlay checkout and so exists only on the identity node, but
+  a bff FORWARDS the deploy RPCs here over `NodeService.Stream`
+  (`DeployControlForwardRequest` / `Response`), carrying the caller as a
+  verified `ForwardedAuthority` so the owner-only rollback gate runs
+  against the originating human rather than the relaying node
+  (`component/grpc/deploy_control_forward.go`).
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 
@@ -1345,14 +1354,11 @@ The DSL tree is **flattened per construct**: every namespace gets one
 directory under `dsl/<namespace>/`, and within it each construct kind
 is consolidated into a single `<construct>s.memql` file (e.g.
 `dsl/cognition/queries.memql`, `dsl/identity/concepts.memql`,
-`dsl/providers/providers.memql`). This replaces the older
-per-construct + per-namespace nested skeleton (the retired
-`dsl/<version>/<type>/<version>/<namespace>/...` tree). The flattened tree is produced
+`dsl/providers/providers.memql`). The flattened tree is produced
 by the [`scripts/restructure-by-construct`](scripts/restructure-by-construct/main.go)
 regenerator. Authoring reference skeletons live under
 `dsl/_reference/` (`_concept`, `_shape`, `_spec`, `_trait`, `_agent`).
-The per-type Go packages still expose embedded FS variables, but
-loaders read through `Source()`, which routes through
+Loaders read through `Source()`, which routes through
 [`core/dslfs`](core/dslfs/dslfs.go).
 
 ### `MEMQL_DSL_PATH` — runtime product-DSL delivery
@@ -1451,9 +1457,8 @@ How the DSL constructs lean on each other. Each layer can only depend
   `@actor` (engine envelope, no signature concept). Trait shapes are
   `@row` shapes signature-bound to a generic trait concept —
   scaffolds for cross-concept predicates (`activeRowTrait`,
-  `statusRowTrait`, etc.). The legacy `@concepts(...)` binding
-  annotation is retired. Shapes can `include` other shapes for
-  composition + aliasing.
+  `statusRowTrait`, etc.). Shapes have no composition verb -- to share
+  a projection, repeat the paths or take the default projection.
 - **Specs** are atomic boolean predicates. A spec **binds one shape XOR
   concept in its signature** (`spec <boundName> <name>`) and the body
   `return`s a boolean over bare field names. The binding picks the eval
@@ -1472,12 +1477,9 @@ How the DSL constructs lean on each other. Each layer can only depend
 - **Providers** are AI vendor + model + auth records; **prompts**
   pin a default provider and pull rendered templates over it.
 - **Queries** stitch concept + filter (specs) + projection (shapes)
-  + args into a typed read. Phase B 2026-05: the struct form
+  + args into a typed read. The struct form
   `query NAME { concept ... filter ... shape ... }` is the only
-  author-facing shape. (The author-side `func (Query)` form is
-  retired and rejected at parse time; `func (Receiver)` survives
-  only as the internal rewriter target authors never write -- see
-  "Procedural form (internal only)" below.)
+  author-facing shape.
 - **Automations** are event-triggered side-effects. They consume
   the layers above them and never the other way around.
 - **Tools** are the AI-facing surface of queries + mutations +
@@ -1485,10 +1487,8 @@ How the DSL constructs lean on each other. Each layer can only depend
   forwards.
 - **Policies** are empty-bodied AI provider-selection records
   (`@primary` / `@fallback` / `@maxLatencyMs` / `@preferredRole`),
-  consumed by the AI Router to resolve a provider chain. (The
-  retired decision-policy tier — caller-based authz / feature-gating
-  decisions — is gone, #984; use **specs** as bare filter conjuncts for
-  caller-context boolean checks.)
+  consumed by the AI Router to resolve a provider chain. Caller-based
+  authz / feature-gating decisions are **specs**, not policies.
 
 **Construct files live under `dsl/<namespace>/<construct>s.memql`**
 (concepts, specs, shapes, mutations, queries, builtins, providers,
@@ -1506,8 +1506,7 @@ surface entirely.
 
 | Construct kind | Where args go |
 |---|---|
-| Struct query / mutation | `args { ... }` sub-block inside the body |
-| Procedural func / automation / policy | File-top `args { ... }` block above the `func (...)` |
+| Query / mutation / logic / automation | `args { ... }` sub-block inside the body |
 | Builtin / tool / prompt | Body fields directly — the body IS the schema |
 
 `args { ... }` field syntax: `<name> <type> [@required] [@enum("a", "b", ...)] [@maxLength(N)] [@pattern("re")]`. Omitting
@@ -1520,7 +1519,7 @@ at load (memql#3336, #991).
 | Name pattern | Source | Available in |
 |---|---|---|
 | `args.X` | Caller-passed arg declared in `args { ... }` | every body |
-| `actor.X` | Resolved auth context (`userId`, `role`, `identityId`, `isClusterOwner`, `partitions`) | every body |
+| `actor.X` | Resolved auth context (`userId`, `role`, `identityId`, `isClusterOwner`, `primaryEmail`, `now`) | every body |
 | `now` | RFC3339 timestamp captured at eval start | every body |
 | `partition` | Active partition for this call | every body |
 | `config.X` | Allow-listed config (`component/config/policy_exposable.go`) | every body |
@@ -1535,11 +1534,6 @@ args block binds nothing. The triggering **event** rides its own `event`
 envelope (`event.topic` / `event.kind` / `event.payload.<field>`), which a
 step conventionally forwards to logic as `logic name ( event )`; the logic
 declares `event` in its args block and reads `args.event.payload.<field>`.
-
-> This paragraph used to say the triggering event was bound as `args`, so
-> that `args.topic` / `args.payload.<field>` read the event. That has not
-> been true since memql#2352 moved the payload into the declared contract,
-> and it is now load-refused (memql#3626) rather than silently nil.
 
 **Declared and used, in both directions.** An `args` field declared but
 never referenced is refused at load, and (memql#3626) so is an `args.X`
@@ -1560,24 +1554,28 @@ repeated argument name (`m(a: 1, a: 2)`) is refused for the same reason
 a repeated annotation argument is — the map collapses last-wins, so the
 value a reader sees is not the value the engine uses.
 
-**Procedural form (internal only).** The struct-form rewriter
-expands every author-side block to a `func (Receiver) NAME(ctx any)
-(any, error) { return <expr>, nil }` shape for the engine's parser.
-The `ctx` parameter name is a placeholder identifier only -- the
-body references `args.X` directly (the parser recognises both
-`args.X` and `ctx.X` and resolves them to the same caller-arg AST
-node). Authors should never write the procedural shape directly --
-use the struct form (`query NAME { args { ... } filter ... shape
-... }`, `logic NAME { args { ... } body { ... return <expr> } }`,
-etc.).
+**Retired author-side forms (all rejected at parse time).** Every
+construct is authored in the struct form. These shapes are gone and the
+parser refuses them with a migration hint — do not write them, and do
+not "restore" them when you see one in an old diff:
 
-**Receivers exempt entirely:**
-- **Specs** keep their `bool` return — they compile into SQL filter
-  predicates (row-specs) or evaluate in-process against caller fields
-  (context-specs). No ctx envelope, no return wrapping.
-- **Declarative receivers** (Tool / Prompt / Provider / Shape /
-  Builtin) have no procedural body — they are schema declarations
-  consumed by the engine. No ctx envelope.
+- `func (Query|Mutation|Spec|Tool|Prompt|Provider|Builtin) NAME(ctx any)`
+  — receiver-function wrapping. (`func (Receiver)` survives only as the
+  internal rewriter target the engine's parser consumes; authors never
+  write it, and `ctx` in it is a placeholder identifier — bodies
+  reference `args.X`.)
+- The `@use*` annotation family (`@useConcept`, `@useShape`, `@useQuery`,
+  `@useMutation`, `@useLogic`, `@useBuiltin`, ...) — replaced by file-top
+  `use` imports.
+- `@concepts(...)` / `@shape("name")` bindings — replaced by the
+  two-identifier construct signature.
+- `@input { ... }` — the prompt body IS the field list.
+- `include` in a shape body.
+- `;`-AND / `,`-OR filter separators, `has`, and the `?.` optional-chain
+  prefix.
+
+Only `dsl/_reference/*.memql` still shows these, deliberately, as
+don't-do-this skeletons.
 
 ## Policies
 
@@ -1595,29 +1593,12 @@ live constructs.
 policy balancedChat { }
 ```
 
-**Decision-policy tier — RETIRED (#984).** The cross-cutting
-decision model (`func (Policy) { @tier / @audited / @traces_persisted
-... if policy(...){} if spec(...){} }`, `engine.EvaluatePolicy`,
-core/bff tiering) was documented + wired but carried **zero live
-constructs** across the entire tree, so it has been retired. Auth /
-feature-gating / vendor decisions live in Go (`component/safety`
-ships the #231 risk×scope decision matrix) and in **specs** — use
-a bare spec conjunct for caller-based boolean checks (admin / owner /
-permission), which run as in-process context-specs and compile to
-SQL or evaluate against the auth envelope.
-
-> Cleanup status: fully removed. The dead tooling (`make
-> policies-lint` / `policies-trace` + `scripts/policies/`) went in the
-> first pass; the Go machinery, gRPC handler, proto messages, and TS
-> SDK helper went in the second (#984 Phase 2). The shared expression-
-> evaluation helpers the live spec evaluator depended on were lifted
-> into `component/memql/expression_evaluator.go`; `policy_evaluator.go`
-> / `policy_function_loader.go` / the `EvaluatePolicy` RPC handler /
-> the `EvaluatePolicyMsg` + `EvaluatePolicyResult` proto messages (oneof
-> 70 / 110, now `reserved`) / the TS `evaluatePolicy` helper are gone.
-> Verified end-to-end: zero `func (Policy)` constructs in the tree and
-> zero `EvaluatePolicy` callers across the product SPA, the bff, cockpit, and
-> the SDK.
+**There is no decision-policy tier.** Auth / feature-gating / vendor
+decisions live in Go (`component/safety` ships the risk×scope decision
+matrix) and in **specs** — use a bare spec conjunct for caller-based
+boolean checks (admin / owner / permission), which run as in-process
+context-specs or compile to SQL. Do not reach for `policy` for these;
+`engine.EvaluatePolicy` and `func (Policy)` do not exist.
 
 ## Key Concepts
 
@@ -1706,20 +1687,15 @@ A time-driven automation uses the `schedule` kwarg instead:
 
 ### Functions
 Reusable query and mutation functions. Both use the struct form --
-it is the only author-facing shape. The author-side procedural
-`func (Query|Mutation) NAME(ctx any) (any, error)` form is retired
-and rejected at parse time; the `func (Receiver)` shape survives
-only as the internal rewriter target (see "Procedural form
-(internal only)" above) that authors never write by hand.
+it is the only author-facing shape (see "Retired author-side forms"
+above).
 
-**Concept binding lives in the construct signature** (locked in
-2026-05 via the import-model pivot; PR #47 / #48 / #49). The
+**Concept binding lives in the construct signature.** The
 two-identifier signature `query <Concept> <name>`,
 `mutate <Concept> <name>`, `seed <Concept> <name>`, and
 `shape <Concept> <name>` names the bound concept directly; the
 loader resolves the concept name through the file's file-top
-imports. The legacy per-construct `@useConcept(<name>)` annotation
-is retired and rejected at parse time.
+imports.
 
 **Cross-file dependencies go through file-top `use` imports.** Every
 construct another file pulls into local scope (shapes, traits,
@@ -1734,15 +1710,11 @@ use common.traits.{ isActiveRecord, isNotDeleted }
 
 The dotted path maps to a file on disk (`cognition.concepts` →
 `dsl/cognition/concepts.memql`); the brace-list names the
-constructs imported into local scope. The legacy `@use*`
-annotation family (`@useConcept`, `@useShape`, `@useQuery`,
-`@useMutation`, `@useLogic`, `@useBuiltin`, etc.) is retired and
-rejected at parse time with a migration-pointing error.
+constructs imported into local scope.
 
 The bound concept's payload is referenced from filter clauses by the
-**bare property name** (epic #2292 — the concept is bound by the
-signature, so `` is removed) and from mutation bodies via the
-bare `insert { ... }` / `update { ... }` block without re-stating the
+**bare property name**, and from mutation bodies via the bare
+`insert { ... }` / `update { ... }` block without re-stating the
 concept id.
 
 **Canonical filter-clause syntax** (enforced at LOAD time by
@@ -1760,74 +1732,59 @@ concept id.
 > failing a fleet's boot over a convention would be worse than the drift.
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
-  `<field>` (removed, epic #2292) and never `<conceptName>.<field>`
+  `<conceptName>.<field>`.
 - Row intrinsics: the **`row.` namespace** — `row.id`, `row.concept`,
   `row.type`, `row.createdAt`, `row.createdBy`, `row.provenance.<leaf>`.
-  The bare spelling is retired (memql#2779) and rejected by
-  `TestFilterIntrinsicsUseRowNamespace`. A filter mixes two field
-  surfaces under one syntax — payload properties are bare, so a bare
-  `id` was indistinguishable from a payload property while compiling to
-  entirely different SQL (a table column vs a JSONB path). `row.` names
-  the envelope explicitly, matching `actor.X` / `args.X` / `config.X`
-  and the shape bodies that have always projected `row.id`.
-  A spec/trait body reads its signature-bound fields bare and rejects
-  `row.*` (epic #2281), and mutation `insert`/`update` blocks write
-  `id:` as a target key, not a reference.
-- Sort keys take the same namespace — `sort "row.createdAt", "desc"`.
-  The bare spelling is retired in authored `.memql` (memql#2786) and
-  rejected by `TestSortKeysUseRowNamespace`; `sort "id"` was
-  indistinguishable from a payload property named `id` while compiling
-  to a different ORDER BY. Payload sort keys stay bare
-  (`sort "version", "desc"`), `provenance` has no sort form, and the
-  runtime/SDK sort surface still accepts either spelling.
-- **One Go boolean grammar** (operator standardization #971): `&&`
-  (AND), `||` (OR), `!` (NOT), parens `( )` with Go precedence
-  (`!` > comparisons > `&&` > `||`). The legacy `;`-AND and `,`-OR
-  separators are retired in authored filters and rejected by the
-  conformance test (`TestNoRetiredOperatorForms`).
+  A filter mixes two field surfaces under one syntax, and payload
+  properties are bare, so a bare `id` is indistinguishable from a
+  payload property while compiling to entirely different SQL (a table
+  column vs a JSONB path). Enforced by
+  `TestFilterIntrinsicsUseRowNamespace`. A spec/trait body reads its
+  signature-bound fields bare and REJECTS `row.*`; mutation
+  `insert`/`update` blocks write `id:` as a target key, not a reference.
+- Sort keys take the same namespace — `sort "row.createdAt", "desc"`,
+  for the same reason (`TestSortKeysUseRowNamespace`). Payload sort keys
+  stay bare (`sort "version", "desc"`), `provenance` has no sort form,
+  and the runtime/SDK sort surface accepts either spelling.
+- **One Go boolean grammar:** `&&` (AND), `||` (OR), `!` (NOT), parens
+  `( )` with Go precedence (`!` > comparisons > `&&` > `||`).
 - Membership is the single `in` operator: `args.x in list`
-  or `kind in ["a", "b"]` (payload props bare). `has` (its reverse) is retired.
+  or `kind in ["a", "b"]` (payload props bare).
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
   if `args.x` is absent the guarded block AND its connective are
-  dropped as if never written (unambiguous under `||`). The `?.`
-  optional-chain prefix it replaces is retired.
+  dropped as if never written (unambiguous under `||`).
 - When a trait spec covers the predicate (e.g. `isActiveRecord`
   for `active==true`), the trait is mandatory. Inline
   `active==true` / `deleted==false` are rejected
   by the conformance test.
 
-**Argument resolution.** Caller-passed args declared in the
-`args { ... }` block are referenced as `args.X` in the body. The
-`ctx` envelope is gone from the author surface — no `ctx.input.X`,
-no `ctx.X` shorthand. Engine-provided values (`now`, `actor.X`,
-`partition`, `config.X`) are bare top-level names; an arg whose
-name collides with one of those is rejected at load time.
+**Argument resolution** follows the rules in the "Argument resolution"
+section above: `args.X` for caller-passed args, bare `now` / `actor.X` /
+`partition` / `config.X` for engine-provided values, no `ctx`.
 
 **Annotations** in the args block:
 - `@required` — non-optional
 - `@enum("a", "b", "c")` — restricts to a value set
 - `@maxLength(N)`, `@pattern("re")`
-- `@description` is **not** valid on an args field (it was parsed and then
-  discarded — there was never an AST slot for it; rejected at load,
-  memql#3336). An arg description is the `///` doc comment on the line above
-  the field, which is the channel the corpus uses and the LSP reads. A
-  `tool` / `prompt` / `builtin` field keeps its `@description` — those bodies
-  ARE the schema and retain it.
-- `@default` is **not** valid on an args field (it was never applied —
-  rejected at load, #991). Apply a default in the body with the `??`
-  operator (`args.X ?? <default>`). A concept-field `@default` is NOT a
-  substitute — it is never applied on insert either
-  (memql#2960), so `??` is the only mechanism that fills a value. `a ?? b ?? c`
-  folds to exactly what `coalesce(a, b, c)` produces; the shorthand is
-  the authored form and `test/dslconformance/no_coalesce_longhand_test.go` gates the
-  corpus on it (`memqlmigrate --rewrite=null-coalesce` converts).
-  **`??` is BLANK-coalescing, not null-coalescing** (memql#3627): it falls
-  through on an empty OR WHITESPACE-ONLY string as well as on absent/null,
-  so a caller who deliberately clears a text field gets the default written
-  back. `false` / `0` / `[]` / `{}` are kept. Deliberate (#1614) and now
-  specified in [authoring-rules.md §28](docs/public/language/authoring-rules.md);
-  `@noUnset` (memql#3415) is the targeted opt-out for a field a blank must
-  not overwrite.
+- `@description` is **not** valid on an args field (rejected at load). An
+  arg description is the `///` doc comment on the line above the field.
+  A `tool` / `prompt` / `builtin` field DOES keep its `@description` —
+  those bodies ARE the schema.
+- `@default` is **not** valid on an args field (rejected at load). Apply
+  a default in the body with the `??` operator (`args.X ?? <default>`).
+  A concept-field `@default` is NOT a substitute — it is never applied
+  on insert either, so `??` is the only mechanism that fills a value.
+  `a ?? b ?? c` folds to what `coalesce(a, b, c)` produces; the
+  shorthand is the authored form and
+  `test/dslconformance/no_coalesce_longhand_test.go` gates the corpus on
+  it (`memqlmigrate --rewrite=null-coalesce` converts).
+  **`??` is BLANK-coalescing, not null-coalescing:** it falls through on
+  an empty OR WHITESPACE-ONLY string as well as on absent/null, so a
+  caller who deliberately clears a text field gets the default written
+  back. `false` / `0` / `[]` / `{}` are kept. Deliberate, and specified
+  in [authoring-rules.md §28](docs/public/language/authoring-rules.md);
+  `@noUnset` is the targeted opt-out for a field a blank must not
+  overwrite.
 
 Queries:
 ```memql
@@ -1919,9 +1876,6 @@ prompt agentReply {
   spaceContext  object
 }
 ```
-Two legacy forms are retired (both rejected at parse time):
-- `func (Prompt) name(ctx any) { ... }` — receiver-function wrapping.
-- `@input { ... }` — body-level wrapper around the field list.
 
 ### Providers
 AI provider configurations (OpenAI, Anthropic -- the only supported
@@ -1949,8 +1903,6 @@ provider openai {
   }
 }
 ```
-The legacy `func (Provider) name { ... }` form is retired; the
-parser rejects it with a migration hint.
 
 **Lifecycle annotations (`@enabled` / `@disabled`).** Providers accept
 the same lifecycle flags as functions / builtins / prompts / specs /
@@ -1995,8 +1947,7 @@ segment.
 **Row shapes** project a concept's payload + row intrinsics. The bound
 concept is named by the **signature** `shape <Concept> <name>` (the
 short-name resolves through the file-top `use ...concepts.{ ... }`
-import); the legacy `@concepts("v1:...")` binding annotation is retired
-and rejected at load:
+import):
 ```memql
 use cognition.concepts.{ space }
 
@@ -2012,12 +1963,10 @@ shape space spaceCard {
 
 **Actor shapes** project the engine envelope (the authenticated
 actor + engine timestamp). They carry no signature concept. Closed
-field set, enforced at load since memql#3621 and identical to the one
-canonical envelope (#2623): `actor.userId` / `actor.role` /
+field set, enforced at load: `actor.userId` / `actor.role` /
 `actor.identityId` / `actor.isClusterOwner` / `actor.primaryEmail` /
-`actor.now` (plus the legacy `actor.isOwner` alias).
-`actor.config.<key>` is retired -- bare `config.<key>` is the config
-read, and shapes do not project it.
+`actor.now`. Bare `config.<key>` is the config read; shapes do not
+project it.
 ```memql
 @description("Actor identity envelope")
 @actor
@@ -2045,18 +1994,12 @@ shape space ownedSpace {
 }
 ```
 
-**No composition.** `include` is NOT a shape verb -- it was documented
-here for a long time and never existed (memql#3621). The parser reads a
-body as a path list, so `include spaceCard` parsed as two payload
-properties (`include`, `spaceCard`) and projected two always-null keys;
-there was no cycle or collision detection because there was no feature.
-Zero shapes in the tree used it, so the promise was removed rather than
-built, and `include` is now REJECTED at load with a message that says
-so. To share a projection, repeat the paths -- or drop the body entirely
-and take the default projection over the bound concept (memql#2035),
-which is the direction the tree is moving anyway.
+**No composition.** `include` is NOT a shape verb and is REJECTED at
+load. To share a projection, repeat the paths -- or drop the body
+entirely and take the default projection over the bound concept, which
+is the direction the tree is moving anyway.
 
-**Every body path is checked at load** (memql#3621): a bare payload
+**Every body path is checked at load**: a bare payload
 property must be a declared field of the bound concept, the bound
 concept must resolve (an ambiguous bare name disambiguates through the
 shape's own domain), two paths may not collapse onto the same terminal
@@ -2081,10 +2024,9 @@ picks the evaluation strategy:
   actor-based checks like "is admin," "owns partition," etc.
 
 A spec body never reads `actor.*` / `row.*` directly (bind a shape that
-projects it and read the projected key bare). The `@shape("name")`
-annotation is **removed** — the binding moved to the signature. A
-`trait` is the one deliberately-unbound row predicate (bare payload
-fields, validated at the call site).
+projects it and read the projected key bare). A `trait` is the one
+deliberately-unbound row predicate (bare payload fields, validated at
+the call site).
 
 ```memql
 use cognition.concepts.{ participant }
@@ -2110,16 +2052,12 @@ trait isActiveRecord {
 }
 ```
 A spec/trait body is a single `return <boolean expression>` over bare
-field names (epic #2281); there is no `ctx` envelope and no parameter.
-Both the legacy `func (Spec) name(ctx any) bool { ... }` receiver form
-and the older bare-expression body (no `return`) are retired and
-rejected at parse time.
+field names; there is no `ctx` envelope and no parameter. A
+bare-expression body with no `return` is rejected at parse time.
 
-**Caller-context checks use specs, not policies.** The decision-policy
-tier that once hosted caller-based boolean predicates is retired
-(#984). Author the predicate as a context-spec in
-`dsl/<namespace>/specs.memql` and name it as a bare conjunct; the live
-`policy` construct is provider-selection only.
+**Caller-context checks use specs, not policies.** Author the predicate
+as a context-spec in `dsl/<namespace>/specs.memql` and name it as a bare
+conjunct; the `policy` construct is provider-selection only.
 
 ### Tools
 AI-callable tool definitions — struct form, mirrors how concepts +
@@ -2135,37 +2073,26 @@ tool searchUsers {
   limit   integer  @default("10") @description("Max results to return")
 }
 ```
-The legacy `func (Tool)` form is retired; the parser rejects it
-with a migration hint.
 
-**A tool declaration is CHECKED (memql#3625).** Until that issue a tool was
-the one construct nothing validated: `ValidateTool` existed and was correct,
-but its only caller was `registerFunctionTools` — which validates the tools
-the engine GENERATES from functions — so an authored `.memql` tool went
-parse -> convert -> registry untouched and was advertised to the model
-whatever state it was in. Four gates now close that:
+**A tool declaration is CHECKED at load.** Four gates, all fail-loud —
+nothing here degrades silently:
 
 - **`@handler` argument names are closed** (`type`, `name`, `query`, `url`,
-  `method`) and `type` is required. A typo used to be DROPPED, not refused:
-  `nmae=` left the function name empty, and `tipe=` dropped the whole handler.
-  `@rateLimit` is closed the same way, and a non-integer value is refused
-  rather than discarded.
+  `method`) and `type` is required. `@rateLimit` is closed the same way,
+  and a non-integer value is refused.
 - **The handler is validated at load** — unknown type, missing function name /
   query / URL — and a tool must carry a handler at all unless it is
   `@clientExecution` (whose body lives in the browser).
 - **The handler's TARGET is resolved** against the function + builtin
-  registry at boot (`tool_handler_resolution.go`). A handler naming a function
-  that does not exist, or a query calling a renamed construct, is a load
-  problem the strict-boot gate refuses — not a mid-turn failure the first time
-  a model calls the tool. A builtin is reached through
-  `@handler(type="function", name="<builtin>")`; there is no `"builtin"`
-  handler type.
-- **Field types and field annotations are closed sets.** An unknown type used
-  to be emitted as `"string"` — not a permissive degrade but a confidently
-  wrong one, since the model is told "string", the `@default` is coerced to a
-  string, and the value reaches a `@required integer` handler argument as
-  `"10"`. An unknown annotation (`@enums` for `@enum`) was discarded, so the
-  constraint the author wrote was never enforced.
+  registry at boot (`tool_handler_resolution.go`), so a handler naming a
+  function that does not exist is a load problem strict boot refuses, not a
+  mid-turn failure the first time a model calls the tool. A builtin is
+  reached through `@handler(type="function", name="<builtin>")`; there is no
+  `"builtin"` handler type.
+- **Field types and field annotations are closed sets.** An unknown type is
+  refused rather than emitted as `"string"` (which would tell the model
+  "string", coerce the `@default` to a string, and hand a `@required
+  integer` handler argument `"10"`).
 
 ### Integration Capabilities
 Go-backed operations callable from the DSL via
@@ -2184,8 +2111,6 @@ builtin cognitionScore {
   utterance      string  @required
 }
 ```
-The legacy `func (Builtin) name { ... }` form is retired; the
-parser rejects it with a migration hint.
 
 Available integrations (core, registered via the plug-in system):
 auth, database, email, embedding, files, gcs (as `storage`), identity,
@@ -2213,17 +2138,13 @@ Three ways to extend memQL, in preference order:
 
 Event routing is also plug-in-registerable: `node.RegisterRoutingRule(...)`
 declares forwarding patterns from `init()`, and build tags on the caller
-decide which binaries include the registration (see the product pack's
-routing registration file for an example). Forwarding is default-deny --
+decide which binaries include the registration. Forwarding is default-deny --
 block rules evaluate first, then forward rules, and an event matching
 neither stays local.
 
-There is no concept-ownership registry. `node.RegisterConceptOwnership`
-existed once and was deleted with `component/node/query_proxy.go` in
-`ac3a751e` ("simplify: drop per-node @visibility filtering +
-concept-ownership routing", 2026-05-16). Which node does a concept's work is now decided by routing
-rules plus which binary's build tags compile the subscriber -- there is
-no per-concept dispatch table to register into.
+**There is no concept-ownership registry.** Which node does a concept's
+work is decided by routing rules plus which binary's build tags compile
+the subscriber -- there is no per-concept dispatch table to register into.
 
 ### MemQL Sense (Language Intelligence)
 Language service for .memql files, exposed via gRPC on `MemqlService.Stream`:
@@ -2237,26 +2158,29 @@ Package: `component/memql/sense/` -- pure Go, no gRPC dependency. gRPC handlers 
 
 ### Platform Concepts
 Platform-level metadata (dsl/platform/concepts.memql)
-- `v1:platform:partition` -- Data isolation boundary (standard, dedicated, personal)
+- `v1:platform:site` -- a hosted web surface; the edge node resolves the request `Host` header to one of these rows and serves its `bundleRef`
+- `v1:platform:globalSecret` / `globalVariable` -- cluster-scoped config storage
+- `v1:platform:outboundRequest` / `inboundRequest` -- request bookkeeping
+- `v1:platform:missingCapability` -- capability gaps recorded at runtime
 
 ### Cluster Concepts
 Distributed node system metadata (dsl/cluster/concepts.memql)
 - `v1:cluster:node` -- Registered node in the cluster
 - `v1:cluster:nodeType` -- Node type definition (bff, voice, cognition, agent, planner). Optional `codeReference` field links this row to its architecture-model service id (consumed by the cockpit's Topology drill-down).
-- `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions (legacy name)
+- `v1:cluster:spawnEvent` -- Lifecycle event for node state transitions
 - `v1:cluster:deployment` -- Append-only deployment record (one timeline per deploymentId; status pending -> in_progress -> succeeded|failed; superseded/rolled_back). The deploy-as-a-pack source of truth for a deploy (#1872)
 - `v1:cluster:deploymentNodeSpec` -- Per-node-type spec child of a deployment (Epic 2 / #2094): one append-only timeline per (deploymentId, nodeType) carrying version + replicas + imageDigest. Engine-as-spine: empty `version` resolves against the deployment's engine version; non-empty pins the node type. Read a deployment's full per-node set via `nodeSpecsForDeployment`
 - `v1:cluster:cluster`, `v1:cluster:database`, `v1:cluster:identityProvider` -- topology bookkeeping
 
 ### Observability Concepts
-Runtime side of the architecture framework (dsl/observability/; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation).
+Runtime side of the architecture framework (dsl/observability/; infrastructure metadata every node loads).
 See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-generated-diagrams.md) for the full design.
 - `v1:observability:codeProfile` -- live per-FQN verbosity override. CDC events feed the observe runtime's in-process cache via `CodeProfileSubscriber`.
 - `v1:observability:invocation` -- per-call records backed by the `code_invocation` TimescaleDB hypertable.
 - `v1:observability:codeMetric` -- per-(FQN, window) aggregates backed by the `code_invocation_1m` / `_1h` continuous aggregates. Drives the cockpit Topology overlay (n / p95 / err% per node).
 
 ### Identity Concepts
-Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads. `@scope` was retired in #56 -- these no longer carry a scope annotation)
+Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads)
 - `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
 - `v1:identity:authSession` -- per-token session record (used for revocation)
@@ -2275,22 +2199,6 @@ Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata eve
 - `v1:identity:delegation` -- agent acting through a user's identity (bounded role/scope/lifetime)
 
 See [docs/public/operate/auth/access-model.md](docs/public/operate/auth/access-model.md) for the full model.
-
----
-
-## Deploy targets
-
-memQL ships ONE installation shape (epic memql#3943). A second environment is a
-second install, with its own domain, its own ArgoCD and its own database. What
-varies within one install is the deploy TARGET:
-
-| Target | Database | Application | Provider |
-|--------|----------|-------------|----------|
-| **Local** | CloudNativePG in k3d | k3d + ArgoCD (`make up`) | `docker-local` |
-| **Cloud** | Tiger Cloud (Timescale) | Azure Kubernetes Service | `azure` |
-
-**Key Principle:** the local cluster is completely isolated from any cloud
-install's database -- they are separate installations, not environments of one.
 
 ---
 
@@ -2338,7 +2246,7 @@ partition checks). The memQL WS bridge accepts the token as
 `?guest_token=<token>` since browsers cannot set custom headers on
 the WebSocket upgrade.
 
-Shipped. Key files:
+Key files:
 - `dsl/identity/concepts.memql` -- the identity-owned `invitation` schema.
 - `dsl/identity/queries.memql` -- `invitationByTokenHash` + `invitationById`.
 - `dsl/identity/shapes.memql` -- the `invitationFull` shape.
@@ -2420,11 +2328,10 @@ Not built: an automated warming ramp (needs reputation telemetry that does
 not exist) and a scheduler for `scheduledAt`. Runbook:
 [docs/public/operate/campaign-sending.md](docs/public/operate/campaign-sending.md).
 
-### Planner / Knowledge / Validation (v1)
+### Planner / Knowledge / Validation
 
-Full schema surface for the brainstorm-locked v1 design. The
-backing implementation ships incrementally; the schema is stable
-so new features add fields/automations without migrations.
+The schema is stable, so new features add fields/automations without
+migrations.
 
 **Concepts**:
 
@@ -2433,184 +2340,76 @@ so new features add fields/automations without migrations.
   / running / paused / awaitingFeedback / needsAgent / succeeded
   / failed / cancelled), goal, ownerAgentId, requestedBy,
   triggerSource, recommendationCardId, input / output,
-  refinementContext, phases[] (Q3 outline+per-phase),
-  estimate (Q5), tokenBudget / tokenSpent / tokenAllocatedToChildren
-  / tokenCapDisabled (Q6), metrics (Q7), pause + feedback +
-  chat-anchor bookkeeping.
+  refinementContext, phases[], estimate, tokenBudget / tokenSpent /
+  tokenAllocatedToChildren / tokenCapDisabled, metrics, pause +
+  feedback + chat-anchor bookkeeping.
 - `v1:planner:task` -- one executable step inside a Plan, never
   recursive. Carries phase tag, executionSurface (inProcess /
-  containerExecutor) + executorBackend (Q13), metrics, parking
-  fields.
-- `v1:agents:agentAuthorization` -- standing authorization
-  per Q4 tiered-trust model.
+  containerExecutor) + executorBackend, metrics, parking fields.
+- `v1:agents:agentAuthorization` -- standing tiered-trust authorization.
 - `v1:planner:taskState` -- persisted Task working state for
-  async parking + planner re-invocation (Q18).
+  async parking + planner re-invocation.
 - `v1:knowledge:document` -- container/manifest for analyzed user
-  files (Q8). Owns attached-domain list, validation rollup,
+  files. Owns attached-domain list, validation rollup,
   supersession back-pointers, lazy-embedding status.
 - `v1:knowledge:spreadsheetRow`, `v1:knowledge:imageRegion` --
-  typed per-format item concepts (Q8). Native column predicates
+  typed per-format item concepts. Native column predicates
   for spreadsheet rows; bbox + caption + embedding for images.
 - `v1:knowledge:validationEvent` -- append-only audit log for
-  every validation transition (Q15).
+  every validation transition.
 - `v1:knowledge:domainEntitySchema` -- per-domain entity schema
-  for cross-file dedup (Q17). Inferred on second-Document
-  trigger; user-confirmed once.
+  for cross-file dedup. Inferred on second-Document trigger;
+  user-confirmed once.
 - `v1:knowledge:entityIndex` -- the dedup lookup table keyed by
-  sha256(normalized key field values) (Q17/Q26). Force-add escape
+  sha256(normalized key field values). Force-add escape
   valve for entity-schema misfires.
 
-Plus expanded existing concepts: `v1:common:knowledgeDomain`
-gains scope (workspace + private per Q21) + ownerId;
-`v1:common:documentChunk` gains documentId + validationStatus.
+`v1:common:knowledgeDomain` carries scope (workspace / private) +
+ownerId; `v1:common:documentChunk` carries documentId +
+validationStatus.
 
-**Frontend surfaces** (in the product SPA):
+**Analysis path.** The attachment HTTP handler creates the queued Plan +
+`plan.created` card synchronously, then runs extract + summarize +
+`CompleteAnalyzePlan` on a detached goroutine with a background context, so
+the user gets instant acknowledgement and the `plan.completed` card lands
+when the work finishes (`runAnalysisAsync` in
+`component/server/attachment_handler.go`). A heuristic estimate is stamped
+on `Plan.estimate` at creation time so the card's estimate strip renders
+immediately; `historicalPlanMetrics` backs the blending logic.
+`cascadeSupersession` + `cascadeValidationToItems` propagate
+Document-level validation transitions to predecessors and per-row items.
 
-- Right-panel views: `?panel=knowledge` (KnowledgeListPanel),
-  `?panel=tasks` (TasksListPanel). Header nav has 5 tiles now:
-  Spaces / Agents / Knowledge / Tasks / Settings.
-- Canvas card variants: `plan.created`, `plan.completed`
-  (with Validate / Reject / Attach-to-domain / Refine actions),
-  `plan.needsAgent` (with [Create X agent] / [Assign to ▾]),
-  `plan.awaitingFeedback` (with per-kind response widgets).
-- Knowledge page: two-column layout, single-step create-domain
-  flow with workspace/private scope picker, drag-onto-row file
-  upload, attached-Document list per selected domain.
+**Planner Agent loop.** The planner-node-owned decompose loop
+(`integrations/planner/agent_loop.go`) invokes the `plannerAgent` prompt
+on a new userGoal Plan; the prompt emits a structured decision (decompose
+/ dispatchTask / createSpecialist / markPlanSucceeded / escalate) and the
+loop dispatches it, re-invoking until terminal.
 
-**Wiring path (v0.x synchronous)**: HTTP attachment upload ->
-existing TextExtractor + AISummarizer -> `EnginePlanStore.
-CreateAndCompleteAnalyzePlan` chains:
-  1. createPlan (queued)
-  2. mutationCreateCanvasState (plan.created card)
-  3. createTask (queued)
-  4. updatePlanStatus + updateTaskStatus to
-     running, then succeeded with output payloads
-  5. mutationCreateDocument (the v1:knowledge:document container)
-  6. mutationCreateCanvasState (plan.completed card with
-     documentId so the card actions target the right row)
+**The cost-safety structure around that loop is the part to respect.**
+It is defense in depth and every layer is load-bearing:
 
-Refinement child Plans (kind='refineAnalysis') spawned by the
-front-end Refine action are picked up by the
-`handleRefinementPlan` automation (triggers on
-graph.node.created.*.v1:planner:plan filtered by
-kind=='refineAnalysis'); the automation drives the child
-Plan through queued -> running -> succeeded and emits its own
-plan.completed card. v0.x acknowledges feedback as the result;
-LLM-backed re-analysis ships with the async planner integration.
+- A hard process-wide LLM rate ceiling and an identical-request circuit
+  breaker at the provider HTTP chokepoint (`component/memql/ai_guard.go`).
+- A CUMULATIVE per-plan token/call budget checked before every
+  `plannerAgent` call, persisted so it survives cycles and retries; on
+  exceed the Plan parks rather than making another call
+  (`component/planner/budget.go`, `integrations/planner/agent_loop_budget.go`).
+- Complexity triage that routes a trivial deliverable to ONE cheap path
+  instead of the decompose loop; model tiering that defaults to a cheap
+  tier and escalates only on an explicit stuck signal.
+- An up-front token estimate + user-approval gate that parks an expensive
+  plan before it spends, gated specialist creation/training, phased
+  execution with per-phase checkpoints, deterministic-first result
+  verification, and a no-task-`markPlanSucceeded` convergence guard.
 
-**Now shipped (subsequent-rounds work landed)**:
-
-- **Async planner activation** -- the attachment HTTP handler
-  creates the queued Plan + plan.created card synchronously, then
-  launches a detached goroutine that runs extract + summarize +
-  CompleteAnalyzePlan with a background context. User sees instant
-  acknowledgement; plan.completed card lands when work finishes.
-  See `runAnalysisAsync` in `component/server/attachment_handler.go`.
-
-- **Estimation system** -- heuristic estimate computed at Plan
-  creation time (`heuristicEstimateAnalyzeFile` in plan_store.go)
-  and stamped on `Plan.estimate` so the canvas card's estimate
-  strip renders immediately. LLM-backed estimate via the
-  `planEstimate` prompt template ships when the planner integration
-  consumes it. Historical bucket query
-  `historicalPlanMetrics` backs the blending logic.
-
-- **LLM-backed refinement** -- the `refineAnalysis` prompt
-  + handleRefinementPlan automation rewritten to call
-  `si("refineAnalysis", ...)` against the parent's output.
-
-- **Validation cascade** -- cascadeSupersession + cascadeValidationToItems
-  automations propagate Document-level validation transitions to
-  predecessor + per-row items.
-
-- **Feedback timeout auto-pause** -- cron */5min cron automation
-  scanning awaitingFeedback Plans whose timeoutAt has passed.
-
-- **needsAgent re-route** -- triggers on agent creation with
-  originatingPlanId set.
-
-- **Chat completion subordinate line + auto-collapse** --
-  ChatPlanCompletionLine front-end component mounted in ChatPanel.
-
-- **Per-item validation drawer for spreadsheets** --
-  SpreadsheetItemDrawer wired into PlanCompletedCard's "Review
-  individual rows…" toggle.
-
-- **Pause / Resume / Cancel** -- Tasks-page row controls wired
-  to updatePlanStatus.
-
-- **Container-executor registry** -- `component/planner/executor.go`
-  ships the `RegisterContainerExecutor` / `LookupContainerExecutor`
-  pattern. NemoClaw + future homegrown variants register at
-  init() time; the planner picks the backend via Task.executorBackend.
-
-- **Token-budget enforcement** -- `component/planner/budget.go`
-  ships the pre-call `CheckCall` helper. It is wired into the Planner
-  Agent decompose loop (`integrations/planner/agent_loop_budget.go`,
-  memql#819): before every `plannerAgent` call the loop checks a
-  CUMULATIVE per-plan ceiling (`Plan.metrics.llmCallCount` + token
-  budget, persisted so it survives across cycles/retries) and parks the
-  Plan on exceed rather than making another LLM call. The 75%/90%
-  soft-warning canvas cards remain the Go side's responsibility -- the
-  original `tokenBudgetSoftWarning` automation was deleted because
-  computing `spent / budget` needed arithmetic the MemQL parser did not
-  support at the time. In-memory arithmetic (`+ - * / %`) in logic /
-  collection-lambda bodies has since landed (#2316), so that computation
-  is now expressible if the soft-warning automation is reintroduced.
-  NOTE: a deeper goal-resolution restructure (cost-aware
-  routing, model tiering, up-front token estimate + user-approval
-  threshold) is tracked in epic memql#836 -- the current cap bounds
-  spend but does not make a trivial request cheap.
-
-- **Cognition plan-triage prompt** --
-  `dsl/cognition/prompts/cognitionPlanTriage.tmpl` (schema in
-  `dsl/cognition/prompts.memql`) ships the per-message classification
-  (needsPlan + planHint). Wiring
-  into the live chat-message dispatch is the final integration
-  step the planner-side handler will pick up.
-
-- **Entity-schema inference prompt** --
-  the `inferEntitySchema` prompt ships the
-  per-domain schema proposal called by the entity-inference Plan
-  on second-Document trigger.
-
-**Planner Agent loop (shipped) + the goal-resolution restructure
-(planned).** The planner-node-owned decompose loop exists
-(`integrations/planner/agent_loop.go`): on a new userGoal Plan it
-invokes the `plannerAgent` prompt, which emits a structured decision
-(decompose / dispatchTask / createSpecialist / markPlanSucceeded /
-escalate), and the loop dispatches it, re-invoking until terminal.
-Safety guards are wired (memql#818): a cumulative per-plan LLM budget
-(#819), a lean prompt projection (#820, strips role embeddings), 429
-backoff (#821), a convergence/no-progress guard (#822), and a global
-identical-request circuit breaker at the provider HTTP chokepoint
-(#825, `component/memql/ai_guard.go`).
-
-Goal-resolution restructure (epic memql#836) -- SHIPPED. The cost-safety
-structure is now in place: a hard process-wide LLM rate ceiling at the
-provider HTTP chokepoint (#834, `ai_guard.go`), complexity triage that
-routes a trivial deliverable to ONE cheap path instead of the decompose
-loop (#837), model tiering that defaults the planner to a cheap tier and
-escalates to Opus+thinking only on an explicit stuck signal (#838), an
-up-front token estimate + user-approval gate that parks an expensive plan
-before it spends (#839), gated specialist creation/training so a one-off
-never auto-trains (#842), phased execution with per-phase checkpoints
-(#840), deterministic-first result verification (#841), and lowered +
-binding per-plan caps with a no-task-markPlanSucceeded convergence guard
-(#843).
-
-`produceArtifact` (the conversational "make me a file" deliverable) now
-flows through the unified loop (memql#835): its old hardcoded
-HandlePlanCreated bypass was removed; it enters invokeAndDispatch where
-the approval gate auto-runs it (tiny estimate) and the triage recognizes
-it as a known single deliverable, shortcutting to ONE direct production
-turn (`startPlanDirect` -> running -> the owning agent writes the file via
-the workbench) -- ZERO plannerAgent decompose calls, exactly as the old
-bypass did, but now as a first-class routing decision with the rate
-ceiling + lowered caps + tiering as structural backstops. The earlier
-#823 attempt was reverted (#832) precisely because those backstops did
-not yet exist; they do now. The synchronous-in-handler path still covers
-the analyzeFile case end-to-end.
+Read [docs/public/ai/llm-cost-control.md](docs/public/ai/llm-cost-control.md)
+before touching any of it. `produceArtifact` (the conversational "make me a
+file" deliverable) rides the unified loop rather than a bypass: triage
+recognizes it as a known single deliverable and shortcuts to ONE direct
+production turn (`startPlanDirect` -> running -> the owning agent writes the
+file via the workbench), with the rate ceiling, caps and tiering as
+structural backstops. An earlier hardcoded bypass was reverted precisely
+because those backstops did not yet exist -- do not reintroduce one.
 
 ## Need Help?
 
