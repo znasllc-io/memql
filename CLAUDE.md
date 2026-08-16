@@ -283,20 +283,52 @@ overhead stopped paying for itself.
 1. **Every change goes through a branch + PR. `main` refuses direct
    pushes.** This is enforced by a repository ruleset, not by
    convention: `gh api repos/znasllc-io/memql/rules/branches/main`
-   returns `pull_request` and `required_status_checks` (plus `deletion`
-   and `non_fast_forward`), so `git push origin main` fails with
-   `push declined due to repository rule violations` no matter how
-   small the change. A one-line docs fix needs a PR exactly like a
-   feature does.
+   returns `pull_request`, `required_status_checks` and `merge_queue`
+   (plus `deletion` and `non_fast_forward`), so `git push origin main`
+   fails with `push declined due to repository rule violations` no
+   matter how small the change. A one-line docs fix needs a PR exactly
+   like a feature does.
 
-   Branch, push, open the PR, let CI go green, merge. Squash merges are
-   disabled repo-wide -- use a merge commit.
+   Branch, push, open the PR, let CI go green, then **enqueue it**:
+
+   ```bash
+   gh pr merge <n> --repo znasllc-io/memql   # bare: no strategy, no --delete-branch
+   ```
+
+   **The bare form is the whole instruction, and both flags you would
+   reach for are wrong.** `--delete-branch` is REFUSED outright --
+   `Cannot use -d or --delete-branch when merge queue enabled` -- because
+   the queue deletes the branch itself. `--merge` is merely ignored with
+   `The merge strategy for main is set by the merge queue`: the queue's
+   `merge_method` is already `MERGE`, so squash merges stay disabled
+   repo-wide and the strategy is not yours to pass.
+
+   **It ENQUEUES rather than merges, and the wait is by design.** The
+   queue's `min_entries_to_merge_wait_minutes` is 5 and it batches under
+   `grouping_strategy: ALLGREEN`, so a PR sits at `OPEN` with
+   `mergedAt: null` for minutes with nothing wrong. Re-running the
+   command answers `is already queued to merge`, which is the
+   CONFIRMATION it worked rather than an error -- reading it as one and
+   "retrying" is the natural mistake.
+
+   **A queued PR can go `DIRTY`, and it will stay there.** When a
+   sibling lands underneath it, `mergeStateStatus` becomes `DIRTY` and
+   does not resolve itself; rebase on `origin/main` and force-push.
+   Worth stating because the failure is silent in a specific way: a
+   watcher looking only for merged / failed / clean cannot see `DIRTY`
+   at all, and its silence is indistinguishable from "still queued".
 
    > This rule previously read "Commit directly to `main`", which had
    > not been true since the ruleset landed. It survived because every
    > change large enough to notice was already being branched; the
    > first thing to actually hit it was a one-line commit somebody
    > reasonably expected to push straight up.
+   >
+   > The `merge_queue` half was missing for the same shape of reason:
+   > the enumeration above named four of the ruleset's five members, and
+   > "merge" was written as though it were a thing you do rather than a
+   > queue you join. Nobody hit it while every merge was performed by
+   > whoever had just watched CI, one PR at a time.
 2. **Pre-release -- no backwards-compat shims or deprecation windows.**
    When a contract changes, fix both memQL and the consumer (typically
    the product pack/SPA) at once and delete what is no longer needed. Do not add
