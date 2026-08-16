@@ -31,9 +31,15 @@ var environmentNames = regexp.MustCompile("(?i)[\"`](production|prod|staging)[\"
 // A prefix, not a file: the point of an entry is "this COMPONENT's job is
 // knowing about environments", and pinning it to today's file names would make
 // the exemption expire on a rename rather than on the reason going away.
-var environmentAwareByDesign = map[string]string{
-	"component/deploycontrol/": "the deploy console's own environment mapping -- ConsoleEnvFor / deploymentEnvFor / validEnvs translate between the deployment record's enum (production|staging|development) and promote.sh's console env (prod|staging), and gate which of the two an operator may target. This is not the engine behaving differently per environment; it is the surface whose entire subject is which environment a deploy names, and the mapping lives in ONE place here precisely so no caller re-derives it (memql#2096).",
-}
+// It is EMPTY, and that is the post-epic state rather than an oversight. Its
+// one entry was component/deploycontrol/, whose environment mapping existed to
+// translate between a deployment record's environment enum and the console's
+// spelling of it; epic memql#3943 removed the concept those two spellings named,
+// so nothing in this repository is environment-aware by design any more. A new
+// entry here is a claim that some component's JOB is telling deployments apart,
+// which is the thing the epic decided the product does not do -- weigh it
+// against that before adding one.
+var environmentAwareByDesign = map[string]string{}
 
 // TestNoEnvironmentBranchingInEngineCode is the structural guard on the
 // two-environments-one-installation boundary (epic memql#3748 / memql#3766).

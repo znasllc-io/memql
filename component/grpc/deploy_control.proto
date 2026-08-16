@@ -6,35 +6,29 @@ option go_package = "github.com/znasllc-io/memql/component/grpc/gen;memqlv1";
 
 // DeployControlService is the gRPC surface behind the memQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
-// machinery -- per-env image authority (the kustomize overlays), the
-// release lockfiles, Argo CD app status, Argo Rollouts progressive
-// delivery, and the in-cluster deploy gate -- as a small set of unary
-// RPCs.
+// machinery -- the image authority (the kustomize overlay), the release
+// lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and
+// the in-cluster deploy gate -- as a small set of unary RPCs.
+//
+// Every RPC operates on THIS installation and takes no environment (epic
+// memql#3943): an operator who wants a second environment installs a second
+// instance, which answers on its own address.
 //
 // Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
-// state into typed status. Write RPCs (DeployStaging / Promote /
-// Rollback / RolloutAction) go through the sanctioned action scripts
-// (scripts/release/promote.sh, `git revert`, `kubectl argo rollouts`)
+// state into typed status. Write RPCs (Rollback / RolloutAction) go
+// through the sanctioned actions (`git revert`, `kubectl argo rollouts`)
 // -- never ad-hoc `kubectl set image`. Every write RPC is gated to
 // owner/admin (#728) and emits an audit event (success / failure /
 // blocked).
 service DeployControlService {
-  // GetDeploymentStatus returns the full deployment picture for one
-  // environment: deployed digests, the resolved release lockfile,
-  // Argo CD sync/health, per-rollout progressive-delivery state, and
-  // the latest deploy-gate result. Read-only; not audited per call.
+  // GetDeploymentStatus returns the full deployment picture: deployed
+  // digests, the resolved release lockfile, Argo CD sync/health, per-rollout
+  // progressive-delivery state, and the latest deploy-gate result.
+  // Read-only; not audited per call.
   rpc GetDeploymentStatus(GetDeploymentStatusRequest) returns (DeploymentStatus);
 
-  // DeployStaging assembles + applies a release into the staging
-  // overlay via scripts/release/promote.sh --env=staging.
-  rpc DeployStaging(DeployStagingRequest) returns (ActionResult);
-
-  // Promote copies a validated staging release into the prod overlay
-  // (digest copy, no rebuild) via promote.sh --env=prod.
-  rpc Promote(PromoteRequest) returns (ActionResult);
-
-  // Rollback reverts the overlay commit identified by commit_sha for
-  // the given environment via `git revert`.
+  // Rollback reverts the overlay commit identified by commit_sha via
+  // `git revert`.
   rpc Rollback(RollbackRequest) returns (ActionResult);
 
   // RolloutAction promotes or aborts an in-flight Argo Rollout via
@@ -42,8 +36,8 @@ service DeployControlService {
   rpc RolloutAction(RolloutActionRequest) returns (ActionResult);
 
   // SuggestNextVersion reads the latest succeeded deployment's version
-  // for an environment (#1877) and proposes the next major / minor /
-  // patch semver. Read-only; owner/admin gated, not audited per call.
+  // (#1877) and proposes the next major / minor / patch semver.
+  // Read-only; owner/admin gated, not audited per call.
   rpc SuggestNextVersion(SuggestNextVersionRequest) returns (SuggestNextVersionResult);
 
   // CutVersion creates a new pending deployment record (#1877) at the
@@ -73,53 +67,48 @@ service DeployControlService {
 // Requests
 // -----------------------------------------------------------------------------
 
+// GetDeploymentStatusRequest is deliberately empty: the console answers for
+// THIS installation. Field 1 was `env` (epic memql#3943).
 message GetDeploymentStatusRequest {
-  // env is "staging" or "prod".
-  string env = 1;
-}
-
-message DeployStagingRequest {
-  // version is the release lockfile version to deploy (releases/<version>.yaml).
-  string version = 1;
-}
-
-message PromoteRequest {
-  // version is the validated release lockfile version to promote staging->prod.
-  string version = 1;
+  reserved 1;
+  reserved "env";
 }
 
 message RollbackRequest {
-  // env is "staging" or "prod".
-  string env = 1;
+  reserved 1;
+  reserved "env";
   // commit_sha is the overlay commit to `git revert`.
   string commit_sha = 2;
 }
 
 message RolloutActionRequest {
-  // env is "staging" or "prod".
-  string env = 1;
+  reserved 1;
+  reserved "env";
   // rollout is the Argo Rollout name (e.g. "bff", "cognition").
   string rollout = 2;
-  // action is "promote" or "abort".
+  // action is "promote" or "abort" -- the ARGO ROLLOUT verb (advance or
+  // cancel an in-flight progressive rollout). Unrelated to the
+  // environment-to-environment promote epic memql#3943 removed.
   string action = 3;
 }
 
+// SuggestNextVersionRequest is deliberately empty; see
+// GetDeploymentStatusRequest.
 message SuggestNextVersionRequest {
-  // env is "staging" or "prod" -- selects which environment's current
-  // version is read.
-  string env = 1;
+  reserved 1;
+  reserved "env";
 }
 
 message CutVersionRequest {
-  // env is "staging" or "prod".
-  string env = 1;
+  reserved 1;
+  reserved "env";
   // bump selects the semver part to increment off the current version:
   // "major" | "minor" | "patch". Empty defaults to "patch". Ignored
   // when version is set.
   string bump = 2;
   // version is an optional explicit version override (clean semver
   // X.Y.Z). When set, bump is ignored and this version is cut directly
-  // (still rejected if it is invalid or already exists for the env).
+  // (still rejected if it is invalid or already exists).
   string version = 3;
 }
 
@@ -140,14 +129,13 @@ message RollbackDeploymentRequest {
 // Status (read)
 // -----------------------------------------------------------------------------
 
-// DeploymentStatus is the aggregate per-env view surfaced by the
-// console's dashboard.
+// DeploymentStatus is the aggregate view surfaced by the console's dashboard.
 message DeploymentStatus {
-  // env echoes the requested environment.
-  string env = 1;
-  // version is the deployed release version (parsed from the prod
-  // overlay's "Promoted from releases/<version>.yaml" comment; empty
-  // for staging where the overlay carries no promotion provenance).
+  reserved 1;
+  reserved "env";
+  // version is the deployed release version (parsed from the overlay's
+  // "Promoted from releases/<version>.yaml" comment; empty when the overlay
+  // carries no promotion provenance).
   string version = 2;
   // engine_version is the engine version from the resolved lockfile.
   string engine_version = 3;
@@ -243,8 +231,8 @@ message GateLeg {
 // next-version proposals (#1877).
 message SuggestNextVersionResult {
   // current_version is the version the proposals are computed from: the
-  // latest succeeded deployment for the env, falling back to the on-disk
-  // overlay's promoted version. Empty when neither is known (proposals
+  // latest succeeded deployment, falling back to the on-disk overlay's
+  // promoted version. Empty when neither is known (proposals
   // are then seeded from 0.0.0).
   string current_version = 1;
   // next_major / next_minor / next_patch are the proposed clean-semver
@@ -272,7 +260,7 @@ message ActionResult {
   string audit_event_id = 3;
   // correlation_id ties together the audit event + any downstream logs.
   string correlation_id = 4;
-  // details carries action-specific key/values (env, version, rollout, ...).
+  // details carries action-specific key/values (version, rollout, ...).
   map<string, string> details = 5;
 }
 

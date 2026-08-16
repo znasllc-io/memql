@@ -80,12 +80,11 @@ type parityCase struct {
 	// request parser rejects, and drive
 	// TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited.
 	//
-	// EVERY RPC on this surface carries the pair. memql#3457 re-ordered four
-	// (DeployStaging, Promote, Rollback, RolloutAction) and left five with a
-	// nil here recording "out of that issue's scope"; memql#3505 finished the
-	// surface, so a nil now means an RPC with no argument a caller can get
-	// wrong -- and there are none. TestBelowFloorInvalidArgumentCoverage pins
-	// the set so it cannot silently shrink.
+	// A nil pair means an RPC with no argument a caller can get wrong. Since
+	// epic memql#3943 there are exactly two -- GetDeploymentStatus and
+	// SuggestNextVersion, whose only argument was the environment -- and
+	// TestBelowFloorInvalidArgumentCoverage names them, so the set can neither
+	// silently shrink nor silently grow.
 	invalidStream func() *memqlv1.DeployControlMsg
 	invalidUnary  func(ctx context.Context, svc *Service) error
 }
@@ -120,125 +119,57 @@ func parityCases() []parityCase {
 			rpc: "GetDeploymentStatus",
 			stream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "staging"},
+					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{},
 				}}
 			},
 			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+				_, err := svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{})
 				return err
 			},
 			allowed:   ownerAdmin,
 			auditVerb: "get_status",
-			// An env outside {staging, prod}. GetDeploymentStatus is a READ,
-			// and it is the read that makes the point: probing it below the
-			// floor used to be the cheapest way to touch this surface without
-			// leaving a trace.
-			invalidStream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"},
-				}}
-			},
-			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.GetDeploymentStatus(ctx, &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"})
-				return err
-			},
+			// No invalid pair: the request carries no argument. Its only one
+			// was the environment, and epic memql#3943 removed it -- the RPC
+			// answers for THIS installation, which is not a parameter.
 		},
 		{
 			rpc: "SuggestNextVersion",
 			stream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
-					SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "staging"},
+					SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{},
 				}}
 			},
 			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{Env: "staging"})
+				_, err := svc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{})
 				return err
 			},
 			allowed:   deployTier,
 			auditVerb: "suggest_version",
-			invalidStream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
-					SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "nowhere"},
-				}}
-			},
-			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.SuggestNextVersion(ctx, &memqlv1.SuggestNextVersionRequest{Env: "nowhere"})
-				return err
-			},
-		},
-		{
-			rpc: "DeployStaging",
-			stream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_DeployStaging{
-					DeployStaging: &memqlv1.DeployStagingRequest{Version: "1.2.3"},
-				}}
-			},
-			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.DeployStaging(ctx, &memqlv1.DeployStagingRequest{Version: "1.2.3"})
-				return err
-			},
-			allowed:   ownerAdmin,
-			auditVerb: "deploy_staging",
-			action:    true,
-			// An empty version is the shape the request parser rejects.
-			invalidStream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_DeployStaging{
-					DeployStaging: &memqlv1.DeployStagingRequest{},
-				}}
-			},
-			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.DeployStaging(ctx, &memqlv1.DeployStagingRequest{})
-				return err
-			},
-		},
-		{
-			rpc: "Promote",
-			stream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Promote{
-					Promote: &memqlv1.PromoteRequest{Version: "1.2.3"},
-				}}
-			},
-			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.Promote(ctx, &memqlv1.PromoteRequest{Version: "1.2.3"})
-				return err
-			},
-			allowed:   ownerAdmin,
-			auditVerb: "promote",
-			action:    true,
-			invalidStream: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Promote{
-					Promote: &memqlv1.PromoteRequest{},
-				}}
-			},
-			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.Promote(ctx, &memqlv1.PromoteRequest{})
-				return err
-			},
+			// No invalid pair, for the same reason GetDeploymentStatus has
+			// none: the environment was its only argument (epic memql#3943).
 		},
 		{
 			rpc: "Rollback",
 			stream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Rollback{
-					Rollback: &memqlv1.RollbackRequest{Env: "staging", CommitSha: "abc1234"},
+					Rollback: &memqlv1.RollbackRequest{CommitSha: "abc1234"},
 				}}
 			},
 			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.Rollback(ctx, &memqlv1.RollbackRequest{Env: "staging", CommitSha: "abc1234"})
+				_, err := svc.Rollback(ctx, &memqlv1.RollbackRequest{CommitSha: "abc1234"})
 				return err
 			},
 			allowed:   ownerAdmin,
 			auditVerb: "rollback",
 			action:    true,
-			// An env outside {staging, prod}: rejected by the same validator
-			// that runs on a permitted caller, with a valid sha beside it so
-			// the env is unambiguously what fails.
+			// An empty commit sha is the shape the request parser rejects.
 			invalidStream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_Rollback{
-					Rollback: &memqlv1.RollbackRequest{Env: "nowhere", CommitSha: "abc1234"},
+					Rollback: &memqlv1.RollbackRequest{},
 				}}
 			},
 			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.Rollback(ctx, &memqlv1.RollbackRequest{Env: "nowhere", CommitSha: "abc1234"})
+				_, err := svc.Rollback(ctx, &memqlv1.RollbackRequest{})
 				return err
 			},
 		},
@@ -246,25 +177,25 @@ func parityCases() []parityCase {
 			rpc: "RolloutAction",
 			stream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_RolloutAction{
-					RolloutAction: &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "promote"},
+					RolloutAction: &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "promote"},
 				}}
 			},
 			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "promote"})
+				_, err := svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "promote"})
 				return err
 			},
 			allowed:   ownerAdmin,
 			auditVerb: "rollout_action",
 			action:    true,
-			// The third of RolloutAction's three validators: an action that is
+			// The second of RolloutAction's two validators: an action that is
 			// neither promote nor abort.
 			invalidStream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_RolloutAction{
-					RolloutAction: &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "bogus"},
+					RolloutAction: &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "bogus"},
 				}}
 			},
 			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "bogus"})
+				_, err := svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "bogus"})
 				return err
 			},
 		},
@@ -272,27 +203,27 @@ func parityCases() []parityCase {
 			rpc: "CutVersion",
 			stream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_CutVersion{
-					CutVersion: &memqlv1.CutVersionRequest{Env: "staging", Bump: "patch"},
+					CutVersion: &memqlv1.CutVersionRequest{Bump: "patch"},
 				}}
 			},
 			unary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: "staging", Bump: "patch"})
+				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Bump: "patch"})
 				return err
 			},
 			allowed:   deployTier,
 			auditVerb: "cut_version",
 			action:    true,
 			// A bump that is neither major, minor nor patch. CutVersion has
-			// three validators (env, explicit version, bump); this one is
-			// reached with a valid env beside it so the bump is unambiguously
+			// two validators (explicit version, bump); this one is reached
+			// with no explicit version beside it, so the bump is unambiguously
 			// what fails.
 			invalidStream: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_CutVersion{
-					CutVersion: &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"},
+					CutVersion: &memqlv1.CutVersionRequest{Bump: "enormous"},
 				}}
 			},
 			invalidUnary: func(ctx context.Context, svc *Service) error {
-				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"})
+				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Bump: "enormous"})
 				return err
 			},
 		},
@@ -372,8 +303,10 @@ func deployControlRpcNames(t *testing.T) []string {
 	// Without this the guards pass vacuously if the reflection ever stops
 	// seeing methods (a generator change, a renamed embed marker): an empty
 	// rpcs list makes "nothing missing" trivially true, which is the exact
-	// failure mode a coverage guard must not have.
-	if len(rpcs) < 9 {
+	// failure mode a coverage guard must not have. The floor is 7 since epic
+	// memql#3943 retired DeployStaging and Promote, which only ever meant
+	// "staging -> prod".
+	if len(rpcs) < 7 {
 		t.Fatalf("reflection found only %d DeployControlService RPCs (%v); "+
 			"the coverage guard cannot work with an empty method set", len(rpcs), rpcs)
 	}
@@ -404,7 +337,7 @@ func newParityService(t *testing.T) (*Service, *fakeAudit, *fakeEngine) {
 			"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
 		}),
 	}}
-	svc := newTestServiceWithEngine(t, &fakeExecutor{promoteOut: "SUCCESS"}, audit, eng)
+	svc := newTestServiceWithEngine(t, &fakeExecutor{}, audit, eng)
 	return svc, audit, eng
 }
 
@@ -479,7 +412,7 @@ func TestStreamedAndUnaryGateParity(t *testing.T) {
 func TestGetDeploymentStatusStaysOwnerAdminOnBothPaths(t *testing.T) {
 	statusMsg := func() *memqlv1.DeployControlMsg {
 		return &memqlv1.DeployControlMsg{Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-			GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "staging"},
+			GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{},
 		}}
 	}
 
@@ -489,7 +422,7 @@ func TestGetDeploymentStatusStaysOwnerAdminOnBothPaths(t *testing.T) {
 		for _, role := range []auth.Role{auth.RoleDeveloper, auth.RoleWriter, auth.RoleReader} {
 			t.Run(string(role), func(t *testing.T) {
 				unarySvc, _, unaryEng := newParityService(t)
-				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{})
 				if got := status.Code(err); got != codes.PermissionDenied {
 					t.Errorf("unary GetDeploymentStatus for %s = %v, want PermissionDenied", role, got)
 				}
@@ -519,7 +452,7 @@ func TestGetDeploymentStatusStaysOwnerAdminOnBothPaths(t *testing.T) {
 		for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
 			t.Run(string(role), func(t *testing.T) {
 				unarySvc, _, _ := newParityService(t)
-				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+				_, err := unarySvc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{})
 				if got := status.Code(err); got == codes.PermissionDenied || got == codes.Unauthenticated {
 					t.Errorf("unary GetDeploymentStatus must ADMIT %s, got %v", role, got)
 				}
@@ -693,17 +626,27 @@ func TestBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *testing.T) 
 //
 // Without it the loop degrades silently: drop an invalidStream and the suite
 // stays green while testing one fewer RPC. memql#3457 re-ordered four RPCs and
-// this guard held the set at those four so a fifth could not be added without
-// fixing its ordering too; memql#3505 did exactly that for the remaining five,
-// so the set is now the WHOLE service.
+// memql#3505 finished the surface, so the set is every RPC that HAS a
+// rejectable argument.
 //
 // It is derived from the generated interface rather than hand-listed, which is
 // what makes it self-extending: a new RPC on deploy_control.proto arrives here
 // with no invalid-argument case and fails, instead of quietly re-opening the
-// hole this pair of issues closed.
+// hole this pair of issues closed. The two exclusions are named rather than
+// inferred from a nil, so an RPC that LOSES its case still fails.
 func TestBelowFloorInvalidArgumentCoverage(t *testing.T) {
+	// These take no argument at all since epic memql#3943 removed the
+	// environment -- there is nothing for a caller to get wrong, so the
+	// gate-before-validation ordering has nothing to order.
+	noRejectableArgument := map[string]bool{
+		"GetDeploymentStatus": true,
+		"SuggestNextVersion":  true,
+	}
 	want := map[string]bool{}
 	for _, rpc := range deployControlRpcNames(t) {
+		if noRejectableArgument[rpc] {
+			continue
+		}
 		want[rpc] = true
 	}
 	got := map[string]bool{}
@@ -774,7 +717,7 @@ func TestStreamedReadsReturnTheirTypedResult(t *testing.T) {
 	res := Dispatch(ctxWithRole(auth.RoleOwner), svc, &memqlv1.DeployControlMsg{
 		RequestId: "req-1",
 		Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
-			SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "staging"},
+			SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{},
 		},
 	})
 	if !res.GetOk() {
@@ -796,8 +739,8 @@ func TestStreamedReadsReturnTheirTypedResult(t *testing.T) {
 
 // recordingServer implements DeployControlServiceServer and records which
 // method the dispatcher called. It exists so the routing table is checked
-// independently of the gate: a case wired to the wrong method (Promote
-// dispatched to DeployStaging, say) would pass every gate assertion above,
+// independently of the gate: a case wired to the wrong method (CutVersion
+// dispatched to Rollback, say) would pass every gate assertion above,
 // because the two share a role tier.
 type recordingServer struct {
 	memqlv1.UnimplementedDeployControlServiceServer
@@ -812,16 +755,6 @@ func (r *recordingServer) GetDeploymentStatus(context.Context, *memqlv1.GetDeplo
 func (r *recordingServer) SuggestNextVersion(context.Context, *memqlv1.SuggestNextVersionRequest) (*memqlv1.SuggestNextVersionResult, error) {
 	r.called = append(r.called, "SuggestNextVersion")
 	return &memqlv1.SuggestNextVersionResult{}, nil
-}
-
-func (r *recordingServer) DeployStaging(context.Context, *memqlv1.DeployStagingRequest) (*memqlv1.ActionResult, error) {
-	r.called = append(r.called, "DeployStaging")
-	return &memqlv1.ActionResult{}, nil
-}
-
-func (r *recordingServer) Promote(context.Context, *memqlv1.PromoteRequest) (*memqlv1.ActionResult, error) {
-	r.called = append(r.called, "Promote")
-	return &memqlv1.ActionResult{}, nil
 }
 
 func (r *recordingServer) Rollback(context.Context, *memqlv1.RollbackRequest) (*memqlv1.ActionResult, error) {
@@ -921,7 +854,7 @@ func TestDispatchRefusesAnEmptyOrUnservedEnvelope(t *testing.T) {
 
 	t.Run("no service on this node", func(t *testing.T) {
 		res := Dispatch(context.Background(), nil, &memqlv1.DeployControlMsg{
-			Request: &memqlv1.DeployControlMsg_Promote{Promote: &memqlv1.PromoteRequest{Version: "1.0.0"}},
+			Request: &memqlv1.DeployControlMsg_Rollback{Rollback: &memqlv1.RollbackRequest{CommitSha: "abc1234"}},
 		})
 		if res.GetOk() || codes.Code(res.GetErrorCode()) != codes.Unimplemented {
 			t.Fatalf("nil service: ok=%v code=%v", res.GetOk(), codes.Code(res.GetErrorCode()))

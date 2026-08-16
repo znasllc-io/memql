@@ -2951,6 +2951,12 @@ message NodeMaintenanceResult {
 message DeployControlMsg {
   string request_id = 1;
 
+  // 12 (deploy_staging) and 13 (promote) retired with the environment
+  // concept, epic memql#3943: both RPCs only ever meant "staging -> prod",
+  // and this installation is not one of two.
+  reserved 12, 13;
+  reserved "deploy_staging", "promote";
+
   // Exactly one request must be set. An empty oneof is rejected with
   // error_code = INVALID_ARGUMENT.
   oneof request {
@@ -2960,8 +2966,6 @@ message DeployControlMsg {
     // Actions. Each writes a v1:identity:auditEvent (category admin,
     // action deployment_console_<verb>) and returns its id on
     // ActionResult.audit_event_id -- identical to the unary path.
-    znasllc.memql.deploycontrol.v1.DeployStagingRequest deploy_staging = 12;
-    znasllc.memql.deploycontrol.v1.PromoteRequest promote = 13;
     znasllc.memql.deploycontrol.v1.RollbackRequest rollback = 14;
     znasllc.memql.deploycontrol.v1.RolloutActionRequest rollout_action = 15;
     znasllc.memql.deploycontrol.v1.CutVersionRequest cut_version = 16;

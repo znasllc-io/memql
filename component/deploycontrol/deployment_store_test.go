@@ -74,68 +74,37 @@ func countContaining(queries []string, substrs ...string) int {
 	return n
 }
 
-// A successful DeployStaging records a deployment (in_progress) then
-// transitions it to succeeded (#1872).
-func TestDeployStagingPersistsDeploymentRecordOnSuccess(t *testing.T) {
-	exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
-	eng := &fakeEngine{}
-	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
-
-	res, err := svc.DeployStaging(ctxWithRole(auth.RoleOwner), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
-	if err != nil {
-		t.Fatalf("DeployStaging err = %v", err)
-	}
-	if !res.GetOk() {
-		t.Fatalf("ok = false, message = %q", res.GetMessage())
-	}
-
-	if got := countContaining(eng.queries, "createDeployment(", `status: "in_progress"`, `environment: "staging"`); got != 1 {
-		t.Errorf("create-deployment(in_progress, staging) calls = %d, want 1; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "succeeded"`); got != 1 {
-		t.Errorf("transition(succeeded) calls = %d, want 1; queries = %v", got, eng.queries)
-	}
-}
-
-// A failed promote still records the deployment and transitions it to
-// failed (#1872).
-func TestDeployStagingTransitionsFailedOnPromoteError(t *testing.T) {
-	exec := &fakeExecutor{promoteErr: context.DeadlineExceeded}
-	eng := &fakeEngine{}
-	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
-
-	res, _ := svc.DeployStaging(ctxWithRole(auth.RoleAdmin), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
-	if res.GetOk() {
-		t.Fatalf("expected ok = false on promote error")
-	}
-	if got := countContaining(eng.queries, "createDeployment("); got != 1 {
-		t.Errorf("create-deployment calls = %d, want 1; queries = %v", got, eng.queries)
-	}
-	if got := countContaining(eng.queries, "updateDeploymentStatus(", `status: "failed"`); got != 1 {
-		t.Errorf("transition(failed) calls = %d, want 1; queries = %v", got, eng.queries)
-	}
-}
-
 // A denied (non-owner/admin) caller writes NO deployment record: the
 // authorize gate short-circuits before the persistence path.
-func TestDeniedDeployWritesNoDeploymentRecord(t *testing.T) {
-	exec := &fakeExecutor{}
+func TestDeniedWriteRecordsNoDeployment(t *testing.T) {
 	eng := &fakeEngine{}
-	svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
+	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
 
-	_, _ = svc.DeployStaging(ctxWithRole(auth.RoleWriter), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
+	_, _ = svc.CutVersion(ctxWithRole(auth.RoleReader), &memqlv1.CutVersionRequest{Bump: "patch"})
 	if len(eng.queries) != 0 {
 		t.Errorf("expected no deployment mutations for denied caller, got %v", eng.queries)
 	}
 }
 
-// With no engine wired the deploy path runs unchanged (no panic, no
-// persistence) -- the engineless / unit-test posture.
-func TestDeployStagingNoEngineIsNoop(t *testing.T) {
-	exec := &fakeExecutor{promoteOut: "SUCCESS"}
-	svc := newTestService(t, exec, &fakeAudit{})
-	res, err := svc.DeployStaging(ctxWithRole(auth.RoleOwner), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
-	if err != nil || !res.GetOk() {
-		t.Fatalf("DeployStaging (no engine) err = %v ok = %v", err, res.GetOk())
+// A cut records the pending deployment WITHOUT an environment: epic
+// memql#3943 removed the field, so nothing in a write may name one.
+func TestCutVersionRecordsNoEnvironment(t *testing.T) {
+	eng := &fakeEngine{}
+	svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
+
+	res, err := svc.CutVersion(ctxWithRole(auth.RoleOwner), &memqlv1.CutVersionRequest{Version: "1.0.0"})
+	if err != nil {
+		t.Fatalf("CutVersion: %v", err)
+	}
+	if !res.GetOk() {
+		t.Fatalf("ok = false: %q", res.GetMessage())
+	}
+	if got := countContaining(eng.queries, "createDeployment(", `status: "pending"`); got != 1 {
+		t.Errorf("create-deployment(pending) calls = %d, want 1; queries = %v", got, eng.queries)
+	}
+	for _, q := range eng.queries {
+		if strings.Contains(q, "environment") {
+			t.Errorf("a write named an environment: %q", q)
+		}
 	}
 }

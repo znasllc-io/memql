@@ -7,25 +7,26 @@
 // "integration.deploypack.<cap>", which the engine resolves to the Go handler
 // registered by NewProvider().Capabilities().
 //
-// All four effects route through the EXISTING component/deploycontrol Executor
-// boundary (promote.sh / git / kubectl argo rollouts) -- this is ADDITIVE, not
-// a rip-and-replace. The live azure deploy path (runPromote -> promote.sh via
-// the Argo Rollout) is the SAME effect the Deploy Console drives; the pack just
-// exposes it declaratively so the E2.3 chained automations can fire it on
-// deployment status transitions.
+// Every effect routes through the EXISTING component/deploycontrol Executor
+// boundary (git / kubectl) -- this is ADDITIVE, not a rip-and-replace.
 //
 // Model A (GitOps-canonical) flow these effects compose:
-//   commitOverlay -> argoSync -> (Argo reconciles) -> recordBack
-// with runPromote as the staging/prod digest-pinning effect that authors the
-// overlay commit in the first place.
+//   commitOverlay -> argoSync -> (Argo reconciles) -> observeReconciledState
+//                                                  -> recordBack
+//
+// deployRunPromote -- the staging-to-prod digest pin that used to author the
+// overlay commit -- was removed with the environment concept itself (epic
+// memql#3943). With one installation the digests are cut on the build server
+// and land in the one overlay by a reviewed PR, so the deploy IS the merge and
+// the lifecycle's terminal transition is decided by OBSERVING ArgoCD rather
+// than by running an effect (see ../pack.go).
 
 @enabled
 @executor("integration.deploypack.commitOverlay")
 @args(profile="object")
-@description("Model A: stage + commit the kustomize overlay change for an environment via the deploycontrol Executor (git). The committed overlay is the GitOps source of truth ArgoCD reconciles. Epic 2 / #2095.")
+@description("Model A: stage + commit the kustomize overlay change via the deploycontrol Executor (git). The committed overlay is the GitOps source of truth ArgoCD reconciles. Epic 2 / #2095.")
 builtin deployCommitOverlay {
-  env      string  @required  @description("Target environment: staging | prod.")
-  message  string             @description("Commit message; a provenance default is used when empty.")
+  message  string  @description("Commit message; a provenance default is used when empty.")
 }
 
 @enabled
@@ -33,16 +34,6 @@ builtin deployCommitOverlay {
 @args(profile="object")
 @description("Model A: push the committed overlay so ArgoCD reconciles it onto the cluster (via the deploycontrol Executor git push). The pack never bypasses ArgoCD with a direct apply. Epic 2 / #2095.")
 builtin deployArgoSync {
-  env  string  @required  @description("Target environment: staging | prod.")
-}
-
-@enabled
-@executor("integration.deploypack.runPromote")
-@args(profile="object")
-@description("THE live azure deploy effect: run scripts/release/promote.sh --version=<version> --env=<env> via the deploycontrol Executor. Pins the digest-authority overlay for the env and lets ArgoCD + the blue/green Rollout deploy-gate reconcile + cut over. Unchanged from the Deploy Console path -- additive exposure only. Epic 2 / #2095.")
-builtin deployRunPromote {
-  version  string  @required  @description("memQL release version to promote (e.g. '2026.6.21').")
-  env      string  @required  @description("promote.sh environment: staging | prod.")
 }
 
 @enabled

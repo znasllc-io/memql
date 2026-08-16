@@ -71,13 +71,10 @@ func (a *recordingAudit) all() []identity.AuditEvent {
 // would risk a test passing because the action was a no-op.
 type refusingExecutor struct{}
 
-func (refusingExecutor) RunPromote(context.Context, string, string) (string, error) {
+func (refusingExecutor) RunRollback(context.Context, string) (string, error) {
 	return "", context.Canceled
 }
-func (refusingExecutor) RunRollback(context.Context, string, string) (string, error) {
-	return "", context.Canceled
-}
-func (refusingExecutor) RunRolloutAction(context.Context, string, string, string) (string, error) {
+func (refusingExecutor) RunRolloutAction(context.Context, string, string) (string, error) {
 	return "", context.Canceled
 }
 func (refusingExecutor) KubectlJSON(context.Context, ...string) ([]byte, error) {
@@ -360,38 +357,14 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 		msg    func() *memqlv1.DeployControlMsg
 	}{
 		{
-			rpc:    "DeployStaging",
-			name:   "DeployStaging (empty version)",
-			verb:   "deployment_console_deploy_staging",
-			denied: ownerAdminDenies,
-			msg: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{RequestId: "req-bad-deploy-staging",
-					Request: &memqlv1.DeployControlMsg_DeployStaging{
-						DeployStaging: &memqlv1.DeployStagingRequest{},
-					}}
-			},
-		},
-		{
-			rpc:    "Promote",
-			name:   "Promote (empty version)",
-			verb:   "deployment_console_promote",
-			denied: ownerAdminDenies,
-			msg: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{RequestId: "req-bad-promote",
-					Request: &memqlv1.DeployControlMsg_Promote{
-						Promote: &memqlv1.PromoteRequest{},
-					}}
-			},
-		},
-		{
 			rpc:    "Rollback",
-			name:   "Rollback (unknown env)",
+			name:   "Rollback (empty commit sha)",
 			verb:   "deployment_console_rollback",
 			denied: ownerAdminDenies,
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollback",
 					Request: &memqlv1.DeployControlMsg_Rollback{
-						Rollback: &memqlv1.RollbackRequest{Env: "nowhere", CommitSha: "abc1234"},
+						Rollback: &memqlv1.RollbackRequest{},
 					}}
 			},
 		},
@@ -403,35 +376,13 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-rollout",
 					Request: &memqlv1.DeployControlMsg_RolloutAction{
-						RolloutAction: &memqlv1.RolloutActionRequest{Env: "staging", Rollout: "bff", Action: "bogus"},
+						RolloutAction: &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "bogus"},
 					}}
 			},
 		},
-		// The five memql#3505 added.
-		{
-			rpc:    "GetDeploymentStatus",
-			name:   "GetDeploymentStatus (unknown env)",
-			verb:   "deployment_console_get_status",
-			denied: ownerAdminDenies,
-			msg: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{RequestId: "req-bad-get-status",
-					Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-						GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "nowhere"},
-					}}
-			},
-		},
-		{
-			rpc:    "SuggestNextVersion",
-			name:   "SuggestNextVersion (unknown env)",
-			verb:   "deployment_console_suggest_version",
-			denied: deployTierDenies,
-			msg: func() *memqlv1.DeployControlMsg {
-				return &memqlv1.DeployControlMsg{RequestId: "req-bad-suggest",
-					Request: &memqlv1.DeployControlMsg_SuggestNextVersion{
-						SuggestNextVersion: &memqlv1.SuggestNextVersionRequest{Env: "nowhere"},
-					}}
-			},
-		},
+		// GetDeploymentStatus and SuggestNextVersion are absent: their only
+		// argument was the environment, and epic memql#3943 removed it, so
+		// neither has a shape a caller can get wrong.
 		{
 			rpc:    "CutVersion",
 			name:   "CutVersion (unknown bump)",
@@ -440,7 +391,7 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			msg: func() *memqlv1.DeployControlMsg {
 				return &memqlv1.DeployControlMsg{RequestId: "req-bad-cut",
 					Request: &memqlv1.DeployControlMsg_CutVersion{
-						CutVersion: &memqlv1.CutVersionRequest{Env: "staging", Bump: "enormous"},
+						CutVersion: &memqlv1.CutVersionRequest{Bump: "enormous"},
 					}}
 			},
 		},
@@ -497,11 +448,27 @@ func TestForwardedBelowFloorCallerWithAnInvalidArgumentIsRefusedAndAudited(t *te
 			rpcs = append(rpcs, name)
 		}
 	}
-	if len(rpcs) < 9 {
+	// The floor is 7 since epic memql#3943 retired DeployStaging and Promote,
+	// which only ever meant "staging -> prod".
+	if len(rpcs) < 7 {
 		t.Fatalf("reflection found only %d DeployControlService RPCs (%v); the guard cannot work "+
 			"with an empty method set", len(rpcs), rpcs)
 	}
+	// GetDeploymentStatus and SuggestNextVersion take no argument at all since
+	// the same epic removed the environment, so there is no argument rejection
+	// to order against the gate. Named rather than inferred from an absent
+	// case, so an RPC that LOSES its case still fails here.
+	noRejectableArgument := map[string]bool{
+		"GetDeploymentStatus": true,
+		"SuggestNextVersion":  true,
+	}
 	for _, rpc := range rpcs {
+		if noRejectableArgument[rpc] {
+			if covered[rpc] {
+				t.Errorf("%s has no rejectable argument but carries an invalid-argument case", rpc)
+			}
+			continue
+		}
 		if !covered[rpc] {
 			t.Errorf("no forwarded invalid-argument case for %s: its gate order is unverified over the mesh hop", rpc)
 		}
@@ -636,7 +603,7 @@ func TestForwardedDeployTierMatchesTheLocalMatrix(t *testing.T) {
 				return &memqlv1.DeployControlMsg{
 					RequestId: "req-status",
 					Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-						GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "staging"},
+						GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{},
 					},
 				}
 			},
@@ -648,7 +615,7 @@ func TestForwardedDeployTierMatchesTheLocalMatrix(t *testing.T) {
 				return &memqlv1.DeployControlMsg{
 					RequestId: "req-cut",
 					Request: &memqlv1.DeployControlMsg_CutVersion{
-						CutVersion: &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"},
+						CutVersion: &memqlv1.CutVersionRequest{Bump: "patch"},
 					},
 				}
 			},

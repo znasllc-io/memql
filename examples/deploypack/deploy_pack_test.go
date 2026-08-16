@@ -6,14 +6,14 @@ package deploypack_test
 // `go test ./...` (no build tag), mirroring examples/referencepack.
 //
 // Coverage (exported-API-provable half of the acceptance):
-//   - the pack's IntegrationProvider exposes all four deploy capabilities under
+//   - the pack's IntegrationProvider exposes every deploy capability under
 //     the FQNs the dsl/builtins.memql @executors name.
 //   - each capability handler routes through the deploycontrol Executor (the
-//     SAME side-effect boundary the Deploy Console uses): runPromote calls
-//     RunPromote, commitOverlay/argoSync call Git, recordBack calls the E2.1
-//     deployment mutations through the engine. The fake Executor + engine prove
-//     the wiring WITHOUT a real promote.sh / git / cluster -- the azure path's
-//     RunPromote contract is exercised, not bypassed.
+//     SAME side-effect boundary the Deploy Console uses):
+//     commitOverlay/argoSync call Git, observeReconciledState calls
+//     KubectlJSON, recordBack calls the E2.1 deployment mutations through the
+//     engine. The fake Executor + engine prove the wiring WITHOUT a real git
+//     or cluster.
 //   - the contract-version gate accepts the pack's pinned ContractVersion.
 //
 // The builtin-registration half (the pack's builtins resolving through
@@ -32,7 +32,7 @@ import (
 	deploypack "github.com/znasllc-io/memql/examples/deploypack"
 )
 
-// errBoom is a sentinel error a fake Executor returns to simulate a promote
+// errBoom is a sentinel error a fake Executor returns to simulate an effect
 // failure the lifecycle automation must observe in-band.
 var errBoom = errors.New("boom")
 
@@ -40,25 +40,14 @@ var errBoom = errors.New("boom")
 // test can assert the effect routed through the sanctioned boundary. Satisfies
 // deploycontrol.Executor.
 type fakeExecutor struct {
-	promoteVersion string
-	promoteEnv     string
-	promoteErr     error // when set, RunPromote returns it (simulates a promote failure)
-	gitCalls       [][]string
-	kubectlJSON    []byte   // fixture returned by KubectlJSON (observe read leg)
-	kubectlErr     error    // when set, KubectlJSON returns it
-	kubectlArgs    []string // args the last KubectlJSON call received
+	gitCalls    [][]string
+	kubectlJSON []byte   // fixture returned by KubectlJSON (observe read leg)
+	kubectlErr  error    // when set, KubectlJSON returns it
+	kubectlArgs []string // args the last KubectlJSON call received
 }
 
-func (f *fakeExecutor) RunPromote(_ context.Context, version, env string) (string, error) {
-	f.promoteVersion = version
-	f.promoteEnv = env
-	if f.promoteErr != nil {
-		return "promote failed", f.promoteErr
-	}
-	return "promoted " + version + " to " + env, nil
-}
-func (f *fakeExecutor) RunRollback(_ context.Context, _, _ string) (string, error) { return "", nil }
-func (f *fakeExecutor) RunRolloutAction(_ context.Context, _, _, _ string) (string, error) {
+func (f *fakeExecutor) RunRollback(_ context.Context, _ string) (string, error) { return "", nil }
+func (f *fakeExecutor) RunRolloutAction(_ context.Context, _, _ string) (string, error) {
 	return "", nil
 }
 
@@ -95,7 +84,6 @@ func TestDeployPackProviderExposesAllEffects(t *testing.T) {
 	want := map[string]bool{
 		"commitOverlay":          false,
 		"argoSync":               false,
-		"runPromote":             false,
 		"recordBack":             false,
 		"observeReconciledState": false,
 	}
@@ -114,75 +102,14 @@ func TestDeployPackProviderExposesAllEffects(t *testing.T) {
 	}
 }
 
-// TestDeployPackRunPromoteUsesExecutor is the azure-path-preservation proof:
-// the runPromote effect calls the deploycontrol Executor's RunPromote with the
-// version + env -- the SAME contract the live Deploy Console path uses.
-func TestDeployPackRunPromoteUsesExecutor(t *testing.T) {
-	exec := &fakeExecutor{}
-	provider := deploypack.NewProviderWithDeps(exec, &fakeEngine{})
-
-	if _, err := callCapability(t, provider, "runPromote",
-		map[string]any{"version": "2026.6.21", "env": "staging"}); err != nil {
-		t.Fatalf("runPromote handler: %v", err)
-	}
-	if exec.promoteVersion != "2026.6.21" || exec.promoteEnv != "staging" {
-		t.Fatalf("runPromote called RunPromote(version=%q, env=%q), want (2026.6.21, staging)",
-			exec.promoteVersion, exec.promoteEnv)
-	}
-}
-
-// TestDeployPackRunPromoteNormalizesEnv proves the runPromote effect maps the
-// deployment.environment enum to the promote.sh console env the same way the Go
-// driver does (production -> prod), so the E2.3 lifecycle automation can pass
-// the raw enum through. The env mapping lives in ONE place (ConsoleEnvFor).
-func TestDeployPackRunPromoteNormalizesEnv(t *testing.T) {
-	exec := &fakeExecutor{}
-	provider := deploypack.NewProviderWithDeps(exec, &fakeEngine{})
-
-	if _, err := callCapability(t, provider, "runPromote",
-		map[string]any{"version": "1.2.3", "env": "production"}); err != nil {
-		t.Fatalf("runPromote handler: %v", err)
-	}
-	if exec.promoteEnv != "prod" {
-		t.Fatalf("runPromote(env=production) -> RunPromote env=%q, want prod (ConsoleEnvFor mapping)", exec.promoteEnv)
-	}
-}
-
-// TestDeployPackRunPromoteReportsOutcomeInBand is the E2.3 (#2096) contract the
-// lifecycle automation relies on: a promote FAILURE is reported as success=false
-// in the result node (NOT a Go error), so the automation can branch to a failed
-// transition rather than aborting the step. A clean promote reports success=true.
-func TestDeployPackRunPromoteReportsOutcomeInBand(t *testing.T) {
-	// Clean promote -> success=true.
-	okProvider := deploypack.NewProviderWithDeps(&fakeExecutor{}, &fakeEngine{})
-	nodes, err := callCapability(t, okProvider, "runPromote", map[string]any{"version": "1.0.0", "env": "staging"})
-	if err != nil {
-		t.Fatalf("runPromote (clean) returned a Go error, want in-band success: %v", err)
-	}
-	if got := successOf(t, nodes); got != true {
-		t.Fatalf("clean promote success=%v, want true", got)
-	}
-
-	// Failed promote -> success=false, NO Go error (the lifecycle must see it).
-	failProvider := deploypack.NewProviderWithDeps(&fakeExecutor{promoteErr: errBoom}, &fakeEngine{})
-	nodes, err = callCapability(t, failProvider, "runPromote", map[string]any{"version": "1.0.0", "env": "staging"})
-	if err != nil {
-		t.Fatalf("runPromote (failed) MUST NOT return a Go error -- it would abort the "+
-			"lifecycle automation before the failed transition: %v", err)
-	}
-	if got := successOf(t, nodes); got != false {
-		t.Fatalf("failed promote success=%v, want false", got)
-	}
-}
-
 func TestDeployPackCommitAndSyncUseGit(t *testing.T) {
 	exec := &fakeExecutor{}
 	provider := deploypack.NewProviderWithDeps(exec, &fakeEngine{})
 
-	if _, err := callCapability(t, provider, "commitOverlay", map[string]any{"env": "prod"}); err != nil {
+	if _, err := callCapability(t, provider, "commitOverlay", map[string]any{}); err != nil {
 		t.Fatalf("commitOverlay handler: %v", err)
 	}
-	if _, err := callCapability(t, provider, "argoSync", map[string]any{"env": "prod"}); err != nil {
+	if _, err := callCapability(t, provider, "argoSync", map[string]any{}); err != nil {
 		t.Fatalf("argoSync handler: %v", err)
 	}
 	// commitOverlay -> git add + git commit; argoSync -> git push.

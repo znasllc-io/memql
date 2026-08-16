@@ -20,12 +20,9 @@ import (
 // fakeExecutor records calls + returns canned output. Read paths
 // return the configured JSON fixtures; action paths record the call.
 type fakeExecutor struct {
-	promoteCalls  [][2]string // (version, env)
-	rollbackCalls [][2]string // (env, sha)
-	rolloutCalls  [][3]string // (env, rollout, action)
-
-	promoteOut string
-	promoteErr error
+	rollbackCalls []string    // sha
+	rollbackErr   error       // when set, RunRollback returns it
+	rolloutCalls  [][2]string // (rollout, action)
 
 	argoJSON     []byte
 	rolloutsJSON []byte
@@ -33,26 +30,23 @@ type fakeExecutor struct {
 	kubectlErr   error
 
 	// kubectlCalls records the full argv of every read, so a test can assert
-	// WHICH namespace / Application was addressed. Added with memql#3769: the
-	// addresses used to be the constant `memql` and a wrong one does not error
-	// -- `kubectl -n <nonexistent> get rollout` is an empty list and exit 0 --
-	// so nothing but the argv distinguishes "nothing is rolling out" from
+	// WHICH namespace / Application was addressed. A wrong address does not
+	// error -- `kubectl -n <nonexistent> get rollout` is an empty list and exit
+	// 0 -- so nothing but the argv distinguishes "nothing is rolling out" from
 	// "asked the wrong namespace".
 	kubectlCalls [][]string
 }
 
-func (f *fakeExecutor) RunPromote(_ context.Context, version, env string) (string, error) {
-	f.promoteCalls = append(f.promoteCalls, [2]string{version, env})
-	return f.promoteOut, f.promoteErr
-}
-
-func (f *fakeExecutor) RunRollback(_ context.Context, env, sha string) (string, error) {
-	f.rollbackCalls = append(f.rollbackCalls, [2]string{env, sha})
+func (f *fakeExecutor) RunRollback(_ context.Context, sha string) (string, error) {
+	f.rollbackCalls = append(f.rollbackCalls, sha)
+	if f.rollbackErr != nil {
+		return "", f.rollbackErr
+	}
 	return "reverted " + sha, nil
 }
 
-func (f *fakeExecutor) RunRolloutAction(_ context.Context, env, rollout, action string) (string, error) {
-	f.rolloutCalls = append(f.rolloutCalls, [3]string{env, rollout, action})
+func (f *fakeExecutor) RunRolloutAction(_ context.Context, rollout, action string) (string, error) {
+	f.rolloutCalls = append(f.rolloutCalls, [2]string{rollout, action})
 	return action + " " + rollout, nil
 }
 
@@ -115,21 +109,21 @@ func newTestService(t *testing.T, exec Executor, audit identity.AuditLogger) *Se
 
 // --- (a) owner + admin admitted -------------------------------------------
 
-func TestDeployStagingAdmittedForOwnerAndAdmin(t *testing.T) {
+func TestWriteRPCAdmittedForOwnerAndAdmin(t *testing.T) {
 	for _, role := range []auth.Role{auth.RoleOwner, auth.RoleAdmin} {
-		exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
+		exec := &fakeExecutor{}
 		audit := &fakeAudit{}
 		svc := newTestService(t, exec, audit)
 
-		res, err := svc.DeployStaging(ctxWithRole(role), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
+		res, err := svc.Rollback(ctxWithRole(role), &memqlv1.RollbackRequest{CommitSha: "abc1234"})
 		if err != nil {
-			t.Fatalf("role %s: DeployStaging err = %v", role, err)
+			t.Fatalf("role %s: Rollback err = %v", role, err)
 		}
 		if !res.GetOk() {
 			t.Errorf("role %s: ok = false, message = %q", role, res.GetMessage())
 		}
-		if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{"0.9.9", "staging"} {
-			t.Errorf("role %s: promote calls = %v", role, exec.promoteCalls)
+		if len(exec.rollbackCalls) != 1 || exec.rollbackCalls[0] != "abc1234" {
+			t.Errorf("role %s: rollback calls = %v", role, exec.rollbackCalls)
 		}
 	}
 }
@@ -142,12 +136,9 @@ func TestWriteRPCsDenyNonAdminWithBlockedAudit(t *testing.T) {
 		audit := &fakeAudit{}
 		svc := newTestService(t, exec, audit)
 
-		_, err := svc.Promote(ctxWithRole(role), &memqlv1.PromoteRequest{Version: "0.9.9"})
+		_, err := svc.RolloutAction(ctxWithRole(role), &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "promote"})
 		if status.Code(err) != codes.PermissionDenied {
 			t.Fatalf("role %s: code = %v, want PermissionDenied", role, status.Code(err))
-		}
-		if len(exec.promoteCalls) != 0 {
-			t.Errorf("role %s: promote should NOT run on denial, got %v", role, exec.promoteCalls)
 		}
 		if len(audit.events) != 1 {
 			t.Fatalf("role %s: want exactly 1 audit event, got %d", role, len(audit.events))
@@ -156,7 +147,7 @@ func TestWriteRPCsDenyNonAdminWithBlockedAudit(t *testing.T) {
 		if ev.Outcome != identity.AuditOutcomeBlocked {
 			t.Errorf("role %s: outcome = %q, want blocked", role, ev.Outcome)
 		}
-		if ev.Action != "deployment_console_promote" {
+		if ev.Action != "deployment_console_rollout_action" {
 			t.Errorf("role %s: action = %q", role, ev.Action)
 		}
 		if ev.Category != identity.AuditCategoryAdmin {
@@ -170,7 +161,7 @@ func TestUnauthenticatedDenied(t *testing.T) {
 	audit := &fakeAudit{}
 	svc := newTestService(t, exec, audit)
 
-	_, err := svc.Rollback(context.Background(), &memqlv1.RollbackRequest{Env: "prod", CommitSha: "abc"})
+	_, err := svc.Rollback(context.Background(), &memqlv1.RollbackRequest{CommitSha: "abc"})
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", status.Code(err))
 	}
@@ -182,13 +173,13 @@ func TestUnauthenticatedDenied(t *testing.T) {
 // --- (c) successful write emits exactly one success event ------------------
 
 func TestSuccessfulWriteEmitsOneSuccessEventWithId(t *testing.T) {
-	exec := &fakeExecutor{promoteOut: "SUCCESS: promoted to prod"}
+	exec := &fakeExecutor{}
 	audit := &fakeAudit{}
 	svc := newTestService(t, exec, audit)
 
-	res, err := svc.Promote(ctxWithRole(auth.RoleOwner), &memqlv1.PromoteRequest{Version: "1.0.0"})
+	res, err := svc.Rollback(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackRequest{CommitSha: "abc1234"})
 	if err != nil {
-		t.Fatalf("Promote: %v", err)
+		t.Fatalf("Rollback: %v", err)
 	}
 	if !res.GetOk() {
 		t.Fatalf("ok = false: %q", res.GetMessage())
@@ -212,22 +203,22 @@ func TestSuccessfulWriteEmitsOneSuccessEventWithId(t *testing.T) {
 	if res.GetAuditEventId() != ev.CorrelationId {
 		t.Errorf("ActionResult id %q != audit event correlation id %q", res.GetAuditEventId(), ev.CorrelationId)
 	}
-	if res.GetDetails()["version"] != "1.0.0" || res.GetDetails()["env"] != "prod" {
+	if res.GetDetails()["commitSha"] != "abc1234" {
 		t.Errorf("details = %v", res.GetDetails())
 	}
 }
 
 func TestFailedWriteEmitsFailureEvent(t *testing.T) {
-	exec := &fakeExecutor{promoteErr: errors.New("promote.sh exit 1")}
+	exec := &fakeExecutor{rollbackErr: errors.New("git revert exit 1")}
 	audit := &fakeAudit{}
 	svc := newTestService(t, exec, audit)
 
-	res, err := svc.DeployStaging(ctxWithRole(auth.RoleAdmin), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
+	res, err := svc.Rollback(ctxWithRole(auth.RoleAdmin), &memqlv1.RollbackRequest{CommitSha: "abc1234"})
 	if err != nil {
-		t.Fatalf("DeployStaging returned status err = %v (expected ActionResult with ok=false)", err)
+		t.Fatalf("Rollback returned status err = %v (expected ActionResult with ok=false)", err)
 	}
 	if res.GetOk() {
-		t.Error("ok = true, want false on script failure")
+		t.Error("ok = true, want false on effect failure")
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeFailure {
 		t.Fatalf("want one failure audit event, got %+v", audit.events)
@@ -239,14 +230,14 @@ func TestRolloutActionValidation(t *testing.T) {
 	svc := newTestService(t, exec, &fakeAudit{})
 
 	_, err := svc.RolloutAction(ctxWithRole(auth.RoleOwner), &memqlv1.RolloutActionRequest{
-		Env: "staging", Rollout: "bff", Action: "bogus",
+		Rollout: "bff", Action: "bogus",
 	})
 	if status.Code(err) != codes.InvalidArgument {
 		t.Fatalf("code = %v, want InvalidArgument for bad action", status.Code(err))
 	}
 
 	res, err := svc.RolloutAction(ctxWithRole(auth.RoleOwner), &memqlv1.RolloutActionRequest{
-		Env: "staging", Rollout: "bff", Action: "promote",
+		Rollout: "bff", Action: "promote",
 	})
 	if err != nil {
 		t.Fatalf("RolloutAction: %v", err)
@@ -254,7 +245,7 @@ func TestRolloutActionValidation(t *testing.T) {
 	if !res.GetOk() {
 		t.Error("ok = false")
 	}
-	if len(exec.rolloutCalls) != 1 || exec.rolloutCalls[0] != [3]string{"staging", "bff", "promote"} {
+	if len(exec.rolloutCalls) != 1 || exec.rolloutCalls[0] != [2]string{"bff", "promote"} {
 		t.Errorf("rollout calls = %v", exec.rolloutCalls)
 	}
 }
@@ -263,12 +254,12 @@ func TestRolloutActionValidation(t *testing.T) {
 
 func TestGetDeploymentStatusReadsAndDoesNotAudit(t *testing.T) {
 	tmp := t.TempDir()
-	// Write a prod overlay + matching lockfile into the temp repo root.
-	overlayDir := filepath.Join(tmp, "deploy", "k8s", "overlays", "prod")
+	// Write the cloud overlay + matching lockfile into the temp repo root.
+	overlayDir := filepath.Join(tmp, "deploy", "k8s", "overlays", "cloud")
 	if err := os.MkdirAll(overlayDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(prodOverlayFixture), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(overlayDir, "kustomization.yaml"), []byte(overlayFixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	releasesDir := filepath.Join(tmp, "releases")
@@ -292,7 +283,7 @@ func TestGetDeploymentStatusReadsAndDoesNotAudit(t *testing.T) {
 
 	// An owner/admin can read; the read path is admin-gated (#728)
 	// but a successful read is NOT audited.
-	out, err := svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{Env: "prod"})
+	out, err := svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{})
 	if err != nil {
 		t.Fatalf("GetDeploymentStatus: %v", err)
 	}
@@ -336,7 +327,7 @@ func TestGetDeploymentStatusDeniesNonAdminWithBlockedAudit(t *testing.T) {
 		audit := &fakeAudit{}
 		svc := newTestService(t, exec, audit)
 
-		_, err := svc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+		_, err := svc.GetDeploymentStatus(ctxWithRole(role), &memqlv1.GetDeploymentStatusRequest{})
 		if status.Code(err) != codes.PermissionDenied {
 			t.Fatalf("role %s: code = %v, want PermissionDenied", role, status.Code(err))
 		}
@@ -361,82 +352,11 @@ func TestGetDeploymentStatusUnauthenticatedDenied(t *testing.T) {
 	audit := &fakeAudit{}
 	svc := newTestService(t, exec, audit)
 
-	_, err := svc.GetDeploymentStatus(context.Background(), &memqlv1.GetDeploymentStatusRequest{Env: "staging"})
+	_, err := svc.GetDeploymentStatus(context.Background(), &memqlv1.GetDeploymentStatusRequest{})
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("code = %v, want Unauthenticated", status.Code(err))
 	}
 	if len(audit.events) != 1 || audit.events[0].Outcome != identity.AuditOutcomeBlocked {
 		t.Errorf("want one blocked audit event, got %+v", audit.events)
-	}
-}
-
-func TestGetDeploymentStatusInvalidEnv(t *testing.T) {
-	svc := newTestService(t, &fakeExecutor{}, &fakeAudit{})
-	_, err := svc.GetDeploymentStatus(ctxWithRole(auth.RoleOwner), &memqlv1.GetDeploymentStatusRequest{Env: "dev"})
-	if status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("code = %v, want InvalidArgument", status.Code(err))
-	}
-}
-
-// --- Epic 2 (E2.6 / #2099): azure-path regression after the pack ----------
-
-// TestEpic2AzurePathRegression is the Epic 2 acceptance guard that the deploy
-// PACK (examples/deploypack) and the E2.5 effect-seam consolidation
-// (promoteRelease) left the live azure deploy path byte-for-byte intact: the
-// two legacy console promote actions still shell out to promote.sh with the
-// correct (version, env) via the SAME Executor.RunPromote, persist the
-// deployment record, and emit one audit event under the right verb. If the
-// promoteRelease consolidation ever drifts a call, env, or audit verb, this
-// fails -- the pack must stay ADDITIVE, never a behavioral change to the
-// authoritative Go path.
-func TestEpic2AzurePathRegression(t *testing.T) {
-	cases := []struct {
-		name    string
-		env     string
-		version string
-		run     func(svc *Service) (*memqlv1.ActionResult, error)
-	}{
-		{
-			name:    "DeployStaging",
-			env:     "staging",
-			version: "0.9.9",
-			run: func(svc *Service) (*memqlv1.ActionResult, error) {
-				return svc.DeployStaging(ctxWithRole(auth.RoleOwner), &memqlv1.DeployStagingRequest{Version: "0.9.9"})
-			},
-		},
-		{
-			name:    "Promote",
-			env:     "prod",
-			version: "0.9.9",
-			run: func(svc *Service) (*memqlv1.ActionResult, error) {
-				return svc.Promote(ctxWithRole(auth.RoleOwner), &memqlv1.PromoteRequest{Version: "0.9.9"})
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
-			audit := &fakeAudit{}
-			svc := newTestService(t, exec, audit)
-
-			res, err := tc.run(svc)
-			if err != nil {
-				t.Fatalf("%s: err = %v", tc.name, err)
-			}
-			if !res.GetOk() {
-				t.Fatalf("%s: ok = false: %q", tc.name, res.GetMessage())
-			}
-			// promote.sh invoked exactly once with the right (version, env).
-			if len(exec.promoteCalls) != 1 || exec.promoteCalls[0] != [2]string{tc.version, tc.env} {
-				t.Fatalf("%s: promote calls = %v, want [[%s %s]]", tc.name, exec.promoteCalls, tc.version, tc.env)
-			}
-			// exactly one audit event, success outcome.
-			if len(audit.events) != 1 {
-				t.Fatalf("%s: audit events = %d, want 1", tc.name, len(audit.events))
-			}
-			if audit.events[0].Outcome != identity.AuditOutcomeSuccess {
-				t.Errorf("%s: audit outcome = %q, want success", tc.name, audit.events[0].Outcome)
-			}
-		})
 	}
 }

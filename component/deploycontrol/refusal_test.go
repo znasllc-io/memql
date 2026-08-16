@@ -46,11 +46,11 @@ func TestRefusalIsAuditedAndReturnsThatEventsId(t *testing.T) {
 		code codes.Code
 	}{
 		{
-			name: "authorize/promote refuses a writer",
+			name: "authorize/rollout_action refuses a writer",
 			role: auth.RoleWriter,
-			verb: "deployment_console_promote",
+			verb: "deployment_console_rollout_action",
 			call: func(ctx context.Context, svc *Service) error {
-				_, err := svc.Promote(ctx, &memqlv1.PromoteRequest{Version: "1.2.3"})
+				_, err := svc.RolloutAction(ctx, &memqlv1.RolloutActionRequest{Rollout: "bff", Action: "promote"})
 				return err
 			},
 			code: codes.PermissionDenied,
@@ -60,7 +60,7 @@ func TestRefusalIsAuditedAndReturnsThatEventsId(t *testing.T) {
 			role: auth.RoleReader,
 			verb: "deployment_console_cut_version",
 			call: func(ctx context.Context, svc *Service) error {
-				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"})
+				_, err := svc.CutVersion(ctx, &memqlv1.CutVersionRequest{Bump: "patch"})
 				return err
 			},
 			code: codes.PermissionDenied,
@@ -116,7 +116,7 @@ func TestRefusalIsAuditedAndReturnsThatEventsId(t *testing.T) {
 	t.Run("unauthenticated caller", func(t *testing.T) {
 		svc, audit, _ := newParityService(t)
 
-		_, err := svc.Rollback(context.Background(), &memqlv1.RollbackRequest{Env: "prod", CommitSha: "abc1234"})
+		_, err := svc.Rollback(context.Background(), &memqlv1.RollbackRequest{CommitSha: "abc1234"})
 		if got := status.Code(err); got != codes.Unauthenticated {
 			t.Fatalf("code = %v, want Unauthenticated", got)
 		}
@@ -194,7 +194,7 @@ func TestNonRefusalFailuresCarryNoAuditId(t *testing.T) {
 		svc, audit, _ := newParityService(t)
 
 		res := Dispatch(ctxWithRole(auth.RoleOwner), svc, &memqlv1.DeployControlMsg{
-			Request: &memqlv1.DeployControlMsg_Promote{Promote: &memqlv1.PromoteRequest{Version: ""}},
+			Request: &memqlv1.DeployControlMsg_Rollback{Rollback: &memqlv1.RollbackRequest{CommitSha: ""}},
 		})
 		if got := codes.Code(res.GetErrorCode()); got != codes.InvalidArgument {
 			t.Fatalf("code = %v, want InvalidArgument", got)
@@ -209,7 +209,7 @@ func TestNonRefusalFailuresCarryNoAuditId(t *testing.T) {
 
 	t.Run("no service on this node", func(t *testing.T) {
 		res := Dispatch(context.Background(), nil, &memqlv1.DeployControlMsg{
-			Request: &memqlv1.DeployControlMsg_Promote{Promote: &memqlv1.PromoteRequest{Version: "1.0.0"}},
+			Request: &memqlv1.DeployControlMsg_Rollback{Rollback: &memqlv1.RollbackRequest{CommitSha: "abc1234"}},
 		})
 		if got := codes.Code(res.GetErrorCode()); got != codes.Unimplemented {
 			t.Fatalf("code = %v, want Unimplemented", got)

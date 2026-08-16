@@ -22,10 +22,10 @@ import (
 //     rollback.
 func TestDeveloperGate(t *testing.T) {
 	t.Run("developer may cut a version", func(t *testing.T) {
-		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")}}
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("succeeded", "1.4.2")}}
 		svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
 
-		res, err := svc.CutVersion(ctxWithRole(auth.RoleDeveloper), &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"})
+		res, err := svc.CutVersion(ctxWithRole(auth.RoleDeveloper), &memqlv1.CutVersionRequest{Bump: "patch"})
 		if err != nil {
 			t.Fatalf("developer CutVersion: %v", err)
 		}
@@ -39,7 +39,7 @@ func TestDeveloperGate(t *testing.T) {
 
 	t.Run("developer may suggest the next version", func(t *testing.T) {
 		svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
-		if _, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleDeveloper), &memqlv1.SuggestNextVersionRequest{Env: "prod"}); err != nil {
+		if _, err := svc.SuggestNextVersion(ctxWithRole(auth.RoleDeveloper), &memqlv1.SuggestNextVersionRequest{}); err != nil {
 			t.Fatalf("developer SuggestNextVersion: %v", err)
 		}
 	})
@@ -51,7 +51,7 @@ func TestDeveloperGate(t *testing.T) {
 				"imageDigest": "sha256:abc", "provider": "azure", "environment": "staging",
 			}),
 		}}
-		exec := &fakeExecutor{promoteOut: "SUCCESS: promoted"}
+		exec := &fakeExecutor{}
 		svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 		res, err := svc.Deploy(ctxWithRole(auth.RoleDeveloper), &memqlv1.DeployRequest{DeploymentId: "d1"})
@@ -64,10 +64,10 @@ func TestDeveloperGate(t *testing.T) {
 	})
 
 	t.Run("admin may cut a version", func(t *testing.T) {
-		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("production", "succeeded", "1.4.2")}}
+		eng := &fakeEngine{queryNodes: []*memqlv1.MemoryNode{deploymentNode("succeeded", "1.4.2")}}
 		svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, eng)
 
-		res, err := svc.CutVersion(ctxWithRole(auth.RoleAdmin), &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"})
+		res, err := svc.CutVersion(ctxWithRole(auth.RoleAdmin), &memqlv1.CutVersionRequest{Bump: "patch"})
 		if err != nil {
 			t.Fatalf("admin CutVersion: %v", err)
 		}
@@ -106,7 +106,7 @@ func TestDeveloperGate(t *testing.T) {
 				"imageDigest": "sha256:def", "provider": "azure", "environment": "staging",
 			}),
 		}}
-		exec := &fakeExecutor{promoteOut: "SUCCESS: rolled back"}
+		exec := &fakeExecutor{}
 		svc := newTestServiceWithEngine(t, exec, &fakeAudit{}, eng)
 
 		res, err := svc.RollbackDeployment(ctxWithRole(auth.RoleOwner), &memqlv1.RollbackDeploymentRequest{ToDeploymentId: "good1"})
@@ -125,10 +125,10 @@ func TestDeveloperGate(t *testing.T) {
 		t.Run("read-only role "+string(role)+" rejected on cut/deploy/rollback", func(t *testing.T) {
 			svc := newTestServiceWithEngine(t, &fakeExecutor{}, &fakeAudit{}, &fakeEngine{})
 
-			if _, err := svc.CutVersion(ctxWithRole(role), &memqlv1.CutVersionRequest{Env: "prod", Bump: "patch"}); status.Code(err) != codes.PermissionDenied {
+			if _, err := svc.CutVersion(ctxWithRole(role), &memqlv1.CutVersionRequest{Bump: "patch"}); status.Code(err) != codes.PermissionDenied {
 				t.Errorf("%s CutVersion code = %v, want PermissionDenied", role, status.Code(err))
 			}
-			if _, err := svc.SuggestNextVersion(ctxWithRole(role), &memqlv1.SuggestNextVersionRequest{Env: "prod"}); status.Code(err) != codes.PermissionDenied {
+			if _, err := svc.SuggestNextVersion(ctxWithRole(role), &memqlv1.SuggestNextVersionRequest{}); status.Code(err) != codes.PermissionDenied {
 				t.Errorf("%s SuggestNextVersion code = %v, want PermissionDenied", role, status.Code(err))
 			}
 			if _, err := svc.Deploy(ctxWithRole(role), &memqlv1.DeployRequest{DeploymentId: "d1"}); status.Code(err) != codes.PermissionDenied {

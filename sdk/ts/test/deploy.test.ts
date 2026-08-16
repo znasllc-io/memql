@@ -1,5 +1,5 @@
 // Mock-dispatcher tests for the deploy-control surface (memql#3311) --
-// the nine DeployControlService RPCs bridged onto MemqlService.Stream so
+// the DeployControlService RPCs bridged onto MemqlService.Stream so
 // a WebSocket client can reach them at all.
 //
 // Two things matter here beyond the usual envelope/unwrap coverage.
@@ -7,7 +7,7 @@
 // First, the ENVELOPE SHAPE. Every method must land in its own inner
 // oneof field: the engine dispatches on that discriminant, so a method
 // wired to the wrong field would silently invoke a different RPC -- a
-// promote firing a rollback is not a bug you want to find in staging.
+// cutVersion firing a rollback is not a bug you want to find in production.
 //
 // Second, the REFUSAL. The gate is server-side and authoritative; the
 // client's whole job on a denial is to surface it faithfully as a
@@ -118,45 +118,33 @@ const envelopeCases: Array<{
 }> = [
   {
     name: "getDeploymentStatus",
-    call: (c) => c.getDeploymentStatus("staging"),
+    call: (c) => c.getDeploymentStatus(),
     field: "getDeploymentStatus",
-    args: { env: "staging" },
+    args: {},
   },
   {
     name: "suggestNextVersion",
-    call: (c) => c.suggestNextVersion("prod"),
+    call: (c) => c.suggestNextVersion(),
     field: "suggestNextVersion",
-    args: { env: "prod" },
-  },
-  {
-    name: "deployStaging",
-    call: (c) => c.deployStaging("1.2.3"),
-    field: "deployStaging",
-    args: { version: "1.2.3" },
-  },
-  {
-    name: "promote",
-    call: (c) => c.promote("1.2.3"),
-    field: "promote",
-    args: { version: "1.2.3" },
+    args: {},
   },
   {
     name: "rollback",
-    call: (c) => c.rollback("prod", "abc1234"),
+    call: (c) => c.rollback("abc1234"),
     field: "rollback",
-    args: { env: "prod", commitSha: "abc1234" },
+    args: { commitSha: "abc1234" },
   },
   {
     name: "rolloutAction",
-    call: (c) => c.rolloutAction("staging", "bff", "abort"),
+    call: (c) => c.rolloutAction("bff", "abort"),
     field: "rolloutAction",
-    args: { env: "staging", rollout: "bff", action: "abort" },
+    args: { rollout: "bff", action: "abort" },
   },
   {
     name: "cutVersion",
-    call: (c) => c.cutVersion("prod", "minor"),
+    call: (c) => c.cutVersion("minor"),
     field: "cutVersion",
-    args: { env: "prod", bump: "minor" },
+    args: { bump: "minor" },
   },
   {
     name: "deploy",
@@ -197,11 +185,10 @@ for (const c of envelopeCases) {
 
 test("deployControl -- getDeploymentStatus maps the full status", async () => {
   const { mock, client } = newClient();
-  const pending = client.getDeploymentStatus("prod");
+  const pending = client.getDeploymentStatus();
   mock.reply(
     okReply({
       deploymentStatus: {
-        env: "prod",
         version: "1.4.2",
         engineVersion: "0.9.40",
         validatedAt: "2026-08-01T00:00:00Z",
@@ -215,7 +202,6 @@ test("deployControl -- getDeploymentStatus maps the full status", async () => {
   );
 
   const status = await pending;
-  assert.equal(status.env, "prod");
   assert.equal(status.version, "1.4.2");
   assert.equal(status.engineVersion, "0.9.40");
   assert.equal(status.components.length, 1);
@@ -233,10 +219,10 @@ test("deployControl -- getDeploymentStatus maps the full status", async () => {
 
 test("deployControl -- an empty status reply reads as empty, not undefined", async () => {
   const { mock, client } = newClient();
-  const pending = client.getDeploymentStatus("staging");
-  // The engine returns a DeploymentStatus with only env set for a staging
-  // overlay carrying no promotion provenance; protojson drops the rest.
-  mock.reply(okReply({ deploymentStatus: { env: "staging" } }));
+  const pending = client.getDeploymentStatus();
+  // The engine returns an all-zero DeploymentStatus for an overlay carrying
+  // no promotion provenance; protojson drops every field.
+  mock.reply(okReply({ deploymentStatus: {} }));
 
   const status = await pending;
   assert.equal(status.version, "");
@@ -248,7 +234,7 @@ test("deployControl -- an empty status reply reads as empty, not undefined", asy
 
 test("deployControl -- suggestNextVersion maps the proposals", async () => {
   const { mock, client } = newClient();
-  const pending = client.suggestNextVersion("prod");
+  const pending = client.suggestNextVersion();
   mock.reply(
     okReply({
       nextVersion: {
@@ -271,15 +257,15 @@ test("deployControl -- suggestNextVersion maps the proposals", async () => {
 
 test("deployControl -- an action returns its audit event id", async () => {
   const { mock, client } = newClient();
-  const pending = client.promote("1.2.3");
+  const pending = client.rollback("abc1234");
   mock.reply(
     okReply({
       action: {
         ok: true,
-        message: "SUCCESS: promoted",
+        message: "reverted abc1234",
         auditEventId: "aud-42",
         correlationId: "aud-42",
-        details: { env: "prod", version: "1.2.3" },
+        details: { commitSha: "abc1234" },
       },
     }),
   );
@@ -288,7 +274,7 @@ test("deployControl -- an action returns its audit event id", async () => {
   assert.equal(res.ok, true);
   assert.equal(res.auditEventId, "aud-42", "the audit id must reach the operator");
   assert.equal(res.correlationId, "aud-42");
-  assert.deepEqual(res.details, { env: "prod", version: "1.2.3" });
+  assert.deepEqual(res.details, { commitSha: "abc1234" });
 });
 
 test("deployControl -- an action that RAN and FAILED resolves with ok=false", async () => {
@@ -296,8 +282,8 @@ test("deployControl -- an action that RAN and FAILED resolves with ok=false", as
   // failed. Collapsing these two would leave a UI unable to say whether
   // the operator lacked permission or the deploy broke.
   const { mock, client } = newClient();
-  const pending = client.deployStaging("1.2.3");
-  mock.reply(okReply({ action: { ok: false, message: "promote.sh: exit 1", auditEventId: "aud-9" } }));
+  const pending = client.rollback("abc1234");
+  mock.reply(okReply({ action: { ok: false, message: "git revert: exit 1", auditEventId: "aud-9" } }));
 
   const res = await pending;
   assert.equal(res.ok, false);
@@ -332,7 +318,7 @@ test("deployControl -- PERMISSION_DENIED surfaces as a typed error", async () =>
 
 test("deployControl -- UNIMPLEMENTED (node has no deploy service) is distinguishable", async () => {
   const { mock, client } = newClient();
-  const pending = client.promote("1.0.0");
+  const pending = client.rollback("abc1234");
   mock.reply({
     deployControlResult: { requestId: "r", errorCode: CODE_UNIMPLEMENTED, errorMessage: "no deploy-control service" },
   });
@@ -360,7 +346,7 @@ test("deployControl -- a reply with neither ok nor an error code is rejected", a
 
 test("deployControl -- a queryError reply surfaces as an error", async () => {
   const { mock, client } = newClient();
-  const pending = client.cutVersion("prod", "patch");
+  const pending = client.cutVersion("patch");
   mock.reply({ queryError: { requestId: "r", error: { code: "internal", message: "boom" } } });
 
   await assert.rejects(pending, /deploy console: cut_version: boom/);
@@ -368,7 +354,7 @@ test("deployControl -- a queryError reply surfaces as an error", async () => {
 
 test("deployControl -- an unexpected reply envelope is rejected", async () => {
   const { mock, client } = newClient();
-  const pending = client.promote("1.0.0");
+  const pending = client.rollback("abc1234");
   mock.reply({ myAccessResult: { userId: "u1" } });
 
   await assert.rejects(pending, /unexpected reply envelope/);
@@ -380,16 +366,10 @@ test("deployControl -- an unexpected reply envelope is rejected", async () => {
 
 test("deployControl -- required arguments are validated before sending", async () => {
   const { mock, client } = newClient();
-  await assert.rejects(client.getDeploymentStatus(""), /env is required/);
-  await assert.rejects(client.suggestNextVersion(""), /env is required/);
-  await assert.rejects(client.deployStaging(""), /version is required/);
-  await assert.rejects(client.promote(""), /version is required/);
-  await assert.rejects(client.rollback("", "sha"), /env is required/);
-  await assert.rejects(client.rollback("prod", ""), /commitSha is required/);
-  await assert.rejects(client.rolloutAction("", "bff", "promote"), /env is required/);
-  await assert.rejects(client.rolloutAction("prod", "", "promote"), /rollout is required/);
-  await assert.rejects(client.rolloutAction("prod", "bff", ""), /action is required/);
-  await assert.rejects(client.cutVersion(""), /env is required/);
+
+  await assert.rejects(client.rollback(""), /commitSha is required/);
+  await assert.rejects(client.rolloutAction("", "promote"), /rollout is required/);
+  await assert.rejects(client.rolloutAction("bff", ""), /action is required/);
   await assert.rejects(client.deploy(""), /deploymentId is required/);
   await assert.rejects(client.rollbackDeployment(""), /toDeploymentId is required/);
   assert.equal(mock.sent.length, 0, "a rejected argument must not reach the wire");
@@ -400,13 +380,13 @@ test("deployControl -- cutVersion omits empty bump/version rather than sending b
   // omitting it is the same on this wire, but the envelope should say
   // what the caller meant.
   const { mock, client } = newClient();
-  const pending = client.cutVersion("staging");
-  assert.deepEqual(deployControlPayload(mock).cutVersion, { env: "staging" });
+  const pending = client.cutVersion();
+  assert.deepEqual(deployControlPayload(mock).cutVersion, {});
   mock.reply(okReply({ action: { ok: true } }));
   await pending;
 
-  const explicit = client.cutVersion("staging", "", "2.0.0");
-  assert.deepEqual(deployControlPayload(mock).cutVersion, { env: "staging", version: "2.0.0" });
+  const explicit = client.cutVersion("", "2.0.0");
+  assert.deepEqual(deployControlPayload(mock).cutVersion, { version: "2.0.0" });
   mock.reply(okReply({ action: { ok: true } }));
   await explicit;
 });
@@ -414,7 +394,7 @@ test("deployControl -- cutVersion omits empty bump/version rather than sending b
 test("deployControl -- an AbortSignal cancels an in-flight call", async () => {
   const { mock, client } = newClient();
   const ctrl = new AbortController();
-  const pending = client.getDeploymentStatus("prod", { signal: ctrl.signal });
+  const pending = client.getDeploymentStatus({ signal: ctrl.signal });
   assert.equal(mock.sent.length, 1);
   ctrl.abort();
   await assert.rejects(pending, /aborted/);

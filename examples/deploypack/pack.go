@@ -8,17 +8,28 @@
 //     dsl/builtins.memql under the "deploypack" namespace.
 //   - memql.RegisterPluginForContract(...) -- register the Go IntegrationProvider
 //     against an explicit Plugin SDK contract version.
-//   - an IntegrationProvider whose Capabilities() back the four deploy builtins
-//     (commitOverlay / argoSync / runPromote / recordBack) via the
+//   - an IntegrationProvider whose Capabilities() back the deploy builtins
+//     (commitOverlay / argoSync / recordBack / observeReconciledState) via the
 //     @executor("integration.deploypack.<cap>") FQNs.
 //
 // SAFETY: every effect routes through the EXISTING component/deploycontrol
-// Executor boundary (promote.sh / git / kubectl argo rollouts). This pack is
-// ADDITIVE -- it does NOT replace the imperative orchestration (that is E2.3 /
-// E2.5); it exposes the same effects declaratively so chained automations can
-// fire them on deployment status transitions. The live azure deploy path
-// (runPromote -> scripts/release/promote.sh via the Argo Rollout) is invoked
-// through the same RunPromote the Deploy Console uses -- unchanged.
+// Executor boundary (git / kubectl). This pack is ADDITIVE -- it does NOT
+// replace the imperative orchestration (that is E2.3 / E2.5); it exposes the
+// same effects declaratively so chained automations can fire them on
+// deployment status transitions.
+//
+// THE FORWARD-DEPLOY EFFECT IS GONE, and what replaced it (epic memql#3943).
+// The pack used to fire `runPromote` on the in_progress edge: pin the target
+// environment's overlay to the digests the source environment was running.
+// With ONE installation there is no source environment to copy from, and the
+// deploy itself is the merge -- a release is {engine version, bundle digest,
+// client digest} pinned in the one overlay by a reviewed PR, which ArgoCD then
+// reconciles. So there is no in-cluster effect left to fire, and the honest
+// terminal transition is the OBSERVED one: driveDeploymentInProgress now reads
+// ArgoCD's reconciled state through observeReconciledState and resolves the
+// record to succeeded / rolled_back only when it reports synced AND healthy.
+// That is strictly more evidence than the promote path had -- it asserted
+// success from a script's exit code -- and it needs no new effect.
 //
 // Like referencepack, the pack carries NO unconditional self-registering
 // init() in this file: linking it in does NOT load it. Registration is opt-in
@@ -98,10 +109,9 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "commitOverlay",
-			Description: "Stage + commit the env's kustomize overlay via the deploycontrol Executor (git). Model A: the committed overlay is the GitOps source of truth.",
+			Description: "Stage + commit the kustomize overlay via the deploycontrol Executor (git). Model A: the committed overlay is the GitOps source of truth.",
 			Handler:     p.commitOverlay,
 			ArgsSchema: map[string]string{
-				"env":     "string (required) - staging | prod",
 				"message": "string (optional) - commit message",
 			},
 		},
@@ -109,18 +119,7 @@ func (p *Provider) Capabilities() []memql.IntegrationCapability {
 			Name:        "argoSync",
 			Description: "Push the committed overlay so ArgoCD reconciles it (git push via the deploycontrol Executor). Never bypasses ArgoCD with a direct apply.",
 			Handler:     p.argoSync,
-			ArgsSchema: map[string]string{
-				"env": "string (required) - staging | prod",
-			},
-		},
-		{
-			Name:        "runPromote",
-			Description: "Run scripts/release/promote.sh --version --env via the deploycontrol Executor -- THE live azure deploy effect (digest-pin overlay + Argo Rollout cutover). Unchanged from the Deploy Console path.",
-			Handler:     p.runPromote,
-			ArgsSchema: map[string]string{
-				"version": "string (required) - release version to promote",
-				"env":     "string (required) - staging | prod",
-			},
+			ArgsSchema:  map[string]string{},
 		},
 		{
 			Name:        "recordBack",
@@ -174,20 +173,20 @@ func argString(args map[string]any, key string) string {
 	return strings.TrimSpace(v)
 }
 
-// commitOverlay stages the env's overlay and commits it via the Executor's git
+// overlayPath is the single cloud overlay's kustomization -- this
+// installation's image authority. It was a per-environment path until epic
+// memql#3943 removed the environment concept.
+const overlayPath = "deploy/k8s/overlays/cloud/kustomization.yaml"
+
+// commitOverlay stages the overlay and commits it via the Executor's git
 // boundary. Model A: the pack authors + commits the overlay; ArgoCD reconciles.
 func (p *Provider) commitOverlay(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	env := argString(args, "env")
-	if env == "" {
-		return nil, fmt.Errorf("deploypack.commitOverlay requires env")
-	}
 	if p.exec == nil {
 		return nil, fmt.Errorf("deploypack.commitOverlay: no Executor wired")
 	}
-	overlayPath := fmt.Sprintf("deploy/k8s/overlays/%s/kustomization.yaml", env)
 	message := argString(args, "message")
 	if message == "" {
-		message = fmt.Sprintf("deploypack: commit %s overlay", env)
+		message = "deploypack: commit overlay"
 	}
 	if _, err := p.exec.Git(ctx, "add", overlayPath); err != nil {
 		return nil, fmt.Errorf("deploypack.commitOverlay: git add %s: %w", overlayPath, err)
@@ -196,16 +195,12 @@ func (p *Provider) commitOverlay(ctx context.Context, args map[string]any, _ int
 	if err != nil {
 		return nil, fmt.Errorf("deploypack.commitOverlay: git commit: %w (%s)", err, out)
 	}
-	return resultNode("deploypack-commit:"+env, "commitOverlay", out, true), nil
+	return resultNode("deploypack-commit", "commitOverlay", out, true), nil
 }
 
 // argoSync pushes the committed overlay so ArgoCD reconciles it. The pack never
 // applies to the cluster directly -- ArgoCD owns reconciliation.
 func (p *Provider) argoSync(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	env := argString(args, "env")
-	if env == "" {
-		return nil, fmt.Errorf("deploypack.argoSync requires env")
-	}
 	if p.exec == nil {
 		return nil, fmt.Errorf("deploypack.argoSync: no Executor wired")
 	}
@@ -213,41 +208,7 @@ func (p *Provider) argoSync(ctx context.Context, args map[string]any, _ int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("deploypack.argoSync: git push: %w (%s)", err, out)
 	}
-	return resultNode("deploypack-sync:"+env, "argoSync", out, true), nil
-}
-
-// runPromote runs the live azure deploy effect (promote.sh via the Argo
-// Rollout) through the SAME RunPromote the Deploy Console uses. The `env` arg
-// is normalized through deploycontrol.ConsoleEnvFor, so a caller may pass the
-// deployment.environment enum (production / staging) or the console env
-// (prod / staging) -- the SAME mapping the Go driver applies, kept in one place.
-//
-// A promote FAILURE is reported in-band (success=false in the result node), NOT
-// as a Go error: this effect drives a deployment LIFECYCLE automation (#2096),
-// and a Go error would abort the automation step before it could transition the
-// deployment to `failed`. A misconfiguration (missing version / unmapped env /
-// no Executor) is still a Go error -- that is a wiring fault, not a deploy
-// outcome the lifecycle reacts to.
-func (p *Provider) runPromote(ctx context.Context, args map[string]any, _ int) ([]memorynodes.MemoryNode, error) {
-	version := argString(args, "version")
-	env := deploycontrol.ConsoleEnvFor(argString(args, "env"))
-	if version == "" {
-		return nil, fmt.Errorf("deploypack.runPromote requires version")
-	}
-	if env == "" {
-		return nil, fmt.Errorf("deploypack.runPromote: unsupported env (want staging|production|prod)")
-	}
-	if p.exec == nil {
-		return nil, fmt.Errorf("deploypack.runPromote: no Executor wired")
-	}
-	out, err := p.exec.RunPromote(ctx, version, env)
-	if err != nil {
-		// In-band failure: the lifecycle automation reads success=false and
-		// transitions the deployment to failed. Carry the error in output.
-		return resultNode("deploypack-promote:"+env+":"+version, "runPromote",
-			fmt.Sprintf("%v: %s", err, out), false), nil
-	}
-	return resultNode("deploypack-promote:"+env+":"+version, "runPromote", out, true), nil
+	return resultNode("deploypack-sync", "argoSync", out, true), nil
 }
 
 // recordBack appends the reconciled state into the deployment concept via the

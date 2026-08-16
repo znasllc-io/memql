@@ -164,27 +164,23 @@ export interface RevokeBadgePayload {
 // (component/grpc/deploy_control.proto), reused rather than
 // re-declared so the streamed and unary surfaces cannot drift.
 
-export interface DeployControlEnvPayload {
-  env: string; // "staging" | "prod"
-}
-
-export interface DeployControlVersionPayload {
-  version: string;
-}
+// The two reads take no argument at all: every RPC on this surface operates
+// on THIS installation since epic memql#3943, and their only argument was the
+// environment.
+export type DeployControlEmptyPayload = Record<string, never>;
 
 export interface DeployControlRollbackPayload {
-  env: string;
   commitSha: string;
 }
 
 export interface DeployControlRolloutActionPayload {
-  env: string;
   rollout: string;
-  action: string; // "promote" | "abort"
+  // "promote" | "abort" -- the ARGO ROLLOUT verb (advance or cancel an
+  // in-flight progressive rollout), unrelated to any environment promote.
+  action: string;
 }
 
 export interface DeployControlCutVersionPayload {
-  env: string;
   bump?: string; // "major" | "minor" | "patch"; empty defaults to patch
   version?: string; // explicit override; when set, bump is ignored
 }
@@ -198,10 +194,8 @@ export interface DeployControlRollbackDeploymentPayload {
 }
 
 export type DeployControlRequestPayload =
-  | { getDeploymentStatus: DeployControlEnvPayload }
-  | { suggestNextVersion: DeployControlEnvPayload }
-  | { deployStaging: DeployControlVersionPayload }
-  | { promote: DeployControlVersionPayload }
+  | { getDeploymentStatus: DeployControlEmptyPayload }
+  | { suggestNextVersion: DeployControlEmptyPayload }
   | { rollback: DeployControlRollbackPayload }
   | { rolloutAction: DeployControlRolloutActionPayload }
   | { cutVersion: DeployControlCutVersionPayload }

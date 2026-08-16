@@ -16040,8 +16040,6 @@ type DeployControlMsg struct {
 	//
 	//	*DeployControlMsg_GetDeploymentStatus
 	//	*DeployControlMsg_SuggestNextVersion
-	//	*DeployControlMsg_DeployStaging
-	//	*DeployControlMsg_Promote
 	//	*DeployControlMsg_Rollback
 	//	*DeployControlMsg_RolloutAction
 	//	*DeployControlMsg_CutVersion
@@ -16114,24 +16112,6 @@ func (x *DeployControlMsg) GetSuggestNextVersion() *SuggestNextVersionRequest {
 	return nil
 }
 
-func (x *DeployControlMsg) GetDeployStaging() *DeployStagingRequest {
-	if x != nil {
-		if x, ok := x.Request.(*DeployControlMsg_DeployStaging); ok {
-			return x.DeployStaging
-		}
-	}
-	return nil
-}
-
-func (x *DeployControlMsg) GetPromote() *PromoteRequest {
-	if x != nil {
-		if x, ok := x.Request.(*DeployControlMsg_Promote); ok {
-			return x.Promote
-		}
-	}
-	return nil
-}
-
 func (x *DeployControlMsg) GetRollback() *RollbackRequest {
 	if x != nil {
 		if x, ok := x.Request.(*DeployControlMsg_Rollback); ok {
@@ -16190,18 +16170,10 @@ type DeployControlMsg_SuggestNextVersion struct {
 	SuggestNextVersion *SuggestNextVersionRequest `protobuf:"bytes,11,opt,name=suggest_next_version,json=suggestNextVersion,proto3,oneof"`
 }
 
-type DeployControlMsg_DeployStaging struct {
+type DeployControlMsg_Rollback struct {
 	// Actions. Each writes a v1:identity:auditEvent (category admin,
 	// action deployment_console_<verb>) and returns its id on
 	// ActionResult.audit_event_id -- identical to the unary path.
-	DeployStaging *DeployStagingRequest `protobuf:"bytes,12,opt,name=deploy_staging,json=deployStaging,proto3,oneof"`
-}
-
-type DeployControlMsg_Promote struct {
-	Promote *PromoteRequest `protobuf:"bytes,13,opt,name=promote,proto3,oneof"`
-}
-
-type DeployControlMsg_Rollback struct {
 	Rollback *RollbackRequest `protobuf:"bytes,14,opt,name=rollback,proto3,oneof"`
 }
 
@@ -16224,10 +16196,6 @@ type DeployControlMsg_RollbackDeployment struct {
 func (*DeployControlMsg_GetDeploymentStatus) isDeployControlMsg_Request() {}
 
 func (*DeployControlMsg_SuggestNextVersion) isDeployControlMsg_Request() {}
-
-func (*DeployControlMsg_DeployStaging) isDeployControlMsg_Request() {}
-
-func (*DeployControlMsg_Promote) isDeployControlMsg_Request() {}
 
 func (*DeployControlMsg_Rollback) isDeployControlMsg_Request() {}
 
@@ -19725,22 +19693,20 @@ const file_memql_proto_rawDesc = "" +
 	"\x05state\x18\x05 \x01(\tR\x05state\x12\x1d\n" +
 	"\n" +
 	"error_code\x18\x06 \x01(\tR\terrorCode\x12#\n" +
-	"\rerror_message\x18\a \x01(\tR\ferrorMessage\"\x83\a\n" +
+	"\rerror_message\x18\a \x01(\tR\ferrorMessage\"\xfd\x05\n" +
 	"\x10DeployControlMsg\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12p\n" +
 	"\x15get_deployment_status\x18\n" +
 	" \x01(\v2:.znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequestH\x00R\x13getDeploymentStatus\x12m\n" +
-	"\x14suggest_next_version\x18\v \x01(\v29.znasllc.memql.deploycontrol.v1.SuggestNextVersionRequestH\x00R\x12suggestNextVersion\x12]\n" +
-	"\x0edeploy_staging\x18\f \x01(\v24.znasllc.memql.deploycontrol.v1.DeployStagingRequestH\x00R\rdeployStaging\x12J\n" +
-	"\apromote\x18\r \x01(\v2..znasllc.memql.deploycontrol.v1.PromoteRequestH\x00R\apromote\x12M\n" +
+	"\x14suggest_next_version\x18\v \x01(\v29.znasllc.memql.deploycontrol.v1.SuggestNextVersionRequestH\x00R\x12suggestNextVersion\x12M\n" +
 	"\brollback\x18\x0e \x01(\v2/.znasllc.memql.deploycontrol.v1.RollbackRequestH\x00R\brollback\x12]\n" +
 	"\x0erollout_action\x18\x0f \x01(\v24.znasllc.memql.deploycontrol.v1.RolloutActionRequestH\x00R\rrolloutAction\x12T\n" +
 	"\vcut_version\x18\x10 \x01(\v21.znasllc.memql.deploycontrol.v1.CutVersionRequestH\x00R\n" +
 	"cutVersion\x12G\n" +
 	"\x06deploy\x18\x11 \x01(\v2-.znasllc.memql.deploycontrol.v1.DeployRequestH\x00R\x06deploy\x12l\n" +
 	"\x13rollback_deployment\x18\x12 \x01(\v29.znasllc.memql.deploycontrol.v1.RollbackDeploymentRequestH\x00R\x12rollbackDeploymentB\t\n" +
-	"\arequest\"\xc0\x03\n" +
+	"\arequestJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eR\x0edeploy_stagingR\apromote\"\xc0\x03\n" +
 	"\x13DeployControlResult\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12\x0e\n" +
@@ -20200,16 +20166,14 @@ var file_memql_proto_goTypes = []any{
 	(*structpb.Value)(nil),                     // 210: google.protobuf.Value
 	(*GetDeploymentStatusRequest)(nil),         // 211: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	(*SuggestNextVersionRequest)(nil),          // 212: znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	(*DeployStagingRequest)(nil),               // 213: znasllc.memql.deploycontrol.v1.DeployStagingRequest
-	(*PromoteRequest)(nil),                     // 214: znasllc.memql.deploycontrol.v1.PromoteRequest
-	(*RollbackRequest)(nil),                    // 215: znasllc.memql.deploycontrol.v1.RollbackRequest
-	(*RolloutActionRequest)(nil),               // 216: znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	(*CutVersionRequest)(nil),                  // 217: znasllc.memql.deploycontrol.v1.CutVersionRequest
-	(*DeployRequest)(nil),                      // 218: znasllc.memql.deploycontrol.v1.DeployRequest
-	(*RollbackDeploymentRequest)(nil),          // 219: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	(*DeploymentStatus)(nil),                   // 220: znasllc.memql.deploycontrol.v1.DeploymentStatus
-	(*SuggestNextVersionResult)(nil),           // 221: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	(*ActionResult)(nil),                       // 222: znasllc.memql.deploycontrol.v1.ActionResult
+	(*RollbackRequest)(nil),                    // 213: znasllc.memql.deploycontrol.v1.RollbackRequest
+	(*RolloutActionRequest)(nil),               // 214: znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	(*CutVersionRequest)(nil),                  // 215: znasllc.memql.deploycontrol.v1.CutVersionRequest
+	(*DeployRequest)(nil),                      // 216: znasllc.memql.deploycontrol.v1.DeployRequest
+	(*RollbackDeploymentRequest)(nil),          // 217: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	(*DeploymentStatus)(nil),                   // 218: znasllc.memql.deploycontrol.v1.DeploymentStatus
+	(*SuggestNextVersionResult)(nil),           // 219: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	(*ActionResult)(nil),                       // 220: znasllc.memql.deploycontrol.v1.ActionResult
 }
 var file_memql_proto_depIdxs = []int32{
 	203, // 0: znasllc.memql.v1.MemqlClientMessage.metadata:type_name -> znasllc.memql.v1.MemqlClientMessage.MetadataEntry
@@ -20453,37 +20417,35 @@ var file_memql_proto_depIdxs = []int32{
 	138, // 238: znasllc.memql.v1.VoiceAgentRealtimeOutput.citations:type_name -> znasllc.memql.v1.AgentTurnCitation
 	211, // 239: znasllc.memql.v1.DeployControlMsg.get_deployment_status:type_name -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
 	212, // 240: znasllc.memql.v1.DeployControlMsg.suggest_next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	213, // 241: znasllc.memql.v1.DeployControlMsg.deploy_staging:type_name -> znasllc.memql.deploycontrol.v1.DeployStagingRequest
-	214, // 242: znasllc.memql.v1.DeployControlMsg.promote:type_name -> znasllc.memql.deploycontrol.v1.PromoteRequest
-	215, // 243: znasllc.memql.v1.DeployControlMsg.rollback:type_name -> znasllc.memql.deploycontrol.v1.RollbackRequest
-	216, // 244: znasllc.memql.v1.DeployControlMsg.rollout_action:type_name -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	217, // 245: znasllc.memql.v1.DeployControlMsg.cut_version:type_name -> znasllc.memql.deploycontrol.v1.CutVersionRequest
-	218, // 246: znasllc.memql.v1.DeployControlMsg.deploy:type_name -> znasllc.memql.deploycontrol.v1.DeployRequest
-	219, // 247: znasllc.memql.v1.DeployControlMsg.rollback_deployment:type_name -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	220, // 248: znasllc.memql.v1.DeployControlResult.deployment_status:type_name -> znasllc.memql.deploycontrol.v1.DeploymentStatus
-	221, // 249: znasllc.memql.v1.DeployControlResult.next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	222, // 250: znasllc.memql.v1.DeployControlResult.action:type_name -> znasllc.memql.deploycontrol.v1.ActionResult
-	209, // 251: znasllc.memql.v1.RunAutomationMsg.payload:type_name -> google.protobuf.Struct
-	185, // 252: znasllc.memql.v1.AutomationRunEvent.accepted:type_name -> znasllc.memql.v1.AutomationRunAccepted
-	186, // 253: znasllc.memql.v1.AutomationRunEvent.step:type_name -> znasllc.memql.v1.AutomationRunStep
-	187, // 254: znasllc.memql.v1.AutomationRunEvent.complete:type_name -> znasllc.memql.v1.AutomationRunComplete
-	209, // 255: znasllc.memql.v1.AutomationRunStep.output:type_name -> google.protobuf.Struct
-	194, // 256: znasllc.memql.v1.IdentityAdminMsg.update_user_profile:type_name -> znasllc.memql.v1.UpdateUserProfileRequest
-	195, // 257: znasllc.memql.v1.IdentityAdminMsg.set_user_role:type_name -> znasllc.memql.v1.SetUserRoleRequest
-	196, // 258: znasllc.memql.v1.IdentityAdminMsg.set_user_suspended:type_name -> znasllc.memql.v1.SetUserSuspendedRequest
-	197, // 259: znasllc.memql.v1.IdentityAdminMsg.revoke_user_token:type_name -> znasllc.memql.v1.RevokeUserTokenRequest
-	198, // 260: znasllc.memql.v1.IdentityAdminMsg.revoke_node_token:type_name -> znasllc.memql.v1.RevokeNodeTokenRequest
-	199, // 261: znasllc.memql.v1.IdentityAdminMsg.update_cluster_settings:type_name -> znasllc.memql.v1.UpdateClusterSettingsRequest
-	200, // 262: znasllc.memql.v1.IdentityAdminMsg.issue_enrolment_link:type_name -> znasllc.memql.v1.IssueEnrolmentLinkRequest
-	201, // 263: znasllc.memql.v1.IdentityAdminMsg.revoke_enrolment_link:type_name -> znasllc.memql.v1.RevokeEnrolmentLinkRequest
-	202, // 264: znasllc.memql.v1.IdentityAdminMsg.set_oauth_client_cors_origins:type_name -> znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
-	7,   // 265: znasllc.memql.v1.MemqlService.Stream:input_type -> znasllc.memql.v1.MemqlClientMessage
-	8,   // 266: znasllc.memql.v1.MemqlService.Stream:output_type -> znasllc.memql.v1.MemqlServerMessage
-	266, // [266:267] is the sub-list for method output_type
-	265, // [265:266] is the sub-list for method input_type
-	265, // [265:265] is the sub-list for extension type_name
-	265, // [265:265] is the sub-list for extension extendee
-	0,   // [0:265] is the sub-list for field type_name
+	213, // 241: znasllc.memql.v1.DeployControlMsg.rollback:type_name -> znasllc.memql.deploycontrol.v1.RollbackRequest
+	214, // 242: znasllc.memql.v1.DeployControlMsg.rollout_action:type_name -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	215, // 243: znasllc.memql.v1.DeployControlMsg.cut_version:type_name -> znasllc.memql.deploycontrol.v1.CutVersionRequest
+	216, // 244: znasllc.memql.v1.DeployControlMsg.deploy:type_name -> znasllc.memql.deploycontrol.v1.DeployRequest
+	217, // 245: znasllc.memql.v1.DeployControlMsg.rollback_deployment:type_name -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	218, // 246: znasllc.memql.v1.DeployControlResult.deployment_status:type_name -> znasllc.memql.deploycontrol.v1.DeploymentStatus
+	219, // 247: znasllc.memql.v1.DeployControlResult.next_version:type_name -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	220, // 248: znasllc.memql.v1.DeployControlResult.action:type_name -> znasllc.memql.deploycontrol.v1.ActionResult
+	209, // 249: znasllc.memql.v1.RunAutomationMsg.payload:type_name -> google.protobuf.Struct
+	185, // 250: znasllc.memql.v1.AutomationRunEvent.accepted:type_name -> znasllc.memql.v1.AutomationRunAccepted
+	186, // 251: znasllc.memql.v1.AutomationRunEvent.step:type_name -> znasllc.memql.v1.AutomationRunStep
+	187, // 252: znasllc.memql.v1.AutomationRunEvent.complete:type_name -> znasllc.memql.v1.AutomationRunComplete
+	209, // 253: znasllc.memql.v1.AutomationRunStep.output:type_name -> google.protobuf.Struct
+	194, // 254: znasllc.memql.v1.IdentityAdminMsg.update_user_profile:type_name -> znasllc.memql.v1.UpdateUserProfileRequest
+	195, // 255: znasllc.memql.v1.IdentityAdminMsg.set_user_role:type_name -> znasllc.memql.v1.SetUserRoleRequest
+	196, // 256: znasllc.memql.v1.IdentityAdminMsg.set_user_suspended:type_name -> znasllc.memql.v1.SetUserSuspendedRequest
+	197, // 257: znasllc.memql.v1.IdentityAdminMsg.revoke_user_token:type_name -> znasllc.memql.v1.RevokeUserTokenRequest
+	198, // 258: znasllc.memql.v1.IdentityAdminMsg.revoke_node_token:type_name -> znasllc.memql.v1.RevokeNodeTokenRequest
+	199, // 259: znasllc.memql.v1.IdentityAdminMsg.update_cluster_settings:type_name -> znasllc.memql.v1.UpdateClusterSettingsRequest
+	200, // 260: znasllc.memql.v1.IdentityAdminMsg.issue_enrolment_link:type_name -> znasllc.memql.v1.IssueEnrolmentLinkRequest
+	201, // 261: znasllc.memql.v1.IdentityAdminMsg.revoke_enrolment_link:type_name -> znasllc.memql.v1.RevokeEnrolmentLinkRequest
+	202, // 262: znasllc.memql.v1.IdentityAdminMsg.set_oauth_client_cors_origins:type_name -> znasllc.memql.v1.SetOAuthClientCorsOriginsRequest
+	7,   // 263: znasllc.memql.v1.MemqlService.Stream:input_type -> znasllc.memql.v1.MemqlClientMessage
+	8,   // 264: znasllc.memql.v1.MemqlService.Stream:output_type -> znasllc.memql.v1.MemqlServerMessage
+	264, // [264:265] is the sub-list for method output_type
+	263, // [263:264] is the sub-list for method input_type
+	263, // [263:263] is the sub-list for extension type_name
+	263, // [263:263] is the sub-list for extension extendee
+	0,   // [0:263] is the sub-list for field type_name
 }
 
 func init() { file_memql_proto_init() }
@@ -20645,8 +20607,6 @@ func file_memql_proto_init() {
 	file_memql_proto_msgTypes[175].OneofWrappers = []any{
 		(*DeployControlMsg_GetDeploymentStatus)(nil),
 		(*DeployControlMsg_SuggestNextVersion)(nil),
-		(*DeployControlMsg_DeployStaging)(nil),
-		(*DeployControlMsg_Promote)(nil),
 		(*DeployControlMsg_Rollback)(nil),
 		(*DeployControlMsg_RolloutAction)(nil),
 		(*DeployControlMsg_CutVersion)(nil),

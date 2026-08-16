@@ -30,7 +30,7 @@ images:
     digest: sha256:dcca35c767456c744491fa205c60b723a715ca261c00450326efddcf8ba8f25d
 `
 
-const prodOverlayFixture = `# Promoted from releases/0.9.9.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
+const overlayFixture = `# Promoted from releases/0.9.9.yaml by scripts/release/promote.sh -- DIGEST COPY, no rebuild (#702).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -73,7 +73,7 @@ func TestParseOverlayStaging(t *testing.T) {
 }
 
 func TestParseOverlayProdPromotedVersion(t *testing.T) {
-	ov, err := ParseOverlay([]byte(prodOverlayFixture))
+	ov, err := ParseOverlay([]byte(overlayFixture))
 	if err != nil {
 		t.Fatalf("ParseOverlay: %v", err)
 	}

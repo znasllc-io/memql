@@ -1,21 +1,20 @@
 // Package deploycontrol implements the gRPC DeployControlService behind
 // the memQL Deployment Console (znasllc-io/memql#725 + #728).
 //
-// The service exposes the deployment-v2 machinery -- per-env image
-// authority (the kustomize overlays), release lockfiles, Argo CD app
-// status, Argo Rollouts progressive delivery, and the in-cluster
-// deploy gate -- as a small set of unary RPCs.
+// The service exposes the deployment-v2 machinery -- the image authority
+// (the kustomize overlay), release lockfiles, Argo CD app status, Argo
+// Rollouts progressive delivery, and the in-cluster deploy gate -- as a
+// small set of unary RPCs.
 //
 // Read RPCs map raw `kubectl ... -o json` + on-disk overlay/lockfile
 // state into typed status (pure mappers in status.go / overlay.go /
-// lockfile.go). Write RPCs go through the sanctioned action scripts
-// (scripts/deploy/promote-overlay.sh, `git revert`, `kubectl argo rollouts`)
-// via the Executor boundary -- never ad-hoc `kubectl set image`.
+// lockfile.go). Write RPCs go through the sanctioned actions (`git revert`,
+// `kubectl argo rollouts`) via the Executor boundary -- never ad-hoc
+// `kubectl set image`.
 //
-// Every cluster address is per-ENVIRONMENT (environment.go): `memql-prod` /
-// `memql-staging` for both the namespace and the ArgoCD Application, since
-// epic memql#3748 / memql#3766 made staging and production two namespaces in
-// one cluster reconciled by one ArgoCD.
+// Every RPC operates on THIS installation and takes no environment (epic
+// memql#3943). Where the cluster is addressed, it is addressed by the three
+// constants below.
 //
 // Every write RPC is gated to owner/admin (#728) and emits an audit
 // event (success / failure / blocked). Read RPCs are NOT audited per
@@ -40,20 +39,31 @@ import (
 	"github.com/znasllc-io/memql/core/id"
 )
 
-// validEnvs is the set of environments the console operates on.
+// The console addresses ONE installation, and these three constants are its
+// whole address: the namespace the workloads run in, the ArgoCD Application
+// that reconciles them, and the kustomize overlay that is their image
+// authority.
 //
-// DERIVED from environmentSurfaces (environment.go) rather than restated, so
-// "an env the console admits" and "an env the console knows how to address"
-// are the same set by construction. They were two independent literals until
-// memql#3769, which is the arrangement where a third environment gets accepted
-// by the argument check and then addressed as an empty namespace.
-var validEnvs = func() map[string]bool {
-	m := make(map[string]bool, len(environmentSurfaces))
-	for env := range environmentSurfaces {
-		m[env] = true
-	}
-	return m
-}()
+// They were a per-environment lookup table until epic memql#3943 removed
+// "environment" as a product concept. An operator who wants a second
+// environment installs a second instance, which has its own namespace, its own
+// Application and its own overlay -- so there is nothing here for a caller to
+// select between, and no parameter to get wrong.
+//
+// The namespace and the Application share a name, and that is a coincidence
+// rather than a derivation: they answer different questions ("where do the pods
+// live" versus "what does an operator sync"), and an estate that renames one
+// has no reason to rename the other.
+const (
+	clusterNamespace = "memql"
+	argoApplication  = "memql"
+)
+
+// overlayDir is the cloud kustomize overlay, relative to the repo root. The
+// local k3d overlay is deliberately not addressable here: it is not a deploy
+// target, and validateDeploymentProvider (driver.go) refuses the retired
+// `docker-local` provider with a pointer to `make up`.
+var overlayDir = filepath.Join("deploy", "k8s", "overlays", "cloud")
 
 // Options configures NewService.
 type Options struct {
@@ -178,10 +188,9 @@ func resolveActor(ctx context.Context) (actor, bool) {
 // (#728). On deny it emits a blocked audit event for the given verb +
 // detail and returns a PermissionDenied status error. The returned
 // actor is valid only when err == nil. This is the owner/admin gate for
-// the legacy console actions (DeployStaging / Promote / Rollback /
-// RolloutAction / GetDeploymentStatus); the #1876 actions use the
-// looser authorizeDeploy (cut + deploy) or the stricter authorizeOwner
-// (rollback_deployment).
+// the legacy console actions (Rollback / RolloutAction /
+// GetDeploymentStatus); the #1876 actions use the looser authorizeDeploy
+// (cut + deploy) or the stricter authorizeOwner (rollback_deployment).
 func (s *Service) authorize(ctx context.Context, verb string, detail map[string]any) (actor, error) {
 	return s.authorizeWith(ctx, verb, detail, auth.AtLeastAdmin, "owner or admin")
 }
@@ -306,116 +315,31 @@ func (s *Service) emitAudit(
 // required set from the generated interface, so an RPC added later cannot
 // re-open the hole by being forgotten.
 
-// DeployStaging assembled + applied a release into the staging overlay.
-//
-// IT NO LONGER HAS A MECHANISM, and says so rather than pretending. It ran
-// `scripts/release/promote.sh --env=staging`, which assembled the overlay from
-// an on-disk release lockfile (`releases/<version>.yaml`); the script left this
-// repository with the product deploy estate (992deb41) and lockfiles are
-// retired outright -- "a release is captured by the digest pins in the overlay,
-// not by an on-disk lockfile" (deploy/k8s/overlays/staging/kustomization.yaml).
-// Staging's digests are now cut on the GitHub build server and pinned into its
-// overlay directly.
-//
-// So this call has been failing since that removal, with `fork/exec
-// .../promote.sh: no such file or directory` -- an error naming a path and no
-// reason. Since memql#3769 it fails at RunPromote with a message that says
-// staging is promoted from nothing and why (executor.go). The RPC is left in
-// place because it is consumed cross-repo by the cockpit's Deploy Console and
-// the SDK; retiring the surface is owner-gated follow-on work (doc.go).
-func (s *Service) DeployStaging(ctx context.Context, req *memqlv1.DeployStagingRequest) (*memqlv1.ActionResult, error) {
-	version := req.GetVersion()
-	act, err := s.authorize(ctx, "deploy_staging", map[string]any{"env": "staging", "version": version})
-	if err != nil {
-		return nil, err
-	}
-	if version == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
-	}
-	return s.promoteRelease(ctx, act, "deploy_staging", "staging", version), nil
-}
-
-// Promote pins the production overlay's image digests to the ones staging is
-// running (digest copy, no rebuild) and lands that edit as ONE COMMIT.
-//
-// Both overlays live in THIS tree and are reconciled by ONE ArgoCD (epic
-// memql#3748), so a promote is a commit rather than a copy between two estates
-// -- which is also what makes the rollback a `git revert` of that one commit.
-//
-// A product's DSL bundle rides the same commit for the same reason: the bundle
-// is a data-only image mounted at MEMQL_DSL_PATH, so promoting it IS pinning
-// production to the digest staging runs. Trained constructs do NOT ride it --
-// see environment.go, which records why and what asserts it.
-func (s *Service) Promote(ctx context.Context, req *memqlv1.PromoteRequest) (*memqlv1.ActionResult, error) {
-	version := req.GetVersion()
-	act, err := s.authorize(ctx, "promote", map[string]any{"env": "prod", "version": version})
-	if err != nil {
-		return nil, err
-	}
-	if version == "" {
-		return nil, status.Error(codes.InvalidArgument, "deploy console: version is required")
-	}
-	return s.promoteRelease(ctx, act, "promote", "prod", version), nil
-}
-
-// promoteRelease is the shared record -> RunPromote -> transition ->
-// audit sequence behind the two legacy console promote actions
-// (DeployStaging env=staging, Promote env=prod). Extracting it (Epic 2 /
-// E2.5, #2098) reduces deploycontrol toward the Executor effect boundary
-// without changing behavior: the call order, the persisted deployment
-// record (#1872; in_progress at start -> succeeded/failed on return), the
-// promote invocation via the SAME Executor.RunPromote, and the single
-// audit event are byte-identical to the inlined form. The azure deploy
-// path is unchanged.
-//
-// What RunPromote DOES changed in memql#3769 (pin from the source overlay +
-// one commit, rather than shell out to a script that had been removed); the
-// sequence around it did not, which is why the parity test below still holds
-// it call-for-call.
-func (s *Service) promoteRelease(ctx context.Context, act actor, verb, consoleEnv, version string) *memqlv1.ActionResult {
-	// Persist the deployment record: write at deploy start (in_progress) so
-	// a record exists even if the process dies mid-rollout, then transition
-	// to succeeded/failed once promote.sh returns. Best-effort.
-	deploymentID := s.recordDeployment(ctx, consoleEnv, version, s.resolveImageDigest(version), act)
-	out, runErr := s.exec.RunPromote(ctx, version, consoleEnv)
-	s.transitionDeployment(ctx, deploymentID, transitionStatusForErr(runErr))
-	return s.finishWrite(ctx, verb, act, map[string]any{"env": consoleEnv, "version": version}, out, runErr,
-		map[string]string{"env": consoleEnv, "version": version})
-}
-
-// Rollback reverts the overlay commit identified by commit_sha for the
-// given environment via `git revert`.
+// Rollback reverts the overlay commit identified by commit_sha via
+// `git revert`.
 func (s *Service) Rollback(ctx context.Context, req *memqlv1.RollbackRequest) (*memqlv1.ActionResult, error) {
-	env := req.GetEnv()
 	sha := req.GetCommitSha()
-	detail := map[string]any{"env": env, "commitSha": sha}
+	detail := map[string]any{"commitSha": sha}
 	act, err := s.authorize(ctx, "rollback", detail)
 	if err != nil {
 		return nil, err
 	}
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
-	}
 	if sha == "" {
 		return nil, status.Error(codes.InvalidArgument, "deploy console: commit_sha is required")
 	}
-	out, runErr := s.exec.RunRollback(ctx, env, sha)
+	out, runErr := s.exec.RunRollback(ctx, sha)
 	return s.finishWrite(ctx, "rollback", act, detail, out, runErr,
-		map[string]string{"env": env, "commitSha": sha}), nil
+		map[string]string{"commitSha": sha}), nil
 }
 
 // RolloutAction promotes or aborts an in-flight Argo Rollout.
 func (s *Service) RolloutAction(ctx context.Context, req *memqlv1.RolloutActionRequest) (*memqlv1.ActionResult, error) {
-	env := req.GetEnv()
 	rollout := req.GetRollout()
 	action := req.GetAction()
-	detail := map[string]any{"env": env, "rollout": rollout, "action": action}
+	detail := map[string]any{"rollout": rollout, "action": action}
 	act, err := s.authorize(ctx, "rollout_action", detail)
 	if err != nil {
 		return nil, err
-	}
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
 	}
 	if rollout == "" {
 		return nil, status.Error(codes.InvalidArgument, "deploy console: rollout is required")
@@ -423,9 +347,9 @@ func (s *Service) RolloutAction(ctx context.Context, req *memqlv1.RolloutActionR
 	if action != "promote" && action != "abort" {
 		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid action %q (want promote|abort)", action)
 	}
-	out, runErr := s.exec.RunRolloutAction(ctx, env, rollout, action)
+	out, runErr := s.exec.RunRolloutAction(ctx, rollout, action)
 	return s.finishWrite(ctx, "rollout_action", act, detail, out, runErr,
-		map[string]string{"env": env, "rollout": rollout, "action": action}), nil
+		map[string]string{"rollout": rollout, "action": action}), nil
 }
 
 // finishWrite is the shared tail for every write RPC: emit exactly one
@@ -463,42 +387,22 @@ func (s *Service) finishWrite(
 // Read RPC
 // -----------------------------------------------------------------------------
 
-// GetDeploymentStatus returns the aggregate per-env deployment view.
-// Read-only; gated to owner/admin (#728). A successful read is NOT
-// audited (reads stay un-audited on success); a denial emits a
-// blocked audit event via authorize.
-func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeploymentStatusRequest) (*memqlv1.DeploymentStatus, error) {
-	env := req.GetEnv()
-
-	// Owner/admin gate (#728), BEFORE the env is validated (memql#3505). The
-	// read RPC is the API read-gate the console's portal view rides on; deny
-	// non-admins with a blocked audit event. Successful reads are not audited.
-	//
-	// This is a read, and it is the read that makes the widening worth doing:
-	// probing a status endpoint with a junk env was the cheapest way to touch
-	// this surface without leaving anything behind.
-	if _, err := s.authorize(ctx, "get_status", map[string]any{"env": env}); err != nil {
+// GetDeploymentStatus returns the aggregate deployment view for this
+// installation. Read-only; gated to owner/admin (#728). A successful read is
+// NOT audited (reads stay un-audited on success); a denial emits a blocked
+// audit event via authorize.
+func (s *Service) GetDeploymentStatus(ctx context.Context, _ *memqlv1.GetDeploymentStatusRequest) (*memqlv1.DeploymentStatus, error) {
+	// Owner/admin gate (#728). The read RPC is the API read-gate the console's
+	// portal view rides on; deny non-admins with a blocked audit event.
+	// Successful reads are not audited.
+	if _, err := s.authorize(ctx, "get_status", map[string]any{}); err != nil {
 		return nil, err
 	}
-	if !validEnvs[env] {
-		return nil, status.Errorf(codes.InvalidArgument, "deploy console: invalid env %q (want staging|prod)", env)
-	}
 
-	// Resolved once, above every read below: the namespace the workloads run in
-	// and the Application that reconciles them are per-ENVIRONMENT since epic
-	// memql#3748 / memql#3766, not the single `memql` this used to name. The
-	// lookup cannot fail here -- validEnvs is derived from the same table -- but
-	// it is checked rather than assumed, because the failure mode of guessing is
-	// an empty namespace that reads as a healthy environment (environment.go).
-	surface, ok := SurfaceFor(env)
-	if !ok {
-		return nil, status.Errorf(codes.Internal, "deploy console: no cluster surface for env %q", env)
-	}
-
-	out := &memqlv1.DeploymentStatus{Env: env}
+	out := &memqlv1.DeploymentStatus{}
 
 	// Overlay (on-disk image authority) -> components + promoted version.
-	overlayPath := filepath.Join(s.repoRoot, surface.OverlayDir, "kustomization.yaml")
+	overlayPath := filepath.Join(s.repoRoot, overlayDir, "kustomization.yaml")
 	overlayRaw, err := os.ReadFile(overlayPath)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "deploy console: read overlay %s: %v", overlayPath, err)
@@ -509,9 +413,9 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeplo
 	}
 	out.Version = overlay.PromotedVersion
 
-	// Resolve the lockfile when the overlay names a promoted version
-	// (prod). Staging carries no promotion provenance, so engineVersion
-	// / validatedAt / gate / repo stay empty unless a lockfile is found.
+	// Resolve the lockfile when the overlay names a promoted version. An
+	// overlay that carries no promotion provenance leaves engineVersion /
+	// validatedAt / gate / repo empty.
 	var lockfile *Lockfile
 	if overlay.PromotedVersion != "" {
 		lfPath := filepath.Join(s.repoRoot, "releases", overlay.PromotedVersion+".yaml")
@@ -540,8 +444,7 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeplo
 	}
 
 	// Argo CD app status (best-effort: a kubectl failure leaves argocd nil).
-	// One ArgoCD, two Applications -- so the app NAME is the environment.
-	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", surface.ArgoApp, "-o", "json"); aerr == nil {
+	if argoRaw, aerr := s.exec.KubectlJSON(ctx, "-n", "argocd", "get", "app", argoApplication, "-o", "json"); aerr == nil {
 		if argo, merr := MapArgoStatus(argoRaw); merr == nil {
 			out.Argocd = argo
 		}
@@ -549,16 +452,17 @@ func (s *Service) GetDeploymentStatus(ctx context.Context, req *memqlv1.GetDeplo
 
 	// Rollouts. Best-effort in the sense that a kubectl FAILURE leaves the field
 	// nil -- but note that a wrong namespace is not a failure: it is an empty
-	// list and exit 0, which is why this address is resolved rather than
-	// constant (environment.go).
-	if rolloutsRaw, rerr := s.exec.KubectlJSON(ctx, "-n", surface.Namespace, "get", "rollout", "-o", "json"); rerr == nil {
+	// list and exit 0, which is a healthy-looking answer for an address nothing
+	// is at. That is why the namespace is a named constant rather than a value
+	// threaded in from a caller (see clusterNamespace above).
+	if rolloutsRaw, rerr := s.exec.KubectlJSON(ctx, "-n", clusterNamespace, "get", "rollout", "-o", "json"); rerr == nil {
 		if rollouts, merr := MapRolloutList(rolloutsRaw); merr == nil {
 			out.Rollouts = rollouts
 		}
 	}
 
 	// Deploy gate (latest AnalysisRun).
-	if gateRaw, gerr := s.exec.KubectlJSON(ctx, "-n", surface.Namespace, "get", "analysisrun", "-o", "json"); gerr == nil {
+	if gateRaw, gerr := s.exec.KubectlJSON(ctx, "-n", clusterNamespace, "get", "analysisrun", "-o", "json"); gerr == nil {
 		if gate, merr := MapGateResult(gateRaw); merr == nil {
 			out.GateResult = gate
 		}

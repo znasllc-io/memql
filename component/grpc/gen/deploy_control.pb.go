@@ -21,10 +21,10 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// GetDeploymentStatusRequest is deliberately empty: the console answers for
+// THIS installation. Field 1 was `env` (epic memql#3943).
 type GetDeploymentStatusRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// env is "staging" or "prod".
-	Env           string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -59,107 +59,8 @@ func (*GetDeploymentStatusRequest) Descriptor() ([]byte, []int) {
 	return file_deploy_control_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *GetDeploymentStatusRequest) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
-}
-
-type DeployStagingRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// version is the release lockfile version to deploy (releases/<version>.yaml).
-	Version       string `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *DeployStagingRequest) Reset() {
-	*x = DeployStagingRequest{}
-	mi := &file_deploy_control_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *DeployStagingRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*DeployStagingRequest) ProtoMessage() {}
-
-func (x *DeployStagingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use DeployStagingRequest.ProtoReflect.Descriptor instead.
-func (*DeployStagingRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *DeployStagingRequest) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
-type PromoteRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// version is the validated release lockfile version to promote staging->prod.
-	Version       string `protobuf:"bytes,1,opt,name=version,proto3" json:"version,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *PromoteRequest) Reset() {
-	*x = PromoteRequest{}
-	mi := &file_deploy_control_proto_msgTypes[2]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *PromoteRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*PromoteRequest) ProtoMessage() {}
-
-func (x *PromoteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[2]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use PromoteRequest.ProtoReflect.Descriptor instead.
-func (*PromoteRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{2}
-}
-
-func (x *PromoteRequest) GetVersion() string {
-	if x != nil {
-		return x.Version
-	}
-	return ""
-}
-
 type RollbackRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// env is "staging" or "prod".
-	Env string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
 	// commit_sha is the overlay commit to `git revert`.
 	CommitSha     string `protobuf:"bytes,2,opt,name=commit_sha,json=commitSha,proto3" json:"commit_sha,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -168,7 +69,7 @@ type RollbackRequest struct {
 
 func (x *RollbackRequest) Reset() {
 	*x = RollbackRequest{}
-	mi := &file_deploy_control_proto_msgTypes[3]
+	mi := &file_deploy_control_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -180,7 +81,7 @@ func (x *RollbackRequest) String() string {
 func (*RollbackRequest) ProtoMessage() {}
 
 func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[3]
+	mi := &file_deploy_control_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -193,14 +94,7 @@ func (x *RollbackRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackRequest.ProtoReflect.Descriptor instead.
 func (*RollbackRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *RollbackRequest) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
+	return file_deploy_control_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RollbackRequest) GetCommitSha() string {
@@ -212,11 +106,11 @@ func (x *RollbackRequest) GetCommitSha() string {
 
 type RolloutActionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// env is "staging" or "prod".
-	Env string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
 	// rollout is the Argo Rollout name (e.g. "bff", "cognition").
 	Rollout string `protobuf:"bytes,2,opt,name=rollout,proto3" json:"rollout,omitempty"`
-	// action is "promote" or "abort".
+	// action is "promote" or "abort" -- the ARGO ROLLOUT verb (advance or
+	// cancel an in-flight progressive rollout). Unrelated to the
+	// environment-to-environment promote epic memql#3943 removed.
 	Action        string `protobuf:"bytes,3,opt,name=action,proto3" json:"action,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -224,7 +118,7 @@ type RolloutActionRequest struct {
 
 func (x *RolloutActionRequest) Reset() {
 	*x = RolloutActionRequest{}
-	mi := &file_deploy_control_proto_msgTypes[4]
+	mi := &file_deploy_control_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -236,7 +130,7 @@ func (x *RolloutActionRequest) String() string {
 func (*RolloutActionRequest) ProtoMessage() {}
 
 func (x *RolloutActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[4]
+	mi := &file_deploy_control_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -249,14 +143,7 @@ func (x *RolloutActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RolloutActionRequest.ProtoReflect.Descriptor instead.
 func (*RolloutActionRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *RolloutActionRequest) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
+	return file_deploy_control_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RolloutActionRequest) GetRollout() string {
@@ -273,18 +160,17 @@ func (x *RolloutActionRequest) GetAction() string {
 	return ""
 }
 
+// SuggestNextVersionRequest is deliberately empty; see
+// GetDeploymentStatusRequest.
 type SuggestNextVersionRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// env is "staging" or "prod" -- selects which environment's current
-	// version is read.
-	Env           string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SuggestNextVersionRequest) Reset() {
 	*x = SuggestNextVersionRequest{}
-	mi := &file_deploy_control_proto_msgTypes[5]
+	mi := &file_deploy_control_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -296,7 +182,7 @@ func (x *SuggestNextVersionRequest) String() string {
 func (*SuggestNextVersionRequest) ProtoMessage() {}
 
 func (x *SuggestNextVersionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[5]
+	mi := &file_deploy_control_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -309,27 +195,18 @@ func (x *SuggestNextVersionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuggestNextVersionRequest.ProtoReflect.Descriptor instead.
 func (*SuggestNextVersionRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *SuggestNextVersionRequest) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
+	return file_deploy_control_proto_rawDescGZIP(), []int{3}
 }
 
 type CutVersionRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// env is "staging" or "prod".
-	Env string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
 	// bump selects the semver part to increment off the current version:
 	// "major" | "minor" | "patch". Empty defaults to "patch". Ignored
 	// when version is set.
 	Bump string `protobuf:"bytes,2,opt,name=bump,proto3" json:"bump,omitempty"`
 	// version is an optional explicit version override (clean semver
 	// X.Y.Z). When set, bump is ignored and this version is cut directly
-	// (still rejected if it is invalid or already exists for the env).
+	// (still rejected if it is invalid or already exists).
 	Version       string `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -337,7 +214,7 @@ type CutVersionRequest struct {
 
 func (x *CutVersionRequest) Reset() {
 	*x = CutVersionRequest{}
-	mi := &file_deploy_control_proto_msgTypes[6]
+	mi := &file_deploy_control_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -349,7 +226,7 @@ func (x *CutVersionRequest) String() string {
 func (*CutVersionRequest) ProtoMessage() {}
 
 func (x *CutVersionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[6]
+	mi := &file_deploy_control_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -362,14 +239,7 @@ func (x *CutVersionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CutVersionRequest.ProtoReflect.Descriptor instead.
 func (*CutVersionRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *CutVersionRequest) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
+	return file_deploy_control_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *CutVersionRequest) GetBump() string {
@@ -397,7 +267,7 @@ type DeployRequest struct {
 
 func (x *DeployRequest) Reset() {
 	*x = DeployRequest{}
-	mi := &file_deploy_control_proto_msgTypes[7]
+	mi := &file_deploy_control_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -409,7 +279,7 @@ func (x *DeployRequest) String() string {
 func (*DeployRequest) ProtoMessage() {}
 
 func (x *DeployRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[7]
+	mi := &file_deploy_control_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -422,7 +292,7 @@ func (x *DeployRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeployRequest.ProtoReflect.Descriptor instead.
 func (*DeployRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{7}
+	return file_deploy_control_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeployRequest) GetDeploymentId() string {
@@ -444,7 +314,7 @@ type RollbackDeploymentRequest struct {
 
 func (x *RollbackDeploymentRequest) Reset() {
 	*x = RollbackDeploymentRequest{}
-	mi := &file_deploy_control_proto_msgTypes[8]
+	mi := &file_deploy_control_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -456,7 +326,7 @@ func (x *RollbackDeploymentRequest) String() string {
 func (*RollbackDeploymentRequest) ProtoMessage() {}
 
 func (x *RollbackDeploymentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[8]
+	mi := &file_deploy_control_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -469,7 +339,7 @@ func (x *RollbackDeploymentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackDeploymentRequest.ProtoReflect.Descriptor instead.
 func (*RollbackDeploymentRequest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{8}
+	return file_deploy_control_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RollbackDeploymentRequest) GetToDeploymentId() string {
@@ -479,15 +349,12 @@ func (x *RollbackDeploymentRequest) GetToDeploymentId() string {
 	return ""
 }
 
-// DeploymentStatus is the aggregate per-env view surfaced by the
-// console's dashboard.
+// DeploymentStatus is the aggregate view surfaced by the console's dashboard.
 type DeploymentStatus struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// env echoes the requested environment.
-	Env string `protobuf:"bytes,1,opt,name=env,proto3" json:"env,omitempty"`
-	// version is the deployed release version (parsed from the prod
-	// overlay's "Promoted from releases/<version>.yaml" comment; empty
-	// for staging where the overlay carries no promotion provenance).
+	// version is the deployed release version (parsed from the overlay's
+	// "Promoted from releases/<version>.yaml" comment; empty when the overlay
+	// carries no promotion provenance).
 	Version string `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
 	// engine_version is the engine version from the resolved lockfile.
 	EngineVersion string `protobuf:"bytes,3,opt,name=engine_version,json=engineVersion,proto3" json:"engine_version,omitempty"`
@@ -509,7 +376,7 @@ type DeploymentStatus struct {
 
 func (x *DeploymentStatus) Reset() {
 	*x = DeploymentStatus{}
-	mi := &file_deploy_control_proto_msgTypes[9]
+	mi := &file_deploy_control_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -521,7 +388,7 @@ func (x *DeploymentStatus) String() string {
 func (*DeploymentStatus) ProtoMessage() {}
 
 func (x *DeploymentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[9]
+	mi := &file_deploy_control_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -534,14 +401,7 @@ func (x *DeploymentStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeploymentStatus.ProtoReflect.Descriptor instead.
 func (*DeploymentStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{9}
-}
-
-func (x *DeploymentStatus) GetEnv() string {
-	if x != nil {
-		return x.Env
-	}
-	return ""
+	return file_deploy_control_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeploymentStatus) GetVersion() string {
@@ -617,7 +477,7 @@ type ComponentDigest struct {
 
 func (x *ComponentDigest) Reset() {
 	*x = ComponentDigest{}
-	mi := &file_deploy_control_proto_msgTypes[10]
+	mi := &file_deploy_control_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -629,7 +489,7 @@ func (x *ComponentDigest) String() string {
 func (*ComponentDigest) ProtoMessage() {}
 
 func (x *ComponentDigest) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[10]
+	mi := &file_deploy_control_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -642,7 +502,7 @@ func (x *ComponentDigest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentDigest.ProtoReflect.Descriptor instead.
 func (*ComponentDigest) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{10}
+	return file_deploy_control_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ComponentDigest) GetName() string {
@@ -686,7 +546,7 @@ type ArgoStatus struct {
 
 func (x *ArgoStatus) Reset() {
 	*x = ArgoStatus{}
-	mi := &file_deploy_control_proto_msgTypes[11]
+	mi := &file_deploy_control_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -698,7 +558,7 @@ func (x *ArgoStatus) String() string {
 func (*ArgoStatus) ProtoMessage() {}
 
 func (x *ArgoStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[11]
+	mi := &file_deploy_control_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -711,7 +571,7 @@ func (x *ArgoStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ArgoStatus.ProtoReflect.Descriptor instead.
 func (*ArgoStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{11}
+	return file_deploy_control_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ArgoStatus) GetSyncStatus() string {
@@ -777,7 +637,7 @@ type RolloutStatus struct {
 
 func (x *RolloutStatus) Reset() {
 	*x = RolloutStatus{}
-	mi := &file_deploy_control_proto_msgTypes[12]
+	mi := &file_deploy_control_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -789,7 +649,7 @@ func (x *RolloutStatus) String() string {
 func (*RolloutStatus) ProtoMessage() {}
 
 func (x *RolloutStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[12]
+	mi := &file_deploy_control_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -802,7 +662,7 @@ func (x *RolloutStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RolloutStatus.ProtoReflect.Descriptor instead.
 func (*RolloutStatus) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{12}
+	return file_deploy_control_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RolloutStatus) GetName() string {
@@ -876,7 +736,7 @@ type GateResult struct {
 
 func (x *GateResult) Reset() {
 	*x = GateResult{}
-	mi := &file_deploy_control_proto_msgTypes[13]
+	mi := &file_deploy_control_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -888,7 +748,7 @@ func (x *GateResult) String() string {
 func (*GateResult) ProtoMessage() {}
 
 func (x *GateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[13]
+	mi := &file_deploy_control_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -901,7 +761,7 @@ func (x *GateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateResult.ProtoReflect.Descriptor instead.
 func (*GateResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{13}
+	return file_deploy_control_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *GateResult) GetResult() string {
@@ -940,7 +800,7 @@ type GateLeg struct {
 
 func (x *GateLeg) Reset() {
 	*x = GateLeg{}
-	mi := &file_deploy_control_proto_msgTypes[14]
+	mi := &file_deploy_control_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -952,7 +812,7 @@ func (x *GateLeg) String() string {
 func (*GateLeg) ProtoMessage() {}
 
 func (x *GateLeg) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[14]
+	mi := &file_deploy_control_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -965,7 +825,7 @@ func (x *GateLeg) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateLeg.ProtoReflect.Descriptor instead.
 func (*GateLeg) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{14}
+	return file_deploy_control_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *GateLeg) GetName() string {
@@ -994,8 +854,8 @@ func (x *GateLeg) GetDetail() string {
 type SuggestNextVersionResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// current_version is the version the proposals are computed from: the
-	// latest succeeded deployment for the env, falling back to the on-disk
-	// overlay's promoted version. Empty when neither is known (proposals
+	// latest succeeded deployment, falling back to the on-disk overlay's
+	// promoted version. Empty when neither is known (proposals
 	// are then seeded from 0.0.0).
 	CurrentVersion string `protobuf:"bytes,1,opt,name=current_version,json=currentVersion,proto3" json:"current_version,omitempty"`
 	// next_major / next_minor / next_patch are the proposed clean-semver
@@ -1013,7 +873,7 @@ type SuggestNextVersionResult struct {
 
 func (x *SuggestNextVersionResult) Reset() {
 	*x = SuggestNextVersionResult{}
-	mi := &file_deploy_control_proto_msgTypes[15]
+	mi := &file_deploy_control_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1025,7 +885,7 @@ func (x *SuggestNextVersionResult) String() string {
 func (*SuggestNextVersionResult) ProtoMessage() {}
 
 func (x *SuggestNextVersionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[15]
+	mi := &file_deploy_control_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1038,7 +898,7 @@ func (x *SuggestNextVersionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SuggestNextVersionResult.ProtoReflect.Descriptor instead.
 func (*SuggestNextVersionResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{15}
+	return file_deploy_control_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SuggestNextVersionResult) GetCurrentVersion() string {
@@ -1087,7 +947,7 @@ type ActionResult struct {
 	AuditEventId string `protobuf:"bytes,3,opt,name=audit_event_id,json=auditEventId,proto3" json:"audit_event_id,omitempty"`
 	// correlation_id ties together the audit event + any downstream logs.
 	CorrelationId string `protobuf:"bytes,4,opt,name=correlation_id,json=correlationId,proto3" json:"correlation_id,omitempty"`
-	// details carries action-specific key/values (env, version, rollout, ...).
+	// details carries action-specific key/values (version, rollout, ...).
 	Details       map[string]string `protobuf:"bytes,5,rep,name=details,proto3" json:"details,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1095,7 +955,7 @@ type ActionResult struct {
 
 func (x *ActionResult) Reset() {
 	*x = ActionResult{}
-	mi := &file_deploy_control_proto_msgTypes[16]
+	mi := &file_deploy_control_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1107,7 +967,7 @@ func (x *ActionResult) String() string {
 func (*ActionResult) ProtoMessage() {}
 
 func (x *ActionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[16]
+	mi := &file_deploy_control_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1120,7 +980,7 @@ func (x *ActionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ActionResult.ProtoReflect.Descriptor instead.
 func (*ActionResult) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{16}
+	return file_deploy_control_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ActionResult) GetOk() bool {
@@ -1193,7 +1053,7 @@ type RefusalInfo struct {
 
 func (x *RefusalInfo) Reset() {
 	*x = RefusalInfo{}
-	mi := &file_deploy_control_proto_msgTypes[17]
+	mi := &file_deploy_control_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1205,7 +1065,7 @@ func (x *RefusalInfo) String() string {
 func (*RefusalInfo) ProtoMessage() {}
 
 func (x *RefusalInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_deploy_control_proto_msgTypes[17]
+	mi := &file_deploy_control_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1218,7 +1078,7 @@ func (x *RefusalInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RefusalInfo.ProtoReflect.Descriptor instead.
 func (*RefusalInfo) Descriptor() ([]byte, []int) {
-	return file_deploy_control_proto_rawDescGZIP(), []int{17}
+	return file_deploy_control_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *RefusalInfo) GetAuditEventId() string {
@@ -1232,33 +1092,23 @@ var File_deploy_control_proto protoreflect.FileDescriptor
 
 const file_deploy_control_proto_rawDesc = "" +
 	"\n" +
-	"\x14deploy_control.proto\x12\x1eznasllc.memql.deploycontrol.v1\".\n" +
-	"\x1aGetDeploymentStatusRequest\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\"0\n" +
-	"\x14DeployStagingRequest\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\tR\aversion\"*\n" +
-	"\x0ePromoteRequest\x12\x18\n" +
-	"\aversion\x18\x01 \x01(\tR\aversion\"B\n" +
-	"\x0fRollbackRequest\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\x12\x1d\n" +
+	"\x14deploy_control.proto\x12\x1eznasllc.memql.deploycontrol.v1\"'\n" +
+	"\x1aGetDeploymentStatusRequestJ\x04\b\x01\x10\x02R\x03env\";\n" +
+	"\x0fRollbackRequest\x12\x1d\n" +
 	"\n" +
-	"commit_sha\x18\x02 \x01(\tR\tcommitSha\"Z\n" +
-	"\x14RolloutActionRequest\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\x12\x18\n" +
+	"commit_sha\x18\x02 \x01(\tR\tcommitShaJ\x04\b\x01\x10\x02R\x03env\"S\n" +
+	"\x14RolloutActionRequest\x12\x18\n" +
 	"\arollout\x18\x02 \x01(\tR\arollout\x12\x16\n" +
-	"\x06action\x18\x03 \x01(\tR\x06action\"-\n" +
-	"\x19SuggestNextVersionRequest\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\"S\n" +
-	"\x11CutVersionRequest\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\x12\x12\n" +
+	"\x06action\x18\x03 \x01(\tR\x06actionJ\x04\b\x01\x10\x02R\x03env\"&\n" +
+	"\x19SuggestNextVersionRequestJ\x04\b\x01\x10\x02R\x03env\"L\n" +
+	"\x11CutVersionRequest\x12\x12\n" +
 	"\x04bump\x18\x02 \x01(\tR\x04bump\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\"4\n" +
+	"\aversion\x18\x03 \x01(\tR\aversionJ\x04\b\x01\x10\x02R\x03env\"4\n" +
 	"\rDeployRequest\x12#\n" +
 	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\"E\n" +
 	"\x19RollbackDeploymentRequest\x12(\n" +
-	"\x10to_deployment_id\x18\x01 \x01(\tR\x0etoDeploymentId\"\xc9\x03\n" +
-	"\x10DeploymentStatus\x12\x10\n" +
-	"\x03env\x18\x01 \x01(\tR\x03env\x12\x18\n" +
+	"\x10to_deployment_id\x18\x01 \x01(\tR\x0etoDeploymentId\"\xc2\x03\n" +
+	"\x10DeploymentStatus\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12%\n" +
 	"\x0eengine_version\x18\x03 \x01(\tR\rengineVersion\x12!\n" +
 	"\fvalidated_at\x18\x04 \x01(\tR\vvalidatedAt\x12\x12\n" +
@@ -1269,7 +1119,7 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\x06argocd\x18\a \x01(\v2*.znasllc.memql.deploycontrol.v1.ArgoStatusR\x06argocd\x12I\n" +
 	"\brollouts\x18\b \x03(\v2-.znasllc.memql.deploycontrol.v1.RolloutStatusR\brollouts\x12K\n" +
 	"\vgate_result\x18\t \x01(\v2*.znasllc.memql.deploycontrol.v1.GateResultR\n" +
-	"gateResult\"Q\n" +
+	"gateResultJ\x04\b\x01\x10\x02R\x03env\"Q\n" +
 	"\x0fComponentDigest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x12\n" +
@@ -1320,11 +1170,9 @@ const file_deploy_control_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"3\n" +
 	"\vRefusalInfo\x12$\n" +
-	"\x0eaudit_event_id\x18\x01 \x01(\tR\fauditEventId2\xbb\b\n" +
+	"\x0eaudit_event_id\x18\x01 \x01(\tR\fauditEventId2\xdd\x06\n" +
 	"\x14DeployControlService\x12\x83\x01\n" +
-	"\x13GetDeploymentStatus\x12:.znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest\x1a0.znasllc.memql.deploycontrol.v1.DeploymentStatus\x12s\n" +
-	"\rDeployStaging\x124.znasllc.memql.deploycontrol.v1.DeployStagingRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12g\n" +
-	"\aPromote\x12..znasllc.memql.deploycontrol.v1.PromoteRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12i\n" +
+	"\x13GetDeploymentStatus\x12:.znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest\x1a0.znasllc.memql.deploycontrol.v1.DeploymentStatus\x12i\n" +
 	"\bRollback\x12/.znasllc.memql.deploycontrol.v1.RollbackRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12s\n" +
 	"\rRolloutAction\x124.znasllc.memql.deploycontrol.v1.RolloutActionRequest\x1a,.znasllc.memql.deploycontrol.v1.ActionResult\x12\x89\x01\n" +
 	"\x12SuggestNextVersion\x129.znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest\x1a8.znasllc.memql.deploycontrol.v1.SuggestNextVersionResult\x12m\n" +
@@ -1345,55 +1193,49 @@ func file_deploy_control_proto_rawDescGZIP() []byte {
 	return file_deploy_control_proto_rawDescData
 }
 
-var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_deploy_control_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_deploy_control_proto_goTypes = []any{
 	(*GetDeploymentStatusRequest)(nil), // 0: znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
-	(*DeployStagingRequest)(nil),       // 1: znasllc.memql.deploycontrol.v1.DeployStagingRequest
-	(*PromoteRequest)(nil),             // 2: znasllc.memql.deploycontrol.v1.PromoteRequest
-	(*RollbackRequest)(nil),            // 3: znasllc.memql.deploycontrol.v1.RollbackRequest
-	(*RolloutActionRequest)(nil),       // 4: znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	(*SuggestNextVersionRequest)(nil),  // 5: znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	(*CutVersionRequest)(nil),          // 6: znasllc.memql.deploycontrol.v1.CutVersionRequest
-	(*DeployRequest)(nil),              // 7: znasllc.memql.deploycontrol.v1.DeployRequest
-	(*RollbackDeploymentRequest)(nil),  // 8: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	(*DeploymentStatus)(nil),           // 9: znasllc.memql.deploycontrol.v1.DeploymentStatus
-	(*ComponentDigest)(nil),            // 10: znasllc.memql.deploycontrol.v1.ComponentDigest
-	(*ArgoStatus)(nil),                 // 11: znasllc.memql.deploycontrol.v1.ArgoStatus
-	(*RolloutStatus)(nil),              // 12: znasllc.memql.deploycontrol.v1.RolloutStatus
-	(*GateResult)(nil),                 // 13: znasllc.memql.deploycontrol.v1.GateResult
-	(*GateLeg)(nil),                    // 14: znasllc.memql.deploycontrol.v1.GateLeg
-	(*SuggestNextVersionResult)(nil),   // 15: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	(*ActionResult)(nil),               // 16: znasllc.memql.deploycontrol.v1.ActionResult
-	(*RefusalInfo)(nil),                // 17: znasllc.memql.deploycontrol.v1.RefusalInfo
-	nil,                                // 18: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	(*RollbackRequest)(nil),            // 1: znasllc.memql.deploycontrol.v1.RollbackRequest
+	(*RolloutActionRequest)(nil),       // 2: znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	(*SuggestNextVersionRequest)(nil),  // 3: znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
+	(*CutVersionRequest)(nil),          // 4: znasllc.memql.deploycontrol.v1.CutVersionRequest
+	(*DeployRequest)(nil),              // 5: znasllc.memql.deploycontrol.v1.DeployRequest
+	(*RollbackDeploymentRequest)(nil),  // 6: znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	(*DeploymentStatus)(nil),           // 7: znasllc.memql.deploycontrol.v1.DeploymentStatus
+	(*ComponentDigest)(nil),            // 8: znasllc.memql.deploycontrol.v1.ComponentDigest
+	(*ArgoStatus)(nil),                 // 9: znasllc.memql.deploycontrol.v1.ArgoStatus
+	(*RolloutStatus)(nil),              // 10: znasllc.memql.deploycontrol.v1.RolloutStatus
+	(*GateResult)(nil),                 // 11: znasllc.memql.deploycontrol.v1.GateResult
+	(*GateLeg)(nil),                    // 12: znasllc.memql.deploycontrol.v1.GateLeg
+	(*SuggestNextVersionResult)(nil),   // 13: znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	(*ActionResult)(nil),               // 14: znasllc.memql.deploycontrol.v1.ActionResult
+	(*RefusalInfo)(nil),                // 15: znasllc.memql.deploycontrol.v1.RefusalInfo
+	nil,                                // 16: znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 }
 var file_deploy_control_proto_depIdxs = []int32{
-	10, // 0: znasllc.memql.deploycontrol.v1.DeploymentStatus.components:type_name -> znasllc.memql.deploycontrol.v1.ComponentDigest
-	11, // 1: znasllc.memql.deploycontrol.v1.DeploymentStatus.argocd:type_name -> znasllc.memql.deploycontrol.v1.ArgoStatus
-	12, // 2: znasllc.memql.deploycontrol.v1.DeploymentStatus.rollouts:type_name -> znasllc.memql.deploycontrol.v1.RolloutStatus
-	13, // 3: znasllc.memql.deploycontrol.v1.DeploymentStatus.gate_result:type_name -> znasllc.memql.deploycontrol.v1.GateResult
-	14, // 4: znasllc.memql.deploycontrol.v1.GateResult.legs:type_name -> znasllc.memql.deploycontrol.v1.GateLeg
-	18, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
+	8,  // 0: znasllc.memql.deploycontrol.v1.DeploymentStatus.components:type_name -> znasllc.memql.deploycontrol.v1.ComponentDigest
+	9,  // 1: znasllc.memql.deploycontrol.v1.DeploymentStatus.argocd:type_name -> znasllc.memql.deploycontrol.v1.ArgoStatus
+	10, // 2: znasllc.memql.deploycontrol.v1.DeploymentStatus.rollouts:type_name -> znasllc.memql.deploycontrol.v1.RolloutStatus
+	11, // 3: znasllc.memql.deploycontrol.v1.DeploymentStatus.gate_result:type_name -> znasllc.memql.deploycontrol.v1.GateResult
+	12, // 4: znasllc.memql.deploycontrol.v1.GateResult.legs:type_name -> znasllc.memql.deploycontrol.v1.GateLeg
+	16, // 5: znasllc.memql.deploycontrol.v1.ActionResult.details:type_name -> znasllc.memql.deploycontrol.v1.ActionResult.DetailsEntry
 	0,  // 6: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:input_type -> znasllc.memql.deploycontrol.v1.GetDeploymentStatusRequest
-	1,  // 7: znasllc.memql.deploycontrol.v1.DeployControlService.DeployStaging:input_type -> znasllc.memql.deploycontrol.v1.DeployStagingRequest
-	2,  // 8: znasllc.memql.deploycontrol.v1.DeployControlService.Promote:input_type -> znasllc.memql.deploycontrol.v1.PromoteRequest
-	3,  // 9: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:input_type -> znasllc.memql.deploycontrol.v1.RollbackRequest
-	4,  // 10: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:input_type -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
-	5,  // 11: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:input_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
-	6,  // 12: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:input_type -> znasllc.memql.deploycontrol.v1.CutVersionRequest
-	7,  // 13: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:input_type -> znasllc.memql.deploycontrol.v1.DeployRequest
-	8,  // 14: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:input_type -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
-	9,  // 15: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:output_type -> znasllc.memql.deploycontrol.v1.DeploymentStatus
-	16, // 16: znasllc.memql.deploycontrol.v1.DeployControlService.DeployStaging:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	16, // 17: znasllc.memql.deploycontrol.v1.DeployControlService.Promote:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	16, // 18: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	16, // 19: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	15, // 20: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:output_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
-	16, // 21: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	16, // 22: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	16, // 23: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
-	15, // [15:24] is the sub-list for method output_type
-	6,  // [6:15] is the sub-list for method input_type
+	1,  // 7: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:input_type -> znasllc.memql.deploycontrol.v1.RollbackRequest
+	2,  // 8: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:input_type -> znasllc.memql.deploycontrol.v1.RolloutActionRequest
+	3,  // 9: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:input_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionRequest
+	4,  // 10: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:input_type -> znasllc.memql.deploycontrol.v1.CutVersionRequest
+	5,  // 11: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:input_type -> znasllc.memql.deploycontrol.v1.DeployRequest
+	6,  // 12: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:input_type -> znasllc.memql.deploycontrol.v1.RollbackDeploymentRequest
+	7,  // 13: znasllc.memql.deploycontrol.v1.DeployControlService.GetDeploymentStatus:output_type -> znasllc.memql.deploycontrol.v1.DeploymentStatus
+	14, // 14: znasllc.memql.deploycontrol.v1.DeployControlService.Rollback:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	14, // 15: znasllc.memql.deploycontrol.v1.DeployControlService.RolloutAction:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	13, // 16: znasllc.memql.deploycontrol.v1.DeployControlService.SuggestNextVersion:output_type -> znasllc.memql.deploycontrol.v1.SuggestNextVersionResult
+	14, // 17: znasllc.memql.deploycontrol.v1.DeployControlService.CutVersion:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	14, // 18: znasllc.memql.deploycontrol.v1.DeployControlService.Deploy:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	14, // 19: znasllc.memql.deploycontrol.v1.DeployControlService.RollbackDeployment:output_type -> znasllc.memql.deploycontrol.v1.ActionResult
+	13, // [13:20] is the sub-list for method output_type
+	6,  // [6:13] is the sub-list for method input_type
 	6,  // [6:6] is the sub-list for extension type_name
 	6,  // [6:6] is the sub-list for extension extendee
 	0,  // [0:6] is the sub-list for field type_name
@@ -1410,7 +1252,7 @@ func file_deploy_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_deploy_control_proto_rawDesc), len(file_deploy_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

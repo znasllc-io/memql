@@ -6,11 +6,14 @@ import {
   type DeploymentStatus,
 } from "@znasllc-io/memql-sdk-core/deploy";
 
-// The two vocabularies this console speaks, declared here because the SDK
-// takes them as plain strings. Narrowing them locally keeps a typo out of a
-// call the server would reject, without asking the SDK to model an enum the
-// wire does not carry.
-export type DeployEnv = "staging" | "prod";
+// The vocabulary this console speaks, declared here because the SDK takes it
+// as a plain string. Narrowing it locally keeps a typo out of a call the
+// server would reject, without asking the SDK to model an enum the wire does
+// not carry.
+//
+// There is no environment beside it: the console targets THIS installation
+// (epic memql#3943), and a second environment is a second install with its
+// own console.
 export type SemverBump = "major" | "minor" | "patch";
 
 import { useCluster } from "../cluster/ClusterProvider";
@@ -134,7 +137,7 @@ export function deployErrorAuditEventId(err: unknown): string {
   return err instanceof DeployControlError ? err.auditEventId : "";
 }
 
-export function useDeployConsole(env: DeployEnv): DeployConsoleState {
+export function useDeployConsole(): DeployConsoleState {
   const { dispatcher } = useCluster();
   const { access } = useMyAccess();
   const role: Role = access?.clusterRole ?? "";
@@ -170,7 +173,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
     setError("");
 
     void new DeployControlClient(dispatcher)
-      .getDeploymentStatus(env, { signal: controller.signal })
+      .getDeploymentStatus({ signal: controller.signal })
       .then((next) => {
         if (live) setStatus(next);
       })
@@ -188,7 +191,7 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
     // `permissions` is rebuilt every render, so it is deliberately NOT a
     // dependency -- the boolean inside it is, and a boolean is stable.
     // Depending on the object would re-read the status on every render.
-  }, [dispatcher, env, epoch, permissions.canView]);
+  }, [dispatcher, epoch, permissions.canView]);
 
   // run funnels every action through one place so the busy flag, the message
   // handling and the follow-up refresh cannot be forgotten on the third one.
@@ -220,8 +223,8 @@ export function useDeployConsole(env: DeployEnv): DeployConsoleState {
 
   const cut = useCallback(
     (bump: SemverBump) =>
-      run(dispatcher ? new DeployControlClient(dispatcher).cutVersion(env, bump) : null),
-    [dispatcher, env, run],
+      run(dispatcher ? new DeployControlClient(dispatcher).cutVersion(bump) : null),
+    [dispatcher, run],
   );
 
   const ship = useCallback(

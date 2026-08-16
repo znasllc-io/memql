@@ -41,14 +41,14 @@ type gateProbe struct {
 	denyWith error
 }
 
-func (g *gateProbe) Promote(ctx context.Context, _ *memqlv1.PromoteRequest) (*memqlv1.ActionResult, error) {
+func (g *gateProbe) Rollback(ctx context.Context, _ *memqlv1.RollbackRequest) (*memqlv1.ActionResult, error) {
 	if ac, ok := auth.AccessFromContext(ctx); ok {
 		g.sawAccess = ac
 	}
 	if g.denyWith != nil {
 		return nil, g.denyWith
 	}
-	return &memqlv1.ActionResult{Ok: true, AuditEventId: "aud-1", Message: "promoted"}, nil
+	return &memqlv1.ActionResult{Ok: true, AuditEventId: "aud-1", Message: "reverted"}, nil
 }
 
 func newDeployControlSession(t *testing.T, role auth.Role, h memqlv1.DeployControlServiceServer) (*streamSession, *captureStream) {
@@ -68,14 +68,14 @@ func newDeployControlSession(t *testing.T, role auth.Role, h memqlv1.DeployContr
 	return s, cs
 }
 
-func promoteEnvelope() *memqlv1.MemqlClientMessage {
+func rollbackEnvelope() *memqlv1.MemqlClientMessage {
 	return &memqlv1.MemqlClientMessage{
 		MessageId: "m1",
 		Payload: &memqlv1.MemqlClientMessage_DeployControl{
 			DeployControl: &memqlv1.DeployControlMsg{
 				RequestId: "r1",
-				Request: &memqlv1.DeployControlMsg_Promote{
-					Promote: &memqlv1.PromoteRequest{Version: "1.2.3"},
+				Request: &memqlv1.DeployControlMsg_Rollback{
+					Rollback: &memqlv1.RollbackRequest{CommitSha: "abc1234"},
 				},
 			},
 		},
@@ -98,7 +98,7 @@ func TestDeployControl_StampsTheSessionIdentityForTheGate(t *testing.T) {
 	probe := &gateProbe{}
 	s, cs := newDeployControlSession(t, auth.RoleOwner, probe)
 
-	env := promoteEnvelope()
+	env := rollbackEnvelope()
 	require.NoError(t, s.handleDeployControl(env, env.GetDeployControl()))
 
 	require.NotNil(t, probe.sawAccess, "the service must receive the caller's AccessContext")
@@ -120,7 +120,7 @@ func TestDeployControl_DenialRidesInTheReplyNotAsAStreamError(t *testing.T) {
 	probe := &gateProbe{denyWith: status.Error(codes.PermissionDenied, "deploy console: promote requires owner or admin role")}
 	s, cs := newDeployControlSession(t, auth.RoleReader, probe)
 
-	env := promoteEnvelope()
+	env := rollbackEnvelope()
 	assert.NoError(t, s.handleDeployControl(env, env.GetDeployControl()),
 		"a denial must not surface as a handler error (it would tear down the stream)")
 
@@ -137,7 +137,7 @@ func TestDeployControl_DenialRidesInTheReplyNotAsAStreamError(t *testing.T) {
 func TestDeployControl_UnimplementedWhenTheNodeHasNoService(t *testing.T) {
 	s, cs := newDeployControlSession(t, auth.RoleOwner, nil)
 
-	env := promoteEnvelope()
+	env := rollbackEnvelope()
 	require.NoError(t, s.handleDeployControl(env, env.GetDeployControl()))
 
 	res := deployControlResult(t, cs)
@@ -152,7 +152,7 @@ func TestDeployControl_ReachableThroughTheStreamPayloadSwitch(t *testing.T) {
 	probe := &gateProbe{}
 	s, cs := newDeployControlSession(t, auth.RoleOwner, probe)
 
-	require.NoError(t, s.handleMessage(promoteEnvelope()))
+	require.NoError(t, s.handleMessage(rollbackEnvelope()))
 
 	res := deployControlResult(t, cs)
 	assert.True(t, res.GetOk(), "handleMessage must route DeployControl to its handler")
@@ -167,6 +167,6 @@ func TestDeployControl_RestrictedUnderALiveBadgeGrant(t *testing.T) {
 	s.badgeStamped = true
 	s.badgeExpiresAt = time.Now().Add(time.Hour)
 
-	assert.Equal(t, badgeGateRestricted, s.badgeGate(promoteEnvelope()),
+	assert.Equal(t, badgeGateRestricted, s.badgeGate(rollbackEnvelope()),
 		"deploy control must be pinned away from badge sessions")
 }

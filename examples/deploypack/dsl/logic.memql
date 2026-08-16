@@ -1,8 +1,8 @@
 // logic.memql -- the deploy pack (examples/deploypack), Epic 2 / #2096 (E2.3).
 //
-// Imperative bodies for the deploy-lifecycle automations. Mirrors deploy.go's
-// Deploy(): read the deployment's new state off the CDC event, and for the
-// azure provider in the in_progress state, fire the promote effect. The
+// Imperative bodies for the deploy-lifecycle automations. Read the
+// deployment's new state off the CDC event, and for the azure provider in the
+// in_progress state, OBSERVE ArgoCD's reconciled state. The
 // TERMINAL TRANSITION is persisted by the automation's gated mutation steps
 // (decide -> act -> persist), not in here -- logic performs no graph writes
 // (behavioral-constructs ADR section 2.1). Rewritten for #2400 after strict
@@ -23,14 +23,16 @@
 // (result.First().payload.x) are still extracted into their own coalesce()
 // steps first.
 //
-// Env mapping (production -> prod) is done inside the deployRunPromote Go
-// handler via deploycontrol.ConsoleEnvFor -- the SAME mapping the Go driver
-// uses -- so this logic passes the deployment.environment enum straight
-// through and the mapping lives in exactly one place.
+// No environment is read off the event (epic memql#3943). The pack drives ONE
+// installation, so there is no environment to map and no promote to aim: the
+// forward-deploy effect this logic used to fire (deployRunPromote) pinned one
+// environment's overlay from another's, and both halves of that are gone. What
+// remains is the honest question -- did ArgoCD reconcile what the merge pinned
+// -- which observeReconciledState already answers.
 
-use deploypack.builtins.{ deployRunPromote, deployObserveReconciledState, deployRecordBack }
+use deploypack.builtins.{ deployObserveReconciledState, deployRecordBack }
 
-@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, fire deployRunPromote (passing the environment enum; the handler maps it to the promote.sh env) and return { deploymentId, outcome } where outcome is succeeded (forward deploy, clean promote), rolled_back (rollback record -- one carrying previousDeploymentId -- clean promote, matching deploy.go's RollbackDeployment terminal, #2115 parity), failed (promote reported failure in-band), or empty (not our edge; nothing fired). The automation persists the transition. Epic 2 / #2096; rewritten for #2400.")
+@description("On every v1:cluster:deployment update: when the new status is in_progress AND the provider is azure (or empty -> azure default) AND a version + deploymentId are present, observe ArgoCD's reconciled state and return { deploymentId, outcome } where outcome is succeeded (forward deploy, ArgoCD synced AND healthy), rolled_back (rollback record -- one carrying previousDeploymentId -- likewise reconciled, matching deploy.go's RollbackDeployment terminal, #2115 parity), failed (observed and NOT reconciled), or empty (not our edge; nothing observed). The automation persists the transition. Epic 2 / #2096; the promote effect it used to fire went with the environment concept, epic memql#3943.")
 logic driveDeploymentInProgress {
   args {
     event object @required
@@ -40,18 +42,18 @@ logic driveDeploymentInProgress {
     provider := coalesce(args.event.payload.provider, "")
     deploymentId := coalesce(args.event.payload.deploymentId, "")
     version := coalesce(args.event.payload.version, "")
-    environment := coalesce(args.event.payload.environment, "")
     previousDeploymentId := coalesce(args.event.payload.previousDeploymentId, "")
     isAzure := cond(provider == "azure", true, cond(provider == "", true, false))
     result := if status == "in_progress" && isAzure == true && version != "" && deploymentId != "" {
-      deployRunPromote(version: version, env: environment)
+      deployObserveReconciledState(app: "")
     }
-    firedProbe := coalesce(result.First().payload.effect, "")
-    successVal := coalesce(result.First().payload.success, false)
-    fired := cond(firedProbe == "", false, true)
-    promoted := cond(fired == true, cond(successVal == true, true, false), false)
+    observedProbe := coalesce(result.First().payload.effect, "")
+    syncedVal := coalesce(result.First().payload.synced, false)
+    healthyVal := coalesce(result.First().payload.healthy, false)
+    observed := cond(observedProbe == "", false, true)
+    reconciled := cond(syncedVal == true, cond(healthyVal == true, true, false), false)
     isRollback := cond(previousDeploymentId == "", false, true)
-    outcome := cond(promoted == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(fired == true, "failed", ""))
+    outcome := cond(reconciled == true, cond(isRollback == true, "rolled_back", "succeeded"), cond(observed == true, "failed", ""))
     return { deploymentId: deploymentId, outcome: outcome }
   }
 }

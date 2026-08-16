@@ -125,7 +125,6 @@ var unroutedFamilies = map[string]string{
 	"create_account_token_result":            "single-reply",
 	"revoke_account_token_result":            "single-reply",
 	"identity_admin_result":                  "single-reply",
-	"promote_site_result":                    "single-reply",
 }
 
 // serverPayloadOneof returns the MemqlServerMessage payload oneof descriptor.
