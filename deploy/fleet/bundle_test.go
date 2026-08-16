@@ -211,6 +211,53 @@ func TestFleetBundleShipsNoGo(t *testing.T) {
 	}
 }
 
+// TestBundleImageCopiesTheBundle.
+//
+// The bundle image's entire content is one COPY line. Move or rename the DSL
+// tree without updating it and `docker build` still succeeds -- COPY of a
+// missing source fails, but COPY of the WRONG existing source does not, and
+// neither does a tree that has simply moved out from under a path that still
+// resolves to something. What ships is an image whose init-container copies
+// nothing useful into the volume, so every node mounts an empty MEMQL_DSL_PATH
+// and the control plane is silently absent: no fleet concepts, no automations,
+// and a mesh that boots perfectly.
+//
+// This also ROUTES the Dockerfile through CI. `deploy/fleet/Dockerfile` matches
+// no path-filter bucket on its own, and scripts/ci's coverage gate offers two
+// remedies for that: exempt the file, or make a gate read it. Reading it is the
+// better answer here precisely because the failure above is invisible.
+func TestBundleImageCopiesTheBundle(t *testing.T) {
+	_, self, _, _ := runtime.Caller(0)
+	dir := filepath.Dir(self)
+
+	b, err := os.ReadFile(filepath.Join(dir, "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	src := string(b)
+
+	// The COPY's source is relative to the build context, which the Dockerfile's
+	// own header documents as deploy/fleet. So the source has to be `dsl/`, and
+	// that directory has to be the one the rest of this file gates.
+	copyLine := regexp.MustCompile(`(?m)^COPY\s+(\S+)\s+(\S+)\s*$`).FindStringSubmatch(src)
+	if copyLine == nil {
+		t.Fatal("the bundle Dockerfile has no COPY line -- it would build an image containing no DSL at all, which mounts as an empty MEMQL_DSL_PATH and boots a mesh with no control plane")
+	}
+	if got := strings.TrimSuffix(copyLine[1], "/"); got != "dsl" {
+		t.Errorf("the Dockerfile copies %q, but the bundle tree is deploy/fleet/dsl (the build context is deploy/fleet)", copyLine[1])
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "dsl")); serr != nil {
+		t.Errorf("the Dockerfile's COPY source does not exist: %v", serr)
+	}
+
+	// The destination is the contract with the dsl-bundle component, whose
+	// init-container runs `cp -a /bundle/. /var/lib/memql/dsl/`. A different
+	// destination here copies nothing and reports success.
+	if dest := strings.TrimSuffix(copyLine[2], "/"); dest != "/bundle" {
+		t.Errorf("the Dockerfile copies into %q; the dsl-bundle component's init-container reads /bundle, so anything else copies nothing and exits 0", copyLine[2])
+	}
+}
+
 // TestFleetActionsResolveToAllowlistedScripts.
 //
 // A `capability script(script: "<id>")` call is only reachable when <id> is in
