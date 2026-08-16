@@ -398,7 +398,7 @@ function requireArg(method: string, name: string, value: string): void {
 // wire -> plain translation
 // -----------------------------------------------------------------------------
 
-function deploymentStatusFromWire(w: DeploymentStatusWire | undefined): DeploymentStatus {
+function deploymentStatusFromWire(w: DeploymentStatusWire | null | undefined): DeploymentStatus {
   return {
     env: w?.env ?? "",
     version: w?.version ?? "",
@@ -439,7 +439,7 @@ function deploymentStatusFromWire(w: DeploymentStatusWire | undefined): Deployme
   };
 }
 
-function nextVersionFromWire(w: SuggestNextVersionResultWire | undefined): NextVersionSuggestion {
+function nextVersionFromWire(w: SuggestNextVersionResultWire | null | undefined): NextVersionSuggestion {
   return {
     currentVersion: w?.currentVersion ?? "",
     nextMajor: w?.nextMajor ?? "",
