@@ -6,9 +6,13 @@
 # in the base manifests below are human-readable placeholders only; the overlay's
 # images: transformer replaces them with the pinned digest.
 #
-# NO database resource: staging/prod use the managed Tiger Cloud DB
-# (xahn9ru4v6) via the MEMQL_DATABASE_DSN (transaction pooler) +
-# MEMORY_NODES_DATABASE_DIRECT_DSN (direct) keys in memql-secrets (#1925).
+# NO database resource HERE, and that is a composition choice rather than an
+# absence (epic memql#3842 / #3848). Every environment runs a self-hosted
+# CloudNativePG cluster, composed by its overlay from
+# deploy/k8s/components/cnpg-db with a tier preset -- so a deployment picks its
+# own size without a per-environment manifest. Nodes reach it through the
+# MEMQL_DATABASE_DSN + MEMORY_NODES_DATABASE_DIRECT_DSN keys in memql-secrets
+# (#1925), both pointing at CNPG's -rw Service.
 #
 # ONE BASE, TWO ENVIRONMENTS (epic memql#3748 / #3766). The `namespace: memql`
 # below is only the base's default; each overlay overrides it -- `overlays/prod`
@@ -27,7 +31,7 @@
 # The `memql-secrets` Secret is intentionally NOT listed here -- it carries
 # real values and is created out-of-band (see secret.example.yaml), PER
 # NAMESPACE. Create it BEFORE applying an overlay so the pods can mount it.
-# $POOLER_DSN is the transaction-pooler string (tsdb_transaction:39578); the
+# $POOLER_DSN is now the same -rw address (no pooler in the path today); the
 # per-environment schema search path is NOT in this Secret -- it is a
 # committed, non-secret value in the overlay's environment.yaml.
 #
@@ -35,7 +39,7 @@
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
 #     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
 #     --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
-#     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)"
+#     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
 #   kubectl apply -k deploy/k8s/overlays/staging   # digest-pinned (#699); creates the namespace
 #
 # identity comes up first (runs the one-time migration + serves JWKS); the
@@ -49,7 +53,7 @@ resources:
   - namespace.yaml
   # Shared Postgres connection-pool bounds (MAX_OPEN_CONNS / MAX_IDLE_CONNS)
   # consumed via envFrom: configMapRef on every DB-connecting node, so the
-  # whole mesh stays under Tiger Cloud's max_connections during a rollout
+  # whole mesh stays under the database's max_connections during a rollout
   # (znasllc-io/memql#1858).
   - db-pool-config.yaml
   - identity.yaml

@@ -149,6 +149,91 @@ watches. Panels are fed by the same `cnpg_*` metrics the alerts use, scraped via
 
 ---
 
+## Cutover from Tiger Cloud (staging)
+
+The one-time migration off the managed service. Written to be executed rather
+than read: every step has a check, and the rollback is one command until the
+soak ends.
+
+**Why a maintenance-window dump/restore rather than replication.** Staging held
+~78k `MemoryNodes` rows at the last DR rehearsal and production does not exist
+yet, so the data is small enough that a window costs less than the machinery of
+logical replication — and a dump/restore has a rollback that is *doing nothing*,
+which replication does not.
+
+### Before the window
+
+1. **The new cluster is running and healthy.** `make status` shows the database
+   litmus green: phase, extensions applied, archiving OK.
+2. **A backup has completed** on the new cluster, and
+   `make db-restore-drill ENV=staging` passes. Do not migrate onto a database
+   whose recovery path is unproven.
+3. **Record the source counts** — these are what step 6 compares against:
+
+   ```bash
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM "MemoryNodes";'
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM timescaledb_information.continuous_aggregates;'
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM timescaledb_information.hypertables;'
+   ```
+
+### The window
+
+4. **Quiesce.** `make scale N=0 ENV=staging`. Nothing should be writing while
+   the dump runs; a dump taken under writes is a dump whose row counts will not
+   match and whose consistency you then have to reason about.
+
+5. **Dump and restore.**
+
+   ```bash
+   pg_dump --format=custom --no-owner --no-privileges "$TIGER_DSN" > staging.dump
+
+   # TimescaleDB REQUIRES the pre/post restore bracket. Without it the restore
+   # replays the extension's own catalog rows as ordinary data and the
+   # hypertables come back as plain tables -- which restores "successfully" and
+   # silently loses every hypertable, chunk and continuous aggregate.
+   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+     psql -U postgres -d memql -c "SELECT timescaledb_pre_restore();"
+
+   pg_restore --no-owner --no-privileges --dbname "$CNPG_DSN" staging.dump
+
+   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+     psql -U postgres -d memql -c "SELECT timescaledb_post_restore();"
+   ```
+
+6. **Spot-check against step 3.** Row count, hypertable count, and continuous
+   aggregate count must all match. A mismatch in the *third* number with the
+   first two correct is the pre/post bracket having been skipped.
+
+7. **Swap the DSNs in Key Vault** — `memory-nodes-database-dsn` and the direct
+   DSN — to `memql-db-rw`. ESO propagates on its refresh interval; force it
+   with `kubectl -n memql-staging annotate externalsecret memql-secrets
+   force-sync=$(date +%s) --overwrite`.
+
+   **`MEMQL_DB_SEARCH_PATH` travels unchanged.** It is not in the DSN and not in
+   this Secret — it is a committed value in the overlay's `environment.yaml`.
+   Changing the database must not change the schema boundary.
+
+8. **Roll the mesh, identity first.** Pods read their environment once, at
+   start: `kubectl rollout restart deploy/identity -n memql-staging`, wait for
+   it, then the rest. Mind that ArgoCD's image sync re-applies replicas —
+   `make scale N=2 ENV=staging` brings the mesh back to its committed width.
+
+9. **Confirm.** `/readyz` green across the mesh; the three database alerts
+   quiet; `make status` litmus green.
+
+### Rollback, until the soak ends
+
+**Swap the Key Vault DSNs back and roll identity first.** That is the whole
+procedure. Tiger stays running and untouched through the soak precisely so this
+stays a one-command answer — which is why deprovisioning is a *separate,
+later* step rather than part of the cutover.
+
+### Ending it
+
+Soak **1–2 weeks** with the alerts quiet. Then deprovision the Tiger service
+(`xahn9ru4v6`) and accept the data purge. Note that `teardown-staging.sh` no
+longer has a `--database` tier: there is nothing left for it to deprovision.
+
 ## Proving HA: the failover litmus
 
 **HA is a property you either measure or merely believe.** A CNPG cluster

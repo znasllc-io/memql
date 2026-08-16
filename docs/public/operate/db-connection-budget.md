@@ -9,11 +9,29 @@ owner: znas
 
 # Database connection budget & graceful-deploy standard
 
-This is the standard for keeping the cluster's Postgres (Tiger Cloud in
-staging/prod, local Postgres in dev) connection demand under the instance's
-ceiling — across steady state **and** deploys — so a rollout can never trigger
-`SQLSTATE 53300` ("remaining connection slots are reserved …" / "too many
-clients already"). It is the deliverable of epic memql#1778.
+This is the standard for keeping the cluster's Postgres connection demand under
+the instance's ceiling — across steady state **and** deploys — so a rollout can
+never trigger `SQLSTATE 53300` ("remaining connection slots are reserved …" /
+"too many clients already"). It is the deliverable of epic memql#1778.
+
+> **What the Tiger cutover changed, and what it did not** (epic memql#3842 /
+> #3848). The database is now self-hosted CloudNativePG in every environment,
+> so **`max_connections` is ours**: 200 local, 400 staging and production, set
+> in `deploy/k8s/components/cnpg-db`. Tiger's per-tier ceiling — ~59 usable
+> slots on the staging tier, which is the scarcity this whole standard was
+> written around — is gone, and with it the two scripts that managed it
+> (`conn-surge-watch.sh`, `deployer-pool-reap.sh`, retired) and the leaked
+> managed control-plane `deployer` pool.
+>
+> **The formula below did not change.** A budget you can now afford to exceed
+> comfortably is still a budget: `Σ(replicas × MAX_OPEN_CONNS) + surge` has to
+> fit under `max_connections - reserved`, because every Postgres backend is a
+> process with its own memory and raising the ceiling trades RAM for headroom.
+> `scripts/deploy/conn-headroom-check.sh` was **kept** and rewritten for the
+> same reason — it is the one thing standing between a replica-count bump and
+> the storm that caused memql#1817.
+>
+> Platform: [database-platform.md](database-platform.md).
 
 **Environment-agnostic by design.** The connection *lifecycle* is identical in
 every environment — a bounded per-pod pool, graceful pool close on shutdown,
@@ -75,14 +93,23 @@ replicas or a pooler.
   that opens a pool and never closes it has no such reaper — it will pin idle
   slots for hours and eat the budget. On staging this showed up as ~28 idle
   backends stamped `application_name=deployer`, connecting as the `postgres`
-  superuser, growing ~1 per 30 min. Detect them with
-  `scripts/deploy/deployer-pool-reap.sh inspect` (read-only) and reclaim with
-  `scripts/deploy/deployer-pool-reap.sh reap --confirm` and the postgres-superuser
-  DSN (only a superuser may terminate superuser-owned sessions; the reaper is
-  guarded — read-only without `--confirm`, and only ever targets idle,
-  `deployer`-stamped, past-threshold backends). The durable fix is to **stop the
-  leaking client** (identified by its `client_addr`) and make it close its pool /
-  set an idle timeout — there is no shared role to put a server-side reaper on.
+  superuser, growing ~1 per 30 min — a **Tiger managed control-plane** artifact
+  that no longer exists (memql#3848; `deployer-pool-reap.sh` retired with it).
+  The general shape of the problem survives the provider, so the detection does
+  too — any tool that opens a pool and never closes it:
+
+  ```sql
+  SELECT application_name, client_addr, state, count(*),
+         min(now() - state_change) AS idle_for
+    FROM pg_stat_activity
+   WHERE datname = current_database() AND state = 'idle'
+   GROUP BY 1,2,3 ORDER BY 4 DESC;
+  ```
+
+  The durable fix is to **stop the leaking client** (identified by its
+  `client_addr`) and make it close its pool / set an idle timeout. What is new
+  is that `idle_session_timeout` is now ours to set on the Cluster, so a
+  server-side backstop is available where Tiger offered none.
   The in-cluster deploy + migration cycle does not leak (the migrate Job closes
   its pool on exit and stamps `application_name=memql-migrate`, memql#1933).
 - **Blue-green drain window** (child E, memql#1780): the bff Rollout's
@@ -117,6 +144,28 @@ The fleet has leaked/accumulated connections and every engine pod is `0/1`
    first) — ArgoCD will not restore replicas on its own.
 
 ## Connection pooling (hybrid endpoint split) — SHIPPED (memql#1925)
+
+> **The POOLER moved; the SPLIT stayed** (memql#3848). What follows describes
+> Tiger Cloud's managed transaction pooler, which is gone. The **two-DSN split
+> it created is not** — `MEMQL_DATABASE_DSN` for bulk traffic,
+> `MEMORY_NODES_DATABASE_DIRECT_DSN` for migrations and session-scoped work —
+> because that split is about *transaction-mode pooling breaking session state*,
+> which is a property of PgBouncer rather than of Tiger.
+>
+> Today both DSNs point at `memql-db-rw` and there is **no pooler in the path**:
+> self-hosting removed the ceiling that made one mandatory, and adding one
+> against a ceiling that no longer exists would be a second network hop and a
+> second thing to fail over for no benefit. A PgBouncer `Pooler` ships **ready
+> but not enabled** (`deploy/k8s/components/cnpg-db/optional/pooler`); the
+> signal to enable it is `cnpg_backends_total` approaching `max_connections` in
+> steady state.
+>
+> **If you do enable it, the direct DSN must stay direct.** `MEMQL_DB_SEARCH_PATH`
+> is a session GUC and *is* the staging/production boundary — pooling it would
+> mean a staging query landing on a connection still set to production's schema.
+> That is the one failure this architecture has no second line of defence
+> against.
+
 
 Right-sizing + `scaleDownDelay` kept the budget under the ceiling at steady
 state, but a full-stack roll still tipped it: blue-green bff + rolling mesh
@@ -171,12 +220,17 @@ watching the instance backend count stay under budget throughout.
 2. **Start the watcher** against the instance (read-only; queries the direct
    endpoint, which sees every backend on the instance):
    ```bash
-   DIRECT_DSN="$(tiger db connection-string xahn9ru4v6 --with-password)" \
-     scripts/deploy/conn-surge-watch.sh --interval=5
+   # conn-surge-watch.sh was retired with Tiger (memql#3848). The same view,
+   # against our own instance:
+   kubectl exec -n <ns> memql-db-1 -c postgres -- \
+     watch -n5 'psql -U postgres -d memql -c "
+       SELECT application_name, count(*)
+         FROM pg_stat_activity WHERE datname = current_database()
+        GROUP BY 1 ORDER BY 2 DESC;
+       SHOW max_connections;"'
    ```
-   It prints, each tick, total backends vs budget + the `application_name`
-   breakdown (mesh pods stamp `memql-<type>`, the migrate Job `memql-migrate`),
-   and tracks the peak.
+   Mesh pods stamp `memql-<type>`, the migrate Job `memql-migrate`. Watch the
+   total against `max_connections` through the roll; the peak is what matters.
 3. **Trigger a full-stack roll** — the wedging scenario: blue-green bff + the
    rolling mesh (all node-types). e.g. bump the staging overlay digests / run
    the normal deploy so every Deployment rolls and the bff Rollout does its

@@ -185,6 +185,6 @@ Record the send date and any reply below.
 ## 7. Related
 
 - Epic memql#3842 -- self-hosted database platform (CNPG on AKS, off Tiger Cloud)
-- [Database setup](../../public/operate/database-setup.md) -- the operational side
+- [Database platform](../../public/operate/database-platform.md) -- the operational side
 - [DR runbook](dr-runbook.md) -- recovery from object-store backups
 - `database_positioning_test.go` -- the gate
