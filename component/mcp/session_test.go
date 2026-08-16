@@ -152,6 +152,77 @@ func TestPromote_OwnerOnlyGate(t *testing.T) {
 	}
 }
 
+// stage takes the AUTHORING bar, not the promote bar -- and the developer row is
+// the whole point of the tier (epic memql#3928). Staging registers nothing
+// shared and broadcasts nothing, so its blast radius is a database row: the same
+// blast radius `define` already has, made durable.
+func TestStage_AuthoringGate(t *testing.T) {
+	cases := []struct {
+		role        string
+		tier        Tier
+		wantRefused bool
+		wantReason  string
+	}{
+		// The row promote refuses and this must not: a developer authors, and
+		// staging is authoring that survives the connection.
+		{"developer", TierAuthoring, false, ""},
+		{"owner", TierAuthoring, false, ""},
+		{"writer", TierAuthoring, true, "owner or developer role"},
+		{"reader", TierAuthoring, true, "owner or developer role"},
+		{"owner", TierSealed, true, "tier"},
+	}
+	for _, c := range cases {
+		t.Run(c.role+"/"+c.tier.String(), func(t *testing.T) {
+			eng := newFakeEngine()
+			reg := newAuthoredRegistry()
+			ctx := withMCPSession(context.Background(), "owner-1", reg)
+			if _, err := memql.AuthorSessionBundle(reg, "owner-1", validSpecBundle, ""); err != nil {
+				t.Fatalf("seed author: %v", err)
+			}
+			res := callMCPTool(ctx, eng, c.role, c.tier, toolStage, map[string]any{"name": "mcpSessionSpec"})
+			if c.wantRefused {
+				if !isError(res) || !strings.Contains(resultText(res), c.wantReason) {
+					t.Fatalf("expected refusal mentioning %q, got %v", c.wantReason, res)
+				}
+				if eng.staged != nil {
+					t.Error("a refused stage must not reach the engine")
+				}
+				return
+			}
+			if isError(res) {
+				t.Fatalf("%s stage should succeed, got %v", c.role, res)
+			}
+			if eng.staged == nil || eng.staged.Name != "mcpSessionSpec" {
+				t.Errorf("stage should pass the construct to the engine, got %+v", eng.staged)
+			}
+			if eng.stagedOwner != "owner-1" {
+				t.Errorf("stage should thread the session owner, got %q", eng.stagedOwner)
+			}
+			// AND NOT THE SHARED PATH. The two tools differ in exactly which
+			// engine call they make, so this is the assertion that a `stage`
+			// which quietly promoted would fail.
+			if eng.promoted != nil {
+				t.Error("stage must not reach the durable-PROMOTE path -- that is the other tier")
+			}
+		})
+	}
+}
+
+// staging a name the session never defined is a not-found error, matching
+// promote. The two resolve through the same helper for that reason.
+func TestStage_UnknownConstruct(t *testing.T) {
+	eng := newFakeEngine()
+	reg := newAuthoredRegistry()
+	ctx := withMCPSession(context.Background(), "owner-1", reg)
+	res := callMCPTool(ctx, eng, "developer", TierAuthoring, toolStage, map[string]any{"name": "neverDefined"})
+	if !isError(res) || !strings.Contains(resultText(res), "no session-authored construct") {
+		t.Fatalf("expected a not-found error, got %v", res)
+	}
+	if eng.staged != nil {
+		t.Error("unknown construct must not reach the engine")
+	}
+}
+
 // promoting a name the session never defined is a not-found error, not a silent
 // pass to the engine.
 func TestPromote_UnknownConstruct(t *testing.T) {
