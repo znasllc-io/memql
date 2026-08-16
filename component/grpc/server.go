@@ -821,6 +821,27 @@ func (e *structuredQueryError) GRPCStatus() *status.Status {
 // executeQuery executes a query and returns the result with metadata.
 // The clientId parameter is used for optimistic update reconciliation.
 func (s *service) executeQuery(ctx context.Context, query string, clientId string, cursor string) (*memqlv1.Result, error) {
+	return s.executeQueryAuthored(ctx, query, clientId, cursor, "", nil)
+}
+
+// executeQueryAuthored is executeQuery with the caller's AUTHORED constructs
+// resolvable by name -- their stream-scoped session definitions and their
+// durable STAGED tier (epic memql#3928).
+//
+// THE STREAM COULD NOT RESOLVE EITHER OF THEM BEFORE THIS. AuthoringSessionDefine
+// wrote into a per-stream registry (memql#2128 / C1) that nothing on the execute
+// path ever read, so the only caller of ExecuteAuthored in the whole engine was
+// the MCP head -- and a construct defined over gRPC was, in practice, defined
+// into a registry that could not be called from the connection that defined it.
+// The staged tier inherits that path, so without this a staged construct would
+// persist, re-hydrate at every boot, appear in its author's catalog, and be
+// callable from nowhere the editor or the SDK can reach.
+//
+// ExecuteAuthored is IDENTICAL to Execute for a caller with no owner and no
+// authored constructs -- it short-circuits before building an overlay -- which is
+// what makes routing every stream query through it safe rather than a change of
+// behaviour for the ~all queries that are neither.
+func (s *service) executeQueryAuthored(ctx context.Context, query string, clientId string, cursor string, owner string, reg *memqlengine.AuthoredRuntimeRegistry) (*memqlv1.Result, error) {
 	if s.engine == nil {
 		return nil, status.Error(codes.Unavailable, "MemQL engine unavailable")
 	}
@@ -830,7 +851,7 @@ func (s *service) executeQuery(ctx context.Context, query string, clientId strin
 	// SQL keyset predicate. Empty cursor is a no-op (offset / first-page path).
 	ctx = memqlengine.ContextWithCursor(ctx, cursor)
 
-	execResult, err := s.engine.Execute(ctx, query)
+	execResult, err := s.engine.ExecuteAuthored(ctx, query, owner, reg)
 	if err != nil {
 		// Wrap error to extract structured information
 		wrappedErr := memqlengine.WrapError(err)
@@ -1029,12 +1050,43 @@ type streamSession struct {
 // lazily creating it on first use. The registry lives for the lifetime of the
 // stream and is dropped when the session ends, so session-authored constructs
 // never persist or leak across streams (issue #2128 / C1).
+// authoredOwner is the authenticated user every authored construct on this
+// stream is keyed to: the same value the session-define handler stamps them
+// with, read back on the execute path so the two cannot disagree about whose
+// constructs resolve.
+//
+// Empty for a stream with no resolved identity, which is what makes
+// ExecuteAuthored fall through to a plain Execute for it.
+func (s *streamSession) authoredOwner(ctx context.Context) string {
+	ac := s.ensureAccess(ctx)
+	if ac == nil {
+		return ""
+	}
+	return strings.TrimSpace(ac.UserId)
+}
+
 func (s *streamSession) authoredSessionRegistry() *memqlengine.AuthoredRuntimeRegistry {
 	s.authoredSessionMu.Lock()
 	defer s.authoredSessionMu.Unlock()
 	if s.authoredSession == nil {
 		s.authoredSession = memqlengine.NewAuthoredRuntimeRegistry()
 	}
+	return s.authoredSession
+}
+
+// authoredSessionRegistryIfAny returns this stream's authored registry WITHOUT
+// creating one, or nil when the stream has defined nothing.
+//
+// The read-side accessor, and the distinction matters on the hot path: the
+// lazy constructor above would hand every query a non-nil empty registry, and a
+// caller that treated "a registry exists" as "there is something to resolve"
+// would then build an overlay -- copying every core function and every core
+// spec -- once per query, forever, for a stream that never authored anything.
+// The engine guards that per-OWNER as well, so this is belt and braces; it is
+// also the honest answer to the question being asked.
+func (s *streamSession) authoredSessionRegistryIfAny() *memqlengine.AuthoredRuntimeRegistry {
+	s.authoredSessionMu.Lock()
+	defer s.authoredSessionMu.Unlock()
 	return s.authoredSession
 }
 
@@ -1908,7 +1960,12 @@ func (s *streamSession) handleExecuteQuery(envelope *memqlv1.MemqlClientMessage,
 		defer cancel()
 		defer s.activeRequests.Delete(requestId)
 
-		result, err := s.service.executeQuery(ctx, query, clientId, msg.GetCursor())
+		// The caller's own authored constructs resolve here, core-first: their
+		// stream-scoped session definitions and their durable staged tier. The
+		// owner comes off the resolved AccessContext already on ctx, so a stream
+		// with no identity gets exactly the plain Execute it got before.
+		result, err := s.service.executeQueryAuthored(ctx, query, clientId, msg.GetCursor(),
+			s.authoredOwner(ctx), s.authoredSessionRegistryIfAny())
 		if err != nil {
 			// Extract structured metadata if available
 			var metadata map[string]string
