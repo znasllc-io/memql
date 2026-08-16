@@ -334,6 +334,12 @@ export const CAPABILITY_SCRIPTS: Record<string, string> = {
   "overlay.revert": "scripts/deploy/revert-overlay.sh",
   "argocd.sync": "scripts/deploy/argo-sync.sh",
 
+  // Tenant lifecycle (epic memql#3852, task memql#3853).
+  "fleet.tenantProvision": "scripts/fleet/tenant-provision.sh",
+  "fleet.tenantSuspend": "scripts/fleet/tenant-suspend.sh",
+  "fleet.tenantResume": "scripts/fleet/tenant-resume.sh",
+  "fleet.tenantTeardown": "scripts/fleet/tenant-teardown.sh",
+
   // Local-cluster install/uninstall substrate (epic #3357).
   "install.refreshPins": "scripts/install/refresh-tool-pins.sh",
   "install.detect": "scripts/install/detect.sh",

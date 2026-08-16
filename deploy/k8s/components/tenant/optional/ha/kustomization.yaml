@@ -1,0 +1,55 @@
+# The Node HA add-on (epic memql#3852, task memql#3853).
+#
+# Raises every mesh Deployment from the `solo` preset's 1 to 2. Composed AFTER
+# the profile preset, so it wins.
+#
+# COMPOSED ONLY ON TOP OF `solo`. From Graph up, HA is included in the price and
+# the profile preset already carries it -- composing this there would be a no-op
+# that implies the tier's replication were optional. The fleet's provisioning
+# path decides from two fields: the tier's `haIncluded` OR the subscription's
+# `haAddOn`, and only the second one reaches this component.
+#
+# WHAT THIS DOES NOT COVER. The database's own HA is the cnpg-db preset's
+# business, and a Node tenant buying HA needs BOTH -- this component and a move
+# from the `entry` preset (1 instance, no PDB) to `mid` (2 instances, PDB on).
+# Shipping only this one would double the mesh in front of a single-instance
+# database, which is the more expensive half of the promise unkept: a mesh
+# survives a node drain, and then has nothing to talk to.
+#
+# The cnpg-db README documents the other half of that trap at length -- raising
+# `instances` while inheriting the single-instance `enablePDB: false` lets a
+# drain take the primary and its only replica together, which is precisely what
+# the second instance was bought to prevent.
+#
+# THE VOICE LANE IS DELIBERATELY UNTOUCHED. HA is an availability purchase, not
+# a capability purchase: a Node tenant who buys HA and not voice still has no
+# voice minutes, and raising a voice Deployment they cannot use from 0 to 2
+# would bill them for it. Buying voice is a separate values change.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }

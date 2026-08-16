@@ -28,6 +28,8 @@ import (
 // that actually broke.
 var walkerExemptions = map[string]string{
 	"cmd/memql-lsp/vscodeimportrule_test.go":         "walks vscodeExtensionSrcDir, the extension's TypeScript source",
+	"deploy/fleet/bundle_test.go":                    "walks deploy/fleet/dsl, the fleet DSL bundle, which contains no nested checkout",
+	"deploy/k8s/components/tenant/render_test.go":    "walks a t.TempDir() a capability script just rendered into",
 	"component/memql/sense/imports_test.go":          "walks corpusRoot, the DSL corpus",
 	"component/memql/sense/runnable_test.go":         "walks corpusRoot, the DSL corpus",
 	"docs_construct_names_test.go":                   "walks dsl/, and skips every dot-prefixed directory",

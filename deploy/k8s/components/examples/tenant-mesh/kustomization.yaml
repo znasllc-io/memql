@@ -1,0 +1,26 @@
+# Composition example for the tenant component -- the MESH tier (epic
+# memql#3852, task memql#3853).
+#
+# The top listed tier: the full mesh on a cluster of the tenant's own, and the
+# `top` database preset (3 instances across 3 zones).
+#
+# WHAT THIS EXAMPLE CANNOT SHOW is the part a Mesh customer is actually paying
+# for -- that this overlay is applied to a DIFFERENT CLUSTER. Isolation is a
+# property of where a manifest lands, not of what it renders, so it is invisible
+# in a `kustomize build` diff against the Graph example. The two differ here
+# only in their database preset; the rest of the difference lives in the fleet's
+# provisioning path, which reads `instanceProfile: dedicated` off the tier and
+# targets accordingly.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tenant-mesh-example
+
+resources:
+  - ../../../base
+
+components:
+  - ../../engine-bff
+  - ../../tenant/presets/dedicated
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/top
