@@ -121,7 +121,6 @@ type Server struct {
 	conceptRegistry      memoryNodes.Registry
 	aiForwarder          *AiForwardRouter
 	agentReplier         AgentTurnHandler
-	sitePromoter         SitePromoter
 	agentPauseHook       func(requestId string)
 	// nodeMaintenanceHandler drives THIS node's lifecycle for the operator
 	// maintenance trigger (memql#1270). Set by app bootstrap on mesh
@@ -364,7 +363,6 @@ func (s *Server) prepareForRun(ctx context.Context) (context.Context, context.Ca
 		identityResolver:       identityResolver,
 		aiForwarder:            s.aiForwarder,
 		agentReplier:           s.agentReplier,
-		sitePromoter:           s.sitePromoter,
 		nodeMaintenanceHandler: s.nodeMaintenanceHandler,
 		deployControlHandler:   s.deployControlHandler,
 		deployControlForwarder: s.deployControlForwarder,
@@ -633,12 +631,6 @@ type service struct {
 	// bootstrap). Other binaries leave this nil; handleAgentGenerateTurn
 	// returns an error when the caller lands on the wrong node type.
 	agentReplier AgentTurnHandler
-
-	// sitePromoter serves PromoteSiteMsg (memql#3768): the cross-schema move of
-	// a site's bundleRef from one environment to another. Non-nil only where
-	// app bootstrap installs one (via Server.SetSitePromoter); other node types
-	// leave it nil and handlePromoteSite reports that rather than panicking.
-	sitePromoter SitePromoter
 
 	// clientToolResultServer serves the substrate-RPC return channel for an
 	// agent turn's client-tool round-trip (memql#1265). Non-nil only on agent
@@ -1630,11 +1622,6 @@ func (s *streamSession) handleMessage(envelope *memqlv1.MemqlClientMessage) erro
 	// Construct catalog -- registry-grain "what have you loaded" (memql#3749)
 	case *memqlv1.MemqlClientMessage_ListConstructs:
 		return s.handleListConstructs(envelope, payload.ListConstructs)
-	// Artifact promotion -- move a site's bundleRef across environment schemas
-	// (epic memql#3748 / memql#3768)
-	case *memqlv1.MemqlClientMessage_PromoteSite:
-		return s.handlePromoteSite(envelope, payload.PromoteSite)
-
 	// Authoring -- validate + session-define a user bundle (issue #2128 / C1)
 	case *memqlv1.MemqlClientMessage_AuthoringValidateBundle:
 		return s.handleAuthoringValidateBundle(envelope, payload.AuthoringValidateBundle)

@@ -53,6 +53,9 @@ message MemqlClientMessage {
   // 70 (evaluate_policy) retired with the decision-policy tier, #984.
   reserved 70;
   reserved "evaluate_policy";
+  // 107 (promote_site) retired with the environment concept, epic memql#3943.
+  reserved 107;
+  reserved "promote_site";
   // Caller-stamped provenance for cross-node propagation. When set,
   // the receiver re-hydrates ctx so any rows the request writes are
   // attributed to the originator, not the receiver's default. When
@@ -336,14 +339,8 @@ message MemqlClientMessage {
     // structurally cannot: a PROMOTED construct lives in
     // v1:authoring:construct and in no file. See ListConstructsMsg.
     ListConstructsMsg list_constructs = 106;
-
-    // Artifact promotion (epic memql#3748 / memql#3768). Moves a site's
-    // bundleRef from one environment's schema to another's, in one
-    // transaction. NOT a mutation on the ordinary write path: the engine
-    // reaches exactly one schema -- the connection's search path decides
-    // which -- so a promote expressed as a DSL mutation would write the row
-    // it read, in the environment it was already in. See PromoteSiteMsg.
-    PromoteSiteMsg promote_site = 107;
+    // 107 (promote_site) retired with the environment concept, epic
+    // memql#3943; the number is reserved at the message level above.
   }
 }
 
@@ -355,6 +352,10 @@ message MemqlServerMessage {
   // tier, #984.
   reserved 110;
   reserved "evaluate_policy_result";
+  // 129 (promote_site_result) retired with the environment concept,
+  // epic memql#3943.
+  reserved 129;
+  reserved "promote_site_result";
 
   oneof payload {
     ServerHello server_hello = 10;
@@ -501,9 +502,8 @@ message MemqlServerMessage {
 
     // Construct-catalog reply (see ListConstructsMsg, memql#3749).
     ListConstructsResult list_constructs_result = 128;
-
-    // Artifact-promotion reply (see PromoteSiteMsg, memql#3768).
-    PromoteSiteResult promote_site_result = 129;
+    // 129 (promote_site_result) retired with the environment concept, epic
+    // memql#3943; the number is reserved at the message level above.
   }
 }
 
@@ -1347,65 +1347,6 @@ message ReadPackFileResult {
 // ListConstructsMsg asks for the whole catalog. No filters: the surface that
 // consumes it groups by kind and namespace client-side and needs all of it, and
 // a filter parameter would be a second place for the kind vocabulary to live.
-// PromoteSiteMsg moves a site to another environment (epic memql#3748 /
-// memql#3768). "Promote the artifacts, not the cluster", as a wire call.
-//
-// The bundle is immutable and versioned by prefix in shared object storage,
-// written once by the publish path and referenced by both environments, so a
-// promote moves only the REFERENCE and performs no object-storage operation.
-//
-// Rollback is not a separate message: send this one with bundle_ref set to the
-// previous_bundle_ref a prior promote returned. That is deliberate -- rollback
-// is the same write with the previous value, and a second message would be a
-// second code path that could drift from the one it undoes.
-message PromoteSiteMsg {
-  string request_id = 1;
-
-  // site_id is the row id, which is the SAME in both environments. The
-  // hostname is not: a staging site lives under the CLUSTER's domain while
-  // production lives wherever the customer's DNS points, which is why the two
-  // rows share an id and differ in hostname.
-  string site_id = 2;
-
-  // from_environment names the source, e.g. "staging". Empty when bundle_ref
-  // is set explicitly -- there is nothing to read from.
-  string from_environment = 3;
-
-  // to_environment names the target, e.g. "prod".
-  string to_environment = 4;
-
-  // bundle_ref pins the value to write instead of resolving it from the
-  // source. This is the rollback form.
-  string bundle_ref = 5;
-
-  // hostname is REQUIRED only when the site does not exist in the target
-  // environment yet, in which case the promote CREATES it -- first publish and
-  // promote are the same act. It cannot be derived from the source hostname,
-  // so a create with no hostname is refused rather than guessed at.
-  string hostname = 6;
-}
-
-message PromoteSiteResult {
-  string request_id = 1;
-  string site_id = 2;
-
-  // previous_bundle_ref is what the target was serving. Send it back in a
-  // PromoteSiteMsg to roll back. Empty when the row was created.
-  string previous_bundle_ref = 3;
-  string bundle_ref = 4;
-
-  // created is true when the target had no row and this call made one.
-  bool created = 5;
-
-  // no_op is true when the target was already pinned to this bundle. No new
-  // row version is written: the graph's row history IS a site's version list,
-  // so an idempotent re-promote that appended would show a deploy that never
-  // happened.
-  bool no_op = 6;
-
-  string error = 7;
-}
-
 message ListConstructsMsg {
   string request_id = 1;
 }

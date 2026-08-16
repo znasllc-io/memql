@@ -32,11 +32,6 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runMigrateSubcommand(args[1:])
 	case "pat":
 		return true, runPATSubcommand(args[1:])
-	// Cross-schema artifact promotion (epic memql#3748 / memql#3768). Untagged
-	// like `pat`: the promote needs the database and nothing else, so it runs
-	// wherever an operator can exec the binary.
-	case "promote-site":
-		return true, runPromoteSiteSubcommand(args[1:])
 	case "enrolment-token":
 		return true, runEnrolmentTokenSubcommand(args[1:])
 	case "voice-agent-token":
