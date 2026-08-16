@@ -1,0 +1,55 @@
+# CloudNativePG operator + Barman Cloud plugin install (epic memql#3842, task
+# memql#3845).
+#
+# The operator stack every environment's database runs on: local k3d, staging,
+# and production reconcile THESE manifests, from this one directory, through
+# ArgoCD. Shape in one place, values in the overlays' Cluster CRs -- the parity
+# doctrine applied to the layer that used to be exempt from it (local ran an
+# in-cluster postgres Deployment while staging rented a managed service, with
+# divergent backup, pooling and connection models).
+#
+# TWO COMPONENTS, AND WHY THE SECOND ONE IS A PLUGIN
+#
+#   cloudnative-pg v1.30.0  -- the operator. Watches Cluster/Database/Backup
+#                              CRs and reconciles Postgres instances.
+#   plugin-barman-cloud v0.14.0
+#                           -- backups to object storage, as a CNPG-I plugin.
+#
+# CNPG's IN-TREE `barmanObjectStore` support is deprecated and is NOT used here.
+# That choice propagates: it is also why the operand image is built on CNPG's
+# `standard` base rather than the deprecated `system` base, which carries the
+# in-tree Barman binaries (see deploy/db-image/README.md). Picking the plugin
+# and the `system` image, or the in-tree stanza and the `standard` image, are
+# both half-configurations that fail at the first backup rather than at apply.
+#
+# THE PLUGIN NEEDS cert-manager, which is the ordering constraint in this stack.
+# Its manifest declares Certificate and Issuer objects for the plugin<->operator
+# mTLS, so on a cluster whose cert-manager CRDs are absent the Application does
+# not degrade -- it fails to apply. deploy/argocd/apps/cert-manager.yaml carries
+# an earlier sync-wave than deploy/argocd/apps/cnpg-operator.yaml for exactly
+# this reason, and scripts/k3d/up.sh waits for cert-manager before applying this
+# one so a local bring-up is deterministic rather than eventually-consistent.
+#
+# NO `namespace:` TRANSFORMER. Both manifests target `cnpg-system` and the
+# operator ships its own Namespace object. Setting a namespace here would
+# rewrite the cross-namespace and cluster-scoped references the manifests make
+# to themselves -- webhook service references, RBAC subjects -- and the damage
+# would surface as a webhook that never answers rather than as an apply error.
+#
+# UPGRADES ARE SCHEDULED DATABASE MAINTENANCE, not a routine bump. Read
+# ../README.md before moving either pin: an operator upgrade rolls every
+# database pod in the cluster, and CNPG supports roughly a six-month window per
+# minor (the CVE-2026-44477 precedent is why staying patch-current is not
+# optional).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # CloudNativePG v1.30.0 -- operator, CRDs, webhooks, and the cnpg-system
+  # Namespace. Pinned to an exact tag: `latest` on an operator that rolls every
+  # database pod is not a convenience, it is an unscheduled outage.
+  - https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v1.30.0/cnpg-1.30.0.yaml
+  # Barman Cloud plugin v0.14.0 -- the ObjectStore CRD plus the sidecar the
+  # operator injects for WAL archiving and base backups. Also lands in
+  # cnpg-system.
+  - https://github.com/cloudnative-pg/plugin-barman-cloud/releases/download/v0.14.0/manifest.yaml

@@ -1,0 +1,62 @@
+# CloudNativePG operator + Barman Cloud plugin, reconciled (epic memql#3842,
+# task memql#3845).
+#
+# The operator stack every environment's database runs on. Local k3d, staging
+# and production reconcile the SAME deploy/cnpg/install directory through the
+# same reconciler; what differs per environment is the Cluster CR in that
+# environment's overlay -- instances, resources, storage, backup destination --
+# which is values, not shape.
+#
+# `project: default` for the same reason as apps/cert-manager.yaml: an operator
+# installs CRDs, ClusterRoles and webhooks by nature, and the `memql` AppProject
+# exists precisely to forbid that to the mesh. See that file's header.
+#
+# SYNC WAVE -1, BEHIND cert-manager (-2). The Barman plugin's manifest declares
+# Certificate and Issuer objects for its mTLS with the operator, so without
+# cert-manager's CRDs already present this Application does not degrade -- it
+# fails to apply. The wave makes the ordering declarative in the cloud;
+# scripts/k3d/up.sh waits for cert-manager explicitly so a local bring-up is
+# deterministic rather than eventually-consistent through retries.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cnpg-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/cnpg/install
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      # prune OFF, and here the stakes are higher than for cert-manager: the
+      # CRDs this manifest owns include `clusters.postgresql.cnpg.io`. Pruning
+      # that deletes every Cluster object in the estate, and the operator
+      # deletes the StatefulSets and PVCs behind them. Removing the operator is
+      # a deliberate act.
+      prune: false
+      # selfHeal ON: drift in the operator Deployment (an image edited by hand,
+      # a replica count changed to debug something) is reverted. The database
+      # instances themselves are not in this Application -- they are Cluster CRs
+      # in the environment overlays -- so this heals the controller, not the data.
+      selfHeal: true
+    syncOptions:
+      # The upstream manifest ships the cnpg-system Namespace.
+      - CreateNamespace=false
+      # The CNPG CRDs are far too large for the last-applied-configuration
+      # annotation; without SSA the apply fails on metadata.annotations size.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
