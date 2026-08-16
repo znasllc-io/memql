@@ -79,7 +79,8 @@ export interface LocalEvidence {
   /** This machine installed the cluster, so there is a pod to mint in. */
   local: boolean;
   /**
-   * The install receipt records the owner `seedBootstrap` bootstrapped.
+   * The install receipt records the owner `seedBootstrap` bootstrapped, AND
+   * that receipt is about this cluster (`receiptCoversCluster`).
    *
    * Presence is the claim being made: an owner ACCOUNT exists. It says nothing
    * about credentials, which is exactly the distinction that matters here.
@@ -97,6 +98,44 @@ export interface LocalEvidence {
  */
 export function evidenceSettlesIt(evidence: LocalEvidence): boolean {
   return evidence.local && evidence.ownerRecorded && evidence.credentialMissing;
+}
+
+/**
+ * Whether the install receipt is demonstrably about a DIFFERENT cluster.
+ *
+ * `~/.memql/install-receipt.json` is a SINGLE file and the extension holds a
+ * LIST of clusters, several of which can be local. So "the receipt records an
+ * owner" is not on its own a fact about the cluster in hand -- it is a fact
+ * about whichever cluster was installed last. Acting on it regardless would
+ * route a second local cluster to enrolment naming a stranger's address, and
+ * the mint execs against the CURRENT kubectl context, so the account it names
+ * and the cluster it lands on are chosen independently.
+ *
+ * The domain is what ties the two together: it is the one value the installer
+ * collects, the receipt stamps it on `--domain`, and the hand-off composes the
+ * registry entry from it. Compared case-insensitively and dot-trimmed for the
+ * same reason `normalizeDomain` exists -- an operator who typed a trailing dot
+ * has named the same cluster.
+ *
+ * WHAT IT DETECTS IS A CONTRADICTION, NOT AN ABSENCE, and the asymmetry is
+ * deliberate. Two known domains that DIFFER is a fact: this receipt is not
+ * about this cluster. A missing domain on either side is not -- and refusing
+ * there would break the case `identityBaseUrlForCluster` documents, a cluster
+ * with no recorded domain deliberately letting the pod's own
+ * MEMQL_IDENTITY_BASE_URL answer. Strictness there would cost a working path
+ * to guard a state that cannot arise from the installer, which always records
+ * both.
+ *
+ * Phrased as the negative so both callers can share one rule: the route offers
+ * enrolment exactly when the mint will accept it, so the editor can never put
+ * a button in front of an operator that its own next step refuses.
+ */
+export function receiptNamesAnotherCluster(clusterDomain: string, receiptDomain: string): boolean {
+  const tidy = (value: string): string => value.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+  const cluster = tidy(clusterDomain);
+  const receipt = tidy(receiptDomain);
+  if (cluster === "" || receipt === "") return false;
+  return cluster !== receipt;
 }
 
 /**

@@ -25,6 +25,7 @@ import {
   identityBaseUrlForCluster,
   mintOwnershipLink,
 } from "../src/clusters/takeOwnership.js";
+import type { TakeOwnershipInputs } from "../src/clusters/takeOwnership.js";
 import type { ClusterConfig } from "../src/clusters/model.js";
 import type { ScriptOutcome } from "../src/install/runner.js";
 
@@ -38,6 +39,22 @@ function local(over: Partial<ClusterConfig> = {}): ClusterConfig {
     local: true,
     ...over,
   } as ClusterConfig;
+}
+
+/**
+ * The inputs a mint takes, with the receipt agreeing with the cluster.
+ *
+ * Spelled out once so the memql#3906 mismatch case reads as the one override it
+ * is, rather than as the one test that happens to pass a fourth field.
+ */
+function inputs(over: Partial<TakeOwnershipInputs> = {}): TakeOwnershipInputs {
+  return {
+    cluster: local(),
+    ownerEmail: "owner@example.com",
+    receiptDomain: "memql.localhost",
+    repoRoot: "/repo",
+    ...over,
+  };
 }
 
 /** A runner that records what it was asked to run and returns a fixed envelope. */
@@ -69,7 +86,7 @@ function runner(result: Record<string, unknown>, exitCode = 0) {
 test("a fresh link is minted and returned", async () => {
   const { calls, run } = runner({ enrolUrl: LINK, enrolmentState: "minted", ownerClaimed: true });
   const url = await mintOwnershipLink(
-    { cluster: local(), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+    inputs(),
     run,
   );
   assert.equal(url, LINK);
@@ -84,7 +101,7 @@ test("the link is pointed at the IDENTITY host, not the api front door", async (
   // the endpoint would mint a link at a host that does not serve /enroll.
   const { calls, run } = runner({ enrolUrl: LINK, enrolmentState: "minted" });
   await mintOwnershipLink(
-    { cluster: local(), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+    inputs(),
     run,
   );
   assert.equal(calls[0].params["base-url"], "https://identity.memql.localhost");
@@ -96,7 +113,7 @@ test("a cluster with no domain lets the pod answer, rather than guessing", async
   assert.equal(identityBaseUrlForCluster(local({ domain: "" })), "");
   const { calls, run } = runner({ enrolUrl: LINK });
   await mintOwnershipLink(
-    { cluster: local({ domain: "" }), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+    inputs({ cluster: local({ domain: "" }) }),
     run,
   );
   assert.equal("base-url" in calls[0].params, false);
@@ -107,7 +124,7 @@ test("a remote cluster is refused, because there is no pod here to mint in", asy
   await assert.rejects(
     () =>
       mintOwnershipLink(
-        { cluster: local({ local: false }), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+        inputs({ cluster: local({ local: false }) }),
         run,
       ),
     (err: unknown) => err instanceof OwnershipError && err.reason === "notLocal",
@@ -118,7 +135,7 @@ test("a remote cluster is refused, because there is no pod here to mint in", asy
 test("no recorded owner is refused before anything runs", async () => {
   const { calls, run } = runner({ enrolUrl: LINK });
   await assert.rejects(
-    () => mintOwnershipLink({ cluster: local(), ownerEmail: "  ", repoRoot: "/repo" }, run),
+    () => mintOwnershipLink(inputs({ ownerEmail: "  " }), run),
     (err: unknown) => err instanceof OwnershipError && err.reason === "noOwner",
   );
   assert.deepEqual(calls, []);
@@ -129,7 +146,7 @@ test("a failed mint is reported with the script's own reason", async () => {
   await assert.rejects(
     () =>
       mintOwnershipLink(
-        { cluster: local(), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+        inputs(),
         run,
       ),
     (err: unknown) =>
@@ -145,7 +162,7 @@ test("an unclaimed cluster is told apart from a mint that produced nothing", asy
   await assert.rejects(
     () =>
       mintOwnershipLink(
-        { cluster: local(), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+        inputs(),
         run,
       ),
     (err: unknown) =>
@@ -159,11 +176,42 @@ test("the link never leaks through an error path", async () => {
   const { run } = runner({ enrolUrl: LINK }, 5);
   try {
     await mintOwnershipLink(
-      { cluster: local(), ownerEmail: "owner@example.com", repoRoot: "/repo" },
+      inputs(),
       run,
     );
     assert.fail("expected the mint to be reported as failed");
   } catch (err) {
     assert.equal((err as Error).message.includes("mql_enr_"), false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// which cluster the recorded owner belongs to (memql#3906)
+// ---------------------------------------------------------------------------
+
+test("an owner recorded for a DIFFERENT cluster is refused before anything runs", async () => {
+  // `~/.memql/install-receipt.json` is one file and the cluster list is many.
+  // The mint execs against the CURRENT kubectl context, so the account it names
+  // and the cluster it lands on are chosen independently -- naming the last
+  // install's owner while acting on a different cluster is the shape of that
+  // mistake.
+  const { calls, run } = runner({ enrolUrl: LINK, ownerClaimed: true });
+  await assert.rejects(
+    () => mintOwnershipLink(inputs({ receiptDomain: "other.example.com" }), run),
+    (err: unknown) => err instanceof OwnershipError && err.reason === "otherCluster",
+  );
+  assert.deepEqual(calls, [], "nothing may be executed once the receipt is known to be about another cluster");
+});
+
+test("a cluster with no recorded domain still mints, because that is a gap not a contradiction", async () => {
+  // The deliberate case identityBaseUrlForCluster documents: this side knows
+  // less than the cluster does, and lets the pod's own MEMQL_IDENTITY_BASE_URL
+  // answer. Refusing here would cost a working path to guard a state the
+  // installer cannot produce -- it always records both.
+  const { calls, run } = runner({ enrolUrl: LINK, ownerClaimed: true });
+  await mintOwnershipLink(inputs({ cluster: local({ domain: "" }) }), run);
+  assert.equal(calls.length, 1);
+  const { calls: c2, run: r2 } = runner({ enrolUrl: LINK, ownerClaimed: true });
+  await mintOwnershipLink(inputs({ receiptDomain: "" }), r2);
+  assert.equal(c2.length, 1, "an unstamped receipt is not evidence of a different cluster");
 });

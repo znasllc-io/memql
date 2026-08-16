@@ -61,7 +61,7 @@ import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCl
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
 import { probeClaimState, setupUrl } from './clusters/claimState.js';
-import { resolveOwnershipRoute } from './clusters/ownershipRoute.js';
+import { receiptNamesAnotherCluster, resolveOwnershipRoute } from './clusters/ownershipRoute.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
 import { AddClusterPanel } from './webview/addClusterPanel.js';
 import { CredentialResolver } from './connection/credentials.js';
@@ -107,7 +107,7 @@ import {
 import { outcomeReport } from './training/outcomeReport.js';
 import type { TrainingPrompt } from './training/report.js';
 import { sessionLensPlans } from './training/session.js';
-import { defaultReceiptPath, readReceipt, recordedOwner } from './install/receipt.js';
+import { defaultReceiptPath, readReceipt, recordedDomain, recordedOwner } from './install/receipt.js';
 import { runCapabilityScript } from './install/runner.js';
 import { EnrolmentError, openEnrolmentLink } from './install/enrolment.js';
 import { OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
@@ -811,7 +811,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       const route = await resolveOwnershipRoute(
         {
           local: target.cluster.local === true,
-          ownerRecorded: recordedOwner(receipt).email !== '',
+          // The receipt is one file and the cluster list is many, so its owner
+          // is evidence only about the cluster whose domain it names.
+          ownerRecorded:
+            recordedOwner(receipt).email !== '' &&
+            !receiptNamesAnotherCluster(target.cluster.domain ?? '', recordedDomain(receipt)),
           credentialMissing: needsAuth(target.cluster),
         },
         // RE-DERIVED at the moment of use rather than read from a stored flag:
@@ -894,7 +898,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           { location: ProgressLocation.Notification, title: 'memQL: minting an enrolment link...' },
           () =>
             mintOwnershipLink(
-              { cluster: target.cluster, ownerEmail: owner.email, repoRoot: installRootFor(context) },
+              {
+                cluster: target.cluster,
+                ownerEmail: owner.email,
+                receiptDomain: recordedDomain(receipt),
+                repoRoot: installRootFor(context),
+              },
               runCapabilityScript
             )
         );

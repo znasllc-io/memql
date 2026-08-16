@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { ClaimState } from "../src/clusters/claimState.js";
 import {
   evidenceSettlesIt,
+  receiptNamesAnotherCluster,
   resolveOwnershipRoute,
   routeForClaimState,
   type LocalEvidence,
@@ -98,6 +99,36 @@ test("a stored credential never routes to enrol, however the cluster answers", a
     const got = await resolveOwnershipRoute(held, probeReturning(state));
     assert.notEqual(got, "enrol", `a held credential must not be answered with enrolment (${state})`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// which cluster the receipt is actually about
+// ---------------------------------------------------------------------------
+
+test("two domains that DIFFER mean the receipt is about another cluster", () => {
+  // `~/.memql/install-receipt.json` is ONE file and the extension holds a LIST
+  // of clusters. Reading its owner as a fact about whichever cluster is in hand
+  // would route a second local cluster to enrolment naming a stranger's
+  // address -- and the mint execs against the CURRENT kubectl context, so the
+  // name it carries and the cluster it lands on are chosen independently.
+  assert.equal(receiptNamesAnotherCluster("lab.example.com", "memql.localhost"), true);
+  assert.equal(receiptNamesAnotherCluster("memql.localhost", "memql.localhost"), false);
+});
+
+test("a match survives the spellings an operator actually types", () => {
+  // Same tidying normalizeDomain does: a trailing dot and a capital letter name
+  // the same cluster, and treating one as a mismatch would send the operator a
+  // "different cluster" message about the only cluster they have.
+  assert.equal(receiptNamesAnotherCluster(" MemQL.localhost. ", "memql.localhost"), false);
+});
+
+test("a MISSING domain is a gap, not a contradiction", () => {
+  // The asymmetry is the design. Two known domains that differ is a fact;
+  // silence is not, and refusing on it would break the documented case of a
+  // cluster with no recorded domain letting the pod answer for itself.
+  assert.equal(receiptNamesAnotherCluster("", "memql.localhost"), false);
+  assert.equal(receiptNamesAnotherCluster("memql.localhost", ""), false);
+  assert.equal(receiptNamesAnotherCluster("", ""), false);
 });
 
 test("an installed cluster is never sent to the sealed wizard", async () => {
