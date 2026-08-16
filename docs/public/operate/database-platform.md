@@ -149,6 +149,93 @@ watches. Panels are fed by the same `cnpg_*` metrics the alerts use, scraped via
 
 ---
 
+## Proving HA: the failover litmus
+
+**HA is a property you either measure or merely believe.** A CNPG cluster
+reports `instances: 3` and *"Cluster in healthy state"* whether or not a
+promotion would actually work — a replica in recovery with a dead WAL receiver
+counts toward that number. The only way to know is to take the primary away and
+watch.
+
+```bash
+make db-failover-litmus CONFIRM=kill-the-primary ENV=staging
+```
+
+`ENV` defaults to **local** for the same reason it does on `make scale`: this
+target deletes a pod, and a remote default would aim a habit at production. The
+phrase is typed at the make level *and* passed through to the capability script,
+so neither layer is the one that made a destructive act easy.
+
+It asserts three separate things:
+
+| # | Assertion | Why it is separate |
+|---|---|---|
+| 1 | a **new primary** is promoted within the timeout | the property HA is bought for. Timed, because "eventually" is not failover |
+| 2 | a row **committed before** the kill is present after it | a replica far enough behind is promoted just as readily, and the cluster looks equally healthy afterwards. This is the outcome that would make the promotion worthless |
+| 3 | every instance returns to ready, streaming again | a cluster that promoted but never rebuilt its replica has spent its redundancy and now **reports HA while having none** |
+
+It **refuses** a single-instance cluster with exit 4 rather than failing it:
+there is nothing to promote to, so killing the primary is not a failover test —
+it is an outage with a script watching.
+
+**Run it on production bring-up acceptance, and after every operator upgrade.**
+An operator upgrade rolls every database pod, which is exactly when you want
+promotion proven rather than assumed.
+
+## Tabletop: losing a whole availability zone
+
+Production runs three instances, one per zone. **No restore is needed** — this
+is the case the third instance exists for.
+
+**Expected behaviour.** The zone's instance disappears. If it held the primary,
+CNPG promotes one of the two survivors; writes pause for the promotion window
+and resume. If it held a replica, nothing pauses. The cluster runs degraded
+(2/3) until the zone returns or Kubernetes reschedules onto a surviving zone —
+and it can reschedule, because the storage is per-instance rather than shared.
+
+**Verification steps.**
+
+1. `kubectl get cluster memql-db -n memql-prod` — expect `2/3 ready` and a
+   `currentPrimary` in a surviving zone.
+2. Confirm the application recovered: `/readyz` green, no sustained error rate.
+3. `MemqlDatabaseReplicaNotStreaming` should be **quiet** — the two survivors
+   must still be replicating to each other. If it fires, the cluster has one
+   working instance and no redundancy.
+4. Confirm WAL archiving is unaffected (`MemqlDatabaseWALArchivingFailing`
+   quiet). The backup account is ZRS, so it survives the zone independently.
+5. When the zone returns, the third instance rejoins and rebuilds. Watch
+   `readyInstances` return to 3 before treating the incident as closed.
+
+**What would make this go wrong.** The `top` preset sets
+`whenUnsatisfiable: DoNotSchedule` on the zone spread deliberately: it is better
+for the third instance to sit `Pending` than for two instances to land in one
+zone while the cluster reports three. A cluster that quietly co-located two
+instances would fail this tabletop *at the moment of the outage*, having looked
+correct until then.
+
+## Cost
+
+Recorded here because "cheaper" was the premise of the whole epic and a premise
+nobody measures stops being true quietly.
+
+| | Tiger Cloud (list) | Self-hosted (list) |
+|---|---|---|
+| Production, 4 CPU HA | ~$1,606/mo | ~$322–454/mo |
+| Per-client instance | ~$393/mo | ~$65–91/mo |
+
+Verified against live Tiger and Azure pricing on 2026-08-14; the epic's target
+is **≤ ~$460/mo list** for production (~$330 on a savings plan) and **≤ ~$40/mo**
+for staging.
+
+Two things to note when checking the actual bill:
+
+- **The savings-plan purchase for the database node pool is a billing action,
+  not a manifest change.** Nothing in this repository can make it happen.
+- **Storage grows forever.** `MemoryNodes` never evicts, and the storage line is
+  the one that moves without anybody changing anything. That was true on Tiger
+  too — at $0.883/GB-month, 11× Azure disk — which is part of why this epic
+  exists.
+
 ## Connection pooling
 
 **Not deployed, deliberately.** A PgBouncer `Pooler` is ready as an opt-in
