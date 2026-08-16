@@ -1,0 +1,38 @@
+# OPTIONAL: a PgBouncer connection pooler in front of the primary
+# (epic memql#3842, task memql#3847).
+#
+# NOT COMPOSED BY ANY OVERLAY TODAY, and that is the decision rather than an
+# oversight. Self-hosting removed the reason a pooler was mandatory: Tiger
+# Cloud's per-tier connection ceiling (~59 usable slots) is what the
+# connection-budget standard was written around and what produced the 53300
+# storm. `max_connections` is ours now, the presets set it to 200/400, and the
+# mesh's per-pod pool bounds are already tuned under that.
+#
+# So this exists READY rather than ENABLED. Compose it when the connection
+# count actually demands it -- not before, because a pooler is a second network
+# hop, a second thing to fail over, and a second place for a connection to be
+# held. Adding one "for safety" against a ceiling that no longer exists would
+# make the system less reliable, not more.
+#
+# WHEN TO REACH FOR IT. Watch `cnpg_backends_total` against the Cluster's
+# max_connections. If the mesh's steady-state connection count approaches the
+# ceiling during a rollout -- when old and new pods overlap and the count
+# roughly doubles -- pool rather than raise the ceiling: every Postgres backend
+# is a process with its own memory, so a larger max_connections trades RAM for
+# headroom while a pooler trades a hop for it.
+#
+# USAGE:
+#   components:
+#     - ../../components/cnpg-db
+#     - ../../components/cnpg-db/presets/mid
+#     - ../../components/cnpg-db/optional/pooler
+#
+# Then repoint MEMQL_DATABASE_DSN at `memql-db-pooler` and leave
+# MEMORY_NODES_DATABASE_DIRECT_DSN on `memql-db-rw`: the direct DSN exists
+# precisely so migrations and session-scoped work bypass the pooler, and
+# transaction-mode pooling breaks anything holding session state.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - pooler.yaml

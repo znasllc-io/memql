@@ -114,7 +114,79 @@ patches:
           name: NODE_IP
           value: "0.0.0.0"
 
+
+  # -------------------------------------------------------------------------
+  # DATABASE -- production VALUES over the cnpg-db component (memql#3847 / #3850)
+  # -------------------------------------------------------------------------
+  # Everything here is an endpoint or a class name. The SHAPE -- four
+  # resources, the preloaded library, the plugin archiver, the declared
+  # extensions -- comes from the component; the SIZES come from the preset.
+  - target: { kind: Cluster, name: memql-db }
+    patch: |
+      # Premium SSD v2, and it is LRS/zonal-only -- which is CORRECT here rather
+      # than a compromise. Zone redundancy comes from Postgres replication
+      # across zones (the preset's anti-affinity), so ZRS disks underneath would
+      # buy the same property a second time and pay for it twice.
+      #
+      # The class is operator-provisioned: AKS ships no PSSDv2 StorageClass by
+      # default. See docs/public/operate/database-platform.md.
+      - { op: add, path: /spec/storage/storageClass, value: managed-csi-premium-v2 }
+      - { op: add, path: /spec/walStorage/storageClass, value: managed-csi-premium-v2 }
+      # Workload identity for the backup credentials: the instance pods
+      # authenticate to Blob as a federated managed identity, so no storage key
+      # exists in the cluster to leak or rotate.
+      - op: add
+        path: /spec/serviceAccountTemplate
+        value:
+          metadata:
+            labels:
+              azure.workload.identity/use: "true"
+            annotations:
+              # The user-assigned managed identity federated to this cluster's
+              # database ServiceAccount. Granted Storage Blob Data Contributor
+              # on the backup account and NOT granted delete/purge -- see the
+              # ObjectStore note below.
+              azure.workload.identity/client-id: "REPLACE-WITH-PROD-DB-IDENTITY-CLIENT-ID"
+
+  - target: { kind: ObjectStore, name: memql-db-backup }
+    patch: |
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "azure://memql-prod-db-backups/"
+      # inheritFromAzureAD replaces the connection string entirely: the sidecar
+      # uses the pod's federated identity. This is what "no storage keys
+      # in-cluster" means concretely.
+      #
+      # THE ACCOUNT ITSELF CARRIES THE OTHER HALF OF THE GUARANTEE, and no
+      # manifest can express it: its own resource group, ZRS + Cool tier,
+      # blob versioning and soft delete ON, and the cluster identity granted
+      # WRITE BUT NOT PURGE. A backup an attacker who owns the cluster can
+      # delete is not a backup -- and the identity that writes them is exactly
+      # the credential such an attacker holds.
+      - op: replace
+        path: /spec/configuration/azureCredentials
+        value:
+          inheritFromAzureAD: true
+      - { op: replace, path: /spec/retentionPolicy, value: "30d" }
+
 images:
+  # THE DATABASE OPERAND IMAGE (epic memql#3842 / #3847).
+  #
+  # Pinned by TAG here and NOT yet by digest, deliberately and visibly: this
+  # image has never been cut on the build server, so no digest exists to pin.
+  # Run .github/workflows/build-db-image.yml, then replace this with the
+  # `@sha256:` the run summary prints -- `scripts/deploy/pin-overlay-digests.sh`
+  # does it mechanically.
+  #
+  # Until then `scripts/deploy/drift-check.sh --rendered` FAILS this overlay,
+  # which is the correct answer to "is this deployable?" -- and it can only give
+  # that answer because memql#3847 taught it to read `imageName:` as well as
+  # `image:`. Before that the database image was the one image outside the gate.
+  #
+  # The tag must begin with the PostgreSQL major: CNPG parses it.
+  - name: memql-db
+    newName: acrmemql.azurecr.io/memql-db
+    newTag: 16.15-timescaledb-2.29.1
   - name: acrmemql.azurecr.io/memql-identity
     digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
   - name: acrmemql.azurecr.io/memql-cognition
@@ -149,3 +221,9 @@ images:
 
 components:
   - ../../components/engine-bff
+  # THE DATABASE (epic memql#3842 / #3847 / #3850). The same component staging
+  # composes, with the `top` preset's numbers: 3 instances across 3 zones,
+  # 4 vCPU / 16 GiB, 256 + 64 GiB. Diff this block against the staging twin --
+  # it names a different preset and nothing else.
+  - ../../components/cnpg-db
+  - ../../components/cnpg-db/presets/top
