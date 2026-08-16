@@ -181,6 +181,22 @@ func (e *MemQLEngine) stageBundleDurableWithStore(ctx context.Context, store pro
 	return result, nil
 }
 
+// StageConstructDurable is the per-construct durable STAGE (memql#3928): the
+// counterpart to PromoteConstructDurable, for a caller that already holds a
+// compiled construct rather than a bundle source.
+//
+// The MCP `stage` tool is that caller. It stages a construct the session already
+// defined, by name, the way `promote` does -- there is no source to re-compile
+// at that point, and re-compiling one would be a second chance for the answer to
+// differ from the one `define` gave.
+//
+// owner is the AUTHENTICATED actor; every staged construct is keyed to it. The
+// gate is the caller's (the MCP stage tool's stageGate -- owner-or-developer,
+// matching `define` rather than `promote`).
+func (e *MemQLEngine) StageConstructDurable(ctx context.Context, owner string, c *AuthoredConstruct) error {
+	return e.stageConstructDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, c)
+}
+
 // stageConstructDurableWithStore stages ONE compiled construct: register it into
 // the owner-scoped staged registry (the authoritative gate -- a refused stage
 // persists nothing), then persist the reviewable bundle + construct row pair

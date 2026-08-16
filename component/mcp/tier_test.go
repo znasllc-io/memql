@@ -140,29 +140,44 @@ func TestGate_InlineQuery(t *testing.T) {
 	}
 }
 
-// tools/list only advertises define/query when BOTH gates permit them, and
+// tools/list only advertises define/stage/query when BOTH gates permit them, and
 // promote strictly tighter than define (owner-only). define = owner|developer
-// + authoring|inline; promote = owner only + authoring|inline.
+// + authoring|inline; stage = the SAME bar as define (memql#3928); promote =
+// owner only + authoring|inline.
+//
+// stage tracking define exactly is the assertion worth having: the tier exists
+// because staging registers nothing shared and broadcasts nothing, so it is
+// define made durable rather than a quieter promote. A stage listed at promote's
+// bar would leave a developer with no durable option but the one that changes
+// what everyone runs.
 func TestGate_Listing(t *testing.T) {
 	eng := newFakeEngine()
 	cases := []struct {
-		role                           string
-		tier                           Tier
-		wantDefine, wantPromote, wantQ bool
+		role                                      string
+		tier                                      Tier
+		wantDefine, wantStage, wantPromote, wantQ bool
 	}{
-		{"owner", TierSealed, false, false, false},
-		{"owner", TierAuthoring, true, true, false},
-		{"developer", TierAuthoring, true, false, false}, // developer authors but cannot promote
-		{"admin", TierAuthoring, false, false, false},    // admin gets none
-		{"owner", TierInline, true, true, true},
-		{"developer", TierInline, true, false, true},
-		{"reader", TierInline, false, false, false},
+		{"owner", TierSealed, false, false, false, false},
+		{"owner", TierAuthoring, true, true, true, false},
+		{"developer", TierAuthoring, true, true, false, false}, // developer authors + stages, cannot promote
+		{"admin", TierAuthoring, false, false, false, false},   // admin gets none
+		{"owner", TierInline, true, true, true, true},
+		{"developer", TierInline, true, true, false, true},
+		{"reader", TierInline, false, false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.role+"/"+c.tier.String(), func(t *testing.T) {
 			names := toolNames(listMCPTools(eng, c.role, c.tier))
 			if names[toolDefine] != c.wantDefine {
 				t.Errorf("define listed=%v, want %v", names[toolDefine], c.wantDefine)
+			}
+			if names[toolStage] != c.wantStage {
+				t.Errorf("stage listed=%v, want %v", names[toolStage], c.wantStage)
+			}
+			if names[toolStage] != names[toolDefine] {
+				t.Errorf("stage listed=%v but define listed=%v -- they share a gate, so they must "+
+					"list together or the tier is unreachable for whoever is missing it",
+					names[toolStage], names[toolDefine])
 			}
 			if names[toolPromote] != c.wantPromote {
 				t.Errorf("promote listed=%v, want %v", names[toolPromote], c.wantPromote)
