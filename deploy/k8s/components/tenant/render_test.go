@@ -89,6 +89,7 @@ func TestProvisionSubstitutesEveryPlaceholder(t *testing.T) {
 		"--tenant=acme", "--domain=acme.memql.cloud",
 		"--profile=solo", "--dbPreset=entry",
 		"--engineTag=v1.2.3", "--dbImageTag=16.4-ts",
+		"--maxLlmCalls=2000", "--maxLlmCostUsd=40",
 		"--outputRoot="+out)
 	if code != 0 || !env.OK {
 		t.Fatalf("provision failed: exit %d, %+v", code, env.Error)
@@ -130,6 +131,7 @@ func TestProvisionIsIdempotent(t *testing.T) {
 	args := []string{
 		"--tenant=acme", "--domain=acme.memql.cloud",
 		"--profile=standard", "--dbPreset=mid",
+		"--maxLlmCalls=10000", "--maxLlmCostUsd=250",
 		"--outputRoot=" + out,
 	}
 
@@ -176,6 +178,7 @@ func TestHaComposesOnlyOntoSolo(t *testing.T) {
 			env, code := runScript(t, "tenant-provision.sh",
 				"--tenant=acme", "--domain=acme.memql.cloud",
 				"--profile="+tc.profile, "--dbPreset=entry",
+				"--maxLlmCalls=2000", "--maxLlmCostUsd=40",
 				"--ha="+tc.ha, "--outputRoot="+out)
 			if code != 0 || !env.OK {
 				t.Fatalf("provision failed: exit %d, %+v", code, env.Error)
@@ -217,6 +220,7 @@ func TestProvisionRefusesUnusableTenantNames(t *testing.T) {
 			env, code := runScript(t, "tenant-provision.sh",
 				"--tenant="+name, "--domain=x.memql.cloud",
 				"--profile=solo", "--dbPreset=entry",
+				"--maxLlmCalls=2000", "--maxLlmCostUsd=40",
 				"--outputRoot="+t.TempDir())
 			if code != 2 {
 				t.Errorf("exit %d for tenant %q, want 2 (bad param)", code, name)
@@ -240,6 +244,7 @@ func TestProvisionRefusesUnknownProfilesAndPresets(t *testing.T) {
 		_, code := runScript(t, "tenant-provision.sh",
 			"--tenant=acme", "--domain=x.memql.cloud",
 			"--profile="+tc.profile, "--dbPreset="+tc.preset,
+			"--maxLlmCalls=2000", "--maxLlmCostUsd=40",
 			"--outputRoot="+t.TempDir())
 		if code != 2 {
 			t.Errorf("profile=%s preset=%s: exit %d, want 2", tc.profile, tc.preset, code)
@@ -309,6 +314,89 @@ func TestResumeRefusesZeroInstances(t *testing.T) {
 		_, code := runScript(t, "tenant-resume.sh", "--tenant=acme", "--dbInstances="+v)
 		if code != 2 {
 			t.Errorf("dbInstances=%q: exit %d, want 2", v, code)
+		}
+	}
+}
+
+// TestEveryTenantRendersASpendCeiling is the launch gate, as a test.
+//
+// The epic's hard gate is "no unbounded-spend path exists". Metering alone
+// cannot make that true: every metering design has a failure mode where the
+// meter stops and the model keeps being called, and ours has a longer list than
+// most -- usage is reported from the tenant's cluster to the mothership over a
+// network, at-least-once, eventually.
+//
+// What makes the claim structural is the ceiling rendered INTO the tenant, read
+// by the LLM guard in-process, since boot, with no network and no graph. This
+// test asserts it is there, is mounted, and is not zero.
+//
+// ZERO IS THE INTERESTING VALUE. `MEMQL_LLM_MAX_TOTAL_CALLS=0` does not mean
+// "no calls"; it means UNLIMITED (docs/public/ai/llm-cost-control.md). So the
+// one configuration that would silently disable the whole mechanism is also the
+// one a caller reaches by leaving a field unset, mis-computing a tier, or
+// coercing an empty string -- and on a healthy-looking pod, in the trial tier,
+// where it costs the most.
+func TestEveryTenantRendersASpendCeiling(t *testing.T) {
+	out := t.TempDir()
+	env, code := runScript(t, "tenant-provision.sh",
+		"--tenant=acme", "--domain=acme.memql.cloud",
+		"--profile=solo", "--dbPreset=entry",
+		"--maxLlmCalls=500", "--maxLlmCostUsd=40",
+		"--outputRoot="+out)
+	if code != 0 || !env.OK {
+		t.Fatalf("provision failed: exit %d, %+v", code, env.Error)
+	}
+
+	allowance, err := os.ReadFile(filepath.Join(out, "deploy", "k8s", "tenants", "acme", "allowance.yaml"))
+	if err != nil {
+		t.Fatalf("the tenant rendered no allowance ConfigMap: %v", err)
+	}
+	for _, want := range []string{
+		`MEMQL_LLM_KILL_SWITCH_ENABLED: "true"`,
+		`MEMQL_LLM_MAX_TOTAL_CALLS: "500"`,
+		`MEMQL_LLM_MAX_TOTAL_COST_USD: "40"`,
+	} {
+		if !strings.Contains(string(allowance), want) {
+			t.Errorf("the rendered ceiling does not carry %s:\n%s", want, allowance)
+		}
+	}
+
+	// A ConfigMap nothing mounts is a ceiling nothing enforces.
+	kust, err := os.ReadFile(filepath.Join(out, "deploy", "k8s", "tenants", "acme", "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("read the rendered overlay: %v", err)
+	}
+	if !strings.Contains(string(kust), "allowance.yaml") {
+		t.Error("the overlay does not include allowance.yaml, so the ceiling is never created")
+	}
+	if !strings.Contains(string(kust), "allowance-envfrom.yaml") {
+		t.Error("the overlay does not apply allowance-envfrom.yaml, so the ceiling exists and no node reads it")
+	}
+}
+
+// TestProvisionRefusesAnUnlimitedCeiling.
+//
+// The guard reads 0 as UNLIMITED, so the value that disables the whole
+// mechanism is the one an empty field or a slipped calculation produces. A
+// caller cannot ask for it, and cannot arrive at it by accident.
+func TestProvisionRefusesAnUnlimitedCeiling(t *testing.T) {
+	for _, tc := range []struct{ calls, cost string }{
+		{calls: "0", cost: "40"},
+		{calls: "500", cost: "0"},
+		{calls: "-1", cost: "40"},
+		{calls: "unlimited", cost: "40"},
+		{calls: "500", cost: ""},
+	} {
+		env, code := runScript(t, "tenant-provision.sh",
+			"--tenant=acme", "--domain=acme.memql.cloud",
+			"--profile=solo", "--dbPreset=entry",
+			"--maxLlmCalls="+tc.calls, "--maxLlmCostUsd="+tc.cost,
+			"--outputRoot="+t.TempDir())
+		if code != 2 {
+			t.Errorf("calls=%q cost=%q: exit %d, want 2 -- this would provision a tenant with no spend ceiling", tc.calls, tc.cost, code)
+		}
+		if env.OK {
+			t.Errorf("calls=%q cost=%q was accepted", tc.calls, tc.cost)
 		}
 	}
 }

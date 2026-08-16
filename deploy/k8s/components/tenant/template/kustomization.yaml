@@ -31,6 +31,7 @@ resources:
   - ../../base
   - environment.yaml
   - domain.yaml
+  - allowance.yaml
 
 components:
   # The product-agnostic bff. A tenant's bff is a plain engine bff fronting
@@ -47,6 +48,12 @@ __HA_COMPONENT_LINE__
   - ../../components/cnpg-db/presets/__DB_PRESET__
 
 patches:
+  # Mount the tenant's SPEND CEILING on every engine node -- the structural
+  # backstop that makes "no unbounded-spend path exists" a property of the
+  # deployment rather than of our metering being correct. See allowance.yaml.
+  - path: allowance-envfrom.yaml
+    target: { kind: Deployment, labelSelector: "app.kubernetes.io/part-of=memql" }
+
   # Mount the tenant's own domain on every engine node. Appended rather than
   # strategic-merged: `envFrom` has no patch merge key, so a merge would REPLACE
   # the list and silently drop memql-secrets (the master key, the genesis

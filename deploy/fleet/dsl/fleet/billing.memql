@@ -1,0 +1,240 @@
+// fleet domain -- BILLING: Stripe in, meters out (epic memql#3852, task
+// memql#3854).
+//
+// Kept in its own file rather than folded into automations.memql because it is
+// a different KIND of orchestration. That file is a controller reconciling a
+// cluster to a desired-state row; this one translates events from two outside
+// systems into graph writes. They share the domain and almost nothing else.
+//
+// =============================================================================
+//   Two inbound flows, one receiver
+// =============================================================================
+//
+// Everything here rides `POST /inbound/{source}` -- the engine's
+// signature-verifying webhook receiver -- and stages nothing of its own. No new
+// HTTP endpoint, which was the epic's architecture decision and is now
+// implementable: memql#3854 taught the receiver to read a COMPOSITE signature
+// header, without which a Stripe delivery could not be verified at all (see
+// component/inbound/verify_composite_test.go for what was actually wrong).
+//
+//   source `stripe`  -- Stripe's own webhooks. Money.
+//   source `usage`   -- a TENANT reporting its own consumption. Metering.
+//
+// THE SECOND ONE IS THE INTERESTING DESIGN PROBLEM. Usage happens inside a
+// tenant's cluster; the meters live on the mothership. There is no shared
+// database between them and there must not be -- instance isolation is what a
+// customer is buying. So a tenant REPORTS: it stages an outbound webhook row,
+// the engine's outbound worker delivers it to the mothership's inbound
+// receiver, and this file turns it into a meter increment. Both halves already
+// existed; this is the first thing to use them as a pair.
+//
+// The consequence to hold onto: metering is EVENTUALLY consistent and
+// at-least-once. A tenant that cannot reach the mothership keeps serving and
+// reports later. That is deliberate -- the alternative is a customer's instance
+// going down because our billing system is having a bad afternoon -- and it is
+// exactly why the allowance ceiling is ALSO enforced inside the tenant, by
+// configuration, where no network is involved. See the "two layers" note below.
+//
+// =============================================================================
+//   Two layers of allowance, and why one of them is not enough
+// =============================================================================
+//
+// LAYER 1, THE METER, is the accounting truth: what the customer consumed this
+// period, what it costs, what Stripe is told. It is reconstructed from reports,
+// so it lags, and a lost report under-bills by that report.
+//
+// LAYER 2, THE GUARD, is the structural backstop: the tier's ceiling rendered
+// into the tenant's own `MEMQL_LLM_MAX_TOTAL_CALLS` / `_MAX_TOTAL_COST_USD`
+// (docs/public/ai/llm-cost-control.md). It is enforced in-process, since boot,
+// with no network and no graph read. A tenant cannot exceed it even if the
+// mothership is unreachable, even if metering is broken, even if this file has
+// a bug in it.
+//
+// Layer 2 is what makes the epic's launch gate -- "NO unbounded-spend path
+// exists" -- a structural claim rather than a hope about our own correctness.
+// A trial is the case that matters: its card has been authorized and never
+// charged, so an unbounded trial is an unbounded gift. Which is why the trial
+// tier's `overagePolicy` is `throttle` where every other tier meters, and why
+// the tenant template renders a hard call cap for it.
+//
+// =============================================================================
+//   Idempotency, which is not optional here
+// =============================================================================
+//
+// The inbound receiver gives at-least-once delivery with a stable row id: a
+// redelivery lands on the SAME v1:platform:inboundRequest row, but staging it
+// is still a write, so the automation FIRES AGAIN. That is the documented
+// contract (docs/public/operate/inbound-delivery.md) and it is the one thing a
+// billing handler must not get wrong -- a doubled meter increment is a customer
+// billed twice for one turn.
+//
+// The defence is the meter's identity rather than a dedupe check: one row per
+// (subscription, period, metric), at a derived id, holding an ABSOLUTE total
+// reported by the tenant. Re-applying the same report writes the same number.
+// Reporting is idempotent because it is a SET, not an ADD -- which is why
+// `recordUsage` takes totals and not deltas, and why the tenant is the one that
+// counts.
+
+use fleet.mutations.{ setSubscriberStatus }
+use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
+
+// =============================================================================
+//   Stripe -> the fleet graph
+// =============================================================================
+
+/// A verified inbound delivery arrived. Claim it for billing if it came from Stripe, and mark it
+/// handled either way.
+///
+/// FIRES ON EVERY INBOUND ROW rather than filtering to `stripe` in the trigger, because a trigger
+/// filters on the CONCEPT and the source is a payload field. The `switch` below is the filter, and
+/// a delivery from any other source falls through its default having done nothing -- which is a
+/// no-op rather than an error, because the set of sources a deployment admits is configuration and
+/// is not knowable from here. `ingestCampaignFeedback` in the campaigns domain has the same shape
+/// for the same reason.
+///
+/// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `processing` and stops, and the
+/// reason is worth stating precisely because the obvious guess is wrong.
+///
+/// It is NOT the lookup. `subscriptionByStripeId` in queries.memql resolves a `sub_...` to a fleet
+/// row perfectly well: @serverOnly + @unbounded is exactly the shape an internal sweep or webhook
+/// handler takes, the same one `usersInDeletionCooldown` has carried in the identity domain for
+/// some time, and a logic reaches it with OriginInternal stamped by the step executor.
+///
+/// It is that THE DSL CANNOT READ THE EVENT. `v1:platform:inboundRequest.body` is the verified raw
+/// request body as a STRING, and the automation evaluator has no JSON parsing -- no field
+/// extraction, no path read, nothing that turns those bytes into `data.object.subscription`. So a
+/// handler can see that a Stripe delivery arrived and cannot see what it says.
+///
+/// That is a real limit on the inbound surface's "no product Go" promise, and this is the second
+/// thing to hit it: campaigns needed a Go builtin (`integration.campaigns.ingestFeedback`) for the
+/// identical reason -- it parses a provider payload off a staged row because nothing in the DSL
+/// could. The fix is generic and belongs in the engine rather than here: one JSON-extract builtin
+/// would serve every product draining `POST /inbound/{source}`, which is the entire point of that
+/// surface existing. Recorded on memql#3854.
+@trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
+automation claimStripeDelivery {
+  args {
+    id     any
+    source any
+    status any
+  }
+
+  step claim {
+    switch source {
+      case "stripe" {
+        updateInboundRequestStatus {
+          requestId: id,
+          status:    "processing"
+        }
+      }
+      default { }
+    }
+  }
+}
+
+// =============================================================================
+//   Dunning -- a payment failed, and what happens next
+// =============================================================================
+//
+// THE POLICY, stated once: a failed payment starts a CLOCK, it does not cut
+// service. Seven days of grace, an email at the start of it, suspension at the
+// end, and an immediate resume on recovery.
+//
+// Cutting a customer off the moment a card expires loses the customer AND the
+// invoice -- the two things dunning exists to protect. Most failed payments are
+// an expired card and a person who has not read their email yet, not a refusal
+// to pay. The subscriber row goes `delinquent` so the state is visible in the
+// fleet console and in Orbit; the instance keeps running.
+
+/// A subscription entered `past_due`: tell the customer, and mark the account delinquent. The
+/// instance is untouched -- see the policy note above. `graceEndsAt` was set by whoever wrote
+/// `past_due` (the Stripe path, or an operator), and the sweep below acts on it.
+@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+automation dunningNoticeOnPaymentFailure {
+  args {
+    id           any
+    subscriberId any
+    status       any
+  }
+
+  step markAccount {
+    switch status {
+      case "past_due" {
+        setSubscriberStatus {
+          subscriberId: subscriberId,
+          status:       "delinquent"
+        }
+      }
+      default { }
+    }
+  }
+}
+
+/// A subscription recovered: clear the account's delinquency. `activateSubscription` already
+/// cleared the grace clock -- a subscription that is active is not in any grace period by
+/// definition, and a stale `graceEndsAt` is how a recovered account gets torn down a week later.
+@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+automation clearDelinquencyOnRecovery {
+  args {
+    id           any
+    subscriberId any
+    status       any
+  }
+
+  step clearAccount {
+    switch status {
+      case "active" {
+        setSubscriberStatus {
+          subscriberId: subscriberId,
+          status:       "active"
+        }
+      }
+      default { }
+    }
+  }
+}
+
+/// A payment failed: tell the person who pays.
+///
+/// FIRES ON THE SUBSCRIPTION, not on the subscriber, even though `billingEmail` is conceptually the
+/// account's. Two reasons, and the second is the one that decided it:
+///
+///   Every automation in this domain reads only the row that triggered it, because an automation's
+///   actor is not the row's owner and a caller-scoped read from inside one returns nothing while
+///   looking entirely correct. So the address is denormalised onto the subscription, exactly as
+///   `instance.notifyEmail` is.
+///
+///   And the IDEMPOTENCY KEY has to change per dunning CYCLE. `stageOutboundRequest` is idempotent
+///   by requestId -- a re-stage onto an existing row preserves the worker-owned delivery state
+///   rather than resending -- which is exactly right for the at-least-once event stream this fires
+///   on, and exactly wrong if the key is constant per account: the customer's SECOND late payment,
+///   months later, would land on a row already marked `sent` and no mail would go out. Keying on
+///   `graceEndsAt` makes it once per cycle, which is what "tell them their payment failed" means.
+///
+/// The message names no amount and no card. It cannot: this row does not carry them, Stripe does,
+/// and a dunning email that guesses at a figure is worse than one that does not mention it.
+@trigger(event="node.updated", concept="v1:fleet:subscription", partition="*")
+automation dunningEmailOnPaymentFailure {
+  args {
+    id           any
+    billingEmail any
+    graceEndsAt  any
+    status       any
+  }
+
+  step notify {
+    switch status {
+      case "past_due" {
+        stageOutboundRequest {
+          requestId:   concat("fleet-dunning-", id, "-", graceEndsAt),
+          medium:      "email",
+          target:      billingEmail,
+          subject:     "Action needed: your memQL Cloud payment did not go through",
+          body:        "We could not process your latest memQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
+          requestedBy: "fleet.dunningEmailOnPaymentFailure"
+        }
+      }
+      default { }
+    }
+  }
+}

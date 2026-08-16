@@ -70,7 +70,42 @@ type SourceConfig struct {
 	// and brings the replay window into force. Empty means the sender signs
 	// the body alone and replay protection is the product's problem -- which
 	// is why dedupeKey exists.
+	//
+	// A sender using ElementSeparator carries its timestamp INSIDE
+	// SignatureHeader; set TimestampHeader to the same header name and name
+	// the element in TimestampElement.
 	TimestampHeader string
+	// ElementSeparator, when set, says the signature header is a list of
+	// `key=value` elements rather than a single value -- e.g.
+	// `t=1614556800,v1=5257a8...`, where "," is the separator. SignatureElement
+	// then names the key carrying the digest and TimestampElement the key
+	// carrying the timestamp.
+	//
+	// WHY THIS IS AN ENCODING AND NOT A VENDOR (memql#3854). The scheme
+	// constants above are deliberately encodings, so that a new sender is a
+	// config change rather than a release, and the comment on them says so at
+	// length. A composite header is the same KIND of fact: it describes how the
+	// bytes are laid out, not who sent them. Naming the separator and the two
+	// element keys keeps that property -- there is still no vendor table, and
+	// the next sender that packs its signature into one header is configured
+	// rather than coded.
+	//
+	// It exists because the alternative was worse. Stripe -- the sender this
+	// epic needs -- sends `Stripe-Signature: t=<unix>,v1=<hex>`: one header,
+	// both values, and `v1=` is not a leading PREFIX because `t=<unix>,` comes
+	// first. So SignaturePrefix cannot reach it, TimestampHeader has no
+	// separate header to read, and a source configured as carefully as the
+	// documentation allows still refuses every delivery with a flat 401. The
+	// only other route was a new HTTP endpoint, which the whole inbound design
+	// exists to avoid.
+	ElementSeparator string
+	// SignatureElement names the element carrying the digest (e.g. "v1").
+	// Required when ElementSeparator is set.
+	SignatureElement string
+	// TimestampElement names the element carrying the timestamp (e.g. "t").
+	// Optional: a composite header that carries no timestamp is a sender that
+	// signs the body alone.
+	TimestampElement string
 	// DedupeHeader names the sender's own idempotency key. Empty falls back to
 	// the SHA-256 of the body, which collapses byte-identical redeliveries.
 	DedupeHeader string
@@ -105,6 +140,9 @@ type Config struct {
 //	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_PREFIX
 //	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_HEADER
 //	MEMQL_INBOUND_SOURCE_<NAME>_DEDUPE_HEADER
+//	MEMQL_INBOUND_SOURCE_<NAME>_ELEMENT_SEPARATOR   e.g. "," for a k=v list header
+//	MEMQL_INBOUND_SOURCE_<NAME>_SIGNATURE_ELEMENT   e.g. "v1"
+//	MEMQL_INBOUND_SOURCE_<NAME>_TIMESTAMP_ELEMENT   e.g. "t"
 //
 // Misconfiguration is reported through the logger and costs the source its
 // slot; it never costs the node its boot, and it never admits the source
@@ -158,13 +196,16 @@ func loadSource(name string) (SourceConfig, error) {
 	}
 	prefix := "MEMQL_INBOUND_SOURCE_" + envSuffix(name) + "_"
 	src := SourceConfig{
-		Name:            name,
-		Secret:          os.Getenv(prefix + "SECRET"),
-		Scheme:          strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_SCHEME")),
-		SignatureHeader: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_HEADER")),
-		SignaturePrefix: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_PREFIX")),
-		TimestampHeader: strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_HEADER")),
-		DedupeHeader:    strings.TrimSpace(os.Getenv(prefix + "DEDUPE_HEADER")),
+		Name:             name,
+		Secret:           os.Getenv(prefix + "SECRET"),
+		Scheme:           strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_SCHEME")),
+		SignatureHeader:  strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_HEADER")),
+		SignaturePrefix:  strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_PREFIX")),
+		TimestampHeader:  strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_HEADER")),
+		DedupeHeader:     strings.TrimSpace(os.Getenv(prefix + "DEDUPE_HEADER")),
+		ElementSeparator: strings.TrimSpace(os.Getenv(prefix + "ELEMENT_SEPARATOR")),
+		SignatureElement: strings.TrimSpace(os.Getenv(prefix + "SIGNATURE_ELEMENT")),
+		TimestampElement: strings.TrimSpace(os.Getenv(prefix + "TIMESTAMP_ELEMENT")),
 	}
 
 	switch src.Scheme {
@@ -184,6 +225,36 @@ func loadSource(name string) (SourceConfig, error) {
 	}
 	if src.SignatureHeader == "" {
 		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_HEADER is unset, so there is nothing to check", prefix)
+	}
+
+	// The composite-header trio is all-or-nothing, and each half is refused
+	// separately because each half fails DIFFERENTLY and neither failure names
+	// itself. A separator without an element key leaves nothing to select, so
+	// every delivery 401s on a digest that is really a whole header. An element
+	// key without a separator is silently ignored, so the source verifies
+	// against the raw header and 401s too -- the same flat status code, from a
+	// configuration that looks more complete than the one that would work.
+	if src.SignatureElement != "" && src.ElementSeparator == "" {
+		return SourceConfig{}, fmt.Errorf("%sSIGNATURE_ELEMENT is set but %sELEMENT_SEPARATOR is not, "+
+			"so the header would be checked whole and every delivery would be refused", prefix, prefix)
+	}
+	if src.TimestampElement != "" && src.ElementSeparator == "" {
+		return SourceConfig{}, fmt.Errorf("%sTIMESTAMP_ELEMENT is set but %sELEMENT_SEPARATOR is not, "+
+			"so no timestamp would be read and the replay window would be off", prefix, prefix)
+	}
+	if src.ElementSeparator != "" {
+		if src.SignatureElement == "" {
+			return SourceConfig{}, fmt.Errorf("%sELEMENT_SEPARATOR is set but %sSIGNATURE_ELEMENT is not, "+
+				"so there is no way to say which element carries the digest", prefix, prefix)
+		}
+		// A composite header carries its timestamp inside itself, so pointing
+		// TimestampHeader at a DIFFERENT header is a configuration that cannot
+		// be satisfied -- the value it would read was never signed.
+		if src.TimestampElement != "" && src.TimestampHeader != "" && src.TimestampHeader != src.SignatureHeader {
+			return SourceConfig{}, fmt.Errorf("%sTIMESTAMP_HEADER=%q differs from %sSIGNATURE_HEADER=%q "+
+				"while a TIMESTAMP_ELEMENT is set: a composite header carries its timestamp inside itself, "+
+				"so the other header's value was never signed", prefix, src.TimestampHeader, prefix, src.SignatureHeader)
+		}
 	}
 	return src, nil
 }

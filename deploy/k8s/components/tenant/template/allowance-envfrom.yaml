@@ -1,0 +1,25 @@
+# JSON 6902 patch: mount the tenant's `memql-allowance` ConfigMap as env on
+# every engine node (epic memql#3852, task memql#3854).
+#
+# The twin of domain-envfrom.yaml beside it, and it carries the same mechanical
+# reasoning: `envFrom` has no patch merge key, so a strategic-merge patch
+# REPLACES the whole list -- which would silently drop `memql-secrets` (the
+# master key, the genesis envelope, the database DSN) from every node it
+# touched. `add` at `envFrom/-` appends.
+#
+# APPENDED LAST, WHICH IS THE POINT. Kubernetes resolves duplicate keys across
+# envFrom sources by LAST WINS, so the ceiling here overrides anything an
+# earlier source set for the same variable. A tenant cannot be handed a looser
+# limit by a secret, a base default, or an operator's stray ConfigMap: whatever
+# the tier bought is what the process boots with.
+#
+# NOT `optional`. A node whose ceiling ConfigMap is missing would boot with the
+# guard's own defaults -- MEMQL_LLM_MAX_TOTAL_CALLS=0, which means UNLIMITED.
+# That is the exact state this whole mechanism exists to prevent, and it would
+# arrive silently, on a healthy-looking pod, in the tier where it costs the
+# most. Refusing to start is the honest failure.
+- op: add
+  path: /spec/template/spec/containers/0/envFrom/-
+  value:
+    configMapRef:
+      name: memql-allowance
