@@ -47,10 +47,16 @@
 # these; they exist for downstream repos' Makefiles.
 #
 #   LOCAL infra (pulled from public registries, not rebuilt here):
-#     postgres    timescale/timescaledb -- pull + import
 #     azurite     mcr.microsoft.com/azure-storage/azurite -- pull + import
 #     redis       redis -- pull + import
 #     livekit     livekit/livekit-server -- pull + import
+#
+#   LOCAL database (BUILT here, not pulled -- memql#3846):
+#     memql-db    deploy/db-image -- build + import when absent from the cluster
+#                 The local database is a CloudNativePG Cluster running this
+#                 image; it exists in no registry, so an absent import is an
+#                 ErrImagePull rather than a slow first start. Refresh it with
+#                 `make dev PULL_INFRA=1` or `make db-image IMPORT=1`.
 #
 # Usage
 # -----
@@ -113,18 +119,33 @@ CARRIER_REPO=""
 CARRIER_CONTEXT=""
 CARRIER_NODES=()
 
-# Infra images (pull from upstream, import into k3d)
+# Infra images (pull from upstream, import into k3d).
+#
+# The database is NOT here. It used to be `timescale/timescaledb:2.19.1-pg16`,
+# pulled like the rest; since memql#3846 the local database is a CloudNativePG
+# Cluster running `memql-db:16-dev`, which is BUILT here (deploy/db-image) and
+# exists in no registry. ensure_db_image below handles it, and the difference
+# matters: everything in this list can be pulled by k3s on its own if the
+# import is skipped, and the operand image cannot -- skipping it leaves the
+# database pod in ErrImagePull indefinitely.
 INFRA_IMAGES=(
-    "timescale/timescaledb:2.19.1-pg16"
     "mcr.microsoft.com/azure-storage/azurite:3.34.0"
     "redis:7-alpine"
     "livekit/livekit-server:v1.8"
 )
 
+# The locally-built database operand image, and the tag the local overlay's
+# Cluster CR names (deploy/k8s/overlays/local/database.yaml).
+DB_IMAGE="memql-db:16-dev"
+
 # Outcome tracking (result envelope + idempotency reporting).
 REBUILT_COUNT=0
 RESTARTED=false
 INFRA_PULLED=false
+DB_IMAGE_IMPORTED=false
+# Set from the --pull-infra flag in main(); read by ensure_db_image, which runs
+# unconditionally and so cannot take the flag from main's local.
+PULL_INFRA=false
 
 #=============================================================================
 # OUTPUT HELPERS -- delegate to the capability runtime (all logs to STDERR)
@@ -412,6 +433,49 @@ function pull_and_import_infra() {
 }
 
 #=============================================================================
+# DATABASE OPERAND IMAGE (built here, not pulled)
+#=============================================================================
+
+# cluster_holds_db_image -- true when the k3d node's containerd already has the
+# operand image under this reference.
+#
+# Presence, not freshness. A rebuilt image under the same tag is NOT detected,
+# which is deliberate rather than a shortcut: the import is ~500MB and paying it
+# on every inner-loop `make dev` is exactly the cost developers notice, while
+# the database image changes about as often as an operator version does.
+# Refreshing it is an explicit act -- `make dev PULL_INFRA=1` or
+# `make db-image IMPORT=1`.
+#
+# A probe that cannot run returns false, so the fallback is to import.
+function cluster_holds_db_image() {
+    docker exec "k3d-${CLUSTER_NAME}-server-0" ctr -n k8s.io images ls -q 2>/dev/null \
+        | grep -q "${DB_IMAGE}"
+}
+
+function ensure_db_image() {
+    section "Ensuring the database operand image (${DB_IMAGE})"
+
+    if [[ "$PULL_INFRA" != "true" ]] && cluster_holds_db_image; then
+        info "${DB_IMAGE} already present in cluster '${CLUSTER_NAME}' -- skipping."
+        info "  refresh it with: make dev PULL_INFRA=1   (or: make db-image IMPORT=1)"
+        return 0
+    fi
+
+    # Smoke test skipped here: it takes ~40s and belongs to the build lane
+    # (`make db-image`, and the CI push gate), not to an inner-loop rebuild.
+    info "Building ${DB_IMAGE}..."
+    bash "${SCRIPT_DIR}/../db-image/build.sh" --tag=16-dev --smokeTest=false >/dev/null \
+        || cap_fail 5 "building ${DB_IMAGE} failed"
+
+    info "Importing ${DB_IMAGE} into k3d..."
+    k3d image import "${DB_IMAGE}" --cluster "${CLUSTER_NAME}" >&2 \
+        || cap_fail 5 "k3d image import of ${DB_IMAGE} failed"
+
+    DB_IMAGE_IMPORTED=true
+    cap_changed
+}
+
+#=============================================================================
 # WAIT FOR ROLLOUTS
 #=============================================================================
 
@@ -493,8 +557,15 @@ function main() {
     fi
 
     if [ -n "${pull_infra}" ]; then
+        PULL_INFRA=true
         pull_and_import_infra
     fi
+
+    # UNCONDITIONAL, unlike the infra images above: memql-db:16-dev exists in no
+    # registry, so a cluster without it cannot fall back to pulling. The
+    # function itself is a no-op once the image is in the cluster, so the inner
+    # loop does not pay for it.
+    ensure_db_image
 
     if [ ${#nodes_to_build[@]} -gt 0 ]; then
         info "Nodes to build: ${nodes_to_build[*]}"
@@ -524,6 +595,7 @@ function main() {
     cap_result_set_raw rebuilt     "$REBUILT_COUNT"
     cap_result_set_raw restarted   "$RESTARTED"
     cap_result_set_raw infraPulled "$INFRA_PULLED"
+    cap_result_set_raw dbImageImported "$DB_IMAGE_IMPORTED"
     cap_ok
 }
 

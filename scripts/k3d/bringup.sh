@@ -224,9 +224,31 @@ function run_migration() {
         warn "migrate-job.yaml not found (${migrate_yaml}); relying on identity boot-migration"
         return 0
     fi
-    info "waiting for postgres to be ready..."
-    kubectl -n "${NAMESPACE}" rollout status deploy/postgres --timeout=150s >&2 2>/dev/null \
-        || warn "postgres not yet Available; the migrate Job will retry against it"
+    # The database is a CloudNativePG Cluster since memql#3846, not a
+    # Deployment, so readiness is the Cluster's own Ready condition rather than
+    # a rollout. The old `rollout status deploy/postgres` would now succeed
+    # instantly and vacuously -- there is no such Deployment, the command errors,
+    # and the `|| warn` swallowed it -- sending the migrate Job at a database
+    # that does not exist yet.
+    #
+    # 300s rather than 150s: a first bring-up runs initdb AND creates the
+    # extensions declared on the Database CR, where the Deployment only had to
+    # start a container.
+    info "waiting for the memql-db CloudNativePG cluster to be ready..."
+    kubectl -n "${NAMESPACE}" wait --for=condition=Ready cluster/memql-db --timeout=300s >&2 2>/dev/null \
+        || warn "memql-db not yet Ready; the migrate Job will retry against it"
+
+    # AND THEN FOR THE EXTENSIONS, which is a SECOND wait and not a redundant
+    # one (memql#3846). A CNPG Cluster reports Ready as soon as Postgres is
+    # serving; the `Database` CR's extensions are reconciled afterwards, and
+    # measured on a local bring-up that gap was tens of seconds. The migration
+    # in between would find a database that accepts connections and has no
+    # timescaledb in it, and fail on the first create_hypertable with an error
+    # naming a missing function rather than a missing extension.
+    info "waiting for the declared extensions (timescaledb, vector) to be applied..."
+    kubectl -n "${NAMESPACE}" wait --for=jsonpath='{.status.applied}'=true \
+        database/memql-db-memql --timeout=300s >&2 2>/dev/null \
+        || warn "the memql-db-memql Database CR has not applied its extensions yet; the migration may fail on a missing timescaledb"
     kubectl -n "${NAMESPACE}" delete job memql-migrate --ignore-not-found >/dev/null 2>&1 || true
     # The SAME migrate Job the cloud deploy runs (`make deploy`), but with the
     # locally-imported identity image -- so `make up` migrates the schema up
