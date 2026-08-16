@@ -67,6 +67,7 @@ import type {
   DurableDemoteBundleResult,
   DurablePromoteBundleResult,
   SessionDefineBundleResult,
+  StageBundleResult,
   ValidateBundleResult,
 } from "@znasllc-io/memql-sdk-core/authoring";
 
@@ -81,14 +82,23 @@ import {
   demotePrompt,
   promotePrompt,
   sessionPrompt,
+  stagePrompt,
   type TrainingCluster,
   type TrainingPrompt,
 } from "./report.js";
 import { SessionDefinitions } from "./session.js";
 import { isTransportClose, withVersionSkewHint } from "../version/skewHint.js";
 
-/** The four commands the training CodeLens offers. */
-export type TrainingActionKind = "dryRun" | "tryInSession" | "promote" | "demote";
+/**
+ * The five commands the training CodeLens offers.
+ *
+ * There is no `"train"`. Training a staged construct IS a promote -- the engine
+ * flips the same persisted row rather than writing a second one -- so it is
+ * dispatched through `promote()` under a lens title that names the act. A fifth
+ * kind here would be a second name for one operation, and every switch over this
+ * union would then have to handle two spellings of it.
+ */
+export type TrainingActionKind = "dryRun" | "tryInSession" | "stage" | "promote" | "demote";
 
 /**
  * What a lens hands over: the document and the construct it was rendered above.
@@ -122,6 +132,9 @@ export interface TrainingEngine {
   // `origin` supplies the engine's ambient domain (memql#3800).
   validateBundle(sources: string, origin?: string): Promise<ValidateBundleResult>;
   sessionDefineBundle(sources: string, origin?: string): Promise<SessionDefineBundleResult>;
+  // stageBundle is the durable OWNER-SCOPED tier (memql#3928). It takes the same
+  // origin as validate for the same reason: a stage runs the SAME Gate-1 sandbox.
+  stageBundle(sources: string, origin?: string): Promise<StageBundleResult>;
   durablePromoteBundle(
     sources: string,
     options: { allowBreaking?: boolean },
@@ -175,6 +188,7 @@ export type TrainingResult =
       /** True when this promote carried the breaking-change override. */
       overridden: boolean;
     }
+  | { kind: "stage"; staged: AuthoringConstruct[] }
   | { kind: "demote"; demoted: AuthoringConstruct[]; outcomes: DemoteOutcome[] };
 
 export type TrainingOutcome =
@@ -335,8 +349,80 @@ export class TrainingActions {
   }
 
   /**
+   * Durably STAGE the closure into the author's OWN tier: persisted, replayed
+   * on restart, and callable by them and by nobody else (epic memql#3928).
+   *
+   * THE CLOSURE, like promote and unlike demote. A staged construct still has to
+   * resolve, and it resolves against the shared registry plus the author's own
+   * staged entries -- so a dependency the cluster does not have has to go with
+   * it or the staged construct compiles and then fails to bind.
+   *
+   * VALIDATED FIRST, like promote. The engine runs Gate-1 itself, but validating
+   * here is what puts a compile error in the Problems panel against the file
+   * rather than in a toast.
+   *
+   * A CONCEPT IN THE CLOSURE IS REFUSED BY THE ENGINE, whole, by name. That
+   * refusal is left exactly as the engine words it -- it names the concept and
+   * says to train it instead, which is a better sentence than anything this
+   * layer could reconstruct from a status code.
+   */
+  async stage(request: TrainingRequest): Promise<TrainingOutcome> {
+    const token = this.latest.begin();
+    const context = this.preflight("stage", request);
+    if ("outcome" in context) return context.outcome;
+
+    const bundle = await this.assemble("stage", request, "closure");
+    if ("outcome" in bundle) return bundle.outcome;
+    if (!this.latest.isCurrent(token)) return superseded();
+
+    const confirmed = await this.deps.confirm(
+      stagePrompt(context.cluster, request.name, bundle.bundle, this.deps.display),
+    );
+    if (!this.latest.isCurrent(token)) return superseded();
+    if (!confirmed) return { status: "declined", action: "stage", request };
+
+    const validated = await this.validate("stage", request, context.engine, bundle.bundle, token);
+    if ("outcome" in validated) return validated.outcome;
+
+    let staged: StageBundleResult;
+    try {
+      staged = await context.engine.stageBundle(
+        bundle.bundle.sources,
+        bundleOrigin(bundle.bundle),
+      );
+    } catch (err) {
+      if (!this.latest.isCurrent(token)) return superseded();
+      return this.fail("stage", request, err);
+    }
+    if (!this.latest.isCurrent(token)) return superseded();
+
+    if (!staged.ok) {
+      const mapped = mapBundleDiagnostics(staged.diagnostics, bundle.bundle);
+      if (mapped.length > 0) {
+        this.deps.publishDiagnostics(mapped);
+        return { status: "invalid", action: "stage", request, diagnostics: mapped };
+      }
+      return this.refuse("stage", request, staged.error, "The engine refused the stage.");
+    }
+
+    await this.deps.catalogChanged();
+    return {
+      status: "ok",
+      action: "stage",
+      request,
+      cluster: context.cluster,
+      result: { kind: "stage", staged: staged.staged },
+    };
+  }
+
+  /**
    * Durably promote the closure into the SHARED registry: persisted, visible to
    * every caller, live on every node within seconds, replayed on restart.
+   *
+   * ALSO THE TRAIN PATH. A construct the cluster holds as STAGED is trained by
+   * this same call: the engine flips its persisted row to active, registers it
+   * shared, and broadcasts it. Nothing here branches on the tier, and nothing
+   * needs to -- which is the point of the wire contract having one verb.
    *
    * Never carries `allowBreaking`. A promote refused for a breaking concept
    * change comes back as the `breaking` outcome; `promoteWithOverride` is the

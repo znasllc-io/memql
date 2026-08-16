@@ -311,6 +311,7 @@ var trainingWireNames = map[string]string{
 	trainingStateTrained:    "TRAINING_STATES",
 	trainingStateSeeded:     "TRAINING_STATES",
 	trainingStateUnknown:    "TRAINING_STATES",
+	trainingStateStaged:     "TRAINING_STATES",
 }
 
 // trainingWireSources are the extension files those constants are declared in.

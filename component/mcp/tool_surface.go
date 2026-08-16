@@ -48,6 +48,13 @@ type Engine interface {
 	// PromoteAuthoredConstruct does. The MCP promote handler calls this so a
 	// promotion survives a restart.
 	PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
+	// StageConstructDurable is the DURABLE, OWNER-SCOPED middle tier (epic
+	// memql#3928): it persists the same reviewable bundle + construct row pair
+	// PromoteConstructDurable does, at status "staged", and registers the
+	// construct into an OWNER-SCOPED registry instead of the shared one -- so it
+	// is callable by its author and by nobody else. The one step it omits is the
+	// cross-node broadcast, and that omission IS the tier.
+	StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
 	// ExecuteInline runs ad-hoc inline MemQL text with the inline-shape
 	// restrictions lifted (MCP Tier-3 #1535), resolving session-authored
 	// constructs core-first. The server gates it to inline tier + owner/developer.
@@ -107,6 +114,7 @@ const (
 	toolRunMutation         = "run_mutation"
 	toolRunAutomation       = "run_automation"
 	toolDefine              = "define"
+	toolStage               = "stage"
 	toolPromote             = "promote"
 	toolQuery               = "query"
 	toolRunInlineAutomation = "run_inline_automation"
@@ -193,6 +201,24 @@ func listMCPTools(eng Engine, role string, tier Tier) []map[string]any {
 				"type":       "object",
 				"properties": map[string]any{"bundle": map[string]any{"type": "string", "description": "The .memql source to author."}},
 				"required":   []any{"bundle"},
+			},
+		})
+	}
+	// stage lists at exactly define's bar, which is the point of the tier: it is
+	// define made durable, and it registers nothing shared and broadcasts
+	// nothing. A developer who can author into a session can author into their
+	// own durable tier.
+	if tierAllows(tier, classAuthor) && roleCanAuthor(role) {
+		out = append(out, map[string]any{
+			"name":        toolStage,
+			"description": "Stage a session-authored construct into your OWN durable tier: persisted, replayed when the cluster restarts, and callable by you and by nobody else. Use `promote` to train it -- to make it live for every session. Requires the authoring tier + owner/developer role.",
+			"inputSchema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{"type": "string", "description": "Name of the session-authored construct to stage."},
+					"kind": map[string]any{"type": "string", "description": "Construct kind (query / mutation / logic / spec). Optional; resolved by name when omitted."},
+				},
+				"required": []any{"name"},
 			},
 		})
 	}
@@ -302,6 +328,8 @@ func callMCPTool(ctx context.Context, eng Engine, role string, tier Tier, name s
 		return handleRunAutomation(ctx, args)
 	case toolDefine:
 		return handleDefine(ctx, eng, role, tier, args)
+	case toolStage:
+		return handleStage(ctx, eng, role, tier, args)
 	case toolPromote:
 		return handlePromote(ctx, eng, role, tier, args)
 	case toolQuery:
@@ -604,6 +632,43 @@ func handlePromote(ctx context.Context, eng Engine, role string, tier Tier, args
 	return textResult(fmt.Sprintf("promoted %s %q into the durable shared schema; it is persisted (reviewable + restart-durable) and now callable by every session", c.Kind, name))
 }
 
+// handleStage implements the `stage` meta-tool (epic memql#3928): durably stage
+// a session-authored construct into the caller's OWN tier -- persisted, replayed
+// at boot, callable by them and by nobody else.
+//
+// IDENTICAL IN SHAPE TO handlePromote and deliberately so, down to reusing
+// resolveSessionConstruct: both take a construct the session already defined, by
+// name, and make it durable. The only differences are the gate (owner-or-
+// developer, not owner-only) and which registry the construct lands in.
+//
+// TRAINING A STAGED CONSTRUCT IS `promote`. There is no third tool, because
+// there is no third act: the engine sees the construct is staged for this owner
+// and flips the same persisted row rather than writing a second one. A `train`
+// tool would have been a second name for one operation, and a model choosing
+// between them would have to know which tier a construct was in first.
+func handleStage(ctx context.Context, eng Engine, role string, tier Tier, args map[string]any) map[string]any {
+	if ok, deny := stageGate(role, tier); !ok {
+		return errorResult(deny)
+	}
+	s := mcpSessionFromContext(ctx)
+	if !s.available() {
+		return errorResult("stage is unavailable: this MCP session has no authoring identity (set MEMQL_MCP_USER)")
+	}
+	name, _ := args["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return errorResult("stage requires the 'name' of a session-authored construct")
+	}
+	c, err := resolveSessionConstruct(s, name, args)
+	if err != nil {
+		return errorResult(err.Error())
+	}
+	if err := eng.StageConstructDurable(ctx, s.owner, c); err != nil {
+		return errorResult(fmt.Sprintf("stage %s %q failed: %v", c.Kind, c.Name, err))
+	}
+	return textResult(fmt.Sprintf("staged %s %q: persisted (reviewable + restart-durable) and callable by you and by nobody else. Use promote to train it -- to make it live for every session", c.Kind, name))
+}
+
 // resolveSessionConstruct finds an active session-authored construct by name.
 // When `kind` is supplied it pins the lookup; otherwise it scans the owner's
 // constructs for a unique name match and errors on an ambiguous one.
@@ -662,6 +727,7 @@ type concreteEngine interface {
 	ExecuteInline(ctx context.Context, query, owner string, reg *memql.AuthoredRuntimeRegistry) (*memql.ExecuteResult, error)
 	PromoteAuthoredConstruct(ctx context.Context, c *memql.AuthoredConstruct) error
 	PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
+	StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error
 	MCPPromotedFunctionTools() []map[string]any
 	MCPPromotedFunctionKind(name string) (string, bool)
 }
@@ -684,6 +750,9 @@ func (a engineAdapter) PromoteAuthoredConstruct(ctx context.Context, c *memql.Au
 }
 func (a engineAdapter) PromoteConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
 	return a.c.PromoteConstructDurable(ctx, owner, c)
+}
+func (a engineAdapter) StageConstructDurable(ctx context.Context, owner string, c *memql.AuthoredConstruct) error {
+	return a.c.StageConstructDurable(ctx, owner, c)
 }
 func (a engineAdapter) MCPPromotedFunctionTools() []map[string]any {
 	return a.c.MCPPromotedFunctionTools()

@@ -11,6 +11,7 @@ import (
 	protocol "github.com/tliron/glsp/protocol_3_16"
 
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
+	"github.com/znasllc-io/memql/component/memql"
 	"github.com/znasllc-io/memql/component/memql/sense"
 )
 
@@ -322,6 +323,50 @@ func TestClusterCatalogPush_ReplacesWholesale(t *testing.T) {
 		t.Errorf("seededMutation = %q after the second push; want %q -- the entries that "+
 			"WERE pushed must survive, or this test would pass for a push that did nothing",
 			states["seededMutation"], trainingStateSeeded)
+	}
+}
+
+// TestTrainingState_StagedIsDecidedBeforeTheSeededDegrade pins the ORDERING that
+// makes the staged state reachable at all (epic memql#3928).
+//
+// `staged` is not `promoted`, so without a branch ahead of the origin degrade
+// every staged construct falls into it and renders as `seeded` -- the one state
+// with NO actions -- on the one tier whose entire point is that its author can
+// act on it. And the failure is invisible: `seeded` is a legitimate state, so
+// the surface looks like it is working.
+//
+// The hash case is the second half of the same ordering. Drift is defined
+// against a PROMOTION ("a construct the cluster knows, whose local source no
+// longer matches what was promoted"), and a staged construct has no promoted
+// version to have drifted from -- exactly the argument the `seeded` degrade
+// already makes for a core construct.
+func TestTrainingState_StagedIsDecidedBeforeTheSeededDegrade(t *testing.T) {
+	declared := sense.ConstructHash{Kind: "query", Name: "mine", SourceHash: "deadbeef"}
+
+	matching := catalogConstruct{
+		Name:       "mine",
+		Kind:       "query",
+		Origin:     memql.ConstructOriginStaged,
+		SourceHash: "deadbeef",
+	}
+	if got := trainingStateFor(declared, matching, catalogPresent); got != trainingStateStaged {
+		t.Errorf("a staged construct reported %q; want %q -- anything else routes it to a "+
+			"state with no Train action", got, trainingStateStaged)
+	}
+
+	moved := matching
+	moved.SourceHash = "cafebabe"
+	if got := trainingStateFor(declared, moved, catalogPresent); got != trainingStateStaged {
+		t.Errorf("an EDITED staged construct reported %q; want %q -- drift is defined against a "+
+			"promotion, and a staged construct has none", got, trainingStateStaged)
+	}
+
+	// And the state it would otherwise have degraded to, so this test would fail
+	// for a build that simply renamed `seeded`.
+	seeded := matching
+	seeded.Origin = memql.ConstructOriginCore
+	if got := trainingStateFor(declared, seeded, catalogPresent); got != trainingStateSeeded {
+		t.Errorf("a core construct reported %q; want %q", got, trainingStateSeeded)
 	}
 }
 

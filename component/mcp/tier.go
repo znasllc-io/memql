@@ -126,6 +126,30 @@ func authoringGate(role string, tier Tier) (bool, string) {
 	return true, ""
 }
 
+// stageGate is Gate A + Gate B for the `stage` op (epic memql#3928): the
+// authoring class must be enabled AND the role must pass CanAuthor.
+//
+// THE MIDDLE PREDICATE this file did not have. It sits at authoringGate's bar,
+// not promoteGate's, and the reason is what the tier is: staging registers
+// nothing into the shared registry and broadcasts nothing to any peer, so its
+// blast radius is a database row rather than a change to what the cluster runs.
+// That is the blast radius `define` already has, made durable -- and a developer
+// whose only durable option was `promote` would be pushed toward the act that
+// changes what everyone runs.
+//
+// A third near-identical function rather than a parameterised one, matching the
+// two beside it: each bakes in the op name it refuses under, and a refusal that
+// named the wrong op would send its reader to the wrong permission.
+func stageGate(role string, tier Tier) (bool, string) {
+	if !tierAllows(tier, classAuthor) {
+		return false, "stage is not permitted: deployment tier is " + tier.String() + " (set MEMQL_MCP_MODE=authoring or inline)"
+	}
+	if !roleCanAuthor(role) {
+		return false, "stage requires the owner or developer role"
+	}
+	return true, ""
+}
+
 // promoteGate is Gate A + Gate B for the `promote` op: the authoring class must
 // be enabled (a sealed deployment promotes nothing) AND the role must be owner.
 func promoteGate(role string, tier Tier) (bool, string) {
