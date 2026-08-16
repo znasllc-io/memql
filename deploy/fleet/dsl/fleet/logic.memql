@@ -26,6 +26,8 @@
 // instance row can see is an infinite loop, and it is one that will not appear
 // in a test -- it appears as a cluster reconciling forever.
 
+use fleet.queries.{ instancesByStatus, subscriptionsByStatus }
+
 /// Which lifecycle action, if any, an instance row is asking for -- returns the capability verb to
 /// dispatch, or "" for a settled row. ONE place decides the transient-status vocabulary, so a fifth
 /// operation added later is a case here rather than four `if` conditions that have to agree.
@@ -82,5 +84,68 @@ logic instanceIsRunning {
   }
   body {
     return (args.status ?? "") == "running"
+  }
+}
+
+// =============================================================================
+//   Sweep candidate selection (task memql#3856)
+// =============================================================================
+//
+// Each of these is a scheduled sweep's DECIDE half: read the candidate set,
+// window it per row, return the rows the automation should act on. Pure -- they
+// read and return, and the automation does every write.
+//
+// THE WINDOWING IS INSIDE THE LOOP because a filter cannot call `addDuration`.
+// That is a parser limitation, not a preference, and identity's deletion
+// reminders carry the same construction for the same reason. The consequence
+// worth knowing: the candidate query returns EVERY row in the status, and the
+// bracket narrows it in memory -- so these read more rows than they act on, by
+// design, and the `@unbounded` reason on each query is what keeps that from
+// being truncated to a first page.
+//
+// THE BRACKETS ARE ONE DAY WIDE and the sweeps fire daily. That is what makes a
+// nudge fire exactly once per instance: a wider bracket sends duplicates, a
+// narrower one drops anyone whose row was written at an awkward hour.
+
+
+/// Every RUNNING instance -- the candidate set for the trial nudges, the trial expiry, and the
+/// hibernation sweep. Deliberately unwindowed: a filter cannot call `addDuration`, so each sweep
+/// applies its own bracket in its `forEach ... where` clause, and one candidate query serves all
+/// four rather than four near-identical ones drifting apart.
+///
+/// The consequence to know: this reads every running instance in the fleet and the sweeps act on a
+/// few. That is what the `@unbounded` reason on the query is for -- without it the pagination gate
+/// would truncate the read to a first page and the tail of the fleet would go unswept, silently and
+/// with the sweep reporting success.
+logic runningInstances {
+  args {
+    event object!
+  }
+  body {
+    running := query instancesByStatus( status: "running" )
+    return running.nodes()
+  }
+}
+
+/// Every SUSPENDED instance -- the candidate set for the grace-expiry teardown. Same unwindowed
+/// shape and same reasoning as runningInstances.
+logic suspendedInstances {
+  args {
+    event object!
+  }
+  body {
+    suspended := query instancesByStatus( status: "suspended" )
+    return suspended.nodes()
+  }
+}
+
+/// Every subscription still in its trial -- the candidate set for the billing side of day 14.
+logic trialingSubscriptions {
+  args {
+    event object!
+  }
+  body {
+    trialing := query subscriptionsByStatus( status: "trialing" )
+    return trialing.nodes()
   }
 }

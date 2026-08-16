@@ -320,9 +320,10 @@ mutate instance createInstance {
     notifyEmail      string!
     maxLlmCalls      string!
     maxLlmCostUsd    string!
+    trialEndsAt      datetime
   }
   insert {
-    accept { subscriptionId, subscriberId, name, domain, tier, instanceProfile, dbPreset, haEnabled, notifyEmail, maxLlmCalls, maxLlmCostUsd }
+    accept { subscriptionId, subscriberId, name, domain, tier, instanceProfile, dbPreset, haEnabled, notifyEmail, maxLlmCalls, maxLlmCostUsd, trialEndsAt }
     stamp {
       id: args.instanceId
       ownerUserId: actor.userId
@@ -581,3 +582,69 @@ mutate usageMeter markUsageMeterReported {
 // rather than editing the row in place: existing subscriptions name a tier by
 // value, so editing the row they name re-prices them retroactively and
 // silently.
+
+// =============================================================================
+//   Lifecycle COMMANDS -- the writes that make the controller act
+// =============================================================================
+//
+// The three below write a TRANSIENT status, which the automations in
+// automations.memql treat as a command (see that file's header). Nothing else in
+// this domain writes one, and that is deliberate: the settled statuses are
+// stamped by the controller when it finishes, so a caller who could write
+// `running` directly could tell the fleet a tenant is up that was never
+// provisioned.
+//
+// They are ordinary owned-tier writes because the customer legitimately asks for
+// two of them (pause, cancel) from Orbit, and the third (teardown) is asked for
+// by a sweep running under the same borrowed authority. What bounds them is not
+// who calls them but that each is ONE named transition -- there is no
+// `setInstanceStatus(status:)` a caller could point anywhere.
+
+/// Ask the fleet to scale this instance to zero, leaving its data intact. Written by Orbit when a
+/// customer pauses, by the trial-expiry sweep, and by the hibernation sweep. The controller picks it
+/// up from the transient status and settles the row at `suspended`.
+@actor
+mutate instance requestInstanceSuspend {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "suspending"
+  }
+}
+
+/// Ask the fleet to bring a suspended instance back up. Written by Orbit on resume and by the
+/// trial-conversion path.
+@actor
+mutate instance requestInstanceResume {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "resuming"
+  }
+}
+
+/// Ask the fleet to destroy this instance. IRREVERSIBLE once the controller acts on it -- the
+/// capability script takes a final backup and then deletes the tenant's ArgoCD Application, which
+/// cascades to its volumes.
+///
+/// Written only by the grace-expiry sweep, and never by Orbit. A customer cancelling schedules a
+/// cancellation; what destroys their data is the grace period running out, days later, after the
+/// export offer. A one-click "delete everything" in a console is a support ticket waiting to happen
+/// and there is no reason to build one.
+@actor
+mutate instance requestInstanceTeardown {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "tearing_down"
+  }
+}
