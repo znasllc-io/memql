@@ -61,6 +61,24 @@
 #           runs ALTER EXTENSION.
 # Doing both in one PR asks the catalog to move while pods are still rolling.
 #
+# THE IMAGE TAG IS PARSED, NOT DECORATIVE
+# ----------------------------------------
+# CloudNativePG's Cluster webhook reads the tag on `spec.imageName` to derive
+# the PostgreSQL major version -- it needs that to refuse an accidental major
+# upgrade -- and REJECTS a tag it cannot parse. So the tag must BEGIN with the
+# major. Measured against the v1.30.0 webhook:
+#
+#   16   16.15   16-dev   16.15-dev   16.15-ts2.29.1   16.15-standard-bookworm
+#        -> accepted
+#   dev      -> rejected: `spec.imageName: Invalid value: "memql-db:dev": invalid version tag`
+#   v16.15   -> rejected, same message (the leading `v` is not tolerated)
+#   0.1.0    -> rejected: "Unsupported PostgreSQL version" (parsed as major 0)
+#
+# This is why the local build tags `16-dev` rather than `dev`, and why a release
+# tag reads like `16.15-timescaledb-2.29.1`. A tag that names only the product
+# version builds an image no Cluster can reference, and the failure surfaces at
+# `kubectl apply` during a bring-up rather than at build time.
+#
 # BUILD
 #   Release (GitHub build server -> ACR):  .github/workflows/build-db-image.yml
 #   Local dev (k3d):                       make db-image   [ -> scripts/db-image/build.sh ]

@@ -27,7 +27,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && cd .. && pwd)"
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
 cap_init "db.buildImage" "Build the memQL database operand image for local development."
-cap_spec_param "tag"        "image tag to build (default: dev)"
+cap_spec_param "tag"        "image tag to build (default: 16-dev; MUST start with the PostgreSQL major -- CNPG parses it)"
 cap_spec_param "pgMajor"    "PostgreSQL major version"
 cap_spec_param "timescaledb" "TimescaleDB minor to install as CURRENT"
 cap_spec_param "timescaledbPrevious" "TimescaleDB minor to also carry as N-1"
@@ -86,7 +86,19 @@ function main() {
     cap_parse_flags "$@"
 
     local tag pg ts tsPrev smoke doImport cluster image
-    tag="$(cap_param tag "dev")"
+    # THE TAG MUST BEGIN WITH THE POSTGRESQL MAJOR. CloudNativePG's Cluster
+    # webhook PARSES spec.imageName's tag to derive the major version (it needs
+    # it to refuse an accidental major upgrade), and rejects anything it cannot.
+    # Measured against the v1.30.0 webhook:
+    #
+    #   16  16.15  16-dev  16.15-dev  16.15-ts2.29.1  16.15-standard-bookworm   accepted
+    #   dev                                          rejected, "invalid version tag"
+    #   v16.15                                       rejected, "invalid version tag"
+    #   0.1.0                                        rejected, "Unsupported PostgreSQL version"
+    #
+    # A plain `dev` therefore builds an image no Cluster can reference, and the
+    # failure lands at `kubectl apply` in a bring-up rather than here.
+    tag="$(cap_param tag "16-dev")"
     pg="$(cap_param pgMajor "16")"
     ts="$(cap_param timescaledb "2.29.1")"
     tsPrev="$(cap_param timescaledbPrevious "2.28.3")"

@@ -380,10 +380,13 @@ scale:
 ## Community/TSL license mode, the three TSL features the schema requires
 ## (continuous aggregates, compression, retention), and the N-1 -> N upgrade
 ## choreography that the two bundled .so files exist for.
-##   make db-image                 # build + smoke test
+## The tag defaults to `16-dev` and MUST start with the PostgreSQL major:
+## CloudNativePG parses it off Cluster.spec.imageName and rejects what it
+## cannot read, so a bare `dev` builds an image no Cluster can reference.
+##   make db-image                 # build + smoke test (tag 16-dev)
 ##   make db-image IMPORT=1        # also import into the local k3d cluster
 ##   make db-image SMOKE=0         # skip the smoke test (fast rebuild)
-##   make db-image TAG=probe       # tag it something other than dev
+##   make db-image TAG=16-probe    # a different tag (keep the major prefix)
 db-image:
 	@bash scripts/db-image/build.sh \
 		$${TAG:+--tag=$${TAG}} \

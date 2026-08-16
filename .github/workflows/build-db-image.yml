@@ -31,7 +31,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Image tag for this build (e.g. 16-2.29.1 or a release version)."
+        description: "Image tag. MUST START WITH THE POSTGRESQL MAJOR -- CNPG parses it (e.g. 16.15-timescaledb-2.29.1). A tag like '1.2.3' is rejected by the Cluster webhook."
         required: true
         type: string
       timescaledb_version:

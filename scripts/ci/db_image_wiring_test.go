@@ -165,6 +165,45 @@ func TestDatabaseImageDockerfileAssertsBothLibraries(t *testing.T) {
 	}
 }
 
+// TestLocalDatabaseImageTagStartsWithThePostgresMajor guards a constraint that
+// lives in another project's webhook and is invisible from here.
+//
+// CloudNativePG PARSES the tag on `Cluster.spec.imageName` to derive the
+// PostgreSQL major version -- it needs that to refuse an accidental major
+// upgrade -- and rejects a tag it cannot read. Measured against the v1.30.0
+// webhook:
+//
+//	16  16.15  16-dev  16.15-dev  16.15-ts2.29.1   accepted
+//	dev                                            rejected, "invalid version tag"
+//	v16.15                                         rejected, same
+//	0.1.0                                          rejected, "Unsupported PostgreSQL version"
+//
+// The default was `dev` when this lane was first written, which builds an image
+// no Cluster can reference. Nothing in this repository would have caught it:
+// the build succeeds, the smoke test passes (it runs the image directly, not
+// through CNPG), and the failure appears at `kubectl apply` during a bring-up
+// with a message about a version tag.
+func TestLocalDatabaseImageTagStartsWithThePostgresMajor(t *testing.T) {
+	buildScript := dbImageRead(t, "scripts/db-image/build.sh")
+	workflow := dbImageRead(t, ".github/workflows/build-db-image.yml")
+
+	major := dbImageFirst(regexp.MustCompile(`(?m)^\s*PG_MAJOR:\s*"([0-9]+)"`), workflow)
+	if major == "" {
+		t.Fatal("could not read PG_MAJOR out of the build workflow; this guard is no longer reading what it claims to")
+	}
+
+	tag := dbImageFirst(regexp.MustCompile(`cap_param tag "([^"]+)"`), buildScript)
+	if tag == "" {
+		t.Fatal("could not read the default tag out of scripts/db-image/build.sh")
+	}
+	if !strings.HasPrefix(tag, major) {
+		t.Errorf("the local build's default tag is %q, which does not start with the PostgreSQL major (%s).\n"+
+			"CloudNativePG parses the tag on Cluster.spec.imageName and rejects what it cannot read, so this "+
+			"builds an image no Cluster can reference -- and the failure lands at `kubectl apply` in a bring-up, "+
+			"not in the build or the smoke test.", tag, major)
+	}
+}
+
 // TestDatabaseImageSmokeTestGatesThePush is the ordering guard.
 //
 // A database image that reached ACR broken is pinnable by an overlay, and the
