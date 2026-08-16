@@ -89,6 +89,7 @@ import {
   COMMAND_DEMOTE,
   COMMAND_DRY_RUN,
   COMMAND_PROMOTE,
+  COMMAND_STAGE,
   COMMAND_SHOW_LIST,
   COMMAND_TRY_IN_SESSION,
   TRAINING_STATE_CAPABILITY,
@@ -1374,6 +1375,10 @@ function registerRunSurface(
       // to redraw now rather than at the next keystroke.
       if (outcome.status === 'ok') refreshSessionLens();
     }),
+    commands.registerCommand(COMMAND_STAGE, async (request?: TrainingRequest) => {
+      if (request === undefined) return;
+      reportTraining(await training.stage(request), trainingOutput);
+    }),
     commands.registerCommand(COMMAND_PROMOTE, async (request?: TrainingRequest) => {
       if (request === undefined) return;
       const outcome = await training.promote(request);
@@ -1920,6 +1925,7 @@ function buildTrainingEngine(conns: ConnectionManager): TrainingEngine | undefin
   return {
     validateBundle: (sources, origin) => authoring.validateBundle(sources, { origin }),
     sessionDefineBundle: (sources, origin) => authoring.sessionDefineBundle(sources, { origin }),
+    stageBundle: (sources, origin) => authoring.stageBundle(sources, { origin }),
     durablePromoteBundle: (sources, options) => authoring.durablePromoteBundle(sources, options),
     durableDemoteBundle: (sources) => authoring.durableDemoteBundle(sources),
   };

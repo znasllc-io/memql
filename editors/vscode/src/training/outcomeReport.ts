@@ -41,6 +41,7 @@ export interface TrainingReport {
 const VERB: Record<TrainingActionKind, string> = {
   dryRun: "Dry-run",
   tryInSession: "Try in session",
+  stage: "Stage",
   promote: "Promote",
   demote: "Demote",
 };
@@ -134,6 +135,23 @@ function okReport(
           constructList(outcome.result.defined),
           "",
           "TEMPORARY. Nothing is persisted, no other caller can see it, and every definition is dropped when the connection drops or you switch cluster -- silently, because the engine does not announce it. Promote is what makes a construct outlive the session.",
+        ].join("\n"),
+      };
+
+    case "stage":
+      return {
+        severity: "info",
+        headline: `Staged ${outcome.result.staged.length} construct(s) on ${where}. Callable by you only.`,
+        body: [
+          `"${outcome.request.name}" is durable on ${where} and callable by you and by nobody else.`,
+          "",
+          constructList(outcome.result.staged),
+          "",
+          // The sentence that distinguishes this from Try in session -- and the
+          // one the whole tier exists to be able to say. Try in session's report
+          // ends by naming Promote as what outlives the connection; this is the
+          // other thing that does, without making the construct everyone's.
+          "PERSISTED, and replayed when the cluster restarts -- unlike Try in session, this survives the connection. No other caller on this cluster can see or call it. Train it (Promote) to make it live for everyone.",
         ].join("\n"),
       };
 

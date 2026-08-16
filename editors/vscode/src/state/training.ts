@@ -32,14 +32,28 @@ import type { LspRange } from "../constructs/runnable.js";
 // -----------------------------------------------------------------------------
 
 /**
- * The five states, from design §2.
+ * The six states, from design §2 plus memql#3928.
  *
  * `seeded` is distinct from `trained` and the distinction is the point: a
  * seeded construct was loaded from disk at boot, so the cluster HAS it but it
  * was never promoted -- and it cannot be, short of a rollout. Collapsing the
  * two would offer a Demote on something there is nothing to demote.
+ *
+ * `staged` is distinct from `trained` on the same kind of argument: it is
+ * durable on the cluster and callable BY ITS AUTHOR ALONE, and it is the only
+ * state with a Train action. Collapsing it into `trained` would claim the
+ * cluster runs something only one person can call; collapsing it into
+ * `untrained` would deny that the cluster has it at all, and offer a Promote
+ * that is really a Train.
  */
-export const TRAINING_STATES = ["untrained", "drifted", "trained", "seeded", "unknown"] as const;
+export const TRAINING_STATES = [
+  "untrained",
+  "drifted",
+  "trained",
+  "seeded",
+  "staged",
+  "unknown",
+] as const;
 export type TrainingState = (typeof TRAINING_STATES)[number];
 
 /**
@@ -161,6 +175,14 @@ export function gutterMarkFor(state: TrainingState): GutterMark | undefined {
       return "drifted";
     case "trained":
     case "seeded":
+    // `staged` is LIVE, and no fourth mark. The gutter answers one question --
+    // does what I am looking at match what runs? -- and for a staged construct
+    // the answer is yes: it is on the cluster and it is this version of it. WHO
+    // can call it is a question about actions, and the lens is where that is
+    // said. A fourth glyph would spend the gutter's very limited legibility on
+    // a distinction the gutter is not being asked about, which is the same
+    // reasoning that keeps `trained` and `seeded` sharing this mark.
+    case "staged":
       return "live";
     case "unknown":
       // NOTHING. Not a grey icon, not a question mark. A disconnection must not
@@ -179,6 +201,16 @@ export const COMMAND_DRY_RUN = "memql.training.dryRun";
 export const COMMAND_TRY_IN_SESSION = "memql.training.tryInSession";
 export const COMMAND_PROMOTE = "memql.training.promote";
 export const COMMAND_DEMOTE = "memql.training.demote";
+/**
+ * Stage: make a construct durable for its AUTHOR ALONE (epic memql#3928).
+ *
+ * The fifth command, and the only one this surface adds for the staged tier.
+ * TRAINING a staged construct reuses COMMAND_PROMOTE, because on the wire it IS
+ * a promote -- the engine flips the same persisted row. A `memql.training.train`
+ * command would have been a second name for one operation, and the lens says
+ * which act it means through its title.
+ */
+export const COMMAND_STAGE = "memql.training.stage";
 
 export interface TrainingAction {
   title: string;
@@ -243,6 +275,8 @@ function detailFor(state: TrainingState): string {
     case "seeded":
       // The one state whose whole content is why there is nothing to do.
       return "Loaded from disk when the cluster booted, rather than promoted -- so there is nothing here to demote, and changing it needs a rollout.";
+    case "staged":
+      return "Staged on this cluster: persisted and replayed at boot, and callable by you and by nobody else. Train it to make it live for everyone.";
     case "unknown":
       return "";
   }
@@ -254,18 +288,37 @@ function actionsFor(state: TrainingState): TrainingAction[] {
       return [
         { title: "Dry-run", command: COMMAND_DRY_RUN },
         { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
+        // Stage sits BETWEEN the two it is offered with, and in that order,
+        // because the order is the escalation: a session that ends, a private
+        // one that does not, and one everybody gets.
+        { title: "Stage", command: COMMAND_STAGE },
         { title: "Promote", command: COMMAND_PROMOTE },
       ];
     case "drifted":
       return [
         { title: "Dry-run", command: COMMAND_DRY_RUN },
         { title: "Try in session", command: COMMAND_TRY_IN_SESSION },
+        { title: "Stage", command: COMMAND_STAGE },
         // Named, because promoting over an existing definition is a different
         // act from promoting a new one and the lens is where that is noticed.
         { title: "Promote (updates the trained version)", command: COMMAND_PROMOTE },
       ];
     case "trained":
       return [{ title: "Demote", command: COMMAND_DEMOTE }];
+    case "staged":
+      return [
+        // Re-stage: how an edited staged construct is updated. Offered first
+        // because it is the smallest of the three and the one a developer
+        // iterating will reach for repeatedly.
+        { title: "Re-stage", command: COMMAND_STAGE },
+        // TRAIN IS COMMAND_PROMOTE, and the title is where the difference is
+        // said. On the wire it IS a promote -- the engine flips the same
+        // persisted row rather than writing a second one -- so a separate
+        // command would have been a second name for one operation. The title
+        // names the consequence, which is what the developer is deciding about.
+        { title: "Train (make it live for everyone)", command: COMMAND_PROMOTE },
+        { title: "Demote", command: COMMAND_DEMOTE },
+      ];
     case "seeded":
     case "unknown":
       // NO ACTION, and rendered as the absence of one rather than as a disabled
@@ -280,15 +333,24 @@ function actionsFor(state: TrainingState): TrainingAction[] {
 // The status bar
 // -----------------------------------------------------------------------------
 
+/**
+ * One counter per state except `unknown`.
+ *
+ * EVERY non-`unknown` state needs a key here, and the requirement is a runtime
+ * one rather than a type one: countStates indexes this object BY STATE NAME, so
+ * a state with no key increments `undefined` and writes NaN -- a status bar
+ * reading "NaN untrained" rather than a compile error (memql#3938).
+ */
 export interface TrainingCounts {
   untrained: number;
   drifted: number;
   trained: number;
   seeded: number;
+  staged: number;
 }
 
 export function countStates(constructs: readonly TrainingConstruct[]): TrainingCounts {
-  const counts: TrainingCounts = { untrained: 0, drifted: 0, trained: 0, seeded: 0 };
+  const counts: TrainingCounts = { untrained: 0, drifted: 0, trained: 0, seeded: 0, staged: 0 };
   for (const c of constructs) {
     if (c.state !== "unknown") counts[c.state] += 1;
   }

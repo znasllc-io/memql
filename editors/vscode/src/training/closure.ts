@@ -309,7 +309,21 @@ function classify(path: string, states: TrainingConstruct[] | undefined): Closur
     return { path, included: false, reason: "unclassified", constructs: [] };
   }
   const constructs = describe(states);
-  const needed = constructs.some((c) => c.state === "untrained" || c.state === "drifted");
+  // STAGED COUNTS AS NEEDED (memql#3928), and the asymmetry with `trained` is
+  // the point. The closure carries every dependency the cluster does not serve
+  // TO EVERYONE, because what lands has to bind for everyone who will call it --
+  // and a staged dependency resolves for one author and for nobody else. Leaving
+  // it out would let a promote land a shared construct bound to a private one,
+  // which compiles on the author's session and fails to resolve on every other.
+  //
+  // The cost is redundancy in the other direction: staging a construct whose
+  // dependency is already staged re-stages the dependency. That writes a second
+  // persisted row for it -- the same thing a re-promote does -- and the entry
+  // supersedes in place. A redundant carry is recoverable; an omitted one lands
+  // something broken.
+  const needed = constructs.some(
+    (c) => c.state === "untrained" || c.state === "drifted" || c.state === "staged",
+  );
   return {
     path,
     included: needed,

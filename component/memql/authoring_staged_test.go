@@ -108,6 +108,34 @@ func TestStageBundleDurable_PersistsStagedAndRegistersOwnerScoped(t *testing.T) 
 	}
 }
 
+// TestStageBundleDurable_RestageSupersedes: staging the same construct again is
+// the iteration loop the tier exists for, and it must not be refused.
+//
+// AuthoredRuntimeRegistry.Register treats a repeat key as a version replacement
+// and refuses one that does not strictly supersede. Every construct reaching the
+// stage path carries version 1 -- the compile registry is fresh per call -- so
+// without an explicit bump the SECOND stage of any construct fails with a
+// version error, and so does the second of two persisted rows at boot.
+func TestStageBundleDurable_RestageSupersedes(t *testing.T) {
+	e := &MemQLEngine{functions: newFunctionRegistry(), specs: newSpecRegistry()}
+	store := &fakePromoteStore{}
+
+	if _, err := e.stageBundleDurableWithStore(ownerCtx("owner-1"), store, "owner-1", stagedSpecSrc, ""); err != nil {
+		t.Fatalf("first stage: %v", err)
+	}
+	if _, err := e.stageBundleDurableWithStore(ownerCtx("owner-1"), store, "owner-1", stagedSpecSrc, ""); err != nil {
+		t.Fatalf("re-stage: %v -- iterating on a staged construct is the tier's whole purpose", err)
+	}
+
+	c, ok := e.stagedAuthored.Lookup("owner-1", "trait", "stagedOnlyTrait")
+	if !ok {
+		t.Fatal("the construct is gone after a re-stage")
+	}
+	if c.Version != 2 {
+		t.Errorf("version after re-stage = %d, want 2", c.Version)
+	}
+}
+
 // TestStageBundleDurable_RefusesConceptByName: a bundle declaring a concept is
 // refused with an error that NAMES the concept, and stages nothing at all --
 // including the constructs that would otherwise have been fine.

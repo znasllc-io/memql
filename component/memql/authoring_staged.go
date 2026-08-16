@@ -274,6 +274,21 @@ func (e *MemQLEngine) stageAuthoredConstruct(owner string, c *AuthoredConstruct)
 
 	staged := c.clone()
 	staged.OwnerUserId = owner
+	// SUPERSEDE THE ENTRY ALREADY THERE. AuthoredRuntimeRegistry.Register treats
+	// a repeat key as a version replacement and REFUSES one whose version does
+	// not strictly exceed the existing entry's -- a stale re-activation must not
+	// silently downgrade a live construct.
+	//
+	// Every construct reaching here carries version 1, because the compile
+	// registry stageBundleDurableWithStore builds is fresh per call and the boot
+	// walk builds its AuthoredConstruct by hand. So without this bump, re-staging
+	// a construct -- the iteration loop the whole tier exists for -- would be
+	// refused with a version error, and so would the second of two persisted
+	// rows at boot.
+	staged.Version = 1
+	if existing, ok := e.stagedRegistry().Lookup(owner, c.Kind, c.Name); ok && existing != nil {
+		staged.Version = existing.Version + 1
+	}
 	// AuthoredActive, on a row whose PERSISTED status is "staged", and the two
 	// are not in conflict: AuthoredConstructStatus is the RUNTIME lifecycle
 	// ("registered and resolvable at execution time"), which a staged construct

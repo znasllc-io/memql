@@ -285,6 +285,10 @@
         "title": "memQL: Try Construct In This Session"
       },
       {
+        "command": "memql.training.stage",
+        "title": "memQL: Stage Construct For Yourself"
+      },
+      {
         "command": "memql.training.promote",
         "title": "memQL: Promote Construct To The Cluster"
       },
@@ -421,6 +425,10 @@
         },
         {
           "command": "memql.training.tryInSession",
+          "when": "false"
+        },
+        {
+          "command": "memql.training.stage",
           "when": "false"
         },
         {
