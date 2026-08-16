@@ -222,7 +222,7 @@ const userRoleFromWire: Record<UserRoleWire, Role> = {
   USER_ROLE_DEVELOPER: "developer",
 };
 
-export function roleFromWire(r: UserRoleWire | undefined): Role {
+export function roleFromWire(r: UserRoleWire | null | undefined): Role {
   if (!r) return "";
   return userRoleFromWire[r] ?? "";
 }

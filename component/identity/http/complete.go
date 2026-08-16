@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -138,28 +139,83 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 // with role=owner) so this path coincides with the previous
 // hard-coded "owner" for that case.
 func (s *Server) startAdminSession(w http.ResponseWriter, r *http.Request, res *magiclink.VerifyResult) error {
+	action := "admin_session_started"
+	if res.Bootstrap {
+		action = "admin_bootstrap_session_started"
+	}
+	// BY EMAIL, deliberately unchanged. The passkey path resolves by id
+	// because that is what an assertion yields; this one keeps the lookup
+	// it has always used, so lifting the shared half out cannot move the
+	// magic-link path's answer.
+	return s.startBrowserSession(w, r, browserSessionSubject{
+		UserId: res.UserId,
+		Email:  res.Email,
+		lookup: func(ctx context.Context) (*identity.UserRow, error) {
+			return s.Store.LookupUserByEmail(ctx, res.Email)
+		},
+	}, action)
+}
+
+// browserSessionSubject is who a successful login was, however it was
+// proved.
+//
+// `lookup` is the factor's own way of finding the directory row: the
+// magic-link verifier yields an email, a WebAuthn assertion yields a user
+// id, and neither should have to translate itself into the other's terms
+// to get a session.
+type browserSessionSubject struct {
+	UserId string
+	Email  string
+	lookup func(context.Context) (*identity.UserRow, error)
+}
+
+// startBrowserSession stamps the memql_admin cookie for an authenticated
+// user, whatever factor authenticated them (memql#3920).
+//
+// WHY THIS IS FACTOR-AGNOSTIC. Identity has an SSO fast-path at
+// /authorize -- `hasValidSession` reads this cookie and mints an auth code
+// without a second ceremony -- and only ONE login factor was leaving the
+// cookie behind. Magic-link set it; `handleWebAuthnLoginFinish` minted an
+// auth code and returned, so a browser that had just proved possession of
+// a passkey held nothing, and the next first-party client to reach
+// /authorize prompted for the passkey again.
+//
+// The result was backwards: the STRONGER, phishing-resistant factor got
+// WORSE single sign-on than the weaker one. What a successful login leaves
+// behind is a property of having logged in, not of which credential proved
+// it, so the two factors now share this.
+func (s *Server) startBrowserSession(
+	w http.ResponseWriter,
+	r *http.Request,
+	subject browserSessionSubject,
+	action string,
+) error {
 	if s == nil || s.Issuer == nil {
-		return errors.New("startAdminSession: nil issuer")
+		return errors.New("startBrowserSession: nil issuer")
 	}
 	role := "reader"
 	internal := false
 	displayName := ""
 	firstName := ""
 	lastName := ""
+	email := subject.Email
 	var revocationEpoch int64
-	if s.Store != nil {
-		if user, err := s.Store.LookupUserByEmail(r.Context(), res.Email); err == nil && user != nil {
+	if s.Store != nil && subject.lookup != nil {
+		if user, err := subject.lookup(r.Context()); err == nil && user != nil {
 			role = user.Role
 			internal = user.Internal
 			displayName = user.DisplayName
 			firstName = user.FirstName
 			lastName = user.LastName
 			revocationEpoch = user.RevocationEpoch
+			if email == "" {
+				email = user.PrimaryEmail
+			}
 		}
 	}
 	jwt, _, err := s.Issuer.IssueAccessToken(identity.IssueInput{
-		UserId:          res.UserId,
-		Email:           res.Email,
+		UserId:          subject.UserId,
+		Email:           email,
 		Name:            displayName,
 		GivenName:       firstName,
 		FamilyName:      lastName,
@@ -168,7 +224,7 @@ func (s *Server) startAdminSession(w http.ResponseWriter, r *http.Request, res *
 		RevocationEpoch: revocationEpoch,
 	}, time.Now().UTC())
 	if err != nil {
-		return fmt.Errorf("startAdminSession: mint token: %w", err)
+		return fmt.Errorf("startBrowserSession: mint token: %w", err)
 	}
 	secure := strings.HasPrefix(strings.ToLower(s.Cfg.BaseURL), "https://")
 	http.SetCookie(w, &http.Cookie{
@@ -180,18 +236,14 @@ func (s *Server) startAdminSession(w http.ResponseWriter, r *http.Request, res *
 		SameSite: http.SameSiteLaxMode,
 	})
 	if s.Audit != nil {
-		action := "admin_session_started"
-		if res.Bootstrap {
-			action = "admin_bootstrap_session_started"
-		}
 		s.Audit.Log(r.Context(), identity.AuditEvent{
 			Category:    identity.AuditCategoryAuth,
 			Action:      action,
-			ActorUserId: res.UserId,
-			ActorEmail:  res.Email,
+			ActorUserId: subject.UserId,
+			ActorEmail:  email,
 			ActorRole:   role,
 			TargetType:  "user",
-			TargetId:    res.UserId,
+			TargetId:    subject.UserId,
 			SourceIP:    clientIP(r),
 			UserAgent:   r.Header.Get("User-Agent"),
 			Outcome:     identity.AuditOutcomeSuccess,

@@ -210,7 +210,16 @@ function constructFromWire(c: ConstructInfoWire): Construct {
     boundConcept: c.boundConcept ?? "",
     sourceHash: c.sourceHash ?? "",
     source: c.source ?? "",
-    ...(c.trigger === undefined ? {} : { trigger: triggerFromWire(c.trigger) }),
+    // `== null`, NOT `=== undefined` (memql#3914). The WebSocket bridge
+    // marshals with protojson's EmitUnpopulated, which sends an unset MESSAGE
+    // field as `null` -- so every construct that is not an automation arrives
+    // carrying `"trigger": null`, and a strict undefined check waves it
+    // straight into triggerFromWire. Listing the catalog over the browser
+    // bridge died on "cannot read properties of null (reading 'concept')".
+    //
+    // Every other field here reads `?? ""`, which absorbs null by accident of
+    // the operator's semantics. This was the one field that did not.
+    ...(c.trigger == null ? {} : { trigger: triggerFromWire(c.trigger) }),
   };
 }
 
@@ -220,11 +229,16 @@ function constructFromWire(c: ConstructInfoWire): Construct {
 // "this construct fires on nothing", and the run form reads manual-run off the
 // absence. Its three MEMBERS are defaulted as everything else is, because once
 // a trigger exists protojson still omits its empty strings.
-function triggerFromWire(t: ConstructTriggerWire): ConstructTrigger {
+//
+// Takes `| null` and reads through it as well, so a caller that reaches here
+// with an absent trigger gets an empty one rather than a TypeError. The
+// caller above is what decides absence means "no trigger"; this is the wall
+// behind it.
+function triggerFromWire(t: ConstructTriggerWire | null): ConstructTrigger {
   return {
-    concept: t.concept ?? "",
-    event: t.event ?? "",
-    schedule: t.schedule ?? "",
+    concept: t?.concept ?? "",
+    event: t?.event ?? "",
+    schedule: t?.schedule ?? "",
   };
 }
 
