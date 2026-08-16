@@ -1,0 +1,26 @@
+# Composition example for the cnpg-db component -- the top tier (epic memql#3842 / #3851).
+#
+# What a CONSUMING OVERLAY writes, reduced to just the database. Committed
+# rather than generated inside the test for two reasons: kustomize refuses an
+# absolute component path, and it detects a CYCLE if the example lives inside
+# the component it references -- so a Go `testdata/` directory next to the test
+# cannot work here.
+#
+# component_test.go renders each of these, which is what "presets exercised in
+# kustomize-build CI" means in practice. They are also the usage documentation,
+# and being rendered is what stops them drifting from it.
+#
+# Applies the `top` preset; see cnpg-db/presets/top for what it buys and why.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cnpg-db-example
+
+components:
+  - ../../cnpg-db
+  - ../../cnpg-db/presets/top
+
+# A real overlay supplies these two as well; the examples omit them so the
+# component's own defaults stay visible to the preset assertions.
+#   patches: ObjectStore /spec/configuration/destinationPath
+#   images:  memql-db -> <registry>/memql-db@sha256:...

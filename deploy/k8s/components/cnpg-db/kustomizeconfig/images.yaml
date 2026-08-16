@@ -1,0 +1,27 @@
+# Teach kustomize's `images:` transformer where the image lives on a CNPG
+# Cluster (epic memql#3842, task memql#3851).
+#
+# WHY THIS FILE EXISTS. The built-in transformer knows the container paths in
+# core workload kinds -- `spec/template/spec/containers[]/image` and friends --
+# and nothing else. A CustomResource that names an image somewhere of its own
+# choosing is invisible to it. CNPG puts it at `spec/imageName` on the Cluster.
+#
+# Without this, an overlay's
+#
+#   images:
+#     - name: memql-db
+#       newTag: 16-dev
+#
+# is silently a no-op: the render succeeds, `imageName` comes out as the bare
+# `memql-db` with no tag, and the failure lands at apply time (CNPG's webhook
+# refuses a tag it cannot parse) or at pull time (`memql-db:latest`, which does
+# not exist). The overlay looks correct in review because the `images:` entry is
+# right there.
+#
+# It lives in the COMPONENT rather than in one overlay because every consumer
+# has the same need -- pinning by digest is the cloud path and the whole point
+# of the seam.
+images:
+  - path: spec/imageName
+    kind: Cluster
+    group: postgresql.cnpg.io

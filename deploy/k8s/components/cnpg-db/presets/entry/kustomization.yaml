@@ -1,0 +1,34 @@
+# ENTRY tier -- one instance, no HA (epic memql#3842, task memql#3851).
+#
+#   instances   1
+#   resources   1 vCPU / 4 GiB
+#   storage     32 GiB data + 16 GiB WAL
+#   HA          OFF
+#
+# THE HA-OFF DEFAULT IS THE PRODUCT DECISION, not an oversight: a single
+# instance has no automatic failover, so a node loss is a restore rather than a
+# promotion. What it still has is continuous WAL archiving and nightly base
+# backups -- the data survives, the availability does not. A deployment that
+# needs the second half moves to `mid`, which is exactly one value plus the PDB.
+#
+# enablePDB stays FALSE here and that is load-bearing: CNPG's default PDB
+# permits zero disruptions at one instance, so a node drain would block forever
+# on a pod nothing can evict.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Cluster
+      name: memql-db
+    patch: |
+      - { op: replace, path: /spec/instances, value: 1 }
+      - { op: replace, path: /spec/enablePDB, value: false }
+      - { op: replace, path: /spec/storage/size, value: 32Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 16Gi }
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: { cpu: "1", memory: 4Gi }
+          limits:   { memory: 4Gi }
+      - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "200" }

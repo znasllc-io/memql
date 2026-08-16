@@ -1,0 +1,40 @@
+# MID tier -- two instances, HA (epic memql#3842, task memql#3851).
+#
+#   instances   2
+#   resources   2 vCPU / 8 GiB
+#   storage     128 GiB data + 32 GiB WAL
+#   HA          ON (automatic failover, PDB, anti-affinity)
+#
+# THE HA TOGGLE IS `instances: 1 -> 2` PLUS THE PDB, and the second half is easy
+# to forget. Raising the count alone leaves `enablePDB: false` inherited from
+# the component's single-instance default, so a node drain could take the
+# primary and its only replica together -- which is the one thing a second
+# instance was bought to prevent.
+#
+# Anti-affinity is `preferred` rather than `required`: on a two-node cluster a
+# required rule leaves the replica permanently Pending, and a database that
+# cannot schedule its replica is worse off than one whose replica shares a node.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target:
+      kind: Cluster
+      name: memql-db
+    patch: |
+      - { op: replace, path: /spec/instances, value: 2 }
+      - { op: replace, path: /spec/enablePDB, value: true }
+      - { op: replace, path: /spec/storage/size, value: 128Gi }
+      - { op: replace, path: /spec/walStorage/size, value: 32Gi }
+      - op: replace
+        path: /spec/resources
+        value:
+          requests: { cpu: "2", memory: 8Gi }
+          limits:   { memory: 8Gi }
+      - { op: replace, path: /spec/postgresql/parameters/max_connections, value: "400" }
+      - op: add
+        path: /spec/affinity
+        value:
+          enablePodAntiAffinity: true
+          topologyKey: kubernetes.io/hostname
+          podAntiAffinityType: preferred

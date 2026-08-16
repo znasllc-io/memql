@@ -1,0 +1,33 @@
+# The nightly base backup (epic memql#3842, task memql#3851).
+#
+# Continuous WAL archiving alone is not a backup strategy: recovery replays WAL
+# from a base backup, so without a periodic base the replay window grows without
+# bound and the restore time with it.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: memql-db-nightly
+  labels:
+    app.kubernetes.io/name: memql-db
+    app.kubernetes.io/part-of: memql
+spec:
+  # SIX FIELDS. CNPG's schedule is a Go cron spec WITH A SECONDS FIELD, unlike
+  # Kubernetes CronJob's five. A five-field spec is not rejected -- it is
+  # interpreted one field over, so "0 3 * * *" (intended: 03:00 daily) becomes
+  # "second 0, minute 3, every hour". The backup still runs, just not when
+  # anyone thinks, and nothing reports a problem. There is a gate on the field
+  # count for exactly that reason.
+  schedule: "0 0 3 * * *"
+  # Take one immediately rather than waiting until the first 03:00. A cluster
+  # whose first base backup is up to 24h away has no recovery point in between.
+  immediate: true
+  # The PLUGIN method, matching the archiver on the Cluster. `barmanObjectStore`
+  # is the deprecated in-tree path and needs an operand image built on the
+  # deprecated `system` base to work at all.
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+    parameters:
+      barmanObjectName: memql-db-backup
+  cluster:
+    name: memql-db
