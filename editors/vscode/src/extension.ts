@@ -58,7 +58,7 @@ import {
   signOut as signOutCredentials,
 } from './auth/store.js';
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
-import { displayLabel, type ClusterConfig } from './clusters/model.js';
+import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
 import { ClusterPresence } from './clusters/presence.js';
 import { entryActionFor, probeClaimState, setupUrl } from './clusters/claimState.js';
 import { removeClusterCompletely, saveClusterEdit } from './clusters/registry.js';
@@ -106,7 +106,10 @@ import {
 import { outcomeReport } from './training/outcomeReport.js';
 import type { TrainingPrompt } from './training/report.js';
 import { sessionLensPlans } from './training/session.js';
-import { defaultReceiptPath } from './install/receipt.js';
+import { defaultReceiptPath, readReceipt, recordedOwner } from './install/receipt.js';
+import { runCapabilityScript } from './install/runner.js';
+import { EnrolmentError, openEnrolmentLink } from './install/enrolment.js';
+import { OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
 import { defaultRunsDir, reconcileOrphanedRuns } from './state/runLog.js';
 import {
   DEPLOYMENT_CONCEPT,
@@ -727,7 +730,28 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       }
       await setSelectedCluster(clustersPath, target.cluster.name);
       clustersTree.refresh();
-      await connections?.connect(target.cluster);
+      // THE REGISTRY WINS OVER A CALLER WITH NO ENDPOINT (#3905). This command
+      // dials what it is handed, and the install hand-off used to hand it a
+      // placeholder built from the cluster's name alone -- so a successful
+      // install ended by reporting "not configured. Set an endpoint" about a
+      // cluster whose endpoint it had just written, and withheld the "Sign in"
+      // button because `notConfigured` is not credential-recoverable.
+      //
+      // The caller is fixed. This is the wall behind it, in the shape
+      // `install/secrets.ts` already argues for: the fix goes where the value is
+      // produced, and the wall goes where it is consumed, because the next
+      // caller to pass a half-built config has not been written yet. Only an
+      // EMPTY endpoint is overridden -- a caller naming a different one is
+      // making a deliberate statement and is left alone.
+      let dialing = target.cluster;
+      if (dialing.endpoint.trim() === '') {
+        const registry = await readClustersFileSafe(clustersPath);
+        const known = registry.ok
+          ? registry.file.clusters.find((c) => c.name === dialing.name)
+          : undefined;
+        if (known !== undefined && known.endpoint.trim() !== '') dialing = known;
+      }
+      await connections?.connect(dialing);
       const state = connections?.state;
       if (state?.status === 'error') {
         // A failure the CREDENTIAL causes now has a first-class recovery in the
@@ -739,12 +763,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // all. canSignIn is the second half: a cluster naming no identity
         // service has nowhere to sign in to, and a button whose only outcome is
         // an error toast is worse than no button.
-        const offer = signInCanRecover(state.reason) && canSignIn(target.cluster);
+        // `dialing`, not `target.cluster`: the resolved config is the one that
+        // was actually connected to, and it is the one carrying the domain
+        // `canSignIn` and `signInToCluster` read to find the identity service.
+        const offer = signInCanRecover(state.reason) && canSignIn(dialing);
         const choice = offer
           ? await window.showErrorMessage(`memQL: ${state.message}`, 'Sign in')
           : await window.showErrorMessage(`memQL: ${state.message}`);
         if (choice === 'Sign in') {
-          await signInToCluster(target.cluster, {
+          await signInToCluster(dialing, {
             clustersPath,
             store: signInStore,
             clustersTree,
@@ -790,11 +817,91 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           return;
         }
       }
+      // CLAIMED, AND THIS OPERATOR STILL HOLDS NOTHING (znasllc-io#3905).
+      //
+      // `entryActionFor` answers a question about the CLUSTER -- has anyone
+      // claimed it -- and that is the right question for the branch above. It is
+      // not the whole state space. A cluster whose owner account exists but who
+      // holds no human credential falls through here to sign-in, and sign-in
+      // cannot succeed: the account was created by `seedBootstrap` from seeded
+      // values and has no passkey and no magic-link identity, so there is
+      // nothing to authenticate WITH and no route in the editor to make one.
+      //
+      // That is the state a local install actually leaves behind, and it is the
+      // one an operator reads as "the plugin will not let me in". So when the
+      // cluster is one this machine installed and no credential is stored, the
+      // two routes are offered side by side. The plugin cannot know whether the
+      // operator already registered a passkey somewhere -- they can -- so it
+      // asks rather than guessing.
+      if (target.cluster.local === true && needsAuth(target.cluster)) {
+        const choice = await window.showInformationMessage(
+          `memQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
+            'Enrol a passkey if this is your first time on this machine; sign in if you already have one.',
+          'Take ownership',
+          'Sign in'
+        );
+        if (choice === undefined) return;
+        if (choice === 'Take ownership') {
+          await commands.executeCommand('memql.clusters.takeOwnership', target);
+          return;
+        }
+      }
       await signInToCluster(target.cluster, {
         clustersPath,
         store: signInStore,
         clustersTree,
       });
+    }),
+    // Minting the FIRST credential for a cluster's owner, from the editor
+    // (znasllc-io#3905).
+    //
+    // The owner account exists the moment `seedBootstrap` runs and holds nothing
+    // a person can sign in with. The install mints an enrolment link, and an
+    // operator who dismissed the notification, whose 15-minute link expired, or
+    // who installed before that screen offered one had no way back to a link at
+    // all -- the only route was a terminal, which is not a route a plugin user
+    // has.
+    //
+    // A FRESH LINK EVERY TIME, never a replay: the install's link is single-use
+    // and short-lived, and re-opening a spent credential would fail in a way
+    // that reads as the feature being broken. It is the same capability the
+    // install graph runs, so the two cannot drift.
+    commands.registerCommand('memql.clusters.takeOwnership', async (node?: ClusterNode) => {
+      const target = node ?? (await pickCluster(clustersPath));
+      if (target === undefined || target.cluster.name === '') {
+        return;
+      }
+      const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
+      const owner = recordedOwner(receipt);
+      let url: string;
+      try {
+        url = await window.withProgress(
+          { location: ProgressLocation.Notification, title: 'memQL: minting an enrolment link...' },
+          () =>
+            mintOwnershipLink(
+              { cluster: target.cluster, ownerEmail: owner.email, repoRoot: installRootFor(context) },
+              runCapabilityScript
+            )
+        );
+      } catch (err) {
+        const detail = err instanceof OwnershipError ? err.message : String(err);
+        window.showErrorMessage(`memQL: ${detail}`);
+        return;
+      }
+      try {
+        // The same opener the install's done screen uses, so the link is
+        // validated (https, `/enroll?code=`) before a browser is pointed at it.
+        await openEnrolmentLink(url, {
+          resolveExternalUri: async (u) => (await env.asExternalUri(Uri.parse(u))).toString(true),
+          openExternal: async (u) => await env.openExternal(Uri.parse(u)),
+        });
+        window.showInformationMessage(
+          'memQL: enrol the passkey in your browser, then sign in. The link is single-use and expires in 2 hours.'
+        );
+      } catch (err) {
+        const detail = err instanceof EnrolmentError ? err.message : String(err);
+        window.showErrorMessage(`memQL: ${detail}`);
+      }
     }),
     // The counterpart: forget this cluster's session. The store owns what that
     // means in each of the two places a credential lives (memql#3404).

@@ -98,8 +98,27 @@ export interface HandoffEffects {
   invalidatePresence: () => void;
   /** Repaints the Clusters tree. */
   refreshTree: () => void;
-  /** Makes the new cluster the selected one. */
-  select: (name: string) => Promise<void>;
+  /**
+   * Makes the new cluster the selected one.
+   *
+   * TAKES THE WHOLE CONFIG, not the name (znasllc-io#3905). It used to take the
+   * name, and the panel's implementation had to invent the rest -- it passed
+   * `{ name, endpoint: "", local: true }`, a placeholder for a cluster whose
+   * real endpoint this module had just written one line earlier.
+   *
+   * The selection command DIALS what it is handed. So a successful install or
+   * repair ended by connecting to a config with no endpoint, which resolves as
+   * `notConfigured`: "Set an endpoint", for a cluster whose endpoint is set.
+   * Worse, `signInCanRecover` treats `notConfigured` as unrecoverable -- rightly,
+   * since no credential fixes a missing address -- so the operator got a bare
+   * error toast with no "Sign in" button, when their actual condition was
+   * `missingCredential`, which that button exists for.
+   *
+   * A placeholder turned a fixable state into a dead end and suppressed the one
+   * control that fixes it. Passing the truth is the fix; the caller no longer
+   * has anything to invent.
+   */
+  select: (cluster: ClusterConfig) => Promise<void>;
 }
 
 /**
@@ -149,14 +168,19 @@ export async function completeInstallHandoff(
 
   effects.invalidatePresence();
   effects.refreshTree();
-  await effects.select(entry.name);
 
+  // COMPOSED BEFORE THE SELECT, so the selection is handed the same config this
+  // function returns rather than one the caller has to invent (#3905). The
+  // ordering is the fix: it used to be built after, which is why `select` could
+  // only be given a name.
   const cluster: ClusterConfig = {
     name: entry.name,
     endpoint: entry.endpoint ?? "",
     domain: entry.domain,
     local: true,
   };
+  await effects.select(cluster);
+
   // A domain is all `identityBaseUrlFor` needs to name the identity host, so a
   // cluster written by this module can always be signed in to. Computed rather
   // than hardcoded true, because that stops being the case the moment the entry
