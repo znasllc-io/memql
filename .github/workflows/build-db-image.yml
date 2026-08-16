@@ -1,0 +1,200 @@
+name: build-db-image
+
+# Builds + pushes the memQL DATABASE OPERAND image (epic memql#3842, task
+# memql#3844): PostgreSQL 16 + TimescaleDB Community + pgvector, the container
+# CloudNativePG runs as a Postgres instance in every environment.
+#
+# Mirrors build-engine-images.yml deliberately -- same OIDC->ACR auth, same
+# GHCR mirror, same immutability guard, same digest-in-summary convention -- so
+# there is one shape to learn for "how a deployable image gets built here", not
+# two. It is a separate workflow rather than a matrix entry on that one because
+# the inputs differ (this takes TimescaleDB versions, not build tags) and
+# because the database is versioned on its own cadence: bumping TimescaleDB
+# should not require cutting an engine release, and vice versa.
+#
+# Auth: GitHub OIDC -> Azure, no long-lived secret. The federated credential
+# subject is `repo:znasllc-io/memql:ref:refs/heads/main`, so this MUST run on
+# main -- hence workflow_dispatch, which runs on the default branch.
+#
+# Deployable images are built HERE, never on an operator laptop (CLAUDE.md,
+# "Image builds: LOCAL Docker for dev, BUILD SERVER for deploys"). The local
+# path (`make db-image`) exists only to put the same Dockerfile into k3d.
+#
+# THE SMOKE TEST GATES THE PUSH, which is the one place this workflow's ordering
+# is load-bearing. The image is built and LOADED locally, exercised, and only
+# then pushed. A broken database image that reached ACR would be pinnable by an
+# overlay, and the symptom of an Apache-build regression is not a failed pull --
+# it is a migration failing much later with an error naming a missing function.
+# Building twice costs nothing: the second build is the same layers out of cache.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag. MUST START WITH THE POSTGRESQL MAJOR -- CNPG parses it (e.g. 16.15-timescaledb-2.29.1). A tag like '1.2.3' is rejected by the Cluster webhook."
+        required: true
+        type: string
+      timescaledb_version:
+        description: "TimescaleDB minor to install as CURRENT."
+        required: false
+        default: "2.29.1"
+        type: string
+      timescaledb_previous_version:
+        description: "TimescaleDB minor to also carry as N-1, for upgrade choreography."
+        required: false
+        default: "2.28.3"
+        type: string
+      allow_overwrite:
+        description: "Re-push an existing tag (release tags are normally immutable)."
+        required: false
+        default: false
+        type: boolean
+
+# Read-only at the top level (Scorecard Token-Permissions); the writes this
+# needs -- the OIDC token for azure/login and the GHCR push -- are granted on
+# the single job below, never workflow-wide.
+permissions:
+  contents: read
+
+env:
+  ACR_NAME: acrmemql
+  ACR_LOGIN_SERVER: acrmemql.azurecr.io
+  # GHCR carries the same image under a public name for the same reason the
+  # engine images do (memql#3572): a local install has to be able to pull it,
+  # and an operator installing a local cluster holds no Azure credentials.
+  GHCR_LOGIN_SERVER: ghcr.io/znasllc-io
+  IMAGE_NAME: memql-db
+  PG_MAJOR: "16"
+
+jobs:
+  build:
+    name: build memql-db
+    runs-on: ubuntu-latest
+    # Bounded so a hang cannot hold a runner for GitHub's 360-minute default.
+    # The measured build is ~2 minutes (base pull + one apt transaction) and the
+    # smoke test ~1; 30 leaves better than 2x headroom on both, per the reasoning
+    # in scripts/ci/workflow_timeout_test.go.
+    timeout-minutes: 30
+    permissions:
+      id-token: write # mint the OIDC token for azure/login
+      contents: read # checkout
+      packages: write # push the same image to GHCR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Azure login (OIDC)
+        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR login
+        run: az acr login --name "$ACR_NAME"
+
+      - name: GHCR login
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Dispatch inputs reach the shell through `env:`, never through a `${{ }}`
+      # interpolated into the script body. They are write-access-only here, so
+      # this is defence in depth rather than a live hole -- but an interpolated
+      # input is the shape of a workflow injection, and the shape is what a
+      # reviewer and a scanner both pattern-match on.
+      - name: Immutability guard
+        if: ${{ !inputs.allow_overwrite }}
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          img="${IMAGE_NAME}:${VERSION}"
+          if az acr repository show --name "$ACR_NAME" --image "$img" >/dev/null 2>&1; then
+            echo "::error::${img} already exists in ${ACR_NAME} -- release tags are immutable. Bump version or re-run with allow_overwrite=true." >&2
+            exit 1
+          fi
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v3
+
+      # Built and LOADED, not pushed. The push happens below, only after the
+      # smoke test passes -- see the header note on why that ordering matters.
+      - name: Build memql-db (local, for testing)
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6
+        with:
+          context: ./deploy/db-image
+          file: ./deploy/db-image/Dockerfile
+          push: false
+          load: true
+          platforms: linux/amd64
+          provenance: false
+          build-args: |
+            PG_MAJOR=${{ env.PG_MAJOR }}
+            TIMESCALEDB_VERSION=${{ inputs.timescaledb_version }}
+            TIMESCALEDB_PREVIOUS_VERSION=${{ inputs.timescaledb_previous_version }}
+          tags: ${{ env.IMAGE_NAME }}:candidate
+          cache-from: type=gha,scope=memql-db
+          cache-to: type=gha,mode=max,scope=memql-db
+
+      # Asserts both extensions, the Community/TSL license mode, the three TSL
+      # features the schema requires, and the N-1 -> N upgrade choreography.
+      # Same script the local build runs, so the two cannot drift.
+      - name: Smoke test
+        env:
+          TS_CURRENT: ${{ inputs.timescaledb_version }}
+          TS_PREVIOUS: ${{ inputs.timescaledb_previous_version }}
+        run: |
+          ./deploy/db-image/smoke-test.sh \
+            "${IMAGE_NAME}:candidate" \
+            "${PG_MAJOR}" \
+            "${TS_CURRENT}" \
+            "${TS_PREVIOUS}"
+
+      # Same context, same args, same cache -- so this re-exports the layers the
+      # smoke test just validated rather than building anything new.
+      - name: Push memql-db
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v6
+        with:
+          context: ./deploy/db-image
+          file: ./deploy/db-image/Dockerfile
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          build-args: |
+            PG_MAJOR=${{ env.PG_MAJOR }}
+            TIMESCALEDB_VERSION=${{ inputs.timescaledb_version }}
+            TIMESCALEDB_PREVIOUS_VERSION=${{ inputs.timescaledb_previous_version }}
+          tags: |
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
+            ${{ env.GHCR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${{ inputs.version }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/znasllc-io/memql
+            org.opencontainers.image.version=${{ inputs.version }}
+          cache-from: type=gha,scope=memql-db
+          cache-to: type=gha,mode=max,scope=memql-db
+
+      - name: Digest summary
+        env:
+          VERSION: ${{ inputs.version }}
+          TS_CURRENT: ${{ inputs.timescaledb_version }}
+          TS_PREVIOUS: ${{ inputs.timescaledb_previous_version }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          {
+            echo "### ${IMAGE_NAME}:${VERSION}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| PostgreSQL | ${PG_MAJOR} |"
+            echo "| TimescaleDB (current) | ${TS_CURRENT} |"
+            echo "| TimescaleDB (N-1) | ${TS_PREVIOUS} |"
+            echo ""
+            echo 'Pin this digest in the overlay:'
+            echo '```'
+            echo "${ACR_LOGIN_SERVER}/${IMAGE_NAME}@${DIGEST}"
+            echo "${GHCR_LOGIN_SERVER}/${IMAGE_NAME}:${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -226,6 +226,22 @@ jobs:
               - '.gitignore'
               - 'Dockerfile'
               - 'cmd/deploy-gate-check/Dockerfile'
+              #   deploy/db-image/** -> scripts/ci/db_image_wiring_test.go
+              #                  (epic memql#3842 / #3844). The database operand
+              #                  image's Dockerfile and its smoke test, both READ
+              #                  by that guard: it asserts the TimescaleDB version
+              #                  pair agrees across its four copies, that the
+              #                  Dockerfile still makes its build-time `test -f`
+              #                  assertions, and that the workflow smoke-tests
+              #                  before it pushes.
+              #
+              #                  Same shape as the two Dockerfiles above -- no PR
+              #                  lane BUILDS this image, but the Go guards over it
+              #                  have to run, and `deploy/**` matches no bucket at
+              #                  all today. Without this entry a PR editing only
+              #                  the operand Dockerfile ran zero lanes and handed
+              #                  the version-drift failure to whoever pushed next.
+              - 'deploy/db-image/**'
               - 'scripts/secrets/manifest.yaml'
               - 'component/genesis/manifest.yaml'
               - 'component/architecture/embedded/**'

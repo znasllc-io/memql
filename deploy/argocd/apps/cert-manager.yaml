@@ -1,0 +1,58 @@
+# cert-manager, reconciled (epic memql#3842, task memql#3845).
+#
+# WHY `project: default` AND NOT `memql`. The `memql` AppProject exists to bound
+# what the MESH reconciler may do: three namespaces, and a
+# clusterResourceWhitelist deliberately kept near-empty. Cluster operators are a
+# different trust tier -- they install CRDs, ClusterRoles, and webhook
+# configurations by nature, so they cannot live inside that boundary without
+# widening it to the point where it bounds nothing.
+#
+# Putting them in `default` is the honest option rather than the lax one:
+# apps/root.yaml, the app-of-apps that renders every Application in this
+# directory, already runs on `project: default` for exactly this reason. A third
+# AppProject with a wide-open whitelist would grant identical access while
+# implying it were tighter, which is worse than saying what is true.
+#
+# SYNC WAVE -2. cert-manager's CRDs must exist before anything that declares a
+# Certificate or an Issuer. The CNPG stack (wave -1) does exactly that for the
+# Barman plugin's mTLS, and ESO's webhook Issuer has the same dependency.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/znasllc-io/memql.git
+    targetRevision: main
+    path: deploy/cert-manager/install
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      # prune is deliberately OFF. Auto-pruning an operator that owns CRDs would
+      # delete the CRDs -- and with them every Certificate and Issuer in the
+      # cluster -- on any sync where the manifest momentarily failed to render.
+      # Removing cert-manager is a deliberate act, not something a reconcile
+      # should be able to do on its own.
+      prune: false
+      selfHeal: true
+    syncOptions:
+      # The upstream manifest ships its own Namespace object.
+      - CreateNamespace=false
+      # CRDs in this manifest exceed the annotation size limit that
+      # kubectl-style apply uses to stash last-applied-configuration, so Argo
+      # must use Server-Side Apply for them.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
