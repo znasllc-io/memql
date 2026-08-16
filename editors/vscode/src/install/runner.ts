@@ -28,6 +28,54 @@
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 
+/**
+ * Where the installer puts the tools every capability script shells out to.
+ *
+ * `install.binary` drops k3d / kubectl / mkcert here, and no shell has ever
+ * heard of it.
+ */
+export function installedToolDir(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(env.HOME ?? "", ".memql", "bin");
+}
+
+/**
+ * `base`, with the installer's tool directory at the front of PATH.
+ *
+ * WHY THIS IS THE SPAWNER'S JOB AND NOT THE CALLER'S (memql#3911). This
+ * composition used to live only in the install session, which meant a
+ * capability script found `kubectl` when the install graph ran it and not when
+ * anything else did. `mintOwnershipLink` calls the runner directly, so taking
+ * ownership -- the whole point of memql#3906 -- died on
+ *
+ *     An enrolment link could not be minted: kubectl is not installed;
+ *     cannot exec the identity pod
+ *
+ * on a machine where the installer had put kubectl at `~/.memql/bin/kubectl`
+ * twenty minutes earlier. Same script, same cluster, same binary; the only
+ * difference was which caller assembled the environment.
+ *
+ * Needing these tools is a property of BEING a capability script, not of any
+ * one call site -- they all shell out to kubectl, k3d or mkcert -- and the type
+ * says `env?`, so nothing about the call site suggests an omission is fatal.
+ * Putting it here makes the whole class impossible instead of fixing one
+ * instance.
+ *
+ * IDEMPOTENT. The session passes an env that already names its own tool
+ * directory; prepending a duplicate would be harmless but untidy, and a caller
+ * that has deliberately chosen a directory should see it stay first.
+ */
+export function withInstalledTools(
+  base: NodeJS.ProcessEnv,
+  toolDir?: string,
+): NodeJS.ProcessEnv {
+  const dir = (toolDir ?? installedToolDir(base)).trim();
+  if (dir === "") return base;
+  const current = base.PATH ?? "";
+  const entries = current.split(path.delimiter);
+  if (entries.includes(dir)) return base;
+  return { ...base, PATH: current === "" ? dir : `${dir}${path.delimiter}${current}` };
+}
+
 /** The `error` block of a failed envelope. */
 export interface CapabilityError {
   code: number;
@@ -196,7 +244,9 @@ export const runCapabilityScript: RunScript = async (run: ScriptRun): Promise<Sc
       // No shell, ever: argv elements go to execve untouched.
       child = spawn(run.scriptPath, argv, {
         cwd: run.cwd,
-        env: run.env ?? process.env,
+        // The installer's tools go on PATH here rather than at the call site,
+        // so a caller that passes no env still finds kubectl (memql#3911).
+        env: withInstalledTools(run.env ?? process.env),
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
       });
