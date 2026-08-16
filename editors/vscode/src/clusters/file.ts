@@ -53,7 +53,8 @@ type StringFieldKey =
   | "issuer"
   | "clientId"
   | "token"
-  | "refreshToken";
+  | "refreshToken"
+  | "version";
 type BooleanFieldKey = "local";
 
 const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
@@ -70,6 +71,15 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   // rename.
   ["token", "token"],
   ["refreshToken", "refresh_token"],
+  // The recorded release (memql#3990). A STRING field on purpose, so it takes
+  // the three-state semantics above rather than the boolean rules below: the
+  // version learners run opportunistically and mostly learn nothing, and an
+  // undefined that meant "clear it" would let a failed refresh erase a version
+  // an earlier, more trustworthy source had established. CONTRACT NOTE: the
+  // memQL Cockpit writes this same file, so its ClusterConfig carries the
+  // matching `Version string` with `yaml:"version,omitempty"` (memql#3994) --
+  // the same coordination the `token` rename above went through.
+  ["version", "version"],
 ];
 
 const BOOLEAN_FIELD_MAP: ReadonlyArray<readonly [BooleanFieldKey, string]> = [["local", "local"]];
