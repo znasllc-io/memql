@@ -2025,9 +2025,15 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
         write: (update) => upsertCluster(this.deps.clustersPath, update),
         invalidatePresence: () => this.presence.invalidate(),
         refreshTree: () => void vscode.commands.executeCommand("memql.clusters.refresh"),
-        select: async (name) => {
+        // The cluster the hand-off just wrote, not a placeholder built from its
+        // name (#3905). The selection command dials what it is given, so the
+        // `endpoint: ""` this used to pass produced "Cluster is not configured.
+        // Set an endpoint" for a cluster whose endpoint had been written one
+        // line earlier -- and suppressed the "Sign in" button, because
+        // `notConfigured` is not a condition a credential can recover.
+        select: async (cluster) => {
           await vscode.commands.executeCommand("memql.clusters.select", {
-            cluster: { name, endpoint: "", local: true },
+            cluster,
             selected: false,
           });
         },

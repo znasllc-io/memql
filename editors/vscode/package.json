@@ -204,6 +204,11 @@
         "title": "memQL: Repair Local Cluster"
       },
       {
+        "command": "memql.clusters.takeOwnership",
+        "title": "memQL: Take Ownership (enrol a passkey)",
+        "icon": "$(key)"
+      },
+      {
         "command": "memql.clusters.signIn",
         "title": "memQL: Sign In",
         "icon": "$(sign-in)"
@@ -340,6 +345,10 @@
         },
         {
           "command": "memql.clusters.repair",
+          "when": "isWorkspaceTrusted"
+        },
+        {
+          "command": "memql.clusters.takeOwnership",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -491,7 +500,6 @@
           "when": "view == memqlClusters && (viewItem == memqlCluster || viewItem == memqlLocalCluster)",
           "group": "auth@2"
         },
-
         {
           "command": "memql.deployments.createDeployment",
           "when": "view == memqlDeployments && viewItem == memqlLocalInstanceAbsent",

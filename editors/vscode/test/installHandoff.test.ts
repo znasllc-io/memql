@@ -33,7 +33,13 @@ function recorder(over: Partial<HandoffEffects> = {}): {
     },
     invalidatePresence: () => void order.push("invalidate"),
     refreshTree: () => void order.push("refresh"),
-    select: async (name) => void order.push(`select:${name}`),
+    // The WHOLE CONFIG now, not the name (znasllc-io#3905): the panel used to
+    // build `{name, endpoint: ""}` here and the selection command dials what it
+    // is handed, so a successful install ended by reporting "not configured.
+    // Set an endpoint" about the cluster it had just written -- and withheld the
+    // "Sign in" button, since `notConfigured` is not credential-recoverable.
+    // Recording the endpoint too is what makes that regression visible here.
+    select: async (c) => void order.push(`select:${c.name}@${c.endpoint}`),
     ...over,
   };
   return { effects, order, written };
@@ -94,7 +100,13 @@ test("the registry is written, then the tree is repainted, then the row is selec
   // "it installed and then nothing happened".
   const { effects, order } = recorder();
   return completeInstallHandoff({ domain: "memql.localhost" }, effects).then(() => {
-    assert.deepEqual(order, ["write", "invalidate", "refresh", "select:memql"]);
+    assert.deepEqual(order, [
+      "write",
+      "invalidate",
+      "refresh",
+      // The endpoint reaches the selection, rather than an empty placeholder.
+      "select:memql@api.memql.localhost:443",
+    ]);
   });
 });
 
