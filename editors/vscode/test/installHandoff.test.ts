@@ -70,7 +70,7 @@ test("no issuer is written -- it is derivable, and storing it would override dis
 
 test("the name is the domain's first label, the way an operator says it", () => {
   assert.equal(defaultClusterName("memql.localhost"), "memql");
-  assert.equal(defaultClusterName("staging.example.com"), "staging");
+  assert.equal(defaultClusterName("acme.example.com"), "acme");
 });
 
 test("a name is never empty, because an empty one orphans the entry", () => {

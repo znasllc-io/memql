@@ -433,6 +433,6 @@ to delivery correctness.
   (per-peer buffer), `automation_execution_claims` migration (memql#561, the
   prunable-coordination-table precedent).
 - Parity foundation: memql#1260 / memql#1261;
-  `docs/public/operate/reproduce-staging-locally.md`.
+  `docs/public/operate/reproduce-the-cloud-locally.md`.
 </content>
 </invoke>

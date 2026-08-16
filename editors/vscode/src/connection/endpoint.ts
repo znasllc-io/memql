@@ -36,9 +36,9 @@ const FRONT_DOOR_PORT = "443";
  * no leading or trailing dots.
  *
  * Trailing dots are the reason this exists rather than a bare `.trim()`. A
- * fully-qualified `staging.example.com.` is a legitimate spelling that DNS
+ * fully-qualified `example.com.` is a legitimate spelling that DNS
  * resolves identically, and an operator who types one composes
- * `api.staging.example.com.:443` and `https://identity.staging.example.com.`
+ * `api.example.com.:443` and `https://identity.example.com.`
  * -- both of which work over the wire and neither of which matches the
  * cluster the same operator registered without the dot. Normalizing once, here,
  * is what keeps the two derivations agreeing about what a domain is.

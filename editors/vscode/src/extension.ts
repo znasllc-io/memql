@@ -459,13 +459,6 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           const access = await query.getMyAccess().catch(() => null);
           return roleVisibility(access?.clusterRole);
         },
-        // The deploy console scopes to an ENVIRONMENT, and the registry entry's
-        // name is the only thing this editor knows about a remote cluster. They
-        // coincide for the conventional `staging` / `production` entries and a
-        // cluster named otherwise is answered by the engine, which refuses an
-        // environment it does not have -- and that refusal is one of the three
-        // states the page renders.
-        deployEnv: (name) => name,
         confirm: (prompt, phrase) =>
           Promise.resolve(
             window.showInputBox({

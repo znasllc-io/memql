@@ -4,7 +4,7 @@ The local dev cluster runs on **k3d + ArgoCD** (Argo parity, memql#2061),
 not Docker Compose. The Docker Compose stack was retired in memql#2068 /
 #2088 -- the same `deploy/k8s` overlays + ArgoCD reconciliation path now run
 locally and in staging. See the k3d runbook:
-[docs/public/operate/reproduce-staging-locally.md](../docs/public/operate/reproduce-staging-locally.md)
+[docs/public/operate/reproduce-the-cloud-locally.md](../docs/public/operate/reproduce-the-cloud-locally.md)
 and the quick start in [CLAUDE.md](../CLAUDE.md) (`make up` / `make dev` /
 `make status` / `make down`).
 

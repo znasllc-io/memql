@@ -10,7 +10,9 @@
 package local
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,12 +94,13 @@ func TestEveryNodeReadsTheDomainConfigMap(t *testing.T) {
 // This is the check that was missing, and its absence shipped a broken install.
 // The earlier version asserted only that `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER`
 // was gone and that no `znas.io` survived -- and the base manifests set FIVE more
-// domain-bearing values on identity, all to `staging.example.com`, which is
+// domain-bearing values on identity, all to the placeholder domain, which is
 // neither of those things.
 //
 // An explicit env entry beats envFrom, so each survivor silently defeated the
 // derivation for its own variable. Identity ran with
-// MEMQL_IDENTITY_BASE_URL=https://identity.staging.example.com, the installer
+// MEMQL_IDENTITY_BASE_URL=https://identity.staging.example.com (the placeholder
+// as it was spelled then), the installer
 // recovered a magic link at that host, nobody could click it, no owner account
 // was created, and the cluster could not be signed into at all -- while every
 // install step reported success.
@@ -105,11 +108,39 @@ func TestEveryNodeReadsTheDomainConfigMap(t *testing.T) {
 // The assertion is therefore about the RENDERED VALUES, not about a list of
 // variable names: a name-keyed check would have to be extended by whoever adds
 // the seventh, which is exactly the discipline that failed here.
+//
+// placeholderDomain must stay in step with what deploy/k8s/base actually sets.
+// It was `staging.example.com` until epic memql#3943 dropped the environment
+// label from every example host; a check still looking for the old spelling
+// would find nothing and pass having verified nothing, which is this gate's own
+// failure mode. TestThePlaceholderDomainIsStillInTheBase below is what stops
+// that -- it fails if the base stops using this string at all.
+// placeholderDomain is the domain deploy/k8s/base sets its example hosts to.
+const placeholderDomain = "example.com"
+
+// TestThePlaceholderDomainIsStillInTheBase keeps the gate above honest.
+//
+// That gate asserts an ABSENCE, so it passes trivially the moment the string it
+// searches for stops being the one the base uses -- which is precisely what
+// happened when epic memql#3943 renamed `staging.example.com` to `example.com`.
+// This asserts the string is still there to be found.
+func TestThePlaceholderDomainIsStillInTheBase(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "base", "identity.yaml"))
+	if err != nil {
+		t.Fatalf("reading base/identity.yaml: %v", err)
+	}
+	if !strings.Contains(string(raw), placeholderDomain) {
+		t.Fatalf("deploy/k8s/base/identity.yaml no longer contains %q, so "+
+			"TestNoNodeCarriesAPlaceholderDomain searches for a string nothing "+
+			"emits and passes having checked nothing", placeholderDomain)
+	}
+}
+
 func TestNoNodeCarriesAPlaceholderDomain(t *testing.T) {
 	rendered := render(t)
 
 	for i, line := range strings.Split(rendered, "\n") {
-		if !strings.Contains(line, "staging.example.com") {
+		if !strings.Contains(line, placeholderDomain) {
 			continue
 		}
 		t.Errorf("line %d carries a placeholder domain, which beats the derivation "+

@@ -25,9 +25,9 @@ The capability tier (`MEMQL_MCP_MODE`) and acting role (`MEMQL_MCP_ROLE`) gates
 are documented in [build-tags.md](../build/build-tags.md#mcp-node-configuration-epic-memql1529);
 this page is about connecting.
 
-## Connect Claude Code to staging (remote HTTP)
+## Connect Claude Code to a deployed cluster (remote HTTP)
 
-Staging serves the MCP head at `https://mcp.staging.example.com/mcp` (your
+A deployed cluster serves the MCP head at `https://mcp.example.com/mcp` (your
 MCP host) at the `authoring` capability tier.
 
 ### 1. Mint a bearer token
@@ -38,9 +38,9 @@ accepts only **JWKS-verifiable identity JWTs**. A **service-account JWT**
 like Claude Code:
 
 ```bash
-# On the identity binary (locally: docker exec memql-identity ...; on staging:
+# On the identity binary (locally: docker exec memql-identity ...; in the cloud:
 # an identity-side Job). Prints the JWT on stdout. 1-hour TTL.
-memql service-account-token mint --label claude-mcp-staging
+memql service-account-token mint --label claude-mcp
 ```
 
 A user session JWT (from the magic-link login) also works. See
@@ -59,15 +59,15 @@ to every tool on top of the tier.
 ### 2. Add the connector
 
 ```bash
-claude mcp add --transport http memql-staging \
-  https://mcp.staging.example.com/mcp \
+claude mcp add --transport http memql-remote \
+  https://mcp.example.com/mcp \
   --header "Authorization: Bearer <token from step 1>"
 ```
 
 Verify the tools resolve:
 
 ```bash
-claude mcp list                 # memql-staging should show "connected"
+claude mcp list                 # memql-remote should show "connected"
 ```
 
 The token expires (1h for a service-account JWT); re-mint and re-add (or update
@@ -128,10 +128,10 @@ its port-forward (`localhost:8085`).
 
 - **Default-deny.** The HTTP transport refuses to start without a verifier, and
   rejects any request without a valid identity JWT with `401`.
-- **Per-caller identity.** On staging the role/user are taken from the verified
+- **Per-caller identity.** On a deployed cluster the role/user are taken from the verified
   token claims (the deployment does not pin `MEMQL_MCP_ROLE`/`USER`), so each
   caller acts as themselves under the normal role + per-row-authorization rules.
-- **Conservative tier first.** Staging starts at `authoring`; `define`/`query`
+- **Conservative tier first.** A deployed cluster starts at `authoring`; `define`/`query`
   still require `owner`/`developer`. Raise or lower the tier via
   `MEMQL_MCP_MODE` as the posture is proven.
 - **OAuth 2.1** for Claude Desktop / claude.ai custom connectors is a tracked

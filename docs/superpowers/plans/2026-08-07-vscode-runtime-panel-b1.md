@@ -1358,9 +1358,9 @@ clusters:
     endpoint: cockpit.local.znas.io:443
     pat: mql_pat_abc
   - name: staging
-    domain: staging.example.com
-    endpoint: cockpit.staging.example.com:443
-    issuer: https://identity.staging.example.com
+    domain: example.com
+    endpoint: cockpit.example.com:443
+    issuer: https://identity.example.com
     client_id: cockpit
 selected_cluster: local
 `;
@@ -1526,7 +1526,7 @@ export interface ClusterConfig {
   // displayName is the human-friendly label; falls back to name when empty.
   displayName?: string;
   // domain is the single value the add/edit flow collects (e.g.
-  // "staging.example.com"). endpoint / issuer / clientId are composed from it
+  // "example.com"). endpoint / issuer / clientId are composed from it
   // by convention. Stored so an edit can round-trip the domain instead of
   // reverse-engineering it from the endpoint.
   domain?: string;

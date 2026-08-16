@@ -57,7 +57,7 @@ cluster-only bugs (cross-node delivery, replica fan-out, node
 lifecycle).
 
 > Runbook + port-forward reference:
-> [docs/public/operate/reproduce-staging-locally.md](../operate/reproduce-staging-locally.md).
+> [docs/public/operate/reproduce-the-cloud-locally.md](../operate/reproduce-the-cloud-locally.md).
 
 ### 2. Secrets
 
@@ -174,7 +174,7 @@ bootstrapped yet, identity stamps `clusterSettings` and emails
 the owner magic link automatically -- no `/setup` visit needed.
 
 ```bash
-export MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=staging.example.com
+export MEMQL_IDENTITY_BOOTSTRAP_DOMAIN=example.com
 export MEMQL_IDENTITY_BOOTSTRAP_OWNER_EMAIL=alex@example.com
 export MEMQL_IDENTITY_BOOTSTRAP_OWNER_FIRST_NAME=Alex
 export MEMQL_IDENTITY_BOOTSTRAP_OWNER_LAST_NAME=Stone

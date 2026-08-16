@@ -16,7 +16,7 @@ preset. That is the environment-parity standard
 applied to a paying customer, and it is what makes a tenant something we already
 know how to operate rather than a second system.
 
-Diff a rendered tenant overlay against `overlays/prod`. What differs is a
+Diff a rendered tenant overlay against `overlays/cloud`. What differs is a
 namespace, a domain, some integers and an object-store path. Nothing else,
 because there is nothing else to differ.
 
@@ -81,7 +81,7 @@ unconfigured is a guaranteed crash-loop rather than a harmless idle.
 presets because they differ in *where* they run — `dedicated` is a cluster of
 the tenant's own — and because they compose different database presets. Two
 presets whose integers happen to match today is the same reasoning that has
-`overlays/prod` restate staging's counts rather than inherit them: a value that
+`overlays/cloud` restate staging's counts rather than inherit them: a value that
 is inherited in one place and stated in another is a structural difference
 wearing a number's clothes.
 

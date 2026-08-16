@@ -33,7 +33,7 @@ cluster and on AKS.
 (memql#3766). Nothing here names a namespace in a string it owns, so kustomize's
 namespace transformer -- which rewrites `metadata.namespace` on every resource
 and `metadata.name` on `namespace.yaml` -- is the whole of the change between
-`overlays/prod` (ns `memql-prod`) and `overlays/staging` (ns `memql-staging`).
+`overlays/cloud` (ns `memql-prod`) and `overlays/cloud` (ns `memql-staging`).
 Two independent meshes form, with no cross-talk and no per-environment
 manifest. Adding a fully-qualified `<svc>.memql.svc.cluster.local` anywhere in
 this base would break that silently, by pinning one environment's node to the
@@ -225,7 +225,7 @@ kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
 
 # 3. All node Deployments + Services (digest-pinned overlay, #699)
-kubectl apply -k deploy/k8s/overlays/staging
+kubectl apply -k deploy/k8s/overlays/cloud
 ```
 
 > deployment-v2 Phase 1 (#699): apply the per-env **overlay**, not this base.
@@ -233,7 +233,7 @@ kubectl apply -k deploy/k8s/overlays/staging
 > authority); the base `:tags` are placeholders. Rollback = `git revert` of the
 > overlay (see `scripts/deploy/aks-rollback.sh`), never `kubectl rollout undo`.
 
-Or, from the repo root: `make deploy-aks ENV=staging` (runs the namespace +
+Or, from the repo root: `make deploy-aks` (runs the namespace +
 kustomize apply; the Secret step is a one-time prerequisite). `identity`
 comes up first to run the one-time migration and serve JWKS; the other
 nodes' verifiers retry JWKS non-fatally until it is ready.
@@ -261,7 +261,7 @@ in-process rather than via a `preStop` sleep.)
 ## Validate
 
 ```bash
-kubectl kustomize deploy/k8s/overlays/staging | kubeconform -strict -summary -kubernetes-version 1.30.0
+kubectl kustomize deploy/k8s/overlays/cloud | kubeconform -strict -summary -kubernetes-version 1.30.0
 ```
 
 ## Smoke test (live front door)

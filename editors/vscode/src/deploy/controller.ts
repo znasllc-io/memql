@@ -52,18 +52,16 @@ export type DeployControlPort = Pick<
   | "suggestNextVersion"
   | "cutVersion"
   | "deploy"
-  | "promote"
   | "rollbackDeployment"
   | "rolloutAction"
 >;
 
 /** The parameters an action needs, by id. */
 export type DeployActionRequest =
-  | { id: "cutVersion"; env: string; bump: string; version: string }
+  | { id: "cutVersion"; bump: string; version: string }
   | { id: "deploy"; deploymentId: string }
-  | { id: "promote"; version: string }
   | { id: "rollback"; toDeploymentId: string }
-  | { id: "rolloutAction"; env: string; rollout: string; subAction: string };
+  | { id: "rolloutAction"; rollout: string; subAction: string };
 
 export interface DeployOutcome {
   kind: "success" | "error";
@@ -140,10 +138,9 @@ export async function runDeployAction(
  */
 export async function previewNextVersion(
   port: DeployControlPort,
-  env: string,
 ): Promise<{ suggestion: Awaited<ReturnType<DeployControlPort["suggestNextVersion"]>> | null; message: string }> {
   try {
-    return { suggestion: await port.suggestNextVersion(env), message: "" };
+    return { suggestion: await port.suggestNextVersion(), message: "" };
   } catch (err) {
     return { suggestion: null, message: describeReadFailure("version suggestion", err) };
   }
@@ -160,7 +157,7 @@ export interface StatusRead {
 }
 
 /**
- * Read the per-env deployment status.
+ * Read the deployment status.
  *
  * Returns a message rather than throwing for the same reason the panel exists:
  * the status read is owner/admin-gated (#728) while topology and deployment
@@ -171,10 +168,9 @@ export interface StatusRead {
  */
 export async function readDeploymentStatus(
   port: DeployControlPort,
-  env: string,
 ): Promise<StatusRead> {
   try {
-    return { status: await port.getDeploymentStatus(env), message: "", reason: "ok" };
+    return { status: await port.getDeploymentStatus(), message: "", reason: "ok" };
   } catch (err) {
     return {
       status: null,
@@ -199,15 +195,13 @@ function invoke(
 ): Promise<{ ok: boolean; message: string; auditEventId: string }> {
   switch (request.id) {
     case "cutVersion":
-      return port.cutVersion(request.env, request.bump, request.version);
+      return port.cutVersion(request.bump, request.version);
     case "deploy":
       return port.deploy(request.deploymentId);
-    case "promote":
-      return port.promote(request.version);
     case "rollback":
       return port.rollbackDeployment(request.toDeploymentId);
     case "rolloutAction":
-      return port.rolloutAction(request.env, request.rollout, request.subAction);
+      return port.rolloutAction(request.rollout, request.subAction);
     default:
       // The union is exhaustive; this keeps a future variant from silently
       // resolving to some other RPC.

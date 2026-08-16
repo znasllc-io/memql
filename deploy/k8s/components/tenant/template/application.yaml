@@ -69,7 +69,7 @@ spec:
         maxDuration: 3m
   # /spec/replicas is ignored so that a suspend (scale to zero) is a runtime
   # override selfHeal will not revert. The overlay's counts are what a resume
-  # returns to -- the same arrangement deploy/argocd/apps/memql-prod.yaml uses
+  # returns to -- the same arrangement deploy/argocd/apps/memql.yaml uses
   # to make `make scale N=<n> ENV=prod` stick.
   ignoreDifferences:
     - group: apps

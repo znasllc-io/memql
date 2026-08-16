@@ -9,7 +9,17 @@ owner: znas
 
 # Deployment v2 — GitOps + progressive delivery (RFC)
 
-**Superseded by:** platform-consolidation (#2472).
+**Superseded by:** platform-consolidation (#2472), and — for everything below
+that names an environment — epic memql#3943, which removed "environment" as a
+product concept. memQL ships ONE installation shape: there is one cloud overlay
+(`deploy/k8s/overlays/cloud`), one ArgoCD Application (`memql`), and a second
+environment is a second INSTALL rather than a second namespace. The
+"staging→prod promotion by digest copy" this RFC designed has no subject left
+and its machinery is deleted; the digest-pinning, Argo-reconciled, analysis-gated
+core it argued for is what shipped and remains.
+
+**This is a HISTORICAL record and is left as written below.** It says what was
+decided in June 2026 and why, which is the point of keeping it.
 
 **Status:** DRAFT — pending owner sign-off (epic znasllc-io/memql#697, Phase 0 #698)
 **Author:** Platform/Staff (ZNAS LLC)

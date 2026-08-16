@@ -54,7 +54,7 @@
 // path is younger than the last release, and that keeps being true: v0.16.1's
 // local overlay pins identity's domain env to staging placeholders that defeat
 // the derivation (memql#3600), so identity would issue a magic link at
-// identity.staging.example.com -- a host nobody can reach, so no owner account is
+// identity.example.com -- a host nobody can reach, so no owner account is
 // ever created and the install ends green with no way in. A pin is only as good
 // as the release it names, which is why bumping it belongs to the release and
 // not to whoever last touched the installer.

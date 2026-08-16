@@ -90,7 +90,7 @@ test("a remote instance's tiers are the deploy catalog's, not a second copy", ()
   const actions = instanceActions(remote(), roleVisibility("owner"));
   assert.equal(actions.find((a) => a.id === "createDeployment")?.tier, actionById("deploy").tier);
   assert.equal(actions.find((a) => a.id === "cutVersion")?.tier, actionById("cutVersion").tier);
-  assert.equal(actions.find((a) => a.id === "promote")?.tier, actionById("promote").tier);
+  assert.equal(actions.find((a) => a.id === "rolloutAction")?.tier, actionById("rolloutAction").tier);
   assert.equal(actions.find((a) => a.id === "rolloutAction")?.tier, actionById("rolloutAction").tier);
   assert.equal(actions.find((a) => a.id === "rollback")?.tier, actionById("rollback").tier);
 });
@@ -107,16 +107,15 @@ test("a developer gets deploy and cut, and nothing admin or owner holds", () => 
   assert.deepEqual(actions.map((a) => a.id).sort(), ["createDeployment", "cutVersion"]);
 });
 
-test("an admin gets promote and rollout but not rollback", () => {
+test("an admin gets rollout but not rollback", () => {
   const ids = instanceActions(remote(), roleVisibility("admin")).map((a) => a.id);
-  assert.equal(ids.includes("promote"), true);
   assert.equal(ids.includes("rolloutAction"), true);
   // Rollback is owner-only in the service, and this table mirrors it exactly.
   assert.equal(ids.includes("rollback"), false);
 });
 
 test("an owner gets everything", () => {
-  assert.equal(instanceActions(remote(), roleVisibility("owner")).length, 5);
+  assert.equal(instanceActions(remote(), roleVisibility("owner")).length, 4);
 });
 
 test("a writer gets nothing", () => {
@@ -127,6 +126,6 @@ test("a role that could not be read is offered everything, with the engine decid
   // The caller may well be an owner. Hiding the surface would lock them out of
   // something they are entitled to, while the engine refuses anything they are
   // not and names the role required.
-  assert.equal(instanceActions(remote(), roleVisibility(undefined)).length, 5);
-  assert.equal(instanceActions(remote()).length, 5);
+  assert.equal(instanceActions(remote(), roleVisibility(undefined)).length, 4);
+  assert.equal(instanceActions(remote()).length, 4);
 });

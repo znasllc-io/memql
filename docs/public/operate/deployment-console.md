@@ -13,13 +13,17 @@ The Deployment Console is the role-gated UI (see
 [the role matrix](#the-role-matrix)) for driving the
 [deployment-v2](../../internal/design/deployment-v2.md) machinery -- "what is
 deployed, is it healthy, and how do I deploy / promote / roll back" --
-from a UI instead of a terminal, for both **staging** and
-**production**.
+from a UI instead of a terminal.
+
+> memQL ships **one installation shape** (epic memql#3943). Every RPC on this
+> surface operates on THIS installation and takes no environment: an operator
+> who wants a second environment installs a second instance, which has its own
+> console at its own address.
 
 It is a **read + action surface** over the existing machinery. It does
 not reimplement any of it: Git stays the single source of truth, Argo
-CD reconciles each env to the digest-pinned overlay, Argo Rollouts
-drives progressive delivery, and a single env overlay pins the release
+CD reconciles the cluster to the digest-pinned overlay, Argo Rollouts
+drives progressive delivery, and that one overlay pins the release
 as `{engine version, bundle digest, client digest}`. This guide is the
 console-driven workflow; the underlying mechanics live in the
 deployment-v2 docs cross-linked at the bottom and are not duplicated
@@ -146,8 +150,6 @@ streamed path and the unary path ever answer a role differently.
 | Suggest the next version | `SuggestNextVersion` | developer, admin, owner |
 | Cut a version | `CutVersion` | developer, admin, owner |
 | Deploy a cut deployment record | `Deploy` | developer, admin, owner |
-| Deploy to staging | `DeployStaging` | owner, admin |
-| Promote staging to prod | `Promote` | owner, admin |
 | Revert an overlay commit | `Rollback` | owner, admin |
 | Rollout promote / abort | `RolloutAction` | owner, admin |
 | Roll back to a prior deployment | `RollbackDeployment` | **owner only -- not even admin** |
@@ -221,17 +223,16 @@ argument parser from probing it. The audit event records the argument as
 sent, invalid values included, because the shape of a probe is the
 interesting part of it.
 
-**Below the floor is a per-action fact.** memql#3457 shipped the re-order
-for `DeployStaging`, `Promote`, `Rollback` and `RolloutAction`; memql#3505
-finished the surface with `GetDeploymentStatus`, `SuggestNextVersion`,
-`CutVersion`, `Deploy` and `RollbackDeployment`. The last two of those are
-where it counts most:
+**Below the floor is a per-action fact.** memql#3457 shipped the re-order for
+the write RPCs; memql#3505 finished the surface with the reads. Where it counts
+most:
 
 - `RollbackDeployment` is owner-only, so **admin** sits below that floor
   and no other. Until #3505 an empty `to_deployment_id` was the one probe
   of this surface an admin could make without leaving a trail.
-- `GetDeploymentStatus` is a read, and a read with a junk `env` was the
-  cheapest thing to send at all.
+- `GetDeploymentStatus` and `SuggestNextVersion` now take no argument at all
+  (their only one was the environment, removed by epic memql#3943), so there is
+  nothing left to probe them with -- the gate is the only thing they answer to.
 
 A caller who *cleared* the floor sees exactly what they saw before, on
 every RPC: same code, same message, and still no audit event, because the
@@ -328,21 +329,21 @@ Reads are not audited per call.
 
 ## Performing actions
 
-Four actions, each gated by [the role matrix](#the-role-matrix), all
-audited, none of which bypass Git or the reconciler:
+Each action is gated by [the role matrix](#the-role-matrix), audited, and none
+of them bypass Git or the reconciler:
 
 | Action | What it does | Confirmation |
 |--------|--------------|--------------|
-| **Deploy to staging** | Runs the `promote.sh` digest-bump into the staging overlay for the chosen version; Argo CD then reconciles. | Version required. |
-| **Promote staging to prod** | Digest-copy of the validated `{engine, bundle, client}` digests into the prod overlay (`promote.sh` semantics) -- no rebuild. | **Type-to-confirm** (re-enter the exact version). |
-| **Roll back** | `git revert` of the env overlay commit; Argo CD reconciles back to the prior digest set. | **Type-to-confirm** (re-enter the commit SHA, or `rollback`). |
-| **Rollout promote / abort** | `kubectl argo rollouts promote|abort` for a BFF/engine Rollout in the chosen env. | `abort` is **type-to-confirm**; `promote` is immediate. |
+| **Cut a version** | Creates a `pending` `v1:cluster:deployment` record at the chosen next version. | Version or bump required. |
+| **Deploy** | Transitions a cut record to `in_progress` and returns an async ack; the deploy-pack automation observes ArgoCD and owns the terminal transition. | Deployment id required. |
+| **Roll back** | `git revert` of the overlay commit; Argo CD reconciles back to the prior digest set. | **Type-to-confirm** (re-enter the commit SHA, or `rollback`). |
+| **Rollout promote / abort** | `kubectl argo rollouts promote\|abort` for an engine Rollout. This is the ARGO verb -- advance or cancel an in-flight progressive rollout -- and is unrelated to any deploy promotion. | `abort` is **type-to-confirm**; `promote` is immediate. |
 
 Notes that hold on both surfaces:
 
-- **Confirmation.** Production promotion, rollback, and Rollout abort
-  require an explicit type-to-confirm step. A mismatched confirmation
-  is rejected and the action is never invoked.
+- **Confirmation.** Rollback and Rollout abort require an explicit
+  type-to-confirm step. A mismatched confirmation is rejected and the
+  action is never invoked.
 - **Audit.** Every action (and every denied attempt) writes a
   `v1:identity:auditEvent` (category `admin`, action
   `deployment_console_<verb>`, with the actor, env, target version /
@@ -446,14 +447,21 @@ rollout settles.
 
 Terminal-status parity: an automation-driven **rollback** lands in
 `rolled_back` (the `driveDeploymentInProgress` automation branches on
-`previousDeploymentId`, #2168); a forward deploy lands in `succeeded` and a
-promote failure in `failed`.
+`previousDeploymentId`, #2168); a forward deploy lands in `succeeded` when
+ArgoCD reports synced AND healthy, and in `failed` when it does not.
+
+> **What the automation OBSERVES rather than runs** (epic memql#3943). It used
+> to fire an effect on the `in_progress` edge: pin one environment's overlay
+> from another's digests. With one installation there is nothing to pin FROM --
+> the deploy IS the merge, which ArgoCD reconciles -- so the automation reads
+> ArgoCD's reconciled state through `observeReconciledState` and resolves the
+> record from that. This is strictly more evidence than the effect path had: it
+> asserted success from a script's exit code.
 
 > The `MEMQL_DEPLOY_AUTOMATION_DRIVEN` env flag that gated this during the
-> owner-supervised staging cutover (steps 1-5) is **removed** -- the path is
-> unconditional. The cutover was verified live on staging on 2026-06-24;
-> step 6 (this retirement) lands the cleanup. The next real staging release
-> exercises the automation path end-to-end as the standing validation.
+> owner-supervised cutover (steps 1-5) is **removed** -- the path is
+> unconditional. The cutover was verified live on 2026-06-24; step 6 (this
+> retirement) lands the cleanup.
 
 ## References
 

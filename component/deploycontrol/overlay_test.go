@@ -2,7 +2,7 @@ package deploycontrol
 
 import "testing"
 
-const stagingOverlayFixture = `# Staging overlay -- the SINGLE image authority for aks-memql-staging.
+const unpromotedOverlayFixture = `# An overlay carrying no promotion provenance.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -47,7 +47,7 @@ images:
 `
 
 func TestParseOverlayStaging(t *testing.T) {
-	ov, err := ParseOverlay([]byte(stagingOverlayFixture))
+	ov, err := ParseOverlay([]byte(unpromotedOverlayFixture))
 	if err != nil {
 		t.Fatalf("ParseOverlay: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestParseOverlayProdPromotedVersion(t *testing.T) {
 }
 
 func TestParseOverlayShortNames(t *testing.T) {
-	ov, err := ParseOverlay([]byte(stagingOverlayFixture))
+	ov, err := ParseOverlay([]byte(unpromotedOverlayFixture))
 	if err != nil {
 		t.Fatalf("ParseOverlay: %v", err)
 	}

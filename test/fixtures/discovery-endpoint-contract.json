@@ -29,10 +29,10 @@
     },
     {
       "name": "the deployed cloud value: base's placeholder front door, patched per overlay",
-      "configured": "api.staging.example.com:443",
-      "identityUrl": "https://identity.staging.example.com",
-      "advertised": "api.staging.example.com:443",
-      "webSocketUrl": "wss://api.staging.example.com/memql/ws"
+      "configured": "api.example.com:443",
+      "identityUrl": "https://identity.example.com",
+      "advertised": "api.example.com:443",
+      "webSocketUrl": "wss://api.example.com/memql/ws"
     },
     {
       "name": "memql#3399 regression: a scheme-ful operator value is normalized, never republished as a URL",

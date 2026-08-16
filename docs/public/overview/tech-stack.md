@@ -34,7 +34,7 @@ This document establishes the **opinionated technologies and practices** for mem
 | **AI** | Multi-provider (OpenAI, Anthropic) | latest | All AI text/chat/vision/speech goes through gRPC on `MemqlService.Stream` (`AiChatMsg`, `AiSpeechMsg`, `AiTranscribeMsg`, `AiSuggestMsg`). The legacy AI HTTP path is gone. |
 | **Auth** | In-house identity service | - | Magic-link login, JWT, JWKS-published; PAT for CLI |
 | **Container** | Docker | latest | Local image builds (imported into k3d) |
-| **Orchestration** | k3d + ArgoCD | latest | Local Kubernetes cluster with GitOps reconciliation (staging parity) |
+| **Orchestration** | k3d + ArgoCD | latest | Local Kubernetes cluster with GitOps reconciliation (cloud parity) |
 | **Coding Agent** | NemoClaw (NVIDIA) | latest | Enterprise coding/automation agent (Apache 2.0) |
 
 ### Query Language
@@ -87,20 +87,26 @@ psql postgres://memql:memql_dev@localhost:5432/memql
 
 ---
 
-### 2. Staging Environment
+### 2. Cloud Deploy Target
 
-**Purpose:** Shared testing and staging environment for integration testing
+**Purpose:** The installation an operator runs for real. memQL ships ONE
+installation shape (epic memql#3943) -- an operator who wants a second
+environment installs a second instance, with its own domain, its own ArgoCD and
+its own database, so this section describes ONE target rather than a ladder of
+them.
 
 | Component | Technology | Location |
 |-----------|-----------|----------|
-| **Database** | TimescaleDB Cloud (Tiger Cloud) | Managed Tiger Cloud instance |
-| **Service** | memQL | Azure Kubernetes Service (cluster `aks-memql-staging`, namespace `memql`) |
-| **URL** | HTTPS | https://app.staging.example.com, https://identity.staging.example.com |
-| **Data** | Persistent | Managed by Tiger Cloud |
+| **Database** | TimescaleDB Cloud (Tiger Cloud) or self-hosted CloudNativePG | Managed instance, or in-cluster |
+| **Service** | memQL node pods | Azure Kubernetes Service, reconciled by ArgoCD from `deploy/k8s/overlays/cloud` |
+| **URL** | HTTPS | `https://api.<domain>`, `https://identity.<domain>`, `https://mcp.<domain>`, `*.<domain>` |
+| **Data** | Persistent | Managed by the database platform |
 
 **Commands:**
 ```bash
-# Deploy to staging (Azure AKS)
+# The blessed deploy is a GIT MERGE: bump the digests in
+# deploy/k8s/overlays/cloud and merge -> ArgoCD reconciles.
+# `make deploy` is break-glass only, for when ArgoCD is unavailable.
 make deploy VERSION=X
 
 # View logs
@@ -110,26 +116,7 @@ kubectl logs -n memql deployment/cognition -f
 See [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
 for the full deploy flow and topology.
 
-**Developer Access:** [x] All developers
-
----
-
-### 3. Production Environment
-
-**Purpose:** Live production system serving real users
-
-| Component | Technology | Location |
-|-----------|-----------|----------|
-| **Database** | TimescaleDB Cloud (Tiger Cloud) | Production instance (separate from staging) |
-| **Service** | memQL | Azure Kubernetes Service (production) |
-| **URL** | HTTPS | Production domain |
-| **Data** | Persistent | Managed by Tiger Cloud (with backups) |
-
-**Deployment:**
-- Automatic via CI/CD pipeline when code is merged to `main` branch
-- Manual deploys require production access permissions
-
-**Developer Access:** WARNING: Limited - only developers with production permissions
+**Developer Access:** [x] Per the cluster's own role model
 
 ---
 
@@ -152,17 +139,16 @@ for the operator-side narrative.
 
 ### Developer Access Levels
 
-| Environment | Access Level | Permissions |
-|-------------|-------------|-------------|
-| **Development** | All Developers | Full access (own machine) |
-| **Staging** | All Developers | Deploy, view logs, test |
-| **Production** | Senior/Lead Developers | Deploy, configure, manage |
+| Target | Access Level | Permissions |
+|--------|-------------|-------------|
+| **Local** | All Developers | Full access (own machine) |
+| **Cloud** | Per the cluster's role model (owner / admin / developer / writer / reader) | Deploy and rollback are role-gated and audited; see [access-model.md](../operate/auth/access-model.md) |
 
 ### Service Accounts
 
 - AKS pulls images from ACR (`acrmemql.azurecr.io`)
 - Secrets managed via the genesis A2 sealed envelope + Azure Key Vault
-  (`kv-memql-<env>`); see [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
+  (the operator's own vault); see [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
 - Environment variables injected at runtime
 
 ---
@@ -181,7 +167,7 @@ for the operator-side narrative.
 7. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
 
 **Best Practices:**
-- Always use the local k3d cluster database (not the staging database)
+- Always use the local k3d cluster database (never a deployed cluster's)
 - Reset the local database if migrations conflict: `make down && make up`
 - Use debug logging (enabled by default in the local overlay)
 - Test automations and functions locally before deploying
@@ -189,25 +175,7 @@ for the operator-side narrative.
 
 ---
 
-### Staging Deployment
-
-**Workflow:**
-1. Ensure all tests pass: `go test ./...`
-2. Push feature branch to GitHub
-3. Deploy to staging: `make deploy VERSION=X`
-4. Verify deployment via logs and health endpoint
-5. Test integration with frontend (if applicable)
-6. Create pull request when ready
-
-**Best Practices:**
-- Always test in development before deploying to staging
-- Staging shares database - be careful with schema changes
-- Coordinate with team if making breaking changes
-- Use staging for integration testing, not development
-
----
-
-### Production Deployment
+### Cloud Deployment
 
 **Workflow:**
 1. Feature branch reviewed and approved via PR
@@ -223,7 +191,7 @@ for the operator-side narrative.
 - Schema migrations run automatically (use caution)
 - Coordinate with team for major changes
 - Have rollback plan ready
-- Test thoroughly in staging before production deployment
+- Test thoroughly on the local parity cluster before deploying
 
 ---
 
@@ -314,7 +282,7 @@ psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL she
 go test ./...                    # Run Go test suite
 
 # Deployment (Azure AKS) -- see docs/public/operate/deploy-bundle-runbook.md
-make deploy VERSION=X            # Deploy to staging (cockpit break-glass, scripts/deploy/cockpit.sh)
+make deploy VERSION=X            # Break-glass deploy (cockpit, scripts/deploy/cockpit.sh)
 
 # Dev secrets workflow
 make bootstrap                                   # Generate .env.local with master key + bootstrap envelope
@@ -325,7 +293,7 @@ make secrets-list                                # Diff manifest vs yaml vs runn
 # AKS
 kubectl get pods -n memql                                   # List pods
 kubectl logs -n memql deployment/cognition -f               # View logs
-kubectl get deployments -n memql                            # Deployment status (staging)
+kubectl get deployments -n memql                            # Deployment status
 ```
 
 ### Environment Variables
@@ -349,7 +317,7 @@ for the full design.
 - The CLI manages partitions interactively in the Clusters tab and persists
   the per-cluster selection in `~/.memql/clusters.yaml`.
 
-**Staging/Production (AKS):**
+**Cloud (AKS):**
 - Shared secrets (DSN, master key, identity signing seed) ride the
   genesis A2 sealed envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
   Secret), backed up in Azure Key Vault (`kv-memql-<env>`). Per-node,
@@ -399,7 +367,7 @@ for the full design.
 
 1. **Migrations:** Automatic on startup (use carefully in production)
 2. **Seeding:** Use concept seeding for test data
-3. **Backups:** Managed by Tiger Cloud (production and staging)
+3. **Backups:** Managed by the database platform
 4. **Reset:** `make down && make up` for a fresh local database (recreates the cluster)
 5. **Schema changes:** Coordinate with team
 
@@ -431,7 +399,7 @@ Notify team if changes affect:
 
 - Local setup time: < 5 minutes
 - Test execution time: < 2 minutes
-- Deploy to staging time: < 5 minutes
+- Deploy time: < 5 minutes
 - Deploy to production time: < 10 minutes
 
 ### Code Quality

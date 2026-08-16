@@ -31,8 +31,6 @@ spec:
   namespaceSelector:
     matchNames:
       - memql
-      - memql-staging
-      - memql-prod
   selector:
     matchLabels:
       # The label CNPG stamps on every instance pod it owns.

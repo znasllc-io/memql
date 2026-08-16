@@ -167,7 +167,7 @@ test("a remote instance is never absent -- only reachable or not", () => {
 test("a remote instance's version is the CURRENT deployment's", () => {
   const instance = remoteInstance({
     name: "staging",
-    domain: "staging.example.com",
+    domain: "example.com",
     reachable: true,
     connected: true,
     deployments: [

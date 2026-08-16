@@ -33,11 +33,10 @@ function ids(role: Role): DeployActionId[] {
 // The catalog mirrors the service
 // -----------------------------------------------------------------------------
 
-test("the catalog carries exactly the five actions the surface drives", () => {
+test("the catalog carries exactly the four actions the surface drives", () => {
   assert.deepEqual(DEPLOY_ACTIONS.map((a) => a.id), [
     "cutVersion",
     "deploy",
-    "promote",
     "rollback",
     "rolloutAction",
   ]);
@@ -45,13 +44,12 @@ test("the catalog carries exactly the five actions the surface drives", () => {
 
 test("each action's tier matches component/deploycontrol's authorize helper", () => {
   // Read off service.go: authorizeDeploy for cut + deploy, authorize for
-  // promote + rollout_action, authorizeOwner for rollback_deployment.
+  // rollout_action, authorizeOwner for rollback_deployment.
   assert.deepEqual(
     Object.fromEntries(DEPLOY_ACTIONS.map((a) => [a.id, a.tier])),
     {
       cutVersion: "developer",
       deploy: "developer",
-      promote: "admin",
       rollback: "owner",
       rolloutAction: "admin",
     },
@@ -65,7 +63,6 @@ test("each action's verb matches the service's audit action suffix", () => {
     {
       cutVersion: "cut_version",
       deploy: "deploy",
-      promote: "promote",
       rollback: "rollback_deployment",
       rolloutAction: "rollout_action",
     },
@@ -81,13 +78,13 @@ test("actionById throws rather than silently resolving to another action", () =>
 // -----------------------------------------------------------------------------
 
 test("an owner sees every action, including the owner-only rollback", () => {
-  assert.deepEqual(ids("owner"), ["cutVersion", "deploy", "promote", "rollback", "rolloutAction"]);
+  assert.deepEqual(ids("owner"), ["cutVersion", "deploy", "rollback", "rolloutAction"]);
 });
 
 test("an admin sees everything EXCEPT rollback -- owner-only by design", () => {
   const shown = ids("admin");
   assert.ok(!shown.includes("rollback"));
-  assert.deepEqual(shown, ["cutVersion", "deploy", "promote", "rolloutAction"]);
+  assert.deepEqual(shown, ["cutVersion", "deploy", "rolloutAction"]);
 });
 
 test("a developer sees cut and deploy, and NOTHING else -- memql#3331", () => {
@@ -97,8 +94,8 @@ test("a developer sees cut and deploy, and NOTHING else -- memql#3331", () => {
   // hedge, three of which the engine was certain to refuse.
   //
   // The engine's tiers (component/deploycontrol/service.go): cut + deploy are
-  // authorizeDeploy (AtLeastDeveloper), promote + rollout_action are
-  // authorize (AtLeastAdmin), rollback is authorizeOwner.
+  // authorizeDeploy (AtLeastDeveloper), rollout_action is authorize
+  // (AtLeastAdmin), rollback is authorizeOwner.
   assert.deepEqual(ids("developer"), ["cutVersion", "deploy"]);
 });
 
@@ -201,8 +198,7 @@ test("tier descriptions read the way the service phrases the refusal", () => {
 // Type-to-confirm
 // -----------------------------------------------------------------------------
 
-test("promote, rollback and rollout abort are the confirmed actions", () => {
-  assert.equal(actionById("promote").typeToConfirm, true);
+test("rollback and rollout abort are the confirmed actions", () => {
   assert.equal(actionById("rollback").typeToConfirm, true);
   assert.equal(actionById("cutVersion").typeToConfirm, false);
   assert.equal(actionById("deploy").typeToConfirm, false);
@@ -213,10 +209,9 @@ test("promote, rollback and rollout abort are the confirmed actions", () => {
 
 test("the phrase is the action's TARGET, not a yes and not the action name", () => {
   // A confirmation satisfiable without reading the target confirms nothing.
-  assert.equal(confirmationPhrase("promote", "2026.6.21"), "2026.6.21");
   assert.equal(confirmationPhrase("rollback", "d-100"), "d-100");
   assert.equal(confirmationPhrase("rolloutAction", "bff-rollout"), "bff-rollout");
-  assert.notEqual(confirmationPhrase("promote", "2026.6.21"), "yes");
+  assert.notEqual(confirmationPhrase("rollback", "d-100"), "yes");
   assert.notEqual(confirmationPhrase("rollback", "d-100"), "rollback");
 });
 
@@ -228,7 +223,7 @@ test("unconfirmed actions have no phrase", () => {
 test("an empty expectation is never satisfiable", () => {
   // An action with nothing identifiable to re-type must not proceed
   // unchallenged, so "" must not read as "no confirmation needed".
-  assert.equal(confirmationPhrase("promote", ""), "");
+  assert.equal(confirmationPhrase("rollback", ""), "");
   assert.equal(confirmationMatches("", ""), false);
   assert.equal(confirmationMatches("", "anything"), false);
 });

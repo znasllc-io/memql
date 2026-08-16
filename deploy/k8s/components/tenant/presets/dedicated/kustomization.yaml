@@ -18,7 +18,7 @@
 #      the money and most of the durability difference actually is.
 #
 # Two presets whose integers happen to match today is the same reasoning that
-# has overlays/prod restate staging's counts rather than inherit them: a value
+# has overlays/cloud restate its counts rather than inherit them: a value
 # inherited in one place and stated in another is a structural difference
 # wearing a number's clothes, and the day these two diverge -- three replicas at
 # the top tier, say -- the diff should be one integer, not a refactor.

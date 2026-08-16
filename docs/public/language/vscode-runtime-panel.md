@@ -208,7 +208,7 @@ pinned in the graph documents and the receipt, not in either front end.
 Both paths install the same cluster the repo's `make up` brings up. The
 difference is what they assume: `make up` is for a checkout of this
 repository and the inner development loop
-([reproduce-staging-locally.md](../operate/reproduce-staging-locally.md)),
+([reproduce-the-cloud-locally.md](../operate/reproduce-the-cloud-locally.md)),
 while the page installs onto a machine that need not have one.
 
 ## Constructs

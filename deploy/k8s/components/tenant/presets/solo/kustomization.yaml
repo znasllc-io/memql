@@ -28,7 +28,7 @@ kind: Component
 
 patches:
   # The mesh: one of each. Stated for every node rather than inherited from
-  # base, for the reason overlays/prod states its counts rather than inheriting
+  # base, for the reason overlays/cloud states its counts rather than inheriting
   # them -- a count that is inherited in one profile and stated in another is a
   # structural difference wearing a number's clothes.
   - target: { kind: Deployment, name: identity }

@@ -64,7 +64,7 @@ Add an A record for the **signaling** host pointing at the ingress-nginx
 LoadBalancer IP:
 
 ```
-livekit.staging.example.com  ->  <ingress-nginx EXTERNAL-IP>
+livekit.example.com  ->  <ingress-nginx EXTERNAL-IP>
 ```
 
 (`kubectl get svc ingress-nginx-controller -n ingress-nginx` for the IP.) The

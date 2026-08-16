@@ -30,12 +30,11 @@
 
 import type { Role } from "@znasllc-io/memql-sdk-core/client";
 
-/** The five actions the DevOps surface drives. */
+/** The four actions the DevOps surface drives. */
 export type DeployActionId =
   | "cutVersion"
   | "deploy"
   | "rollback"
-  | "promote"
   | "rolloutAction";
 
 /**
@@ -87,15 +86,6 @@ export const DEPLOY_ACTIONS: readonly DeployActionSpec[] = [
     typeToConfirm: false,
     description:
       "Ship the selected pending deployment record. Asynchronous: success means accepted and kicked off, not deployed.",
-  },
-  {
-    id: "promote",
-    label: "Promote staging to prod",
-    verb: "promote",
-    tier: "admin",
-    typeToConfirm: true,
-    description:
-      "Digest-copy the validated staging release into the prod overlay. No rebuild.",
   },
   {
     id: "rollback",
@@ -247,7 +237,6 @@ export function tierDescription(tier: RoleTier): string {
  */
 export function confirmationPhrase(id: DeployActionId, target: string): string {
   switch (id) {
-    case "promote":
     case "rollback":
       return target;
     case "rolloutAction":

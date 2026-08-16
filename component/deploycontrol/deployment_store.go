@@ -4,9 +4,9 @@
 // Before this, a deploy left no trace in the data layer -- image
 // digests lived only in releases/*.yaml on disk, and there was no
 // deployment entity, status, or history to query. The console write
-// RPCs (DeployStaging / Promote) now write a record at deploy start
-// (status in_progress) and transition it as the rollout resolves
-// (succeeded on a clean promote, failed on error). Each write appends a
+// RPCs now write a record at deploy start (status in_progress) and transition
+// it as the rollout resolves (succeeded on a clean run, failed on error). Each
+// write appends a
 // new payload version under the SAME concept id (the deploymentId), so
 // the lifecycle is reconstructable asOf any time, and the CDC path emits
 // graph.node.created/updated.<partition>.v1:cluster:deployment -- the

@@ -1,5 +1,5 @@
 ---
-title: Reproduce staging locally (k3d + ArgoCD)
+title: Reproduce the cloud locally (k3d + ArgoCD)
 audience: public
 status: stable
 area: operate
@@ -7,31 +7,24 @@ sinceVersion: 0.9.36
 owner: znas
 ---
 
-# Reproduce staging locally (k3d + ArgoCD)
+# Reproduce the cloud locally (k3d + ArgoCD)
 
 The k3d + ArgoCD cluster is the **blessed local dev topology** (memql#2061,
-Epic 0 -- Argo parity): boot it with `make up`. It mirrors staging
-(the `aks-memql-staging` AKS cluster, `deploy/k8s/`) end to end -- the
-same Kustomize overlays, the same ArgoCD-reconciled manifests, the same
-`ignoreDifferences`/selfHeal config -- so the full class of GitOps +
-cross-node mesh bugs reproduces locally instead of only on staging.
+Epic 0 -- Argo parity): boot it with `make up`. It mirrors the cloud cluster
+(AKS, `deploy/k8s/`) end to end -- the same Kustomize base, the same
+ArgoCD-reconciled manifests, the same `ignoreDifferences`/selfHeal config -- so
+the full class of GitOps + cross-node mesh bugs reproduces locally instead of
+only after a deploy.
 
-> **Local is ONE environment, and stays one.** The cloud cluster carries
-> staging and production as two namespaces on two schema search paths
-> (epic memql#3748); `make up` grows no second namespace, the local
-> overlay supplies no environment ConfigMap, and an unset
-> `MEMQL_DB_SEARCH_PATH` is exactly what "one environment" means to the
-> engine. `TestLocalStaysOneEnvironment` asserts it. Development is not
-> staging: a second local environment would make the inner loop slower to
-> prove nothing, and the class of bug this cluster exists to reproduce --
-> GitOps plus cross-node mesh -- does not need one. What local therefore
-> does NOT reproduce is the environment boundary itself; that model is
-> [environments.md](environments.md), and `ENV=` on `make scale` is where
-> it touches this page (it defaults to `local`, so the inner-loop command
-> typed from memory cannot point at production).
+> **memQL ships ONE installation shape** (epic memql#3943). There is no
+> staging-versus-production dimension inside the product: an operator who wants
+> a second environment installs a second instance, with its own domain and its
+> own ArgoCD. Local and cloud are two INSTALLS of the same system, not two
+> environments of one, which is why the only differences enumerated below are
+> resource sizes and the sources of DNS, TLS and secrets.
 
 > **Development principle: multi-node is the default.** Every feature
-> runs across the 2-replica mesh in local, staging, and prod -- never
+> runs across the 2-replica mesh locally and in the cloud -- never
 > assume a single process. State/context/events that cross a node
 > boundary need explicit plumbing (proxied/forwarded requests don't
 > carry another node's session state; cross-node events need a routing
@@ -44,14 +37,14 @@ cross-node mesh bugs reproduces locally instead of only on staging.
 
 ## What "parity" means here
 
-| Aspect | Local cluster | Staging | Parity |
+| Aspect | Local cluster | Cloud cluster | Parity |
 |---|---|---|---|
 | Orchestrator | ArgoCD (k3d) | ArgoCD (AKS) | identical |
-| Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/staging/` | same base, env config differs |
+| Manifests | `deploy/k8s/overlays/local/` | `deploy/k8s/overlays/cloud/` | same base, values differ |
 | Node-type split | identity / voice / mcp / cognition / agent / planner / workbench / voice-agent | same | identical (the product `bff` head is pack-owned, #2204) |
 | Build model | engine (`Dockerfile`) for ALL node types (`memql-<type>:local`), product-agnostic | same product-agnostic engine images | identical -- a product's DSL mounts at runtime via `MEMQL_DSL_PATH` (the `dsl-bundle` component), not a per-product image; see [downstream-stacks.md](downstream-stacks.md) |
-| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**, matching prod; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width (memql#3766) |
-| Per-replica node id | `fieldRef: metadata.name` (downward API, same as staging) | `fieldRef: metadata.name` | **identical** |
+| Replicas per mesh node (default) | **1** (scale to 2 with `make scale N=2`) | **2**; scaled to 0 when idle | equivalent once scaled -- the saving is the idle time, not the width |
+| Per-replica node id | `fieldRef: metadata.name` (downward API, same as the cloud) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
 | Database | CloudNativePG Cluster (`memql-db`), 1 instance, WAL + base backups to Azurite | Tiger Cloud | config only -- **same operator + manifests since memql#3846**; only instances/sizes/backup destination differ |
@@ -195,7 +188,7 @@ make up-refresh
 following in order:
 
 1. Creates a k3d cluster (default name `memql`).
-2. Installs ArgoCD v2.13.3 (same version as staging) via
+2. Installs ArgoCD v2.13.3 (same version as the cloud) via
    `kubectl apply -k deploy/argocd/bootstrap`.
 3. Seeds k8s Secrets (`memql-secrets`, `memql-db-app-creds`,
    `livekit-secrets`, `telephony-secrets`) via `scripts/k3d/seed-secrets.sh`.
@@ -255,7 +248,7 @@ that differs from the one the cluster is already serving; rebuild with
 missing. Re-run `make secrets`.
 
 The reference is deliberately not optional. A node with no domain would fall
-back to the base manifests' staging placeholder issuer, boot, form a mesh, and
+back to the base manifests' placeholder issuer, boot, form a mesh, and
 reject every token with an error naming neither the domain nor the ConfigMap --
 so refusing to start is the honest failure.
 
@@ -278,7 +271,7 @@ The product SPA (`:8080`) and the product `bff` gRPC head (`:50051`) -- a
 plain engine `bff` node fronting the product's DSL bundle -- are NOT part of
 the engine repo's local overlay (#2204); they are wired from the product's own
 overlay (the client image + the `dsl-bundle` component). Clients (the Cockpit,
-SDKs) connect to the product-neutral `bff` node **exactly as in staging/prod** --
+SDKs) connect to the product-neutral `bff` node **exactly as in the cloud** --
 through the `api.memql.localhost` traefik front door (TLS on 443, mkcert
 `*.memql.localhost` wildcard, h2c gRPC to `svc/bff:50051`); no port-forward is in
 the connection path (see [environment-parity.md](environment-parity.md)). For
@@ -376,7 +369,7 @@ torn down and recreated the cluster, or if you've rotated the dev secret values.
 
 The local database is a **CloudNativePG Cluster** (`memql-db`), not a bare
 `postgres` pod — the same operator, the same operand image and the same four
-resource kinds staging and production run, with smaller numbers in them
+resource kinds the cloud runs, with smaller numbers in them
 (memql#3846). It archives WAL and takes base backups to the in-cluster
 **Azurite**, so the backup path is exercised locally rather than only in the
 cloud.
@@ -455,7 +448,7 @@ point in time rather than to the latest backup.
 > **Two local-only settings make this work, and both look like noise.** The
 > `ObjectStore`'s `destinationPath` is a full HTTP URL including the account
 > (`http://azurite:10000/devstoreaccount1/...`) rather than the `azure://`
-> form staging uses — barman rejects the scheme form against an emulator as
+> form the cloud uses — barman rejects the scheme form against an emulator as
 > *"malformed"*. And the azurite Deployment passes `--skipApiVersionCheck`,
 > because Azurite refuses the `x-ms-version` barman's SDK sends. Without either
 > one there are simply no backups, and **the Cluster still reports Ready** —
@@ -471,7 +464,7 @@ make down PURGE=1   # also remove the kubeconfig context
 ## Config-vs-topology audit
 
 The governing invariant: **along the mesh-delivery path, only config may differ
-from staging -- never topology or build.** Every divergence below is enumerated
+from the cloud -- never topology or build.** Every divergence below is enumerated
 with its justification.
 
 ### Invariants -- MUST stay identical
@@ -480,26 +473,26 @@ with its justification.
   workbench / voice-agent (the product `bff` head and SPA are pack-owned,
   #2204).
 - **Build source per node:** every node is the same **product-agnostic engine
-  image** (built here from this repo's Dockerfile; digest-pinned in staging) --
-  local and staging never diverge on build. Only the **DSL bundle** mounted at
+  image** (built here from this repo's Dockerfile; digest-pinned in the cloud
+  overlay) -- local and cloud never diverge on build. Only the **DSL bundle** mounted at
   runtime (`MEMQL_DSL_PATH`) differs per product (the #1053 rule, revised under
   platform consolidation #2472).
 - **`fieldRef: metadata.name`** for `MEMQL_NODE_ID` on every Deployment in
-  `deploy/k8s/base/` -- identical to staging.
-- **ArgoCD `ignoreDifferences`** on `/spec/replicas` -- identical to staging.
+  `deploy/k8s/base/` -- identical to the cloud.
+- **ArgoCD `ignoreDifferences`** on `/spec/replicas` -- identical to the cloud.
 - **Inter-node addressing** (`MEMQL_NODE_ADDRESS` / `MEMQL_PARENT_ADDRESS` /
   `MEMQL_WORKER_PEERS` / `MEMQL_WORKBENCH_REMOTE`) -- via k8s Service DNS
-  (same as staging, just cluster-local).
+  (same as the cloud, just cluster-local).
 
 ### Divergences -- justified
 
-| # | Divergence | Local | Staging | Why acceptable |
+| # | Divergence | Local | Cloud | Why acceptable |
 |---|---|---|---|---|
-| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment, matching prod (0 when idle) | Resource-constrained laptops locally; cost in staging, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2` / `ENV=staging`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
+| 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment (0 when idle) | Resource-constrained laptops locally; cost in the cloud, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
-| 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split used in staging can be reproduced by running PgBouncer as a separate pod if needed. |
+| 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split the cloud uses can be reproduced by running PgBouncer as a separate pod if needed. |
 | 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |
 
 ### Config-only -- EXPECTED to differ
@@ -507,7 +500,7 @@ with its justification.
 - `MEMQL_DATABASE_DSN` (local Postgres vs Tiger Cloud).
 - Blob backend (Azurite connection string vs Azure Blob).
 - LiveKit plane (local → a **LiveKit Cloud** project, creds from your env via
-  `livekit-secrets`; staging/prod → self-hosted `livekit-server`, key/secret
+  `livekit-secrets`; the cloud → self-hosted `livekit-server`, key/secret
   ESO-synced from Key Vault — Epic #2184).
 - Bootstrap/dev escape hatches (`MEMQL_IDENTITY_ALLOW_INSECURE_*`).
 - `MEMQL_IDENTITY_BASE_URL` / `MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER` (local port-forward
@@ -536,10 +529,10 @@ memql#2061 (Epic 0). The earlier Compose-based local stack is fully retired
 deleted, replaced by `make up` / `make dev` / `make down`. k3d + ArgoCD wins
 because:
 
-- It uses the same manifests and reconciliation path as staging (Kustomize +
+- It uses the same manifests and reconciliation path as the cloud (Kustomize +
   ArgoCD), so GitOps bugs reproduce locally.
-- `fieldRef: metadata.name` for `MEMQL_NODE_ID` is identical to staging.
-- The ArgoCD `ignoreDifferences` and selfHeal behavior matches staging exactly.
+- `fieldRef: metadata.name` for `MEMQL_NODE_ID` is identical to the cloud.
+- The ArgoCD `ignoreDifferences` and selfHeal behavior matches the cloud exactly.
 
 There is no *nginx* front door locally, but the local overlay DOES ship a
 k3s-bundled **traefik** front door on 443 for `https://identity.memql.localhost`

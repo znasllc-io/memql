@@ -125,7 +125,7 @@ const TABLE: Row[] = [
     receipt: null,
     // No `local` flag at all -- the shape of every cluster registered before
     // that field existed, and of every staging/production cluster since.
-    clusters: [{ name: "staging", endpoint: "api.staging.example.com:443" }],
+    clusters: [{ name: "staging", endpoint: "api.example.com:443" }],
     probe: fixedProbe(true),
     want: "absent",
     wantEvidence: { receipt: false, registry: false },

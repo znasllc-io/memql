@@ -13,11 +13,11 @@ Operational reference for the memQL node lifecycle introduced by the
 resilient-mesh epic (znasllc-io/memql#1259, Phase 3). It covers the explicit
 node state machine, the graceful SIGTERM drain, the operator on-demand
 maintenance trigger, the coordinated/ordered rollout driver, and the
-green-before-staging-deploy parity gate that gates every staging roll.
+green-before-deploy parity gate that gates every roll.
 
 This is the *lifecycle* companion to the cluster/secrets/promotion reference in
 [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, `make deploy`,
-genesis envelope, staging→prod promotion). Read that for *what* deploys; read
+genesis envelope, the digest bump). Read that for *what* deploys; read
 this for *how a node enters and leaves rotation cleanly* during one.
 
 ---
@@ -161,11 +161,11 @@ on-demand / cross-type ordered case (e.g. drain workers before the hub).
 
 ### Blue-green / green-before-deploy expectation
 
-A staging roll is **never** the place a multi-replica delivery bug is first seen.
+A cloud roll is **never** the place a multi-replica delivery bug is first seen.
 The contract (epic #1259's whole point):
 
-1. The cross-replica parity gate (§5) must be **green** before any staging
-   deploy — the multi-replica delivery path is exercised in CI, not staging.
+1. The cross-replica parity gate (§5) must be **green** before any cloud
+   deploy — the multi-replica delivery path is exercised in CI, not in the cloud.
 2. The roll itself is gap-free: graceful drain (§2) + ordered rollout (§4) keep
    ≥ N−1 replicas of every type serving throughout, and identity HA keeps auth
    up across the roll.
@@ -175,9 +175,9 @@ The contract (epic #1259's whole point):
 
 ---
 
-## 5. Parity-CI gate (green-before-staging-deploy)
+## 5. Parity-CI gate (green-before-deploy)
 
-The parity-CI workflow boots the 2-replica **staging-parity** cluster from
+The parity-CI workflow boots the 2-replica **cloud-parity** cluster from
 product-agnostic engine images and runs the cross-replica delivery gate; the
 product DSL is delivered at runtime via the dsl-bundle component, not
 carrier-built from a sibling Go repo. The harness itself is engine-side:
@@ -203,9 +203,9 @@ observable without a live LLM.
 **It gates the DEPLOY path, not the PR merge queue.** A full-cluster boot (~16
 containers, a cold-cache multi-image build, a 10m health wait) is heavy and
 flakier than a unit lane; a required check on `pull_request` would let one slow
-boot wedge the merge queue. So the workflow runs on the **staging-deploy
+boot wedge the merge queue. So the workflow runs on the **deploy
 trigger** (an overlay-digest bump landing in the deploy repo) and on
-`workflow_dispatch`, and its result is the green-before-staging-deploy signal
+`workflow_dispatch`, and its result is the green-before-deploy signal
 — **not** a branch-protection required check on PRs (`ci-required` in `ci.yml`
 stays the only required PR check in this repo).
 
@@ -227,7 +227,7 @@ present?` → skip) and never spuriously blocks:
 ## 6. Owner-finalization checklist (Phase 4 closeout)
 
 The remaining steps below are **owner actions** — they cannot be done from CI/a
-PR (secrets + a live staging deploy):
+PR (secrets + a live deploy):
 
 1. **Provision the two secrets** (`SIBLING_CHECKOUT_TOKEN`, `MEMQL_PACKAGES_TOKEN`)
    as repo/org Actions secrets. The `cluster-e2e` gate's `secrets present?` job
@@ -237,10 +237,10 @@ PR (secrets + a live staging deploy):
    passes on current `main` (it should, post-#1264).
 3. **Flip it to a required deploy gate** — wire `cluster-e2e / gate` as a required
    status on the deploy/promotion path (the overlay-digest-pin/promote step), so a
-   red parity gate blocks the staging roll. Keep it **off** the PR-merge-queue
+   red parity gate blocks the roll. Keep it **off** the PR-merge-queue
    required set.
-4. **Final coherent staging roll** — cut + promote the whole-epic release per
+4. **Final coherent roll** — cut + deploy the whole-epic release per
    [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (`make deploy
    VERSION=X`, deep smoke, pin the overlay's `{engine, bundle, client}` digests,
-   then promote), and verify the resilient-mesh stack on staging (no drop / no
+   then deploy), and verify the resilient-mesh stack on the cluster (no drop / no
    dup across replicas; clean drains on the roll).

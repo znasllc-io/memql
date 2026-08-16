@@ -144,9 +144,9 @@ spec:
             # Public identity host = the JWT issuer (staging convention: identity.<domain>).
             # Deployment-specific placeholders; a product stack's overlay patches the
             # real hosts. Unpatched, JWKS/issuer checks fail loudly (intended).
-            - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.staging.example.com" }
-            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.staging.example.com" }
-            - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "staging.example.com" }
+            - { name: MEMQL_IDENTITY_BASE_URL, value: "https://identity.example.com" }
+            - { name: MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER, value: "https://identity.example.com" }
+            - { name: MEMQL_IDENTITY_BOOTSTRAP_DOMAIN, value: "example.com" }
             # The dial address this cluster ADVERTISES to clients in
             # GET /.well-known/memql-config.json (memql#3399). It is the FRONT
             # DOOR -- api.<domain>:443, the one host whose ingress carries
@@ -162,14 +162,14 @@ spec:
             # value in an operator's sealed envelope can no longer reach the
             # wire. Same placeholder convention as the URLs above: a
             # deployment's overlay patches the real host.
-            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "api.staging.example.com:443" }
+            - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "api.example.com:443" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
             # The ops-edge host is listed alongside it because the memQL Portal
             # (memql#3315) is itself a browser client of this identity service:
             # it exchanges its authorization code cross-origin, and with the
             # origin absent that XHR dies in CORS with nothing in identity's
             # log to say why.
-            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.staging.example.com,https://api.staging.example.com" }
+            - { name: MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, value: "https://app.example.com,https://api.example.com" }
             # Only product-neutral ENGINE clients live in base: the terminal
             # cockpit and the portal, which are the two halves of one ops edge.
             # The product SPA's OAuth client is registered per-environment via
@@ -179,7 +179,7 @@ spec:
             # door, which is what it briefly was after the api.<domain>
             # rename and before this), so its redirect URI is that origin's
             # own /auth/callback.
-            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://portal.staging.example.com/auth/callback"]}]' }
+            - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://portal.example.com/auth/callback"]}]' }
             - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.

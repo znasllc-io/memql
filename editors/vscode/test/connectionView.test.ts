@@ -26,7 +26,7 @@ import type { ConnectionState } from "../src/connection/manager.js";
 const NOW = Date.parse("2026-08-14T12:00:00Z");
 
 function cluster(over: Partial<ClusterConfig> = {}): ClusterConfig {
-  return { name: "staging", endpoint: "api.staging.example.com:443", domain: "staging.example.com", ...over };
+  return { name: "staging", endpoint: "api.example.com:443", domain: "example.com", ...over };
 }
 
 function factOf(facts: readonly { key: string; value: string; note: string }[], key: string) {
@@ -85,7 +85,7 @@ test("the issuer is DERIVED when the entry carries none, and says so", () => {
   // POST to, and the operator is here because something in that chain failed.
   const view = connectionView({ cluster: cluster(), state: DISCONNECTED, nowMs: NOW });
   const issuer = factOf(view.connection, "issuer");
-  assert.equal(issuer.value, "https://identity.staging.example.com");
+  assert.equal(issuer.value, "https://identity.example.com");
   assert.equal(issuer.note, "derived from the domain");
 
   const explicit = connectionView({
@@ -207,9 +207,9 @@ test("the cluster's OWN site row outranks the composed host", () => {
   // which are what a first run actually reaches.
   const target = portalTarget(cluster(), [
     siteRow({ hostname: "shop.example.com", systemOwned: false }),
-    siteRow({ hostname: "console.staging.example.com", systemOwned: true }),
+    siteRow({ hostname: "console.example.com", systemOwned: true }),
   ]);
-  assert.equal(target.url, "https://console.staging.example.com/");
+  assert.equal(target.url, "https://console.example.com/");
   assert.equal(target.fromSiteRow, true);
 });
 
@@ -218,7 +218,7 @@ test("systemOwned is what identifies it, not a name", () => {
   // "portal".
   const target = portalTarget(cluster(), [siteRow({ hostname: "portal.example.com", systemOwned: false })]);
   assert.equal(target.fromSiteRow, false);
-  assert.equal(target.url, "https://portal.staging.example.com/");
+  assert.equal(target.url, "https://portal.example.com/");
 });
 
 test("the composed portal is its OWN origin, not a path on the api front door", () => {
@@ -227,7 +227,7 @@ test("the composed portal is its OWN origin, not a path on the api front door", 
   // has no Ingress rule of its own, so it falls through to the `/` h2c
   // catch-all and answers 415, an HTTP/1.1 request handed to a gRPC backend.
   const target = portalTarget(cluster(), []);
-  assert.equal(target.url, "https://portal.staging.example.com/");
+  assert.equal(target.url, "https://portal.example.com/");
   assert.equal(target.fromSiteRow, false);
   assert.doesNotMatch(target.url, /\/portal\/$/, "the sub-path form is what 415s");
 });

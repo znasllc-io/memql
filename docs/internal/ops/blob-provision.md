@@ -48,15 +48,15 @@ pod restart.
 ## Step 1 -- Run the provision script
 
 ```bash
-make blob-provision ENV=staging
+make blob-provision
 # or directly:
-bash scripts/deploy/blob-provision.sh --env=staging
+bash scripts/deploy/blob-provision.sh 
 ```
 
 Dry-run first if you want to preview without touching Azure:
 
 ```bash
-make blob-provision ENV=staging DRY_RUN=1
+make blob-provision DRY_RUN=1
 ```
 
 The script creates (idempotently):
@@ -226,7 +226,7 @@ If the storage account key is rotated (security incident, periodic rotation),
 re-run the provision script to get the new connection string:
 
 ```bash
-bash scripts/deploy/blob-provision.sh --env=staging
+bash scripts/deploy/blob-provision.sh 
 ```
 
 Then repeat Steps 2-5 with the new connection string. The script is idempotent --
