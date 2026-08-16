@@ -29,9 +29,10 @@ package memql
 //     concept declares. This is the mechanism for reads that have no
 //     declared binding to resolve from -- a raw client-supplied query
 //     string (`handleExecuteQuery` passes one straight through) -- and
-//     the ONLY mechanism available to graph expansion, which reaches
-//     rows through relationship definitions and has no filter to AND
-//     anything into.
+//     the ONLY mechanism available to two paths with no filter to AND
+//     anything into: graph expansion, which reaches rows through
+//     relationship definitions, and a TOP-LEVEL BUILTIN CALL, whose
+//     rows come out of a Go handler rather than a query (memql#3982).
 //
 // Neither mechanism reads the filter to decide whether to engage. That
 // is the whole of memql#3172 finding 1: the refused implementation
@@ -405,6 +406,92 @@ func admitRowAuthzNode(ctx context.Context, node memorynodes.MemoryNode) bool {
 // Undecidable fails closed here for that reason.
 func admitRowAuthzTraversal(ctx context.Context, node memorynodes.MemoryNode) bool {
 	return rowAuthzAdmits(ctx, node.Concept, node.ID, node.Payload) == rowAuthzAdmit
+}
+
+// admitRowAuthzBuiltinResult applies the row gate to a row handed back by
+// a TOP-LEVEL builtin call (memql#3982).
+//
+// THE SEAM. A Logic whose whole body is `return <builtin>({...})` resolves
+// to a bare *BuiltinFunctionExpression at plan.Root, and executeWith
+// dispatches that straight to evaluateBuiltinFunctionExpression and returns.
+// That short-circuit stepped around BOTH mechanisms this file implements:
+//
+//   - FILTER INJECTION never engaged, and arguably could not have.
+//     enforceRowAuthzOnPlan resolves the tier from plan.BoundConcept, and a
+//     builtin call binds no concept -- there is nothing for the predicate to
+//     bind to, and no filter to AND it into.
+//   - ROW ADMISSION never engaged either, and that is the actual defect.
+//     filterRowAuthzSet is applied inside evaluateExpressionSet, which this
+//     branch returns BEFORE reaching. The NESTED spelling of the same call
+//     (executor.go's `case *BuiltinFunctionExpression`, reached through
+//     evaluateExpressionSetWithContext) is covered, because its rows come
+//     back up through evaluateExpressionSet's gate. So one builtin call was
+//     gated and the identical call one syntactic level up was not.
+//
+// Rows produced this way are not always synthetic. Most builtins return a
+// result envelope under a made-up concept (`memql:validate`,
+// `integration:email:send`), which declares no tier and is unaffected. But
+// an integration capability is a builtin too, and several of them run SQL
+// against the node store and hand back the rows they read, carrying the
+// row's REAL concept and REAL payload -- `integration.embedding.findSimilar`
+// scans the concept out of the query, `integration.harnessRecall.recall`
+// takes it from caller args. Those are graph rows of a declared concept
+// reaching a caller having passed no per-row authorization at all.
+//
+// UNDECIDABLE FAILS CLOSED, matching admitRowAuthzTraversal rather than
+// admitRowAuthzNode, and the reason is the same one that splits those two.
+// admitRowAuthzNode admits the `granted` tier because on the filtered path
+// a filter ran and, for a bound construct, that filter now carries the
+// tier's spec as a top-level conjunct -- the join has already happened.
+// Here nothing ran: no filter, no injection, no join. There is nothing to
+// defer to, so a tier whose predicate is a relationship spec cannot be
+// satisfied on the strength of a row in isolation and must not be.
+//
+// A ROW WITH AN EMPTY CONCEPT IS ADMITTED, and that is a decision rather
+// than an oversight. rowAuthzDeclFor("") answers nil, so such a row lands
+// in rowAuthzAdmits' UNDECLARED branch -- which this file already argues at
+// length is "not safe and not unchanged -- unmeasured", and admits. Denying
+// it HERE would give the same row two different answers depending on which
+// seam it left through, with nothing to say which is right; the traversal
+// gate, whose semantics this one copies, admits it too. It also costs
+// nothing against the hole being closed: a row with no concept is by
+// definition not a row of a concept that declared a tier. If concept-less
+// rows should be denied, that is a change to rowAuthzAdmits' undeclared
+// branch and applies to every seam at once -- not a local override here.
+func admitRowAuthzBuiltinResult(ctx context.Context, node memorynodes.MemoryNode) bool {
+	return rowAuthzAdmits(ctx, node.Concept, node.ID, node.Payload) == rowAuthzAdmit
+}
+
+// filterRowAuthzBuiltinNodes drops every row of a top-level builtin's
+// result the caller may not see.
+//
+// It filters the SLICE, before nodesToMap, rather than the map afterwards.
+// The two are equivalent today -- nodesToMap only dedups by id and drops
+// blank ids -- but gating the handler's OWN output means the gate cannot be
+// routed around by a later change to how that output is keyed. Returns the
+// slice unchanged when nothing was denied, so the common case (no declared
+// concept in the result, which is every synthetic result envelope)
+// allocates nothing.
+func filterRowAuthzBuiltinNodes(ctx context.Context, nodes []memorynodes.MemoryNode) []memorynodes.MemoryNode {
+	if len(nodes) == 0 {
+		return nodes
+	}
+	denied := 0
+	for _, node := range nodes {
+		if !admitRowAuthzBuiltinResult(ctx, node) {
+			denied++
+		}
+	}
+	if denied == 0 {
+		return nodes
+	}
+	admitted := make([]memorynodes.MemoryNode, 0, len(nodes)-denied)
+	for _, node := range nodes {
+		if admitRowAuthzBuiltinResult(ctx, node) {
+			admitted = append(admitted, node)
+		}
+	}
+	return admitted
 }
 
 // filterRowAuthzSet drops every row of the fetched set the caller may

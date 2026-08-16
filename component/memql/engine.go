@@ -617,19 +617,45 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// BuiltinFunctionExpression at plan.Root. The query path below
 	// would treat it as a filter and trip "expected collection
 	// literal" at the SQL compile step, so dispatch it to the
-	// builtin executor directly here -- same path the inline
+	// builtin executor directly here -- same EXECUTOR the inline
 	// expression evaluator uses (executor.go's
 	// `case *BuiltinFunctionExpression`). The result is wrapped as
 	// the function's return value, matching how
 	// `executeLogicFunctionCall` packages a multi-step Logic's
 	// output.
+	//
+	// ROW-AUTHZ (memql#3982). "Same executor" is not "same path", and the
+	// difference was a live hole. The inline spelling returns its rows up
+	// through evaluateExpressionSet, which applies filterRowAuthzSet; this
+	// branch returns from executeWith directly and reached NEITHER
+	// enforcement mechanism -- not the injection seam (enforceRowAuthzOnPlan
+	// resolves the tier from plan.BoundConcept, and a builtin call binds no
+	// concept), and not the row gate. So one builtin call was gated and the
+	// identical call one syntactic level up was not. Most builtins return a
+	// synthetic result envelope under a made-up concept and are unaffected,
+	// but an integration capability is a builtin too and several read the
+	// node store directly, handing back real graph rows under their real
+	// concept. Gated here, before setOutput, with the traversal gate's
+	// fail-closed semantics: nothing filtered and nothing was injected, so
+	// there is no performed join for an undecidable tier to defer to.
+	//
+	// refuseRowAuthzWithoutActor (further down, on the query path) is
+	// deliberately NOT run here, and the omission is the honest answer
+	// rather than an oversight. It refuses a read whose INJECTED term would
+	// compare an owner field against an empty caller identity and match
+	// every row owned by nobody -- it guards `plan.RowAuthzInjected`, and
+	// nothing was injected into this plan because there was no binding to
+	// inject from. There is no term here to compare against an empty
+	// identity. The anonymous caller is handled where it actually arises:
+	// rowAuthzAdmits denies the owned tier outright when the actor is empty
+	// (finding 4 on the row side), which is the check this branch now runs.
 	if builtinCall, ok := plan.Root.(*BuiltinFunctionExpression); ok {
 		nodes, err := e.evaluateBuiltinFunctionExpression(ctx, builtinCall, 0)
 		if err != nil {
 			return nil, err
 		}
 		result := newExecuteResult(nil)
-		result.setOutput(nodesToMap(nodes))
+		result.setOutput(nodesToMap(filterRowAuthzBuiltinNodes(ctx, nodes)))
 		e.emitQueryExecutedEvent(startTime, result, false)
 		return result, nil
 	}
