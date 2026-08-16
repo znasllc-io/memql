@@ -1747,9 +1747,14 @@ function clustersRegistryChanged(clustersTree: ClustersTreeProvider): void {
 // file-watcher callback registered before the run surface exists) can reach it.
 let runOrchestrator: RunOrchestrator | undefined;
 
-// currentRunCluster resolves the selected cluster down to the three facts a run
+// currentRunCluster resolves the selected cluster down to the few facts a run
 // needs. Deliberately NOT the whole ClusterConfig: the PAT must never travel
 // into the orchestrator, and from there into a webview or a log.
+//
+// The recorded version joined that set in memql#4000. It is safe to carry for
+// the same reason the others are -- it is a release tag, not a credential --
+// and it is what lets a severed session say the cluster is older than the
+// plugin instead of only "stream closed".
 function currentRunCluster(
   clustersPath: string,
   conns: ConnectionManager
@@ -1768,6 +1773,10 @@ function currentRunCluster(
     name: cluster.name,
     label: cluster.displayName !== undefined && cluster.displayName !== '' ? cluster.displayName : cluster.name,
     local: cluster.local === true,
+    // The recorded release, so a severed session can say whether this cluster
+    // is older than the plugin (memql#4000). Undefined stays undefined -- an
+    // unlearned version produces no hint rather than a guess.
+    version: cluster.version,
   };
 }
 

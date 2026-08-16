@@ -85,6 +85,7 @@ import {
   type TrainingPrompt,
 } from "./report.js";
 import { SessionDefinitions } from "./session.js";
+import { isTransportClose, withVersionSkewHint } from "../version/skewHint.js";
 
 /** The four commands the training CodeLens offers. */
 export type TrainingActionKind = "dryRun" | "tryInSession" | "promote" | "demote";
@@ -632,12 +633,31 @@ export class TrainingActions {
     return { ok: true };
   }
 
+  // A failure that SEVERED THE SESSION gets one extra sentence when the
+  // cluster is recorded as older than this plugin (memql#4000).
+  //
+  // This is the exact path the motivating incident travelled: a plugin newer
+  // than its cluster sent a field that release refused, the refusal ended the
+  // session rather than failing the request, and every surface reported
+  // "stream closed" with nothing naming the skew. The hint is composed in
+  // `version/skewHint.ts` rather than here, so its wording is asserted once
+  // and every surface reporting a failure can reuse it -- and so this method
+  // stays a two-line adapter rather than growing prose.
   private fail(
     action: TrainingActionKind,
     request: TrainingRequest,
     err: unknown,
   ): TrainingOutcome {
-    return this.error(action, request, err instanceof Error ? err.message : String(err));
+    const message = err instanceof Error ? err.message : String(err);
+    return this.error(
+      action,
+      request,
+      withVersionSkewHint({
+        message,
+        reason: isTransportClose(err) ? "transport" : undefined,
+        recorded: this.deps.cluster()?.version,
+      }),
+    );
   }
 
   private refuse(

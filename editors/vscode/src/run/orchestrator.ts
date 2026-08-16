@@ -93,6 +93,14 @@ export interface RunCluster {
   label: string;
   /** True only when clusters.yaml marks it `local: true`. Absent means NOT local. */
   local: boolean;
+  /**
+   * The recorded release (memql#3990), when clusters.yaml carries one.
+   *
+   * Carried so a failure that severed the session can say whether this cluster
+   * is OLDER than the plugin -- see `version/skewHint.ts`. Undefined is the
+   * ordinary case and produces no hint rather than a guess.
+   */
+  version?: string;
 }
 
 export interface RunDeps {
