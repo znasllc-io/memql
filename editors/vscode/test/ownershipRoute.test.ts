@@ -72,12 +72,36 @@ test("evidenceSettlesIt needs all three, and says so one at a time", () => {
   assert.equal(evidenceSettlesIt({ ...installed, credentialMissing: false }), false);
 });
 
-test("a cluster local evidence cannot speak for falls through to the probe", async () => {
-  // Remote, or local with no receipt. #3885's mapping applies unchanged.
+test("a REMOTE cluster falls through to the probe, unchanged", async () => {
+  // #3885's mapping applies verbatim. Nothing here can be minted from this
+  // machine, so there is no third answer to offer.
   const remote: LocalEvidence = { local: false, ownerRecorded: false, credentialMissing: true };
   assert.equal(await resolveOwnershipRoute(remote, probeReturning("unclaimed")), "claim");
   assert.equal(await resolveOwnershipRoute(remote, probeReturning("claimed")), "signIn");
   assert.equal(await resolveOwnershipRoute(remote, probeReturning("unknown")), "signIn");
+});
+
+test("a LOCAL cluster with nothing stored is never dropped into a bare sign-in", async () => {
+  // The blind-probe case, and the one that would otherwise reproduce #3885's
+  // original complaint on the only cluster kind that cannot escape it: local
+  // TLS defeats the probe, so `unknown` is all it will ever say, and sign-in
+  // times out then falls back to a device code that cannot complete.
+  //
+  // Offering ownership costs a dialog whose other button is still "Sign in".
+  // If there is nothing to enrol against, the mint names which of the two
+  // things is missing; a timeout names none.
+  const local: LocalEvidence = { local: true, ownerRecorded: false, credentialMissing: true };
+  assert.equal(await resolveOwnershipRoute(local, probeReturning("unknown")), "enrol");
+  assert.equal(await resolveOwnershipRoute(local, probeReturning("claimed")), "enrol");
+  // A cluster whose wizard genuinely RENDERS is still sent there: /setup is the
+  // right answer when there is no owner at all, and a verified 200 says so.
+  assert.equal(await resolveOwnershipRoute(local, probeReturning("unclaimed")), "claim");
+});
+
+test("a local cluster that holds a credential is left alone", async () => {
+  const local: LocalEvidence = { local: true, ownerRecorded: false, credentialMissing: false };
+  assert.equal(await resolveOwnershipRoute(local, probeReturning("unknown")), "signIn");
+  assert.equal(await resolveOwnershipRoute(local, probeReturning("claimed")), "signIn");
 });
 
 test("CLAIM is reachable only on a real 200", () => {

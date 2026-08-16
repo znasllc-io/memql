@@ -145,13 +145,25 @@ export function receiptNamesAnotherCluster(clusterDomain: string, receiptDomain:
  * That is the load-bearing behaviour: on the cluster this issue is about the
  * probe cannot succeed, and a version that dialled anyway would spend a TLS
  * failure on every sign-in to learn nothing.
+ *
+ * THE LAST CLAUSE IS NOT A TIE-BREAK, it is the blind-probe case. A LOCAL
+ * cluster holding no credential is one this machine can act on, and the probe
+ * has just told us nothing about it -- so falling through to a bare sign-in
+ * would reproduce memql#3885's original complaint on the one cluster kind that
+ * cannot escape it: the browser flow times out and the device code cannot
+ * complete. Offering ownership instead costs a dialog whose other button is
+ * still "Sign in", and if there turns out to be nothing to enrol against, the
+ * mint says which of the two things is missing -- `noOwner` or `otherCluster`
+ * -- both of which name a next step. A sign-in timeout names none.
  */
 export async function resolveOwnershipRoute(
   evidence: LocalEvidence,
   probe: () => Promise<ClaimState>,
 ): Promise<OwnershipRoute> {
   if (evidenceSettlesIt(evidence)) return "enrol";
-  return routeForClaimState(await probe());
+  const probed = routeForClaimState(await probe());
+  if (probed === "claim") return "claim";
+  return evidence.local && evidence.credentialMissing ? "enrol" : "signIn";
 }
 
 /**
