@@ -223,9 +223,21 @@ jobs:
               #                  have to run.
               #   cmd/deploy-gate-check/Dockerfile -> the same manifest guard,
               #                  which asserts on both Dockerfiles by name.
+              #   docker/memql.Dockerfile -> release_stamp_test.go in the root
+              #                  package (memql#3998), which asserts BOTH image
+              #                  builds link the release into the binary and
+              #                  that neither re-adds the VERSION-file stamp.
+              #                  Same shape as the two above: no PR lane builds
+              #                  this image, but the guard over it is a Go test
+              #                  and has to run. It moved here out of the
+              #                  `docker/**` allow-list, whose "no gate reads
+              #                  them" reason stopped being true the moment
+              #                  that test named the file -- which is exactly
+              #                  the memql#3451 check firing as designed.
               - '.gitignore'
               - 'Dockerfile'
               - 'cmd/deploy-gate-check/Dockerfile'
+              - 'docker/memql.Dockerfile'
               #   deploy/db-image/** -> scripts/ci/db_image_wiring_test.go
               #                  (epic memql#3842 / #3844). The database operand
               #                  image's Dockerfile and its smoke test, both READ
