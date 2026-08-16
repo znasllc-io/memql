@@ -597,3 +597,67 @@ func TestPasskeyLoginPKCEConstantsMatch(t *testing.T) {
 	sum := sha256.Sum256([]byte(passkeyLoginVerifier))
 	require.Equal(t, passkeyLoginChallenge, base64.RawURLEncoding.EncodeToString(sum[:]))
 }
+
+// ---------------------------------------------------------------------
+// A LOGIN LEAVES A BROWSER SESSION, WHICHEVER FACTOR PROVED IT (#3920)
+// ---------------------------------------------------------------------
+
+// Identity has an SSO fast-path at /authorize: `hasValidSession` reads the
+// memql_admin cookie and mints an auth code without a second ceremony.
+// Magic-link left that cookie; the passkey path did not -- it minted an
+// auth code for the requesting client and returned, so a browser that had
+// just proved possession of a passkey held nothing, and the next
+// first-party surface started its own ceremony.
+//
+// The result was backwards: the stronger, phishing-resistant factor got
+// worse single sign-on than the weaker one. An operator who signed in
+// through the editor was asked for the passkey again by the portal.
+func TestHandleWebAuthnLoginFinish_LeavesABrowserSession(t *testing.T) {
+	a := newHTTPSoftwareAuthenticator(t)
+	s, _ := newPasskeyLoginServer(t, loginPasskeyRow(a, passkeyTestUserId, 0, true))
+
+	rec := runPasskeyLogin(t, s, a, passkeyTestUserId, pkceBeginRequest())
+	require.Equal(t, http.StatusOK, rec.Code, "body=%s", rec.Body.String())
+
+	var session *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == adminCookieName {
+			session = c
+		}
+	}
+	require.NotNil(t, session,
+		"a passkey login must leave the same session a magic-link login leaves, or /authorize has nothing to single-sign-on against")
+	require.NotEmpty(t, session.Value)
+
+	// The SHAPE has to match what startAdminSession writes, or the two
+	// factors disagree about what a login leaves behind -- which is the
+	// drift this whole change exists to remove.
+	require.True(t, session.HttpOnly, "the session cookie must not be readable from script")
+	require.Equal(t, "/", session.Path)
+	require.Equal(t, http.SameSiteLaxMode, session.SameSite)
+}
+
+// The cookie is a real session, not a placeholder: it carries the user
+// who authenticated, with the role off their directory row.
+func TestHandleWebAuthnLoginFinish_SessionNamesTheUserWhoAuthenticated(t *testing.T) {
+	a := newHTTPSoftwareAuthenticator(t)
+	s, _ := newPasskeyLoginServer(t, loginPasskeyRow(a, passkeyTestUserId, 0, true))
+
+	rec := runPasskeyLogin(t, s, a, passkeyTestUserId, pkceBeginRequest())
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var raw string
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == adminCookieName {
+			raw = c.Value
+		}
+	}
+	require.NotEmpty(t, raw)
+
+	claims, err := s.Issuer.VerifyAccessToken(raw, time.Now().UTC())
+	require.NoError(t, err, "the session cookie must carry a token this issuer verifies")
+	require.Equal(t, passkeyTestUserId, claims.Subject)
+	// Off the directory row the harness seeds, NOT a hard-coded default:
+	// a passkey login must not forge a role its holder does not have.
+	require.Equal(t, "writer", claims.Role)
+}
