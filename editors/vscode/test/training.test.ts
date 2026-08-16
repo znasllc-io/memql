@@ -19,6 +19,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  COMMAND_PROMOTE,
   TRAINING_STATES,
   countStates,
   gutterMarkFor,
@@ -181,7 +182,7 @@ test("a mixed file shows all three simultaneously, in document order", () => {
 test("the actions are OFF by default, because #3763 registers the commands", () => {
   // A lens posting to an unregistered command fails with "command not found",
   // and a click that does nothing teaches a developer the extension is broken.
-  for (const state of ["untrained", "drifted", "trained", "seeded"] as const) {
+  for (const state of ["untrained", "drifted", "trained", "seeded", "staged"] as const) {
     assert.deepEqual(trainingLensPlans([construct(state)])[0]?.actions, [], state);
   }
 });
@@ -191,16 +192,41 @@ test("with actions on, each state offers exactly what the design's table says", 
     trainingLensPlans([construct(state)], { offerActions: true })[0]?.actions.map((a) => a.title) ??
     [];
 
-  assert.deepEqual(of("untrained"), ["Dry-run", "Try in session", "Promote"]);
+  // The order is the ESCALATION: a session that ends, a private one that does
+  // not, and one everybody gets.
+  assert.deepEqual(of("untrained"), ["Dry-run", "Try in session", "Stage", "Promote"]);
   assert.deepEqual(of("drifted"), [
     "Dry-run",
     "Try in session",
+    "Stage",
     "Promote (updates the trained version)",
   ]);
   assert.deepEqual(of("trained"), ["Demote"]);
   // Not a disabled control: absent. A seeded construct needs a rollout, which
   // is not something this editor can offer.
   assert.deepEqual(of("seeded"), []);
+  // Staged is the only state with a Train, and Train is COMMAND_PROMOTE under a
+  // title that names the consequence -- on the wire it IS a promote.
+  assert.deepEqual(of("staged"), [
+    "Re-stage",
+    "Train (make it live for everyone)",
+    "Demote",
+  ]);
+});
+
+test("staged trains through the promote command, not a command of its own", () => {
+  // The wire has one verb for it, so the editor has one command for it. A second
+  // command would be a second name for one operation, and the two would then
+  // have to be kept doing the same thing.
+  const [plan] = trainingLensPlans([construct("staged")], { offerActions: true });
+  const train = plan?.actions.find((a) => a.title.startsWith("Train"));
+  assert.equal(train?.command, COMMAND_PROMOTE);
+});
+
+test("staged says who can call it, which is the whole of what makes it not trained", () => {
+  const [plan] = trainingLensPlans([construct("staged")]);
+  assert.match(plan?.detail ?? "", /callable by you and by nobody else/);
+  assert.match(plan?.detail ?? "", /Train it/);
 });
 
 test("drifted names what promoting will do, because it is not the same act", () => {
@@ -233,8 +259,9 @@ test("the status bar reports only what needs attention", () => {
     construct("drifted", "d"),
     construct("trained", "e"),
     construct("seeded", "f"),
+    construct("staged", "g"),
   ]);
-  assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1 });
+  assert.deepEqual(counts, { untrained: 3, drifted: 1, trained: 1, seeded: 1, staged: 1 });
   // The design's example, exactly.
   assert.equal(statusBarText(counts), "3 untrained · 1 drifted");
 });
@@ -245,6 +272,14 @@ test("an all-trained file says nothing", () => {
   assert.equal(statusBarText(countStates([construct("trained"), construct("seeded")])), "");
 });
 
+test("a staged construct needs no attention, so the status bar stays silent about it", () => {
+  // The bar exists to make "I saved but did not promote" impossible to miss. A
+  // staged construct HAS been acted on -- it is durable on the cluster -- so
+  // counting it here would put a permanent number in front of a developer
+  // iterating on one, which is how the warning stops being read.
+  assert.equal(statusBarText(countStates([construct("staged")])), "");
+});
+
 test("a zero count is omitted rather than shown as `0 drifted`", () => {
   assert.equal(statusBarText(countStates([construct("untrained")])), "1 untrained");
   assert.equal(statusBarText(countStates([construct("drifted")])), "1 drifted");
@@ -252,7 +287,7 @@ test("a zero count is omitted rather than shown as `0 drifted`", () => {
 
 test("unknown counts toward nothing", () => {
   const counts = countStates([construct("unknown", "a"), construct("unknown", "b")]);
-  assert.deepEqual(counts, { untrained: 0, drifted: 0, trained: 0, seeded: 0 });
+  assert.deepEqual(counts, { untrained: 0, drifted: 0, trained: 0, seeded: 0, staged: 0 });
   assert.equal(statusBarText(counts), "");
 });
 

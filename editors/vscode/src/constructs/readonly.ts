@@ -145,6 +145,11 @@ export function readonlyVerdict(input: ReadonlyInput): ReadonlyVerdict {
   if (constructs.some((c) => c.origin === "bundle") && input.clusterLocal !== true) {
     return { readonly: true, reason: "remoteCluster" };
   }
+  // `promoted` and `staged` both fall through to EDITABLE, which is the answer
+  // and not an omission: neither lives in a sealed tree, and for both the file
+  // on disk is the developer's own working copy of something they are entitled
+  // to change. Staged is if anything the clearer case -- the only person who can
+  // call it is the person looking at the file (memql#3928).
   return EDITABLE;
 }
 
@@ -154,6 +159,8 @@ export function readonlyVerdict(input: ReadonlyInput): ReadonlyVerdict {
  * A PROMOTED CONSTRUCT IS EXCLUDED, because it has no file -- its `originPath`
  * is "", and indexing that would put every construct that lives in the
  * database under one empty key and make an empty path look like a real file.
+ * A STAGED one is excluded by the same test for the same reason: it lives in
+ * the database too.
  */
 export function constructsByPath(
   constructs: readonly OriginatedConstruct[],

@@ -126,8 +126,8 @@ const capabilityTrainingState = "memqlTrainingState"
 // a pair of flags that can disagree.
 const methodClusterCatalog = "memql/clusterCatalog"
 
-// The five states. Fixed vocabulary, defined in the design's §2 and named here
-// exactly as the wire carries them.
+// The six states. Fixed vocabulary, defined in the design's §2, extended by
+// epic memql#3928, and named here exactly as the wire carries them.
 const (
 	// trainingStateUnknown is the state of a construct nothing can be said
 	// about: no cluster is connected, or its kind is one the catalog does not
@@ -145,6 +145,15 @@ const (
 	// never promoted; changing what the cluster runs needs a rollout, not a
 	// promote.
 	trainingStateSeeded = "seeded"
+	// trainingStateStaged: durable on the cluster and callable BY ITS AUTHOR
+	// ALONE (epic memql#3928). The middle tier -- persisted and replayed at boot
+	// like `trained`, private like a session define.
+	//
+	// It is a STATE rather than a lens over `trained`, because the two differ in
+	// the one thing the state vocabulary exists to decide (§4): the action set.
+	// A trained construct offers Demote; a staged one offers Train and Demote,
+	// and Train is an action no other state has.
+	trainingStateStaged = "staged"
 )
 
 // trainingStateParams is the request payload, and it is `{textDocument}` and
@@ -438,6 +447,24 @@ func trainingStateFor(declared sense.ConstructHash, entry catalogConstruct, answ
 		return trainingStateUnknown
 	case catalogAbsent:
 		return trainingStateUntrained
+	}
+	// STAGED IS DECIDED BEFORE THE SEEDED DEGRADE, and the placement is the
+	// whole of what makes the state reachable (memql#3928): `staged` is not
+	// `promoted`, so without this branch every staged construct would fall into
+	// the degrade below and render as `seeded` -- the one state with no actions
+	// at all, on the one tier whose entire point is that its author can act on
+	// it.
+	//
+	// It is also decided BEFORE the hash, on the same argument the paragraph
+	// above makes for `seeded`: drift is defined against a PROMOTION ("a
+	// construct the cluster knows, whose local source no longer matches what was
+	// promoted"), and a staged construct has no promoted version to have drifted
+	// from. Its action set -- Train, Demote -- is the same whether or not the
+	// buffer has moved on, and re-staging is how an edited staged construct is
+	// updated. Rendering it `drifted` would offer Promote as an update to a
+	// version that was never shared.
+	if entry.Origin == memql.ConstructOriginStaged {
+		return trainingStateStaged
 	}
 	if entry.Origin != memql.ConstructOriginPromoted {
 		// core, bundle -- and anything a client sends that is neither, which

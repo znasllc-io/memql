@@ -36,6 +36,7 @@ import type {
   DurableDemoteBundleResult,
   DurablePromoteBundleResult,
   SessionDefineBundleResult,
+  StageBundleResult,
   ValidateBundleResult,
 } from "@znasllc-io/memql-sdk-core/authoring";
 
@@ -66,6 +67,7 @@ import type { TrainingCluster, TrainingPrompt } from "../src/training/report.js"
 type Call =
   | { op: "validate"; sources: string }
   | { op: "define"; sources: string }
+  | { op: "stage"; sources: string }
   | { op: "promote"; sources: string; allowBreaking: boolean }
   | { op: "demote"; sources: string };
 
@@ -80,11 +82,13 @@ type Call =
 interface StubRegistry {
   promoted: string[];
   sessionDefined: string[];
+  /** The author's own durable tier -- separate from `promoted`, which is shared. */
+  staged: string[];
 }
 
 class StubEngine implements TrainingEngine {
   readonly calls: Call[] = [];
-  readonly registry: StubRegistry = { promoted: [], sessionDefined: [] };
+  readonly registry: StubRegistry = { promoted: [], sessionDefined: [], staged: [] };
 
   validateResult: ValidateBundleResult = { ok: true, diagnostics: [] };
   defineResult: SessionDefineBundleResult = {
@@ -109,6 +113,12 @@ class StubEngine implements TrainingEngine {
     diagnostics: [],
     error: "",
   };
+  stageResult: StageBundleResult = {
+    ok: true,
+    staged: [{ kind: "query", name: "spaceParticipants" }],
+    diagnostics: [],
+    error: "",
+  };
   throwOn: Call["op"] | undefined;
   // What `throwOn` throws. Overridable so a test can supply the SDK's
   // transport-reason error rather than a bare one (memql#4000).
@@ -127,6 +137,15 @@ class StubEngine implements TrainingEngine {
       for (const c of this.defineResult.defined) this.registry.sessionDefined.push(c.name);
     }
     return this.defineResult;
+  }
+
+  async stageBundle(sources: string): Promise<StageBundleResult> {
+    this.calls.push({ op: "stage", sources });
+    if (this.throwOn === "stage") throw this.throwWith;
+    if (this.stageResult.ok) {
+      for (const c of this.stageResult.staged) this.registry.staged.push(c.name);
+    }
+    return this.stageResult;
   }
 
   async durablePromoteBundle(
@@ -830,6 +849,92 @@ test("a successful override is reported as one", async () => {
 // -----------------------------------------------------------------------------
 // Demote
 // -----------------------------------------------------------------------------
+
+// -----------------------------------------------------------------------------
+// Stage (epic memql#3928)
+// -----------------------------------------------------------------------------
+
+test("a stage validates first, submits the CLOSURE, and refreshes the catalog", async () => {
+  // The closure, not the construct alone: a staged construct still has to bind,
+  // and a dependency the cluster does not serve to this author would leave it
+  // compiling and then failing to resolve.
+  const h = harness();
+  const outcome = await h.actions.stage(REQUEST);
+  assert.equal(outcome.status, "ok");
+  assert.deepEqual(h.engine.ops(), ["validate", "stage"]);
+  assert.equal(h.catalogRefreshes, 1);
+});
+
+test("a stage puts the construct in the author's tier and NOT in the shared one", async () => {
+  // Asserted against state rather than a call log, for the dry-run test's
+  // reason. The whole difference between this tier and a promote is which of
+  // these two lists moves.
+  const h = harness();
+  await h.actions.stage(REQUEST);
+  assert.deepEqual(h.engine.registry.staged, ["spaceParticipants"]);
+  assert.deepEqual(h.engine.registry.promoted, [], "staging must not make anything shared");
+  assert.deepEqual(h.engine.registry.sessionDefined, []);
+});
+
+test("the stage confirmation says who can call it, which is the whole distinction", () => {
+  // Durability is most of what a developer reads "this is real now" from, and
+  // staging has it. The sentence that has to land is the other half.
+  return (async () => {
+    const h = harness();
+    await h.actions.stage(REQUEST);
+    const detail = h.confirms[0]?.prompt.detail ?? "";
+    assert.match(detail, /callable BY YOU AND BY NOBODY ELSE/);
+    assert.match(detail, /concept cannot be staged/);
+    assert.equal(
+      /owner-only/.test(detail),
+      false,
+      "staging takes the authoring bar, so promising an owner-only refusal would be wrong",
+    );
+  })();
+});
+
+test("declining a stage stages nothing", async () => {
+  const h = harness();
+  h.answerConfirm(false);
+  const outcome = await h.actions.stage(REQUEST);
+  assert.equal(outcome.status, "declined");
+  assert.deepEqual(h.engine.ops(), []);
+  assert.deepEqual(h.engine.registry.staged, []);
+  assert.equal(h.catalogRefreshes, 0);
+});
+
+test("the engine's concept refusal is surfaced, not paraphrased", async () => {
+  // The engine names the concept and says to train it instead. That is a better
+  // sentence than anything this layer could reconstruct from a status code.
+  const h = harness();
+  h.engine.stageResult = {
+    ok: false,
+    staged: [],
+    diagnostics: [],
+    error:
+      'authoring: durable stage of concept "order" is not supported: ... train the concept (durable promote) and stage the constructs bound to it',
+  };
+  const outcome = await h.actions.stage(REQUEST);
+  assert.equal(outcome.status, "error");
+  if (outcome.status !== "error") return;
+  assert.match(outcome.message, /concept "order"/);
+  assert.deepEqual(h.engine.registry.staged, []);
+});
+
+test("a staged dependency joins the closure, because the cluster serves it to nobody else", async () => {
+  // The asymmetry with `trained` is the point: a promote landing a shared
+  // construct bound to a private one compiles on its author's session and
+  // resolves on no other.
+  const h = harness();
+  h.addDependency("/w/dsl/demo/specs.memql", "spec isActive { }\n", [
+    construct("isActive", "staged"),
+  ]);
+  await h.actions.stage(REQUEST);
+  assert.ok(
+    h.confirms[0]?.prompt.detail.includes("dsl/demo/specs.memql"),
+    "a staged dependency is carried, not assumed present",
+  );
+});
 
 test("a demote submits the construct alone and never compiles it", async () => {
   const h = harness();
