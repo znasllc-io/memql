@@ -132,6 +132,27 @@ patches:
       # default. See docs/public/operate/database-platform.md.
       - { op: add, path: /spec/storage/storageClass, value: managed-csi-premium-v2 }
       - { op: add, path: /spec/walStorage/storageClass, value: managed-csi-premium-v2 }
+      # A DEDICATED NODE POOL. The database is the one workload in the mesh
+      # whose neighbours can hurt it: Postgres is memory- and IO-sensitive, and
+      # a noisy agent pod sharing a node costs latency on every query rather
+      # than on its own workload. The taint is what makes the pool dedicated --
+      # a nodeSelector alone only says "put it there", not "keep others out".
+      #
+      # ONE POOL SERVES BOTH ENVIRONMENTS, which is the same choice the cluster
+      # already makes everywhere else (epic memql#3748: one cluster, two
+      # namespaces). Sized for production; staging's smaller database lands on
+      # it too and spends most of its life scaled to zero anyway.
+      - op: add
+        path: /spec/affinity/nodeSelector
+        value:
+          memql.io/node-pool: database
+      - op: add
+        path: /spec/affinity/tolerations
+        value:
+          - key: memql.io/dedicated
+            operator: Equal
+            value: database
+            effect: NoSchedule
       # Workload identity for the backup credentials: the instance pods
       # authenticate to Blob as a federated managed identity, so no storage key
       # exists in the cluster to leak or rotate.

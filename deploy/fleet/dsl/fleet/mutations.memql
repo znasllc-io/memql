@@ -1,0 +1,576 @@
+// fleet domain -- writes.
+//
+// THE OWNERSHIP RULE, stated once and obeyed everywhere below: `ownerUserId` is
+// stamped from `actor.userId`, never accepted from a caller argument, on every
+// insert AND on every update. Never from an argument, because a caller who can
+// name the owner can create rows owned by somebody else. On updates too,
+// because an update that omits it leaves the field to the read-merge, and a row
+// whose ownership depends on a merge is a row whose ownership can drift.
+//
+// THE THREE WRITERS. Who calls what matters more here than in most domains,
+// because some of these rows decide what infrastructure exists and what money
+// is owed:
+//
+//   1. THE CUSTOMER, through Orbit. `createSubscriber`, `updateSubscriberBilling`,
+//      `requestTierChange`, `setSubscriptionAddOns`, `requestCancellation`.
+//      These are ordinary owned-tier writes and they state INTENT: they move a
+//      row the automations then act on. Note what is NOT here -- there is no
+//      customer-callable mutation that sets a subscription to `active`, moves a
+//      period boundary, or writes a Stripe id. A customer cannot pay themselves.
+//
+//   2. THE STRIPE WEBHOOK PATH, through the inbound receiver's automations
+//      (task memql#3854). `activateSubscription`, `recordPaymentFailure`,
+//      `recordPaymentRecovery`, `setSubscriptionPeriod`, `linkStripeCustomer`,
+//      `linkStripeSubscription`. Every one of these is reached only from an
+//      automation triggered by a SIGNATURE-VERIFIED v1:platform:inboundRequest
+//      row. They run under the subscriber's own actor -- the automation resolves
+//      the owner from a subscription row it read first, and then writes as that
+//      user. The engine borrows the customer's authority rather than out-ranking
+//      it, exactly as component/campaigns does for a send, and for the same
+//      reason: no path in this domain should be able to touch a row its nominal
+//      owner could not.
+//
+//   3. THE LIFECYCLE AUTOMATIONS, through the provisioning actions.
+//      `createInstance` and the `*InstanceStatus` family. Same actor-borrowing
+//      rule.
+//
+// WHY THE STATUS TRANSITIONS ARE SEPARATE MUTATIONS rather than one
+// `setInstanceStatus(status:)`. A single parameterised setter would make every
+// transition legal from every state and would put the state machine in the
+// caller's hands -- including a caller replaying a webhook. Named transitions
+// keep the machine in the DSL where it can be read, and make an illegal move
+// (resuming something that was torn down) a mutation that does not exist rather
+// than an argument nobody validated.
+
+use fleet.concepts.{ instance, subscriber, subscription, usageMeter }
+
+// =============================================================================
+//   subscriber -- the account
+// =============================================================================
+
+/// Create the caller's memQL Cloud account. Called at signup, BEFORE checkout and before any
+/// instance exists, so a checkout that is abandoned leaves an account with no subscription rather
+/// than a half-written record. Owned: ownerUserId is stamped from actor.userId, so a caller can
+/// only ever create their own account.
+@actor
+mutate subscriber createSubscriber {
+  args {
+    subscriberId  string!
+    companyName   string!
+    billingEmail  string!
+  }
+  insert {
+    accept { companyName, billingEmail }
+    stamp {
+      id: args.subscriberId
+      ownerUserId: actor.userId
+      status: "active"
+    }
+  }
+}
+
+/// Update the account's billing details. Owned -- ownerUserId is re-stamped from actor.userId, and
+/// the engine's row-authz write guard refuses the update outright when the target row belongs to
+/// somebody else.
+@actor
+mutate subscriber updateSubscriberBilling {
+  args {
+    subscriberId  string!
+    companyName   string
+    billingEmail  string
+  }
+  update {
+    id: args.subscriberId
+    ownerUserId: actor.userId
+    companyName: args.companyName
+    billingEmail: args.billingEmail
+  }
+}
+
+/// Record the Stripe customer id on an account, once, after the first checkout session completes.
+/// Written from the webhook path. Not customer-callable in any meaningful sense: a caller who
+/// pointed their account at another customer's `cus_...` would be re-parenting somebody else's
+/// billing history, and the only thing standing between that and reality is that this value comes
+/// out of a signature-verified event body rather than out of a form.
+@actor
+mutate subscriber linkStripeCustomer {
+  args {
+    subscriberId      string!
+    stripeCustomerId  string!
+  }
+  update {
+    id: args.subscriberId
+    ownerUserId: actor.userId
+    stripeCustomerId: args.stripeCustomerId
+  }
+}
+
+/// Move an account into or out of delinquency. Written by the dunning automations. Delinquency does
+/// NOT stop service on its own -- see the concept's status doc for why cutting a customer off over
+/// an expired card loses both the customer and the invoice.
+@actor
+mutate subscriber setSubscriberStatus {
+  args {
+    subscriberId  string!
+    status        string!  @enum("active", "delinquent", "cancelled")
+  }
+  update {
+    id: args.subscriberId
+    ownerUserId: actor.userId
+    status: args.status
+  }
+}
+
+// =============================================================================
+//   subscription -- the plan
+// =============================================================================
+
+/// Create a subscription for the caller's account. Called from the checkout-completed webhook path
+/// with the tier Stripe actually charged for -- not from the signup form, which only expresses what
+/// the customer selected. The difference matters: a subscription created from an intent rather than
+/// from a payment is a subscription that can exist without money behind it.
+@actor
+mutate subscription createSubscription {
+  args {
+    subscriptionId  string!
+    subscriberId    string!
+    tier            string!  @enum("trial", "node", "graph", "mesh", "enterprise")
+    billingPeriod   string   @enum("monthly", "annual")
+    status          string!  @enum("trialing", "active", "past_due", "paused", "cancelled")
+    trialEndsAt     datetime
+  }
+  insert {
+    accept { subscriberId, tier, status, trialEndsAt }
+    stamp {
+      id: args.subscriptionId
+      ownerUserId: actor.userId
+      billingPeriod: args.billingPeriod ?? "monthly"
+      voiceAddOn: false
+      haAddOn: false
+    }
+  }
+}
+
+/// Record the Stripe subscription and price ids. Written from the webhook path; this is the join
+/// key every later Stripe event resolves against.
+@actor
+mutate subscription linkStripeSubscription {
+  args {
+    subscriptionId        string!
+    stripeSubscriptionId  string!
+    stripePriceId         string
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    stripeSubscriptionId: args.stripeSubscriptionId
+    stripePriceId: args.stripePriceId
+  }
+}
+
+/// Move a subscription to 'active' -- payment succeeded and service is owed. Also clears the grace
+/// clock, because a subscription that is active is not in any grace period by definition, and
+/// leaving a stale graceEndsAt behind is how a recovered account gets torn down a week later.
+@actor
+mutate subscription activateSubscription {
+  args {
+    subscriptionId  string!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    status: "active"
+    graceEndsAt: ""
+  }
+}
+
+/// Mirror the current billing period from Stripe. Its passing is what rolls the usage meters and
+/// resets allowances, so this is written on every `invoice.paid` rather than computed locally --
+/// month lengths, time zones and proration are Stripe's problem and getting them subtly wrong here
+/// would show up as an allowance that resets on the wrong day.
+@actor
+mutate subscription setSubscriptionPeriod {
+  args {
+    subscriptionId      string!
+    currentPeriodStart  datetime!
+    currentPeriodEnd    datetime!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    currentPeriodStart: args.currentPeriodStart
+    currentPeriodEnd: args.currentPeriodEnd
+  }
+}
+
+/// Move a subscription to 'past_due' and start the dunning clock. Service continues until
+/// graceEndsAt passes; see the concept doc.
+@actor
+mutate subscription recordPaymentFailure {
+  args {
+    subscriptionId  string!
+    graceEndsAt     datetime!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    status: "past_due"
+    graceEndsAt: args.graceEndsAt
+  }
+}
+
+/// Change the tier a subscription is on. The write the tier-change automation reacts to by
+/// re-rendering the tenant's values. Customer-callable: an upgrade is a customer decision, and the
+/// money follows through Stripe rather than being asserted here.
+@actor
+mutate subscription requestTierChange {
+  args {
+    subscriptionId  string!
+    tier            string!  @enum("trial", "node", "graph", "mesh", "enterprise")
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    tier: args.tier
+  }
+}
+
+/// Turn the paid add-ons on or off. Only meaningful on Node, where voice and HA are not in the base
+/// price; from Graph up the tier's own haIncluded wins and haAddOn is ignored.
+@actor
+mutate subscription setSubscriptionAddOns {
+  args {
+    subscriptionId  string!
+    voiceAddOn      bool!
+    haAddOn         bool!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    voiceAddOn: args.voiceAddOn
+    haAddOn: args.haAddOn
+  }
+}
+
+/// Schedule a cancellation. NOT immediate: the customer paid through the period, so the row stays
+/// active until cancelAt passes. What this write does is set the date the lifecycle sweep acts on.
+@actor
+mutate subscription requestCancellation {
+  args {
+    subscriptionId  string!
+    cancelAt        datetime!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    cancelAt: args.cancelAt
+  }
+}
+
+/// End a subscription: no further billing, and the grace clock on the data starts. Written by the
+/// lifecycle sweep when cancelAt passes, and by the `customer.subscription.deleted` webhook.
+@actor
+mutate subscription endSubscription {
+  args {
+    subscriptionId  string!
+    status          string!  @enum("paused", "cancelled")
+    graceEndsAt     datetime!
+  }
+  update {
+    id: args.subscriptionId
+    ownerUserId: actor.userId
+    status: args.status
+    graceEndsAt: args.graceEndsAt
+  }
+}
+
+// =============================================================================
+//   instance -- what runs
+// =============================================================================
+
+/// Record a tenant instance and start provisioning it. Written BEFORE any cluster object exists, so
+/// that a provisioning run which dies halfway leaves a row saying what was being attempted rather
+/// than an orphaned namespace nothing points at.
+///
+/// STAMPS `provisioning`, NOT `pending`, and the difference is the trigger. The lifecycle
+/// automations treat the transient statuses as COMMANDS (see automations.memql), so a row created
+/// as `pending` would sit there settled and inert -- correct-looking, and never provisioned.
+/// `pending` remains in the enum for a row written ahead of any intent to act on it; creating one
+/// is not how a customer's instance comes into being.
+///
+/// THE SHAPE ARGUMENTS ARE RESOLVED FROM THE TIER, NOT CHOSEN. A caller supplies instanceProfile,
+/// dbPreset and haEnabled, and a caller could therefore ask for `dedicated` on a Node subscription.
+/// What stops that is not this mutation -- it is that the caller is either the checkout automation
+/// (which reads them off the tier's own spec row) or Orbit (which does the same), and that a wrong
+/// shape is corrected on the next re-render from the same source. Recorded here because the
+/// argument list looks like a choice and is not one.
+@actor
+mutate instance createInstance {
+  args {
+    instanceId       string!
+    subscriptionId   string!
+    subscriberId     string!
+    name             string!
+    domain           string!
+    tier             string!  @enum("trial", "node", "graph", "mesh", "enterprise")
+    instanceProfile  string!  @enum("solo", "standard", "dedicated")
+    dbPreset         string!  @enum("entry", "mid", "top")
+    haEnabled        bool!
+    notifyEmail      string!
+  }
+  insert {
+    accept { subscriptionId, subscriberId, name, domain, tier, instanceProfile, dbPreset, haEnabled, notifyEmail }
+    stamp {
+      id: args.instanceId
+      ownerUserId: actor.userId
+      status: "provisioning"
+      argoApplication: args.name
+      namespace: args.name
+    }
+  }
+}
+
+/// Mark an instance as being brought up. The transient state Orbit renders as progress.
+@actor
+mutate instance markInstanceProvisioning {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "provisioning"
+    lastError: ""
+  }
+}
+
+/// Mark an instance as up and serving. Stamps provisionedAt, which is the customer-visible created
+/// date and the start of any uptime commitment.
+@actor
+mutate instance markInstanceRunning {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "running"
+    provisionedAt: now
+    suspendedAt: ""
+    lastError: ""
+  }
+}
+
+/// Mark an instance as scaled to zero with its data intact. Stamps suspendedAt so the teardown and
+/// hibernation sweeps can answer "how long has this been down" from one field read rather than by
+/// walking row history.
+@actor
+mutate instance markInstanceSuspended {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "suspended"
+    suspendedAt: now
+  }
+}
+
+/// Mark an instance as torn down. Terminal: the volumes are gone and a resume is no longer possible,
+/// which is why this is a different state from 'suspended' rather than a flag on it.
+@actor
+mutate instance markInstanceTornDown {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "torn_down"
+  }
+}
+
+/// Record a failed lifecycle transition, verbatim from the capability script's JSON error envelope.
+/// The row stays 'failed' until something retries it -- the control plane does not guess at whether
+/// a half-provisioned tenant should be resumed or destroyed.
+@actor
+mutate instance markInstanceFailed {
+  args {
+    instanceId  string!
+    lastError   string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    status: "failed"
+    lastError: args.lastError
+  }
+}
+
+/// Re-stamp what an instance is actually rendered at, after a tier change reconciles. Separate from
+/// the subscription's tier on purpose: this says what is RUNNING, which can lag what was BOUGHT by
+/// one reconciliation, and conflating the two is how a tier change reports success before the pods
+/// have rolled.
+@actor
+mutate instance setInstanceShape {
+  args {
+    instanceId       string!
+    tier             string!  @enum("trial", "node", "graph", "mesh", "enterprise")
+    instanceProfile  string!  @enum("solo", "standard", "dedicated")
+    dbPreset         string!  @enum("entry", "mid", "top")
+    haEnabled        bool!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    tier: args.tier
+    instanceProfile: args.instanceProfile
+    dbPreset: args.dbPreset
+    haEnabled: args.haEnabled
+  }
+}
+
+/// Stamp the last time this instance served a request. The input to idle hibernation. Written by
+/// the tenant's own heartbeat, because the control plane cannot see the tenant's traffic.
+@actor
+mutate instance recordInstanceActivity {
+  args {
+    instanceId  string!
+  }
+  update {
+    id: args.instanceId
+    ownerUserId: actor.userId
+    lastActivityAt: now
+  }
+}
+
+// =============================================================================
+//   usageMeter -- what is consumed
+// =============================================================================
+
+/// Open a meter for one (subscription, period, metric). The id is derived from those three values
+/// by the caller, so opening the same period twice lands on the same row rather than opening a
+/// second accumulator -- which is what makes metering idempotent under replay.
+///
+/// `included` is copied from the tier here, at period open, rather than looked up at check time.
+/// See the concept header: an allowance is a promise about a period, and a period already in flight
+/// must not be re-priced by a tier change or a price change.
+@actor
+mutate usageMeter openUsageMeter {
+  args {
+    meterId         string!
+    subscriptionId  string!
+    metric          string!  @enum("message_credits", "voice_minutes")
+    periodStart     datetime!
+    periodEnd       datetime!
+    included        float!
+  }
+  insert {
+    accept { subscriptionId, metric, periodStart, periodEnd, included }
+    stamp {
+      id: args.meterId
+      ownerUserId: actor.userId
+      consumed: 0
+      overage: 0
+      reportedToStripe: 0
+      status: "open"
+    }
+  }
+}
+
+/// Write the accumulated totals for a meter. The caller supplies the new absolute values rather
+/// than a delta, because the read-modify-write happens where the allowance decision happens -- the
+/// same place that has to answer "does this turn get admitted", and splitting the two would let a
+/// turn be admitted against a total that was already stale.
+@actor
+mutate usageMeter recordUsage {
+  args {
+    meterId   string!
+    consumed  float!
+    overage   float!
+  }
+  update {
+    id: args.meterId
+    ownerUserId: actor.userId
+    consumed: args.consumed
+    overage: args.overage
+  }
+}
+
+/// Record how much of the overage has been pushed to Stripe. The difference between this and
+/// `overage` is what the next push owes -- which is what makes the push idempotent under retry and
+/// self-healing after a missed one, rather than a permanently lost charge.
+@actor
+mutate usageMeter markUsageReported {
+  args {
+    meterId           string!
+    reportedToStripe  float!
+  }
+  update {
+    id: args.meterId
+    ownerUserId: actor.userId
+    reportedToStripe: args.reportedToStripe
+  }
+}
+
+/// Close a meter at period end. No further increments are accepted; a late one is then visibly
+/// refused rather than landing silently on a period that has already been invoiced.
+@actor
+mutate usageMeter closeUsageMeter {
+  args {
+    meterId  string!
+  }
+  update {
+    id: args.meterId
+    ownerUserId: actor.userId
+    status: "closed"
+  }
+}
+
+/// Mark a closed meter as fully reported -- its final overage reached Stripe and the row is history.
+@actor
+mutate usageMeter markUsageMeterReported {
+  args {
+    meterId  string!
+  }
+  update {
+    id: args.meterId
+    ownerUserId: actor.userId
+    status: "reported"
+  }
+}
+
+// =============================================================================
+//   tierSpec -- the price list has NO mutation, deliberately
+// =============================================================================
+//
+// There is no `publishTierSpec` here, and the omission is the design.
+//
+// The obvious shape -- an owner/admin-gated mutation that writes a tier row --
+// cannot actually BE owner/admin-gated in this domain. A mutation carries no
+// filter, so the DSL has no place to hang a caller predicate; the constructs
+// that are gated that way in the engine tree (createDeployment,
+// updateDeploymentStatus) are gated in GO, by deploycontrol.authorize, and
+// their `requiresOwnerOrAdmin` spec is documentation of that Go gate rather
+// than the gate itself. A bundle has no Go, so the same shape here would be a
+// mutation any authenticated caller could reach, on a @rowAuthz(public)
+// concept, with a doc comment claiming otherwise.
+//
+// That is not a theoretical hole. `included` on a usage meter is copied from
+// the tier at period open; `instanceProfile` and `dbPreset` decide what
+// infrastructure a purchase provisions. A caller who can write a tier row can
+// mint themselves an allowance -- which is precisely the unbounded-spend path
+// this epic's launch gate exists to forbid, arriving through the front door.
+//
+// So the catalog is SEEDED (seeds.memql) and a price change is a bundle change:
+// edit the seed, review it, deploy it. That is not a workaround, it is the
+// right amount of friction. A price is a promise to every subscription that
+// names the tier, and "somebody could change it from a console at 2am" is not a
+// property a price list should have. The GitOps path already gives us review,
+// an audit trail, and a rollback.
+//
+// A price RISE publishes a NEW tier and marks the old one 'grandfathered'
+// rather than editing the row in place: existing subscriptions name a tier by
+// value, so editing the row they name re-prices them retroactively and
+// silently.

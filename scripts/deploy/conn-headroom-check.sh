@@ -8,6 +8,21 @@
 # exceed the instance budget, so a fleet-growth or pool-size change can never
 # silently re-introduce the SQLSTATE 53300 storm.
 #
+# KEPT THROUGH THE TIGER CUTOVER (epic memql#3842 / #3848), unlike its two
+# sibling scripts, and the difference is worth stating. conn-surge-watch.sh and
+# deployer-pool-reap.sh managed TIGER'S SCARCITY -- a per-tier ceiling of ~59
+# usable slots and a managed-pooler artifact -- and the scarcity went away with
+# the provider. This gate is about OUR budget: the arithmetic below holds for
+# any Postgres, and self-hosting changed the NUMBER on the right-hand side
+# rather than the inequality. Losing it would have removed the one thing
+# standing between a replica-count bump and the storm it caused in #1817.
+#
+# What changed with the cutover: `max_connections` is ours to set (200 local,
+# 400 staging/prod, in deploy/k8s/components/cnpg-db), the reserved slots are
+# Postgres's own superuser reservation rather than Tiger's ops overhead, and
+# the DSN no longer has a `tiger` CLI fallback -- there is no Tiger service to
+# ask.
+#
 # Budget contract (from the spike findings,
 # docs/internal/ops/conn-exhaustion-53300-spike.md):
 #
@@ -33,8 +48,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # CONFIGURATION (env-overridable; staging defaults from the live #1817 capture)
 #=============================================================================
 
-DEFAULT_MAX_CONNECTIONS="${MAX_CONNECTIONS:-105}"   # SHOW max_connections (staging Tiger 2GB)
-DEFAULT_RESERVED="${RESERVED_CONNECTIONS:-17}"      # superuser(12) + Tiger ops(5)
+# The SMALLEST max_connections we run anywhere (the local/entry preset), so
+# the default is conservative: staging and production set 400, and --live
+# reads the real value off the instance anyway.
+DEFAULT_MAX_CONNECTIONS="${MAX_CONNECTIONS:-200}"   # deploy/k8s/components/cnpg-db
+# superuser_reserved_connections (3 by default) + CNPG's own instance-manager
+# and monitoring connections. No Tiger ops overhead to leave room for.
+DEFAULT_RESERVED="${RESERVED_CONNECTIONS:-10}"      # superuser + operator connections
 DEFAULT_MAX_OPEN="${MAX_OPEN_CONNS:-10}"            # per-pod pool default (database.go)
 DEFAULT_MANIFESTS="${MANIFESTS_DIR:-$REPO_ROOT/deploy/k8s/base}"
 
@@ -46,7 +66,6 @@ DEFAULT_MANIFESTS="${MANIFESTS_DIR:-$REPO_ROOT/deploy/k8s/base}"
 # (the 0.9.88 failure mode). No-op without --live (pure manifest projection).
 LIVE=false
 DSN=""
-TIGER_SVC="${TIGER_SVC:-xahn9ru4v6}"
 PGCONNECT_TIMEOUT_S="${PGCONNECT_TIMEOUT_S:-8}"
 LIVE_FOREIGN=0
 
@@ -70,8 +89,7 @@ Options:
                         read the real max_connections (needs a DSN). Catches a
                         deploy into an already-near-full instance (memql#1958).
   --dsn=DSN             DB DSN for --live (default: DIRECT_DSN /
-                        MEMORY_NODES_DATABASE_DIRECT_DSN / MEMQL_DATABASE_DSN
-                        / tiger CLI for \$TIGER_SVC)
+                        MEMORY_NODES_DATABASE_DIRECT_DSN / MEMQL_DATABASE_DSN)
   --help
 
 Exit: 0 = within budget, 1 = PEAK or steady exceeds budget (gate FAIL).
@@ -108,9 +126,6 @@ function resolve_live() {
     fi
     if [[ -z "$DSN" ]]; then
         DSN="${DIRECT_DSN:-${MEMORY_NODES_DATABASE_DIRECT_DSN:-${MEMQL_DATABASE_DSN:-}}}"
-        if [[ -z "$DSN" ]] && command -v tiger >/dev/null 2>&1; then
-            DSN="$(tiger db connection-string "$TIGER_SVC" --with-password 2>/dev/null)"
-        fi
     fi
     if [[ -z "$DSN" ]]; then
         echo "CONN-HEADROOM-WARN: --live found no DSN; skipping live adjustment"; return 0

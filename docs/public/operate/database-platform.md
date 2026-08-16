@@ -149,6 +149,178 @@ watches. Panels are fed by the same `cnpg_*` metrics the alerts use, scraped via
 
 ---
 
+## Cutover from Tiger Cloud (staging)
+
+The one-time migration off the managed service. Written to be executed rather
+than read: every step has a check, and the rollback is one command until the
+soak ends.
+
+**Why a maintenance-window dump/restore rather than replication.** Staging held
+~78k `MemoryNodes` rows at the last DR rehearsal and production does not exist
+yet, so the data is small enough that a window costs less than the machinery of
+logical replication — and a dump/restore has a rollback that is *doing nothing*,
+which replication does not.
+
+### Before the window
+
+1. **The new cluster is running and healthy.** `make status` shows the database
+   litmus green: phase, extensions applied, archiving OK.
+2. **A backup has completed** on the new cluster, and
+   `make db-restore-drill ENV=staging` passes. Do not migrate onto a database
+   whose recovery path is unproven.
+3. **Record the source counts** — these are what step 6 compares against:
+
+   ```bash
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM "MemoryNodes";'
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM timescaledb_information.continuous_aggregates;'
+   psql "$TIGER_DSN" -c 'SELECT count(*) FROM timescaledb_information.hypertables;'
+   ```
+
+### The window
+
+4. **Quiesce.** `make scale N=0 ENV=staging`. Nothing should be writing while
+   the dump runs; a dump taken under writes is a dump whose row counts will not
+   match and whose consistency you then have to reason about.
+
+5. **Dump and restore.**
+
+   ```bash
+   pg_dump --format=custom --no-owner --no-privileges "$TIGER_DSN" > staging.dump
+
+   # TimescaleDB REQUIRES the pre/post restore bracket. Without it the restore
+   # replays the extension's own catalog rows as ordinary data and the
+   # hypertables come back as plain tables -- which restores "successfully" and
+   # silently loses every hypertable, chunk and continuous aggregate.
+   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+     psql -U postgres -d memql -c "SELECT timescaledb_pre_restore();"
+
+   pg_restore --no-owner --no-privileges --dbname "$CNPG_DSN" staging.dump
+
+   kubectl exec -n memql-staging memql-db-1 -c postgres -- \
+     psql -U postgres -d memql -c "SELECT timescaledb_post_restore();"
+   ```
+
+6. **Spot-check against step 3.** Row count, hypertable count, and continuous
+   aggregate count must all match. A mismatch in the *third* number with the
+   first two correct is the pre/post bracket having been skipped.
+
+7. **Swap the DSNs in Key Vault** — `memory-nodes-database-dsn` and the direct
+   DSN — to `memql-db-rw`. ESO propagates on its refresh interval; force it
+   with `kubectl -n memql-staging annotate externalsecret memql-secrets
+   force-sync=$(date +%s) --overwrite`.
+
+   **`MEMQL_DB_SEARCH_PATH` travels unchanged.** It is not in the DSN and not in
+   this Secret — it is a committed value in the overlay's `environment.yaml`.
+   Changing the database must not change the schema boundary.
+
+8. **Roll the mesh, identity first.** Pods read their environment once, at
+   start: `kubectl rollout restart deploy/identity -n memql-staging`, wait for
+   it, then the rest. Mind that ArgoCD's image sync re-applies replicas —
+   `make scale N=2 ENV=staging` brings the mesh back to its committed width.
+
+9. **Confirm.** `/readyz` green across the mesh; the three database alerts
+   quiet; `make status` litmus green.
+
+### Rollback, until the soak ends
+
+**Swap the Key Vault DSNs back and roll identity first.** That is the whole
+procedure. Tiger stays running and untouched through the soak precisely so this
+stays a one-command answer — which is why deprovisioning is a *separate,
+later* step rather than part of the cutover.
+
+### Ending it
+
+Soak **1–2 weeks** with the alerts quiet. Then deprovision the Tiger service
+(`xahn9ru4v6`) and accept the data purge. Note that `teardown-staging.sh` no
+longer has a `--database` tier: there is nothing left for it to deprovision.
+
+## Proving HA: the failover litmus
+
+**HA is a property you either measure or merely believe.** A CNPG cluster
+reports `instances: 3` and *"Cluster in healthy state"* whether or not a
+promotion would actually work — a replica in recovery with a dead WAL receiver
+counts toward that number. The only way to know is to take the primary away and
+watch.
+
+```bash
+make db-failover-litmus CONFIRM=kill-the-primary ENV=staging
+```
+
+`ENV` defaults to **local** for the same reason it does on `make scale`: this
+target deletes a pod, and a remote default would aim a habit at production. The
+phrase is typed at the make level *and* passed through to the capability script,
+so neither layer is the one that made a destructive act easy.
+
+It asserts three separate things:
+
+| # | Assertion | Why it is separate |
+|---|---|---|
+| 1 | a **new primary** is promoted within the timeout | the property HA is bought for. Timed, because "eventually" is not failover |
+| 2 | a row **committed before** the kill is present after it | a replica far enough behind is promoted just as readily, and the cluster looks equally healthy afterwards. This is the outcome that would make the promotion worthless |
+| 3 | every instance returns to ready, streaming again | a cluster that promoted but never rebuilt its replica has spent its redundancy and now **reports HA while having none** |
+
+It **refuses** a single-instance cluster with exit 4 rather than failing it:
+there is nothing to promote to, so killing the primary is not a failover test —
+it is an outage with a script watching.
+
+**Run it on production bring-up acceptance, and after every operator upgrade.**
+An operator upgrade rolls every database pod, which is exactly when you want
+promotion proven rather than assumed.
+
+## Tabletop: losing a whole availability zone
+
+Production runs three instances, one per zone. **No restore is needed** — this
+is the case the third instance exists for.
+
+**Expected behaviour.** The zone's instance disappears. If it held the primary,
+CNPG promotes one of the two survivors; writes pause for the promotion window
+and resume. If it held a replica, nothing pauses. The cluster runs degraded
+(2/3) until the zone returns or Kubernetes reschedules onto a surviving zone —
+and it can reschedule, because the storage is per-instance rather than shared.
+
+**Verification steps.**
+
+1. `kubectl get cluster memql-db -n memql-prod` — expect `2/3 ready` and a
+   `currentPrimary` in a surviving zone.
+2. Confirm the application recovered: `/readyz` green, no sustained error rate.
+3. `MemqlDatabaseReplicaNotStreaming` should be **quiet** — the two survivors
+   must still be replicating to each other. If it fires, the cluster has one
+   working instance and no redundancy.
+4. Confirm WAL archiving is unaffected (`MemqlDatabaseWALArchivingFailing`
+   quiet). The backup account is ZRS, so it survives the zone independently.
+5. When the zone returns, the third instance rejoins and rebuilds. Watch
+   `readyInstances` return to 3 before treating the incident as closed.
+
+**What would make this go wrong.** The `top` preset sets
+`whenUnsatisfiable: DoNotSchedule` on the zone spread deliberately: it is better
+for the third instance to sit `Pending` than for two instances to land in one
+zone while the cluster reports three. A cluster that quietly co-located two
+instances would fail this tabletop *at the moment of the outage*, having looked
+correct until then.
+
+## Cost
+
+Recorded here because "cheaper" was the premise of the whole epic and a premise
+nobody measures stops being true quietly.
+
+| | Tiger Cloud (list) | Self-hosted (list) |
+|---|---|---|
+| Production, 4 CPU HA | ~$1,606/mo | ~$322–454/mo |
+| Per-client instance | ~$393/mo | ~$65–91/mo |
+
+Verified against live Tiger and Azure pricing on 2026-08-14; the epic's target
+is **≤ ~$460/mo list** for production (~$330 on a savings plan) and **≤ ~$40/mo**
+for staging.
+
+Two things to note when checking the actual bill:
+
+- **The savings-plan purchase for the database node pool is a billing action,
+  not a manifest change.** Nothing in this repository can make it happen.
+- **Storage grows forever.** `MemoryNodes` never evicts, and the storage line is
+  the one that moves without anybody changing anything. That was true on Tiger
+  too — at $0.883/GB-month, 11× Azure disk — which is part of why this epic
+  exists.
+
 ## Connection pooling
 
 **Not deployed, deliberately.** A PgBouncer `Pooler` is ready as an opt-in

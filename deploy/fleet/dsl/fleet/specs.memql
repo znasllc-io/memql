@@ -1,0 +1,115 @@
+// fleet domain -- reusable row predicates.
+//
+// All row-specs: each binds a concept in its signature, reads that concept's
+// payload fields bare, and compiles into a SQL WHERE fragment.
+//
+// NONE OF THESE IS AN AUTHORIZATION PREDICATE. Authorization in this domain is
+// the @rowAuthz tier on each concept plus the ownerUserId==actor.userId
+// conjunct every caller-scoped query names at top level, and both are written
+// at the call site deliberately -- a per-row-authz classifier that cannot SEE
+// the gate cannot classify the query, and a gate hidden inside a spec is a gate
+// that gets refactored away by someone who reads the spec's name and not its
+// body.
+//
+// What these DO carry is the handful of domain rules that have to mean the same
+// thing in more than one place. Each one is a sentence that would otherwise be
+// re-derived, slightly differently, by every caller that needs it -- which is
+// how "suspended" comes to mean one thing to the teardown sweep and another to
+// the billing sweep.
+
+use fleet.concepts.{ instance, subscription, tierSpec, usageMeter }
+
+// =============================================================================
+//   instance predicates
+// =============================================================================
+
+/// Matches instances that are up and serving. The ONE definition of "running", named positively:
+/// a sixth lifecycle state added later is not running until somebody says so here, whereas an
+/// exclusion list ("not suspended, not torn down, ...") would have quietly admitted it.
+spec instance isRunningInstance {
+  return status=="running"
+}
+
+/// Matches instances mid-transition -- the control plane is acting on them right now. A lifecycle
+/// automation must not start a second transition on one of these, and the fleet console renders
+/// them with progress rather than with a state. Grouped into one predicate because every caller
+/// that cares cares about all four equally.
+spec instance isTransitioningInstance {
+  return status=="provisioning" || status=="suspending" || status=="resuming" || status=="tearing_down"
+}
+
+/// Matches instances that are scaled to zero with their data intact -- the state suspend leaves and
+/// resume undoes. Deliberately distinct from 'torn_down', which has no data: conflating the two is
+/// how a resume gets attempted against a tenant whose volumes were deleted, and the failure lands
+/// as a confusing reconciliation error rather than as a refusal.
+spec instance isSuspendedInstance {
+  return status=="suspended"
+}
+
+/// Matches instances that still hold data the customer could get back -- everything except torn
+/// down. The predicate a teardown sweep and an export offer both need, and the reason it is stated
+/// once: "does this customer still have their data" must not be answerable two ways.
+spec instance isRecoverableInstance {
+  return status!="torn_down"
+}
+
+// =============================================================================
+//   subscription predicates
+// =============================================================================
+
+/// Matches subscriptions that entitle their owner to a running instance: trialing, active, or
+/// past_due. past_due IS in this set on purpose -- dunning does not cut service, it starts a clock
+/// (see subscriber.status). A subscription that has run out of clock is 'paused', which is not here.
+spec subscription isServiceableSubscription {
+  return status=="trialing" || status=="active" || status=="past_due"
+}
+
+/// Matches subscriptions in their trial period. The trial automations (task memql#3856) sweep on
+/// this rather than on "tier=='trial'", because tier is what they will buy and status is where they
+/// are -- a subscription can be trialing on a Graph tier, which is exactly what the card-required
+/// trial offers.
+spec subscription isTrialingSubscription {
+  return status=="trialing"
+}
+
+/// Matches subscriptions whose payment has failed and whose grace period is running. The dunning
+/// sweep's input set.
+spec subscription isDunningSubscription {
+  return status=="past_due"
+}
+
+/// Matches subscriptions that have ended and whose instances are eligible for teardown once grace
+/// expires. Both terminal-ish states, because both mean "stop charging and start the clock on the
+/// data": 'cancelled' is the customer's choice, 'paused' is ours.
+spec subscription isEndedSubscription {
+  return status=="cancelled" || status=="paused"
+}
+
+// =============================================================================
+//   tierSpec predicates
+// =============================================================================
+
+/// Matches tiers a new customer may buy today. Grandfathered and hidden tiers stay readable -- the
+/// subscriptions on them still need their numbers -- but they are not offered.
+spec tierSpec isBuyableTier {
+  return status=="available"
+}
+
+// =============================================================================
+//   usageMeter predicates
+// =============================================================================
+
+/// Matches meters still accepting increments. An increment against a closed or reported meter is a
+/// bug (usage arriving after a period was invoiced), and naming the live state positively is what
+/// turns that bug into a refusal instead of a silent write onto settled history.
+spec usageMeter isOpenMeter {
+  return status=="open"
+}
+
+/// Matches meters with overage that has not yet been pushed to Stripe. The billing sweep's input
+/// set. Expressed as a field comparison rather than as a status, because "reported" is a statement
+/// about the whole row and this is a statement about the delta -- a meter can be open, still
+/// accumulating, and already owe Stripe a usage record for what it has accrued so far.
+spec usageMeter hasUnreportedOverage {
+  return overage > reportedToStripe
+}

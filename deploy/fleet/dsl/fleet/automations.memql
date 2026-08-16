@@ -1,0 +1,314 @@
+// fleet domain -- ORCHESTRATION: the memQL Cloud control plane's controller
+// (epic memql#3852, task memql#3853).
+//
+// THE DESIGN IN ONE SENTENCE: the v1:fleet:instance row is DESIRED STATE, and
+// these automations reconcile the world to it.
+//
+// That is the standard controller shape, and choosing it here bought three
+// things that are otherwise fiddly:
+//
+//   1. NO CROSS-ROW LOOKUPS. Every automation below reads only the row that
+//      triggered it. An instance row carries its slug, its domain, its profile,
+//      its preset and its HA flag, so provisioning needs no join -- which
+//      matters because an automation's actor is not the row's owner, and a
+//      caller-scoped query from inside one would return nothing while looking
+//      entirely correct.
+//
+//   2. NO LOOPS, BY CONSTRUCTION. The COMMAND vocabulary is the transient
+//      statuses (`provisioning`, `suspending`, `resuming`, `tearing_down`).
+//      Every action automation fires only on one of those and ends by writing a
+//      SETTLED status (`running`, `suspended`, `torn_down`, `failed`) that no
+//      action automation triggers on. A controller whose own writes cannot
+//      re-trigger it needs no generation counter, no reconcile lock and no
+//      debounce -- three things that are easy to add and hard to be sure of.
+//      logic.memql states the corollary that constrains future changes.
+//
+//   3. AN HONEST PROGRESS SIGNAL FOR ORBIT. The console renders provisioning
+//      progress by reading these transitions, and deliberately never reaches
+//      ArgoCD from the browser: a console that queries the cluster's control
+//      plane needs credentials for the cluster's control plane, which is a far
+//      larger blast radius than "can read my own rows" for the sake of a
+//      progress bar.
+//
+// WHY THE WELCOME EMAIL DOES NOT CARRY AN ENROLMENT LINK, which is a deliberate
+// deviation from this task's acceptance criterion and an improvement on it. An
+// enrolment token is a CREDENTIAL. Staging it in an outbound row would put a
+// live credential in the graph at rest, in plaintext, in a concept whose own
+// field documentation says "never secret material" -- and every other
+// credential in this system is stored as a SHA-256 hash for exactly that
+// reason. So the welcome email points at the tenant's own sign-in page and the
+// credential ceremony happens there, through identity's magic-link or passkey
+// path, which stores only hashes. The enrolment-token route stays available to
+// an operator (scripts/install/enrolment-link.sh, memql#3408); what it does not
+// do is travel through a graph row on the way to a mailbox.
+//
+// DELIVERY IS AT-LEAST-ONCE, so every automation here has to be idempotent
+// against a redelivered event. Two properties carry that: the provisioning
+// script is a pure function of its parameters (a replay rewrites byte-identical
+// files and reports changed=false), and suspend / resume / teardown are
+// naturally idempotent operations on a cluster. The status writes are
+// last-write-wins onto the same row.
+
+use fleet.actions.{ provisionTenant, resumeTenant, suspendTenant, tearDownTenant }
+use fleet.logic.{ instanceCommand, teardownConfirmationPhrase }
+use fleet.mutations.{ markInstanceRunning, markInstanceSuspended, markInstanceTornDown }
+use platform.mutations.{ stageOutboundRequest }
+
+// =============================================================================
+//   Provisioning
+// =============================================================================
+
+/// A new tenant instance row exists: render its overlay and its ArgoCD Application, adopt it, and
+/// mark it running. Fires on row CREATION, where the status is `provisioning` -- the settled
+/// `pending` state exists for a row written ahead of any intent to act on it, and is not what
+/// createInstance stamps.
+@trigger(event="node.created", concept="v1:fleet:instance", partition="*")
+automation provisionInstanceOnCreate {
+  args {
+    id              any
+    name            any
+    domain          any
+    instanceProfile any
+    dbPreset        any
+    haEnabled       any
+    status          any
+  }
+
+  step command {
+    logic instanceCommand ( status )
+  }
+  step render {
+    switch steps.command.result {
+      case "provision" {
+        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, dryRun: false)
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "provision" {
+        markInstanceRunning {
+          instanceId: id
+        }
+      }
+      default { }
+    }
+  }
+}
+
+/// An existing instance was moved back to `provisioning` -- a tier change, an HA add-on, or an
+/// operator re-render. Runs the identical render, which is idempotent: unchanged inputs rewrite
+/// byte-identical files and ArgoCD reconciles nothing.
+///
+/// A SEPARATE AUTOMATION FROM ITS CREATE TWIN rather than one with two triggers, because the two
+/// events carry different meanings even where they run identical steps: this one is the tier-change
+/// path, and the day it needs to differ -- draining connections before a downgrade, say -- it is
+/// already its own construct rather than a branch inside a shared one.
+@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+automation reRenderInstanceOnShapeChange {
+  args {
+    id              any
+    name            any
+    domain          any
+    instanceProfile any
+    dbPreset        any
+    haEnabled       any
+    status          any
+  }
+
+  step command {
+    logic instanceCommand ( status )
+  }
+  step render {
+    switch steps.command.result {
+      case "provision" {
+        action provisionTenant(tenant: name, domain: domain, profile: instanceProfile, dbPreset: dbPreset, ha: haEnabled, dryRun: false)
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "provision" {
+        markInstanceRunning {
+          instanceId: id
+        }
+      }
+      default { }
+    }
+  }
+}
+
+// =============================================================================
+//   Suspend / resume
+// =============================================================================
+
+/// An instance was asked to suspend -- a trial that expired, a grace period that ran out, or an
+/// idle hibernation. Scales it to zero and settles it as `suspended`, with every volume, backup and
+/// namespace intact.
+///
+/// THE DATABASE STAYS UP (includeDatabase defaults false in the script). Scaling it down saves more,
+/// but adds resume latency and takes the tenant's backups offline while it is down; task memql#3856
+/// measures which one hibernation should default to.
+@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+automation suspendInstanceOnRequest {
+  args {
+    id     any
+    name   any
+    status any
+  }
+
+  step command {
+    logic instanceCommand ( status )
+  }
+  step scaleDown {
+    switch steps.command.result {
+      case "suspend" {
+        action suspendTenant(tenant: name, dryRun: false)
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "suspend" {
+        markInstanceSuspended {
+          instanceId: id
+        }
+      }
+      default { }
+    }
+  }
+}
+
+/// An instance was asked to resume -- a trial converted, a payment recovered, or a hibernating
+/// tenant was touched. Brings it back up at the counts its overlay declares, INCLUDING a tier change
+/// made while it was down, because the mesh is restored by handing sync back to ArgoCD rather than
+/// by scaling to remembered numbers.
+///
+/// Resuming a torn-down instance is impossible and is not guarded here: `torn_down` is a settled
+/// status, so nothing can move a torn-down row to `resuming` without going through a mutation that
+/// would have to say so. That is why the two are different statuses rather than a flag on one.
+@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+automation resumeInstanceOnRequest {
+  args {
+    id     any
+    name   any
+    status any
+  }
+
+  step command {
+    logic instanceCommand ( status )
+  }
+  step scaleUp {
+    switch steps.command.result {
+      case "resume" {
+        action resumeTenant(tenant: name, dryRun: false)
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "resume" {
+        markInstanceRunning {
+          instanceId: id
+        }
+      }
+      default { }
+    }
+  }
+}
+
+// =============================================================================
+//   Teardown
+// =============================================================================
+
+/// An instance was asked to tear down -- a grace period expired after cancellation, or a trial was
+/// never converted. Takes a final backup and destroys the tenant. Irreversible.
+///
+/// THE CONFIRMATION PHRASE IS COMPOSED, NOT CONSTANT. tenant-teardown.sh demands
+/// `teardown <tenant>`, and composing it per tenant is what preserves the property the phrase exists
+/// for: a confirmation that names one tenant cannot authorise the destruction of another. An
+/// automation passing a constant would have quietly removed that.
+///
+/// THE BACKUP FAILING ABORTS THE TEARDOWN. That is the script's behaviour, and the row is left in
+/// `tearing_down` rather than settled -- a state that says what was being attempted, which is what
+/// an operator needs and what a row that looked finished would deny them.
+@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+automation tearDownInstanceOnRequest {
+  args {
+    id     any
+    name   any
+    status any
+  }
+
+  step command {
+    logic instanceCommand ( status )
+  }
+  step phrase {
+    logic teardownConfirmationPhrase ( tenant: name )
+  }
+  step destroy {
+    switch steps.command.result {
+      case "teardown" {
+        action tearDownTenant(tenant:  name, confirm: steps.phrase.result, dryRun:  false)
+      }
+      default { }
+    }
+  }
+  step settle {
+    switch steps.command.result {
+      case "teardown" {
+        markInstanceTornDown {
+          instanceId: id
+        }
+      }
+      default { }
+    }
+  }
+}
+
+// =============================================================================
+//   Onboarding
+// =============================================================================
+
+/// A subscriber's instance reached `running` for the first time: tell them where it is.
+///
+/// Staged as an outbound row rather than sent, which is the zero-Go delivery surface a product
+/// bundle has (docs/public/operate/outbound-delivery.md) -- the engine's outbound worker drains it,
+/// retries it, and records the outcome, none of which this bundle has to implement.
+///
+/// It fires on the `running` transition, which suspend and resume also produce, so a resumed tenant
+/// gets this message again. That is deliberate for now and it is the honest trade: the alternative
+/// is a "welcomed" flag on the instance row, which is state that exists only to suppress an email
+/// and which drifts the first time a row is rebuilt. A second "your instance is ready" after a
+/// resume is a mildly redundant email; a missed one is a customer who does not know their instance
+/// exists. Task memql#3855 revisits it when Orbit owns the onboarding sequence.
+@trigger(event="node.updated", concept="v1:fleet:instance", partition="*")
+automation welcomeOnInstanceRunning {
+  args {
+    id          any
+    name        any
+    domain      any
+    notifyEmail any
+    status      any
+  }
+
+  step notify {
+    switch status {
+      case "running" {
+        stageOutboundRequest {
+          requestId:   concat("fleet-welcome-", id),
+          medium:      "email",
+          target:      notifyEmail,
+          subject:     "Your memQL instance is ready",
+          body:        concat("Your memQL instance is running at https://", domain, " -- sign in there to get started."),
+          requestedBy: "fleet.welcomeOnInstanceRunning"
+        }
+      }
+      default { }
+    }
+  }
+}

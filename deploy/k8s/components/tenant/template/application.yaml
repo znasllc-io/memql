@@ -1,0 +1,78 @@
+# PER-TENANT ArgoCD Application TEMPLATE (epic memql#3852, task memql#3853).
+#
+# Rendered by scripts/fleet/tenant-provision.sh into
+# deploy/argocd/tenants/<tenant>.yaml. Placeholders: __TENANT__, __REPO_URL__,
+# __TARGET_REVISION__.
+#
+# ONE APPLICATION PER TENANT is the unit of isolation the fleet operates on.
+# Suspend, resume and teardown are all statements about this object: suspend
+# turns automated sync off and scales the workloads to zero, resume reverses it,
+# teardown deletes the Application and lets the finalizer cascade. A tenant is
+# therefore something ArgoCD can describe -- `argocd app get <tenant>` is the
+# honest answer to "what is that customer running", rather than a query against
+# our own control plane, which is exactly the answer you want when the control
+# plane is the thing that is broken.
+#
+# `project: memql` -- the AppProject that bounds what the mesh reconciler may
+# do. A tenant renders the same base as staging and production and needs
+# nothing they do not, so it belongs inside that boundary rather than in the
+# wide-open `default` project the cluster-operator Applications use.
+#
+# PRUNE IS ON, unlike the operator Applications. A tenant overlay owns
+# everything in its namespace and nothing outside it, so a resource that
+# disappears from the overlay SHOULD disappear from the cluster -- that is how a
+# tier downgrade takes replicas away. The operators turn prune off because
+# pruning a CRD owner deletes every CR in the cluster; a tenant owns no CRDs.
+#
+# SELF-HEAL IS ON, and it is what makes suspend a fleet operation rather than a
+# kubectl one. `kubectl scale` against a self-healing Application is reverted on
+# the next reconcile, so the suspend script turns automated sync OFF FIRST and
+# scales second. Doing it the other way round is a suspend that silently comes
+# back up.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: __TENANT__
+  namespace: argocd
+  labels:
+    memql/tenant: __TENANT__
+    app.kubernetes.io/part-of: memql-cloud
+  finalizers:
+    # Teardown deletes this Application; the finalizer is what makes that delete
+    # cascade to the namespace's workloads and volumes instead of orphaning
+    # them. A torn-down tenant that leaves its PVCs behind is a tenant we keep
+    # paying for.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: memql
+  source:
+    repoURL: __REPO_URL__
+    targetRevision: __TARGET_REVISION__
+    path: deploy/k8s/tenants/__TENANT__
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: __TENANT__
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      # CNPG's CRDs exceed the annotation size limit kubectl-style apply uses to
+      # stash last-applied-configuration.
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  # /spec/replicas is ignored so that a suspend (scale to zero) is a runtime
+  # override selfHeal will not revert. The overlay's counts are what a resume
+  # returns to -- the same arrangement deploy/argocd/apps/memql-prod.yaml uses
+  # to make `make scale N=<n> ENV=prod` stick.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas

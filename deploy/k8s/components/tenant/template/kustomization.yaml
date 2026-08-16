@@ -1,0 +1,93 @@
+# PER-TENANT OVERLAY TEMPLATE (epic memql#3852, task memql#3853).
+#
+# Rendered by scripts/fleet/tenant-provision.sh into
+# deploy/k8s/tenants/<tenant>/kustomization.yaml. The double-underscored tokens
+# below are substituted; nothing else about the file changes, which is the
+# point -- a tenant differs from staging and production in VALUES only, so the
+# thing that renders one is a substitution rather than a generator.
+#
+# Do not write an example token in a comment here: render_test.go scans this
+# directory for the token pattern and asserts none of what it finds survives
+# into a rendered overlay, so a literal in prose reads to it as a substitution
+# somebody forgot.
+#
+# READ THIS FILE AGAINST deploy/k8s/overlays/prod/kustomization.yaml. Same base,
+# same components, same shape. A namespace, a domain, a profile preset and a
+# database preset are what a customer buys.
+#
+# THIS FILE IS NOT ITSELF A KUSTOMIZATION and must not be built: it lives under
+# a component directory but is excluded from every render, because its
+# placeholders are not valid values. component_test.go renders the SUBSTITUTED
+# form instead, which is the form that has to work.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# The tenant's namespace. Equal to the tenant slug, which is also its ArgoCD
+# Application name and its subdomain label -- one name, validated once as a DNS
+# label at the mutation that creates the instance row.
+namespace: __TENANT__
+
+resources:
+  - ../../base
+  - environment.yaml
+  - domain.yaml
+
+components:
+  # The product-agnostic bff. A tenant's bff is a plain engine bff fronting
+  # whatever DSL bundle the tenant runs; it is a component rather than part of
+  # base precisely so a tenant that brings its own does not collide.
+  - ../../components/engine-bff
+
+  # The instance profile -- what shape of mesh this tier buys.
+  - ../../components/tenant/presets/__PROFILE__
+__HA_COMPONENT_LINE__
+
+  # The database, and the preset the tier pays for.
+  - ../../components/cnpg-db
+  - ../../components/cnpg-db/presets/__DB_PRESET__
+
+patches:
+  # Mount the tenant's own domain on every engine node. Appended rather than
+  # strategic-merged: `envFrom` has no patch merge key, so a merge would REPLACE
+  # the list and silently drop memql-secrets (the master key, the genesis
+  # envelope, the database DSN) from every node it touched.
+  - path: domain-envfrom.yaml
+    target: { kind: Deployment, labelSelector: "app.kubernetes.io/part-of=memql" }
+
+  # Where this tenant's WAL and base backups land. REQUIRED: the cnpg-db
+  # component ships the placeholder PATCH-ME-IN-THE-OVERLAY, and an overlay that
+  # forgets does not error -- it archives nowhere while the Cluster reports
+  # Ready and the pods look healthy. Per-tenant path, so one tenant's restore
+  # can never read another's backups.
+  - target: { kind: ObjectStore, name: memql-db-backup }
+    patch: |
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "__BACKUP_DESTINATION__"
+
+images:
+  # The engine images. A tenant runs the SAME product-agnostic engine images as
+  # every other deployment -- pinned by the fleet to one version across the
+  # tenant estate, so "which version is that customer on" has an answer that is
+  # not per-pod archaeology.
+  - name: acrmemql.azurecr.io/memql-identity
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-bff
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-cognition
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-agent
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-planner
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-workbench
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-voice
+    newTag: __ENGINE_TAG__
+  - name: acrmemql.azurecr.io/memql-mcp
+    newTag: __ENGINE_TAG__
+  # The database operand. Its tag MUST begin with the PostgreSQL major -- CNPG's
+  # webhook parses it to derive the major version. See deploy/db-image/README.md.
+  - name: memql-db
+    newName: acrmemql.azurecr.io/memql-db
+    newTag: __DB_IMAGE_TAG__

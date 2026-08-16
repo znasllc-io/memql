@@ -1,0 +1,66 @@
+# Instance profile: DEDICATED -- the full mesh, on a cluster of the tenant's own
+# (epic memql#3852, task memql#3853).
+#
+# Used by the Mesh and Enterprise tiers; see ../../README.md for the tier ->
+# profile table.
+#
+# WHY THIS EXISTS AS A SEPARATE PRESET WHEN ITS MESH COUNTS MATCH `standard`.
+# Two reasons, and neither is visible in the integers:
+#
+#   1. What a Mesh tenant buys is ISOLATION -- their own cluster, not their own
+#      namespace. That is a property of where the overlay is applied rather than
+#      of what it renders, so it cannot show up as a patch here; naming the
+#      profile is how the fleet's provisioning path knows which cluster to
+#      target. A tenant on `standard` lands on the shared cluster; a tenant on
+#      `dedicated` gets one stood up.
+#   2. It composes the `top` database preset (3 instances, 3 zones) where
+#      `standard` composes `mid`. The database half of a tier is where most of
+#      the money and most of the durability difference actually is.
+#
+# Two presets whose integers happen to match today is the same reasoning that
+# has overlays/prod restate staging's counts rather than inherit them: a value
+# inherited in one place and stated in another is a structural difference
+# wearing a number's clothes, and the day these two diverge -- three replicas at
+# the top tier, say -- the diff should be one integer, not a refactor.
+#
+# THE VOICE LANE runs two transports here against Mesh's 5,000 included minutes;
+# voice-agent stays at one for the dispatcher reason recorded in the `standard`
+# preset, and LiveKit gets a second server because at this volume it is a
+# request-serving component rather than a convenience.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+patches:
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: livekit }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 2 }

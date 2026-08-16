@@ -1,0 +1,224 @@
+// fleet domain -- the memQL Cloud control plane, as ordinary graph state
+// (epic memql#3852, task memql#3853).
+//
+// WHY THIS IS A BUNDLE AND NOT ENGINE CODE. memQL Cloud is a PRODUCT built on
+// memQL; the engine underneath it is product-neutral by doctrine
+// (docs/internal/design/platform-consolidation.md). So the control plane's
+// state lives here, in a data-only DSL bundle mounted at MEMQL_DSL_PATH on an
+// otherwise-plain engine mesh -- the same delivery any customer's product uses.
+// Nothing in this file is compiled into a binary, and `dsl/embed.go` does not
+// name it. That is the acceptance bar for the consolidation epic ("a second
+// product boots a full stack with ZERO engine-repo edits") applied to our own
+// product, which is the only honest way to know the bar is real.
+//
+// WHAT IS ENGINE-SIDE, and why that is not a contradiction: the four tenant
+// lifecycle capability scripts (scripts/fleet/) and the `tenant` kustomize
+// component. Those provision A MEMQL INSTANCE -- they take a tenant name, a
+// tier and a domain, and render an ArgoCD Application. They know nothing about
+// subscriptions, money, or trials. Any operator running memQL for anyone would
+// want them; that is what makes them platform rather than product.
+//
+// FIVE CONCEPTS. They answer the four questions a subscription business has to
+// answer -- who is the customer, what did they buy, what are they running, and
+// how much of it have they used:
+//
+//   subscriber    WHO      the paying account (one per customer org)
+//   subscription  WHAT     the plan they bought, and its billing state
+//   tierSpec      WHAT     the catalog row: what a tier costs and includes
+//   instance      RUNNING  one provisioned memQL deployment
+//   usageMeter    USED     one (subscription, period, metric) accumulator
+//
+// PER-ROW AUTHZ. Four tiers are in play and the split is deliberate:
+//
+//   subscriber / subscription / instance / usageMeter are OWNED, keyed on
+//   `ownerUserId`. A subscriber is a person with a login on the mothership,
+//   and every row they can see is a row they own. Cross-tenant reads are then
+//   impossible by construction rather than by a filter somebody has to
+//   remember: the owned tier injects ownerUserId==actor.userId into every read
+//   and has no cluster-owner bypass. This is the property task memql#3855's
+//   acceptance criterion "cross-tenant reads impossible" is asking for, and it
+//   is enforced here rather than in Orbit -- a console is a client, and a
+//   client cannot be the gate.
+//
+//   tierSpec is PUBLIC (@rowAuthz(public)). It is the price list. The pricing
+//   page reads it unauthenticated, which is the whole point of a price list,
+//   and it carries no customer data of any kind.
+//
+// WHY `ownerUserId` AND NOT `subscriberId` AS THE AUTHZ KEY on subscription /
+// instance / usageMeter. The owned tier compares a field to actor.userId, so
+// the key has to BE a user id; `subscriberId` would need a join the row-authz
+// layer cannot do. Each row therefore carries both: `subscriberId` for the
+// domain relationship, `ownerUserId` mirrored from the subscriber at create
+// time for the gate. A team-owned account (several admins on one subscriber)
+// is a deliberate non-goal today for exactly this reason -- widening it is a
+// tier change plus a grant concept, not a re-model, and it is cheaper to do
+// once there is a customer asking than to guess the shape now.
+//
+// MONEY IS NOT THE SOURCE OF TRUTH HERE. Stripe is. Every row that mirrors a
+// Stripe object carries its id (`stripeCustomerId`, `stripeSubscriptionId`,
+// ...) and the fleet graph is the OPERATIONAL mirror: it decides what runs,
+// Stripe decides what is owed. When the two disagree, Stripe wins and the
+// reconciliation is a re-read, never a write back. That rule is what keeps a
+// webhook replay from being able to move money.
+
+use identity.concepts.{ user }
+
+// =============================================================================
+//   subscriber -- WHO
+// =============================================================================
+
+/// A paying account on memQL Cloud: one customer organisation, one Stripe customer, one billing
+/// relationship. Created at signup, before any money moves and before any instance exists, so that
+/// a checkout that never completes leaves a subscriber with no subscription rather than a dangling
+/// half-record. Per-row authz: owned -- ownerUserId is stamped from actor.userId on every write.
+@displayCard(primary="companyName", secondary="billingEmail", tertiary="ownerUserId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept subscriber {
+  ownerUserId       string!  @description("v1:identity:user.id of the person who signed up -- the account's owner and, today, its only administrator. Stamped from actor.userId at create time and re-stamped on every update, so ownership can never be reassigned by a caller. The load-bearing per-row authz key for this concept and, mirrored, for every other customer-facing concept in this domain.")
+  companyName       string!  @description("The customer-facing account name, e.g. 'Acme Corp'. Shown on invoices and in Orbit's account header. Not required to be unique -- two customers may genuinely share a name, and forcing uniqueness here would make signup fail for the second one.")
+  billingEmail      string!  @pii  @description("Where invoices, dunning notices and trial nudges are sent. Kept distinct from the owner's login address because finance and engineering are usually different mailboxes; defaults to the login address at signup. Marked @pii: the deletion path scrubs it and every query projecting it must constrain its caller.")
+  stripeCustomerId  string   @description("The Stripe `cus_...` id this account maps to. Empty until the first checkout session completes -- a subscriber exists before Stripe knows about them. Once set it is never changed: re-pointing an account at a different Stripe customer would silently re-parent its entire billing history.")
+  status            enum("active", "delinquent", "cancelled")  @default("active")  @description("Account standing, as distinct from any one subscription's status. 'delinquent' means a payment failed and dunning is running -- instances keep running through the grace period, because cutting a customer off mid-incident over a expired card is how you lose the customer AND the invoice. 'cancelled' means the relationship ended; rows are kept for the invoices that reference them.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+// =============================================================================
+//   tierSpec -- the price list
+// =============================================================================
+
+/// One row of the memQL Cloud price list: what a tier costs, what it includes, and what shape of
+/// infrastructure it provisions. PUBLIC by design -- the pricing page reads it without
+/// authenticating, which is what a price list is for, and it carries no customer data.
+///
+/// THE POINT OF MODELLING PRICES AS ROWS rather than as constants in a config file is that three
+/// surfaces need the same numbers and must not disagree: the public pricing page, Orbit's upgrade
+/// picker, and the allowance enforcement that decides whether a turn is billable. A price that
+/// lives in three places is a price that is wrong in at least one of them the first time it moves.
+@rowAuthz(public)
+@displayCard(primary="displayName", secondary="monthlyPriceUsd", tertiary="tier", status="status")
+concept tierSpec {
+  tier                  enum("trial", "node", "graph", "mesh", "enterprise")!  @description("The tier's stable identifier. Also the key every other row in this domain names, so renaming a tier is a data migration rather than a copy edit -- which is the correct amount of friction for a change that repoints live subscriptions.")
+  displayName           string!  @description("Customer-facing name, e.g. 'Graph'. Distinct from `tier` so marketing can rename a tier without repointing subscriptions.")
+  monthlyPriceUsd       float!  @description("List price per month in US dollars, billed monthly. 0 for trial and for enterprise (which is quoted, not listed). The annual price is not a separate field: annual billing is this number times ten (two months free), computed at checkout, so the discount cannot drift from the list price.")
+  messageCredits        float!  @description("Included message credits per billing period. One credit is one standard-model agent turn; a premium-model turn meters at five. Consumption beyond this is billed at `overageMessagesUsdPer1k` or throttled, per `overagePolicy`.")
+  voiceMinutes          float!  @description("Included voice minutes per billing period. Zero on Node -- voice there is a paid add-on, because the marginal cost of a voice minute is roughly two orders of magnitude above a text turn and bundling it into the entry price would make the entry price wrong.")
+  overageMessagesUsdPer1k  float!  @description("What 1,000 message credits cost once the included allowance is spent. Deliberately above the blended marginal cost, so overage is profitable rather than merely survivable -- an allowance that costs us money to exceed is an incentive to under-serve the customers who like the product most.")
+  overageVoiceUsdPerMinute float!  @description("What one voice minute costs past the included allowance.")
+  overagePolicy         enum("meter", "throttle")!  @description("What happens at the allowance ceiling. 'meter' bills the overage and keeps serving; 'throttle' stops serving until the period rolls or the customer upgrades. Trial is 'throttle' -- a trial with metered overage is an unbounded spend path attached to an unverified card, which is the single failure mode this epic's launch gate exists to prevent.")
+  instanceProfile       enum("solo", "standard", "dedicated")!  @description("The infrastructure SHAPE this tier provisions, and therefore what it costs us to run. 'solo' is the condensed profile (task memql#3856) used by trial and Node; 'standard' is the full mesh on the shared cluster; 'dedicated' is a cluster of the tenant's own. This is the field the tenant kustomize component reads -- a tier is a price attached to a profile, and keeping the two on one row is what stops a price change from silently changing the infrastructure or vice versa.")
+  dbPreset              enum("entry", "mid", "top")!  @description("Which `cnpg-db` preset (deploy/k8s/components/cnpg-db/presets/) this tier's database uses. The presets are already a documented promise about instances, CPU, memory and storage; naming one here is how a tier inherits that promise instead of restating it.")
+  haIncluded            bool  @default(false)  @description("Whether high availability is part of the price. False on Node, where HA is a paid add-on; true from Graph up, where it is not optional -- a tier that promises 'every service replicated' and ships one replica is a promise the running cluster does not keep.")
+  haAvailable           bool  @default(true)  @description("Whether the customer may turn HA on at all. False for trial: a pooled trial instance has nothing to fail over to.")
+  status                enum("available", "grandfathered", "hidden")!  @default("available")  @description("Whether this tier may be bought today. 'grandfathered' means existing subscriptions keep it but nobody new may pick it -- the state a price rise leaves behind, and the reason tier rows are versioned by existing rather than edited in place. 'hidden' keeps a tier out of the picker without ending it.")
+}
+
+// =============================================================================
+//   subscription -- WHAT they bought
+// =============================================================================
+
+/// What a subscriber currently pays for: one tier, one billing period, one lifecycle. The row Orbit
+/// shows as 'your plan' and the row the provisioning automations react to. Per-row authz: owned via
+/// ownerUserId, mirrored from the subscriber at create time.
+///
+/// STRIPE IS THE SOURCE OF TRUTH FOR MONEY; this row is the operational mirror that decides what
+/// runs. `status` here is what the fleet acts on, and it is only ever written from a verified Stripe
+/// webhook or an explicit customer action -- never inferred, because a subscription state guessed
+/// from a missing event is a state that either bills a cancelled customer or serves a churned one.
+@displayCard(primary="tier", secondary="status", tertiary="subscriberId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept subscription {
+  ownerUserId            string!  @description("v1:identity:user.id that owns this subscription -- mirrored from the parent subscriber at create time. The per-row authz key; see the header for why the key is a user id rather than the subscriberId.")
+  subscriberId           string!  @description("v1:fleet:subscriber.id this subscription belongs to. The domain relationship, as distinct from the authz key above.")
+  tier                   enum("trial", "node", "graph", "mesh", "enterprise")!  @description("The v1:fleet:tierSpec.tier currently in force. Changing it is what a tier change IS -- the automations re-render the tenant's values from the new tier's profile and preset.")
+  billingPeriod          enum("monthly", "annual")!  @default("monthly")  @description("How often the base fee is charged. Annual is ten months' list price for twelve months of service; the discount is computed at checkout from the tier's monthly price so it cannot drift.")
+  status                 enum("trialing", "active", "past_due", "paused", "cancelled")!  @description("The lifecycle state the fleet acts on. 'trialing' provisions a trial-profile instance with hard caps; 'active' is a paid, running subscription; 'past_due' is dunning in progress -- instances KEEP RUNNING, see the subscriber.status doc; 'paused' is suspended (scale-to-zero, data intact) after grace expired; 'cancelled' is ended and scheduled for teardown.")
+  voiceAddOn             bool  @default(false)  @description("Whether the paid voice add-on is active. Only meaningful on Node, where voice minutes are not in the base price.")
+  haAddOn                bool  @default(false)  @description("Whether the paid HA add-on is active. Only meaningful on Node; from Graph up HA is included and this field is ignored in favour of the tier's haIncluded.")
+  currentPeriodStart     datetime  @description("Start of the current billing period, mirrored from Stripe. The lower bound of every usageMeter row's window -- so 'usage this period' is a field comparison rather than a calendar calculation that has to know about month lengths and time zones.")
+  currentPeriodEnd       datetime  @description("End of the current billing period, mirrored from Stripe. When it passes, meters roll and allowances reset.")
+  trialEndsAt            datetime  @description("When the trial converts or expires. Empty on a subscription that never trialed. The trial automations (task memql#3856) key their nudges and their suspend off this field rather than off createdAt + 14 days, so that extending a trial is one field write.")
+  graceEndsAt            datetime  @description("When the current grace period runs out -- set when dunning starts or when a trial expires, cleared on recovery. Its passing is what schedules a teardown; while it is in the future, data is intact and a payment or a conversion restores service with nothing lost.")
+  stripeSubscriptionId   string   @description("The Stripe `sub_...` id. Empty on a subscription created ahead of checkout. This is the join key every inbound Stripe webhook resolves against -- which is why webhook handling filters on it rather than trusting any customer id in the event body.")
+  stripePriceId          string   @description("The Stripe `price_...` id currently attached, recorded so a tier change can be reconciled against what Stripe actually charged rather than against what we meant to charge.")
+  cancelAt               datetime  @description("When a customer-requested cancellation takes effect. A cancellation is not immediate: the customer paid through the period, so the row stays 'active' until this passes and only then moves to 'cancelled'. Empty when no cancellation is pending.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="subscriberId", target=subscriber, direction="outgoing")
+}
+
+// =============================================================================
+//   instance -- what is RUNNING
+// =============================================================================
+
+/// One provisioned memQL deployment belonging to one subscription: its namespace, its domain, its
+/// tier-derived shape, and where it is in its lifecycle. This is the row Orbit's dashboard renders
+/// and the row the provisioning capability scripts report back into. Per-row authz: owned.
+///
+/// STATUS IS AUTOMATION-STAMPED, NOT POLLED. Orbit shows provisioning progress by reading these
+/// transitions, and deliberately never reaches ArgoCD from the browser: a console that queries the
+/// cluster's control plane directly needs credentials for the cluster's control plane, which is a
+/// far larger blast radius than 'can read my own rows' for the sake of a progress bar.
+@displayCard(primary="name", secondary="domain", tertiary="tier", status="status")
+@rowAuthz(owner="ownerUserId")
+concept instance {
+  ownerUserId      string!  @description("v1:identity:user.id that owns this instance -- mirrored from the subscription. The per-row authz key.")
+  subscriptionId   string!  @description("v1:fleet:subscription.id that pays for this instance. One subscription has exactly one instance today; the field is a pointer rather than the instance being a field on the subscription so that a future multi-instance plan is a new row rather than a re-model.")
+  subscriberId     string!  @description("v1:fleet:subscriber.id, denormalised from the subscription so the fleet console can group instances by account without a second read.")
+  name             string!  @description("The tenant's slug -- lowercase, hyphen-separated, globally unique. It is the Kubernetes namespace, the ArgoCD Application name and the subdomain label all at once, which is why it is validated as a DNS label at the mutation rather than merely as a string.")
+  domain           string!  @description("The fully-qualified domain this instance is served at, e.g. 'acme.memql.cloud'. Becomes the tenant's MEMQL_DOMAIN, from which its nodes derive their issuer, CORS origins and OAuth redirect URIs at boot (component/genesis/domain.go). Recorded here rather than derived so that a customer bringing their own domain later is a field write.")
+  tier             enum("trial", "node", "graph", "mesh", "enterprise")!  @description("The tier this instance is currently rendered at, denormalised from the subscription. Denormalised deliberately: it is what the instance IS running, which can lag what the subscription has BOUGHT by the length of one reconciliation, and conflating the two is how a tier change reports success before the pods have rolled.")
+  instanceProfile  enum("solo", "standard", "dedicated")!  @description("The infrastructure shape actually rendered, from the tier's spec. Same lag argument as `tier`.")
+  haEnabled        bool  @default(false)  @description("Whether this instance is rendered with high availability -- every service at two or more replicas and the database preset's PDB on. Derived from the tier's haIncluded OR the subscription's haAddOn at render time, and recorded here because the answer is a property of what is running, not of what was bought.")
+  status           enum("pending", "provisioning", "running", "suspending", "suspended", "resuming", "tearing_down", "torn_down", "failed")!  @default("pending")  @description("Lifecycle. The transient states ('provisioning', 'suspending', 'resuming', 'tearing_down') exist so Orbit can render honest progress and so a crashed automation leaves a row that says what it was doing rather than a row that looks finished. 'failed' is terminal-until-retried and carries `lastError`.")
+  argoApplication  string   @description("The ArgoCD Application name reconciling this tenant, normally equal to `name`. Recorded rather than assumed so that an instance adopted from a differently-named Application is still manageable.")
+  namespace        string   @description("The Kubernetes namespace this tenant runs in, normally equal to `name`. Same reason as argoApplication.")
+  dbPreset         enum("entry", "mid", "top")  @description("Which cnpg-db preset the tenant's database was rendered with. Recorded so a preset change is visible as a diff against what is running.")
+  provisionedAt    datetime  @description("When this instance first reached 'running'. The customer-visible 'created' date and the start of any uptime commitment.")
+  suspendedAt      datetime  @description("When it last entered 'suspended'. Cleared on resume. Used by the hibernation and teardown-after-grace automations to answer 'how long has this been down' without walking row history.")
+  lastActivityAt   datetime  @description("When this instance last served a request. The input to idle hibernation (task memql#3856): an instance with no activity for N days scales to zero. Stamped by the tenant's own heartbeat rather than by the control plane, because the control plane cannot see the tenant's traffic.")
+  notifyEmail      string   @pii  @description("Where lifecycle notices about THIS instance go -- the welcome message, and later the hibernation and teardown warnings. Denormalised from the parent subscriber's billingEmail at create time rather than looked up when a notice is sent, because the automations that send them read only the row that triggered them: an automation's actor is not the row's owner, so a caller-scoped read of the subscriber from inside one returns nothing while looking entirely correct. Marked @pii for the same reasons subscriber.billingEmail is.")
+  lastError        string   @description("Why the last lifecycle transition failed, verbatim from the capability script's JSON error envelope. Empty when the last transition succeeded. Operator-facing; Orbit shows a generic message and this text is for the fleet console.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="subscriptionId", target=subscription, direction="outgoing")
+  @relationship(type="parent", field="subscriberId", target=subscriber, direction="outgoing")
+}
+
+// =============================================================================
+//   usageMeter -- what they USED
+// =============================================================================
+
+/// One accumulator: how much of one metric one subscription has consumed in one billing period.
+/// The row allowance enforcement reads before admitting a billable turn, and the row the Stripe
+/// usage-record push reads when reporting overage. Per-row authz: owned.
+///
+/// ONE ROW PER (subscription, period, metric), AND THAT IS THE IDEMPOTENCY KEY. The id is derived
+/// from those three values, so a meter increment is an update to a row whose identity is a pure
+/// function of what is being metered -- there is no way to accidentally open a second accumulator
+/// for the same period, and a replayed billing event lands on the row it already landed on. This is
+/// the same shape v1:campaigns:delivery uses to make a resumed send idempotent, for the same reason.
+///
+/// WHY `included` IS COPIED ONTO THE ROW rather than read from the tier at check time: an allowance
+/// is a promise about a PERIOD. A customer who was on Graph for the first half of a period and is
+/// now on Node did not retroactively lose the allowance they were serving under; and a price change
+/// must not silently re-price a period already in flight. Copying the number at period open makes
+/// the meter self-contained, so what a period allowed is a fact about that period rather than a
+/// lookup that changes underneath it.
+@displayCard(primary="metric", secondary="consumed", tertiary="subscriptionId", status="status")
+@rowAuthz(owner="ownerUserId")
+concept usageMeter {
+  ownerUserId      string!  @description("v1:identity:user.id that owns this meter -- mirrored from the subscription. The per-row authz key.")
+  subscriptionId   string!  @description("v1:fleet:subscription.id being metered.")
+  metric           enum("message_credits", "voice_minutes")!  @description("What is being counted. Two metrics, not one, because they have different marginal costs, different allowances and different overage prices -- a single 'usage' number would have to be denominated in something, and any choice of unit makes one of the two wrong.")
+  periodStart      datetime!  @description("Start of the billing period this meter covers, copied from the subscription. Part of the derived row id, so it is the field that makes one period's meter a different row from the next period's rather than a reset of the same row -- history is then readable without walking row versions.")
+  periodEnd        datetime!  @description("End of the billing period this meter covers.")
+  included         float!  @description("The allowance for this period, copied from the tier spec at period open. See the header for why it is copied rather than looked up.")
+  consumed         float!  @default(0)  @description("How much has been used. Monotonic within a period: it is only ever incremented, never recomputed, so a lost increment under-bills by that increment rather than corrupting the total.")
+  overage          float!  @default(0)  @description("How much has been used PAST the allowance. Derived at increment time rather than at read time so that the number Stripe is told and the number the customer is shown come from one computation. Zero while consumed <= included.")
+  reportedToStripe float!  @default(0)  @description("How much of `overage` has already been pushed to Stripe as a usage record. The difference between this and `overage` is what the next push owes -- which makes the push idempotent under retry, and makes a missed push self-healing on the next one rather than a permanently lost charge.")
+  status           enum("open", "closed", "reported")!  @default("open")  @description("'open' is the current period and still accumulating; 'closed' means the period ended and no further increments are accepted; 'reported' means the final overage has been pushed to Stripe and the row is history. The three states exist so a late increment arriving after period close is visibly refused rather than silently landing on a period that has already been invoiced.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="parent", field="subscriptionId", target=subscription, direction="outgoing")
+}

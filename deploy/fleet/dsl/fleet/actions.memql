@@ -1,0 +1,118 @@
+// fleet domain -- ACTIONS: the world-touching layer of the memQL Cloud control
+// plane (epic memql#3852, task memql#3853).
+//
+// Per the behavioral-constructs split: logic decides, mutations persist,
+// ACTIONS TOUCH THE WORLD, automations orchestrate. Each action below is a
+// single external capability call rendered from typed args. None of them calls
+// a logic, query, mutation or automation; none touches the graph; none carries
+// a reactive trigger. That is what keeps them inside the action-rules validator
+// (component/memql/callgraph) rather than being baselined out of it.
+//
+// EVERY ONE IS `capability script(...)`, selecting an ALLOWLISTED capability
+// script by its `script` argument. The runner maps that id to a repo-relative
+// path (component/automations/steps.capabilityScriptAllowlist) and execs the
+// constant path directly with each rendered arg as its own `--name=value` argv
+// element -- never the `bash` interpreter, never a `sh -c` string. So an
+// event-derived value can only ever select an allowlisted script, and travels
+// as data. That property is why provisioning a tenant from an inbound Stripe
+// webhook is not the obviously terrible idea it sounds like.
+//
+// WHAT AN ACTION MAY NOT DECIDE. The tier -> (profile, dbPreset, ha) resolution
+// does NOT happen here and does not happen in the scripts either: it happens in
+// logic.memql, reading the tier's own spec row. The capability-script contract's
+// "no decisions inside" rule and the action shape point the same way -- an
+// action renders arguments it was handed.
+//
+// DRY-RUN DEFAULTS TO TRUE IN THE SCRIPTS, and every action below therefore
+// passes `dryRun` through explicitly. An automation that forgot the argument
+// would render a tenant and never apply it, which is a visible no-op; the
+// reverse default would have a mis-wired trigger tearing down a customer.
+
+use capabilities.shell.{ script }
+
+/// Render a tenant's kustomize overlay and its ArgoCD Application from the tenant component's
+/// templates, and adopt it into ArgoCD. Idempotent: re-running with unchanged inputs rewrites
+/// byte-identical files and reports changed=false, which is what makes a redelivered provisioning
+/// event harmless.
+action provisionTenant {
+  args {
+    tenant            string!
+    domain            string!
+    profile           string!
+    dbPreset          string!
+    ha                boolean
+    engineTag         string
+    dbImageTag        string
+    backupDestination string
+    repoUrl           string
+    targetRevision    string
+    dryRun            boolean
+  }
+  capability script(
+    script:            "fleet.tenantProvision",
+    tenant:            args.tenant,
+    domain:            args.domain,
+    profile:           args.profile,
+    dbPreset:          args.dbPreset,
+    ha:                args.ha,
+    engineTag:         args.engineTag,
+    dbImageTag:        args.dbImageTag,
+    backupDestination: args.backupDestination,
+    repoUrl:           args.repoUrl,
+    targetRevision:    args.targetRevision,
+    dryRun:            args.dryRun
+  )
+}
+
+/// Scale a tenant to zero, leaving every volume, backup and namespace intact. What a trial expiry,
+/// an exhausted grace period and an idle hibernation all reduce to. NOT teardown -- a suspended
+/// tenant costs storage and resumes with nothing lost.
+action suspendTenant {
+  args {
+    tenant          string!
+    includeDatabase boolean
+    dryRun          boolean
+  }
+  capability script(
+    script:          "fleet.tenantSuspend",
+    tenant:          args.tenant,
+    includeDatabase: args.includeDatabase,
+    dryRun:          args.dryRun
+  )
+}
+
+/// Bring a suspended tenant back up at the counts its overlay declares -- including a tier change
+/// made while it was down, because the mesh is restored by handing sync back to ArgoCD rather than
+/// by scaling to remembered numbers.
+action resumeTenant {
+  args {
+    tenant      string!
+    dbInstances string
+    dryRun      boolean
+  }
+  capability script(
+    script:      "fleet.tenantResume",
+    tenant:      args.tenant,
+    dbInstances: args.dbInstances,
+    dryRun:      args.dryRun
+  )
+}
+
+/// Destroy a tenant after taking a final backup. The only irreversible operation in the fleet: it
+/// requires the exact phrase 'teardown <tenant>', and a backup that fails ABORTS the teardown
+/// rather than proceeding without one.
+action tearDownTenant {
+  args {
+    tenant     string!
+    confirm    string!
+    skipBackup boolean
+    dryRun     boolean
+  }
+  capability script(
+    script:     "fleet.tenantTeardown",
+    tenant:     args.tenant,
+    confirm:    args.confirm,
+    skipBackup: args.skipBackup,
+    dryRun:     args.dryRun
+  )
+}

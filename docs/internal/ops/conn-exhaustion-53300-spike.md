@@ -1,6 +1,6 @@
 ---
 audience: internal
-status: current
+status: historical
 area: ops
 sinceVersion: "0.9.78"
 owner: platform
@@ -9,6 +9,24 @@ owner: platform
 # Spike: Postgres connection exhaustion (SQLSTATE 53300) on deploy/test
 
 **Issue:** memql#1817 · **Status:** root cause identified · **Date:** 2026-06-20
+
+> **HISTORICAL as of epic memql#3842 / #3848.** This is the record of a spike
+> against **Tiger Cloud**, and it is kept as written: the analysis was correct
+> about the system it was analysing. What it describes no longer exists.
+>
+> The scarcity this spike is about was Tiger's — a per-tier `max_connections`
+> ceiling of ~59 usable slots, and a managed control-plane pool that leaked
+> `application_name='deployer'` connections. Self-hosting removed both:
+> `max_connections` is ours to set (200 local, 400 staging/prod, in
+> `deploy/k8s/components/cnpg-db`), and there is no Tiger control plane to leak
+> a pool.
+>
+> `scripts/deploy/deployer-pool-reap.sh` and `conn-surge-watch.sh`, referenced
+> below, were **retired with the provider**. `conn-headroom-check.sh` was kept
+> and rewritten: the arithmetic holds for any Postgres, and the cutover changed
+> the number on the right-hand side rather than the inequality.
+>
+> Current platform: [database-platform.md](../../public/operate/database-platform.md).
 
 Deliverable: understanding + recommendation. The robustness code/config
 fixes that are unambiguously correct ship with this spike; the capacity

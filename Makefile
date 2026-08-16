@@ -397,6 +397,71 @@ db-image:
 		$${SMOKE:+--smokeTest=$${SMOKE}} \
 		$${CLUSTER:+--cluster=$${CLUSTER}}
 
+.PHONY: db-restore-drill
+
+## Restore the latest database backup into a scratch namespace, prove the
+## restored data is usable, report the measured RTO, and tear it down
+## (epic memql#3842 / #3849).
+##
+## A backup's EXISTENCE proves nothing; its RESTORE proves everything. Run it
+## quarterly at minimum, and after any change to the backup path -- a new
+## storage account, an operator upgrade, a credential rotation.
+##
+## SAFE BY CONSTRUCTION: it never touches the live cluster, never repoints a
+## DSN, and the scratch cluster archives NOWHERE -- given a WAL archiver it
+## would write its own timeline into the very store it was restored from, and
+## that corruption stays invisible until the next real recovery.
+##   make db-restore-drill                 # local
+##   make db-restore-drill ENV=staging
+##   make db-restore-drill ENV=prod KEEP=1 # leave the scratch ns for a post-mortem
+##   make db-restore-drill ENV=staging AT=2026-08-16T04:30:00Z   # point-in-time
+db-restore-drill:
+	@bash scripts/deploy/db-restore-drill.sh \
+		--sourceNamespace="$(DB_LITMUS_NS)" \
+		$${CLUSTER_NAME:+--cluster=$${CLUSTER_NAME}} \
+		$${AT:+--recoveryTarget=$${AT}} \
+		$${KEEP:+--keep=$${KEEP}} \
+		$${TIMEOUT:+--timeout=$${TIMEOUT}}
+
+.PHONY: db-failover-litmus
+
+# ENV -> namespace, the same mapping `make scale` uses, and defaulting to local
+# for the same reason: this target deletes a pod, so a remote default would aim
+# a habit at production.
+DB_LITMUS_NS := $(if $(filter prod,$(ENV)),memql-prod,$(if $(filter staging,$(ENV)),memql-staging,memql))
+
+## DESTRUCTIVE: kill the database primary and assert the cluster promotes a
+## replica, keeps every committed write, and rebuilds its redundancy
+## (epic memql#3842 / #3850).
+##
+## HA is a property you either MEASURE or merely believe. A CNPG cluster
+## reports `instances: 3` and "Cluster in healthy state" whether or not a
+## promotion would actually work -- a replica in recovery with a dead WAL
+## receiver counts toward that number. The only way to know is to take the
+## primary away and watch.
+##
+## Run it on production bring-up acceptance, and after every operator upgrade:
+## an operator upgrade rolls every database pod, which is exactly when you want
+## promotion proven rather than assumed.
+##
+## ENV names the environment and therefore the namespace, and it DEFAULTS TO
+## local for the same reason `make scale` does -- this one deletes a pod, and a
+## remote default would point that at production.
+## CONFIRM is not a formality: the phrase is typed here AND passed through to
+## the capability script, so neither layer can be the one that made a
+## destructive act easy. Same reasoning as `--confirm` in the contract -- a
+## confirmation is an explicit parameter, never a prompt.
+##   make db-failover-litmus CONFIRM=kill-the-primary               # local
+##   make db-failover-litmus CONFIRM=kill-the-primary ENV=staging
+##   make db-failover-litmus CONFIRM=kill-the-primary ENV=prod      # deliberately
+db-failover-litmus:
+	@bash scripts/deploy/db-failover-litmus.sh \
+		--confirm="$${CONFIRM:?usage: make db-failover-litmus CONFIRM=kill-the-primary [ENV=prod|staging|local]}" \
+		--namespace="$(DB_LITMUS_NS)" \
+		$${CLUSTER_NAME:+--cluster=$${CLUSTER_NAME}} \
+		$${TIMEOUT:+--timeout=$${TIMEOUT}} \
+		$${RECOVERY_TIMEOUT:+--recoveryTimeout=$${RECOVERY_TIMEOUT}}
+
 # ---------------------------------------------------------------------------
 # Test targets
 # ---------------------------------------------------------------------------

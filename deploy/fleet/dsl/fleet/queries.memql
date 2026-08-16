@@ -1,0 +1,156 @@
+// fleet domain -- reads.
+//
+// Two classes of read, and the boundary between them is the whole security
+// story of this domain:
+//
+//   CALLER-SCOPED (everything except the two tier reads). Every filter names
+//   ownerUserId==actor.userId as a TOP-LEVEL conjunct -- never inside a when()
+//   guard, never as one arm of an ||. That placement is the gate: a guarded
+//   conjunct VANISHES when its argument is absent, which is exactly how a query
+//   that reads as scoped comes to return the whole table (memql#2883). No
+//   argument in this file can widen the row set past the caller's own rows,
+//   which is what makes task memql#3855's "cross-tenant reads impossible"
+//   true of the server rather than of the console.
+//
+//   PUBLIC (`publicTiers`, `tierByName`). The price list. @public and
+//   unauthenticated on purpose, binding the narrow `tierPublic` projection.
+//
+// The by-id reads are exempt from the pagination rule by shape rather than by
+// annotation: an unguarded row.id equality reads at most one row, so it is not
+// a list. Every list read declares sort + paginate.
+
+use fleet.concepts.{ instance, subscriber, subscription, tierSpec, usageMeter }
+use fleet.shapes.{ instanceFull, subscriberFull, subscriptionFull, tierFull, tierPublic, usageMeterFull }
+use fleet.specs.{ isBuyableTier, isOpenMeter }
+
+// =============================================================================
+//   The price list -- public
+// =============================================================================
+
+/// The buyable tiers, cheapest first -- the public price list. Unauthenticated by design: this is
+/// what the pricing page renders and what an Orbit signup shows before anyone has an account.
+/// Binds the narrow `tierPublic` projection, so the operational fields (which infrastructure
+/// profile, which database preset) stay off the open internet.
+@public
+query tierSpec publicTiers {
+  sort      "monthlyPriceUsd", "asc"
+  paginate  20
+  filter    isBuyableTier
+  shape     tierPublic
+}
+
+/// One tier by name, for the public pricing page's detail view and for an Orbit signup deep-linked
+/// to a chosen plan. Reads grandfathered and hidden tiers too -- a customer on a grandfathered tier
+/// still has to be able to see what they are on.
+@public
+query tierSpec tierByName {
+  args {
+    tier  string!
+  }
+  filter  tier==args.tier
+  shape   tierPublic
+}
+
+/// One tier including its operational fields -- which instance profile it provisions and which
+/// database preset it uses. AUTHENTICATED: this is the read the provisioning automations and
+/// Orbit's upgrade picker make, and it is deliberately a different query from `tierByName` rather
+/// than a wider projection on the same one, because the difference between them is exactly what
+/// must not be reachable without a caller.
+@actor
+query tierSpec tierSpecByName {
+  args {
+    tier  string!
+  }
+  filter  tier==args.tier
+  shape   tierFull
+}
+
+// =============================================================================
+//   The caller's own account
+// =============================================================================
+
+/// The caller's subscriber account. At most one row today (one account per login), returned as a
+/// list because "the caller has not signed up yet" is a normal answer that an empty list expresses
+/// and a by-id read cannot. Owned.
+@actor
+query subscriber mySubscriber {
+  sort      "row.createdAt", "desc"
+  paginate  5
+  filter    ownerUserId==actor.userId
+  shape     subscriberFull
+}
+
+/// The caller's subscriptions, newest first. Owned: the row set is gated by
+/// ownerUserId==actor.userId server-side. Optional status filter narrows to one lifecycle bucket.
+@actor
+query subscription mySubscriptions {
+  args {
+    status  string
+  }
+  sort      "row.createdAt", "desc"
+  paginate  20
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  shape     subscriptionFull
+}
+
+/// One subscription by id, gated to its owner. Backs Orbit's plan panel. Owned --
+/// ownerUserId==actor.userId is the load-bearing guard, so a caller cannot read another account's
+/// subscription even holding its id.
+@actor
+query subscription mySubscriptionById {
+  args {
+    subscriptionId  string!
+  }
+  filter  row.id==args.subscriptionId && ownerUserId==actor.userId
+  shape   subscriptionFull
+}
+
+/// The caller's instances, newest first. Backs Orbit's dashboard. Owned.
+@actor
+query instance myInstances {
+  args {
+    status  string
+  }
+  sort      "row.createdAt", "desc"
+  paginate  20
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  shape     instanceFull
+}
+
+/// One instance by id, gated to its owner. Backs the per-instance detail view and the provisioning
+/// progress display. Owned.
+@actor
+query instance myInstanceById {
+  args {
+    instanceId  string!
+  }
+  filter  row.id==args.instanceId && ownerUserId==actor.userId
+  shape   instanceFull
+}
+
+/// The caller's open usage meters -- what they have consumed against this period's allowance.
+/// Backs Orbit's usage strip. Owned. Filtered to open meters because "usage" without qualification
+/// means the current period; closed periods are read through `myUsageHistory`.
+@actor
+query usageMeter myCurrentUsage {
+  args {
+    subscriptionId  string
+  }
+  sort      "metric", "asc"
+  paginate  20
+  filter    ownerUserId==actor.userId && isOpenMeter && when(args.subscriptionId) { subscriptionId==args.subscriptionId }
+  shape     usageMeterFull
+}
+
+/// The caller's usage meters across every period, newest first -- the billing-history view. Owned.
+@actor
+query usageMeter myUsageHistory {
+  args {
+    subscriptionId  string
+    metric          string
+  }
+  sort      "periodStart", "desc"
+  paginate  50
+  filter    ownerUserId==actor.userId && when(args.subscriptionId) { subscriptionId==args.subscriptionId } && when(args.metric) { metric==args.metric }
+  shape     usageMeterFull
+}

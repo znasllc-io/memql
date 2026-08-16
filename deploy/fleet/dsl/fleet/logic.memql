@@ -1,0 +1,86 @@
+// fleet domain -- PURE logic: the decision layer of the control plane
+// (epic memql#3852, task memql#3853).
+//
+// Per the behavioral-constructs split: LOGIC DECIDES, mutations persist,
+// actions touch the world, automations orchestrate. Nothing here writes, calls
+// an action, or carries a trigger.
+//
+// WHAT THESE DECIDE is one question in several dresses: "is this instance row
+// asking the control plane to do something, and what?" The instance row is the
+// DESIRED STATE and the automations are a controller reconciling the world to
+// it -- so the whole lifecycle reduces to reading a status and dispatching.
+//
+// WHY THE COMMAND VOCABULARY IS THE TRANSIENT STATUSES. `suspending`,
+// `resuming`, `tearing_down` and `provisioning` are simultaneously "what is
+// happening" and "what was asked for", and collapsing the two is what makes
+// the design loop-free. Every action automation fires ONLY on a transient
+// status, and every one of them ends by writing a SETTLED status (`running`,
+// `suspended`, `torn_down`, `failed`) that no action automation triggers on.
+// A controller whose own writes cannot re-trigger it does not need a
+// generation counter, a reconcile lock, or a debounce -- three things that are
+// easy to add and hard to be sure of.
+//
+// THE COROLLARY, worth stating because it constrains every future change: any
+// new lifecycle operation must arrive as a new TRANSIENT status and depart to a
+// settled one. An automation triggering on `running` that writes anything the
+// instance row can see is an infinite loop, and it is one that will not appear
+// in a test -- it appears as a cluster reconciling forever.
+
+/// Which lifecycle action, if any, an instance row is asking for -- returns the capability verb to
+/// dispatch, or "" for a settled row. ONE place decides the transient-status vocabulary, so a fifth
+/// operation added later is a case here rather than four `if` conditions that have to agree.
+logic instanceCommand {
+  args {
+    status string
+  }
+  body {
+    s := args.status ?? ""
+    teardown := cond(s == "tearing_down", "teardown", "")
+    resume := cond(s == "resuming", "resume", teardown)
+    suspend := cond(s == "suspending", "suspend", resume)
+    return cond(s == "provisioning", "provision", suspend)
+  }
+}
+
+/// Whether a subscription's status entitles its owner to a RUNNING instance. Mirrors spec
+/// isServiceableSubscription for the automation path, which reads a payload field rather than
+/// filtering rows. past_due is deliberately serviceable -- dunning starts a clock, it does not cut
+/// service; see the subscriber.status concept doc for why cutting a customer off over an expired
+/// card loses the customer AND the invoice.
+logic subscriptionIsServiceable {
+  args {
+    status string
+  }
+  body {
+    s := args.status ?? ""
+    active := cond(s == "active", true, cond(s == "past_due", true, false))
+    return cond(s == "trialing", true, active)
+  }
+}
+
+/// The confirmation phrase tenant-teardown.sh demands, composed for one tenant. The phrase includes
+/// the tenant name so that a confirmation copy-pasted from the last teardown does not authorise
+/// this one -- which is exactly the property that would be lost if the automation passed a constant.
+///
+/// Composed here rather than inline at the call site so there is ONE place the phrase is built, and
+/// it is the same place a reader goes to check it against the script's `cap_confirm_or_die`.
+logic teardownConfirmationPhrase {
+  args {
+    tenant string!
+  }
+  body {
+    return concat("teardown ", args.tenant)
+  }
+}
+
+/// Whether an instance is up and serving, from a payload status rather than from a row filter.
+/// The automation-path mirror of spec isRunningInstance, which the subscription-side automations
+/// cannot use because they read an event payload rather than querying.
+logic instanceIsRunning {
+  args {
+    status string
+  }
+  body {
+    return (args.status ?? "") == "running"
+  }
+}
