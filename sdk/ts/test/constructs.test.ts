@@ -231,6 +231,66 @@ test("a construct with no trigger leaves it undefined rather than empty", async 
   assert.ok(!("trigger" in shape), "the key itself must be absent, not present-and-undefined");
 });
 
+// A NULL TRIGGER IS THE WIRE'S OWN SPELLING OF ABSENT (memql#3914).
+//
+// The test above sends the field OMITTED, which is what protojson does by
+// default. The WebSocket bridge does not use the default: it marshals with
+// EmitUnpopulated (component/server/memqlws/handler.go), which emits every
+// unset field -- scalars as their zero value, and an unset MESSAGE as `null`.
+//
+// So over the browser bridge -- which is how the VS Code extension, the portal
+// and every WS client read the catalog -- EVERY construct that is not an
+// automation arrives carrying `"trigger": null`. The client guarded
+// `=== undefined`, so null went straight into the decoder and the whole
+// catalog died on:
+//
+//     Failed to read the catalog: cannot read properties of null
+//     (reading 'concept')
+//
+// The wire TYPE said `trigger?: ConstructTriggerWire`, which does not admit
+// null, so the guard looked exhaustive to the compiler and to every reader.
+test("a NULL trigger reads as absent, not as a crash", async () => {
+  const { mock, client } = newClient();
+  const pending = client.listConstructs();
+  mock.reply({
+    listConstructsResult: {
+      constructs: [
+        // Exactly what EmitUnpopulated produces for a view-only construct.
+        { name: "spaceCard", kind: "shape", trigger: null },
+        { name: "manualOnly", kind: "automation", runnable: true, trigger: null },
+      ],
+    },
+  } as never);
+  const { constructs } = await pending;
+  assert.equal(constructs.length, 2, "the catalog must decode at all");
+  for (const c of constructs) {
+    assert.equal(c.trigger, undefined, `${c.name}: null must read as absent`);
+    assert.ok(!("trigger" in c), `${c.name}: the key itself must be absent`);
+  }
+});
+
+// The other half: a trigger that IS present still decodes, so the fix above
+// cannot have been "treat every trigger as missing".
+test("a null trigger does not make a real one disappear", async () => {
+  const { mock, client } = newClient();
+  const pending = client.listConstructs();
+  mock.reply({
+    listConstructsResult: {
+      constructs: [
+        { name: "spaceCard", kind: "shape", trigger: null },
+        { name: "autoJoin", kind: "automation", trigger: { event: "node.created", concept: "v1:cognition:participant" } },
+      ],
+    },
+  } as never);
+  const { constructs } = await pending;
+  assert.equal(constructs[0]!.trigger, undefined);
+  assert.deepEqual(constructs[1]!.trigger, {
+    event: "node.created",
+    concept: "v1:cognition:participant",
+    schedule: "",
+  });
+});
+
 test("a promoted construct keeps its source and reports no path", async () => {
   const { mock, client } = newClient();
   const pending = client.listConstructs();
