@@ -397,6 +397,32 @@ db-image:
 		$${SMOKE:+--smokeTest=$${SMOKE}} \
 		$${CLUSTER:+--cluster=$${CLUSTER}}
 
+.PHONY: db-restore-drill
+
+## Restore the latest database backup into a scratch namespace, prove the
+## restored data is usable, report the measured RTO, and tear it down
+## (epic memql#3842 / #3849).
+##
+## A backup's EXISTENCE proves nothing; its RESTORE proves everything. Run it
+## quarterly at minimum, and after any change to the backup path -- a new
+## storage account, an operator upgrade, a credential rotation.
+##
+## SAFE BY CONSTRUCTION: it never touches the live cluster, never repoints a
+## DSN, and the scratch cluster archives NOWHERE -- given a WAL archiver it
+## would write its own timeline into the very store it was restored from, and
+## that corruption stays invisible until the next real recovery.
+##   make db-restore-drill                 # local
+##   make db-restore-drill ENV=staging
+##   make db-restore-drill ENV=prod KEEP=1 # leave the scratch ns for a post-mortem
+##   make db-restore-drill ENV=staging AT=2026-08-16T04:30:00Z   # point-in-time
+db-restore-drill:
+	@bash scripts/deploy/db-restore-drill.sh \
+		--sourceNamespace="$(DB_LITMUS_NS)" \
+		$${CLUSTER_NAME:+--cluster=$${CLUSTER_NAME}} \
+		$${AT:+--recoveryTarget=$${AT}} \
+		$${KEEP:+--keep=$${KEEP}} \
+		$${TIMEOUT:+--timeout=$${TIMEOUT}}
+
 .PHONY: db-failover-litmus
 
 # ENV -> namespace, the same mapping `make scale` uses, and defaulting to local
