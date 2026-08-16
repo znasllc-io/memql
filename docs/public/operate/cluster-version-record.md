@@ -131,8 +131,13 @@ version learners write far more often than any human edit does.
 **The cockpit does not.** `cli/config.SaveClusters` is a
 `yaml.Marshal` of the whole `ClustersFile` struct, so its next write
 rewrites the file from the struct alone. Comments are lost and **any key
-it does not model is dropped**. This is a known, asserted limitation
-rather than a bug to route around.
+it does not model is dropped**.
+
+This is a known limitation rather than a bug to route around, and it is
+asserted so it cannot drift silently: `TestClusterLocalFieldRoundTrip`
+in the cockpit's `cli/config/clusters_test.go` ends by checking that a
+`future_key` written by another tool does **not** survive the round
+trip.
 
 The consequence is the rule:
 
