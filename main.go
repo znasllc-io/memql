@@ -11,11 +11,10 @@ import (
 	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/service"
+	"github.com/znasllc-io/memql/core/buildinfo"
 	"github.com/znasllc-io/memql/core/common"
 	"github.com/znasllc-io/memql/core/logger"
 )
-
-const versionFilePath = "VERSION"
 
 var (
 	fatalWithLoggerFn       = logger.FatalWithLogger
@@ -153,22 +152,31 @@ func resolveShutdownGracePeriod(logger *slog.Logger) time.Duration {
 	return d
 }
 
+// resolveServiceVersion answers what this binary states about itself. It is
+// stamped onto startup events, health output and the engine's memqlVersion()
+// builtin (via app.RunConfig.Version), and it is what a client asks for when it
+// wants to know which engine it is talking to.
+//
+// There is exactly one source: the link-time release stamp in core/buildinfo
+// (memql#3998). It used to read `VERSION` from the environment and then a
+// `VERSION` FILE on disk, and both were removed rather than demoted:
+//
+//   - The file said `0.15.0` at every tag from v0.16.1 onward, and the image
+//     build overwrote it with `0.15.0-<epoch>` -- a stamp VERSIONING.md
+//     explicitly forbids ("No -<epoch> suffixes"). So the answer was
+//     release-SHAPED and wrong, which reads as authoritative to anything
+//     comparing versions.
+//   - The env var let a deployment assert any version it liked over a build
+//     that already knew the truth. A version a running process can be told is
+//     not a version, and the reason the engine could not state its release
+//     honestly is that it had two ways to be told what to say and no way to
+//     know.
+//
+// A build that was not cut from a release now says "dev", which no release
+// parser accepts -- the client gets "cannot compare" instead of a confident
+// wrong answer.
 func resolveServiceVersion() string {
-	value := strings.TrimSpace(os.Getenv("VERSION"))
-
-	if value != "" {
-		return value
-	}
-
-	data, err := os.ReadFile(versionFilePath)
-
-	if err == nil {
-		if trimmed := strings.TrimSpace(string(data)); trimmed != "" {
-			return trimmed
-		}
-	}
-
-	return "dev"
+	return buildinfo.Version()
 }
 
 func mustCreateServiceLogger() *slog.Logger {

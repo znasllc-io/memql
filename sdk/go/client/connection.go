@@ -33,8 +33,16 @@ type Connection struct {
 	logger     *slog.Logger
 
 	// Server info from handshake.
-	NodeId  string
+	NodeId string
+	// Version is the WIRE PROTOCOL version the node speaks ("v1"), not its
+	// release. Read EngineVersion for that.
 	Version string
+	// EngineVersion is the release the node's binary was cut from --
+	// e.g. "v0.18.1" -- or "dev" when it was not cut from a release
+	// (memql#3998). Empty when the node predates the field, which is a
+	// meaningful third answer: it says the cluster is older than this
+	// contract, not that it has no version.
+	EngineVersion string
 }
 
 // ConnectConfig configures a new gRPC connection.
@@ -135,10 +143,12 @@ func (c *Connection) handshake(ctx context.Context) error {
 	if hello := resp.GetServerHello(); hello != nil {
 		c.NodeId = hello.GetNodeId()
 		c.Version = hello.GetVersion()
+		c.EngineVersion = hello.GetEngineVersion()
 		if c.logger != nil {
 			c.logger.Info("connected to memQL node",
 				"nodeId", c.NodeId,
-				"version", c.Version,
+				"protocolVersion", c.Version,
+				"engineVersion", c.EngineVersion,
 			)
 		}
 	}
