@@ -1,10 +1,4 @@
-// The install wizard's enrolment step, host side (memql#3408).
-//
-// The `enrolmentLink` graph step mints a single-use passkey-enrolment link
-// inside the cluster and puts it on `result.enrolUrl`. This module is the
-// other half: it reads that link off the execution report and OPENS it, so
-// the operator ends an install holding a passkey rather than a string they
-// have to paste somewhere.
+// The install wizard's enrolment step, host side (memql#3408, memql#3906).
 //
 // WHY THE OPENING IS NOT IN THE STEP. A capability script's product is a JSON
 // envelope on stdout; it has no browser and must not acquire one -- the same
@@ -14,19 +8,40 @@
 // under plain node. So the two host capabilities this needs arrive as injected
 // functions, exactly as src/auth/flow.ts takes them for the sign-in flow.
 //
-// THE LINK IS A CREDENTIAL. It is passed straight from the envelope to the
-// opener and is never logged, never written to a file by this module, and
-// never returned to a caller that has not asked for it. It is already in the
-// receipt -- the executor records every step's `result` verbatim -- which is
-// noted below rather than silently relied on.
+// THIS MODULE NO LONGER READS THE RUN'S LINK (memql#3906). It used to lift
+// `result.enrolUrl` off the execution report and open that, which was wrong in
+// two ways that only show up after the install screen has been sitting open:
+//
+//   - the link is SINGLE-USE and short-lived, so the button was dead exactly
+//     when an operator came back to it, and failed in a way that reads as the
+//     feature being broken rather than as a link having expired;
+//   - a run whose enrolment step produced nothing offered no route at all, so
+//     the operator's only remaining option was a terminal.
+//
+// The remedy is to MINT ON DEMAND -- `clusters/takeOwnership.ts` runs the same
+// `install.enrolmentLink` capability the graph runs, at the moment of the
+// click. What survives here is the opener, which is still the one place a
+// minted link is validated before a browser is pointed at it, and a reader for
+// the one field of that step worth keeping: whether an owner account exists.
+//
+// THE LINK IS A CREDENTIAL. It is passed straight from the mint to the opener
+// and is never logged, never written to a file by this module, and never
+// returned to a caller that has not asked for it.
 
 import type { ExecutionReport, StepOutcome } from "./executor.js";
 
 /** The graph step this module pairs with. */
 export const ENROLMENT_STEP_ID = "enrolmentLink";
 
-/** The envelope field the step's link arrives on. */
-export const ENROLMENT_RESULT_FIELD = "enrolUrl";
+/**
+ * The envelope field saying an owner ACCOUNT exists on the cluster.
+ *
+ * `enrolment-link.sh` reports it alongside `enrolmentState`, and it is the
+ * cheapest honest answer to "is there anything here to enrol against" -- the
+ * script has just asked the cluster, from inside it, with the only authority
+ * that exists before anyone holds a credential.
+ */
+export const OWNER_CLAIMED_FIELD = "ownerClaimed";
 
 /**
  * Binds to `vscode.env.asExternalUri`. Takes and returns an absolute URL
@@ -42,12 +57,15 @@ export interface EnrolmentDeps {
   openExternal: ExternalOpener;
 }
 
-/** Why an enrolment link could not be opened. */
+/**
+ * Why an enrolment link could not be opened.
+ *
+ * The two "the run produced nothing" reasons went with the replay path
+ * (memql#3906). Nothing mints a link and then asks this module to find it any
+ * more, so a mint that produces nothing is `OwnershipError`'s to report, from
+ * where it happened.
+ */
 export type EnrolmentFailureReason =
-  /** The step did not run, was skipped, or failed. */
-  | "notRun"
-  /** The step ran but produced no link. */
-  | "missing"
   /** The value is not an https /enroll?code= URL. */
   | "malformed"
   /** No browser could be opened on this host. */
@@ -69,17 +87,22 @@ export class EnrolmentError extends Error {
 }
 
 /**
- * Pulls the enrolment link out of an execution report.
+ * Whether the run established that this cluster has an owner ACCOUNT.
  *
- * Returns "" when the step did not run or produced nothing -- an install that
- * skipped enrolment is not a broken install, and the caller decides whether to
- * say anything about it.
+ * The done screen's question, and deliberately not "did the run produce a
+ * link": a link is a perishable artefact of one moment, an owner account is a
+ * durable fact about the cluster, and it is the fact that decides whether
+ * enrolment is the route to offer.
+ *
+ * FALSE is returned for a step that did not run, was skipped, or failed. That
+ * is the honest reading -- nothing was established -- and it costs the operator
+ * only the offer, not the capability: `memql.clusters.takeOwnership` is
+ * reachable from the Clusters tree whatever this says.
  */
-export function enrolmentUrlFrom(report: ExecutionReport): string {
+export function ownerAccountExistsFrom(report: ExecutionReport): boolean {
   const outcome = report.outcomes.find((o: StepOutcome) => o.id === ENROLMENT_STEP_ID);
-  if (outcome === undefined || outcome.status !== "ok" || outcome.envelope === null) return "";
-  const value = outcome.envelope.result[ENROLMENT_RESULT_FIELD];
-  return typeof value === "string" ? value : "";
+  if (outcome === undefined || outcome.status !== "ok" || outcome.envelope === null) return false;
+  return outcome.envelope.result[OWNER_CLAIMED_FIELD] === true;
 }
 
 /**
@@ -145,33 +168,6 @@ export async function openEnrolmentLink(url: string, deps: EnrolmentDeps): Promi
       err,
     );
   }
-}
-
-/**
- * The whole host-side step: find the link, open it, report what happened.
- *
- * Returns the link on success so a caller can say "we opened this" without
- * re-reading the report. It does NOT return the link on failure -- a caller
- * that could not open a browser should show the operator the link, and it gets
- * that by calling enrolmentUrlFrom itself, deliberately, rather than by
- * catching an error that happens to carry a credential.
- */
-export async function completeEnrolment(
-  report: ExecutionReport,
-  deps: EnrolmentDeps,
-): Promise<string> {
-  const url = enrolmentUrlFrom(report);
-  if (url === "") {
-    const ran = report.outcomes.some((o) => o.id === ENROLMENT_STEP_ID);
-    throw new EnrolmentError(
-      ran ? "missing" : "notRun",
-      ran
-        ? "The enrolment step ran but produced no link, so there is nothing to open."
-        : "The install did not run the enrolment step, so there is no link to open.",
-    );
-  }
-  await openEnrolmentLink(url, deps);
-  return url;
 }
 
 function errorText(err: unknown): string {

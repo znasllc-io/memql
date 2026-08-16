@@ -27,6 +27,7 @@
 // takes them.
 
 import type { ClusterConfig } from "./model.js";
+import { receiptNamesAnotherCluster } from "./ownershipRoute.js";
 import { capabilityScriptPath, type CapabilityEnvelope, type ScriptOutcome } from "../install/runner.js";
 
 /** The capability that mints the link, shared with the install graph. */
@@ -47,6 +48,13 @@ export interface TakeOwnershipInputs {
   cluster: ClusterConfig;
   /** The owner to enrol, off the install receipt. */
   ownerEmail: string;
+  /**
+   * The domain that same receipt was recorded against (`recordedDomain`).
+   *
+   * Carried so the mint can check that the owner it is about to name came from
+   * a receipt describing THIS cluster -- see the refusal in mintOwnershipLink.
+   */
+  receiptDomain: string;
   /** Where the capability scripts live. */
   repoRoot: string;
 }
@@ -57,6 +65,8 @@ export type OwnershipFailureReason =
   | "notLocal"
   /** No owner email is recorded, so there is no account to name. */
   | "noOwner"
+  /** The recorded owner belongs to a DIFFERENT cluster's install. */
+  | "otherCluster"
   /** The mint itself failed. */
   | "mintFailed"
   /** It succeeded and produced no link, which should not happen. */
@@ -108,6 +118,30 @@ export async function mintOwnershipLink(
       "noOwner",
       "No owner email is recorded for this cluster, so there is no account to enrol. " +
         "Re-run the installer, which records the owner it bootstraps.",
+    );
+  }
+  // THE RECEIPT IS ONE FILE AND THE CLUSTER LIST IS MANY (memql#3906).
+  //
+  // `~/.memql/install-receipt.json` describes whichever cluster was installed
+  // LAST, so an owner read out of it is only evidence about the cluster whose
+  // domain it was recorded against. Without this check, taking ownership of a
+  // second local cluster would name the first one's owner -- and the mint runs
+  // `kubectl exec` against the CURRENT context, so the name it carries and the
+  // cluster it lands on are chosen independently.
+  //
+  // Refused rather than degraded. The plausible-looking alternative -- mint
+  // anyway and let the cluster reject an address it does not know -- turns a
+  // question this side can answer into a failure the operator has to interpret,
+  // and it would silently succeed on the day two clusters share an owner.
+  //
+  // It refuses on a CONTRADICTION, not on a gap: a cluster with no recorded
+  // domain still mints, because that is the case the fallback below is written
+  // for. See receiptNamesAnotherCluster.
+  if (receiptNamesAnotherCluster(inputs.cluster.domain ?? "", inputs.receiptDomain)) {
+    throw new OwnershipError(
+      "otherCluster",
+      `The install receipt on this machine records an owner for a different cluster, so it cannot name the account to enrol on "${inputs.cluster.name}". ` +
+        "Repair this cluster from the wizard, which re-records the owner it bootstraps.",
     );
   }
 

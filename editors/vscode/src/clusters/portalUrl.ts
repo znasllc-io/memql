@@ -1,26 +1,34 @@
 // Where this cluster's portal is.
 //
-// THE ROW IS ASKED FIRST, AND THE PATH IS THE FALLBACK. When connected, the
-// portal is a `v1:platform:site` row like any other hosted surface -- site #1,
-// no special case -- and its hostname is what the cluster itself says the
-// portal is served at. Composing `https://api.<domain>/portal/` is what
-// `component/genesis/domain.go` puts there TODAY, and memql#3711 moves it to
-// its own origin; a hard-coded path would be silently wrong the day that lands,
-// on every cluster that had already moved.
+// THE ROW IS ASKED FIRST, AND THE COMPOSITION IS THE FALLBACK. When connected,
+// the portal is a `v1:platform:site` row like any other hosted surface -- site
+// #1, no special case -- and its hostname is what the cluster itself says the
+// portal is served at.
+//
+// THE PREDICTION IN THIS COMMENT CAME TRUE, AND THE FALLBACK HAD NOT MOVED.
+// It used to say that composing `https://api.<domain>/portal/` was the current
+// convention and that memql#3711 would move the portal to its own origin, so
+// "a hard-coded path would be silently wrong the day that lands". #3711 landed;
+// the composition did not follow it, and every cluster reached that address
+// until memql#3906. Preferring the row was the right design and it did not
+// save anyone, because the composition is what runs when there is no connection
+// -- which is exactly the first-run case where the portal is being opened for
+// the first time.
 //
 // So: read the row when there is a connection to read it over, and compose only
-// when there is not. The composed answer is not a guess -- it is the current
-// convention -- but it is the older of the two answers, and the cluster's own
+// when there is not. The composed answer is not a guess -- it is the same rule
+// `component/genesis/domain.go` composes the portal's redirect URI and CORS
+// origin from -- but it is the older of the two answers, and the cluster's own
 // row outranks it.
 //
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 //
-// Refs: #3742 #3711 #3733
+// Refs: #3742 #3711 #3733 #3906
 
 import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { flattenForList } from "../state/rowProjection.js";
-import { normalizeDomain } from "../connection/endpoint.js";
+import { hostOf, normalizeDomain } from "../connection/endpoint.js";
 import type { ClusterConfig } from "./model.js";
 
 /** The concept every hosted surface on a cluster is a row of. */
@@ -68,19 +76,47 @@ function systemOwnedHostname(rows: readonly Row[]): string {
 }
 
 /**
- * `https://api.<domain>/portal/`, where the bff serves it today.
+ * `https://portal.<domain>/`, where the edge node serves it.
  *
- * Falls back to the ENDPOINT's host when the entry records no domain -- an
- * operator who registered a cluster by endpoint alone still has a front door,
- * and the port is dropped because the portal is served over 443 whatever the
- * gRPC endpoint names.
+ * THE DAY THE COMMENT ABOVE PREDICTED HAS LANDED (memql#3711, fixed in
+ * memql#3906). This composed `https://api.<domain>/portal/` -- the sub-path the
+ * bff used to mount the bundle on -- and the portal has since moved to its own
+ * origin as site #1. Verified against a running cluster:
+ *
+ *     https://api.<domain>/portal/   -> 415
+ *     https://portal.<domain>/       -> 200
+ *     v1:platform:site               -> hostname=portal.<domain>, systemOwned
+ *
+ * The 415 is worth naming, because it is not the 404 a stale path usually
+ * gives. `/portal/` has no Ingress rule of its own, so it falls through to the
+ * `/` catch-all, which forwards h2c to the bff's gRPC edge -- an HTTP/1.1
+ * request handed to an h2c backend. The engine-side rule this now mirrors is
+ * `component/genesis/domain.go`, which composes the same `https://portal` +
+ * site suffix for the portal's OAuth redirect URI and CORS origin.
+ *
+ * WHY THIS MATTERED MORE THAN THE ROW PATH SUGGESTS. `portalTarget` prefers the
+ * cluster's own site row and is right whenever it can read one -- but reading
+ * rows needs a live connection, which needs a credential. The composed answer
+ * is therefore exactly what a first-run operator gets, which is the one moment
+ * a wrong address is least recoverable.
+ *
+ * Falls back to the ENDPOINT when the entry records no domain, deriving the
+ * domain from an `api.<domain>` front door exactly as `identityBaseUrlFor`
+ * derives its own sibling. An endpoint that names no such front door composes
+ * nothing: the portal is a DIFFERENT host from the gRPC endpoint now, so there
+ * is no host left to reuse, and inventing one would open a browser at an
+ * address nobody nominated.
  *
  * Empty when there is nothing to compose from, which the caller renders as "no
- * portal address can be worked out" rather than opening `https:///portal/`.
+ * portal address can be worked out" rather than opening `https:///`.
  */
 export function composePortalUrl(cluster: ClusterConfig): string {
   const domain = normalizeDomain(cluster.domain ?? "");
-  if (domain !== "") return `https://api.${domain}/portal/`;
-  const host = (cluster.endpoint ?? "").trim().split(":")[0] ?? "";
-  return host === "" ? "" : `https://${host}/portal/`;
+  if (domain !== "") return `https://portal.${domain}/`;
+  const host = hostOf(cluster.endpoint ?? "");
+  const API = "api.";
+  if (host !== undefined && host.startsWith(API) && host.length > API.length) {
+    return `https://portal.${host.slice(API.length)}/`;
+  }
+  return "";
 }

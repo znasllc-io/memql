@@ -49,7 +49,7 @@ import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
-import { EnrolmentError, enrolmentUrlFrom, openEnrolmentLink } from "../install/enrolment.js";
+import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import {
   deleteReceipt,
   readReceipt,
@@ -946,19 +946,21 @@ export class AddClusterPanel {
 
     this.state.finish({ ok: report?.ok === true, cancelled: report?.cancelled === true });
 
-    // THE ENROLMENT LINK, off the report and onto the done screen (memql#3408).
+    // IS THERE AN OWNER ACCOUNT TO ENROL AGAINST (memql#3408, memql#3906).
     //
-    // The `enrolmentLink` step mints a single-use passkey link inside the
-    // cluster and the executor records it on the step's result. Until now
-    // nothing read it back, so a successful install ended with the operator
-    // holding no way to reach the credential the install had just created for
-    // them -- the URL existed only in the receipt on disk.
+    // This used to lift the run's minted link onto the done screen so the
+    // button could replay it. Two failures came out of that. The link is
+    // single-use and expires in fifteen minutes, so an operator who stepped
+    // away came back to a button that failed in a way indistinguishable from
+    // the feature being broken; and a run whose enrolment step produced nothing
+    // offered no ownership route at all, which is how a repair -- where
+    // `magicLink` correctly reports `linkState=none`, because identity only
+    // logs a link that was REQUESTED -- ended with no way in but a terminal.
     //
-    // Read here rather than in `doneHtml` because `report` is local to this
-    // method and the screen re-renders many times. `enrolmentUrlFrom` returns
-    // "" when the step did not run or produced nothing, which is not a failure:
-    // an install that skipped enrolment simply gets no button.
-    if (report !== undefined) this.state.setEnrolmentUrl(enrolmentUrlFrom(report));
+    // So the screen keeps the durable half of that step's answer and mints the
+    // perishable half on click. Read here rather than in `doneHtml` because
+    // `report` is local to this method and the screen re-renders many times.
+    if (report !== undefined) this.state.setOwnerAccountExists(ownerAccountExistsFrom(report));
 
     // THE MAGIC LINK, and on a fresh install it is the ONLY one of the two that
     // exists (memql#3884).
@@ -2064,31 +2066,26 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   }
 
   /**
-   * Opens the passkey enrolment link the install minted (memql#3408).
+   * Mints a passkey enrolment link and opens it (memql#3408, memql#3906).
    *
-   * The link never enters the webview -- the button carries no href, and the
-   * URL is read from host-side state here. `openEnrolmentLink` re-validates
-   * it (https, `/enroll?code=`) before anything is opened, so a value that was
-   * rewritten between the mint and this click is refused rather than followed.
+   * MINTS, rather than replaying the one the run produced. The install's link
+   * is single-use and 15-minute, so this screen -- which an operator can leave
+   * open indefinitely -- was the worst possible place to hold one. Minting on
+   * click also means the button is offered whenever there is an ACCOUNT to
+   * enrol against, instead of only when the run happened to produce a URL.
    *
-   * A failure is REPORTED, not swallowed, and the message says what is still
-   * available: the magic-link route on this same screen still works, so an
-   * operator whose machine has no browser is inconvenienced rather than stuck.
+   * Delegating to the command rather than calling `mintOwnershipLink` here is
+   * deliberate: it is the same route the Clusters tree and the palette take, so
+   * an operator cannot reach two implementations of "take ownership" that
+   * behave differently, and the credential never enters this file at all.
    */
   private async enrolPasskey(): Promise<void> {
-    const url = this.state.enrolmentUrl;
-    if (url === "") return;
-    try {
-      await openEnrolmentLink(url, {
-        resolveExternalUri: async (target) => (await vscode.env.asExternalUri(vscode.Uri.parse(target))).toString(),
-        openExternal: async (target) => await vscode.env.openExternal(vscode.Uri.parse(target)),
-      });
-    } catch (err) {
-      const detail = err instanceof EnrolmentError ? err.message : String(err);
-      void vscode.window.showErrorMessage(
-        `${detail} You can still sign in with a magic link from this screen.`,
-      );
-    }
+    const handoff = this.state.handoff;
+    if (handoff === undefined || !handoff.ok) return;
+    await vscode.commands.executeCommand("memql.clusters.takeOwnership", {
+      cluster: handoff.cluster,
+      selected: true,
+    });
   }
 
   /**
@@ -2181,7 +2178,7 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       // imports `vscode`, so nothing under `node --test` can render it.
       const primary = this.state.primaryHandoffAction;
       const cls = (name: string) => (primary === name ? "primary" : "secondary");
-      const enrol = this.state.hasEnrolmentLink
+      const enrol = this.state.canEnrol
         ? `<button class="${cls("enrol")}" type="button" data-act="enrolPasskey">Set up a passkey</button>`
         : "";
       const claim = this.state.hasClaimLink
@@ -2190,12 +2187,15 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
       const signIn = handoff.canSignIn
         ? `<button class="${cls("signIn")}" type="button" data-act="signInAsOwner">Sign in as owner</button>`
         : "";
-      // Said only when there is a passkey to explain. The link expires and is
-      // single-use, and an operator who closes this screen without knowing that
-      // will come back to a dead link with no idea why.
-      const enrolNote = this.state.hasEnrolmentLink
+      // Said only when there is a passkey to explain, and it no longer hurries
+      // anybody (memql#3906). The old wording -- "do it now, the link expires"
+      // -- was true of a link this screen was holding. Nothing is held now: the
+      // link is minted when the button is pressed, so the honest thing to say
+      // is what the click DOES, and that this account cannot be signed into
+      // until it has been done once.
+      const enrolNote = this.state.canEnrol
         ? `<p>${escapeHtml(
-            "Setting up a passkey opens your browser once. The link is single-use and expires shortly, so do it now -- otherwise sign in with a magic link.",
+            "This cluster's owner account has no way to sign in yet. Setting up a passkey opens your browser once and gives it one; you can come back and do it whenever you like.",
           )}</p>`
         : "";
       // The claim note says what the click DOES, because "claim" is the one

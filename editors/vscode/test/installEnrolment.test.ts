@@ -1,23 +1,27 @@
-// The install wizard's enrolment step, host side (memql#3408).
+// The install wizard's enrolment step, host side (memql#3408, memql#3906).
 //
-// What these tests are really pinning is that the wizard OPENS the link
-// instead of printing it, and that it refuses to open anything that is not a
-// minted enrolment link. The second half matters more than it looks: the value
-// comes from a shell script's stdout, and "open whatever URL the script
-// printed" is a browser-navigation primitive handed to anything that can write
-// to that pipe.
+// What these tests are really pinning is that the wizard OPENS a link instead
+// of printing it, and that it refuses to open anything that is not a minted
+// enrolment link. The second half matters more than it looks: the value comes
+// from a shell script's stdout, and "open whatever URL the script printed" is a
+// browser-navigation primitive handed to anything that can write to that pipe.
+//
+// The reader half changed in memql#3906. This module used to lift the run's
+// minted link off the report so the done screen could replay it; a single-use,
+// 15-minute credential was the wrong thing to hold on a screen that can stay
+// open for days. What it reads now is the durable fact -- whether there is an
+// owner ACCOUNT to enrol against -- and the link is minted at click time.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  ENROLMENT_RESULT_FIELD,
   ENROLMENT_STEP_ID,
   EnrolmentError,
-  completeEnrolment,
-  enrolmentUrlFrom,
+  OWNER_CLAIMED_FIELD,
   isEnrolmentUrl,
   openEnrolmentLink,
+  ownerAccountExistsFrom,
 } from "../src/install/enrolment.js";
 import type { ExecutionReport, StepOutcome } from "../src/install/executor.js";
 
@@ -33,7 +37,7 @@ function outcome(over: Partial<StepOutcome> = {}): StepOutcome {
       ok: true,
       capability: "install.enrolmentLink",
       changed: true,
-      result: { [ENROLMENT_RESULT_FIELD]: LINK },
+      result: { [OWNER_CLAIMED_FIELD]: true, enrolmentState: "minted" },
       error: null,
     },
     verified: true,
@@ -69,23 +73,44 @@ function recorder() {
 }
 
 // ---------------------------------------------------------------------------
-// Reading the link off the report
+// Reading the OWNER ACCOUNT off the report
 // ---------------------------------------------------------------------------
 
-test("the link is read off the enrolment step's envelope", () => {
-  assert.equal(enrolmentUrlFrom(report([outcome()])), LINK);
+test("ownerClaimed off the enrolment step is what says enrolment is possible", () => {
+  assert.equal(ownerAccountExistsFrom(report([outcome()])), true);
 });
 
-test("a step that did not run yields no link rather than a stale one", () => {
-  assert.equal(enrolmentUrlFrom(report([])), "");
-  assert.equal(enrolmentUrlFrom(report([outcome({ status: "failed", envelope: null })])), "");
-  assert.equal(enrolmentUrlFrom(report([outcome({ status: "skipped" })])), "");
+test("a cluster with no owner yet reports false, and gets the claim route instead", () => {
+  // `enrolment-link.sh` reports ownerClaimed=false / enrolmentState=
+  // awaitingFirstSignIn when nothing has claimed the cluster. That is the
+  // hand-rolled case: there is no account to enrol a passkey for, so the done
+  // screen leads with the magic link instead.
+  const unclaimed = outcome();
+  unclaimed.envelope = {
+    ...unclaimed.envelope!,
+    result: { [OWNER_CLAIMED_FIELD]: false, enrolmentState: "awaitingFirstSignIn" },
+  };
+  assert.equal(ownerAccountExistsFrom(report([unclaimed])), false);
 });
 
-test("a step whose envelope carries no link yields empty, not undefined-as-string", () => {
+test("a step that did not run establishes nothing, and says so", () => {
+  // Not an error. It costs the operator the OFFER, not the capability --
+  // memql.clusters.takeOwnership is reachable from the Clusters tree whatever
+  // any one run managed to find out.
+  assert.equal(ownerAccountExistsFrom(report([])), false);
+  assert.equal(ownerAccountExistsFrom(report([outcome({ status: "failed", envelope: null })])), false);
+  assert.equal(ownerAccountExistsFrom(report([outcome({ status: "skipped" })])), false);
+});
+
+test("a missing field is false, not truthy-by-accident", () => {
   const empty = outcome();
   empty.envelope = { ...empty.envelope!, result: {} };
-  assert.equal(enrolmentUrlFrom(report([empty])), "");
+  assert.equal(ownerAccountExistsFrom(report([empty])), false);
+  // The string "false" is what a shell that forgot cap_result_set_raw would
+  // emit, and it must not read as an owner.
+  const stringly = outcome();
+  stringly.envelope = { ...stringly.envelope!, result: { [OWNER_CLAIMED_FIELD]: "false" } };
+  assert.equal(ownerAccountExistsFrom(report([stringly])), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -121,8 +146,7 @@ test("a non-URL is refused rather than thrown on", () => {
 
 test("the operator copies nothing -- the link is opened for them", async () => {
   const rec = recorder();
-  const opened = await completeEnrolment(report([outcome()]), rec.deps);
-  assert.equal(opened, LINK);
+  await openEnrolmentLink(LINK, rec.deps);
   assert.deepEqual(rec.opened, [LINK]);
 });
 
@@ -163,16 +187,15 @@ test("no browser on this host is browserUnavailable, not a generic failure", asy
   );
 });
 
-test("a skipped enrolment step is reported as notRun, a barren one as missing", async () => {
+test("the opener is the only gate a minted link passes through", async () => {
+  // Every route into ownership -- the palette command, the Clusters tree, the
+  // install's done screen -- reaches the browser through openEnrolmentLink, so
+  // the https + `/enroll?code=` check above cannot be bypassed by adding a
+  // fourth entry point. A second opener is the regression worth naming.
   const rec = recorder();
   await assert.rejects(
-    () => completeEnrolment(report([]), rec.deps),
-    (err: unknown) => err instanceof EnrolmentError && err.reason === "notRun",
+    () => openEnrolmentLink("https://identity.example.com/enroll", rec.deps),
+    (err: unknown) => err instanceof EnrolmentError && err.reason === "malformed",
   );
-  const barren = outcome();
-  barren.envelope = { ...barren.envelope!, result: {} };
-  await assert.rejects(
-    () => completeEnrolment(report([barren]), rec.deps),
-    (err: unknown) => err instanceof EnrolmentError && err.reason === "missing",
-  );
+  assert.deepEqual(rec.opened, []);
 });

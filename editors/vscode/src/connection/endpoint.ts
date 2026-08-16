@@ -109,7 +109,13 @@ export function identityBaseUrlFor(cluster: ClusterConfig): string | undefined {
 // hostOf extracts the host from a stored endpoint, tolerating the same spellings
 // webSocketUrlFor accepts. Returns undefined for anything it cannot read as a
 // host -- callers treat that as "not derivable" rather than guessing.
-function hostOf(rawEndpoint: string): string | undefined {
+//
+// EXPORTED for the portal's sibling composition (memql#3906), which needs the
+// same "what domain does this endpoint imply" step identityBaseUrlFor takes
+// above. portalUrl.ts had its own `endpoint.split(":")[0]`, which is the second
+// copy this file's comments keep warning about -- it read a scheme-prefixed
+// endpoint as the scheme and an IPv6 literal as a hostname.
+export function hostOf(rawEndpoint: string): string | undefined {
   const raw = rawEndpoint.trim();
   if (raw === "") return undefined;
   const schemeMatch = raw.match(SCHEME_RE);

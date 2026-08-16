@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  entryActionFor,
   probeClaimState,
   setupUrl,
   type ClaimState,
@@ -88,13 +87,23 @@ test("the probe does not follow redirects", async () => {
   );
 });
 
-test("UNKNOWN offers sign-in, which is the previous behaviour", () => {
-  // Failing toward sign-in is what keeps this change from taking a working
-  // sign-in away from every cluster behind a proxy that hides a 404. The
-  // cluster this issue is about answers 200, so it is not the one at risk.
-  assert.equal(entryActionFor("unknown"), "signIn");
-  assert.equal(entryActionFor("claimed"), "signIn");
-  assert.equal(entryActionFor("unclaimed"), "claim");
+test("a local cluster's own TLS is what the probe cannot get past", async () => {
+  // NOT A HYPOTHETICAL. `globalThis.fetch` verifies against Node's bundled
+  // roots, and the local installer puts its mkcert CA in the OS/NSS store, so
+  // a real probe of a real local cluster throws exactly this:
+  //
+  //   fetch failed / cause: UNABLE_TO_VERIFY_LEAF_SIGNATURE
+  //
+  // Reporting it as `unknown` is right -- nothing about ownership was
+  // established -- but it means this module cannot answer for the clusters the
+  // installer builds, which is why clusters/ownershipRoute.ts asks the install
+  // receipt before it asks the network.
+  const tlsFailure: FetchLike = async () => {
+    const err = new TypeError("fetch failed");
+    (err as { cause?: unknown }).cause = { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" };
+    throw err;
+  };
+  assert.equal(await probeClaimState("https://identity.memql.localhost", { fetch: tlsFailure }), "unknown");
 });
 
 test("setupUrl composes the wizard from the issuer", () => {

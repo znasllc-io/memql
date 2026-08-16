@@ -943,46 +943,54 @@ function escapeForRegExp(value: string): string {
 }
 
 // -----------------------------------------------------------------------------
-// the enrolment link the install minted and then threw away (memql#3408)
+// the route into ownership the install used to drop (memql#3408, memql#3906)
 // -----------------------------------------------------------------------------
 //
-// The `enrolmentLink` step mints a single-use passkey link inside the cluster
-// and puts it on `result.enrolUrl`. `src/install/enrolment.ts` was written to
-// open it -- and was reachable from nothing but its own test. An operator
-// finished a successful install with no way to reach the credential the
-// install had just created for them; the URL survived only in the receipt on
-// disk, which nothing tells them about.
+// The `enrolmentLink` step mints a single-use passkey link inside the cluster.
+// `src/install/enrolment.ts` was written to open it -- and was reachable from
+// nothing but its own test. An operator finished a successful install with no
+// way to reach the credential the install had just created for them; the URL
+// survived only in the receipt on disk, which nothing tells them about.
 //
 // The failure shape is this file's recurring one: every piece existed and was
 // individually green, and the operator's path still did not work.
+//
+// memql#3906 moved what the screen REMEMBERS. It used to hold the run's link
+// and replay it, which failed twice over: the link is single-use and expires in
+// fifteen minutes, so the button was dead by the time anyone came back to it,
+// and a run that minted none offered nothing at all. The screen now remembers
+// only that an owner ACCOUNT exists -- a durable fact -- and the button mints a
+// fresh link when pressed.
 
-const ENROL_LINK = "https://identity.memql.localhost/enroll?code=mql_enr_" + "a".repeat(43);
-
-async function runToDoneWithEnrolment(link: string): Promise<Harness> {
-  const runner = await fakeRunner({}, { "install.enrolmentLink": { enrolUrl: link } });
+async function runToDoneWithOwner(): Promise<Harness> {
+  const runner = await fakeRunner(
+    {},
+    { "install.enrolmentLink": { ownerClaimed: true, enrolmentState: "minted" } },
+  );
   const h = open({ runner });
   beginInstall(h);
   await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
   return h;
 }
 
-test("a successful install offers the passkey it just minted", async () => {
-  const h = await runToDoneWithEnrolment(ENROL_LINK);
+test("a successful install offers to enrol against the owner it bootstrapped", async () => {
+  const h = await runToDoneWithOwner();
   try {
     const html = h.html();
     assert.match(html, /Your cluster is ready/, "the run should have reached the done screen");
     assert.match(
       html,
       /data-act="enrolPasskey"/,
-      "the done screen must offer the enrolment link. Minting a credential and " +
-        "discarding it leaves the operator holding nothing at the one moment they " +
-        "are ready to use it",
+      "the done screen must offer a route to ownership. Bootstrapping an account " +
+        "with no way to sign into it leaves the operator holding nothing at the one " +
+        "moment they are ready to use the cluster",
     );
     assert.match(
       html,
       /class="primary" type="button" data-act="enrolPasskey"/,
-      "and offer it as the PRIMARY action: the link is already minted, whereas the " +
-        "magic-link route waits on a mailbox a local cluster does not have",
+      "and offer it as the PRIMARY action: the account already exists and holds no " +
+        "credential, whereas the magic-link route waits on a mailbox a local cluster " +
+        "does not have",
     );
     assert.match(
       html,
@@ -994,13 +1002,12 @@ test("a successful install offers the passkey it just minted", async () => {
   }
 });
 
-// The link carries a plaintext single-use bearer in its query string. The
-// webview is a separate document with its own script; keeping the credential
-// on the host side means a bug in the page -- or anything that can read the
-// rendered HTML -- cannot walk off with it. The button therefore carries no
-// href and no token, and the URL is looked up host-side on click.
-test("the enrolment link itself never reaches the webview", async () => {
-  const h = await runToDoneWithEnrolment(ENROL_LINK);
+// The link carries a plaintext single-use bearer in its query string. Since
+// memql#3906 the panel does not hold one at all -- it is minted at click time
+// and handed straight to the opener -- so this asserts the property is intact
+// end to end rather than that one field is guarded.
+test("no enrolment credential reaches the webview, or the panel", async () => {
+  const h = await runToDoneWithOwner();
   try {
     const html = h.html();
     // Asserted FIRST so this cannot pass vacuously. "the token is absent" is
@@ -1012,22 +1019,22 @@ test("the enrolment link itself never reaches the webview", async () => {
       "the enrolment must actually be on screen for its containment to mean anything",
     );
     assert.ok(
-      !html.includes(ENROL_LINK),
-      "the full enrolment URL must not be rendered into the page",
+      !html.includes("mql_enr_"),
+      "no enrolment bearer may be rendered into the page, in any form",
     );
     assert.ok(
-      !html.includes("mql_enr_"),
-      "and neither must the bearer token inside it, in any form",
+      !/href=/.test(html.slice(html.indexOf('data-act="enrolPasskey"') - 200)),
+      "the button carries no href: the host opens the URL, the page never sees one",
     );
   } finally {
     h.close();
   }
 });
 
-// An install that never ran the step -- or ran it against a cluster with no
-// account to enrol, which is what `enrolmentState` reports -- is not a broken
-// install. It just has no button, and the magic link goes back to primary.
-test("no minted link means no button, and the magic link is primary again", async () => {
+// An install whose enrolment step never ran, or ran against a cluster with no
+// account to enrol (`ownerClaimed=false`), is not a broken install. It just has
+// no button, and the magic link goes back to primary.
+test("no owner account means no button, and the magic link is primary again", async () => {
   const runner = await fakeRunner();
   const h = open({ runner });
   try {
