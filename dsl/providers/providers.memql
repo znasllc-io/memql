@@ -91,8 +91,20 @@ provider chat54Mini {
     // bounded by the schema's maxItems=50 so a runaway response
     // can't blow the wallet.
     maxCompletionTokens        16384
-    inputCostPerMillion        0.15
-    outputCostPerMillion       0.60
+    // CORRECTED 2026-08-16 (memql#3854). Was 0.15 / 0.60 / 0.075 -- the
+    // gpt-4o-mini rates, carried forward through two model renames while the
+    // MODEL underneath changed twice. Official gpt-5.4-mini list is
+    // $0.75 / $4.50 per million, so every cost this provider reported was
+    // understated FIVE-fold on input and SEVEN-fold on output.
+    //
+    // It mattered from the moment memQL Cloud attached billing to it (epic
+    // memql#3852): these numbers price the AI cost of goods that the tier
+    // margins are computed against, and an understated cost does not present
+    // as an error -- it presents as a business that looks profitable. The
+    // margin targets the epic commits to (>=21% Node, >=35% Graph, >=40% Mesh
+    // at full allowance consumption) are only meaningful if the input is real.
+    inputCostPerMillion        0.75
+    outputCostPerMillion       4.50
     cachedInputCostPerMillion  0.075
   }
 }
@@ -421,8 +433,15 @@ provider stream54Mini {
   params {
     contextWindow              128000
     maxCompletionTokens        4096
-    inputCostPerMillion        0.15
-    outputCostPerMillion       0.60
+    // CORRECTED 2026-08-16 (memql#3854), for the reason recorded in full on
+    // chat54Mini above. THE SAME @model, THE SAME STALE NUMBERS: this is the
+    // streaming sibling, and it carried an identical copy of the gpt-4o-mini
+    // rates. Finding one and not the other would have left the two providers
+    // for one model disagreeing about what that model costs -- and the
+    // streaming one is the one the agent reply path actually uses, so it is
+    // the copy that was wrong more often.
+    inputCostPerMillion        0.75
+    outputCostPerMillion       4.50
     cachedInputCostPerMillion  0.075
   }
 }
