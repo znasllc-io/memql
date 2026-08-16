@@ -44,6 +44,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
@@ -362,6 +363,30 @@ func (s *Server) handleWebAuthnLoginFinish(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, WebAuthnLoginFinishResponse{
 			ErrorCode: "internal", Error: "could not build the client callback target"})
 		return
+	}
+
+	// THE BROWSER GETS A SESSION TOO (memql#3920).
+	//
+	// Everything above hands the CLIENT an auth code. This hands the
+	// BROWSER the same thing a magic-link sign-in leaves it: the
+	// memql_admin cookie that /authorize's SSO fast-path reads. Without
+	// it a browser that had just proved possession of a passkey held
+	// nothing, so the next first-party surface -- the portal -- started
+	// its own ceremony and asked for the passkey again. The stronger
+	// factor got the worse single sign-on.
+	//
+	// AFTER the auth code, and best-effort for the same reason the
+	// bookkeeping below is: the login has already succeeded, and failing
+	// it now over a cookie would cost the operator the credential they
+	// just proved. A missing cookie costs one extra ceremony; a failed
+	// login costs the whole attempt.
+	if err := s.startBrowserSession(w, r, browserSessionSubject{
+		UserId: userId,
+		lookup: func(ctx context.Context) (*identity.UserRow, error) {
+			return s.Store.LookupUserById(ctx, userId)
+		},
+	}, "passkey_session_started"); err != nil {
+		s.logErr("webauthn: passkey browser session not started", err)
 	}
 
 	// Best-effort bookkeeping, AFTER the code is minted so a failure here
