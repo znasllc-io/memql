@@ -11515,12 +11515,12 @@ func SetConstructCompiledFormBuild(args SetConstructCompiledFormArgs) string {
 	return b.String()
 }
 
-// SetConstructStatus -- Set a construct's lifecycle status (draft / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement.
+// SetConstructStatus -- Set a construct's lifecycle status (draft / staged / active / retired), following its parent bundle. The authored runtime flips constructs to active on bundle activation and retired on bundle retirement. `staged` is the owner-scoped middle tier (memql#3928): the durable stage path writes it, and training flips the SAME row staged -> active rather than writing a second one, so a trained construct has one lifecycle rather than two rows disagreeing about which tier it is in.
 //
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["setConstructStatus"] in generated_concepts.go).
 type SetConstructStatusArgs struct {
 	ConstructId string
-	// Enum: draft | active | retired
+	// Enum: draft | staged | active | retired
 	Status string
 }
 
