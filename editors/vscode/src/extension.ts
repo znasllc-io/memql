@@ -2902,7 +2902,7 @@ async function deploymentStatusForThisCluster(
   // Rebuilt per call from the LIVE dispatcher rather than cached, matching the
   // deploy surface's own reasoning: the ConnectionManager drops it the moment
   // the socket dies, and a cached client would go on writing into a dead stream.
-  return await new DeployControlClient(dispatcher).getDeploymentStatus('');
+  return await new DeployControlClient(dispatcher).getDeploymentStatus();
 }
 
 /**
