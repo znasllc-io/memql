@@ -5,7 +5,7 @@
 <h1 align="center">memQL</h1>
 
 <p align="center">
-  <strong>AI-native time-series memory graph with a single DSL.</strong><br>
+  <strong>The AI memory platform: agents, automations, and voice on a time-series memory graph.</strong><br>
   Unifies concepts, queries, agent workflows, and voice into deployable primitives.
 </p>
 
@@ -25,7 +25,7 @@
 
 ## What is memQL?
 
-memQL is a distributed time-series memory graph with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes.
+memQL is a distributed AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes.
 
 It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a memQL cluster.
 
@@ -359,4 +359,4 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-**memQL - Time-series memory graph database for AI-powered collaboration**
+**memQL - the AI memory platform: agents, automations, and voice on a time-series memory graph**

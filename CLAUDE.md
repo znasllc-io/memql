@@ -1,9 +1,21 @@
-# memQL - Time-Series Memory Graph Database
+# memQL - the AI memory platform
 
-**Type:** Time-series database with event-driven automations and AI integration
+**Type:** AI platform -- agents, automations, and voice on a time-series memory graph
 **Language:** Go + MemQL DSL
 **Stack:** PostgreSQL + TimescaleDB extension
-**Purpose:** Store and query time-series memory nodes with semantic relationships
+**Purpose:** Run agents, automations, and voice against a time-series memory graph
+
+> **Positioning is load-bearing, not marketing** (memql#3843). memQL is an AI
+> platform *built on* a time-series memory graph; it is not a database, and no
+> public-facing file may say it is. The embedded TimescaleDB Community Edition
+> is licensed under the Timescale License (TSL), whose §2.1(b) "Value Added
+> Products or Services" grant is what makes self-hosting free for our model --
+> and §3.10 prong (i) withholds that grant from a product that is "primarily
+> [a] database storage or operations" product. Describing the storage layer
+> precisely is fine ("backed by / built on a time-series memory graph");
+> claiming memQL *is* a database is not. `TestNoDatabaseProductClaims`
+> (`database_positioning_test.go`) fails the build on the latter. Compliance
+> pack: [docs/internal/ops/timescaledb-license-compliance.md](docs/internal/ops/timescaledb-license-compliance.md).
 
 ---
 

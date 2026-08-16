@@ -33,6 +33,8 @@ import {
   runCapabilityScript,
   toArgv,
   type ScriptOutcome,
+  installedToolDir,
+  withInstalledTools,
   type ScriptRun,
 } from "../src/install/runner.js";
 import { executeGraph, type StepPlan } from "../src/install/executor.js";
@@ -776,4 +778,69 @@ test("the uninstall plan reads its target and its verdict off the receipt", asyn
   const cluster = plan(g.steps.find((s) => s.id === "removeCluster")!);
   assert.equal(cluster.action, "skip");
   assert.equal(cluster.action === "skip" ? cluster.satisfied : false, true);
+});
+
+// -----------------------------------------------------------------------------
+// the installer's tools reach every capability script (memql#3911)
+// -----------------------------------------------------------------------------
+
+test("withInstalledTools -- the tool directory goes to the FRONT of PATH", () => {
+  const got = withInstalledTools({ HOME: "/home/op", PATH: "/usr/bin:/bin" });
+  assert.equal(got.PATH, `/home/op/.memql/bin${path.delimiter}/usr/bin${path.delimiter}/bin`);
+});
+
+test("withInstalledTools -- idempotent, so a session's own choice stays first", () => {
+  // The install session passes an env that already names its tool directory.
+  // Prepending a duplicate is harmless but untidy, and a caller that has
+  // deliberately chosen a directory should see it stay where it put it.
+  const already = { HOME: "/home/op", PATH: `/home/op/.memql/bin${path.delimiter}/usr/bin` };
+  assert.equal(withInstalledTools(already).PATH, already.PATH);
+});
+
+test("withInstalledTools -- an explicit toolDir wins over the default", () => {
+  const got = withInstalledTools({ HOME: "/home/op", PATH: "/usr/bin" }, "/opt/memql/bin");
+  assert.equal(got.PATH, `/opt/memql/bin${path.delimiter}/usr/bin`);
+  assert.equal(installedToolDir({ HOME: "/home/op" }), path.join("/home/op", ".memql", "bin"));
+});
+
+test("withInstalledTools -- an empty PATH becomes the tool directory, not a stray delimiter", () => {
+  assert.equal(withInstalledTools({ HOME: "/home/op" }).PATH, "/home/op/.memql/bin");
+});
+
+test("runCapabilityScript -- a script finds the installer's tools without the caller arranging it", async () => {
+  // THE OPERATOR'S FAILURE, reproduced. Taking ownership died on
+  //
+  //   An enrolment link could not be minted: kubectl is not installed;
+  //   cannot exec the identity pod
+  //
+  // on a machine where the installer had put kubectl at ~/.memql/bin/kubectl
+  // twenty minutes earlier. `enrolment-link.sh` does `command -v kubectl`, and
+  // `mintOwnershipLink` calls this runner directly -- so the PATH composition
+  // that lived only in the install session never happened. Same script, same
+  // binary; the only difference was which caller assembled the environment.
+  //
+  // This FAILS against a runner that passes its env through untouched.
+  const home = await tempDir();
+  const toolDir = path.join(home, ".memql", "bin");
+  await fs.mkdir(toolDir, { recursive: true });
+  await script(toolDir, "memql-fake-tool", `echo tool`);
+
+  const dir = await tempDir();
+  const s = await script(
+    dir,
+    "needs-tool.sh",
+    `command -v memql-fake-tool >/dev/null 2>&1 || { ` +
+      `echo '${envelope({ ok: false, result: {}, error: { code: 4, message: "tool is not installed" } })}'; exit 4; }\n` +
+      `echo '${envelope({ result: { found: true } })}'`,
+  );
+
+  // A PATH with no memory of the tool directory -- exactly what an extension
+  // host hands a capability script.
+  const out = await runCapabilityScript({
+    scriptPath: s,
+    params: {},
+    env: { HOME: home, PATH: "/usr/bin:/bin" },
+  });
+  assert.equal(out.exitCode, 0, `the script could not find the tool: ${out.stdout}`);
+  assert.equal(out.envelope?.result.found, true);
 });
