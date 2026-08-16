@@ -56,6 +56,7 @@ import {
 } from "../src/training/closure.js";
 import { outcomeReport } from "../src/training/outcomeReport.js";
 import { sessionLensPlans } from "../src/training/session.js";
+import { DEFAULT_STACK_TAG } from "../src/install/stackPin.js";
 import type { TrainingCluster, TrainingPrompt } from "../src/training/report.js";
 
 // -----------------------------------------------------------------------------
@@ -109,10 +110,13 @@ class StubEngine implements TrainingEngine {
     error: "",
   };
   throwOn: Call["op"] | undefined;
+  // What `throwOn` throws. Overridable so a test can supply the SDK's
+  // transport-reason error rather than a bare one (memql#4000).
+  throwWith: unknown = new Error("transport died");
 
   async validateBundle(sources: string): Promise<ValidateBundleResult> {
     this.calls.push({ op: "validate", sources });
-    if (this.throwOn === "validate") throw new Error("transport died");
+    if (this.throwOn === "validate") throw this.throwWith;
     return this.validateResult;
   }
 
@@ -472,6 +476,61 @@ test("a session-define that fails on the transport claims nothing", async () => 
   // The registration state is unknown, so the safe direction is to claim
   // nothing -- a lens that stops saying something true costs nothing.
   assert.equal(h.actions.sessionDefinitions.isDefined("local", "spaceParticipants"), false);
+});
+
+// -----------------------------------------------------------------------------
+// The version-skew hint on a severed session (memql#4000)
+// -----------------------------------------------------------------------------
+//
+// This is the path the motivating incident travelled: a plugin newer than its
+// cluster sends a field that cluster refuses, the refusal ENDS THE SESSION
+// rather than failing the request, and the operator reads
+// `ERROR (validate): stream closed` with nothing anywhere naming the skew.
+
+const transportClose = (): Error =>
+  Object.assign(new Error("stream closed"), { reason: "transport" });
+
+test("a severed session on a cluster BEHIND the plugin names the possible skew", async () => {
+  const h = harness();
+  h.setCluster({ ...LOCAL, version: "v0.17.0" });
+  h.engine.throwOn = "validate";
+  h.engine.throwWith = transportClose();
+
+  const outcome = await h.actions.dryRun(REQUEST);
+  assert.equal(outcome.status, "error");
+  assert.ok(outcome.status === "error" && outcome.message.startsWith("stream closed"));
+  assert.match(outcome.status === "error" ? outcome.message : "", /v0\.17\.0/);
+  assert.match(outcome.status === "error" ? outcome.message : "", /upgrad/i);
+});
+
+test("a severed session on a CURRENT cluster says nothing extra", async () => {
+  // The failure is real but version skew cannot explain it, and a hint that
+  // fires on every dropped socket is one an operator learns to skip.
+  const h = harness();
+  h.setCluster({ ...LOCAL, version: DEFAULT_STACK_TAG });
+  h.engine.throwOn = "validate";
+  h.engine.throwWith = transportClose();
+
+  const outcome = await h.actions.dryRun(REQUEST);
+  assert.equal(outcome.status === "error" && outcome.message, "stream closed");
+});
+
+test("a cluster with no recorded version says nothing extra", async () => {
+  const h = harness();
+  h.engine.throwOn = "validate";
+  h.engine.throwWith = transportClose();
+  const outcome = await h.actions.dryRun(REQUEST);
+  assert.equal(outcome.status === "error" && outcome.message, "stream closed");
+});
+
+test("an ordinary error on an old cluster is not dressed up as version skew", async () => {
+  // `throwWith` defaults to a bare Error with no transport reason. The socket
+  // was fine, so a severed-session explanation does not apply.
+  const h = harness();
+  h.setCluster({ ...LOCAL, version: "v0.17.0" });
+  h.engine.throwOn = "validate";
+  const outcome = await h.actions.dryRun(REQUEST);
+  assert.equal(outcome.status === "error" && outcome.message, "transport died");
 });
 
 // -----------------------------------------------------------------------------
