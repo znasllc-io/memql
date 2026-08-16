@@ -80,6 +80,26 @@ export interface DeployOutcome {
   /** True only for a refusal by the role gate, so a caller can style or log
    *  "you may not do this" apart from "this did not work". */
   permissionDenied: boolean;
+  /**
+   * The action's own key/values, straight off `ActionResult.details`.
+   *
+   * WHY THIS IS CARRIED (memql#3997). It was dropped here and nowhere else:
+   * the engine puts them on the result (`cutVersion` returns `deploymentId`,
+   * `imageDigest`, the resolved `version` -- component/deploycontrol/
+   * cutversion.go), the proto declares `map<string,string> details = 5`, and
+   * the TS SDK populates it. This layer took `message` and `auditEventId` and
+   * left the rest on the floor.
+   *
+   * What that cost: an upgrade that cuts a version and then ships it had no
+   * handle on the record it had just created, so it re-read the catalog and
+   * took the newest row -- correct almost always, and wrong for whichever
+   * operator lost a race with another cut in that window.
+   *
+   * Empty on a failure, on a refusal, and on a throw. A caller reads a key it
+   * expects and handles absence; nothing here promises which keys an action
+   * sets.
+   */
+  details: Record<string, string>;
 }
 
 /**
@@ -108,6 +128,7 @@ export async function runDeployAction(
         line: auditSuffix(`SUCCESS: ${spec.verb}${detailSuffix(result.message)}`, result.auditEventId),
         auditEventId: result.auditEventId,
         permissionDenied: false,
+        details: result.details ?? {},
       };
     }
     // Ran, did not work. `message` is the engine's own words, surfaced
@@ -121,6 +142,7 @@ export async function runDeployAction(
       ),
       auditEventId: result.auditEventId,
       permissionDenied: false,
+      details: result.details ?? {},
     };
   } catch (err) {
     return errorOutcome(request.id, err);
@@ -189,10 +211,19 @@ export async function readDeploymentStatus(
   }
 }
 
-function invoke(
-  port: DeployControlPort,
-  request: DeployActionRequest,
-): Promise<{ ok: boolean; message: string; auditEventId: string }> {
+/**
+ * DERIVED from the port rather than restated (memql#3997).
+ *
+ * This used to be spelled `{ ok, message, auditEventId }` by hand, and that
+ * hand-restatement was the layer that lost `ActionResult.details` -- the engine
+ * sets it, the proto declares it, the SDK populates it, and a narrower literal
+ * here structurally deleted it before any caller could look. Deriving it is the
+ * same call `DeployControlPort` makes above, for the same reason: a shape that
+ * changes upstream should fail to compile here rather than drift.
+ */
+type ActionOutcome = Awaited<ReturnType<DeployControlPort["cutVersion"]>>;
+
+function invoke(port: DeployControlPort, request: DeployActionRequest): Promise<ActionOutcome> {
   switch (request.id) {
     case "cutVersion":
       return port.cutVersion(request.bump, request.version);
@@ -240,6 +271,8 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
         ),
         auditEventId: err.auditEventId,
         permissionDenied: true,
+        // A refusal produced no action result, so there is nothing to carry.
+        details: {},
       };
     }
     if (err.code === CODE_UNIMPLEMENTED) {
@@ -275,7 +308,15 @@ function errorOutcome(id: DeployActionId, err: unknown): DeployOutcome {
 }
 
 function unreachable(line: string, auditEventId = ""): DeployOutcome {
-  return { kind: "error", line: auditSuffix(line, auditEventId), auditEventId, permissionDenied: false };
+  // No details: nothing that produced a result ran. An empty map is the honest
+  // answer, not a placeholder.
+  return {
+    kind: "error",
+    line: auditSuffix(line, auditEventId),
+    auditEventId,
+    permissionDenied: false,
+    details: {},
+  };
 }
 
 /** Describe a failed READ, which never has an audit id (reads are unaudited). */

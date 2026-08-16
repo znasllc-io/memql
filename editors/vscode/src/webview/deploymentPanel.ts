@@ -51,9 +51,12 @@ import {
   runDeployAction,
   type DeployActionRequest,
   type DeployControlPort,
+  type DeployOutcome,
   type StatusRead,
 } from "../deploy/controller.js";
 import { instanceActions, type InstanceActionId } from "../deploy/instanceActions.js";
+import { upgradeVerdict, type UpgradeTarget, type UpgradeVerdict } from "../deploy/upgrade.js";
+import { describeVersion } from "../version/describe.js";
 import { pipelineState, type PipelineState } from "../deploy/pipelineState.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { installSessionOptions, runInstall, type SessionHooks } from "../install/session.js";
@@ -172,6 +175,7 @@ export class DeploymentPanel {
   private outcome = "";
   private runs: readonly Run[] = [];
   private listing: TagListing = { tags: [], error: "" };
+  private roleVisibility: RoleVisibility | undefined;
   private target = "";
   private tagError = "";
   private plan: PlannedStepView[] = [];
@@ -278,6 +282,11 @@ export class DeploymentPanel {
     const port = this.deps.deployPort?.();
     const visibility = (await this.deps.readRole?.()) ?? roleVisibility(undefined);
     if (this.disposed) return;
+    // Kept, because the upgrade button is drawn from the synchronous render
+    // path and cannot await a role read. Undefined until the first load, which
+    // upgradeVerdict reads as INDETERMINATE and therefore offers -- the same
+    // call src/deploy/actions.ts makes, for the same reason.
+    this.roleVisibility = visibility;
     if (port === undefined) {
       // NOT CONNECTED IS NOT "NO PIPELINE". The read never happened, so the
       // page says which of the two it is rather than reporting the cluster has
@@ -308,6 +317,15 @@ export class DeploymentPanel {
     const { type, value } = message as { type?: unknown; value?: unknown };
     if (typeof type !== "string") return;
 
+    if (type === "upgrade") {
+      // Its OWN message rather than a "choose" id, because the upgrade button
+      // is not one of the instance actions: `choose` validates its id against
+      // instanceActions(), and adding a fourth entry there would put the
+      // move-to-newest button in the same list as install, repair and
+      // uninstall -- which is exactly the confusion the epic is trying to end.
+      await this.runUpgrade();
+      return;
+    }
     if (type === "choose" && typeof value === "string") {
       await this.choose(value as InstanceActionId);
       return;
@@ -587,6 +605,162 @@ export class DeploymentPanel {
     await this.load();
   }
 
+  // -------------------------------------------------------------------------
+  // the upgrade button (memql#3997)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Whether this page offers the move to the newest release, and what happens
+   * when it is taken.
+   *
+   * Recomputed per render rather than stored: the recorded version changes
+   * under this page (a run finishes, a learner writes) and the release listing
+   * arrives after the first paint, so a cached verdict would be answering about
+   * a cluster the page has since re-read.
+   */
+  private upgrade(): UpgradeVerdict {
+    const instance = this.instance;
+    if (instance === undefined) return { kind: "none", reason: "no instance loaded" };
+    return upgradeVerdict({
+      instance,
+      // peek(), never get(): this is called from the synchronous render path.
+      version: describeVersion({
+        recorded: instance.version,
+        listing: this.deps.releases?.peek(),
+      }),
+      ...(this.roleVisibility === undefined ? {} : { visibility: this.roleVisibility }),
+    });
+  }
+
+  /**
+   * The button, end to end: refuse, or confirm once and run.
+   *
+   * ONE CONFIRMATION covers the whole move, including the remote path's two
+   * RPCs. Prompting twice would turn a single decision into a sequence the
+   * operator can be halfway through, and there is no coherent state to be
+   * halfway into: a cut version with nothing shipped is a pending record they
+   * did not ask for.
+   */
+  private async runUpgrade(): Promise<void> {
+    const verdict = this.upgrade();
+    if (verdict.kind === "none") return;
+
+    if (verdict.kind === "refused") {
+      // REFUSAL, NOT A WARNING. The move can leave a cluster running with an
+      // empty graph and no error anywhere (version/barriers.ts says why), and a
+      // warning is something an operator clicks past.
+      //
+      // `error`, not `outcome`: this is "a failure this page produced" -- the
+      // type's own words -- rather than a line the engine wrote, and it is the
+      // field BOTH the local and the remote page render. Nothing was sent, so
+      // there is no audit id and no engine line to surface.
+      this.error = verdict.message;
+      this.render();
+      return;
+    }
+
+    const ask = this.deps.confirm ?? (async () => undefined);
+    const typed = await ask(
+      `${verdict.confirmation} Type ${verdict.phrase} to confirm.`,
+      verdict.phrase,
+    );
+    if (typed === undefined) return;
+    if (!confirmationMatches(verdict.phrase, typed)) {
+      this.error = `That did not match ${verdict.phrase}, so nothing was run.`;
+      this.render();
+      return;
+    }
+    this.error = "";
+
+    if (verdict.target.flow === "upgradeToTag") {
+      // The SAME run path "Create deployment" reaches, with the target already
+      // decided. Not a second implementation that could disagree with it about
+      // what a move does.
+      this.target = verdict.target.to;
+      this.tagError = "";
+      await this.startDeploy();
+      return;
+    }
+    await this.runRemoteUpgrade(verdict.target);
+  }
+
+  /**
+   * THE ONE PLACE THE REMOTE UPGRADE TOUCHES THE DEPLOY-CONTROL SURFACE.
+   *
+   * Epic memql#3943 is collapsing that surface to a single target and removing
+   * the environment parameter. Everything env-shaped about a remote upgrade is
+   * inside this function -- one `env` value, resolved once and passed to
+   * `cutVersion`, which is the only call on this path that still takes one
+   * (`deploy` already takes a deploymentId and nothing else). So the collapse
+   * is a line here rather than a scavenger hunt, and nothing about this button
+   * introduces a NEW env-shaped parameter.
+   *
+   * TWO RPCs, ONE DECISION. `cutVersion` writes a pending deployment record at
+   * the target version; `deploy` ships it. They are separate calls because the
+   * engine has no combined one, not because the operator made two choices --
+   * which is why the confirmation happened before either.
+   */
+  private async runRemoteUpgrade(target: UpgradeTarget): Promise<void> {
+    const port = this.deps.deployPort?.();
+    if (port === undefined) {
+      this.outcome = "ERROR: not connected to this cluster.";
+      this.render();
+      return;
+    }
+    const env = this.deps.deployEnv?.(target.instanceName) ?? target.instanceName;
+
+    const cut = await runDeployAction(port, {
+      id: "cutVersion",
+      env,
+      bump: "patch",
+      // The version is NAMED rather than left to the engine's suggestion. The
+      // operator confirmed a specific release; cutting whatever comes next
+      // would ship a version nobody agreed to.
+      version: target.to,
+    });
+    if (this.disposed) return;
+    if (cut.kind === "error") {
+      // Verbatim, audit id and all -- including, on a refusal, the role that
+      // would have worked.
+      this.outcome = cut.line;
+      await this.load();
+      return;
+    }
+
+    // THE RECORD THE CUT JUST CREATED, BY ID. cutVersion returns it on
+    // ActionResult.details (component/deploycontrol/cutversion.go stamps
+    // `deploymentId`), so the ship names that row rather than "whatever is
+    // newest now".
+    //
+    // This read the catalog back and took runs[0] until memql#3997 carried
+    // `details` through deploy/controller.ts. That was correct almost always
+    // and wrong for whichever operator lost a race: two cuts against one
+    // cluster inside the reload window and the second ship names the first
+    // one's record. There is no window now, because there is no interval --
+    // the id came back with the cut.
+    const record = cut.details.deploymentId ?? "";
+    if (record === "") {
+      // An engine too old to stamp the id. REFUSE rather than fall back to the
+      // catalog: the fallback is the race this replaced, and a pending record
+      // nobody shipped is visible, inert and easy to ship by hand -- while the
+      // wrong record shipped is neither.
+      this.outcome = joinOutcomes(
+        cut,
+        `ERROR: ${target.to} was cut, but the cluster returned no deployment id, so nothing was shipped. ` +
+          `The pending record is on the Deployments list and can be shipped from there.`,
+      );
+      await this.load();
+      return;
+    }
+
+    const ship = await runDeployAction(port, { id: "deploy", deploymentId: record });
+    if (this.disposed) return;
+    // BOTH audit ids reach the operator. Two calls happened, the engine audited
+    // each, and reporting only the second would leave the cut untraceable.
+    this.outcome = joinOutcomes(cut, ship.line);
+    await this.load();
+  }
+
   /**
    * The parameters an action needs, and the confirmation the destructive ones
    * demand.
@@ -704,6 +878,7 @@ export class DeploymentPanel {
             error: this.error,
             // peek(), never get(): bodyHtml is synchronous. loadTags warms it.
             releases: this.deps.releases?.peek(),
+            upgrade: this.upgrade(),
           });
         }
         return renderInstanceOverview({
@@ -713,6 +888,7 @@ export class DeploymentPanel {
           nowMs: Date.now(),
           error: this.error,
           releases: this.deps.releases?.peek(),
+          upgrade: this.upgrade(),
         });
     }
   }
@@ -845,4 +1021,15 @@ ${this.bodyHtml()}
  */
 function nonceValue(): string {
   return randomBytes(16).toString("base64");
+}
+
+/**
+ * Two engine outcomes as one line.
+ *
+ * BOTH survive, audit ids and all. A remote upgrade is two audited calls, and a
+ * line reporting only the second would leave the cut version untraceable -- the
+ * audit id is the deliverable of runDeployAction, not a decoration on it.
+ */
+function joinOutcomes(first: DeployOutcome, second: string): string {
+  return `${first.line} ${second}`;
 }

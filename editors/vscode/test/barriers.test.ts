@@ -112,6 +112,31 @@ test("every barrier says what the move changes", () => {
   }
 });
 
+test("no barrier summary names local-only machinery", () => {
+  // A crossing is REFUSED ON THE REMOTE PATH TOO (memql#3997), so a staging
+  // operator reads these sentences. The first draft of the v0.18.0 entry said
+  // "the local cluster's database" and "moving the checkout does not carry the
+  // data across" -- stackCheckout/clusterUp concepts that mean nothing to a
+  // deploy-control move, and which sent a staging operator to a runbook whose
+  // remedy is `make down PURGE=1`.
+  //
+  // A barrier is a fact about what a RELEASE changed. The machinery that would
+  // have crossed it belongs to the caller and the runbook, not to the table.
+  // The list is LOCAL-ONLY machinery, not "words that sound local". `overlay`
+  // is deliberately absent: staging and production are overlays too, so a
+  // remote operator reads that word correctly. `checkout`, `k3d`, `make up`
+  // and "this machine" are the ones that mean nothing to them.
+  const localOnly = /\bcheckout\b|\blocal cluster\b|\bmake (up|down)\b|\bk3d\b|\bthis machine\b/i;
+  for (const barrier of UPGRADE_BARRIERS) {
+    assert.doesNotMatch(
+      barrier.summary,
+      localOnly,
+      `barrier after ${barrier.afterVersion} describes local-only machinery; ` +
+        `the remote path is refused with this same sentence`,
+    );
+  }
+});
+
 // --- the crossing rule ------------------------------------------------------
 
 test("a move that stays on one side of a barrier is clear", () => {

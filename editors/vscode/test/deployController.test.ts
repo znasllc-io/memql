@@ -45,6 +45,58 @@ function port(over: Partial<DeployControlPort> = {}): DeployControlPort {
 }
 
 // -----------------------------------------------------------------------------
+// The action's own details (memql#3997)
+// -----------------------------------------------------------------------------
+
+test("an action's details survive to the outcome", () => {
+  // THE LAYER THAT LOST THEM WAS THIS ONE. The engine stamps them
+  // (component/deploycontrol/cutversion.go returns `deploymentId`,
+  // `imageDigest`, the resolved `version`), the proto declares
+  // `map<string,string> details = 5`, and the TS SDK populates it -- and then
+  // `invoke` restated the result as `{ ok, message, auditEventId }` by hand and
+  // structurally deleted the rest.
+  //
+  // What it cost: an upgrade that cuts a version and then ships it had no
+  // handle on the record it had just created, so it re-read the catalog and
+  // took the newest row. Correct almost always, and wrong for whichever
+  // operator lost a race with another cut in that window.
+  return runDeployAction(
+    port({
+      cutVersion: async () => ({
+        ...OK,
+        details: { deploymentId: "dep-abc", version: "v0.19.0", imageDigest: "sha256:beef" },
+      }),
+    }),
+    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+  ).then((outcome) => {
+    assert.equal(outcome.kind, "success");
+    assert.equal(outcome.details.deploymentId, "dep-abc");
+    assert.equal(outcome.details.imageDigest, "sha256:beef");
+  });
+});
+
+test("a failed action still carries whatever details it returned", async () => {
+  const outcome = await runDeployAction(
+    port({ cutVersion: async () => ({ ...OK, ok: false, message: "duplicate version", details: { version: "v0.19.0" } }) }),
+    { id: "cutVersion", env: "staging", bump: "patch", version: "v0.19.0" },
+  );
+  assert.equal(outcome.kind, "error");
+  assert.equal(outcome.details.version, "v0.19.0");
+});
+
+test("details is an empty map when nothing produced a result", async () => {
+  // A refusal and a throw both reach the operator through outcomes that never
+  // saw an ActionResult. An empty map is the honest answer; a missing field
+  // would make every reader guard for undefined.
+  const thrown = await runDeployAction(
+    port({ deploy: async () => { throw new Error("socket died"); } }),
+    { id: "deploy", deploymentId: "dep-1" },
+  );
+  assert.equal(thrown.kind, "error");
+  assert.deepEqual(thrown.details, {});
+});
+
+// -----------------------------------------------------------------------------
 // Routing
 // -----------------------------------------------------------------------------
 
