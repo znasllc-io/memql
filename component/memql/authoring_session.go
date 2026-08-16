@@ -316,74 +316,103 @@ func compileAuthoredSpec(c SandboxConstruct) (*Spec, error) {
 }
 
 // buildAuthoredFunctionOverlay returns a function registry holding the core
-// functions plus the owner's session-authored functions, with CORE-FIRST
-// precedence: an authored function whose name a core function already owns is
-// dropped, so authored constructs can only ADD owner-private capability and can
-// never shadow sealed engine behaviour (the one-way guarantee in
-// authoring_resolver.go).
-func (e *MemQLEngine) buildAuthoredFunctionOverlay(owner string, reg *AuthoredRuntimeRegistry) *FunctionRegistry {
+// functions plus the owner's STAGED and session-authored functions, with the
+// precedence CORE -> STAGED -> SESSION.
+//
+// Core-first is the one-way guarantee in authoring_resolver.go: an authored
+// function whose name a core function already owns is dropped, so authored
+// constructs can only ADD owner-private capability and can never shadow sealed
+// engine behaviour. "Core" here is everything the shared registry holds, which
+// includes anything durably promoted -- a trained construct is what the cluster
+// runs, and neither tier below it may take its name.
+//
+// STAGED SITS BELOW CORE AND ABOVE SESSION (memql#3932), and that middle
+// position is the whole ordering question. Below core for the reason above.
+// Above session because session-define is the more specific, more immediate
+// statement of intent: an author who defines a construct in this connection is
+// working on it RIGHT NOW, and a durable staged version of the same name is the
+// older draft they are editing. Reversing the two would make the staged copy
+// un-overridable without a demote, which is exactly the friction the tier exists
+// to remove.
+func (e *MemQLEngine) buildAuthoredFunctionOverlay(owner string, staged, reg *AuthoredRuntimeRegistry) *FunctionRegistry {
 	overlay := newFunctionRegistry()
 	if e.functions != nil {
 		for _, fn := range e.functions.Snapshot() {
 			_ = overlay.Upsert(fn)
 		}
 	}
-	if reg == nil || strings.TrimSpace(owner) == "" {
+	if strings.TrimSpace(owner) == "" {
 		return overlay
 	}
-	for _, c := range reg.ListForOwner(owner) {
-		if c.Status != AuthoredActive {
+	// Staged first, session second: a later Upsert replaces an earlier one, so
+	// applying them in precedence order low-to-high is what makes session win.
+	for _, layer := range []*AuthoredRuntimeRegistry{staged, reg} {
+		if layer == nil {
 			continue
 		}
-		fn, ok := c.Compiled.(*Function)
-		if !ok || fn == nil {
-			continue
-		}
-		// Core-first: never shadow a sealed core construct.
-		if e.functions != nil {
-			if existing, err := e.functions.Get(fn.Name); err == nil && existing != nil {
+		for _, c := range layer.ListForOwner(owner) {
+			if c.Status != AuthoredActive {
 				continue
 			}
+			fn, ok := c.Compiled.(*Function)
+			if !ok || fn == nil {
+				continue
+			}
+			// Core-first: never shadow a sealed core construct.
+			if e.functions != nil {
+				if existing, err := e.functions.Get(fn.Name); err == nil && existing != nil {
+					continue
+				}
+			}
+			_ = overlay.Upsert(fn)
 		}
-		_ = overlay.Upsert(fn)
 	}
 	return overlay
 }
 
 // buildAuthoredSpecOverlay returns a name->spec map holding the core specs plus
-// the owner's session-authored specs, with CORE-FIRST precedence: a session spec
-// whose name a core spec already owns is dropped, so an authored spec can only
-// ADD owner-private predicates and can NEVER shadow a sealed core spec -- the same
-// one-way guarantee buildAuthoredFunctionOverlay enforces for functions. The
-// resulting map threads through parseWithFunctions -> resolveAuthoredSpecOverlay
-// so a session-defined spec referenced inside an authored query's filter
-// resolves on the authored path only. A nil/empty result is fine -- a nil overlay
-// short-circuits the authored expansion entirely.
-func (e *MemQLEngine) buildAuthoredSpecOverlay(owner string, reg *AuthoredRuntimeRegistry) map[string]*Spec {
+// the owner's STAGED and session-authored specs, at the same CORE -> STAGED ->
+// SESSION precedence buildAuthoredFunctionOverlay applies to functions and for
+// the same reasons (see there). A spec whose name a core spec already owns is
+// dropped, so an authored spec can only ADD owner-private predicates and can
+// NEVER shadow a sealed core spec.
+//
+// The resulting map threads through parseWithFunctions ->
+// resolveAuthoredSpecOverlay so an authored spec referenced inside an authored
+// query's filter resolves on the authored path only. A nil/empty result is fine
+// -- a nil overlay short-circuits the authored expansion entirely.
+func (e *MemQLEngine) buildAuthoredSpecOverlay(owner string, staged, reg *AuthoredRuntimeRegistry) map[string]*Spec {
 	overlay := make(map[string]*Spec)
 	if e.specs != nil {
 		for name, spec := range e.specs.Snapshot() {
 			overlay[name] = spec
 		}
 	}
-	if reg == nil || strings.TrimSpace(owner) == "" {
+	if strings.TrimSpace(owner) == "" {
 		return overlay
 	}
-	for _, c := range reg.ListForOwner(owner) {
-		if c.Status != AuthoredActive {
+	// Staged first, session second: the later write wins, so applying the
+	// layers low-to-high is what puts session above staged.
+	for _, layer := range []*AuthoredRuntimeRegistry{staged, reg} {
+		if layer == nil {
 			continue
 		}
-		spec, ok := c.Compiled.(*Spec)
-		if !ok || spec == nil {
-			continue
-		}
-		// Core-first: never shadow a sealed core spec.
-		if e.specs != nil {
-			if _, exists := e.specs.Lookup(spec.Name); exists {
+		for _, c := range layer.ListForOwner(owner) {
+			if c.Status != AuthoredActive {
 				continue
 			}
+			spec, ok := c.Compiled.(*Spec)
+			if !ok || spec == nil {
+				continue
+			}
+			// Core-first: never shadow a sealed core spec.
+			if e.specs != nil {
+				if _, exists := e.specs.Lookup(spec.Name); exists {
+					continue
+				}
+			}
+			overlay[spec.Name] = spec
 		}
-		overlay[spec.Name] = spec
 	}
 	return overlay
 }
@@ -456,11 +485,18 @@ func expandSpecReferencesWithOverlay(expr ExpressionNode, overlay map[string]*Sp
 // With no registry or owner it is identical to Execute, so callers can route
 // every query through it unconditionally.
 func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
-	if reg == nil || strings.TrimSpace(owner) == "" {
+	// The STAGED registry makes this call non-trivial for an owner with no
+	// session registry (memql#3932), which is why the short-circuit now asks
+	// about both. A caller holding no session registry -- an HTTP-side execute,
+	// an automation firing under its author -- still has to resolve that
+	// author's staged constructs, and returning plain Execute would report their
+	// own durable construct as an unknown name.
+	staged := e.stagedAuthored
+	if strings.TrimSpace(owner) == "" || (reg == nil && staged == nil) {
 		return e.Execute(ctx, query)
 	}
-	overlay := e.buildAuthoredFunctionOverlay(owner, reg)
-	specOverlay := e.buildAuthoredSpecOverlay(owner, reg)
+	overlay := e.buildAuthoredFunctionOverlay(owner, staged, reg)
+	specOverlay := e.buildAuthoredSpecOverlay(owner, staged, reg)
 	ctx = ensureAuthorEnvelope(ctx, owner)
 	return e.executeWith(ctx, query, overlay, specOverlay, false)
 }
@@ -476,9 +512,10 @@ func (e *MemQLEngine) ExecuteAuthored(ctx context.Context, query, owner string, 
 func (e *MemQLEngine) ExecuteInline(ctx context.Context, query, owner string, reg *AuthoredRuntimeRegistry) (*ExecuteResult, error) {
 	fns := e.functions
 	var specOverlay map[string]*Spec
-	if reg != nil && strings.TrimSpace(owner) != "" {
-		fns = e.buildAuthoredFunctionOverlay(owner, reg)
-		specOverlay = e.buildAuthoredSpecOverlay(owner, reg)
+	staged := e.stagedAuthored
+	if (reg != nil || staged != nil) && strings.TrimSpace(owner) != "" {
+		fns = e.buildAuthoredFunctionOverlay(owner, staged, reg)
+		specOverlay = e.buildAuthoredSpecOverlay(owner, staged, reg)
 		ctx = ensureAuthorEnvelope(ctx, owner)
 	}
 	return e.executeWith(ctx, query, fns, specOverlay, true)

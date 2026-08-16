@@ -50,11 +50,16 @@ export interface ConstructPageInput {
 /**
  * What the origin badge says, and what it means for opening the source.
  *
- * The three are genuinely different situations rather than three labels:
+ * The four are genuinely different situations rather than four labels:
  * `core` came from the embedded tree, `bundle` from a product's DSL mounted at
  * MEMQL_DSL_PATH, and `promoted` has NO FILE AT ALL -- it lives in the
  * cluster's database, which is where a developer first meets the
  * seeded-versus-trained distinction.
+ *
+ * `staged` (memql#3928) is the same place as `promoted` with a different
+ * audience, and the note says so in those terms: what a reader needs to know
+ * about a staged construct is not where it lives but that nobody else can call
+ * it yet.
  */
 export function originNote(construct: CatalogConstruct): string {
   switch (construct.origin) {
@@ -64,6 +69,8 @@ export function originNote(construct: CatalogConstruct): string {
       return "from the DSL bundle this cluster mounts";
     case "promoted":
       return "promoted -- it lives in this cluster's database and has no file";
+    case "staged":
+      return "staged -- it lives in this cluster's database, and only you can call it until it is trained";
   }
 }
 

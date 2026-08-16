@@ -188,9 +188,14 @@ function tooltipFor(construct: CatalogConstruct): vscode.MarkdownString {
 /**
  * The origin, as an icon.
  *
- * All three are distinguishable at a glance, which is an acceptance item: a
+ * All four are distinguishable at a glance, which is an acceptance item: a
  * `promoted` construct is the one that exists only in the cluster, and a
  * developer needs to see that before they go looking for its file.
+ *
+ * `staged` shares `promoted`'s database icon and takes a different COLOUR, and
+ * that pairing is the point: the two are the same fact about where the
+ * construct lives, and differ only in who can call it. A fourth silhouette
+ * would say they were unrelated.
  */
 function originIcon(origin: CatalogConstruct["origin"]): vscode.ThemeIcon {
   switch (origin) {
@@ -200,6 +205,8 @@ function originIcon(origin: CatalogConstruct["origin"]): vscode.ThemeIcon {
       return new vscode.ThemeIcon("package");
     case "promoted":
       return new vscode.ThemeIcon("database", new vscode.ThemeColor("charts.purple"));
+    case "staged":
+      return new vscode.ThemeIcon("database", new vscode.ThemeColor("charts.orange"));
   }
 }
 

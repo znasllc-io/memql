@@ -121,7 +121,9 @@ const authoringPromotePattern = "authoring.promote.#"
 // so the propagation path and the restart path share one re-registration code
 // path. Idempotent + core-first.
 func (e *MemQLEngine) rehydratePromotedBundleNow(ctx context.Context, store promoteRehydrateStore, owner, bundleId string) (RehydrateResult, error) {
-	return rehydratePromotedBundleWithStore(ctx, store, owner, bundleId, withRehydratePromote(e.recompileAndPromoteRow))
+	return rehydratePromotedBundleWithStore(ctx, store, owner, bundleId,
+		withRehydratePromote(e.recompileAndPromoteRow),
+		withRehydrateStage(e.recompileAndStageRow))
 }
 
 // rehydratePromotedBundleWithStore is the store-driven core for a single-bundle
@@ -129,12 +131,12 @@ func (e *MemQLEngine) rehydratePromotedBundleNow(ctx context.Context, store prom
 // promoteRehydrateStore (no live DB). It mirrors
 // rehydratePromotedConstructsWithStore but scopes to one bundle.
 func rehydratePromotedBundleWithStore(ctx context.Context, store promoteRehydrateStore, owner, bundleId string, opts ...rehydrateOption) (RehydrateResult, error) {
-	cfg := rehydrateConfig{promote: nil}
-	for _, o := range opts {
-		o(&cfg)
-	}
-	if cfg.promote == nil {
-		return RehydrateResult{}, errAuthoringPromoteNoRecompile
+	cfg, err := newRehydrateConfig(opts...)
+	if err != nil {
+		if cfg.promote == nil {
+			return RehydrateResult{}, errAuthoringPromoteNoRecompile
+		}
+		return RehydrateResult{}, err
 	}
 	constructs, err := store.LoadConstructsForBundle(ctx, owner, bundleId)
 	if err != nil {
@@ -145,24 +147,14 @@ func rehydratePromotedBundleWithStore(ctx context.Context, store promoteRehydrat
 		if !isDurablePromotableKind(row.Kind) {
 			continue
 		}
-		if isRetiredConstructStatus(row.Status) {
-			// A demoted (retired) construct must NOT re-register from a
-			// stale promote broadcast -- skip it.
-			continue
-		}
-		result.Seen++
-		if perr := cfg.promote(ctx, row); perr != nil {
-			if errors.Is(perr, errRehydrateSkippedDisabled) {
-				// Intentional skip (#2607/#2643), same classification as the
-				// boot walk: a stored @disabled row must not read as a
-				// re-hydration failure on peer replicas either.
-				result.SkippedDisabled++
-				continue
-			}
-			result.Failed = append(result.Failed, row.Kind+":"+row.Name)
-			continue
-		}
-		result.Rehydrated++
+		// The same three-way route the boot walk takes (memql#3928). A peer
+		// receiving a promote broadcast for a bundle whose row is still STAGED
+		// registers it owner-scoped, not shared -- which is what makes a
+		// re-stage of an already-staged bundle safe to broadcast-adjacent
+		// traffic, and what keeps a train's ordering honest: the row transition
+		// commits before publishAuthoringPromote fires, so the peer reads
+		// "active" and shares it.
+		cfg.rehydrateRow(ctx, row, &result)
 	}
 	return result, nil
 }

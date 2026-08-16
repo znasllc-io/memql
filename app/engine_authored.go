@@ -130,8 +130,13 @@ func (a *App) rehydratePromotedConstructs() {
 			"error", err)
 		return
 	}
+	// `staged` is reported alongside `rehydrated` rather than folded into it
+	// (memql#3928). A staged construct came back, so it counts as re-hydrated --
+	// but it came back OWNER-SCOPED, resolvable for its author and nobody else,
+	// and an operator reading "12 re-hydrated" with no split would take that as
+	// twelve constructs the cluster can now run.
 	a.Logger.Info("durably-promoted constructs re-hydrated on boot",
-		"seen", res.Seen, "rehydrated", res.Rehydrated, "failed", len(res.Failed))
+		"seen", res.Seen, "rehydrated", res.Rehydrated, "staged", res.Staged, "failed", len(res.Failed))
 }
 
 // rearmActiveAuthoredBundles re-registers the persisted active authored bundles

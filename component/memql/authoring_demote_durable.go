@@ -61,6 +61,22 @@ func isRetiredConstructStatus(status string) bool {
 	return strings.EqualFold(strings.TrimSpace(status), string(BundleRetired))
 }
 
+// isStagedConstructStatus reports whether a persisted construct row is STAGED
+// (memql#3928): durable and reviewable, but registered owner-scoped rather than
+// into the shared registry.
+//
+// It sits beside isRetiredConstructStatus because the two are read by the same
+// callers for the same decision. Every re-hydration walk used to ask one
+// question -- retired, skip; anything else, promote shared -- and staged turns
+// that two-way branch into a three-way route. Asking the staged question with a
+// bare == against a string literal at each of those sites is how the retired
+// question got asked before this predicate existed, and the reason it stopped
+// being asked that way is that "retired" arrives off a graph row: whitespace and
+// case are the row's, not the engine's.
+func isStagedConstructStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), string(ConstructStaged))
+}
+
 // DemoteConstructDurable is the durable, restart-surviving DEMOTE of a single
 // previously durably-promoted plain construct (memql#2163), the inverse of
 // PromoteConstructDurable. It removes the construct from the shared registry
@@ -201,6 +217,20 @@ func (e *MemQLEngine) demoteConstructDurableWithStore(ctx context.Context, store
 	}
 	if !isDurablePromotableKind(kind) {
 		return DemoteOutcome{}, fmt.Errorf("authoring: durable demotion of %s constructs is not supported (concept + function-family + spec only)", kind)
+	}
+
+	// A STAGED construct withdraws down its own path (memql#3928), and it has to
+	// be checked BEFORE the shared-registry withdrawal below: staging never put
+	// anything in the shared registry, so demoteAuthoredConstructWithOutcome
+	// would refuse it as "not author-promoted" -- an author would be told their
+	// own staged construct does not exist. The staged path drops the owner-scoped
+	// entry and retires the same rows, minus the two steps staging itself omits
+	// (nothing shared to remove, no peer to broadcast to).
+	if _, staged := e.lookupStaged(owner, kind, name); staged {
+		if err := e.demoteStagedConstructWithStore(ctx, store, owner, kind, name); err != nil {
+			return DemoteOutcome{}, err
+		}
+		return DemoteOutcome{Kind: kind, Name: name, Outcome: DemoteOutcomeRemoved}, nil
 	}
 
 	// Withdraw from the shared registry FIRST (the authoritative safety gate). A

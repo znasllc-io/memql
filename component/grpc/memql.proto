@@ -1401,11 +1401,17 @@ message ConstructInfo {
   // shared registries do not carry.
   string namespace = 3;
 
-  // origin is "core" | "bundle" | "promoted", DERIVED SERVER-SIDE in one
-  // place: core when the construct's file resolves inside the embedded tree,
-  // bundle when it resolves under a runtime-mounted product domain (what
+  // origin is "core" | "bundle" | "promoted" | "staged", DERIVED SERVER-SIDE
+  // in one place: core when the construct's file resolves inside the embedded
+  // tree, bundle when it resolves under a runtime-mounted product domain (what
   // MEMQL_DSL_PATH registers), promoted when the engine holds an
-  // authored-promotion marker for it. No client re-derives this.
+  // authored-promotion marker for it, staged when it is durable but registered
+  // OWNER-SCOPED and therefore callable by its author alone (memql#3928). No
+  // client re-derives this.
+  //
+  // A CLOSED VOCABULARY that every client degrades on rather than rejects, so
+  // adding a value here is a coordinated change: see
+  // memql.ConstructOriginVocabulary and the parity gate over it.
   string origin = 4;
 
   // origin_path is the construct's file relative to the DSL tree root
@@ -1481,6 +1487,17 @@ message ConstructInfo {
   // this catalog when it is not. TestRunnableTriggerMatchesConstructTrigger
   // pins the two.
   ConstructTrigger trigger = 12;
+
+  // owner is the v1:identity:user.id a STAGED construct belongs to, and is
+  // EMPTY for every other origin (memql#3928).
+  //
+  // A caller sees the shared catalog plus their own staged constructs; a
+  // CLUSTER OWNER additionally sees every other author's, which is the only
+  // case where the name alone is ambiguous -- two authors may each stage
+  // `recentOrders`, and an operator auditing the tier needs to know whose is
+  // whose. Populated unconditionally for a staged construct rather than only
+  // for the cluster-owner read, so the field means one thing to every caller.
+  string owner = 13;
 }
 
 // ConstructTrigger is an automation's trigger, projected exactly as the

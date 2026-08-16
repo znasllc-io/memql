@@ -43,8 +43,15 @@ import type { ConstructArgWire, ConstructInfoWire, ConstructTriggerWire } from "
 // Plain result types (no wire shapes leak to consumers)
 // -----------------------------------------------------------------------------
 
-/** A construct's origin. Derived server-side; never re-derived here. */
-export type ConstructOrigin = "core" | "bundle" | "promoted";
+/**
+ * A construct's origin. Derived server-side; never re-derived here.
+ *
+ * `staged` is the memql#3928 fourth value: durable and persisted like
+ * `promoted`, but registered owner-scoped, so it is callable by its author and
+ * by nobody else. It is pinned to the engine's `ConstructOriginVocabulary` by a
+ * parity gate, because the degrade below is silent in both directions.
+ */
+export type ConstructOrigin = "core" | "bundle" | "promoted" | "staged";
 
 /**
  * One declared input of a runnable construct.
@@ -246,9 +253,15 @@ function triggerFromWire(t: ConstructTriggerWire | null): ConstructTrigger {
 // arbitrary string: the field is a closed set the engine owns, and a consumer
 // switching on it should never have to carry a default branch. A value outside
 // the set means the cluster is newer than this client, and rendering a
-// construct as core is the least wrong of the three.
+// construct as core is the least wrong of the four.
+//
+// THE DEGRADE IS WHY THE VOCABULARY IS GATED. A staged construct read by a
+// client that did not list "staged" here comes back as `core` -- which the
+// editor renders sealed and read-only with reason `coreSealed`, on a file its
+// author can edit freely. The failure is not a crash or a missing entry; it is
+// a confident wrong answer, so nothing downstream can notice it.
 function originFromWire(v: string | undefined): ConstructOrigin {
-  return v === "bundle" || v === "promoted" ? v : "core";
+  return v === "bundle" || v === "promoted" || v === "staged" ? v : "core";
 }
 
 function argFromWire(a: ConstructArgWire): ConstructArg {

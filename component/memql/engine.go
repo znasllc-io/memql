@@ -99,6 +99,29 @@ type MemQLEngine struct {
 	// authoring_concept_retire.go for why that fact belongs beside the promotion
 	// marker rather than in a map of its own.
 	promotedAuthored sync.Map
+	// stagedAuthored holds the STAGED tier (epic memql#3928): durable authored
+	// constructs registered OWNER-SCOPED rather than into the shared registries
+	// above. A staged construct persists, is reviewable, and comes back at boot
+	// -- session-define, minus dying with the connection -- but it resolves for
+	// its author alone, because staging is exactly the promote path with the
+	// cross-node broadcast omitted.
+	//
+	// ONE instance serves every owner, and that is not a shortcut:
+	// AuthoredRuntimeRegistry is already keyed by (owner, kind, name) and
+	// enumerates by owner, so a map of per-owner registries would add a second
+	// place for the owner to be wrong without adding any isolation the key does
+	// not already give.
+	//
+	// Nil until the first stage, and every READER must tolerate that -- the
+	// overlay builders already short-circuit on a nil registry, which is the
+	// same nil the session path passes when a stream has authored nothing.
+	// stagedRegistry() is the write-side accessor that creates it.
+	stagedAuthored *AuthoredRuntimeRegistry
+	// stagedOnce guards the lazy construction of stagedAuthored. A sync.Once
+	// rather than construction in New because *MemQLEngine is also built
+	// directly as a struct literal (tests, BuildOfflineSense), and a field only
+	// New initializes is a field that is nil on half the engines in the tree.
+	stagedOnce sync.Once
 	// conceptRowCount counts the rows stored under a concept, which is what
 	// chooses between the two outcomes of a concept DEMOTE (memql#3756): rows
 	// exist -> retire (still registered, rows readable, new writes refused);

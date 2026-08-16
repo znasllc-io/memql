@@ -42,8 +42,14 @@
  * vocabulary it never looks at.
  */
 export interface OriginatedConstruct {
-  /** Which tree the ENGINE says this came from. */
-  origin: "core" | "bundle" | "promoted";
+  /**
+   * Which tree the ENGINE says this came from.
+   *
+   * `staged` (memql#3928) is durable but owner-scoped, and it is EDITABLE for
+   * the same reason `promoted` is: it lives in the database rather than in a
+   * sealed tree, and its author is the person looking at the file.
+   */
+  origin: "core" | "bundle" | "promoted" | "staged";
   /** Relative to the CLUSTER's tree. Empty for a promoted construct. */
   originPath: string;
 }
