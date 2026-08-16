@@ -82,8 +82,8 @@ use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
 //   Stripe -> the fleet graph
 // =============================================================================
 
-/// A verified inbound delivery arrived. Claim it for billing if it came from Stripe, and mark it
-/// handled either way.
+/// A verified inbound delivery arrived. If it came from Stripe, mark it as one nothing can handle
+/// yet, with the reason on the row.
 ///
 /// FIRES ON EVERY INBOUND ROW rather than filtering to `stripe` in the trigger, because a trigger
 /// filters on the CONCEPT and the source is a payload field. The `switch` below is the filter, and
@@ -92,8 +92,20 @@ use platform.mutations.{ stageOutboundRequest, updateInboundRequestStatus }
 /// is not knowable from here. `ingestCampaignFeedback` in the campaigns domain has the same shape
 /// for the same reason.
 ///
-/// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `processing` and stops, and the
-/// reason is worth stating precisely because the obvious guess is wrong.
+/// WHAT IT DELIBERATELY DOES NOT DO is act on the event. It stamps `failed` with a reason and stops.
+///
+/// `failed`, NOT `processing`, and the difference matters more than it looks (corrected after
+/// memql#3854 landed). `processing` means "a product automation has this in hand" -- so every Stripe
+/// delivery would sit in that state forever, and an operator running
+/// `inboundRequestsByStatus("processing")` would watch a pile grow that nothing was working. A
+/// status that claims a worker which does not exist is worse than no handler at all: it is a
+/// backlog that reads as progress.
+///
+/// `failed` is what the row IS. It is queryable, it carries `lastError` naming the missing piece,
+/// and the day the JSON-extract builtin lands the same rows are re-drainable -- because the engine
+/// never retries product-side handling itself, so nothing here is lost by saying so plainly.
+///
+/// The reason is worth stating precisely, because the obvious guess about it is wrong.
 ///
 /// It is NOT the lookup. `subscriptionByStripeId` in queries.memql resolves a `sub_...` to a fleet
 /// row perfectly well: @serverOnly + @unbounded is exactly the shape an internal sweep or webhook
@@ -124,7 +136,8 @@ automation claimStripeDelivery {
       case "stripe" {
         updateInboundRequestStatus {
           requestId: id,
-          status:    "processing"
+          status:    "failed",
+          lastError: "no handler: the DSL cannot parse a webhook body, so the Stripe event cannot be mapped to a fleet row (memql#3854). Re-drainable once a JSON-extract builtin lands."
         }
       }
       default { }
