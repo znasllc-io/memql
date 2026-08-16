@@ -64,6 +64,37 @@ export interface ClusterConfig {
   // `local: false`: the cockpit drops the key on write, so a tool that wrote it
   // back would make the two churn the file against each other forever.
   local?: boolean;
+  // version is the cluster's RECORDED release, learned opportunistically and
+  // written back here (memql#3990).
+  //
+  // It exists because no cluster can currently state its release honestly:
+  // `ServerHello.version` is the literal `"v1"`, and the `VERSION` file has read
+  // `0.15.0` at every tag since v0.16.1 before the Dockerfile overwrites it with
+  // a build stamp. memql#3998 fixes that going forward, but it cannot reach
+  // backwards -- it cannot teach an already-installed v0.18.0 to introduce
+  // itself. This field is what does reach those clusters.
+  //
+  // RECORDED, not observed, and that is the point: it is readable with the
+  // cluster switched off, unreachable, or never dialled at all. A version only a
+  // live connection could report would be absent in exactly the situation an
+  // operator most needs it -- the motivating incident was a session that had
+  // just been severed.
+  //
+  // Deliberately a plain string, so it inherits the documented three-state
+  // semantics from FIELD_MAP wholesale: undefined leaves disk alone, "" deletes.
+  // The learners (memql#3993) depend on that distinction -- they run
+  // opportunistically and often learn nothing, and "I learned nothing" must be
+  // spelled differently from "this cluster has no version" or a failed refresh
+  // would erase what a better source established.
+  //
+  // What lands here is what the cluster SAID, unmangled -- a release tag, but
+  // equally a branch name, a commit sha, or the `0.15.0-<epoch>` build stamp.
+  // Judging it is the comparison module's job (memql#3991), and it can only
+  // report `notComparable` on a value that reached disk intact. The cockpit
+  // carries the matching `Version string` with `yaml:"version,omitempty"`
+  // (memql#3994); unlike `local` there is no false-must-be-absent rule to
+  // negotiate, because a string has no third state to collapse.
+  version?: string;
 }
 
 export interface ClustersFile {

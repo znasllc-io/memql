@@ -544,3 +544,111 @@ test("a local: true cluster survives a read-modify-write round trip", async () =
   assert.equal(parsed.clusters[1]?.local, undefined);
   assert.equal(parsed.selectedCluster, "staging");
 });
+
+// --- The recorded version (memql#3990) --------------------------------------
+//
+// `version` is what a cluster's release is RECORDED as, so a surface can say
+// how old it is without dialling it -- the disconnected case the motivating
+// incident had no answer for. It is a plain string and therefore inherits the
+// documented three-state string semantics wholesale: undefined leaves disk
+// alone, "" deletes the key. That is deliberate rather than incidental. The
+// value is LEARNED opportunistically (memql#3993) from sources of differing
+// trustworthiness, and every one of those learners writes through this same
+// path, so "I did not learn anything this time" must be spelled differently
+// from "this cluster has no version" -- otherwise a failed refresh would erase
+// a version an earlier, better source had established.
+//
+// It is NOT a boolean and must not go near BOOLEAN_FIELD_MAP: the
+// `local: false`-serialises-as-absent rule exists because the cockpit declares
+// that field `omitempty`, and a string has no such collapse.
+
+test("readClustersFile parses a recorded version", async () => {
+  const f = await tempFile(
+    "clusters:\n  - name: local\n    endpoint: h:443\n    version: v0.18.0\n",
+  );
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, "v0.18.0");
+});
+
+test("readClustersFile leaves version undefined when the key is absent", async () => {
+  // Every cluster in an operator's file predates this field. Absent must stay
+  // absent rather than becoming "", which the write path reads as a DELETE.
+  const f = await tempFile("clusters:\n  - name: local\n    endpoint: h:443\n");
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, undefined);
+});
+
+test("upsertCluster records a version on an existing cluster", async () => {
+  const f = await tempFile(SAMPLE);
+  await upsertCluster(f, { name: "local", version: "v0.18.0" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, "v0.18.0");
+});
+
+test("upsertCluster writes a version on a NEW cluster", async () => {
+  const f = await tempFile("clusters: []\n");
+  await upsertCluster(f, { name: "dev", endpoint: "localhost:50051", version: "v0.19.0" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, "v0.19.0");
+});
+
+test("upsertCluster leaves a recorded version alone when the write does not mention it", async () => {
+  // The learner path depends on this: a refresh that learned nothing passes
+  // undefined, and must not erase what a better source already established.
+  const f = await tempFile(
+    "clusters:\n  - name: local\n    endpoint: h:443\n    version: v0.18.0\n",
+  );
+  await upsertCluster(f, { name: "local", endpoint: "h:50051" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, "v0.18.0");
+  assert.equal(parsed.clusters[0]?.endpoint, "h:50051");
+});
+
+test("upsertCluster deletes the version when it is explicitly cleared", async () => {
+  const f = await tempFile(
+    "clusters:\n  - name: local\n    endpoint: h:443\n    version: v0.18.0\n",
+  );
+  await upsertCluster(f, { name: "local", version: "" });
+  const raw = await fs.readFile(f, "utf8");
+  assert.equal(/\bversion\b/.test(raw), false);
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, undefined);
+});
+
+test("recording a version preserves comments and unknown keys written by a newer cockpit", async () => {
+  // The property this whole file exists to defend, exercised on the new field:
+  // the version learners write far more often than any human edit does, so a
+  // write path that stripped either would destroy an operator's file quickly.
+  const f = await tempFile(
+    SAMPLE.replace("    client_id: cockpit\n", "    client_id: cockpit\n    future_field: keep-me\n"),
+  );
+  await upsertCluster(f, { name: "staging", version: "v0.18.0" });
+  const raw = await fs.readFile(f, "utf8");
+  assert.match(raw, /# my clusters/, "the operator's comments must survive a version write");
+  assert.match(raw, /future_field: keep-me/, "an unmodelled key must survive a version write");
+  assert.match(raw, /version: v0\.18\.0/);
+});
+
+test("recording a version disturbs no other field on the node", async () => {
+  const f = await tempFile(SAMPLE);
+  await upsertCluster(f, { name: "local", version: "v0.18.0" });
+  assert.deepEqual(await readClustersFile(f).then((p) => p.clusters[0]), {
+    name: "local",
+    displayName: "memql.localhost",
+    domain: "memql.localhost",
+    endpoint: "api.memql.localhost:443",
+    token: "eyJhbGci.eyJzdWIi.sig",
+    version: "v0.18.0",
+  });
+});
+
+test("a version that is not release-shaped is still recorded verbatim", async () => {
+  // The file records what the cluster SAID, not a judgement about it. A build
+  // stamp or a branch name is exactly the case the comparison module has to
+  // report as notComparable (memql#3991), and it can only do that if the value
+  // reached disk unmangled.
+  const f = await tempFile("clusters: []\n");
+  await upsertCluster(f, { name: "dev", endpoint: "h:443", version: "0.15.0-1737072000" });
+  const parsed = await readClustersFile(f);
+  assert.equal(parsed.clusters[0]?.version, "0.15.0-1737072000");
+});
