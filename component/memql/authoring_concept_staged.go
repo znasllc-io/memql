@@ -135,10 +135,18 @@ func (e *MemQLEngine) conceptDataIsStaged(conceptId string) bool {
 //
 // So this method is a one-line delegation ON PURPOSE. It adds no state, no
 // cache and no second lookup: it is the same sync.Map load against the same key
-// that the promote path writes and the boot replay restores. memql#3983's
-// enumeration accessor reads that same map under the same
-// conceptDataStagedKey namespace, so the two are one source of truth already;
-// nothing here may grow into a mirror of it.
+// that the promote path writes and the boot replay restores.
+//
+// THE TWO ACCESSORS ARE ALREADY ONE SOURCE OF TRUTH, and keeping them that way
+// is the standing constraint on this file. staged_enforce.go's
+// stagedConceptIds (memql#3983) enumerates e.promotedAuthored under
+// conceptDataStagedPrefix; this loads e.promotedAuthored under
+// conceptDataStagedKey, which composes that same prefix. One map, one key
+// namespace, two directions of the same question -- membership here,
+// enumeration there. Neither may grow a cache, a snapshot or a mirror of the
+// other; TestConceptDataIsStagedIsTheSameAnswerAsTheTier pins the membership
+// half of that, and stagedConceptIds carries its own prefix-drift test for the
+// enumeration half, because a drifted prefix fails OPEN.
 //
 // # It is handed OUT as a func, not reached FOR
 //

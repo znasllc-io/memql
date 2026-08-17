@@ -197,12 +197,14 @@ func (i *Integration) embedHandler(ctx context.Context, args map[string]any, _ i
 // concept, staging is a pure function of the concept (memql#3980), so deciding
 // before the round-trip produces exactly the result an in-query conjunct would.
 //
-// Sequencing note: the statement below gets its LATEST-VERSION COLLAPSE from
-// memql#3984's other half (PR #4037), and that ordering is load-bearing rather
-// than incidental -- an uncollapsed join returns an ARBITRARY version of an id,
+// Sequencing note: the statement below got its LATEST-VERSION COLLAPSE from
+// memql#3984's other half, and that ordering is load-bearing rather than
+// incidental -- the uncollapsed join returned an ARBITRARY version of an id,
 // and a visibility predicate answered about the wrong version is not a
-// visibility predicate. The gate here is concept-grain, so it is correct either
-// way, which is why the two halves could land independently.
+// visibility predicate. The gate here is concept-grain -- an id is
+// `{concept}:{shortId}`, so every version of an id shares one concept -- which
+// is why it is correct either way and why the two halves could land
+// independently.
 func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 	text, _ := args["text"].(string)
 	concept, _ := args["concept"].(string)
