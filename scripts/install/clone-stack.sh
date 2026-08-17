@@ -62,7 +62,7 @@
 #   4 prerequisite missing (git not installed)
 #   5 operation failed (remote unreachable, clone/fetch/checkout failed)
 #
-# Refs: #3901 #3882 #3605 #3363 #3357 #2221
+# Refs: #4059 #3901 #3882 #3605 #3363 #3357 #2221
 
 set -euo pipefail
 
@@ -264,6 +264,40 @@ function dir_is_empty() {
     [[ -z "$(ls -A "$1" 2>/dev/null)" ]]
 }
 
+# worktree_is_materialized <git> <dest> -- is a tree actually checked out here,
+# or is there only a .git directory?
+#
+# THE CHECK THIS SCRIPT WAS MISSING, and the reason it could report success over
+# an empty directory (memql#4059). `git clone` writes objects, refs and HEAD
+# BEFORE it materializes the working tree. The clone is the longest step in an
+# install, so it is the step an interruption lands in, and what it leaves behind
+# passes every ref-shaped check: .git exists, so classify_dest calls it a
+# checkout; `rev-parse HEAD` is the wanted commit, so the idempotency branch
+# calls it up to date; and there is not one file on disk. The run then reports
+# ok/changed=false with the correct commit sha, and the install fails two steps
+# later complaining that the directory "is a git checkout, but not of memQL".
+#
+# A ref is not a working tree. This asks about the tree.
+#
+# Two reads, because the damage arrives in two shapes. `ls-files` reads the
+# INDEX, which an interrupted clone never wrote at all; checking that the first
+# tracked path is also PRESENT catches the other shape, where the index survived
+# and the files were removed from under it. Neither can misfire on a healthy
+# checkout, which always has both.
+#
+# Deliberately not `git ls-files | head -1`: this tree carries thousands of
+# files, so head closes the pipe first and git dies of SIGPIPE, which under
+# `set -o pipefail` would report a healthy checkout as broken. Reading one
+# NUL-delimited record through a redirection keeps git out of a pipeline
+# entirely.
+function worktree_is_materialized() {
+    local git_bin="$1" dest="$2" first=""
+    IFS= read -r -d '' first \
+        < <("$git_bin" -C "$dest" ls-files -z 2>/dev/null) || true
+    [[ -n "$first" ]] || return 1
+    [[ -e "${dest}/${first}" ]]
+}
+
 # classify_dest <dest> -- prints: absent | empty | checkout | occupied
 function classify_dest() {
     local dest="$1"
@@ -393,6 +427,33 @@ function fetch_and_detach() {
     fi
 }
 
+# restore_worktree <git> <dest> <commit> -- force the working tree back to
+# <commit>, whatever is or is not on disk.
+#
+# WHY --force, AND WHY ONLY HERE. A plain `git checkout --detach` is enough for
+# only ONE of the shapes this repairs. Measured, all three at the same commit:
+#
+#   damage                          checkout --detach   checkout --force --detach
+#   no index, no files (clone -9)   restored            restored
+#   index intact, files removed     STILL BROKEN (rc 0) restored
+#
+# With the index intact git reads a missing file as a local DELETION to carry
+# across the checkout, prints "D <path>", and exits 0 having restored nothing --
+# a silent no-op that looks exactly like a repair. --force is what makes this a
+# restore instead of a merge.
+#
+# It is confined to this path deliberately. Here the tree is already known to be
+# unusable, so there is by definition nothing to clobber; an ordinary upgrade
+# must keep refusing to overwrite an operator's modifications, so it does not
+# come through here.
+function restore_worktree() {
+    local git_bin="$1" dest="$2" commit="$3"
+    cap_step "restoring the working tree at ${dest}"
+    if ! "$git_bin" -C "$dest" checkout --force --detach "$commit" >&2; then
+        cap_fail 5 "could not restore the working tree in ${dest}"
+    fi
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -452,15 +513,31 @@ function main() {
             cap_changed
             ;;
         checkout)
-            local head
+            local head materialized=true
             head="$("$git_bin" -C "$dest" rev-parse HEAD 2>/dev/null || true)"
-            if [[ "$head" == "$want_commit" ]]; then
+            worktree_is_materialized "$git_bin" "$dest" || materialized=false
+            if [[ "$head" == "$want_commit" && "$materialized" == true ]]; then
                 cap_info "${dest} is already at ${ref_name} (${want_commit}) -- no change."
             else
+                if [[ "$materialized" == false ]]; then
+                    # Name the repair. "fetching v1.4.0 into the existing
+                    # checkout" logged over a directory already sitting on
+                    # v1.4.0 reads like a no-op that somehow changed something;
+                    # the operator is owed the actual reason, which is that
+                    # their previous run did not finish.
+                    cap_info "${dest} has a .git directory but no checked-out tree -- an interrupted clone leaves exactly this; restoring the working tree"
+                fi
                 if [[ "$ref_kind" == "tag" ]]; then
                     update_to_tag "$git_bin" "$repo" "$ref_name" "$dest" "$depth"
                 else
                     fetch_and_detach "$git_bin" "$repo" "$dest" "$depth" "$want_commit"
+                fi
+                if [[ "$materialized" == false ]]; then
+                    # The fetch above guaranteed the objects; this guarantees
+                    # the FILES. Ordered this way round so the repair works
+                    # whether the broken tree was already on the wanted commit
+                    # or on a different one.
+                    restore_worktree "$git_bin" "$dest" "$want_commit"
                 fi
                 updated=true
                 cap_changed
@@ -483,6 +560,15 @@ function main() {
     fi
     if [[ "$commit" != "$want_commit" ]]; then
         cap_fail 5 "checkout landed on ${commit:-<nothing>}, expected ${ref_kind} ${ref_name} (${want_commit})"
+    fi
+    # THE POST-CONDITION, and it is deliberately separate from the branch that
+    # repairs this above. That branch fixes the shape we know about; this one
+    # states the property every caller depends on -- there are FILES here -- so
+    # no future path can exit 0 having left a directory the next step cannot
+    # read. The commit check immediately above is a ref check, and a ref check
+    # is what let this through in the first place.
+    if ! worktree_is_materialized "$git_bin" "$dest"; then
+        cap_fail 5 "${dest} is at ${commit} but has no checked-out working tree; the checkout did not complete"
     fi
 
     cap_info "Done. ${dest} is pinned at ${commit} (${ref_kind} ${ref_name})."

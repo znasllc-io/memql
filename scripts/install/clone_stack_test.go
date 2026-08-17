@@ -306,6 +306,98 @@ func TestCloneStackSameTagIsUnchanged(t *testing.T) {
 	}
 }
 
+// interruptCheckout leaves <dest> in the state a `git clone` killed partway
+// through leaves behind: every object and ref intact, HEAD on the right commit,
+// no index and no working tree. Git writes refs and HEAD BEFORE it materializes
+// files, so this is not a contrived shape -- it is the ordinary result of a
+// Ctrl-C, and the clone is the longest step in the install, so it is the step a
+// Ctrl-C lands in.
+func interruptCheckout(t *testing.T, dest string) {
+	t.Helper()
+	if err := os.Remove(filepath.Join(dest, ".git", "index")); err != nil {
+		t.Fatalf("remove index: %v", err)
+	}
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	for _, e := range entries {
+		if e.Name() == ".git" {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dest, e.Name())); err != nil {
+			t.Fatalf("remove %s: %v", e.Name(), err)
+		}
+	}
+}
+
+// A HALF-MATERIALIZED CHECKOUT IS NOT A CHECKOUT (memql#4059).
+//
+// Every check this script made was a REF check, and a ref is not a working
+// tree. classify_dest called the directory above a `checkout` because .git
+// existed; `git rev-parse HEAD` matched the wanted commit because clone had
+// written HEAD before it was killed; so the run reported ok, changed=false, and
+// the correct commit sha on its envelope -- for a directory containing no files
+// at all.
+//
+// The install graph cannot catch that at the seam either: its verification for
+// this step is resultNonEmpty on result.commit, and the commit IS present in
+// exactly the broken case. So the step went green and the NEXT step failed with
+// "repo-root ... has no deploy/argocd/bootstrap -- it is a git checkout, but not
+// of memQL" -- a true sentence about the wrong problem, which sends the operator
+// hunting for a bad clone URL when what they have is the right repository with
+// nothing checked out of it.
+//
+// The success predicate has to be a property of the WORKING TREE, because that
+// is what every consumer of this checkout actually reads.
+func TestCloneStackRematerializesAnInterruptedCheckout(t *testing.T) {
+	origin := newCloneOrigin(t)
+	dest := cloneDest(t)
+
+	if _, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0", "--dest="+dest); code != 0 {
+		t.Fatalf("first clone failed (exit %d): %s", code, out)
+	}
+	interruptCheckout(t, dest)
+
+	env, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0", "--dest="+dest)
+	if code != 0 || !env.OK {
+		t.Fatalf("re-run over an interrupted checkout failed (exit %d): %s", code, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(dest, "VERSION")); err != nil || string(got) != "1.0.0\n" {
+		t.Fatalf("the working tree was not restored: %q (%v)\n%s", got, err, out)
+	}
+	if got := cloneGit(t, dest, "rev-parse", "HEAD"); got != origin.v100 {
+		t.Errorf("HEAD is %s, want the v1.0.0 commit %s", got, origin.v100)
+	}
+	// Restoring a tree that was not there IS a change, and a receipt that says
+	// otherwise is the same lie in a quieter voice.
+	if !env.Changed {
+		t.Errorf("restoring an unmaterialized working tree reported changed=false: %s", out)
+	}
+}
+
+// The same hole, reached the other way: a checkout whose files were removed but
+// whose index survived. `rev-parse HEAD` is equally blind to it.
+func TestCloneStackRematerializesAnEmptiedWorkingTree(t *testing.T) {
+	origin := newCloneOrigin(t)
+	dest := cloneDest(t)
+
+	if _, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0", "--dest="+dest); code != 0 {
+		t.Fatalf("first clone failed (exit %d): %s", code, out)
+	}
+	if err := os.Remove(filepath.Join(dest, "VERSION")); err != nil {
+		t.Fatalf("remove VERSION: %v", err)
+	}
+
+	env, code, out := cloneRun(t, "--repo="+origin.path, "--tag=v1.0.0", "--dest="+dest)
+	if code != 0 || !env.OK {
+		t.Fatalf("re-run over an emptied working tree failed (exit %d): %s", code, out)
+	}
+	if got, err := os.ReadFile(filepath.Join(dest, "VERSION")); err != nil || string(got) != "1.0.0\n" {
+		t.Fatalf("the working tree was not restored: %q (%v)\n%s", got, err, out)
+	}
+}
+
 func TestCloneStackMovesToANewTag(t *testing.T) {
 	origin := newCloneOrigin(t)
 	dest := cloneDest(t)
