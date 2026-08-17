@@ -30,7 +30,7 @@ Related: [front-door.md](front-door.md) ·
 |---|---|---|---|
 | **1. Connected** | Their site stays put; add the SDK | [memql#3716](https://github.com/znasllc-io/memql/issues/3716) | You own the API, not their uptime |
 | **2. Hosted (static)** | Their site is a site row | [memql#3700](https://github.com/znasllc-io/memql/issues/3700) | You own their hosting |
-| **3. Hosted (container)** | Anything that runs | [memql#3718](https://github.com/znasllc-io/memql/issues/3718) | You own their runtime |
+| **3. Hosted (container)** | Anything that runs | deferred, see below | You own their runtime |
 
 **Moving up the ladder is nearly free, and that is the property worth
 understanding before choosing a rung.** The SDK integration is *identical* at
@@ -44,10 +44,15 @@ same-origin with its own API — which deletes the CORS configuration and the
 cross-origin auth handling this page spends most of its length on. Nobody has to
 unpick a Connected integration to host it later.
 
-> **INFO: rungs 2 and 3 are design, not deployment.** The `edge` node type
-> exists, but the site-serving path and the same-origin proxy ship with epic
-> memql#3700, and the container kind with memql#3718. Rung 1 is the one that
-> works against a cluster today, which is most of the reason this page exists.
+> **INFO: rung 3 is deferred; rungs 1 and 2 work today.** The `edge` node
+> type serves site rows and mounts the same-origin proxy, both shipped with
+> epic memql#3700. **Rung 3 is NOT on the roadmap** — the container kind was
+> decided in memql#3718 and then closed unbuilt, because its motivation is
+> migrating a customer's existing Rails/Laravel/Django/Express app and no such
+> migration is in front of us. The reasoning is preserved on that closed issue;
+> it is a decision to revisit when a real migration arrives, not a queued task.
+> Until then a customer who "has a site that runs" takes rung 1, which owes them
+> nothing about their runtime.
 
 So Connected is a legitimate destination, not a staging area. Pick it when the
 customer already has a deployment pipeline they like, when their site is built
@@ -212,9 +217,8 @@ CSP — and getting the cluster's three right while missing that one produces a
 sign-in that fails at its last step with nothing in any server log. See
 [the `connect-src` subsection below](#the-origin-grant-is-necessary-and-not-sufficient-connect-src).
 
-A hosted site (rung 2 or 3) is designed to need none of this, because it is
-same-origin. That is the concrete content of "moving up the ladder removes
-code".
+A hosted site (rung 2) needs none of this, because it is same-origin. That is
+the concrete content of "moving up the ladder removes code".
 
 ## Auth from a cross-origin SPA
 
@@ -375,8 +379,8 @@ they want it that way and a limitation when they do not.
 
 - Design: `docs/superpowers/specs/2026-08-13-cluster-front-door-design.md`
   (epic [memql#3700](https://github.com/znasllc-io/memql/issues/3700)) —
-  decision D9 is the same-origin proxy that rungs 2 and 3 get instead of this
-  page's CORS work.
+  decision D9 is the same-origin proxy that rung 2 gets instead of this page's
+  CORS work.
 - Generator: `scripts/sdk-gen/main.go`, `sdk/gen/emit_ts.go`,
   `sdk/gen/emit_concepts.go`.
 - The runtime core's own surface: `sdk/ts/README.md`.

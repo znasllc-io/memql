@@ -92,6 +92,33 @@ func TestRowAuthzDocDoesNotClaimEnforcementIsInert(t *testing.T) {
 	}
 }
 
+// ITS SCOPE WAS THE SECOND DEFECT, AND THE SUCCESSOR IS IN THE ROOT PACKAGE
+// (memql#3987).
+//
+// The test above reads exactly one string. That string has been correct since
+// memql#3727 fixed it -- and NINE other places in the tree went on asserting
+// the opposite for months, including the parser file that DEFINES @rowAuthz,
+// the struct field that carries the tier, an operator-facing boot warning, the
+// authoring skeleton every DSL author copies, and a public page that stated
+// the claim and then linked, four lines later, to the page contradicting it.
+// None of those was a worse comment than this one had been; they were the SAME
+// comment, out of scope.
+//
+// TestNoStaleRowAuthzInertClaim (rowauthz_inert_claim_test.go, root package)
+// sweeps the tracked tree for it. It is deliberately NOT here, and the reason
+// is the one thing this file's own placement argument does not cover: CI. This
+// package is db-gated and runs only when the `ci`, `go` or `dsl` bucket fires,
+// while the root package runs uncached under RUN_GO *and* RUN_GATES, whose
+// bucket includes `*.md` precisely because the root gates sweep `git
+// ls-files`. A docs-only PR -- the shape that would put the claim back in
+// public markdown, which is where its worst instance lived -- reaches the root
+// package and never reaches this one.
+//
+// The split leaves each gate a job it can actually do: the tree sweep polices
+// the CLAIM wherever it is written, this test pins the annotation entry's
+// POSITIVE content (a sweep can only ban words, not require the right ones),
+// and TestRowAuthzEnforcementLandGate measures the BEHAVIOUR.
+
 // TestRowAuthzDocCitesTestsThatExist keeps the doc's evidence honest in the
 // other direction.
 func TestRowAuthzDocCitesTestsThatExist(t *testing.T) {

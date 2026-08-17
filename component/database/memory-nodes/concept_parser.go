@@ -1019,9 +1019,12 @@ func applyConceptAttribute(c *parsedConcept, attr *parser.Attribute) error {
 		// @rowAuthz(public) / @rowAuthz(clusterOwner) /
 		// @rowAuthz(owner="<field>") / @rowAuthz(via="<spec>")
 		//   -- the declared row-authorization tier (memql#2920).
-		//   PHASE 1 IS INERT: the tier is parsed, validated and
-		//   carried on the Concept, and nothing reads it at query
-		//   time. The `owner=` field-existence check runs in
+		//   Parsed and validated here, ENFORCED at query time by
+		//   component/memql/rowauthz_enforce.go (Phase 3,
+		//   memql#3172) -- so what this arm accepts decides what
+		//   reads of the concept return, and a mis-parse is an
+		//   authorization outcome rather than a lost annotation.
+		//   The `owner=` field-existence check runs in
 		//   BuildConceptFromDecl AFTER the property pass, for the
 		//   same reason @displayCard's does.
 		//

@@ -87,11 +87,15 @@ type (
 		// author must remember to type into every filter over it.
 		// Nil when the concept declared no tier.
 		//
-		// PHASE 1 IS INERT (memql#2920). Nothing on the query path
-		// reads this field -- no predicate is injected and no result
-		// set changes. It exists so #2803's Phase 2 shadow mode has a
-		// declared tier to compute against, and TestRowAuthzIsInert
-		// gates that nothing starts reading it by accident.
+		// THE QUERY PATH READS THIS FIELD (Phase 3, memql#3172).
+		// component/memql/rowauthz_enforce.go ANDs the tier's
+		// predicate into the plan and separately admits each emitted
+		// row against it, so nil here and a tier here are different
+		// RESULT SETS -- and, since memql#3174, different write
+		// outcomes. This is not carried metadata, and the comment
+		// here described it as such for months after it stopped being
+		// (swept in memql#3987). What watches it is
+		// TestRowAuthzEnforcementLandGate, in component/memql.
 		//
 		// The type is the parser's own, not a local mirror, so the
 		// loader and the memqlmigrate codemod cannot drift in what a
