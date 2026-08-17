@@ -252,7 +252,7 @@ func (c Config) CanRotateUnsubscribeSecret() bool {
 
 // LoadConfig resolves the policy from the MEMQL_CAMPAIGNS_* env vars, all
 // registered in scripts/secrets/manifest.yaml and
-// component/genesis/manifest.yaml:
+// component/envregistry/manifest.yaml:
 //
 //	MEMQL_CAMPAIGNS_ENABLED
 //	MEMQL_CAMPAIGNS_POLL_SECONDS

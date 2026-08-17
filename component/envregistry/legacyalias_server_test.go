@@ -1,4 +1,4 @@
-package genesis
+package envregistry
 
 import (
 	"os"
@@ -6,6 +6,13 @@ import (
 )
 
 // The SERVER_* / SERVICE_* bridge (memql#3892).
+//
+// Moved here from component/genesis with its subject (memql#3963): the
+// registry half of that package -- the manifest, boot validation, domain
+// derivations and this legacy-alias shim -- became component/envregistry, and
+// the sealed-envelope half it shared a directory with was deleted outright
+// (epic memql#3958). A test in the package that no longer declares
+// ApplyLegacyEnvAliases is a build failure, not a smaller diff.
 //
 // component/server and component/service moved their env prefixes onto the
 // MEMQL_ convention so the family could be REGISTERED at all -- the registry

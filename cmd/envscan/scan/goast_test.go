@@ -821,7 +821,7 @@ func TestPreConventionExemptionIsEmpty(t *testing.T) {
 		"names with the old names recorded as legacy aliases. An exemption is not the "+
 		"fix for an unprefixed var -- it is what made the prefix lint and the drift gate "+
 		"each green via the other's blind spot. Rename it, alias the old name in "+
-		"component/genesis/legacyalias.go, and register the new one.", len(keys), keys)
+		"component/envregistry/legacyalias.go, and register the new one.", len(keys), keys)
 }
 
 // The exemption must not be laundered through the `external` denylist, which

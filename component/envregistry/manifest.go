@@ -1,4 +1,4 @@
-package genesis
+package envregistry
 
 import (
 	_ "embed"
@@ -232,41 +232,4 @@ func loadManifestFromFile(path, label string) (*Manifest, error) {
 		return nil, fmt.Errorf("manifest: read %s: %w", path, err)
 	}
 	return LoadManifestFromBytes(data, label)
-}
-
-// FindMissing returns the required names not present in entries,
-// in input order. An empty result means the .env covers every
-// required name; extras above the floor are not flagged here.
-func FindMissing(entries []EnvEntry, required []string) []string {
-	have := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		have[e.Name] = true
-	}
-	var missing []string
-	for _, name := range required {
-		if !have[name] {
-			missing = append(missing, name)
-		}
-	}
-	return missing
-}
-
-// FindMissingWithLegacy is the legacy-tolerant variant of FindMissing
-// used by Seal (Epic 7.3 / memql#2106). A floor name counts as present
-// if the .env carries either the new name OR its legacy alias, so an
-// operator's pre-7.3 .env (still using the old IDENTITY_* / POLYPHON_* /
-// ... names) seals without forcing an immediate rename. The boot-time
-// shim ApplyLegacyEnvAliases bridges the value at runtime.
-func FindMissingWithLegacy(entries []EnvEntry, required []string) []string {
-	have := make(map[string]bool, len(entries))
-	for _, e := range entries {
-		have[e.Name] = true
-	}
-	var missing []string
-	for _, name := range required {
-		if !PresentWithLegacy(have, name) {
-			missing = append(missing, name)
-		}
-	}
-	return missing
 }

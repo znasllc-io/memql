@@ -1219,6 +1219,36 @@ func (s *Store) HasOwnerUser(ctx context.Context) (bool, error) {
 	return len(nodes) > 0, nil
 }
 
+// OwnerUserIds returns the ids of the cluster's owner users.
+//
+// Backs the recovery-key mint invariant (memql#3965), which needs the ids
+// themselves rather than HasOwnerUser's boolean: it binds a key to each owner.
+//
+// IT ASKS "IS THERE AN OWNER NAMED", NOT "HAS THE CLUSTER BEEN CLAIMED", and
+// the distinction is the whole judgment. HasClaimedOwner is the stricter
+// question and is the wrong one here: it reports false until somebody has
+// authenticated, and an owner who has never authenticated is precisely the
+// owner most in need of a break-glass route. Gating the key on a claim would
+// withhold it from the one case where a cluster can be locked out from its
+// very first minute.
+//
+// Error-returning by design, like its siblings: a DB failure must surface as
+// "unknown" so the caller declines to act, rather than being swallowed into
+// "no owner" and skipping the invariant silently.
+func (s *Store) OwnerUserIds(ctx context.Context) ([]string, error) {
+	nodes, err := s.executeAndExtractInternal(ctx, `query activeUsers(role: "owner")`)
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: owner user ids: %w", err)
+	}
+	out := make([]string, 0, len(nodes))
+	for _, n := range nodes {
+		if id := strings.TrimSpace(n.GetId()); id != "" {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
 // HasClaimedOwner reports whether the cluster's owner has ever AUTHENTICATED --
 // the question memql#1864's self-heal actually wanted, and the one the
 // auto-bootstrap guard asks (memql#3591).

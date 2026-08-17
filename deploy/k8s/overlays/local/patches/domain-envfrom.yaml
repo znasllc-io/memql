@@ -5,7 +5,7 @@
 # given. It carries exactly ONE key, MEMQL_DOMAIN, from which the engine derives
 # identity's base URL, the issuer every node verifies against, the discovery
 # endpoint, the CORS origins and the OAuth redirect URIs -- see
-# component/genesis/domain.go. Those six values used to be pinned in this
+# component/envregistry/domain.go. Those six values used to be pinned in this
 # overlay, six times plus twice more in its Ingresses; missing one is not a
 # visible failure (memql#3315 was a single forgotten CORS origin, and it
 # presented as sign-in dying with an empty identity log).

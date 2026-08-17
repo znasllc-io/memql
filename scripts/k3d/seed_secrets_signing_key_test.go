@@ -11,8 +11,12 @@ import (
 // seed_secrets_signing_key_test.go -- memql#3400.
 //
 // deploy/k8s/base/identity.yaml declares `replicas: 2` and states the design
-// out loud: "the signing key comes from the envelope (same seed on every pod
-// -> identical JWKS), so there is NO single-writer key PVC". Locally that key
+// out loud: the seed arrives as a KEY on memql-secrets, so every pod derives
+// the same key + kid + JWKS and there is NO single-writer key PVC. (That
+// sentence was quoted here as "the signing key comes from the ENVELOPE" until
+// memql#3960, which removed the envelope as a delivery path for this seed in
+// every environment -- the cloud now declares the key in Key Vault exactly as
+// this script writes it locally.) Locally that key
 // was never provided by anything. identity therefore fell through
 // KeyManager.Load() to generateAndWriteCurrent() and EVERY POD MINTED ITS OWN
 // Ed25519 keypair -- observed on a live local cluster as two replicas serving

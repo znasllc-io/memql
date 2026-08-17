@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	httpidentity "github.com/znasllc-io/memql/component/identity/http"
 	"github.com/znasllc-io/memql/component/identity/magiclink"
 	"github.com/znasllc-io/memql/component/identity/pat"
+	"github.com/znasllc-io/memql/component/identity/recoverykey"
 	"github.com/znasllc-io/memql/component/identity/refresh"
 	identityweb "github.com/znasllc-io/memql/component/identity/web"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
@@ -482,6 +484,63 @@ func (a *App) integrationsIdentity() {
 	// just prefill the form. Errors here are warnings, not fatal --
 	// the operator can always fall back to /setup.
 	a.attemptAutoBootstrap(context.Background(), cfg, store, mlIssuer)
+
+	// The owner recovery key is an INVARIANT, evaluated here on every start
+	// (memql#3965): "if a cluster owner exists and there is no active,
+	// unredeemed recovery key, mint one".
+	//
+	// AFTER attemptAutoBootstrap, deliberately -- that call is what names the
+	// owner on an env-bootstrapped cluster (memql#3591), so running before it
+	// would find no owner on precisely the install that has one. On a cluster
+	// claimed by first sign-in instead, this is a no-op now and mints on the
+	// next start, which is the ordinary case and is why the rule is an
+	// invariant rather than a one-shot.
+	//
+	// Warnings, not fatal, for the same reason auto-bootstrap's failures are:
+	// a cluster that cannot mint a break-glass key must still serve auth. The
+	// warning is loud because the absence is silent otherwise.
+	a.ensureOwnerRecoveryKey(context.Background(), store)
+}
+
+// ensureOwnerRecoveryKey evaluates the recovery-key invariant (memql#3965).
+//
+// THE PLAINTEXT IS DISCARDED HERE AND THAT IS THE DESIGN. EnsureForAllOwners
+// returns it, and this caller drops it on the floor: a plaintext
+// owner-equivalent credential must never reach a pod log, which means never
+// reaching a log aggregator or whatever ships those logs off the cluster. The
+// operator obtains it exactly once, on demand, through
+// `memql recovery-key claim` (memql#3969).
+func (a *App) ensureOwnerRecoveryKey(ctx context.Context, store *identity.Store) {
+	if store == nil || a.engine == nil {
+		return
+	}
+	// The DIRECT (non-pooled) handle. A transaction-mode PgBouncer recycles the
+	// backend between statements and would silently drop the advisory lock
+	// (epic memql#1925) -- and a dropped lock here means two replicas each mint
+	// a live owner credential, which is the exact failure the lock exists for.
+	getDB := a.directDBGetter()
+	res, err := recoverykey.EnsureForAllOwners(identity.ContextWithSystemActor(ctx), recoverykey.EnsureOptions{
+		DB: func() *sql.DB {
+			bdb := getDB()
+			if bdb == nil {
+				return nil
+			}
+			return bdb.DB
+		},
+		Store:    &recoverykey.Store{Engine: a.engine, Logger: a.Logger},
+		Owners:   store,
+		MintedBy: "system:identity-svc",
+		Logger:   a.Logger,
+	})
+	if err != nil {
+		a.Logger.Warn("identity: recovery-key invariant did not complete; this cluster may have no break-glass route for its owner",
+			"error", err, "component", identity.ComponentName)
+		return
+	}
+	if res.Minted > 0 {
+		a.Logger.Info("identity: owner recovery key minted; claim it with `memql recovery-key claim` inside the identity pod",
+			"minted", res.Minted, "component", identity.ComponentName)
+	}
 }
 
 // attemptAutoBootstrap drives the same path as the /setup wizard but

@@ -14,7 +14,7 @@ func fakeEnv(vars map[string]string) func(string) string {
 	return func(k string) string { return vars[k] }
 }
 
-// registeredClientsFixture mirrors the shape component/genesis/domain.go
+// registeredClientsFixture mirrors the shape component/envregistry/domain.go
 // serializes into MEMQL_IDENTITY_REGISTERED_CLIENTS: an "app" site, a
 // loopback "cockpit" native client, and an arbitrary hosted site -- proving
 // the lookup is not keyed on any name this package recognises.

@@ -1,4 +1,4 @@
-package genesis
+package envregistry
 
 import (
 	"os"
@@ -65,21 +65,5 @@ func TestPresentWithLegacy(t *testing.T) {
 	}
 	if PresentWithLegacy(have, "MEMQL_ANTHROPIC_API_KEY") {
 		t.Error("neither new nor legacy present should be false")
-	}
-}
-
-func TestFindMissingWithLegacy_LegacyCovers(t *testing.T) {
-	// Floor asks for the new names; .env carries the legacy names.
-	required := []string{"MEMQL_OPENAI_API_KEY", "MEMQL_DATABASE_DSN"}
-	entries := []EnvEntry{
-		{Name: "OPENAI_API_KEY", Value: "x"},
-		{Name: "MEMORY_NODES_DATABASE_DSN", Value: "y"},
-	}
-	if missing := FindMissingWithLegacy(entries, required); len(missing) != 0 {
-		t.Fatalf("legacy names should cover the floor, missing=%v", missing)
-	}
-	// Plain FindMissing would flag both as missing.
-	if missing := FindMissing(entries, required); len(missing) != 2 {
-		t.Fatalf("plain FindMissing should flag both, got %v", missing)
 	}
 }

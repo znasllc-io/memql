@@ -216,7 +216,7 @@ Everything domain-shaped follows from that one value. It is seeded into the
 cluster as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap, and
 every node derives its identity base URL, expected issuer, discovery endpoint,
 CORS origins and OAuth redirect URIs from it at boot
-(`component/genesis/domain.go`). When the domain differs from the overlay's
+(`component/envregistry/domain.go`). When the domain differs from the overlay's
 committed default, `k3d.up` also emits two `spec.source.kustomize.patches`
 entries on the ArgoCD Application to repoint the two front-door Ingress hosts.
 No file under `deploy/` names a domain.

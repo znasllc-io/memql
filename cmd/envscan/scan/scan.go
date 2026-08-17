@@ -75,7 +75,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/envregistry"
 )
 
 // external is the explicit allow-list of env keys that are NOT
@@ -124,14 +124,14 @@ var externalPrefixes = []string{"GITHUB_", "RUNNER_", "GO"}
 //
 // It held six names: MEMORY_ENGINE_MAX_RESULTS / _MAX_WINDOW /
 // _DEFAULT_LIST_CAP / _CACHE_MAX_ITEMS, CACHE_MAX_TTL and SERVER_PUBLIC_PATH.
-// They could not be registered, because component/genesis's
+// They could not be registered, because component/envregistry's
 // TestOwnedVarsArePrefixed (Epic 7.3 / memql#2106) fails on any
 // non-MEMQL_-prefixed entry that is not a legacy alias, and none of the six was
 // one. So registering them reddened that gate and omitting them reddened this
 // one: there was no state of the registry in which both held.
 //
 // The exit was never a better exemption. It was a RENAME -- MEMQL_ names, the
-// old names recorded in genesis.LegacyAliases so an operator's existing
+// old names recorded in envregistry.LegacyAliases so an operator's existing
 // configuration keeps working through the boot-time shim, and the reading code
 // updated. All six are registered now, so the contradiction is dissolved rather
 // than tolerated on one side of it.
@@ -257,20 +257,20 @@ func scannable(path string) bool {
 
 // LoadRegistry loads the manifest from the repo path explicitly so the
 // scan does not depend on MEMQL_REPO / embedded-snapshot resolution.
-func LoadRegistry(root string) (*genesis.Manifest, error) {
+func LoadRegistry(root string) (*envregistry.Manifest, error) {
 	path := filepath.Join(root, "scripts", "secrets", "manifest.yaml")
 	if _, err := os.Stat(path); err == nil {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return nil, err
 		}
-		return genesis.LoadManifestFromBytes(data, path)
+		return envregistry.LoadManifestFromBytes(data, path)
 	}
-	return genesis.LoadManifest("")
+	return envregistry.LoadManifest("")
 }
 
 // RegisteredSet returns the set of every registered env-var name.
-func RegisteredSet(manifest *genesis.Manifest) map[string]bool {
+func RegisteredSet(manifest *envregistry.Manifest) map[string]bool {
 	registered := map[string]bool{}
 	for _, e := range manifest.AllEntries() {
 		registered[e.Name] = true
@@ -479,7 +479,7 @@ func CheckDrift(root string) (Result, error) {
 		// exactly the edit this gate exists to catch, and under a substring
 		// match the surviving MEMQL_X kept the alias looking referenced
 		// forever -- measured by dropping one alias row from
-		// component/genesis/legacyalias.go, which left that name with zero
+		// component/envregistry/legacyalias.go, which left that name with zero
 		// real references while the gate still reported no drift.
 		//
 		// Deliberately no live registry name in this comment: repoCorpus
@@ -559,14 +559,14 @@ func missingRegistryFiles(excluded []string) []string {
 //
 // There are TWO copies and they carry identical rows: the authored
 // scripts/secrets/manifest.yaml (the source of truth) and the
-// //go:embed snapshot component/genesis/manifest.yaml, which
+// //go:embed snapshot component/envregistry/manifest.yaml, which
 // scripts/secrets/sync-embedded-manifest.sh regenerates verbatim and
 // TestEmbeddedManifestInSync keeps in step. Missing the second one is
 // what made the reverse check unsatisfiable (memql#2971), so CheckDrift
 // hard-fails rather than proceeding if any entry here goes unmatched.
 var registryFiles = []string{
 	"scripts/secrets/manifest.yaml",
-	"component/genesis/manifest.yaml",
+	"component/envregistry/manifest.yaml",
 }
 
 // repoCorpus concatenates the text of every config-bearing file

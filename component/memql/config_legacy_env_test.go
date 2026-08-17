@@ -3,7 +3,7 @@ package memql
 import (
 	"testing"
 
-	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/envregistry"
 )
 
 // config_legacy_env_test.go -- znasllc-io/memql#3831.
@@ -21,7 +21,7 @@ import (
 // controlled.
 //
 // WHY IT IS WORTH A TEST. The path has two halves maintained in different
-// packages: genesis.LegacyAliases must name the pair, and this package's const
+// packages: envregistry.LegacyAliases must name the pair, and this package's const
 // must read the NEW name. Get either wrong and the knob stops working with
 // NOTHING failing -- the loader falls back to its default, which is a perfectly
 // plausible value, so a cluster silently reverts to a 500-row ceiling and looks
@@ -85,7 +85,7 @@ func TestLegacyEngineEnvNamesStillConfigure(t *testing.T) {
 
 			// The shim, called where main.go calls it: after the env layers are
 			// painted, before any component reads its config.
-			genesis.ApplyLegacyEnvAliases(nil)
+			envregistry.ApplyLegacyEnvAliases(nil)
 
 			if got := tc.got(loadEngineConfigFromEnv()); got != tc.want {
 				t.Errorf("%s=%s did not reach %s: got %d, want %d.\n"+
@@ -107,7 +107,7 @@ func TestNewEngineEnvNameBeatsItsLegacyAlias(t *testing.T) {
 	t.Setenv("MEMORY_ENGINE_MAX_RESULTS", "111")
 	t.Setenv("MEMQL_MEMORY_ENGINE_MAX_RESULTS", "222")
 
-	genesis.ApplyLegacyEnvAliases(nil)
+	envregistry.ApplyLegacyEnvAliases(nil)
 
 	if got := loadEngineConfigFromEnv().MaxResults; got != 222 {
 		t.Errorf("MaxResults = %d, want 222. A legacy value that overrides the new "+

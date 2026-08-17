@@ -179,7 +179,7 @@ Two knobs that exist purely so the derivation can stay production-honest.
 
 ### 4.1 Engine (Go)
 
-**NEW `component/genesis/domain.go`** — `ApplyDomainDerivations(logger)`. Reads
+**NEW `component/envregistry/domain.go`** — `ApplyDomainDerivations(logger)`. Reads
 `MEMQL_DOMAIN`; fills each derived var only when unset; logs at INFO which ones it
 filled. Called from `main.go` immediately after `genesis.ApplyLegacyEnvAliases`
 (main.go:77) and from `subcommand_env.go:43`, so `memql env` reports the truth.
@@ -367,7 +367,7 @@ proof the parameterisation is real rather than a rename.
 
 **Go.**
 
-- `component/genesis/domain_test.go`: a table of `MEMQL_DOMAIN` → each derived value;
+- `component/envregistry/domain_test.go`: a table of `MEMQL_DOMAIN` → each derived value;
   explicit-env-wins for every one; unset domain is a no-op; malformed inputs (scheme,
   port, trailing dot, uppercase) rejected.
 - `component/identity/config_test.go`: `isSingleProcessHost("identity.memql.localhost")`

@@ -6,7 +6,7 @@
 // The same host has to be spelled identically in two places that are compiled,
 // reviewed and deployed separately: the Ingress rules under deploy/k8s (written
 // by cmd/frontdoorhosts) and the env values every node derives at boot
-// (component/genesis/domain.go). When those two disagree the cluster does not
+// (component/envregistry/domain.go). When those two disagree the cluster does not
 // fail to start -- identity issues tokens naming an issuer nothing is served at,
 // every other node's verifier rejects them, and the symptom is "sign-in is
 // broken" with both manifests looking correct. memql#3315 was one forgotten CORS

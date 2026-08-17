@@ -55,6 +55,7 @@ readonly DB_GATED_TREES=(
 	"component/automations"
 	"component/backup"
 	"component/grpc"
+	"component/identity/recoverykey"
 	"integrations/cognition"
 	"integrations/embedding"
 	"integrations/planner"
@@ -82,7 +83,7 @@ readonly DB_GATED_TREES=(
 # looked: the same as for the wire tier. `component/frontdoor` and the two
 # `cmd/frontdoor*` binaries over it are all still enumerated in workspace mode,
 # so `hosts_test.go` runs in this lane and needs no lane of its own; the count
-# rose to 184. The module exists because component/genesis -- itself a module --
+# rose to 184. The module exists because component/envregistry -- itself a module --
 # derives a node's issuer and CORS origins from the SAME role-vs-site host rule
 # the Ingress generator writes hosts with, and a root-module package cannot be
 # imported from a nested one with GOWORK=off.
@@ -100,6 +101,7 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/events"
 	"component/fileprocessor"
 	"component/frontdoor"
+	"component/envregistry"
 	"component/genesis"
 	"component/grpc"
 	"component/grpc/gen"

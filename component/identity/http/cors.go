@@ -209,7 +209,7 @@ func (s *Server) readGrantedCORSOrigins(ctx context.Context) ([]string, error) {
 //
 //  1. the boot-time MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS list on Cfg -- the
 //     bootstrap set every deployment has (identity itself, the portal, the app),
-//     derived from MEMQL_DOMAIN in component/genesis/domain.go;
+//     derived from MEMQL_DOMAIN in component/envregistry/domain.go;
 //  2. origins an owner/admin GRANTED on a v1:identity:oauthClient row, read live
 //     per request so a grant needs no identity restart.
 //
@@ -267,7 +267,7 @@ func (s *Server) handleOptions(w http.ResponseWriter, _ *http.Request) {
 // Measured safe to refuse: nothing in the tree sets it. The only assignments are
 // deploy/k8s/base/identity.yaml, the local overlay's
 // MEMQL_IDENTITY_CORS_EXTRA_ORIGINS, and the derivation in
-// component/genesis/domain.go -- all explicit origin lists. A "*" that somehow
+// component/envregistry/domain.go -- all explicit origin lists. A "*" that somehow
 // reaches here is skipped rather than rejected loudly, so the explicit entries
 // beside it keep working.
 func originAllowed(allowed []string, origin string) bool {

@@ -125,6 +125,13 @@ var coverageAllowList = map[string]exemption{
 			"path in prose (below) does not change which lane reads it",
 		coveredByWorkflow: "gitleaks.yml",
 		mentionedBy: map[string]string{
+			"component/identity/recoverykey/recoverykey_test.go": "prose, not a reference CI " +
+				"executes. TestMintShape names this file in a failure message to say WHY the " +
+				"43-character body length is pinned: the memql-credential-token rule added by " +
+				"memql#3962 matches exactly 43 body characters, so a shorter body would be a " +
+				"credential the secret scanner cannot see. The test reads nothing -- it asserts " +
+				"on Mint()'s output -- and the coupling it describes is real, which is the " +
+				"reason to record the sentence rather than reword it away.",
 			".github/workflows/gitleaks.yml": "prose, not a reference CI executes. The " +
 				"workflow's header comment names this file to tell the next person that a " +
 				"HISTORICAL finding is cleared by an entry here and never by editing the " +

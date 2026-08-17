@@ -238,7 +238,7 @@ export interface FrontDoor {
 // The HOSTS BLOCK must name everything something will type, which includes
 // `portal.` -- the origin the portal's bundle moves to in memql#3711. The
 // wildcard certificate already covers it and identity already allows it as a
-// CORS origin (component/genesis/domain.go), so the hosts entry is the one
+// CORS origin (component/envregistry/domain.go), so the hosts entry is the one
 // remaining piece, and it is cheap to place ahead of the Ingress: a name
 // resolving to 127.0.0.1 with nothing serving it fails visibly, whereas a name
 // that does not resolve fails in the resolver, before any request is made.

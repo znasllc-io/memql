@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/znasllc-io/memql/app"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/service"
@@ -60,7 +61,7 @@ func main() {
 	// dev relies on this to flip knobs (verbose observability, debug
 	// flags, ...) without re-sealing the envelope; production simply
 	// has no .env file and the call is a no-op.
-	if overridden, err := genesis.ApplyLocalOverride("."); err != nil {
+	if overridden, err := envregistry.ApplyLocalOverride("."); err != nil {
 		serviceLogger.Warn("local .env override failed -- continuing with envelope values", "err", err)
 	} else if len(overridden) > 0 {
 		serviceLogger.Info("local .env override applied", "vars", overridden)
@@ -73,13 +74,13 @@ func main() {
 	// bridged var. Runs after the envelope + .env layers are painted so
 	// a legacy value from any of them is honored, and before config is
 	// read so every consumer sees the new name.
-	genesis.ApplyLegacyEnvAliases(serviceLogger)
+	envregistry.ApplyLegacyEnvAliases(serviceLogger)
 
 	// One domain in, every domain-shaped env var out (memql#3593). Runs after
 	// the alias shim so a bridged MEMQL_DOMAIN is already on its new name, and
 	// before app.Run so every component reads the derived values. Set-if-absent,
 	// so a deployment that configures these explicitly is untouched.
-	genesis.ApplyDomainDerivations(serviceLogger)
+	envregistry.ApplyDomainDerivations(serviceLogger)
 
 	app.Run(app.RunConfig{
 		Logger:  serviceLogger,
