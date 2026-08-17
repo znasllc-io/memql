@@ -87,7 +87,7 @@ func planDataVerb(plan *QueryPlan, functions *FunctionRegistry) string {
 	}
 	var snapshot map[string]*Function
 	if functions != nil {
-		snapshot = functions.Snapshot()
+		snapshot = functions.LookupIndex()
 	}
 	if findImpureCall(plan.Root, snapshot) != "" {
 		return auth.VerbCreate

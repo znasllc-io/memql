@@ -19,7 +19,7 @@ func registerFunctionTools(logger *slog.Logger, functions *FunctionRegistry, too
 		return
 	}
 
-	snapshot := functions.Snapshot()
+	snapshot := functions.LookupIndex()
 	if snapshot == nil {
 		return
 	}

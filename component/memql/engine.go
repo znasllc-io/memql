@@ -929,7 +929,10 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	if plan.ShapeTemplate != nil {
 		var specs map[string]*Spec
 		if e.specs != nil {
-			specs = e.specs.Snapshot()
+			// LookupIndex, not Snapshot (memql#3897): this map is KEYED into by
+			// a bare spec name written in a filter conjunct, which is the
+			// documented authoring surface -- so it needs both spellings.
+			specs = e.specs.LookupIndex()
 		}
 		shaped, err := applyShapeTemplate(ctx, result.Bundle, plan.ShapeTemplate, e.aiRuntime, specs)
 		if err != nil {
@@ -1106,7 +1109,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(fns.Snapshot(), nil)
+	validator := newFunctionValidator(fns.LookupIndex(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}
@@ -1173,7 +1176,7 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(fns.Snapshot(), nil)
+	validator := newFunctionValidator(fns.LookupIndex(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}
@@ -1293,7 +1296,12 @@ func (e *MemQLEngine) resolvePlanSpecs(plan *QueryPlan, inline map[string]*Spec)
 
 	var globalSpecs map[string]*Spec
 	if e.specs != nil {
-		globalSpecs = e.specs.Snapshot()
+		// The specValidator KEYS INTO this map by the bare name an author wrote
+		// as a filter conjunct (`filter ... && isActiveRecord`). A bare spec
+		// conjunct is the DOCUMENTED authoring surface, not a fixture
+		// convenience, so it has to keep resolving -- namespacing the registry
+		// must not quietly make it a language change (memql#3897).
+		globalSpecs = e.specs.LookupIndex()
 	}
 	validator := newSpecValidator(e.schemaIndex(), globalSpecs, inline)
 

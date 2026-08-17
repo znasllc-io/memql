@@ -61,7 +61,12 @@ func resolveSpecBindings(logger *slog.Logger, specs *SpecRegistry, shapes *Shape
 			errs = append(errs, fmt.Errorf("%s: spec %q: %w", spec.Origin, spec.Name, err))
 			continue
 		}
-		if err := specs.Upsert(spec.Name, spec); err != nil {
+		// The QUALIFIED key (memql#3897). Writing the resolved spec back under
+		// its bare name would leave the namespaced entry unresolved and add a
+		// second, shadowing one -- so every binding would silently fail to
+		// stick while the registry reported two specs where there is one.
+		key := QualifyConstruct(ConstructNamespaceForOrigin(spec.Origin), spec.Name)
+		if err := specs.Upsert(key, spec); err != nil {
 			errs = append(errs, fmt.Errorf("%s: re-register spec %q: %w", spec.Origin, spec.Name, err))
 			continue
 		}

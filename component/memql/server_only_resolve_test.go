@@ -39,7 +39,7 @@ func resolveAuthored(t *testing.T, fns *FunctionRegistry, specs *SpecRegistry, n
 	if err != nil || fn == nil {
 		t.Fatalf("construct %q not in the loaded tree: %v", name, err)
 	}
-	v := newFunctionValidatorWithOrigin(fns.Snapshot(), specs, origin)
+	v := newFunctionValidatorWithOrigin(fns.LookupIndex(), specs, origin)
 	_, err = v.expandFunctionCall(&FunctionCallExpression{Name: name, Args: args})
 	return err
 }
