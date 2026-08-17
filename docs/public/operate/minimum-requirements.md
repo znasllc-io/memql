@@ -147,8 +147,9 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 
 | Key | What |
 |-----|------|
-| `MEMQL_MASTER_KEY` | 32-byte key that decrypts the genesis envelope. |
-| `MEMQL_GENESIS_B64` | base64 of the **sealed env envelope** (~150 config vars, decrypted in-process at boot; `MEMQL_GENESIS_AUTOLOAD=true`). |
+| `MEMQL_MASTER_KEY` | 32-byte key that decrypts stored secrets at rest (`v1:platform:globalSecret`). It DECRYPTS and never authenticates -- the operator bearer is `MEMQL_OPERATOR_KEY` (memql#3519). |
+| `MEMQL_OPERATOR_KEY` | 32-byte credential that AUTHENTICATES `Authorization: Operator <key>` as a synthetic cluster owner. A **different** value from the master key (memql#3519). |
+| `MEMQL_IDENTITY_SIGNING_KEY_B64` | base64-std 32-byte Ed25519 seed. Required for any multi-replica identity: without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail (memql#3400). |
 | `MEMQL_DATABASE_DSN` | DB — the **transaction pooler** endpoint. |
 | `MEMORY_NODES_DATABASE_DIRECT_DSN` | DB — the **direct** endpoint. |
 

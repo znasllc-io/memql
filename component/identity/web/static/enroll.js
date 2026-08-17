@@ -1,16 +1,24 @@
-// enroll.js -- the browser half of the enrolment page (memql#3408).
+// enroll.js -- the browser half of BOTH passkey-registration pages
+// (memql#3408 for /enroll, memql#3968 for /recover).
 //
-// GET /enroll?code=mql_enr_... has already validated the token server-side and
-// rendered this page. What is left is the part only a browser can do: the
-// WebAuthn registration ceremony, navigator.credentials.create(), running
-// inside the document. That is why /auth/webauthn/register/{begin,finish} are
-// HTTP and not gRPC -- there is no wire form of "the user touched their
-// security key".
+// The server has already validated the presented code and rendered the page.
+// What is left is the part only a browser can do: the WebAuthn registration
+// ceremony, navigator.credentials.create(), running inside the document. That
+// is why /auth/webauthn/register/{begin,finish} are HTTP and not gRPC -- there
+// is no wire form of "the user touched their security key".
 //
-// The token travels as `Authorization: Enrolment <code>`, exactly the way the
-// worker-pairing redeem sends `Authorization: Pair <code>`. It is read out of
-// location.search rather than echoed into the DOM by the server: the value is
-// already in the address bar, and one copy of a credential is better than two.
+// ONE DRIVER FOR TWO ROUTES, PARAMETERISED ON THE AUTHORIZATION SCHEME. The
+// enrolment token travels as `Authorization: Enrolment <code>` and the owner
+// recovery key as `Authorization: Recovery <code>`; everything else about the
+// ceremony -- the base64url helpers, the create() call, the error mapping,
+// the single-use-at-finish semantics -- is identical. Forking this file for
+// the second route would duplicate the WebAuthn logic on the surface where a
+// silent divergence is hardest to notice, so the scheme is read from the
+// page's data-auth-scheme attribute and nothing else varies.
+//
+// The code is read out of location.search rather than echoed into the DOM by
+// the server: the value is already in the address bar, and one copy of a
+// credential is better than two.
 //
 // The single-use stamp lands on the FINISH call, server-side, so reloading
 // this page or abandoning it halfway does not burn the link.
@@ -150,13 +158,26 @@
     }
   }
 
+  // authScheme reads the scheme off the rendered card, defaulting to the
+  // enrolment one. A page that somehow rendered without the attribute still
+  // works as /enroll did before memql#3968 rather than sending a header the
+  // server cannot parse.
+  function authScheme() {
+    var card = document.querySelector("[data-auth-scheme]");
+    if (card === null) {
+      return "Enrolment";
+    }
+    var value = String(card.getAttribute("data-auth-scheme") || "").trim();
+    return value === "" ? "Enrolment" : value;
+  }
+
   function post(path, code, body) {
     return fetch(path, {
       method: "POST",
       credentials: "same-origin",
       headers: {
         "Content-Type": "application/json",
-        Authorization: "Enrolment " + code,
+        Authorization: authScheme() + " " + code,
       },
       body: JSON.stringify(body),
     }).then(function (res) {

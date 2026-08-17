@@ -161,7 +161,6 @@ require (
 	github.com/znasllc-io/memql/component/envregistry v0.0.0
 	github.com/znasllc-io/memql/component/fileprocessor v0.0.0
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0
-	github.com/znasllc-io/memql/component/genesis v0.0.0
 	github.com/znasllc-io/memql/component/grpc v0.0.0
 	github.com/znasllc-io/memql/component/identity v0.0.0
 	github.com/znasllc-io/memql/component/identity/admin v0.0.0
@@ -267,8 +266,6 @@ replace github.com/znasllc-io/memql/component/harness => ./component/harness
 replace github.com/znasllc-io/memql/docs => ./docs
 
 replace github.com/znasllc-io/memql/component/envregistry => ./component/envregistry
-
-replace github.com/znasllc-io/memql/component/genesis => ./component/genesis
 
 replace github.com/znasllc-io/memql/dsl => ./dsl
 

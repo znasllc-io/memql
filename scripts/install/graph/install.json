@@ -261,6 +261,23 @@
         "kind": "resultNonEmpty",
         "field": "result.enrolmentState"
       }
+    },
+    {
+      "id": "recoveryKey",
+      "script": "install.recoveryKey",
+      "description": "Claim the cluster's owner recovery key and show it once, so the install ends with a break-glass credential the operator holds off-cluster. Every other credential this install produces assumes the owner can sign in; this one is the answer to all of them being gone. A cluster nobody has signed into yet has no owner and therefore no key, which is reported rather than failed.",
+      "params": {
+        "local": "1"
+      },
+      "dependsOn": [
+        "enrolmentLink"
+      ],
+      "elevation": "none",
+      "containedBy": "clusterUp",
+      "verify": {
+        "kind": "resultNonEmpty",
+        "field": "result.recoveryKeyState"
+      }
     }
   ]
 }

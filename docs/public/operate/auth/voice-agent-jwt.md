@@ -95,7 +95,7 @@ the call to the `VoiceAgent*` payload types.
 `VOICE_AGENT_TOKEN` is an **injected runtime credential**, not a
 stored secret. It is minted at bring-up and lives only in the
 process environment of the voice-agent container -- the sealed
-genesis envelope (dev) and the deploy pipeline's secret store
+`memql-secrets` Secret (dev) and the deploy pipeline's secret store
 (prod) do NOT carry it.
 
 ### Local cluster: self-bootstrap (default, memql#342)
@@ -140,7 +140,7 @@ healthy and inject it as the pod's `VOICE_AGENT_TOKEN`:
    `voice-agent-token mint --instance-id=voice-agent-local`
    subcommand and captures the JWT.
 4. Seed the JWT into the `memql-secrets` Secret (`make secrets`
-   after updating the genesis envelope) and roll the Deployment
+   after updating `memql-secrets`) and roll the Deployment
    (`kubectl rollout restart -n memql deploy/voice`). Once
    `VOICE_AGENT_TOKEN` is set, the explicit token wins over the
    self-bootstrap path (operator-provisioned tokens always win).

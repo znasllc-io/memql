@@ -23,7 +23,7 @@ import (
 // at boot. The script is documented idempotent and `make up` calls it, so an
 // ordinary re-run with the variable unset REPLACED a working key with one the
 // runtime rejects -- observed taking 7 deployments into CrashLoopBackOff on a
-// shared cluster. If the genesis envelope had been sealed under the replaced
+// shared cluster. If a stored secret had been sealed under the replaced
 // key and no pod still held it in memory, it was unrecoverable.
 //
 // These tests drive the REAL script against a fake kubectl rather than testing
@@ -43,7 +43,7 @@ import (
 // scenario:
 //
 //	FAKE_SECRET_STATE  absent | present | error
-//	FAKE_MASTER_KEY_B64, FAKE_GENESIS_B64, FAKE_SIGNING_KEY_B64,
+//	FAKE_MASTER_KEY_B64, FAKE_SIGNING_KEY_B64,
 //	FAKE_NODE_BOOTSTRAP_TOKEN_B64
 //	                   base64 payloads when present
 //	FAKE_JSONPATH_FAILS  non-empty -> the value reads fail while the secret exists
@@ -79,9 +79,6 @@ case "$args" in
   *"get secret memql-secrets"*jsonpath*MEMQL_MASTER_KEY*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_MASTER_KEY_B64"; exit 0 ;;
-  *"get secret memql-secrets"*jsonpath*MEMQL_GENESIS_B64*)
-    [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
-    printf '%s' "$FAKE_GENESIS_B64"; exit 0 ;;
   *"get secret memql-secrets"*jsonpath*MEMQL_IDENTITY_SIGNING_KEY_B64*)
     [ -n "$FAKE_JSONPATH_FAILS" ] && { printf 'Error from server\n' >&2; exit 1; }
     printf '%s' "$FAKE_SIGNING_KEY_B64"; exit 0 ;;
@@ -139,7 +136,6 @@ type scenario struct {
 	envSigningKey  string // MEMQL_IDENTITY_SIGNING_KEY_B64; exported only when non-empty
 	secretState    string // "absent" (default) | "present" | "error"
 	clusterKey     string // plaintext; encoded into the fake when secretState=present
-	clusterB64     string // plaintext genesis payload the "cluster" holds
 	clusterSigning string // plaintext signing seed the "cluster" holds
 	jsonpathFails  bool
 
@@ -252,11 +248,10 @@ func runSeedSecretsFull(t *testing.T, sc scenario) (string, string, []string, in
 	cmd.Dir = root
 	env := []string{
 		"PATH=" + tmp + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"HOME=" + tmp, // no genesis file at $HOME/.memql/genesis.znas
+		"HOME=" + tmp,
 		"FAKE_KUBECTL_LOG=" + logPath,
 		"FAKE_SECRET_STATE=" + state,
 		"FAKE_MASTER_KEY_B64=" + enc(sc.clusterKey),
-		"FAKE_GENESIS_B64=" + enc(sc.clusterB64),
 		"FAKE_SIGNING_KEY_B64=" + enc(sc.clusterSigning),
 		"FAKE_NODE_BOOTSTRAP_TOKEN_B64=" + enc(sc.clusterBootstrapToken),
 		"FAKE_JSONPATH_FAILS=" + jsonpathFails,
@@ -391,29 +386,6 @@ func TestSeedSecretsPreservesAnExistingKeyWhenEnvIsUnset(t *testing.T) {
 }
 
 // TestSeedSecretsPreservesTheExistingGenesisEnvelope covers the sibling field.
-// MEMQL_GENESIS_B64 is written in the same kubectl call three lines from the
-// master key and had the same unconditional-overwrite shape: an operator with
-// no genesis file on THIS machine used to blank the envelope every other node
-// was running on, with only a WARN. Guarding the key while wiping the thing it
-// protects would have been a hollow fix.
-func TestSeedSecretsPreservesTheExistingGenesisEnvelope(t *testing.T) {
-	const envelope = "c2VhbGVkLWVudmVsb3BlLXBheWxvYWQ="
-
-	stdout, calls, code := runSeedSecrets(t, scenario{
-		secretState: "present", clusterKey: goodCluster, clusterB64: envelope,
-	})
-	if code != 0 {
-		t.Fatalf("exit code = %d, want 0", code)
-	}
-	if got := seededLiteral(t, calls, "MEMQL_GENESIS_B64"); got != envelope {
-		t.Errorf("seeded MEMQL_GENESIS_B64 = %q, want the cluster's existing envelope %q.\n"+
-			"A re-run with no local genesis file must not blank the envelope the mesh is running on.",
-			got, envelope)
-	}
-	if src := parseEnvelope(t, stdout).Result.Source; src != "cluster" {
-		t.Errorf("source = %q, want \"cluster\"", src)
-	}
-}
 
 // TestSeedSecretsNeverWritesANonHexKey is the invariant the issue reduces to:
 // whatever branch resolution takes, the value written is one the runtime can

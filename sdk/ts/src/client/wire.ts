@@ -285,7 +285,19 @@ export type IdentityAdminRequestPayload =
   | { revokeNodeToken: IdentityAdminRevokeTokenPayload }
   | { updateClusterSettings: IdentityAdminClusterSettingsPayload }
   | { issueEnrolmentLink: IdentityAdminIssueEnrolmentLinkPayload }
-  | { revokeEnrolmentLink: IdentityAdminRevokeEnrolmentLinkPayload };
+  | { revokeEnrolmentLink: IdentityAdminRevokeEnrolmentLinkPayload }
+  | { rotateRecoveryKey: IdentityAdminRotateRecoveryKeyPayload };
+
+/**
+ * Rotate the cluster's owner recovery key (memql#3970).
+ *
+ * `userId` may be omitted when the cluster has exactly one owner; with several
+ * it is required, because picking one would hand the caller a credential for
+ * an account they did not name.
+ */
+export interface IdentityAdminRotateRecoveryKeyPayload {
+  userId?: string;
+}
 
 export type IdentityAdminPayload = { requestId: string } & IdentityAdminRequestPayload;
 
@@ -874,6 +886,14 @@ export interface IdentityAdminResultPayload {
   // and no later request can fetch it. Empty on every other operation and on
   // every refusal.
   enrolmentUrl?: string;
+  // Set by rotateRecoveryKey ONLY (memql#3970) -- the SECOND field on this
+  // reply that carries a credential, for the same reason as enrolmentUrl
+  // above. Empty on every other operation.
+  //
+  // One case where it arrives on a NON-ok reply: the replacement was minted
+  // and revealed but retiring a predecessor failed. Withholding it there would
+  // tell the caller nothing happened when something did.
+  recoveryKey?: string;
 }
 
 // AutomationRunEvent -- one frame of a run's streamed trace. Mirrors

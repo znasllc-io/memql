@@ -23,7 +23,9 @@
 # bent: no operator, no WAL archiving, no backups.
 #
 # SECRETS (created by `make secrets`, NOT committed)
-#   - memql-secrets      -- main app envelope (genesis, DB DSN, blob conn string)
+#   - memql-secrets      -- the one config delivery path: master key, identity
+#                          signing seed, node bootstrap token, DB DSNs, blob
+#                          connection string (epic memql#3958)
 #   - livekit-secrets    -- LiveKit API key+secret for local livekit server
 #   - telephony-secrets  -- stub (telephony disabled locally)
 #   - memql-db-app-creds -- Postgres credentials for the in-cluster DB. A
@@ -602,7 +604,6 @@ patches:
   # scripts/install/seed-bootstrap.sh, `optional: true` so a cluster brought up
   # without the installer behaves exactly as it does today. Targeted by name
   # regex at the engine nodes that carry an envFrom list.
-  - path: patches/genesis-autoload-off.yaml
   - path: patches/bootstrap-secret-envfrom.yaml
     target:
       kind: Deployment

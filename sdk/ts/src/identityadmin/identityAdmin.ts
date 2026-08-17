@@ -101,6 +101,19 @@ export interface EnrolmentLinkResult extends AdminWriteResult {
   url: string;
 }
 
+/**
+ * What `rotateRecoveryKey` reports back.
+ *
+ * `key` is a CREDENTIAL, and the highest-value one this surface returns: it
+ * authorizes registering a passkey AS THE CLUSTER OWNER. It exists nowhere
+ * else (the server persisted only its SHA-256 hash) and no later call can
+ * retrieve it. Show it once, let the operator copy it somewhere the cluster is
+ * not, and hold it nowhere else.
+ */
+export interface RecoveryKeyResult extends AdminWriteResult {
+  key: string;
+}
+
 export interface IdentityAdminCallOptions {
   signal?: AbortSignal;
 }
@@ -244,6 +257,42 @@ export class IdentityAdminClient {
       );
     }
     return { ...result, url };
+  }
+
+  /**
+   * Rotate the cluster's owner recovery key: mint a replacement, retire the
+   * current one, and return the new key ONCE.
+   *
+   * The recovery key is the break-glass credential -- it registers a passkey as
+   * the cluster owner, and ONLY while that owner has no working way to sign in.
+   * Rotate it when the value was lost, never claimed, or is suspected leaked.
+   *
+   * `userId` may be omitted when the cluster has exactly one owner.
+   *
+   * The returned `key` is shown ONCE. See RecoveryKeyResult.
+   */
+  async rotateRecoveryKey(
+    userId = "",
+    opts: IdentityAdminCallOptions = {},
+  ): Promise<RecoveryKeyResult> {
+    const { result, raw } = await this.callRaw(
+      "rotating the recovery key",
+      { rotateRecoveryKey: userId === "" ? {} : { userId } },
+      opts,
+    );
+    const key = raw.recoveryKey ?? "";
+    if (key === "") {
+      // A success with no key is not a success: it would leave a live
+      // break-glass credential in the cluster that nobody holds, which is a
+      // recovery route that will not work when it is reached for.
+      throw new IdentityAdminError(
+        "rotating the recovery key",
+        13,
+        "the server reported success but returned no recovery key",
+        result.auditEventId,
+      );
+    }
+    return { ...result, key };
   }
 
   /** Kill an unused enrolment link before it expires. */

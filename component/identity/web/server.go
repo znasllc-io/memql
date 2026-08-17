@@ -223,6 +223,18 @@ type Server struct {
 	resolveEnrolment ResolveEnrolmentFunc
 	enrolAudit       identity.AuditLogger
 
+	// Owner recovery redeem (memql#3968). Same contract as the pair above:
+	// resolveRecovery validates a presented recovery key AND applies the
+	// break-glass gate; recoverAudit receives one event per outcome. Both nil
+	// leaves /recover unmounted.
+	//
+	// A SEPARATE audit sink field from enrolAudit even though the wiring layer
+	// passes the same logger to both: the two surfaces are wired independently
+	// (SetResolveEnrolment / SetResolveRecovery), and a shared field would let
+	// wiring one silently satisfy the other's mount condition.
+	resolveRecovery ResolveRecoveryFunc
+	recoverAudit    identity.AuditLogger
+
 	// Per-IP redeem limiter, lazily built per-Server on first use so each
 	// Server (and each test) gets its own buckets.
 	enrolLimiterValue *abuse.IPRateLimiter
@@ -372,6 +384,13 @@ func (s *Server) Mount(mux *http.ServeMux) {
 	// Mounts only when the validator + audit sink are both wired.
 	if s.resolveEnrolment != nil && s.enrolAudit != nil {
 		mux.HandleFunc("GET /enroll", wrap(s.handleEnroll))
+	}
+
+	// Owner recovery redeem (memql#3968). Same reasoning as /enroll above --
+	// the recovery key IS the credential, so this is NOT wrapped in preAuth.
+	// Mounts only when the validator + audit sink are both wired.
+	if s.resolveRecovery != nil && s.recoverAudit != nil {
+		mux.HandleFunc("GET /recover", wrap(s.handleRecover))
 	}
 
 	// /me/* SPA shells. Authentication is fetched client-side via

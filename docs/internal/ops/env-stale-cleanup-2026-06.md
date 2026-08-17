@@ -102,7 +102,7 @@ and was left in place:
   `MEMQL_REALTIME_VAD_SILENCE_DURATION_MS`,
   `MEMQL_VOICE_AGENT_INSTANCE_ID`, `VOICE_AGENT_TOKEN`.
 - **Other live Go reads** the registry omits by design but code
-  consumes: `MEMQL_GENESIS_AUTOLOAD`, `MEMQL_GENESIS_B64`,
+  consumes (the MEMQL_GENESIS_* names are retired -- epic memql#3958): `MEMQL_GENESIS_AUTOLOAD`, `MEMQL_GENESIS_B64`,
   `MEMQL_MASTER_KEY`, `MEMQL_HTTP_TLS_CA_FILE`, `MEMQL_DB_APP_NAME`,
   `MEMQL_WORKBENCH_ROOT`.
 - **Inline-cronjob-script vars** (`conn-monitor-cronjob.yaml`
@@ -128,7 +128,7 @@ and was left in place:
 - **Shell-script locals / operator knobs** (`seed-secrets.sh` and
   other `scripts/`): `BASH_SOURCE`, `SCRIPT_DIR`, `REPO_ROOT`,
   `CLUSTER_NAME`, `MEMQL_K3D_CLUSTER`, `MEMQL_K3D_NAMESPACE`,
-  `MEMQL_GENESIS_FILE`, `LOCAL_DB_USER` / `_PASSWORD` / `_NAME`,
+  `MEMQL_GENESIS_FILE` (retired -- epic memql#3958), `LOCAL_DB_USER` / `_PASSWORD` / `_NAME`,
   `MEMQL_LOCAL_DB_USER` / `_PASSWORD` / `_NAME`.
 - **Dockerfile build args**: `BUILD_TAGS`, `CGO_ENABLED`,
   `TAILWIND_VERSION`.

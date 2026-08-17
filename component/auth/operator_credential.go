@@ -16,7 +16,7 @@ package auth
 // produce it)". That premise is about HOST FILESYSTEM ACCESS, and it stopped
 // describing where the value actually lived:
 //
-//   - `genesis-seal --sync-shell` DEFAULTED TO TRUE and wrote the master key
+//   - the envelope's sealing CLI DEFAULTED TO --sync-shell=true and wrote the master key
 //     into ~/.bashrc / ~/.zshrc at each file's existing (typically 0644) mode
 //     -- world-readable to every local account, and carried into dotfile
 //     backups, sync tools and screen shares.

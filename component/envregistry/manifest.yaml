@@ -713,26 +713,6 @@ variables:
     optional: true
     description: "On-disk root of ADDITIONAL product-DSL domains mounted into the unified tree at boot (dsl.MountRuntimeDomainsFromEnv, accessor core/dslfs.PathFromEnv). This is the mechanism by which a product-agnostic engine image runs a product's DSL with zero compiled-in product code (memql#2472): a data-only bundle image's init-container copies the .memql tree into a shared volume and the node reads it here. One sub-directory per product namespace. It ADDS domains -- a directory whose name collides with a core embedded domain is skipped, and directories starting with _ or . are skipped. The mounted tree loads through the same strict-boot gate as the embedded one, so a malformed construct refuses boot. Unset is a no-op (embedded tree only)."
 
-  - name: MEMQL_GENESIS_AUTOLOAD
-    component: engine
-    scope: node
-    default: "false"
-    optional: true
-    description: "When exactly \"true\", boot decrypts the sealed genesis envelope IN-PROCESS and applies its entries to the process environment SET-IF-ABSENT, so a value already present (a k8s/Container App override) always wins over the envelope. Requires MEMQL_MASTER_KEY and an envelope source (MEMQL_GENESIS_B64, else MEMQL_GENESIS_PATH). FAIL-CLOSED: enabled with no source, no master key, or a failed decrypt is fatal at boot rather than a partial config. Any other value (including unset) is a no-op -- the local path where the envelope is seeded into k8s Secrets instead."
-
-  - name: MEMQL_GENESIS_B64
-    component: engine
-    scope: node
-    optional: true
-    description: "The base64-encoded ENCRYPTED genesis envelope carried directly in an env var, decoded and decrypted in memory so the ciphertext never lands on disk. Preferred over MEMQL_GENESIS_PATH in cloud, and consulted first when both are set. Only read when MEMQL_GENESIS_AUTOLOAD=true. Still ciphertext -- useless without MEMQL_MASTER_KEY -- but it is the whole envelope, so treat it as secret material."
-
-  - name: MEMQL_GENESIS_PATH
-    component: engine
-    scope: node
-    default: "~/.memql/genesis.znas"
-    optional: true
-    description: "Path to the sealed genesis envelope that the engine decrypts at bootstrap."
-
   - name: MEMQL_MASTER_KEY
     component: platform
     scope: node

@@ -34,7 +34,7 @@
 #
 #   kubectl create secret generic memql-secrets -n memql \
 #     --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
-#     --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
+#     --from-literal=MEMQL_IDENTITY_SIGNING_KEY_B64="$(make identity-signing-key)" \
 #     --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
 #     --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
 #   kubectl apply -k deploy/k8s/overlays/cloud   # digest-pinned (#699); creates the namespace

@@ -1,13 +1,38 @@
 package webtempl
 
-// EnrollData drives GET /enroll?code=... -- the page a single-use enrolment
-// link lands on (memql#3408).
+import "strings"
+
+// EnrollData drives GET /enroll?code=... and GET /recover?code=... -- the two
+// pages a passkey-registration credential lands on (memql#3408, memql#3968).
 //
-// Two shapes in one component: the live enrolment card, and one of four
-// distinct refusals. They share a template because they share a URL and a
-// layout, not because they are the same page -- Rejection is what picks.
+// Two shapes in one component: the live card, and one of several distinct
+// refusals. They share a template because they share a layout and a ceremony,
+// not because they are the same page -- Rejection is what picks.
+//
+// ONE COMPONENT FOR BOTH ROUTES, GENERALISED RATHER THAN FORKED. A second
+// template and a second driver script for /recover would be a copy of the
+// WebAuthn ceremony -- the base64url helpers, the create() call, the error
+// mapping -- and the copy would drift on the surface where drift is least
+// visible. The ceremony is identical; only the Authorization scheme and the
+// wording differ, so only those are variables.
 type EnrollData struct {
 	Layout LayoutData
+
+	// AuthScheme is the HTTP Authorization scheme the browser presents the
+	// code under: "Enrolment" or "Recovery". Rendered into a data attribute
+	// and read by enroll.js. Empty defaults to "Enrolment", so every existing
+	// caller is unchanged.
+	AuthScheme string
+
+	// LiveHeading overrides the live card's title. Named apart from Heading
+	// below, which is the REJECTION card's title -- two headings on two
+	// mutually exclusive shapes of one page, and collapsing them would put the
+	// refusal's words on the live card.
+	LiveHeading string
+
+	// SingleUseNote is an extra line under the live card. /recover uses it to
+	// say that spending the key mints a replacement; /enroll leaves it empty.
+	SingleUseNote string
 
 	// Rejection is "" on the live path. Otherwise it is the machine-readable
 	// state: "invalid", "expired", "already-used" or "revoked". Rendered into
@@ -31,6 +56,22 @@ type EnrollData struct {
 
 	// ExpiresIn is a rendered duration ("14 minutes"), live path only.
 	ExpiresIn string
+}
+
+// AuthSchemeOrDefault is the scheme the browser presents the code under.
+func (d EnrollData) AuthSchemeOrDefault() string {
+	if s := strings.TrimSpace(d.AuthScheme); s != "" {
+		return s
+	}
+	return "Enrolment"
+}
+
+// HeadingOrDefault is the live card's title.
+func (d EnrollData) HeadingOrDefault() string {
+	if h := strings.TrimSpace(d.LiveHeading); h != "" {
+		return h
+	}
+	return "Set up your passkey"
 }
 
 // Enroll renders the enrolment page.
@@ -65,8 +106,8 @@ templ Enroll(data EnrollData) {
 				}
 			</div>
 		} else {
-			<div class="card" data-enroll-state="valid">
-				<h1 class="card-title">Set up your passkey</h1>
+			<div class="card" data-enroll-state="valid" data-auth-scheme={ data.AuthSchemeOrDefault() }>
+				<h1 class="card-title">{ data.HeadingOrDefault() }</h1>
 				<p class="text-muted">
 					A passkey signs you in with the unlock you already use on this device --
 					Touch ID, Windows Hello, or your screen lock. There is nothing to
@@ -81,6 +122,9 @@ templ Enroll(data EnrollData) {
 					<p class="text-small text-subtle">
 						This link is single-use and expires in { data.ExpiresIn }.
 					</p>
+				}
+				if data.SingleUseNote != "" {
+					<p class="text-small text-subtle">{ data.SingleUseNote }</p>
 				}
 				<div class="mt-2">
 					<button type="button" id="enroll-start" class="btn btn-primary">
