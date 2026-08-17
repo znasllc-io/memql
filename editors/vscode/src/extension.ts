@@ -377,6 +377,15 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         const result = await query.executeNamed('memqlVersion', 'memqlVersion()');
         return readReportedVersion(result.rows());
       },
+      // The release the connected engine's binary was CUT FROM, stated on the
+      // handshake (memql#3998) and the most trustworthy of the five
+      // (memql#4018). Same gate as the two live sources above and for the same
+      // reason -- a connection can only answer for the cluster it is connected
+      // to -- and no RPC at all: the value arrived with ServerHello.
+      helloVersion: async (cluster) => {
+        if (!connectedTo(connections, cluster.name)) return '';
+        return connections?.engineVersion ?? '';
+      },
     }),
     write: (name, version) => upsertCluster(clustersPath, { name, version }),
   });

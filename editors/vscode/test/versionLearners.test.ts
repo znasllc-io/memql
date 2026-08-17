@@ -1,18 +1,22 @@
-// Version-learner tests (memql#3993).
+// Version-learner tests (memql#3993, fifth source memql#4018).
 //
-// Four sources can say what release a cluster is running, and they disagree --
-// not occasionally, but structurally, because none of them was built to answer
-// this question:
+// Five sources can say what release a cluster is running, and they disagree --
+// not occasionally, but structurally, because only one of them was built to
+// answer this question:
 //
+//   handshake     `ServerHello.engine_version` -- the release the engine binary
+//                 was CUT FROM, stamped at link time and stated on connect
+//                 (memql#3998). Ranked FIRST: it is the only value here the
+//                 running process cannot be told and cannot get wrong.
 //   receipt       what the wizard checked out. A real release tag, but a record
 //                 of one moment; the cluster may have moved since.
 //   argocd        the targetRevision being reconciled. Legitimately a BRANCH
 //                 NAME -- `scripts/k3d/status.sh` says so in as many words, and
 //                 memql#3817 was exactly that fact outliving the branch.
 //   deployControl the resolved lockfile's version. Absent for a local cluster.
-//   live          `memqlVersion()`. Returns the Dockerfile's build stamp today,
-//                 which is why it is ranked LAST despite being the most direct
-//                 evidence -- memql#3998 is what will make it honest.
+//   live          `memqlVersion()`. Returns the Dockerfile's build stamp on an
+//                 engine predating memql#3998, which is why it is ranked LAST
+//                 despite being direct evidence.
 //
 // So the rule cannot be "newest observation wins". It is: prefer a value that
 // names a release, then prefer the more trustworthy source, and NEVER let a
@@ -60,22 +64,86 @@ test("among release-shaped candidates the more trustworthy source wins", () => {
   assert.deepEqual(chosen, { source: "receipt", value: "v0.18.0" });
 });
 
-test("the source ranking is receipt, argocd, deployControl, live", () => {
-  // live is LAST despite being the most direct evidence, because today it
-  // reports the build stamp. memql#3998 makes it honest; the quality rule
-  // already lets it through once it is.
+test("the source ranking is handshake, receipt, argocd, deployControl, live", () => {
+  // live is LAST despite being direct evidence, because on an engine predating
+  // memql#3998 it reports the build stamp. The quality rule lets it through
+  // once it is honest.
   const all: VersionCandidate[] = [
     { source: "live", value: "v0.1.0" },
     { source: "deployControl", value: "v0.2.0" },
     { source: "argocd", value: "v0.3.0" },
     { source: "receipt", value: "v0.4.0" },
+    { source: "handshake", value: "v0.5.0" },
   ];
-  assert.equal(chooseCandidate(all)?.source, "receipt");
-  assert.equal(chooseCandidate(all.filter((c) => c.source !== "receipt"))?.source, "argocd");
-  assert.equal(
-    chooseCandidate(all.filter((c) => c.source !== "receipt" && c.source !== "argocd"))?.source,
-    "deployControl",
-  );
+  const ranked: VersionCandidate["source"][] = [];
+  let left = all;
+  while (left.length > 0) {
+    const next = chooseCandidate(left);
+    assert.notEqual(next, undefined);
+    ranked.push((next as VersionCandidate).source);
+    left = left.filter((c) => c.source !== next?.source);
+  }
+  assert.deepEqual(ranked, ["handshake", "receipt", "argocd", "deployControl", "live"]);
+});
+
+// --- The fifth source: the handshake (memql#4018) ---------------------------
+
+test("the handshake outranks the install receipt when both name a release", () => {
+  // THE DECISION memql#4018 EXISTS TO MAKE. The receipt records what the
+  // INSTALLER PULLED, and it goes stale the moment anything moves the checkout
+  // -- an upgrade run by other means, a hand-edited overlay, a second machine.
+  // `engine_version` is stamped into the binary at link time and stated by the
+  // process actually serving this connection, so when the two disagree the
+  // receipt is the one describing a past that has been left behind.
+  const chosen = chooseCandidate([
+    { source: "receipt", value: "v0.18.0" },
+    { source: "handshake", value: "v0.19.0" },
+  ]);
+  assert.deepEqual(chosen, { source: "handshake", value: "v0.19.0" });
+});
+
+test("an OLDER handshake still outranks the receipt, because trust is not recency", () => {
+  // The reverse disagreement is the same fact seen from the other side: an
+  // operator whose receipt says v0.19.0 while the cluster is serving v0.18.0
+  // has a cluster that did not move, and the record should say so.
+  const chosen = chooseCandidate([
+    { source: "receipt", value: "v0.19.0" },
+    { source: "handshake", value: "v0.18.0" },
+  ]);
+  assert.deepEqual(chosen, { source: "handshake", value: "v0.18.0" });
+});
+
+test("a handshake that does not name a release loses to a receipt that does", () => {
+  // Quality still outranks trust, ahead of the new source exactly as it does
+  // ahead of every other one. `dev` is what a binary NOT cut from a release
+  // states, and it is a true statement that places the cluster nowhere on the
+  // release line.
+  const chosen = chooseCandidate([
+    { source: "handshake", value: "dev" },
+    { source: "receipt", value: "v0.18.0" },
+  ]);
+  assert.deepEqual(chosen, { source: "receipt", value: "v0.18.0" });
+});
+
+test("a handshake reporting `dev` never overwrites a recorded release", () => {
+  // The record-quality rule handles the whole of the not-a-release case with no
+  // special-casing here -- which is what memql#4018 predicted when it said the
+  // rule "handles an older cluster returning \"\" without a special case".
+  const d = decideVersionWrite("v0.18.0", [{ source: "handshake", value: "dev" }]);
+  assert.equal(d.write, false);
+});
+
+test("a cluster whose engine predates the field contributes no candidate at all", () => {
+  // Every cluster installed before memql#3998 reports "", which is dropped
+  // before ranking -- so the four original sources answer for it exactly as
+  // they did, and nothing about this cluster changes.
+  const d = decideVersionWrite("v0.18.0", [
+    { source: "handshake", value: "" },
+    { source: "receipt", value: "v0.19.0" },
+  ]);
+  assert.equal(d.write, true);
+  assert.equal(d.source, "receipt");
+  assert.equal(d.value, "v0.19.0");
 });
 
 test("among only non-release-shaped candidates the ranking still applies", () => {

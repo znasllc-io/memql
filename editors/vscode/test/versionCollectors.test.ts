@@ -1,4 +1,4 @@
-// The four version collectors (memql#3993).
+// The five version collectors (memql#3993, the handshake source memql#4018).
 //
 // Each collector answers "what does THIS source say this cluster is running",
 // and each returns "" for "nothing to say". None of them may throw: a refresh
@@ -251,7 +251,46 @@ test("a dead connection contributes nothing", async () => {
   assert.deepEqual((await collect(cluster())).filter((c) => c.source === "live"), []);
 });
 
-// --- All four together ------------------------------------------------------
+// --- The handshake (memql#4018) ---------------------------------------------
+
+test("the handshake contributes the release the engine binary was cut from", async () => {
+  const collect = collector({ helloVersion: async () => "v0.19.0" });
+  assert.deepEqual(
+    (await collect(cluster())).filter((c) => c.source === "handshake"),
+    [{ source: "handshake", value: "v0.19.0" }],
+  );
+});
+
+test("an engine that states `dev` still contributes it", async () => {
+  // A binary not cut from a release says so, and reporting it is right: the
+  // write decision refuses to let a value that names no release overwrite one
+  // that does, and filtering it out HERE would hide that the engine answered.
+  const collect = collector({ helloVersion: async () => "dev" });
+  assert.equal((await collect(cluster())).find((c) => c.source === "handshake")?.value, "dev");
+});
+
+test("an engine predating the field contributes nothing", async () => {
+  // Every cluster installed before memql#3998 states "". That is the state of
+  // the entire fleet on the day this source lands, and it must be a silent
+  // non-answer rather than a candidate.
+  const collect = collector({ helloVersion: async () => "" });
+  assert.deepEqual((await collect(cluster())).filter((c) => c.source === "handshake"), []);
+});
+
+test("a handshake read that throws contributes nothing", async () => {
+  const collect = collector({
+    helloVersion: async () => {
+      throw new Error("stream closed");
+    },
+  });
+  assert.deepEqual((await collect(cluster())).filter((c) => c.source === "handshake"), []);
+});
+
+test("the handshake is not consulted when no connection is wired", async () => {
+  assert.deepEqual((await collector({})(cluster())).filter((c) => c.source === "handshake"), []);
+});
+
+// --- All five together ------------------------------------------------------
 
 test("every source that answers is collected, and one failure does not silence the rest", async () => {
   const collect = collector({
@@ -261,11 +300,12 @@ test("every source that answers is collected, and one failure does not silence t
     },
     deployStatus: async () => ({ version: "v0.17.1", engineVersion: "" }),
     liveVersion: async () => "0.15.0-1737072000",
+    helloVersion: async () => "v0.19.0",
   });
   const found = await collect(cluster({ local: true }));
   assert.deepEqual(
     found.map((c) => c.source).sort(),
-    ["deployControl", "live", "receipt"],
+    ["deployControl", "handshake", "live", "receipt"],
   );
 });
 

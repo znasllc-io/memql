@@ -117,6 +117,23 @@ export class ConnectionManager {
     return this.conn?.subscriptions;
   }
 
+  // The release the connected node's binary was CUT FROM, as it stated on the
+  // handshake (ServerHello.engine_version, memql#3998). The most trustworthy
+  // answer to "what is this cluster running" and the fifth version learner
+  // reads it here (memql#4018).
+  //
+  // A getter over `conn` rather than a cached field, for the same reason
+  // `query` and `dispatcher` are: watchForTermination drops `conn` the moment
+  // the socket dies, and a cached build fact would go on describing a cluster
+  // this editor is no longer talking to.
+  //
+  // "" and undefined are DIFFERENT answers and the collector depends on the
+  // difference: "" is a node that answered and predates the field, undefined is
+  // no connection to ask.
+  get engineVersion(): string | undefined {
+    return this.conn?.engineVersion;
+  }
+
   // The raw dispatcher, for the surfaces the SDK exposes as free functions
   // over one rather than as methods on QueryClient -- currently callTool
   // (memql#3309's tool runs). Undefined whenever `query` is, and for the same

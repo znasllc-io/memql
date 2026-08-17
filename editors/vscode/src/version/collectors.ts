@@ -1,4 +1,4 @@
-// The four sources that can say what release a cluster is running.
+// The five sources that can say what release a cluster is running.
 //
 // Each collector answers for ONE source and returns "" for "nothing to say".
 // NONE of them throws: a version refresh is opportunistic background work
@@ -62,6 +62,15 @@ export interface VersionCollectorDeps {
   deployStatus?: (cluster: ClusterConfig) => Promise<DeployVersionStatus | null>;
   /** `memqlVersion()` over a live connection, when one is open. */
   liveVersion?: (cluster: ClusterConfig) => Promise<string>;
+  /**
+   * `ServerHello.engine_version` off a live connection -- the release the
+   * engine binary was cut from, as it stated on connect (memql#4018).
+   *
+   * Absent means "there is no connection to ask". `""` is a different answer
+   * and is the one every cluster installed before memql#3998 gives: the node
+   * answered and does not carry the field.
+   */
+  helloVersion?: (cluster: ClusterConfig) => Promise<string>;
 }
 
 // Every collector funnels through this: a source that fails contributes
@@ -139,6 +148,18 @@ async function fromLive(cluster: ClusterConfig, deps: VersionCollectorDeps): Pro
   return quietly(() => ask(cluster));
 }
 
+async function fromHandshake(
+  cluster: ClusterConfig,
+  deps: VersionCollectorDeps,
+): Promise<string> {
+  const ask = deps.helloVersion;
+  if (ask === undefined) return "";
+  // No RPC: the value was stated on connect and is held on the connection, so
+  // this source costs nothing and cannot time out. It is still routed through
+  // `quietly` because the closure resolves the connection, which may be gone.
+  return quietly(() => ask(cluster));
+}
+
 /**
  * Asks every source, concurrently, and returns what answered.
  *
@@ -150,7 +171,8 @@ export function createVersionCollector(
   deps: VersionCollectorDeps,
 ): (cluster: ClusterConfig) => Promise<VersionCandidate[]> {
   return async (cluster) => {
-    const [receipt, argocd, deployControl, live] = await Promise.all([
+    const [handshake, receipt, argocd, deployControl, live] = await Promise.all([
+      fromHandshake(cluster, deps),
       fromReceipt(cluster, deps),
       fromArgocd(cluster, deps),
       fromDeployControl(cluster, deps),
@@ -158,6 +180,7 @@ export function createVersionCollector(
     ]);
     return (
       [
+        { source: "handshake", value: handshake },
         { source: "receipt", value: receipt },
         { source: "argocd", value: argocd },
         { source: "deployControl", value: deployControl },
