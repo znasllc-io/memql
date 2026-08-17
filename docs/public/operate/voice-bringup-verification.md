@@ -66,7 +66,7 @@ cluster each value comes from the manifests in `deploy/k8s/base` /
 | `LIVEKIT_API_KEY` | the LiveKit Cloud project key, from `livekit-secrets` | yes |
 | `LIVEKIT_API_SECRET` | the LiveKit Cloud project secret, from `livekit-secrets` | yes |
 | `MEMQL_GRPC_ADDR` | `bff:50051` (cluster DNS) | yes |
-| `MEMQL_OPENAI_API_KEY` | `memql-secrets` Secret (seeded from the genesis envelope) | yes |
+| `MEMQL_OPENAI_API_KEY` | `memql-secrets` Secret (seeded by `make secrets`) | yes |
 | `VOICE_AGENT_TOKEN` | `memql-secrets` Secret, seeded by `make up` / `make secrets` | yes |
 | `MEMQL_AVATAR_VENDOR` | `anam` default; overridable in the overlay | no |
 | `MEMQL_ANAM_API_KEY` | `memql-secrets` Secret | required when `MEMQL_AVATAR_VENDOR=anam` |
@@ -112,6 +112,6 @@ loop:
 | Symptom | Cause | Recovery |
 | --- | --- | --- |
 | `voice` pod CrashLoopBackOff | `VOICE_AGENT_TOKEN` empty | re-seed with `make secrets` then `kubectl rollout restart -n memql deploy/voice`, or run [the manual mint-and-recreate](auth/voice-agent-jwt.md#bring-up-injection-dev--prod) |
-| Auth works but no TTS | OpenAI key missing | seal the key into the genesis envelope, then `make secrets` |
+| Auth works but no TTS | OpenAI key missing | put the key on `memql-secrets`, then `make secrets` |
 | `UNAUTHENTICATED` in voice-agent logs | Token expired or identity row soft-deleted | re-mint with `make voice-agent-token INSTANCE=voice-agent-local`, re-seed, and roll the voice Deployment |
 | `voice agent turn request` lands but cognition doesn't reply | Cognition node down or routing broken | `kubectl logs -n memql deploy/cognition`; `kubectl rollout restart -n memql deploy/cognition` |

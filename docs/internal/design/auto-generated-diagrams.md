@@ -162,7 +162,7 @@ Constructed via `model.ServiceID(...)`, `model.PackageID(...)`, etc. **Never inl
 
 ---
 
-## Local override: `.env` over genesis
+## Local override: `.env` over the process environment
 
 Genesis seals secrets + variables into an encrypted envelope. For local development, retyping a value into `memql-cockpit genesis init` for every tweak was friction. The framework adds a `.env` override layered on top:
 
@@ -202,7 +202,7 @@ Four levels, four redactors, three resolvers, two storage tiers:
 # Regenerate the architecture model after code changes:
 cd memql/component/architecture/embedded && go generate
 
-# Tune locally without re-sealing genesis:
+# Tune locally without touching memql-secrets:
 echo 'MEMQL_OBSERVE_LEVEL=verbose' >> /Users/me/projects/memql/.env
 
 # Instrument a function:

@@ -234,7 +234,7 @@ run. The token never lives in git and never leaves the cluster.
 - **Rotate:** mint a fresh token (and refresh the Secret). The 1-hour TTL means
   a stale token self-expires fast.
 - **Revoke all at once:** rotate the identity **signing key** (re-seal the seed
-  into the genesis envelope and roll identity, per
+  onto the `memql-secrets` Secret and roll identity, per
   [identity-service.md](identity-service.md)) — this invalidates *every*
   outstanding JWT of every class, so use it only for a true key-compromise.
 - There is **no per-token revoke list** (no DB row by design). If you need

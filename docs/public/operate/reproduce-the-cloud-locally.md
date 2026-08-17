@@ -166,7 +166,7 @@ runtime by mounting its DSL bundle at `MEMQL_DSL_PATH` (the `dsl-bundle`
 component) -- there are no per-product node images (see
 [downstream-stacks.md](downstream-stacks.md)).
 
-No genesis env file is required for `make up`; dev secrets are hardcoded
+No env file is required for `make up`; dev secrets are hardcoded
 in `scripts/k3d/seed-secrets.sh` (Azurite well-known key, `memql_dev` Postgres
 password).
 

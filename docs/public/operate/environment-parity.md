@@ -60,7 +60,7 @@ registry, or the environment — never in application logic.
 | DNS | `/etc/hosts` wildcard → 127.0.0.1 | real DNS → ingress IP |
 | TLS cert source | mkcert `*.memql.localhost` (`memql-front-door-tls`) | cert-manager / Let's Encrypt |
 | Ingress controller | k3s-bundled **traefik** (`serversscheme: h2c`) | **nginx** (`backend-protocol: GRPC`) |
-| Secrets source | `make secrets` from the genesis envelope | External Secrets + Key Vault |
+| Secrets source | `make secrets` writes `memql-secrets` directly | External Secrets + Key Vault |
 
 Everything in this table is a config cell. The topology above it is untouched.
 The ingress-controller row is the one place the *manifest* genuinely differs

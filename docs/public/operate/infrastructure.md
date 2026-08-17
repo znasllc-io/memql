@@ -11,7 +11,7 @@ owner: znas
 
 memQL and its downstream product stack run on **Azure Kubernetes Service**
 (cluster `aks-memql-staging`, namespace `memql`), with a managed **Tiger Cloud**
-database, images in **ACR** (`acrmemql.azurecr.io`), secrets in the **genesis
+database, images in **ACR** (`acrmemql.azurecr.io`), secrets in the **memql-secrets
 A2** sealed envelope, and per-env config in **Key Vault** (`kv-memql-<env>`).
 
 The former Google Cloud Run / Cloud Build / Artifact Registry / Secret Manager

@@ -229,7 +229,7 @@ matches. Read as tiers:
 | tier | modules |
 |---|---|
 | `wire` | `component/{grpc,node,bus}/gen` |
-| `base` | `core`, `component/{architecture,auth,bus,config,events,fileprocessor,genesis,healing,metadata,metrics,observe,planner,polyphon,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
+| `base` | `core`, `component/{architecture,auth,bus,config,envregistry,events,fileprocessor,healing,metadata,metrics,observe,planner,polyphon,provenance,safety,secret}`, `component/language/{annotations,ast,dslclause}`, `docs` |
 | `engine` | `component/{language,database,harness,actions,memql}`, `dsl` |
 | `platform` | `component/{identity,node}`, `integrations/{email,openai,stt}` |
 | between platform and the servers | `component/{deploycontrol,router,service,worker,mcp,outbound,automations}`, `component/identity/admin`, `integrations` |
@@ -265,7 +265,7 @@ engine pulls DOWN with it:
 
 | directory | tier | why |
 |---|---|---|
-| `component/genesis` | `base` | `component/memql` imports it and its only internal dependency is `component/secret`. Left in the root module it would have made the engine require the app tier. |
+| `component/envregistry` | `base` | `component/memql` imports it, and it depends only on `yaml.v3` plus `component/frontdoor`. Left in the root module it would have made the engine require the app tier.<br><br>It was `component/genesis` until memql#3963, and this row USED TO justify the tier by "its only internal dependency is `component/secret`". That stopped being true when the sealed envelope was deleted (epic memql#3958): `component/secret` was the ENVELOPE's dependency, not the registry's, and it left with it. The tier is unchanged and the reason is now a different one. |
 | `docs` | `base` | `component/memql/executor_builtin.go` imports it for the `memqlGuide` builtin. It is a one-file L0 package whose `//go:embed` reaches `docs/public/language/memql.md` -- and `go:embed` cannot cross a module boundary, so the module has to be rooted at `docs/`, not somewhere tidier. |
 | the `dsl` conformance suite | root module (`test/dslconformance`) | It imports `component/{actions,memql}`, both of which import `dsl`. A test import is a module requirement, so it could not stay inside `dsl`. |
 

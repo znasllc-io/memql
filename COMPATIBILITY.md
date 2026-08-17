@@ -47,7 +47,7 @@ pinning:
    one number the product team bumps to move to a newer backend.
 
 2. **carrier → memql.** The carrier imports memQL's Go packages
-   (`app`, `server`, `genesis`, `core/...`) and mounts its own DSL
+   (`app`, `server`, `envregistry`, `core/...`) and mounts its own DSL
    subtree via `dsl.RegisterTree`. It pins the memQL version it
    builds against and bakes it into the immutable backend image.
    Because the import graph is **carrier → memQL** (never the

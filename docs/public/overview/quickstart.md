@@ -37,7 +37,7 @@ make status          # parity litmus: distinct per-pod MEMQL_NODE_ID
 
 `make up` creates a k3d cluster, installs ArgoCD, applies the local
 overlay at `deploy/k8s/overlays/local`, and seeds the k8s Secrets from
-the genesis envelope. The same k8s manifests and ArgoCD reconciliation
+`make secrets`. The same k8s manifests and ArgoCD reconciliation
 path run locally and on AKS staging, so local IS staging parity.
 
 For full multi-node mesh testing (2 replicas per mesh node), bring the
@@ -62,7 +62,7 @@ lifecycle).
 ### 2. Secrets
 
 `make up` seeds the k8s Secrets (OpenAI / Anthropic keys, identity
-service signing-key encryption secret, DB DSN, etc.) from the genesis
+service signing-key encryption secret, DB DSN, etc.) into the
 envelope via `scripts/k3d/seed-secrets.sh`. If you change a secret,
 re-seed with:
 

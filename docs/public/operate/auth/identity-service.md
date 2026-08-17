@@ -444,10 +444,13 @@ The identity service has two signing-key modes:
   AND mesh node tokens) fail with `unknown kid`, flapping login.
 
 > **This caused the 2026-06-16 staging auth outage.** Staging ran
-> identity at `replicas: 2` but had no `MEMQL_IDENTITY_SIGNING_KEY_B64` in
-> its sealed genesis envelope, so it fell into per-pod file-key mode
-> and JWKS flapped between the two pods' keys. The fix is the shared
-> seed (added to staging's envelope) plus the startup guard below.
+> identity at `replicas: 2` with no `MEMQL_IDENTITY_SIGNING_KEY_B64`
+> reaching the pods, so it fell into per-pod file-key mode and JWKS
+> flapped between the two pods' keys. The fix is the shared seed plus
+> the startup guard below. The seed is now a DECLARED key on
+> `memql-secrets` in every environment (memql#3960) -- it used to reach
+> the cloud only by riding inside the sealed genesis envelope, which is
+> what made deleting that envelope a latent repeat of this outage.
 
 **Fail-fast guard.** `Config.Validate()` REFUSES to start a deployment
 that has no `MEMQL_IDENTITY_SIGNING_KEY_B64` unless the operator explicitly
@@ -477,9 +480,8 @@ make identity-signing-key      # head -c 32 /dev/urandom | base64
 ```
 
 Set the result as `MEMQL_IDENTITY_SIGNING_KEY_B64` on every identity replica
--- as a key on the `memql-secrets` Secret every node `envFrom`s, or inside
-the sealed genesis envelope that Secret carries (autoload is set-if-absent,
-so an explicit Secret key wins). **Locally there is nothing to do**:
+-- as a KEY on the `memql-secrets` Secret every node `envFrom`s, and by no
+other route (memql#3960). **Locally there is nothing to do**:
 `scripts/k3d/seed-secrets.sh` (`make secrets`, which `make up` runs)
 generates a seed when the cluster has none and reuses it verbatim on every
 later run.
@@ -686,12 +688,11 @@ the cluster only recovered after a manual reseal + mesh roll. The reset
 is now auth-coherent by construction -- it leans on two facts and you do
 NOT have to do anything by hand afterward:
 
-- **The signing key is NOT in the DB.** `MEMQL_IDENTITY_SIGNING_KEY_B64` rides
-  the sealed genesis envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
-  Secret); the wipe never touches the Secret, so every replica derives
-  the same key + `kid` + JWKS after the reset -- as long as the seed is
-  present. The reset **pre-flights** this BEFORE wiping: it refuses if
-  the Secret carries no genesis envelope / direct seed, or if identity is
+- **The signing key is NOT in the DB.** `MEMQL_IDENTITY_SIGNING_KEY_B64` is a
+  key on the `memql-secrets` Secret; the wipe never touches the Secret, so
+  every replica derives the same key + `kid` + JWKS after the reset -- as
+  long as the seed is present. The reset **pre-flights** this BEFORE
+  wiping: it refuses if the Secret carries no seed, or if identity is
   running in the divergent per-pod ephemeral-key mode
   (`MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true` at `replicas >= 2`). A wipe in
   either state would leave auth unrecoverable, so it is blocked.

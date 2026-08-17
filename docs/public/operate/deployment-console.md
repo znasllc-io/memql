@@ -424,7 +424,7 @@ How a deploy now flows:
 
 1. The deploy pack (`examples/deploypack`) is **always anchored on the
    identity binary** (`app/anchor_deploypack.go`, a bootstrap phase after
-   genesis autoload and before the engine loads its DSL tree), so the
+   env layering and before the engine loads its DSL tree), so the
    `driveDeploymentInProgress` (E2.3) / `recordReconciledState` (E2.4)
    automations are loaded where the Deploy Console writes deployment records.
 2. `Deploy` validates the record's provider and transitions it to
