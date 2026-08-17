@@ -78,7 +78,7 @@ func TestServerEnvNamesAreTheRegisteredOnes(t *testing.T) {
 // here is what makes the alias shim load-bearing rather than decorative: if the
 // prefix ever reverted, this test would pass a value through and fail.
 //
-// component/genesis owns the other half (TestServerServiceLegacyAliasesBridge),
+// component/envregistry owns the other half (TestServerServiceLegacyAliasesBridge),
 // because the bridge is its code and importing it here would be a cycle.
 func TestServerEnvIgnoresPreConventionNames(t *testing.T) {
 	t.Setenv("SERVER_ADDRESS", "0.0.0.0:7777")

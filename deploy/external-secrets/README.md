@@ -24,7 +24,7 @@ assembled it.
 
 | Object | Keys |
 |---|---|
-| `memql-secrets` | `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY`, `MEMQL_GENESIS_B64` (the sealed A2 envelope), `MEMQL_DATABASE_DSN` |
+| `memql-secrets` | `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY`, `MEMQL_DATABASE_DSN` |
 | `memql-secrets-identity` (memql#3960) | `MEMQL_IDENTITY_SIGNING_KEY_B64`, `MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT`, `MEMQL_NODE_BOOTSTRAP_TOKEN`, `MEMORY_NODES_DATABASE_DIRECT_DSN` |
 
 **The split is load-bearing, not tidiness.** ESO fails a whole `ExternalSecret`
@@ -40,17 +40,19 @@ riding inside the sealed envelope, or by an operator hand-adding a key outside
 ESO — which `creationPolicy: Merge` permits and nothing records. Declaring it
 here is what makes deleting the envelope safe.
 
-## The genesis-envelope boundary
+## There is no second delivery path
 
-ESO does **not** change the genesis envelope itself: the A2 envelope is the
-**app-internal** shared-secret bootstrap (`component/secret/`,
-`component/genesis/`), autoloaded at boot. To rotate a shared secret you re-seal
-the envelope and push the new blob to **Key Vault** — ESO then propagates it to
-the cluster Secret on the next refresh, replacing the manual `kubectl patch`
-step.
+ESO owns the `memql-secrets` Secret, and that Secret is **the** way config
+reaches a pod (epic memql#3958). Rotating a key is a Key Vault write; ESO
+reconciles it to the cluster on the next refresh.
 
-> The envelope is being removed entirely (epic memql#3958): once `MEMQL_GENESIS_B64`
-> is gone, config has one delivery path and this section goes with it.
+> There used to be a second path: `MEMQL_GENESIS_B64` carried a sealed A2
+> envelope each pod decrypted in-process at boot under `MEMQL_MASTER_KEY`,
+> applying ~150 vars set-if-absent. It is gone, along with `component/genesis/`,
+> its sealing CLI and its `.znas` format. If a runbook tells you to re-seal an
+> envelope and push the blob to Key Vault, it is describing a mechanism that no
+> longer exists. What the envelope was genuinely load-bearing for -- getting a
+> locked-out owner back in -- is now the recovery key (memql#3964).
 
 ## Files
 

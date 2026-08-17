@@ -165,8 +165,8 @@ ESO syncs from `kv-memql-<env>` into k8s Secrets declaratively. This retires the
 hand-edited / `kubectl patch secret` flow for **cluster-facing** material. The
 **genesis A2 envelope keeps its role** (SUPERSEDED -- epic memql#3958 deleted the envelope; config has one delivery path, the `memql-secrets` Secret) as the app-internal shared-secret bootstrap
 (it is an application concern — NaCl secretbox under `MEMQL_MASTER_KEY`, autoloaded
-at boot); ESO owns the *k8s Secret* that carries `MEMQL_MASTER_KEY`,
-`MEMQL_GENESIS_B64`, and the DSN, so the cluster's secret state becomes
+at boot); ESO owns the *k8s Secret* that carries `MEMQL_MASTER_KEY`
+and the DSN, so the cluster's secret state becomes
 declarative and reconciled instead of hand-applied. (Detailed in Phase 5 #703.)
 
 ### 3.4 Automation auth (resolves #691): **`class="service_account"` JWT**

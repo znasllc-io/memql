@@ -95,9 +95,9 @@ func TestLoadConfig_RealtimeAndOverrides(t *testing.T) {
 	env["MEMQL_AVATAR_VENDOR"] = "none"
 	// Renamed onto the MEMQL_ convention (memql#3834). LoadConfig reads only
 	// the new name; the pre-convention spelling still reaches an operator's
-	// process through genesis.ApplyLegacyEnvAliases, which the voice-agent
+	// process through envregistry.ApplyLegacyEnvAliases, which the voice-agent
 	// subcommand applies via applySubcommandEnv -- so this test asserts the
-	// READER, and component/genesis asserts the bridge.
+	// READER, and component/envregistry asserts the bridge.
 	env["MEMQL_VOICE_AGENT_LOG_LEVEL"] = "debug"
 	cfg, err := LoadConfig(envMap(env))
 	require.NoError(t, err)
