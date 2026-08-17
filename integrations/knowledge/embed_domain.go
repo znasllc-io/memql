@@ -305,15 +305,22 @@ func (i *Integration) loadChunk(ctx context.Context, chunkId string) (*chunkRow,
 //
 // The second half is the interesting one and it was decided rather than
 // defaulted. The subquery returns no document ROWS -- it consumes them -- so
-// leaving it ungated would leak only one bit per chunk (whether a hidden,
-// rejected parent exists). That is the smaller leak, and it is still the wrong
-// rule: it makes "staged" mean "invisible except as an influence", which is a
-// weaker guarantee than the tier states and a harder one to reason about at
-// the next seam. Withholding the rows from BOTH scans keeps one rule -- a
-// staged concept's rows are visible to nobody, including to a suppression --
-// at the cost of returning chunks whose hidden parent had rejected them. Those
-// chunks are themselves gated by the first half whenever documentChunk is
-// staged, and the pair is only ever reachable when exactly one of the two is.
+// leaving it ungated leaks only one bit per chunk, whether a hidden rejected
+// parent exists. That is the smaller leak. It is still the wrong rule, and the
+// reason is sharper than "smaller leak versus larger":
+//
+// The chunks at stake are LIVE ROWS OF A CONCEPT THAT IS NOT STAGED. Leaving
+// the suppression ungated means their absence from the result is caused by a
+// row nobody can observe. A staged row that still suppresses live results is
+// not invisible -- it is UNOBSERVABLE BUT LOAD-BEARING, which is strictly
+// harder to reason about than either "visible" or "absent", and it leaves the
+// author of the next seam with two incompatible readings of what staged means.
+// One rule survives the choice: a staged concept's rows are visible to nobody,
+// including to a suppression.
+//
+// The price is returning chunks whose hidden parent had rejected them. Bounded:
+// those chunks are gated by the first half whenever documentChunk is staged, so
+// the pair is only reachable when exactly one of the two concepts is.
 //
 // Implemented as a `$3::boolean` guard INSIDE the subquery rather than by
 // building two statement strings: the guard makes the scan empty exactly where
