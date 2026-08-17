@@ -660,7 +660,13 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 			return nil, err
 		}
 		result := newExecuteResult(nil)
-		result.setOutput(nodesToMap(filterRowAuthzBuiltinNodes(ctx, nodes)))
+		// Staged-DATA enforcement on the top-level builtin's own output
+		// (memql#3983), stacked on the row-authz gate memql#3982 put here.
+		// This is the seam that covers the 115 constructs memql#3981 measured
+		// as binding NO concept: nothing was injected into this plan because
+		// there was no binding to inject from, so the row gate is the whole of
+		// the enforcement for them.
+		result.setOutput(nodesToMap(e.filterStagedNodes(filterRowAuthzBuiltinNodes(ctx, nodes))))
 		e.emitQueryExecutedEvent(startTime, result, false)
 		return result, nil
 	}

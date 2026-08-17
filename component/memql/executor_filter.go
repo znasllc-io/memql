@@ -455,6 +455,26 @@ func (e *MemQLEngine) latestMatchingNodes(
 			candidate = latestNode
 		}
 
+		// THE SWAP CO-GATE (staged data, memql#3983).
+		//
+		// The line above is the one that makes an SQL-only visibility gate a
+		// lie. loadLatestNodes filters on `id IN (?)` and an optional
+		// `createdAt <= ?` and NOTHING else -- no concept, no filter, no authz
+		// -- so it can hand back a version the scan's WHERE clause would never
+		// have returned, and the assignment above installs it as the result.
+		//
+		// nodeMatchesExpression below re-runs the full expression and would
+		// reject a staged candidate on its own, because the injected conjunct
+		// compares `concept` and that is evaluable in process. This gate does
+		// not rely on that: `expr` only carries the conjunct when something
+		// injected one, and the unbound plans (memql#3981 measured 115 of 619
+		// constructs binding no concept) are exactly the ones where nothing
+		// did. Staging is a pure function of the row's concept, so asking the
+		// row directly is both cheaper and complete.
+		if !e.admitStagedRow(candidate) {
+			continue
+		}
+
 		match, err := nodeMatchesExpression(candidate, expr, payloadCache)
 		if err != nil {
 			return nil, err
@@ -912,6 +932,32 @@ func (e *MemQLEngine) compileConceptComparison(op ComparisonOperator, value any)
 			if _, err := e.concepts.Get(conceptName); err != nil {
 				return compiledExpression{}, fmt.Errorf("concept %q not found in registry", conceptName)
 			}
+		}
+
+		// NULL-safe inequality, matching the payload rule at
+		// compilePayloadComparison (memql#1685): `!=` must MATCH a row whose
+		// value is NULL, because NULL is logically DISTINCT FROM any concrete
+		// value, and plain SQL `<>` yields NULL rather than true -- which
+		// silently DROPS those rows. That is the isNotDeleted bug, and the
+		// staged-data read gate (memql#3983) injects `row.concept!=<staged>`
+		// as an AND-ed conjunct on every read, which is precisely the shape
+		// that turns a dropped row into an emptied installation.
+		//
+		// `concept` is typed Go `string` and tagged `bun:",notnull"`, so no
+		// real row can reach this with a NULL, and the two forms are identical
+		// in practice today. That is what makes the change safe; it is not
+		// what makes it worthwhile. The point is that the gate's safety stops
+		// depending on a schema annotation staying true, and the cost of being
+		// wrong about that annotation is silent data loss.
+		//
+		// No `!= ""` exception here, unlike the payload rule: that exception
+		// exists because an ABSENT string field is logically EQUAL to "", and
+		// a NOT NULL column has no absent case to reconcile.
+		if op == OpNe {
+			return compiledExpression{
+				sql:  "(concept IS DISTINCT FROM ?)",
+				args: []any{conceptName},
+			}, nil
 		}
 
 		baseSql := fmt.Sprintf("(concept %s ?)", sqlOp)
