@@ -118,7 +118,15 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 	// noise of every initial creation; subscribers tracking births still
 	// listen on .created. Both events carry the same payload so callers
 	// can pick whichever signal fits their model.
-	if result != nil && result.Bundle != nil && len(result.Bundle.Nodes) > 0 {
+	//
+	// STAGED DATA (memql#3985): withheld for a staged concept, on the same
+	// argument as the graph.node.created emit in executeWrite, which this build
+	// deliberately mirrors field for field -- so it leaks the same complete row,
+	// and additionally the PRIOR row's status as `oldStatus`. Suppressing only
+	// .created would hide a staged row's birth and then announce every
+	// subsequent write to it in full.
+	if result != nil && result.Bundle != nil && len(result.Bundle.Nodes) > 0 &&
+		!e.withholdGraphWriteEvent(meta.conceptName) {
 		updatedNode := result.Bundle.Nodes[0]
 		// #2441: the retired `partition` dimension no longer rides the event
 		// payload. It was dead data (storage stopped scoping on partition in
@@ -171,6 +179,28 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 // returns its decoded payload. exists is false (with a nil map, nil error)
 // when no row is present -- the create case. Partition is not a filter
 // dimension post-#56 phase 3, so a bare id lookup is correct.
+//
+// THIS READ IS NOT STAGED-FILTERED, AND MUST NEVER BE (memql#3985). It looks
+// exactly like a read the staged-DATA tier should hide, which is why it is
+// called out here rather than left to inference -- a later pass aligning "every
+// read consults conceptDataIsStaged" would find it, gate it, and pass its own
+// tests.
+//
+// What that would cost: a staged prior row returns len(priorNodes)==0 four lines
+// below, so exists comes back false, so executeWrite's read-merge has nothing to
+// merge onto and the UPDATE degrades into a CREATE. Every field the caller did
+// not restate -- which for a partial update is nearly all of them -- is written
+// away. That is SILENT DATA LOSS on a write the user believes is a partial
+// update: no error, no warning, a successful mutation, and a row that has
+// forgotten most of itself. It would land on every concept an author had staged,
+// which is to say on data whose entire purpose is to be sitting there
+// accumulating until training makes it visible.
+//
+// The distinction the tier turns on: staging withholds rows from CALLERS asking
+// what exists. This is the ENGINE asking what it is about to overwrite. Hiding a
+// row from the mechanism that preserves it does not hide the row, it destroys
+// it. TestStagedWrite_PartialUpdatePreservesOmittedFields (staged_write_test.go)
+// fails loudly if this ever grows a gate.
 func (e *MemQLEngine) loadPriorPayload(ctx context.Context, conceptMeta *memorynodes.Concept, id string) (payload map[string]any, exists bool, err error) {
 	store := &bunStore{db: e.database()}
 	priorNodes, err := conceptMeta.Query(ctx, store, memorynodes.QueryParams{
@@ -972,39 +1002,81 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 		e.embedActionIntent(ctx, result.ID, result.Payload)
 	}
 
-	// Emit node created event
-	// Flatten node payload fields into event for easier filter access
-	// This allows filters to use "participantType==\"human\"" instead of "payload.participantType==\"human\""
-	eventPayload := map[string]any{
-		"id":        result.ID,
-		"nodeId":    result.ID, // Alias for backward compatibility
-		"concept":   conceptMeta.Name,
-		"actor":     actor,
-		"nodeType":  result.Type,
-		"createdAt": result.CreatedAt.Format(time.RFC3339),
-	}
-	// Unmarshal and flatten node payload fields for direct filter access
-	var payloadMap map[string]any
-	if len(result.Payload) > 0 {
-		if err := json.Unmarshal(result.Payload, &payloadMap); err == nil {
-			maps.Copy(eventPayload, payloadMap)
+	// STAGED DATA (memql#3985): a write to a STAGED concept publishes NO
+	// graph.node.created event. The row is written, durable and addressable --
+	// this is not the retirement refusal above, it is its opposite -- but the
+	// event that would announce it is withheld until the concept is trained.
+	//
+	// Forced, not chosen, and the build immediately below is the evidence: it
+	// flattens the ENTIRE stored payload into the envelope's top level and then
+	// retains the whole object again under "payload". events.Bus.Publish matches
+	// on topic and fans a clone out to every subscriber -- component/events has
+	// no AccessContext and no authorization hook of any kind -- so emitting this
+	// while the read seam hides the row would publish the complete row to every
+	// in-process subscriber and every automation triggering on the concept, and
+	// call that hidden. See staged_write.go for the full argument, including why
+	// the withheld events are NOT replayed when the concept is later trained.
+	//
+	// Guarded around the BUILD as well as the publish, deliberately: a staged
+	// row's payload should never be assembled into an event envelope at all,
+	// not assembled and then dropped.
+	if !e.withholdGraphWriteEvent(conceptMeta.Name) {
+		// Emit node created event
+		// Flatten node payload fields into event for easier filter access
+		// This allows filters to use "participantType==\"human\"" instead of "payload.participantType==\"human\""
+		eventPayload := map[string]any{
+			"id":        result.ID,
+			"nodeId":    result.ID, // Alias for backward compatibility
+			"concept":   conceptMeta.Name,
+			"actor":     actor,
+			"nodeType":  result.Type,
+			"createdAt": result.CreatedAt.Format(time.RFC3339),
 		}
-	}
-	// Keep full payload for reference (nested access still works)
-	eventPayload["payload"] = payloadMap
+		// Unmarshal and flatten node payload fields for direct filter access
+		var payloadMap map[string]any
+		if len(result.Payload) > 0 {
+			if err := json.Unmarshal(result.Payload, &payloadMap); err == nil {
+				maps.Copy(eventPayload, payloadMap)
+			}
+		}
+		// Keep full payload for reference (nested access still works)
+		eventPayload["payload"] = payloadMap
 
-	e.publishEventWithActor(
-		events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
-		events.KindNodeCreated,
-		eventPayload,
-		actor,
-	)
+		e.publishEventWithActor(
+			events.BuildTopicWithConcept(events.TopicGraphNodeCreated, conceptMeta.Name),
+			events.KindNodeCreated,
+			eventPayload,
+			actor,
+		)
+	}
 	// 5.6 (memql#1970): also emit the dedicated cache-invalidation event
 	// on its own broadcast channel. ONLY the result-cache evictor
 	// subscribes, and a single cache.invalidate.* routing rule forwards
 	// it to every node -- so cross-node eviction needs no per-concept
 	// graph forwarding (which would risk double-firing automations on
 	// sibling replicas). Same commit point as the graph-write publish.
+	//
+	// DELIBERATELY OUTSIDE the staged guard above (memql#3985), and the
+	// asymmetry is the ruling rather than an oversight -- the two emits look
+	// alike and are not:
+	//
+	//   - There is nothing here to leak. The payload is {"concept": <id>} and
+	//     the sole subscriber (result_cache_invalidation.go) does not even read
+	//     it -- it recovers the concept from the TOPIC and evicts. A staged
+	//     concept's NAME is public anyway: it is registered, resolvable and
+	//     listed, which is the entire difference between this tier and the
+	//     memql#3928 construct tier. Only its ROWS are withheld.
+	//   - Suppressing it would cause the failure this tier exists to avoid.
+	//     While a concept is staged its reads answer empty, and empty results
+	//     are cacheable. With no invalidation, the cache still holds "empty" at
+	//     the moment memql#3986 trains the concept -- so rows that just went
+	//     live stay invisible until a TTL lapses or a node restarts. Rows
+	//     intact, addressable, and absent from every read: indistinguishable
+	//     from having lost them, which is the exact direction
+	//     authoring_concept_staged.go's fold refuses to point.
+	//   - The channel is safe BECAUSE it carries no side effects. That property
+	//     is what makes graph.node.created dangerous and this one not; reading
+	//     the two as one rule inverts it.
 	e.publishCacheInvalidate(conceptMeta.Name)
 
 	bundle := &memqlv1.GraphBundle{
@@ -1265,6 +1337,19 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	return result, nil
 }
 
+// checkNodeExists reports whether any version of (concept, id) is stored. Its
+// caller is previewInsert, which derives a CONTENT-ADDRESSED id from the
+// normalized payload and reports back whether that id is already taken.
+//
+// NOT STAGED-FILTERED, AND MUST NEVER BE (memql#3985), for the same reason
+// loadPriorPayload is not. A gate here makes this answer "free" about an id a
+// staged row already occupies; the caller, told the id is unused, inserts -- and
+// the append-only store puts that write on top of the staged row as a new
+// version of it. The row it was told did not exist is the row it silently
+// overwrote.
+//
+// This is the collision probe. A collision probe that cannot see half the rows
+// is not a narrower probe, it is a wrong answer.
 func (e *MemQLEngine) checkNodeExists(ctx context.Context, conceptName, id string) bool {
 	if e.db == nil {
 		return false
