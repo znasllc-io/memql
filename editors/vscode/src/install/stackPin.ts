@@ -98,6 +98,55 @@
 export const DEFAULT_STACK_TAG = "v0.18.0";
 
 /**
+ * The value the version picker carries for "the tip of main" (memql#3901).
+ *
+ * A SENTINEL RATHER THAN A TAG-SHAPED STRING, because every consumer has to be
+ * able to tell it apart: `isReleaseTag` must reject it, `imageTagFor` must not
+ * be handed it, and `installPlan` has to send `--branch` instead of `--tag`. A
+ * value that looked like a tag would be silently accepted by all three and fail
+ * at the far end as an ImagePullBackOff.
+ */
+export const MAIN_BRANCH_CHOICE = "main";
+
+/**
+ * Whether a chosen version means "the tip of main" rather than a release.
+ *
+ * Exported so the branch/tag decision is made in ONE place. `installPlan`, the
+ * image-tag derivation and the picker all ask this rather than each comparing
+ * against a literal.
+ */
+export function isMainBranchChoice(version: string): boolean {
+  return version.trim() === MAIN_BRANCH_CHOICE;
+}
+
+/**
+ * The node images a `main` install runs, and WHY THEY ARE NOT main's.
+ *
+ * `build-engine-images.yml` publishes `memql-<node>:<version>` only on an
+ * explicit release dispatch. There is no `main` tag and no nightly in GHCR, so
+ * `imageTagFor("main")` would ask for `memql-bff:main` and put every pod into
+ * ImagePullBackOff. A `main` install therefore runs the newest images that
+ * exist, which is the newest published release.
+ *
+ * SO A `main` INSTALL IS A SKEW, DELIBERATELY, AND THE PICKER SAYS SO. What it
+ * gets from main is the CHECKOUT -- the deploy manifests ArgoCD reconciles and
+ * the install scripts the run itself executes. What it does not get is a newer
+ * engine BINARY. Measured against the three fixes that motivated memql#3882:
+ * the missing `api-front-door.yaml` (a manifest) and the seedBootstrap roll
+ * budget (a script) both arrive; the migration-retry fix (engine code) does not.
+ * Two out of three, which is the honest description and the one the label uses.
+ *
+ * The alternative -- teaching CI to publish a moving `main` image tag -- is a
+ * bigger change than this issue, and a mutable image tag is its own decision.
+ */
+export function imageTagForVersion(version: string, latestRelease: string): string {
+  if (isMainBranchChoice(version)) {
+    return imageTagFor(latestRelease.trim() || DEFAULT_STACK_TAG);
+  }
+  return imageTagFor(version.trim() || DEFAULT_STACK_TAG);
+}
+
+/**
  * The repository an install clones, and the one the version list is read from.
  *
  * It lives here rather than in the panel for the reason every other default in

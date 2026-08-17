@@ -44,6 +44,7 @@ import type {
   Inputs,
   StepProgress,
 } from "../state/addCluster.js";
+import { MAIN_BRANCH_CHOICE } from "../install/stackPin.js";
 import { SUPPORTED_PROVIDERS, requiredFields } from "../state/addCluster.js";
 import { failureGuidance, runIsSettled, toStepViews } from "../state/installProgress.js";
 
@@ -123,6 +124,12 @@ export interface CollectScreenInput {
    * `install/tags.ts` documents for the deployment picker, for the same reason.
    */
   versionChoices?: readonly string[];
+  /**
+   * The newest published release, named in the `main` choice's label so an
+   * operator can see WHICH engine images a development install would run
+   * (memql#3901). Empty renders as "the newest release".
+   */
+  latestRelease?: string;
 }
 
 export function renderCollectScreen(input: CollectScreenInput): string {
@@ -156,12 +163,21 @@ export function renderCollectScreen(input: CollectScreenInput): string {
       // off the remote at page-open time. Falls through to the text box when
       // the listing is empty, which is what makes a no-network install still
       // able to name a version.
-      const fieldChoices =
+      //
+      // `main` is appended to that listing as a labelled choice rather than a
+      // tag (memql#3901). It is NOT offered when the listing is empty: with no
+      // network the field is a free-text box, and a text box that accepts "main"
+      // would be an unlabelled branch, which clone-stack.sh refuses on purpose.
+      const fieldChoices: readonly VersionChoice[] | undefined =
         field === "version"
           ? (input.versionChoices ?? []).length === 0
             ? undefined
-            : dedupeKeepingDefault(input.versionChoices ?? [], values.version)
-          : choices;
+            : versionChoiceList(
+                input.versionChoices ?? [],
+                values.version,
+                input.latestRelease ?? "",
+              )
+          : choices?.map((choice) => ({ value: choice, label: choice }));
       const control =
         fieldChoices === undefined
           ? `<div class="control-row"><input id="f-${field}" data-field="${field}" value="${escapeHtml(
@@ -170,9 +186,9 @@ export function renderCollectScreen(input: CollectScreenInput): string {
           : `<select id="f-${field}" data-field="${field}">${fieldChoices
               .map(
                 (choice) =>
-                  `<option value="${escapeHtml(choice)}"${
-                    choice === values[field] ? " selected" : ""
-                  }>${escapeHtml(choice)}</option>`,
+                  `<option value="${escapeHtml(choice.value)}"${
+                    choice.value === values[field] ? " selected" : ""
+                  }>${escapeHtml(choice.label)}</option>`,
               )
               .join("")}</select>`;
       return `<div class="field" data-invalid="${error !== undefined}">
@@ -392,4 +408,46 @@ export function dedupeKeepingDefault(
 ): readonly string[] {
   const rest = choices.filter((c) => c !== current);
   return current === "" ? rest : [current, ...rest];
+}
+
+/** One entry in the version picker: what gets submitted, and what is read. */
+export interface VersionChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * The version picker's entries (memql#3901).
+ *
+ * `main` IS OFFERED, AND IT IS NOT MIXED IN WITH THE RELEASE TAGS. It goes last,
+ * after a separator, and its label says what it is -- because it is a different
+ * KIND of answer, and an operator scanning a list of `v0.18.0`-shaped strings
+ * would reasonably read a bare "main" as just another one.
+ *
+ * The label states the skew rather than hiding it. A `main` install gets main's
+ * CHECKOUT -- the deploy manifests ArgoCD reconciles and the install scripts the
+ * run executes -- and the newest RELEASE's node images, because
+ * build-engine-images.yml publishes on a release dispatch only and there is no
+ * `main` image in GHCR. So an unreleased manifest or script fix arrives and an
+ * unreleased engine fix does not. Saying so here is the difference between an
+ * operator who knows why their engine bug is still present and one who files
+ * an issue about it (see imageTagForVersion).
+ */
+export function versionChoiceList(
+  choices: readonly string[],
+  current: string,
+  latestRelease: string,
+): readonly VersionChoice[] {
+  const releases = dedupeKeepingDefault(
+    choices.filter((c) => c !== MAIN_BRANCH_CHOICE),
+    current === MAIN_BRANCH_CHOICE ? "" : current,
+  );
+  const images = latestRelease.trim() === "" ? "the newest release" : latestRelease.trim();
+  return [
+    ...releases.map((value) => ({ value, label: value })),
+    {
+      value: MAIN_BRANCH_CHOICE,
+      label: `main -- development (manifests and scripts from main, node images from ${images})`,
+    },
+  ];
 }

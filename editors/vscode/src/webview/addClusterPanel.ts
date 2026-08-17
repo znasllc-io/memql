@@ -57,6 +57,7 @@ import {
   recordedOwner,
   recordedProvider,
   recordedProviderKeyFile,
+  recordedCheckout,
   recordedStackTag,
 } from "../install/receipt.js";
 import { REDACTED, looksLikeProviderKey } from "../install/secrets.js";
@@ -105,7 +106,7 @@ import {
 } from "./installScreens.js";
 import type { ExecutionReport } from "../install/executor.js";
 import { listReleaseTags } from "../install/tags.js";
-import { DEFAULT_STACK_REPO } from "../install/stackPin.js";
+import { DEFAULT_STACK_REPO, DEFAULT_STACK_TAG } from "../install/stackPin.js";
 import { UninstallRunState } from "../state/uninstallRun.js";
 
 /** The ids the webview may send. A real guard, not a cast. */
@@ -835,11 +836,18 @@ export class AddClusterPanel {
       dir: this.deps.runsDir ?? defaultRunsDir(),
       instance: LOCAL_INSTANCE_NAME,
       kind: action === "repair" ? "repair" : "install",
-      // A repair returns the cluster to the tag its receipt names, so that tag
+      // A repair returns the cluster to the checkout its receipt names, so that
       // is both where it came from and where it is going. An install has
       // neither: nothing was here.
-      ...(action === "repair" && recordedStackTag(priorReceipt) !== ""
-        ? { fromVersion: recordedStackTag(priorReceipt), toVersion: recordedStackTag(priorReceipt) }
+      //
+      // The LABEL rather than the tag (memql#3901): a branch install records no
+      // tag, and reading one would leave the run record blank for exactly the
+      // installs whose version is hardest to know by other means.
+      ...(action === "repair" && recordedCheckout(priorReceipt).label !== ""
+        ? {
+            fromVersion: recordedCheckout(priorReceipt).label,
+            toVersion: recordedCheckout(priorReceipt).label,
+          }
         : {}),
     });
     this.deps.refreshTree();
@@ -871,16 +879,26 @@ export class AddClusterPanel {
           // A PATH, never the key. argv is world-readable in `ps`. On a
           // repair this is the path the receipt recorded (memql#3512).
           providerKeyFile,
-          // On a REPAIR, the tag the receipt recorded (memql#3605). Without it
-          // the run fell through to DEFAULT_STACK_TAG and a repair from a newer
-          // extension silently upgraded the cluster.
+          // On a REPAIR, the checkout the receipt recorded (memql#3605). Without
+          // it the run fell through to DEFAULT_STACK_TAG and a repair from a
+          // newer extension silently upgraded the cluster.
           //
           // On a FRESH INSTALL the receipt records no checkout, so the answer is
           // whatever the version field says -- which starts on DEFAULT_STACK_TAG
           // and is an OVERRIDE, not a replacement (memql#3882). The receipt is
           // checked first so a repair can never be steered by a field it does
           // not collect.
-          tag: recordedStackTag(priorReceipt) || inputs.version,
+          //
+          // TWO FIELDS NOW (memql#3901), and `recordedCheckout` decides which
+          // one carries the answer. A repair of a BRANCH install must replay the
+          // resolved COMMIT: replaying `--branch=main` would check out wherever
+          // main is today, which is memql#3605's failure by the one route that
+          // reopens it.
+          tag: recordedCheckout(priorReceipt).tag || inputs.version,
+          commit: recordedCheckout(priorReceipt).commit,
+          // Only ever consulted for a `main` install, to pick node images that
+          // exist. See imageTagForVersion.
+          latestRelease: this.latestRelease(),
           timeoutMs: STEP_TIMEOUT_MS,
           env: this.sudoEnv(),
         }),
@@ -1607,7 +1625,27 @@ ${cards}`;
       values: this.state.inputs,
       errors: this.state.errors,
       versionChoices: this.versionChoices,
+      latestRelease: this.latestRelease(),
     });
+  }
+
+  /**
+   * The newest published release, or the compiled-in pin when nothing was
+   * listed (memql#3901).
+   *
+   * `listReleaseTags` already returns newest-first and drops anything that is
+   * not a `vX.Y.Z` release, so the head of the list IS the newest release.
+   * Falling back to the pin rather than to "" matters: the pin is a real
+   * published release, so a `main` install with no network still asks for node
+   * images that exist instead of for none.
+   *
+   * NOTE THIS IS NOT "auto-select the newest", which stackPin.ts argues against
+   * at length and which still holds -- nothing here changes what the version
+   * field is SET to. It answers a different question: given that the operator
+   * chose `main`, which images should it run.
+   */
+  private latestRelease(): string {
+    return this.versionChoices[0] ?? DEFAULT_STACK_TAG;
   }
 
   /**

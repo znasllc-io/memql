@@ -49,7 +49,9 @@ import {
   DEFAULT_IMAGE_REGISTRY,
   DEFAULT_REGISTRATION_MODE,
   DEFAULT_STACK_TAG,
-  imageTagFor,
+  MAIN_BRANCH_CHOICE,
+  imageTagForVersion,
+  isMainBranchChoice,
 } from "./stackPin.js";
 
 /**
@@ -67,8 +69,35 @@ export interface SessionOptions {
   skip: Set<string>;
   /** Directory the pinned tools go into; prepended to the child PATH. */
   toolDir?: string;
+  /**
+   * Which code to check out. A release tag, or the `main` sentinel.
+   *
+   * ONE FIELD FOR BOTH (memql#3901), rather than a second `branch?: string`
+   * beside it. Both front ends already thread `tag` end to end, and what the
+   * operator is choosing is one thing -- "which version" -- with two kinds of
+   * answer. A second field would make "neither set" and "both set" reachable
+   * states that every caller would have to reason about, for no gain: the
+   * translation to `--tag` versus `--branch` happens once, in `installPlan`.
+   */
   tag?: string;
+  /**
+   * An exact commit, which OUTRANKS `tag` when set.
+   *
+   * The repair path, and only the repair path (memql#3901). A repair of a
+   * branch install cannot replay `--branch=main` -- main has moved, so "repair"
+   * would mean "upgrade", which is exactly the failure memql#3605 fixed for
+   * tags. `repairSessionOptions` reads the resolved commit off the receipt and
+   * puts it here.
+   */
+  commit?: string;
   repo?: string;
+  /**
+   * The newest published release, used ONLY to pick node images for a `main`
+   * install. See imageTagForVersion: there is no `main` image in GHCR, so a
+   * branch install runs the newest images that exist. Empty falls back to
+   * DEFAULT_STACK_TAG.
+   */
+  latestRelease?: string;
   /** Registry the node images come from; see DEFAULT_IMAGE_REGISTRY. */
   imageRegistry?: string;
   /**
@@ -137,6 +166,10 @@ export interface WizardAnswers {
    * restore.
    */
   tag?: string;
+  /** See SessionOptions.commit -- set only by a repair replaying a branch install. */
+  commit?: string;
+  /** See SessionOptions.latestRelease -- images for a `main` install. */
+  latestRelease?: string;
   timeoutMs?: number;
   /** See SessionOptions.env -- in practice, the sudo agent's SUDO_ASKPASS. */
   env?: Record<string, string>;
@@ -169,6 +202,8 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     ownerFirstName: answers.ownerFirstName,
     ownerLastName: answers.ownerLastName,
     tag: answers.tag,
+    commit: answers.commit,
+    latestRelease: answers.latestRelease,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
     env: answers.env,
@@ -298,7 +333,23 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // refuses (exit 2). Defaulting at the one place both front ends go
         // through is what makes "the wizard forgot an input the CLI collects"
         // unable to happen again (memql#3560).
-        params = present({ tag: opts.tag || DEFAULT_STACK_TAG, repo: opts.repo, dest: stackDir });
+        //
+        // AND THE ONE PLACE THE THREE REF KINDS ARE TOLD APART (memql#3901).
+        // clone-stack.sh takes exactly one of --tag / --branch / --commit, so
+        // the translation belongs here for the same reason the default does:
+        // both front ends pass the operator's single "which version" answer and
+        // neither needs to know how the script spells it.
+        //
+        // Precedence is commit > main > tag, and it is not arbitrary. A commit
+        // is only ever set by a repair replaying what the receipt recorded, and
+        // that has to win over any version the surrounding session carries --
+        // otherwise a repair of a branch install becomes an upgrade, which is
+        // memql#3605's failure by a new route.
+        params = opts.commit
+          ? present({ commit: opts.commit, repo: opts.repo, dest: stackDir })
+          : isMainBranchChoice(opts.tag ?? "")
+            ? present({ branch: MAIN_BRANCH_CHOICE, repo: opts.repo, dest: stackDir })
+            : present({ tag: opts.tag || DEFAULT_STACK_TAG, repo: opts.repo, dest: stackDir });
         break;
       case "clusterUp":
         // The checkout stackCheckout just created. Without it k3d.up derives a
@@ -316,7 +367,14 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
           // CONVERTED, not passed through: git tags carry the `v` and image
           // tags do not. See imageTagFor.
-          "image-tag": imageTagFor(opts.tag || DEFAULT_STACK_TAG),
+          //
+          // AND NEVER "main" (memql#3901). build-engine-images.yml publishes
+          // memql-<node>:<version> on a release dispatch only -- there is no
+          // main tag and no nightly in GHCR -- so a `main` install runs the
+          // newest images that exist, which is the newest published release.
+          // The version picker states that skew rather than hiding it. See
+          // imageTagForVersion.
+          "image-tag": imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
           // The FOURTH consumer of the typed domain (memql#3593). The other
           // three place it on the MACHINE -- the hosts block, the certificate,
           // the front-door probe. This one places it in the CLUSTER: k3d.up

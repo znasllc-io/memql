@@ -6,20 +6,40 @@
 # Capability: install.cloneStack -- fetch the memQL stack at a release tag into
 # ~/.memql/src, the checkout the rest of the install substrate then runs.
 #
-# WHY A TAG, AND ONLY A TAG
+# WHY --tag REFUSES A BRANCH, AND WHY --branch EXISTS ANYWAY
 #
 # scripts/k3d/up.sh defaults its ArgoCD targetRevision to whatever branch the
 # operator happens to be sitting on. That is right for repo development and
 # wrong for an install. A branch MOVES: two installs of "the same version" a
 # week apart are not the same install, and afterwards nobody can say what a
-# given machine is actually running. A tag is the only ref that makes "what is
-# installed here" a durable answer, so a branch ref is rejected outright
-# (exit 2) rather than quietly accepted -- an installer that silently pins to a
-# moving target is worse than one that refuses.
+# given machine is actually running. So `--tag` rejects a branch outright
+# (exit 2) -- an installer that SILENTLY pins to a moving target is worse than
+# one that refuses, and that refusal is unchanged.
 #
-# The check is against the REMOTE: the ref must resolve under refs/tags/. A
-# name that is a branch gets an error saying so; a name that is neither is
-# rejected as unknown.
+# The property being protected is not "never check out a branch". It is "what
+# is installed on this machine must still be answerable a week later"
+# (memql#3901). A branch checkout only makes that unanswerable when the ref is
+# what gets recorded. Resolve the branch to a COMMIT, record the commit, and
+# the property holds -- the cluster reports a specific SHA exactly as a tag
+# install reports a specific tag.
+#
+# Hence three ways to say which code to check out, and exactly one may be given:
+#
+#   --tag=vX.Y.Z     a release tag. The ordinary install. A branch name here is
+#                    still refused, with the message it always gave.
+#   --branch=main    an EXPLICITLY LABELLED branch. Passing it here is the
+#                    operator saying "I know this moves" -- which is the whole
+#                    difference between this and the refusal above. Resolved to
+#                    a commit before anything is written.
+#   --commit=<sha>   a specific commit. This is what a REPAIR replays: replaying
+#                    `--branch=main` would silently upgrade the cluster to
+#                    wherever main is today, which is precisely the failure
+#                    memql#3605 fixed for tags ("a repair returns a cluster to
+#                    the state its receipt describes; it is not an upgrade").
+#
+# `result.commit` is set on every path and is the durable answer. `result.ref`
+# and `result.refKind` say what was ASKED for, which is a different question and
+# worth keeping separately.
 #
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
@@ -28,19 +48,21 @@
 # Usage:
 #   scripts/install/clone-stack.sh --tag=v1.4.0
 #   scripts/install/clone-stack.sh --tag=v1.4.0 --dest=/opt/memql/src
+#   scripts/install/clone-stack.sh --branch=main
+#   scripts/install/clone-stack.sh --commit=8f2c1ab...
 #   scripts/install/clone-stack.sh --repo=https://github.com/acme/fork.git --tag=v2.0.0
 #   scripts/install/clone-stack.sh --print-spec
 #
-# Idempotent: re-running at the tag already checked out is changed=false;
-# naming a different tag fetches and checks it out in place.
+# Idempotent: re-running at the commit already checked out is changed=false;
+# naming a different one fetches and checks it out in place.
 #
 # Exit codes:
-#   0 ok | 2 bad param (missing tag, a branch, an unknown ref)
+#   0 ok | 2 bad param (no ref, more than one, a bare branch, an unknown ref)
 #   3 refused (the destination holds something that is not our checkout)
 #   4 prerequisite missing (git not installed)
 #   5 operation failed (remote unreachable, clone/fetch/checkout failed)
 #
-# Refs: #3363 #3357 #2221
+# Refs: #3901 #3882 #3605 #3363 #3357 #2221
 
 set -euo pipefail
 
@@ -48,9 +70,17 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "install.cloneStack" "Fetch the memQL stack at a release tag into a pinned local checkout."
+cap_init "install.cloneStack" "Fetch the memQL stack at a tag, a labelled branch, or an exact commit into a pinned local checkout."
 cap_spec_param "repo"  "git repository URL (default: the memQL engine)"
-cap_spec_param_required "tag"   "release TAG to check out (required; a branch is rejected)"
+# DECLARED REQUIRED, and it stays that way even though --branch and --commit can
+# stand in for it (memql#3568's property, memql#3901): the spec's contract is
+# that a caller supplying everything marked required always succeeds, and for
+# the ordinary install --tag IS the one. The two alternatives are optional
+# because choosing one is a deliberate act, not something a caller discovers by
+# reading the spec and finding a gap.
+cap_spec_param_required "tag"   "release TAG to check out (a branch name here is rejected -- use --branch); replaced by --branch or --commit"
+cap_spec_param "branch" "BRANCH to check out, explicitly labelled as one; resolved to a commit before anything is written. Mutually exclusive with --tag and --commit"
+cap_spec_param "commit" "exact COMMIT sha to check out; what a repair replays so it cannot become an upgrade. Mutually exclusive with --tag and --branch"
 cap_spec_param "dest"  "checkout directory (default: ~/.memql/src)"
 cap_spec_param "depth" "clone/fetch depth, 0 for a full history (default: 1)"
 cap_spec_param "git"   "path to the git binary (default: resolved from PATH)"
@@ -74,6 +104,8 @@ export GIT_TERMINAL_PROMPT=0
 # a useless message. Anything that can fail runs in the parent shell.
 GIT_BIN=""
 WANT_COMMIT=""
+REF_KIND=""
+REF_NAME=""
 
 function resolve_git() {
     local candidate="$1"
@@ -128,9 +160,100 @@ function resolve_tag_commit() {
     local heads
     heads="$("$git_bin" ls-remote --heads "$repo" "refs/heads/${tag}" 2>/dev/null || true)"
     if [[ -n "$heads" ]]; then
-        cap_fail 2 "'${tag}' is a branch, not a tag; an install must pin to a tag (a branch moves, so two installs of the same 'version' would differ). Pass a release tag, e.g. --tag=v1.4.0"
+        # The refusal stands; the guidance now names the deliberate way through
+        # it (memql#3901). Telling an operator only "pass a release tag" was
+        # complete when a branch install was impossible and is misleading now
+        # that it is merely something they have to ask for by name.
+        cap_fail 2 "'${tag}' is a branch, not a tag; an install must pin to a tag (a branch moves, so two installs of the same 'version' would differ). Pass a release tag, e.g. --tag=v1.4.0 -- or, if you mean it, --branch=${tag}, which resolves to a commit and records that instead of the ref"
     fi
     cap_fail 2 "'${tag}' is not a tag in ${repo}"
+}
+
+# resolve_branch_commit <git> <repo> <branch> -- sets WANT_COMMIT to the commit
+# the branch head points at RIGHT NOW.
+#
+# The resolution is the entire point of allowing this at all. From here on the
+# run behaves exactly like a commit install: the SHA is what is checked out,
+# what is verified, and what lands on the result envelope for the receipt to
+# record. Nothing downstream ever sees a moving ref.
+function resolve_branch_commit() {
+    local git_bin="$1" repo="$2" branch="$3" heads
+    WANT_COMMIT=""
+
+    if ! heads="$("$git_bin" ls-remote --heads "$repo" "refs/heads/${branch}" 2>/dev/null)"; then
+        cap_fail 5 "cannot reach the repository '${repo}'"
+    fi
+    if [[ -z "$heads" ]]; then
+        # Say which mistake it is. A tag passed to --branch is a swapped flag,
+        # not a typo, and telling them to check the spelling sends them hunting
+        # for something that is not wrong.
+        local tags
+        tags="$("$git_bin" ls-remote --tags "$repo" "refs/tags/${branch}" 2>/dev/null || true)"
+        if [[ -n "$tags" ]]; then
+            cap_fail 2 "'${branch}' is a tag, not a branch; pass it as --tag=${branch}"
+        fi
+        cap_fail 2 "'${branch}' is not a branch in ${repo}"
+    fi
+
+    WANT_COMMIT="$(printf '%s\n' "$heads" | head -n 1 | cut -f1)"
+    if [[ -z "$WANT_COMMIT" ]]; then
+        cap_fail 5 "could not resolve refs/heads/${branch} in ${repo}"
+    fi
+}
+
+# resolve_commit <git> <repo> <sha> -- validates the sha and sets WANT_COMMIT.
+#
+# NOT verified against the remote first, deliberately. `ls-remote` lists refs,
+# and the commit a repair replays is typically NOT at any ref any more -- that
+# is the whole reason it was recorded as a SHA. The fetch below is the real
+# existence check, and it fails 5 with git's own message, which names the commit.
+function resolve_commit() {
+    local sha="$3"
+    WANT_COMMIT=""
+    if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+        cap_fail 2 "invalid --commit '${sha}': expected a full 40-character lowercase hex sha (an abbreviated one cannot be fetched from a remote)"
+    fi
+    WANT_COMMIT="$sha"
+}
+
+# resolve_requested_ref <git> <repo> <tag> <branch> <commit>
+#
+# Enforces exactly-one-of and dispatches. Sets REF_KIND, REF_NAME and (via the
+# resolvers) WANT_COMMIT. Runs BEFORE the destination is touched, so a rejected
+# ref leaves no checkout behind -- the property the tag path already had.
+function resolve_requested_ref() {
+    local git_bin="$1" repo="$2" tag="$3" branch="$4" commit="$5"
+    local -a given=()
+    [[ -n "$tag"    ]] && given+=("--tag")
+    [[ -n "$branch" ]] && given+=("--branch")
+    [[ -n "$commit" ]] && given+=("--commit")
+
+    if [[ ${#given[@]} -eq 0 ]]; then
+        cap_fail 2 "missing required parameter: one of --tag=<release tag>, --branch=<branch>, or --commit=<sha>"
+    fi
+    if [[ ${#given[@]} -gt 1 ]]; then
+        cap_fail 2 "pass exactly one of --tag / --branch / --commit; got ${given[*]}"
+    fi
+
+    if [[ -n "$tag" ]]; then
+        if [[ ! "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/+-]*$ ]]; then
+            cap_fail 2 "invalid --tag '${tag}'"
+        fi
+        REF_KIND="tag"
+        REF_NAME="$tag"
+        resolve_tag_commit "$git_bin" "$repo" "$tag"
+    elif [[ -n "$branch" ]]; then
+        if [[ ! "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/+-]*$ ]]; then
+            cap_fail 2 "invalid --branch '${branch}'"
+        fi
+        REF_KIND="branch"
+        REF_NAME="$branch"
+        resolve_branch_commit "$git_bin" "$repo" "$branch"
+    else
+        REF_KIND="commit"
+        REF_NAME="$commit"
+        resolve_commit "$git_bin" "$repo" "$commit"
+    fi
 }
 
 #=============================================================================
@@ -204,6 +327,72 @@ function update_to_tag() {
     fi
 }
 
+# init_empty <git> <repo> <dest> -- an empty repository pointed at origin.
+#
+# The --commit path cannot `git clone --branch <sha>`: clone takes a ref name
+# and a sha is not one. Init + fetch-the-sha is the only shape that reaches an
+# arbitrary commit, and it is also the shape that works when that commit is no
+# longer at any ref -- which is the normal case for a repair replaying one.
+function init_empty() {
+    local git_bin="$1" repo="$2" dest="$3"
+    cap_step "initialising ${dest} against ${repo}"
+    mkdir -p "$dest"
+    if ! "$git_bin" -C "$dest" init --quiet >&2; then
+        cap_fail 5 "could not initialise a git repository at ${dest}"
+    fi
+    if ! "$git_bin" -C "$dest" remote add origin "$repo" >&2; then
+        cap_fail 5 "could not point ${dest} at ${repo}"
+    fi
+}
+
+# fetch_and_detach <git> <repo> <dest> <depth> <commit>
+#
+# Lands the checkout on an exact commit, whatever it was before.
+#
+# WHY THIS FETCHES THE SHA RATHER THAN THE REF. For a branch the resolved head
+# can move between the ls-remote above and this fetch, and fetching
+# `refs/heads/main` would then land on a DIFFERENT commit than the one this run
+# resolved, reported and is about to record. Fetching the SHA makes the run
+# atomic with respect to its own resolution: the commit reported on the envelope
+# is the commit on disk, always. GitHub serves an arbitrary reachable sha to a
+# fetch, which is what makes this possible at depth 1.
+function fetch_and_detach() {
+    local git_bin="$1" repo="$2" dest="$3" depth="$4" commit="$5" current_origin
+
+    current_origin="$("$git_bin" -C "$dest" remote get-url origin 2>/dev/null || true)"
+    if [[ "$current_origin" != "$repo" ]]; then
+        cap_info "origin was '${current_origin:-<none>}'; pointing it at ${repo}"
+        if ! "$git_bin" -C "$dest" remote set-url origin "$repo" >&2; then
+            cap_fail 5 "could not point origin at ${repo}"
+        fi
+    fi
+
+    cap_step "fetching ${commit} into ${dest}"
+    local -a args=(-C "$dest" fetch)
+    if [[ "$depth" != "0" ]]; then
+        args+=(--depth "$depth")
+    fi
+    args+=(origin "$commit")
+    if ! "$git_bin" "${args[@]}" >&2; then
+        # FETCHING A BARE SHA IS A SERVER OPTION, not a git guarantee. GitHub
+        # enables it (uploadpack.allowAnySHA1InWant), which is why the default
+        # path works, but --repo accepts a fork and a self-hosted host may not.
+        # Falling back to fetching every ref is slower and always works, because
+        # the commit is reachable from one of them; only a commit that is
+        # reachable from NOTHING fails both, and that one genuinely is gone.
+        cap_info "the remote refused a fetch by sha; retrying with a full fetch"
+        if ! "$git_bin" -C "$dest" fetch --tags origin >&2; then
+            cap_fail 5 "could not fetch from ${repo}"
+        fi
+        if ! "$git_bin" -C "$dest" cat-file -e "${commit}^{commit}" 2>/dev/null; then
+            cap_fail 5 "commit ${commit} is not in ${repo} (it may have been force-pushed away)"
+        fi
+    fi
+    if ! "$git_bin" -C "$dest" checkout --detach "$commit" >&2; then
+        cap_fail 5 "could not check out commit ${commit} in ${dest}"
+    fi
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -212,21 +401,19 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local repo tag dest depth git_candidate
-    repo="$(cap_param repo  "$DEFAULT_REPO")"
-    tag="$(cap_param tag    "")"
-    dest="$(cap_param dest  "$DEFAULT_DEST")"
+    local repo tag branch want_ref dest depth git_candidate
+    repo="$(cap_param repo   "$DEFAULT_REPO")"
+    tag="$(cap_param tag     "")"
+    branch="$(cap_param branch "")"
+    want_ref="$(cap_param commit "")"
+    dest="$(cap_param dest   "$DEFAULT_DEST")"
     depth="$(cap_param depth "$DEFAULT_DEPTH")"
     git_candidate="$(cap_param git "git")"
 
     cap_require repo "$repo"
-    cap_require tag  "$tag"
     cap_require dest "$dest"
     if [[ ! "$depth" =~ ^[0-9]+$ ]]; then
         cap_fail 2 "invalid --depth '${depth}': expected a non-negative integer (0 = full history)"
-    fi
-    if [[ ! "$tag" =~ ^[A-Za-z0-9][A-Za-z0-9._/+-]*$ ]]; then
-        cap_fail 2 "invalid --tag '${tag}'"
     fi
 
     resolve_git "$git_candidate"
@@ -234,9 +421,9 @@ function main() {
 
     # Resolve (and gate) the ref BEFORE touching the destination: a rejected
     # ref must leave no checkout behind.
-    resolve_tag_commit "$git_bin" "$repo" "$tag"
-    local want_commit="$WANT_COMMIT"
-    cap_info "${tag} resolves to ${want_commit}"
+    resolve_requested_ref "$git_bin" "$repo" "$tag" "$branch" "$want_ref"
+    local ref_kind="$REF_KIND" ref_name="$REF_NAME" want_commit="$WANT_COMMIT"
+    cap_info "${ref_kind} ${ref_name} resolves to ${want_commit}"
 
     local state cloned=false updated=false
     state="$(classify_dest "$dest")"
@@ -245,7 +432,22 @@ function main() {
             cap_fail 3 "refusing to overwrite ${dest}: it exists and is not a memQL checkout; move it aside or pass --dest"
             ;;
         absent|empty)
-            clone_at_tag "$git_bin" "$repo" "$tag" "$dest" "$depth"
+            case "$ref_kind" in
+                tag)
+                    clone_at_tag "$git_bin" "$repo" "$ref_name" "$dest" "$depth"
+                    ;;
+                branch)
+                    # Cloned at the branch and then reconciled to the resolved
+                    # sha below, rather than fetched blind: a shallow clone of
+                    # the branch is one round trip and lands on the right commit
+                    # in every case except the narrow race the reconcile covers.
+                    clone_at_tag "$git_bin" "$repo" "$ref_name" "$dest" "$depth"
+                    ;;
+                commit)
+                    init_empty "$git_bin" "$repo" "$dest"
+                    fetch_and_detach "$git_bin" "$repo" "$dest" "$depth" "$want_commit"
+                    ;;
+            esac
             cloned=true
             cap_changed
             ;;
@@ -253,9 +455,13 @@ function main() {
             local head
             head="$("$git_bin" -C "$dest" rev-parse HEAD 2>/dev/null || true)"
             if [[ "$head" == "$want_commit" ]]; then
-                cap_info "${dest} is already at ${tag} (${want_commit}) -- no change."
+                cap_info "${dest} is already at ${ref_name} (${want_commit}) -- no change."
             else
-                update_to_tag "$git_bin" "$repo" "$tag" "$dest" "$depth"
+                if [[ "$ref_kind" == "tag" ]]; then
+                    update_to_tag "$git_bin" "$repo" "$ref_name" "$dest" "$depth"
+                else
+                    fetch_and_detach "$git_bin" "$repo" "$dest" "$depth" "$want_commit"
+                fi
                 updated=true
                 cap_changed
             fi
@@ -264,13 +470,31 @@ function main() {
 
     local commit
     commit="$("$git_bin" -C "$dest" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$commit" != "$want_commit" && "$ref_kind" == "branch" ]]; then
+        # The branch moved between resolution and clone. Reconcile onto the
+        # commit this run resolved rather than accepting the newer one: the
+        # envelope has already committed to a SHA and the receipt is about to
+        # record it, so landing anywhere else would make the record a lie.
+        cap_info "branch ${ref_name} moved during the clone; reconciling onto ${want_commit}"
+        fetch_and_detach "$git_bin" "$repo" "$dest" "$depth" "$want_commit"
+        updated=true
+        cap_changed
+        commit="$("$git_bin" -C "$dest" rev-parse HEAD 2>/dev/null || true)"
+    fi
     if [[ "$commit" != "$want_commit" ]]; then
-        cap_fail 5 "checkout landed on ${commit:-<nothing>}, expected ${tag} (${want_commit})"
+        cap_fail 5 "checkout landed on ${commit:-<nothing>}, expected ${ref_kind} ${ref_name} (${want_commit})"
     fi
 
-    cap_info "Done. ${dest} is pinned at ${tag}."
+    cap_info "Done. ${dest} is pinned at ${commit} (${ref_kind} ${ref_name})."
     cap_result_set     repo    "$repo"
+    # `tag` stays on the envelope and stays EMPTY for a non-tag install rather
+    # than being repurposed to carry a branch name. Readers that mean "which
+    # release is this" must not silently start receiving "main"; `ref` and
+    # `refKind` are where the non-tag answer lives, and `commit` is the durable
+    # one every path sets.
     cap_result_set     tag     "$tag"
+    cap_result_set     ref     "$ref_name"
+    cap_result_set     refKind "$ref_kind"
     cap_result_set     dest    "$dest"
     cap_result_set     commit  "$commit"
     cap_result_set_raw cloned  "$cloned"
