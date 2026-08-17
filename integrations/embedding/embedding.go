@@ -208,13 +208,72 @@ func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]an
 	// Format embedding as pgvector literal: [0.1,0.2,...]
 	vecLiteral := vectorLiteral(vec)
 
+	// LATEST-VERSION COLLAPSE (memql#3984). This query used to join
+	// `"MemoryNodes" n` to `node_vectors nv ON n.id = nv.id` with no collapse
+	// at all -- no DISTINCT ON, no MAX("createdAt"), no correlated subquery --
+	// and the two tables are keyed differently in exactly the way that makes
+	// that fatal. "MemoryNodes" is append-only with PK (id, "createdAt"), so
+	// one logical row is MANY table rows, one per version; node_vectors is
+	// PK (id, vector_field) (migration 20260325000002_vector_tables.up.sql),
+	// so it holds ONE row per id. Two consequences, both real:
+	//
+	//  1. VERSION FAN-OUT. The join matched every version of an id, so a node
+	//     edited 15 times contributed 15 result rows at identical similarity,
+	//     each consuming one slot of LIMIT $4. A caller asking for the top 10
+	//     could receive one document 10 times and nothing else.
+	//  2. ARBITRARY VERSION RETURNED. With nothing ordering on "createdAt",
+	//     the payload served for an id was whichever version the planner
+	//     emitted. A field redacted or corrected in version 12 could be served
+	//     from version 3.
+	//
+	// These rows reach LLM context through the DSL-callable `findSimilar`
+	// tool, so this is a correctness and data-freshness defect, not a
+	// performance nit -- and it has to be fixed BEFORE staged-data adds its
+	// visibility predicate here (memql#3974/#3984), because a predicate
+	// evaluated against an arbitrary version answers about the wrong row.
+	//
+	// WHY A CTE OVER "MemoryNodes" RATHER THAN `DISTINCT ON` OVER THE JOINED
+	// RESULT -- the two are NOT equivalent:
+	//
+	//  1. Postgres requires a `DISTINCT ON (expr)` to match the LEADING
+	//     ORDER BY terms, and picking the latest version needs
+	//     `ORDER BY n.id, n."createdAt" DESC`. So a joined-result DISTINCT ON
+	//     cannot ALSO be ordered by similarity; it needs an enclosing query to
+	//     re-sort, which sorts the whole collapsed set a second time before
+	//     LIMIT can apply. The CTE form leaves the statement exactly ONE
+	//     ordering -- the similarity one -- which is the shape the pgvector
+	//     HNSW index on node_vectors exists to serve.
+	//  2. Joining first fans the join itself out to (versions per id) rows
+	//     that the collapse then discards. Collapsing first makes the join
+	//     1:1: node_vectors' PK (id, vector_field) admits at most one row per
+	//     id once the outer WHERE pins vector_field.
+	//
+	// Either shape must collapse BEFORE the LIMIT, or the limit keeps
+	// budgeting versions instead of distinct ids. The four sibling retrieval
+	// paths -- integrations/similarity/capabilities.go,
+	// integrations/actionsearch/actionsearch.go,
+	// integrations/harnessrecall/recall.go and
+	// integrations/knowledge/embed_domain.go -- all already take this CTE
+	// shape; making the fifth read alike is deliberate.
+	//
+	// The concept predicate lives INSIDE the CTE (it prunes rows before the
+	// DISTINCT ON sort, and an id's concept does not change across versions);
+	// vector_field is a node_vectors column, so it stays in the outer WHERE.
+	// Both original WHERE semantics are preserved, as is the parameter
+	// order/count the call site below passes: $1 query vector, $2 concept,
+	// $3 vector field, $4 limit.
 	query := `
-		SELECT n.id, n.concept, n.payload,
+		WITH latest AS (
+			SELECT DISTINCT ON (id) id, concept, payload
+			FROM "MemoryNodes"
+			WHERE concept = $2
+			ORDER BY id, "createdAt" DESC
+		)
+		SELECT latest.id, latest.concept, latest.payload,
 		       1 - (nv.embedding <=> $1::vector) AS similarity
-		FROM "MemoryNodes" n
-		JOIN node_vectors nv ON n.id = nv.id
-		WHERE n.concept = $2
-		  AND nv.vector_field = $3
+		FROM latest
+		JOIN node_vectors nv ON nv.id = latest.id
+		WHERE nv.vector_field = $3
 		ORDER BY nv.embedding <=> $1::vector
 		LIMIT $4
 	`
