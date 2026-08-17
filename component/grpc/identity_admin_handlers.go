@@ -116,6 +116,11 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 		})
 	case *memqlv1.IdentityAdminMsg_RevokeEnrolmentLink:
 		res = svc.RevokeEnrolmentLink(ctx, req.RevokeEnrolmentLink.GetEnrolmentTokenId())
+	case *memqlv1.IdentityAdminMsg_RotateRecoveryKey:
+		// No SourceIP threaded through: the recovery-key row has no sourceIP
+		// field, and the audit event this writes gets the address from the
+		// stream's own metadata the same way every other admin event does.
+		res = svc.RotateRecoveryKey(ctx, req.RotateRecoveryKey.GetUserId())
 	case *memqlv1.IdentityAdminMsg_SetOauthClientCorsOrigins:
 		p := req.SetOauthClientCorsOrigins
 		// The origin list is passed through verbatim. Validation lives in
@@ -138,6 +143,11 @@ func (s *streamSession) handleIdentityAdmin(envelope *memqlv1.MemqlClientMessage
 	// every refusal. See IdentityAdminResult.enrolment_url in memql.proto for
 	// why one field on this reply is allowed to carry a credential.
 	out.EnrolmentUrl = res.EnrolmentURL
+	// Set by RotateRecoveryKey alone; empty everywhere else. The one place it
+	// rides a NON-ok reply is a rotation that minted and revealed the
+	// replacement but failed to retire a predecessor -- see the field comment
+	// on adminops.Result for why withholding it there would be worse.
+	out.RecoveryKey = res.RecoveryKey
 
 	if s.logger != nil && !res.OK {
 		s.logger.Warn("identity admin (streamed) rejected",

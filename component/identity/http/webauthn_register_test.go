@@ -220,6 +220,13 @@ type passkeyStubEngine struct {
 	// a single row is all a test ever needs to stand in for "the one that
 	// matches".
 	enrolment map[string]any
+	// recovery is the row recoveryKeyByHash returns; nil for none
+	// (memql#3968). Same single-row reasoning as enrolment above.
+	recovery map[string]any
+	// signInRoutes is what signInIdentitiesForUser returns -- the input to the
+	// memql#3967 break-glass gate. Empty means the owner is locked out, which
+	// is the state that ADMITS a redemption.
+	signInRoutes []map[string]any
 
 	queries   []string
 	mutations []string
@@ -257,6 +264,13 @@ func (e *passkeyStubEngine) Execute(_ context.Context, query string) (*memqlengi
 			return e.nodes()
 		}
 		return e.nodes(e.enrolment)
+	case strings.Contains(query, "recoveryKeyByHash"):
+		if e.recovery == nil {
+			return e.nodes()
+		}
+		return e.nodes(e.recovery)
+	case strings.Contains(query, "signInIdentitiesForUser"):
+		return e.nodes(e.signInRoutes...)
 	case strings.Contains(query, "passkeyByCredentialId"):
 		for credId, fields := range e.byCredentialId {
 			if strings.Contains(query, credId) {

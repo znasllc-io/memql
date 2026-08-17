@@ -219,6 +219,7 @@ function PersonDetail({
               onChanged={onChanged}
             />
             <EnrolmentForm person={person} writes={writes} />
+            <RecoveryKeyForm person={person} writes={writes} />
           </div>
         </div>
       </Band>
@@ -497,6 +498,89 @@ function MintedEnrolmentLink({ url, onDismiss }: { url: string; onDismiss: () =>
           onClick={onDismiss}
         >
           I have copied it
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Rotate this owner's recovery key (memql#3970).
+//
+// SHOWN FOR OWNERS ONLY, because a recovery key exists only for an owner: it
+// is the break-glass route into the account that can promote everybody else,
+// and there is nothing for it to recover on a reader's account. Rendering the
+// control on people who cannot have one would invite an operator to click it
+// and get a refusal.
+//
+// WHAT IT IS FOR. The key is minted automatically and its plaintext is never
+// logged, so an operator who lost the value they were shown -- or who never
+// claimed it -- has a live break-glass credential nobody holds. That is not a
+// lockout, but it is a recovery route that will not work when it is reached
+// for. Rotating mints one they can actually store. It is also the response to
+// a suspected leak, which is why it lives here rather than only in a CLI: the
+// person who needs it most urgently is the one who can still sign in.
+function RecoveryKeyForm({ person, writes }: { person: Row; writes: WriteState }): ReactNode {
+  const id = rowId(person);
+  // THE ONE-TIME PLAINTEXT, held in component state and nowhere else -- same
+  // discipline as the enrolment link above, and the value is worth more.
+  const [minted, setMinted] = useState("");
+  const [keyed, setKeyed] = useState(id);
+  if (keyed !== id) {
+    setKeyed(id);
+    setMinted("");
+  }
+  if (field(person, "role") !== "owner") {
+    return null;
+  }
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        setMinted("");
+        writes.run(async (client) => {
+          const result = await client.rotateRecoveryKey(id);
+          setMinted(result.key);
+          return result;
+        });
+      }}
+      className="rounded-lg border border-line bg-surface p-4"
+    >
+      <h3 className="text-xs font-semibold tracking-wide text-muted uppercase">Recovery key</h3>
+      <p className="mt-1 text-xs text-subtle">
+        The break-glass credential for this owner. It sets up a passkey — and
+        only while this account has no working way to sign in, so it is refused
+        on any day it is not needed. Rotating retires the current key and shows
+        you a new one.
+      </p>
+      <div className="mt-3">
+        <SubmitButton busy={writes.busy}>Rotate the key</SubmitButton>
+      </div>
+      {minted === "" ? null : <MintedRecoveryKey value={minted} onDismiss={() => setMinted("")} />}
+    </form>
+  );
+}
+
+// The one-time key. Shown once, held in component state and nowhere else.
+function MintedRecoveryKey({ value, onDismiss }: { value: string; onDismiss: () => void }): ReactNode {
+  return (
+    <div className="mt-3 flex flex-col gap-2 rounded border border-accent bg-accent-subtle p-3">
+      <h4 className="text-sm font-semibold">Copy this key now</h4>
+      <p className="text-xs">
+        You will not see it again. Only its hash was stored, so it cannot be shown a second time —
+        if you lose it, rotate again. Store it somewhere the cluster is NOT: a password manager, a
+        safe. Anyone holding it can take over this account on a day this owner cannot sign in.
+      </p>
+      <code className="block rounded border border-line bg-bg px-2 py-1.5 font-mono text-xs break-all select-all">
+        {value}
+      </code>
+      <div>
+        <button
+          type="button"
+          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
+          onClick={onDismiss}
+        >
+          I have stored it
         </button>
       </div>
     </div>

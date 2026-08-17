@@ -73,12 +73,19 @@ import (
 // transport dependency. component/grpc maps them straight onto
 // IdentityAdminResult.error_code, which is where the numbers are observed.
 const (
-	CodeOK               = 0
-	CodeInvalidArgument  = 3
-	CodeNotFound         = 5
-	CodePermissionDenied = 7
-	CodeInternal         = 13
-	CodeUnauthenticated  = 16
+	CodeOK              = 0
+	CodeInvalidArgument = 3
+	CodeNotFound        = 5
+	// CodeFailedPrecondition is the cluster-state refusal: the request is
+	// well-formed and the caller is entitled, but the cluster is not in a
+	// state where the operation means anything -- rotating a recovery key on a
+	// cluster with no owner (memql#3970). Distinct from InvalidArgument, which
+	// says the CALLER got something wrong, and from NotFound, which says a
+	// named thing is absent.
+	CodeFailedPrecondition = 9
+	CodePermissionDenied   = 7
+	CodeInternal           = 13
+	CodeUnauthenticated    = 16
 )
 
 // Result is the uniform outcome of every operation.
@@ -98,6 +105,20 @@ type Result struct {
 	AuditEventId string
 	// One line describing what changed, for the console's status line.
 	Message string
+
+	// RecoveryKey is the SECOND field on this Result that carries a credential,
+	// set by exactly one operation (RotateRecoveryKey, memql#3970).
+	//
+	// It earns the exception the same way EnrolmentURL does and for the same
+	// reasons: the key IS the product of that call, the plaintext exists
+	// nowhere else (only its SHA-256 hash is persisted), and no later request
+	// can fetch it. Empty on every other operation and on every refusal.
+	//
+	// One case where it is set on a NON-ok Result: the replacement was minted
+	// and shown but retiring a predecessor failed. Reporting the error while
+	// withholding the key would tell the caller nothing happened when
+	// something did, and they would rotate again.
+	RecoveryKey string
 
 	// EnrolmentURL is the ONE field on this Result that carries a credential,
 	// and it is set by exactly one operation (IssueEnrolmentLink, memql#3408).
