@@ -43,7 +43,12 @@ import (
 // TYPE ("v1:cognition:space") does NOT match and is preserved. Anchored
 // so a topic string ("graph.node.created.v1:cognition:utterance") does
 // not match either.
-var wireCanonicalIdPattern = regexp.MustCompile(`^v[0-9]+:[a-z0-9]+:[a-zA-Z0-9_]+:.+`)
+//
+// The namespace segment admits `/` since memql#3898 -- a namespace is a
+// directory PATH, so `v1:agents/tools:widget:abc` is a canonical id and must
+// be bare-ified on egress exactly like any other. Missing it here would leak a
+// canonical id to a client that is contracted to never see one.
+var wireCanonicalIdPattern = regexp.MustCompile(`^v[0-9]+:[a-z0-9/]+:[a-zA-Z0-9_]+:.+`)
 
 // WireCanonicalIdPattern returns the compiled pattern the egress
 // bare-ifier uses to recognise an id-position value. The wire contract

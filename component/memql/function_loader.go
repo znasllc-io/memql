@@ -201,7 +201,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 	// the path that derives row ids. The same-domain scope the last segment
 	// describes is a different question, and this is not it.
 	if resolved, cerr := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		content, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
+		content, NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin)); cerr != nil {
 		return nil, fmt.Errorf("%s: %w", origin, cerr)
 	} else {
 		content = resolved
@@ -256,7 +256,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		// same file can only ever emit `v1:agents:*`.
 		if err := resolver.ResolveFileWithSignatureConceptsInDomain(
 			file, version, signatureConcepts,
-			RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin),
+			NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin),
 		); err != nil {
 			return nil, fmt.Errorf("concept resolution: %w", err)
 		}
@@ -329,7 +329,7 @@ func tryParseNewFunctionSyntax(expectedName, expectedKind, content, origin strin
 		resolver := NewConceptResolver(registry)
 		if id, err := resolver.ResolveSignatureConceptInNamespace(
 			file.Uses, signatureConcepts[0],
-			RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin),
+			NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin),
 		); err == nil {
 			boundConcept = id
 		}

@@ -346,49 +346,87 @@ func TestCanonicalId_InDomainComposesTheRealPin(t *testing.T) {
 	}
 }
 
-// TestCanonicalId_NestedFileUsesItsRootDomainsNamespace covers the layout the
-// first cut of this fix broke (memql#3026 landing review).
+// TestCanonicalId_NestedFileUsesItsOwnNamespace pins the rule memql#3898
+// established, and REPLACES the root-domain rule this test asserted for
+// memql#3026.
 //
-// Boot assembles a concept id from the origin's FIRST path segment
-// (unified_loader.go pass 1: `dir := firstPathSegment(p)`), so
-// beta/sub/concepts.memql declares v1:beta:widget. DomainFromFilePath returns
-// the LAST segment, "sub" -- not a namespace at all. Feeding that to the
-// ambient rule refuses every same-domain reference in a nested file and then
-// demands the same-domain import TestNoSameDomainUse bans: the memql#2976
-// deadlock, one directory deeper. The tree has 23 nested .memql files today, so
-// this is a live layout even though none of them currently writes canonicalId.
-func TestCanonicalId_NestedFileUsesItsRootDomainsNamespace(t *testing.T) {
-	// The pin belongs to the ROOT domain, and a nested file must still find it.
-	if got := declaredNamespaceForOrigin("deployment/anything/mutations.memql"); got != "cluster" {
-		t.Errorf("a nested file under a PINNED domain must declare that domain's namespace. "+
-			"Resolving \"anything\" instead finds no pin and yields a directory name that no "+
-			"concept id can ever carry. got %q, want \"cluster\"", got)
+// # What changed, and why the reversal is not a regression
+//
+// memql#3026 made a nested file resolve against its ROOT domain, because that
+// was the directory boot assembled ids from (`dir := firstPathSegment(p)`).
+// Ambient scope and assembly had to agree, and root-domain assembly was the
+// fixed point, so ambient scope followed it there.
+//
+// memql#3898 moved the OTHER one. A directory is a namespace and a SUBDIRECTORY
+// IS A DIFFERENT NAMESPACE -- `dsl/agents/roles/` is `agents/roles`, not
+// `agents` -- so assembly now uses the whole directory path and ambient scope
+// follows it there instead. The invariant memql#3026 was protecting is intact:
+// exactly one function answers both questions (dslfs.NamespaceFromFilePath),
+// which is why the deadlock it fixed cannot come back.
+//
+// # The model is Go's
+//
+// A directory is a package; a subdirectory is a different, unrelated package
+// with no privileged access to its parent; and a symbol's global identity is
+// the full IMPORT PATH plus the name. So a concept in a subdirectory assembles
+// as `v1:agents/tools:widget` -- the path inside the domain segment, which
+// keeps core/id.ParseNodeId's version:domain:entity arity intact.
+//
+// # The corpus already agreed
+//
+// 17 of the 23 nested files carry `use agents.concepts.{ agentRole }` for a
+// concept in their PARENT directory -- an import the old engine did not require
+// and which would have been redundant under it. Authors had been writing the
+// boundary the engine did not enforce. The other 6 (dsl/agents/tools/*.memql)
+// reference nothing ambient at all; their `@handler(name=...)` targets are
+// string literals, resolved against the function registry rather than the
+// namespace.
+func TestCanonicalId_NestedFileUsesItsOwnNamespace(t *testing.T) {
+	// A subdirectory is its own namespace, and the PARENT'S PIN DOES NOT REACH
+	// IT. Go again: `package cluster` in directory `deployment` does not name
+	// the package in `deployment/anything`, which declares its own. A pin is
+	// per-directory, so a subdirectory that wants one carries its own file.
+	if got := declaredNamespaceForOrigin("deployment/anything/mutations.memql"); got != "deployment/anything" {
+		t.Errorf("a nested file must declare its OWN namespace, not its parent's. "+
+			"got %q, want \"deployment/anything\"", got)
 	}
+	// THE FLAT CASE IS UNCHANGED, pin and all. This is the assertion that keeps
+	// the change scoped: every non-nested file in the tree -- which is every
+	// file that declares a concept -- resolves exactly as it did.
 	if got := declaredNamespaceForOrigin("deployment/mutations.memql"); got != "cluster" {
 		t.Errorf("the flat case must be unchanged. got %q, want \"cluster\"", got)
 	}
-	// An unpinned root domain declares its own directory, nested or not.
-	if got := declaredNamespaceForOrigin("agents/skills/categories.memql"); got != "agents" {
-		t.Errorf("a nested file under an UNPINNED domain declares that domain. got %q, "+
-			"want \"agents\"", got)
+	if got := declaredNamespaceForOrigin("agents/skills/categories.memql"); got != "agents/skills" {
+		t.Errorf("a nested file under an unpinned domain declares its own path. got %q, "+
+			"want \"agents/skills\"", got)
 	}
 	// Loader origin decorations must not leak into the namespace.
 	if got := declaredNamespaceForOrigin("unified:deployment/mutations.memql:createDeployment"); got != "cluster" {
 		t.Errorf("a unified-loader slice origin must strip to the same namespace. got %q, "+
 			"want \"cluster\"", got)
 	}
+}
 
-	// And through the LOADER, not just the helper. Asserting only the helper
-	// would repeat the gap TestCanonicalId_InDomainComposesTheRealPin exists to
-	// close: the rule right, the wiring unpinned. tryParseNewFunctionSyntax is
-	// the seam function_loader.go resolves canonicalId in, and it is handed the
-	// origin, so this fails if that call site ever goes back to deriving the
-	// namespace from DomainFromFilePath's last segment.
+// TestCanonicalId_NestedFileMustImportItsParentsConcept is memql#3898's second
+// acceptance bullet, and the behaviour change an author will actually meet.
+//
+// Under memql#3026 this resolved ambiently and silently. It is now REFUSED,
+// naming the import -- which is the whole point of a namespace boundary: the
+// dependency is declared rather than inferred from adjacency.
+//
+// THE IMPORT IT DEMANDS IS NOT THE ONE memql#2617 BANS, and that is what makes
+// this safe rather than a new deadlock. TestNoSameDomainUse refuses an import
+// whose namespace equals the file's OWN; here the file's namespace is
+// `deployment/anything` and the import names `deployment`, which is a different
+// one. The two rules finally agree about what "same domain" means -- the drift
+// core/dslfs/domain.go's header measured ("boot -> tools, lint -> agents") is
+// what memql#3898 closes.
+func TestCanonicalId_NestedFileMustImportItsParentsConcept(t *testing.T) {
 	registry := &memoryNodes.MemoryRegistry{}
 	registry.ReplaceAll(map[string]*memoryNodes.Concept{
 		"v1:cluster:deployment": {Name: "v1:cluster:deployment"},
 	})
-	const src = `@description("A nested file referencing its own domain's concept.")
+	const src = `@description("A nested file referencing its PARENT domain's concept.")
 mutate deployment nestedAmbientRef {
   args {
     x  string  @required
@@ -397,59 +435,41 @@ mutate deployment nestedAmbientRef {
     id: canonicalId(args.x, deployment)
   }
 }`
-	// Asserted POSITIVELY -- `err == nil`, not "err is not the ambient error".
-	// The conditional form passes vacuously on any unrelated failure, which is
-	// the same "documents but does not pin" defect this round is fixing
-	// elsewhere; the loader returns a nil error and a real function for this
-	// source today, so the strict form costs nothing.
-	fn, err := tryParseNewFunctionSyntax(
-		"nestedAmbientRef", "mutation", src, "deployment/anything/mutations.memql", registry)
-	if err != nil {
-		t.Fatalf("the loader refused a nested file's reference to its OWN domain's concept. If "+
-			"this is the \"neither imported nor a same-domain concept\" error, the import it "+
-			"demands is the one TestNoSameDomainUse bans -- the memql#2976 deadlock reinstated "+
-			"one directory deeper. The loader must derive the ambient namespace from the "+
-			"origin's ROOT domain, the way boot derives the id: %v", err)
-	}
-	if fn == nil {
-		t.Fatal("the loader returned no function for the nested origin")
+	if _, err := tryParseNewFunctionSyntax(
+		"nestedAmbientRef", "mutation", src, "deployment/anything/mutations.memql", registry); err == nil {
+		t.Error("a nested file reached its PARENT directory's concept with no import. A " +
+			"subdirectory is a different namespace (memql#3898), so the dependency must be " +
+			"declared -- otherwise the boundary is documentation the engine does not enforce, " +
+			"which is the state memql#3898 exists to end.")
 	}
 
-	// The same source under the flat origin must behave identically -- if it
-	// does not, the assertion above is passing for some unrelated reason.
+	// The FLAT file in the same domain still resolves ambiently, which is what
+	// makes the assertion above about NESTING rather than about the concept.
 	flatFn, ferr := tryParseNewFunctionSyntax(
 		"nestedAmbientRef", "mutation", src, "deployment/mutations.memql", registry)
 	if ferr != nil || flatFn == nil {
-		t.Fatalf("the FLAT case regressed too, so this test is not measuring what it claims: %v", ferr)
+		t.Fatalf("the FLAT case regressed, so the refusal above is not measuring what it claims: %v", ferr)
 	}
 }
 
-// TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysNamespace is the guard
-// on which directory the ambient rule is handed (memql#3026 landing review,
-// round 3).
+// TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysBareName is the guard on
+// what a nested file must NOT reach.
 //
-// Admitting the directory as well as the pin is only correct when `domain` IS
-// the directory assembly used -- the FIRST path segment. The loader was still
-// passing DomainFromFilePath's LAST segment, so for
-// agents/tools/askSpecialist.memql the rule admitted any id whose namespace is
-// `tools`: a FOREIGN domain's concepts, bound with no import, on the path that
-// derives row ids. That is a widening, not a near miss, and it is the exact
-// bind the gate exists to refuse -- introduced by the fix for the deadlock in
-// the other direction.
+// Under memql#3026's rule the hazard was the LAST segment: a file in
+// agents/tools resolving against a foreign domain literally named `tools`. The
+// namespace is now the full path `agents/tools`, so that collision is gone by
+// construction -- a top-level domain cannot be named `agents/tools`.
 //
-// The tree has 23 nested files under dsl/agents/{roles,skills,tools}; none
-// writes canonicalId today, so this was latent, and a MEMQL_DSL_PATH bundle
-// mounting a domain named `tools`, `roles` or `skills` makes it live.
-func TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysNamespace(t *testing.T) {
+// The guard still matters in the other direction: a nested file must not reach
+// a foreign namespace ambiently, whatever it is called.
+func TestCanonicalId_NestedFileDoesNotBindItsSubdirectorysBareName(t *testing.T) {
 	registry := &memoryNodes.MemoryRegistry{}
 	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		// A foreign domain whose namespace happens to equal the SUBDIRECTORY
-		// of the file doing the referencing.
+		// A foreign domain whose namespace is the file's SUBDIRECTORY name.
 		"v1:tools:widget": {Name: "v1:tools:widget"},
 	})
 	const origin = "agents/tools/askSpecialist.memql"
 
-	// Through the loader, which is where the wrong segment was being passed.
 	src := `@description("A nested file naming a foreign domain's concept.")
 mutate widget nestedForeignRef {
   args {
@@ -461,316 +481,21 @@ mutate widget nestedForeignRef {
 }`
 	if _, err := tryParseNewFunctionSyntax(
 		"nestedForeignRef", "mutation", src, origin, registry); err == nil {
-		t.Error("a nested file bound a FOREIGN domain's concept ambiently, with no import, " +
-			"because the ambient rule was handed the file's SUBDIRECTORY (\"tools\") instead of " +
-			"the directory its own concepts assemble under (\"agents\"). The two arguments must " +
-			"both describe the assembly directory.")
+		t.Error("a nested file bound a FOREIGN domain's concept ambiently, with no import.")
 	}
 
-	// And directly on the correct pairing, so a failure names the rule rather
-	// than the loader. (The mis-pairing is not asserted here: handing the rule
-	// the last segment DOES admit v1:tools:widget, which is precisely why the
-	// loader must not do it -- a test asserting the broken call still breaks
-	// would be pinning the hazard, not the fix.)
-	if got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, widget)`, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin)); err == nil {
-		t.Errorf("the ambient rule admitted a foreign namespace even when handed the assembly "+
-			"directory. `tools` is not a namespace agents/tools/askSpecialist.memql can "+
-			"assemble under.\n  got: %s", got)
-	}
-
-	// The right pairing resolves this file's OWN domain, which is what the
-	// directory arm is for -- so the guard above is not just refusing
-	// everything.
+	// And its OWN namespace resolves, so the guard above is not refusing
+	// everything. `v1:agents/tools:widget` is what a concept declared in this
+	// file's directory assembles as -- the Go-faithful path-in-domain form.
 	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		"v1:agents:widget": {Name: "v1:agents:widget"},
+		"v1:agents/tools:widget": {Name: "v1:agents/tools:widget"},
 	})
 	got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, widget)`, RootDomainFromFilePath(origin), declaredNamespaceForOrigin(origin))
+		`canonicalId(args.x, widget)`, NamespaceFromFilePath(origin), declaredNamespaceForOrigin(origin))
 	if err != nil {
-		t.Fatalf("a nested file must still reach its own root domain's concept: %v", err)
+		t.Fatalf("a nested file must reach a concept declared in its OWN directory: %v", err)
 	}
-	if !strings.Contains(got, `"v1:agents:widget"`) {
+	if !strings.Contains(got, `"v1:agents/tools:widget"`) {
 		t.Errorf("wrong id.\n  got: %s", got)
-	}
-}
-
-// TestCanonicalId_AmbientNamespaceTestIsAnchored guards the substring hazard
-// (memql#3026 landing review).
-//
-// Namespaces are colon-separated and multi-segment ones are live -- dsl/cognition
-// declares @namespace("cognition:client:tool"). The first cut tested
-// strings.Contains(id, ":"+declaredNS+":"), which matches an INTERIOR segment,
-// so a domain named "tool" or "client" bound v1:cognition:client:tool:* with no
-// import. Once uniqueness was deleted this condition became the ONLY thing
-// refusing a foreign concept, so an unanchored match silently reopened the
-// cross-namespace bind that DoD item 2 closes -- reachable from any bundle
-// mounted at MEMQL_DSL_PATH that happens to name a domain "tool".
-func TestCanonicalId_AmbientNamespaceTestIsAnchored(t *testing.T) {
-	registry := &memoryNodes.MemoryRegistry{}
-	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		"v1:cognition:client:tool:gadget": {Name: "v1:cognition:client:tool:gadget"},
-	})
-	r := NewConceptResolver(registry)
-
-	for _, foreign := range []string{"tool", "client"} {
-		if got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-			`canonicalId(args.x, gadget)`, foreign, foreign); err == nil {
-			t.Errorf("declaredNS %q bound a concept in the `cognition:client:tool` namespace "+
-				"ambiently -- %q is an INTERIOR segment of that id, not its namespace. On the "+
-				"path that derives row ids this is the silent cross-namespace bind DoD item 2 "+
-				"exists to refuse.\n  got: %s", foreign, foreign, got)
-		}
-	}
-
-	// The colon EXTENSION is admitted deliberately, and must stay admitted:
-	// AssembleConceptIdFromDeclInDir accepts an @namespace that colon-extends
-	// the directory, so v1:cognition:client:tool:gadget IS a concept of domain
-	// cognition and is in its ambient scope.
-	got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, gadget)`, "cognition", "cognition")
-	if err != nil {
-		t.Fatalf("a colon-extended sub-namespace must stay in its root domain's ambient scope, "+
-			"or the anchor has over-tightened into the mirror of the bug it fixes: %v", err)
-	}
-	if !strings.Contains(got, `"v1:cognition:client:tool:gadget"`) {
-		t.Errorf("wrong id.\n  got: %s", got)
-	}
-
-	// A namespace that merely PREFIXES another segment-wise is not a match:
-	// "cog" must not bind "cognition:...".
-	if got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, gadget)`, "cog", "cog"); err == nil {
-		t.Errorf("declaredNS \"cog\" bound a `cognition:...` concept -- the anchor must be at a "+
-			"segment boundary, not a raw prefix.\n  got: %s", got)
-	}
-}
-
-// TestCanonicalId_PinnedDomainAdmitsItsDirectoryToo is the second-round
-// correction to the ambient rule, and it guards a DEADLOCK rather than a
-// widening (memql#3026 landing review).
-//
-// AssembleConceptIdFromDeclInDir admits three namespaces for a file in a
-// pinned domain -- the directory, a colon-extension of the directory, and the
-// pin (concept_id.go's #2614 rule, `if !hasNamespace { namespace = dir }`
-// first among them). Testing only the PIN refused a concept declared in the
-// file's own domain that simply carries no @namespace, while the same-domain
-// import its error demanded is the one TestNoSameDomainUse bans: no working
-// spelling, which is the memql#2976 deadlock re-entered from the other side,
-// and a regression against main.
-//
-// Aggravated by TestNoRedundantNamespace, which STRIPS a @namespace equal to
-// the directory -- so the tree's own gates push a concept in a pinned domain
-// towards exactly the shape that was refused.
-func TestCanonicalId_PinnedDomainAdmitsItsDirectoryToo(t *testing.T) {
-	// A pinned domain (directory "zdeploy", pin "zcluster") whose concepts are
-	// declared under BOTH namespaces -- annotated and not.
-	registry := &memoryNodes.MemoryRegistry{}
-	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		"v1:zcluster:widget":     {Name: "v1:zcluster:widget"},     // @namespace("zcluster")
-		"v1:zdeploy:gadget":      {Name: "v1:zdeploy:gadget"},      // no @namespace: derives the directory
-		"v1:zdeploy:sub:sprover": {Name: "v1:zdeploy:sub:sprover"}, // @namespace("zdeploy:sub")
-		"v1:elsewhere:foreign":   {Name: "v1:elsewhere:foreign"},   // another namespace entirely
-	})
-	r := NewConceptResolver(registry)
-
-	for name, want := range map[string]string{
-		"widget":  `"v1:zcluster:widget"`,     // via the pin
-		"gadget":  `"v1:zdeploy:gadget"`,      // via the directory
-		"sprover": `"v1:zdeploy:sub:sprover"`, // via a colon-extension of the directory
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-				"canonicalId(args.x, "+name+")", "zdeploy", "zcluster")
-			if err != nil {
-				t.Fatalf("a concept this domain could have DECLARED was refused ambient scope. "+
-					"The ambient test must mirror AssembleConceptIdFromDeclInDir -- directory, "+
-					"colon-extension of the directory, or pin -- or a concept in the file's own "+
-					"domain has no working spelling at all: %v", err)
-			}
-			if !strings.Contains(got, want) {
-				t.Errorf("wrong id.\n  want to contain: %s\n  got: %s", want, got)
-			}
-		})
-	}
-
-	// And the refusal still holds where it must: another namespace entirely is
-	// NOT in scope, however unique its name.
-	if got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, foreign)`, "zdeploy", "zcluster"); err == nil {
-		t.Errorf("admitting the directory must not re-open cross-namespace binding -- "+
-			"v1:elsewhere:foreign is a namespace this domain cannot assemble.\n  got: %s", got)
-	}
-}
-
-// TestIdNamespace_StripsOnlyARealVersionSegment pins the assumption underneath
-// the anchor (memql#3026 landing review).
-//
-// idNamespace drops the leading `v<major>:` so the namespace can be anchored at
-// its own first character. Dropping "everything before the first colon"
-// unconditionally reproduces the exact interior-segment bind the anchor exists
-// to close the moment it meets an id without a version prefix: "client" would
-// match "cognition:client:tool:gadget". Every id AssembleConceptId emits does
-// carry a version, which is the reason to CHECK the assumption rather than to
-// rely on it -- an unchecked one is invisible until something else changes.
-func TestIdNamespace_StripsOnlyARealVersionSegment(t *testing.T) {
-	for _, tc := range []struct{ id, want string }{
-		{"v1:cognition:space", "cognition"},
-		{"v1:cognition:client:tool:request", "cognition:client:tool"},
-		{"v12:cluster:node", "cluster"},
-		// No version segment: nothing is stripped, so the FIRST segment is
-		// part of the namespace and cannot be matched as an interior one.
-		{"cognition:client:tool:gadget", "cognition:client:tool"},
-		{"voice:thing", "voice"}, // "v" followed by a non-digit is not a version
-		{"v1x:thing", "v1x"},
-		// Degenerate: no name segment means it is not a concept id.
-		{"v1:cluster", ""},
-		{"cluster", ""},
-		{"", ""},
-	} {
-		if got := idNamespace(tc.id); got != tc.want {
-			t.Errorf("idNamespace(%q) = %q, want %q", tc.id, got, tc.want)
-		}
-	}
-
-	// The consequence, stated as the assertion that matters: an id with no
-	// version prefix must not be matchable by one of its interior segments.
-	if idIsInDomainAmbientScope("cognition:client:tool:gadget", "client", "client") {
-		t.Error("an id without a version prefix was matched by its INTERIOR segment \"client\" -- " +
-			"the version strip must verify it is stripping a version, or the anchor is not an " +
-			"anchor at all.")
-	}
-}
-
-// TestCanonicalId_EscapedQuoteDoesNotDesyncTheScanner guards the interaction
-// between the string tracker and the comment branches (memql#3026 landing
-// review).
-//
-// The tracker toggles inStr on every `"`. Before the comment branches existed
-// an escaped quote's desync was harmless; afterwards it is not, because the
-// next `/*` is then read as a real block comment, finds no closer, and copies
-// THE REST OF THE FILE through verbatim -- so every genuine canonicalId after
-// it is silently left un-rewritten and the bare name reaches evaluation
-// unresolved. Silent, on the path that derives row ids. Escaped quotes are
-// already in the corpus (dsl/todos/tools.memql, dsl/forge/tools.memql).
-func TestCanonicalId_EscapedQuoteDoesNotDesyncTheScanner(t *testing.T) {
-	for name, src := range map[string]string{
-		"escaped quote then block comment": "@description(\"a \\\"/* b\")\ncanonicalId(args.x, widget)",
-		"escaped quote then line comment":  "@description(\"a \\\" // b\")\ncanonicalId(args.x, widget)",
-		"escaped backslash before quote":   "@description(\"a \\\\\")\ncanonicalId(args.x, widget)",
-		"two escaped quotes":               "@description(\"\\\"x\\\"\")\ncanonicalId(args.x, widget)",
-	} {
-		t.Run(name, func(t *testing.T) {
-			got, err := remappedPackResolver().ResolveCanonicalIdConceptRefsInNamespace(
-				src, "zdeploy", "zcluster")
-			if err != nil {
-				t.Fatalf("resolve failed: %v", err)
-			}
-			if !strings.Contains(got, `"v1:zcluster:widget"`) {
-				t.Errorf("the real canonicalId call after an escaped quote was NOT rewritten -- "+
-					"the string tracker desynced and the scanner swallowed the rest of the file "+
-					"as a comment. This fails silently at load and resolves to nil at "+
-					"evaluation.\n  src: %q\n  got: %q", src, got)
-			}
-		})
-	}
-}
-
-// TestCanonicalId_DisambiguatorIsAnchoredToo is the other half of the
-// anchoring fix (memql#3026 landing review).
-//
-// idIsInDomainAmbientScope was anchored while resolveBareConceptNameWithNamespace's
-// own hint filter still used the `":"+hint+":"` substring. For a hint that is
-// an INTERIOR segment of a live multi-segment namespace -- "tool" against
-// v1:cognition:client:tool:request, the exact bundle scenario this rule is
-// for -- the filter kept BOTH candidates, so resolution failed as "ambiguous"
-// before the anchored gate ever ran. The gate cannot refuse what never reaches
-// it, and the caller was left demanding a same-domain import the gate bans.
-func TestCanonicalId_DisambiguatorIsAnchoredToo(t *testing.T) {
-	registry := &memoryNodes.MemoryRegistry{}
-	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		"v1:tool:request":                  {Name: "v1:tool:request"},                  // a bundle's own
-		"v1:cognition:client:tool:request": {Name: "v1:cognition:client:tool:request"}, // real, dsl/cognition
-	})
-	r := NewConceptResolver(registry)
-
-	got, err := r.ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, request)`, "tool", "tool")
-	if err != nil {
-		t.Fatalf("a bundle domain named \"tool\" could not reference its OWN v1:tool:request. "+
-			"The hint filter must anchor at the namespace: \"tool\" is an interior segment of "+
-			"v1:cognition:client:tool:request, so an unanchored filter keeps both candidates and "+
-			"the name stays ambiguous -- while the import the error asks for is stripped by the "+
-			"same-domain gate: %v", err)
-	}
-	if !strings.Contains(got, `"v1:tool:request"`) {
-		t.Errorf("bound the FOREIGN concept.\n  got: %s", got)
-	}
-
-	// The colon-extended namespace is still reachable from its own root domain.
-	cog, cerr := r.ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, request)`, "cognition", "cognition")
-	if cerr != nil {
-		t.Fatalf("domain cognition must still reach its own colon-extended sub-namespace: %v", cerr)
-	}
-	if !strings.Contains(cog, `"v1:cognition:client:tool:request"`) {
-		t.Errorf("wrong id from domain cognition.\n  got: %s", cog)
-	}
-}
-
-// TestCanonicalId_EmptyDeclaredNamespaceStillResolvesViaTheDirectory covers a
-// caller that knows only the directory -- an unpinned domain, or the plain
-// ResolveCanonicalIdConceptRefsInDomain path.
-//
-// It is named for what it asserts. An earlier version claimed to pin a
-// `declaredNS = domain` FALLBACK, and did not: with the directory now an
-// ambient namespace in its own right, deleting that fallback changed neither
-// behaviour nor any test, so the branch was dead and the test was pinning
-// nothing. The branch is gone; this asserts the behaviour that remains.
-// (Same "passes against the regression" flaw this file calls out twice in
-// other people's tests -- it was in mine too. Landing review, round 3.)
-//
-// The fixture is the AMBIGUOUS one so the hint genuinely has work to do.
-func TestCanonicalId_EmptyDeclaredNamespaceStillResolvesViaTheDirectory(t *testing.T) {
-	got, err := ambiguousRemappedResolver().ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, widget)`, "zcluster", "  ")
-	if err != nil {
-		t.Fatalf("a caller supplying only the directory must still get ambient resolution -- "+
-			"with an ambiguous name the directory hint is the only thing that can "+
-			"disambiguate: %v", err)
-	}
-	if !strings.Contains(got, `"v1:zcluster:widget"`) {
-		t.Errorf("wrong id.\n  got: %s", got)
-	}
-}
-
-// TestCanonicalId_AmbientHintPrefersThePin pins ambientHints' ORDER, which
-// decides which canonical id is emitted and was pinned by nothing (landing
-// review, round 3).
-//
-// A pinned domain assembles under two namespaces, so it can declare the same
-// short name twice -- once annotated (the pin), once not (the directory). Both
-// are legitimately its own and both pass idIsInDomainAmbientScope, so the gate
-// cannot choose between them: precedence alone decides, and it decides a ROW
-// ID. Pin first, because the pin is the deliberate declaration (#2614's escape
-// hatch is written down on purpose) while the directory is the default.
-func TestCanonicalId_AmbientHintPrefersThePin(t *testing.T) {
-	registry := &memoryNodes.MemoryRegistry{}
-	registry.ReplaceAll(map[string]*memoryNodes.Concept{
-		"v1:zcluster:widget": {Name: "v1:zcluster:widget"}, // annotated: the pin
-		"v1:zdeploy:widget":  {Name: "v1:zdeploy:widget"},  // unannotated: the directory
-	})
-
-	got, err := NewConceptResolver(registry).ResolveCanonicalIdConceptRefsInNamespace(
-		`canonicalId(args.x, widget)`, "zdeploy", "zcluster")
-	if err != nil {
-		t.Fatalf("a name declared under BOTH of a pinned domain's namespaces must still "+
-			"resolve -- both are this domain's own: %v", err)
-	}
-	if !strings.Contains(got, `"v1:zcluster:widget"`) {
-		t.Errorf("the PIN must win when a short name is declared under both the pin and the "+
-			"directory. Swapping the hint order silently changes the derived row id, and both "+
-			"ids pass the ambient gate, so nothing else catches it.\n"+
-			"  want to contain: \"v1:zcluster:widget\"\n  got: %s", got)
 	}
 }

@@ -140,7 +140,12 @@ func LoadUnifiedConceptsWithSkips(logger *slog.Logger) (int, []ConceptSkip, erro
 		// to them (#1067). Best-effort: a parse failure just yields no
 		// imports and cross-namespace targets fall through to the warning.
 		uses, _ := parsedUseDeclarations(string(raw))
-		dir := firstPathSegment(p)
+		// The file's NAMESPACE, which since memql#3898 is the whole directory
+		// path rather than its first segment: a subdirectory is a different
+		// namespace, so beta/sub/concepts.memql declares v1:beta/sub:widget.
+		// Ambient resolution reads the same rule from the same function, which
+		// is what keeps assembly and scope from disagreeing.
+		dir := NamespaceFromFilePath(p)
 		files = append(files, conceptFile{path: p, dir: dir, decls: decls, uses: uses})
 
 		for _, decl := range decls {

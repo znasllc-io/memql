@@ -2465,6 +2465,50 @@ is. Name collisions across namespaces are resolved by **aliasing**
 
 That is the model, and until memql#3803 the engine enforced only a third of it.
 
+### The model is Go's, and a namespace is a PATH
+
+Worth stating plainly, because it settles the questions the rest of this section
+answers. In Go a directory is a package; a **subdirectory is a different,
+unrelated package** with no privileged access to its parent; and a symbol's
+global identity is the full **import path** plus the name —
+`example.com/m/agents/tools.Widget`, not `tools.Widget`. The package *name* is
+only a file-local qualifier, which is exactly why two packages may both be named
+`tools` and why collisions inside one file are fixed by aliasing the import.
+
+memQL follows that. A namespace is the whole directory path, so a concept
+declared in `dsl/agents/tools/` assembles as:
+
+```
+v1:agents/tools:widget:a9f3b7c2...
+\_/ \__________/ \____/ \_______/
+ v    namespace   name   shortId
+```
+
+**The path goes inside the domain segment, not as an extra one** (memql#3898).
+`v1:agents:tools:widget` is the same idea and breaks the id contract:
+`core/id.ParseNodeId` defines a concept as the version segment plus *exactly
+two* more, and that arity is unrecoverable from the string — `v1:agents:tools:widget:abc`
+is indistinguishable from concept `v1:agents:tools` with shortId `widget:abc`
+without consulting a registry. Every component splits node ids through that
+function. Keeping the path inside the domain leaves `version:domain:entity`
+intact, so nothing downstream changes.
+
+Three consequences worth knowing:
+
+- **A parent's `namespace.pin` does not reach a subdirectory.** A pin is
+  per-directory, the way `package cluster` in `deployment/` does not name the
+  package in `deployment/sub/`. A subdirectory that wants one carries its own.
+- **A nested file must import its parent's constructs.** This is the change an
+  author meets. It is not the same-namespace import memql#2617 bans — the file's
+  namespace is `agents/roles` and the import names `agents`, which is a different
+  one. The corpus already agreed: 17 of the 23 nested files were writing
+  `use agents.concepts.{ agentRole }` before anything required it.
+- **No existing id moved.** Every file that declares a concept in this tree is
+  flat, and for a flat file the namespace is exactly what the root domain was.
+  That is what made the decision cheap to take when it was taken, and it gets
+  expensive the first time a concept lands in a subdirectory (memql#3898,
+  reconciling memql#3026).
+
 ### Does `use` participate in resolution?
 
 | Construct kind | Registry | Two domains may share a name? | Is `use` required for a cross-namespace reference? |

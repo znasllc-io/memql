@@ -756,3 +756,8 @@ func VersionFromFilePath(path string) string { return dslfs.VersionFromFilePath(
 func DomainFromFilePath(path string) string { return dslfs.DomainFromFilePath(path) }
 
 func RootDomainFromFilePath(path string) string { return dslfs.RootDomainFromFilePath(path) }
+
+// NamespaceFromFilePath is the file's NAMESPACE -- the whole directory path it
+// sits in, which since memql#3898 is both the ambient-resolution scope and the
+// domain a concept's canonical id is assembled under. See core/dslfs.
+func NamespaceFromFilePath(path string) string { return dslfs.NamespaceFromFilePath(path) }
