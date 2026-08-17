@@ -53,9 +53,30 @@ import (
 	memoryNodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
-// stagedBackupDB opens the shared test database. The backup path takes a
-// bun.IDB and does its own SQL, so no engine is needed here.
-func stagedBackupDB(t *testing.T) (*bun.DB, context.Context) {
+// stagedBackupTx opens the shared test database and hands back a REPEATABLE
+// READ transaction to run the whole test inside.
+//
+// A transaction, not the pool, and the isolation level is the point. The
+// db-tests lane runs each package's binary as a PARALLEL PROCESS against one
+// database -- the advisory lock in TestMain serializes migration and then
+// releases, so from that moment component/memql, component/grpc and the
+// integrations suites are all committing rows underneath these tests. Two
+// things here would otherwise be racy against that, and both would present as
+// an unreproducible flake in somebody else's PR:
+//
+//   - a before/after row-count delta, which any concurrent insert breaks;
+//   - Export's OFFSET paging, where a row committed EARLIER in the (createdAt,
+//     id) order between two pages shifts later rows past the offset and skips
+//     one.
+//
+// Under REPEATABLE READ the snapshot is fixed at the transaction's first
+// statement, so neither is reachable: concurrent commits are invisible, while
+// this transaction's own insert is visible to itself. Everything rolls back, so
+// the fixture also leaves nothing behind for the next run to trip over -- which
+// is why there is no cleanup delete anywhere below.
+//
+// bun.Tx satisfies bun.IDB, which is what Export and CountRows already take.
+func stagedBackupTx(t *testing.T) (bun.Tx, context.Context) {
 	t.Helper()
 	dsn := dbtest.DSN()
 	db := bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
@@ -65,7 +86,13 @@ func stagedBackupDB(t *testing.T) (*bun.DB, context.Context) {
 		dbtest.Unreachable(t, "staged-data backup test", dsn, err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return db, ctx
+
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		t.Fatalf("begin repeatable-read tx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	return tx, ctx
 }
 
 // seedStagedConstructRow writes the row that CARRIES the staged flag: a
@@ -73,7 +100,7 @@ func stagedBackupDB(t *testing.T) (*bun.DB, context.Context) {
 // Written straight to the table because what is under test is the EXPORT, and
 // routing through the engine would add a dependency on the promote path without
 // changing a byte of what eachRow reads.
-func seedStagedConstructRow(t *testing.T, ctx context.Context, db *bun.DB) (id string, createdAt time.Time) {
+func seedStagedConstructRow(t *testing.T, ctx context.Context, db bun.IDB) (id string, createdAt time.Time) {
 	t.Helper()
 	id = fmt.Sprintf("v1:authoring:construct:staged-3985-%d", os.Getpid())
 	createdAt = time.Now().UTC().Truncate(time.Microsecond)
@@ -88,18 +115,14 @@ func seedStagedConstructRow(t *testing.T, ctx context.Context, db *bun.DB) (id s
 		Metadata:   json.RawMessage(`{}`),
 		Provenance: json.RawMessage(`{"mutation":"stagedBackupTest"}`),
 	}
-	_, err := db.NewInsert().Model(row).Exec(ctx)
-	if err != nil {
+	// No cleanup delete: the caller's transaction is rolled back.
+	if _, err := db.NewInsert().Model(row).Exec(ctx); err != nil {
 		t.Fatalf("seed construct row: %v", err)
 	}
-	t.Cleanup(func() {
-		_, _ = db.NewDelete().Model((*memoryNodes.MemoryNode)(nil)).
-			Where("id = ?", id).Exec(context.Background())
-	})
 	return id, createdAt
 }
 
-func exportedRows(t *testing.T, ctx context.Context, db *bun.DB) []Row {
+func exportedRows(t *testing.T, ctx context.Context, db bun.IDB) []Row {
 	t.Helper()
 	var buf bytes.Buffer
 	if _, err := Export(ctx, db, &buf, Options{EngineVersion: "0.0.0-test", Domain: "memql.localhost"}); err != nil {
@@ -132,7 +155,7 @@ func exportedRows(t *testing.T, ctx context.Context, db *bun.DB) []Row {
 // operator is least able to notice, because a restore is expected to change
 // everything at once.
 func TestBackupCarriesTheStagedFlagSoARestoreCannotResurrectStagedRowsAsLive(t *testing.T) {
-	db, ctx := stagedBackupDB(t)
+	db, ctx := stagedBackupTx(t)
 	id, _ := seedStagedConstructRow(t, ctx, db)
 
 	var found *Row
@@ -172,7 +195,7 @@ func TestBackupCarriesTheStagedFlagSoARestoreCannotResurrectStagedRowsAsLive(t *
 // staged read gate" and which would additionally destroy every staged data row
 // on the next restore.
 func TestExportIsUnfilteredAcrossConcepts(t *testing.T) {
-	db, ctx := stagedBackupDB(t)
+	db, ctx := stagedBackupTx(t)
 	constructId, _ := seedStagedConstructRow(t, ctx, db)
 
 	concepts := map[string]bool{}
@@ -200,7 +223,7 @@ func TestExportIsUnfilteredAcrossConcepts(t *testing.T) {
 // that loses the data would disable the check that exists to catch it, which is
 // why neither is gated and why both are pinned.
 func TestCountRowsIsUnfiltered(t *testing.T) {
-	db, ctx := stagedBackupDB(t)
+	db, ctx := stagedBackupTx(t)
 	before, err := CountRows(ctx, db)
 	if err != nil {
 		t.Fatalf("CountRows: %v", err)
