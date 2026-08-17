@@ -101,9 +101,75 @@ func DomainFromFilePath(path string) string {
 	return ""
 }
 
+// NamespaceFromFilePath returns the file's NAMESPACE: the whole directory path
+// it sits in, slash-joined -- "agents/tools" for
+// agents/tools/askSpecialist.memql, and "cognition" for cognition/queries.memql.
+//
+// THIS IS THE AMBIENT RULE AND THE ASSEMBLY RULE, and it is one function
+// because they must not disagree (memql#3898). A directory is a namespace and a
+// SUBDIRECTORY IS A DIFFERENT NAMESPACE -- `dsl/agents/roles/` is
+// `agents/roles`, not `agents` -- confirmed as the intended model by the
+// repository owner on 2026-08-15 and written into
+// docs/public/language/authoring-rules.md section 31.
+//
+// The model is Go's. A directory is a package; a subdirectory is a DIFFERENT,
+// unrelated package with no privileged access to its parent; and the global
+// identity of a symbol is the full IMPORT PATH plus the name --
+// `example.com/m/agents/tools.Widget`, not `tools.Widget`. The package NAME is
+// only a file-local qualifier, which is precisely why two packages may both be
+// named `tools`. So a namespace here is a PATH, and a concept declared in one
+// assembles as `v1:agents/tools:widget`: the domain segment carries the path,
+// exactly as a Go import path is one slash-separated string.
+//
+// WHY THE PATH GOES IN THE DOMAIN SEGMENT RATHER THAN ADDING A SEGMENT. The
+// alternative spelling, `v1:agents:tools:widget`, is the same idea and it
+// breaks the id contract: core/id.ParseNodeId defines a concept as the version
+// segment plus EXACTLY TWO more, and that arity is unrecoverable from the
+// string -- `v1:agents:tools:widget:abc` is indistinguishable from concept
+// `v1:agents:tools` with shortId `widget:abc` without consulting a registry.
+// Every component splits node ids through that function. Putting the path in
+// the domain keeps the arity at version:domain:entity, so ParseNodeId,
+// parseConceptId and every LastIndex-based split are untouched.
+//
+// TODAY IT CHANGES NO ID. The three nested directories in this tree
+// (agents/roles, agents/skills, agents/tools) declare no concepts at all, so
+// every canonical id is what it was. That is exactly why memql#3898 says the
+// decision is cheap NOW and expensive the first time a concept lands in one.
+//
+// Loader origin decorations are stripped, and legacy `v<digits>` segments are
+// dropped, matching both functions below.
+//
+// Returns "" when the path carries no directory.
+func NamespaceFromFilePath(path string) string {
+	parts := strings.Split(stripOriginDecoration(path), "/")
+	if len(parts) < 2 {
+		return "" // no directory component: a bare filename has no namespace
+	}
+	segments := make([]string, 0, len(parts)-1)
+	for i := 0; i < len(parts)-1; i++ {
+		part := parts[i]
+		if part == "" || part == "." {
+			continue
+		}
+		if VersionFromFilePath(part) == part {
+			continue // legacy v<digits> layout segment, not a namespace segment
+		}
+		segments = append(segments, part)
+	}
+	return strings.Join(segments, "/")
+}
+
 // RootDomainFromFilePath returns the FIRST directory segment of a mounted
 // .memql file's path -- "agents" for agents/tools/askSpecialist.memql, where
-// DomainFromFilePath returns "tools".
+// DomainFromFilePath returns "tools" and NamespaceFromFilePath returns
+// "agents/tools".
+//
+// SINCE memql#3898 THIS IS NOT THE AMBIENT RULE AND NOT THE ASSEMBLY RULE.
+// Both are NamespaceFromFilePath. What is left for the first segment is the
+// TREE: RegisterTree mounts a top-level domain, and MEMQL_DSL_PATH's
+// product-domain scan works one level down from the root -- so "which mounted
+// domain does this file belong to" is still a first-segment question, and it is
+// the only one.
 //
 // The two exist side by side because the tree answers two different questions
 // with two different segments, and confusing them is a live defect class

@@ -65,7 +65,7 @@ func declaredNamespaceForDomain(domain string) string {
 // Deriving the namespace the way boot derives the id is what keeps the loader
 // and boot agreeing, which is the whole point of this rule.
 func declaredNamespaceForOrigin(origin string) string {
-	return declaredNamespaceForDomain(RootDomainFromFilePath(origin))
+	return declaredNamespaceForDomain(NamespaceFromFilePath(origin))
 }
 
 // idIsInDomainAmbientScope reports whether a canonical concept id is one this
