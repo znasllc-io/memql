@@ -2,6 +2,7 @@ package actionsearch
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -17,7 +18,13 @@ func init() {
 		if pctx.EmbeddingProviderByName == nil {
 			return nil, nil
 		}
+		// REFUSE rather than default (epic memql#3974): "cannot tell whether a
+		// concept is staged" must never resolve to "nothing is staged".
+		if pctx.ConceptDataIsStaged == nil {
+			return nil, fmt.Errorf("actionSearch plug-in: no ConceptDataIsStaged in plugin context")
+		}
 		integ := New(pctx.Logger)
+		integ.SetStagedConceptPredicate(pctx.ConceptDataIsStaged)
 		integ.SetDBGetter(func() *sql.DB {
 			bunDB := pctx.BunDB()
 			if bunDB == nil {

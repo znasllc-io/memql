@@ -125,6 +125,54 @@ func (e *MemQLEngine) conceptDataIsStaged(conceptId string) bool {
 	return staged
 }
 
+// ConceptDataIsStaged is conceptDataIsStaged, exported, and it exists so that
+// the DIRECT-SQL read sites can ask the same question the DSL seams ask
+// (epic memql#3974, task memql#3984).
+//
+// # There is ONE staged set, and this is the only door to it
+//
+// A hand-rolled `SELECT ... FROM "MemoryNodes"` in integrations/ or
+// component/harness does not pass through the engine's parse or filter path, so
+// nothing memql#3983 injects reaches it. Those sites need the same fact, and the
+// failure mode of them computing it a second way -- their own map, their own
+// key prefix, their own boot replay -- is a set that AGREES on the day it is
+// written and diverges silently afterwards, which is the one class of drift this
+// tier cannot tolerate (the divergence direction that publishes rows is
+// invisible from the outside).
+//
+// So this method is a one-line delegation ON PURPOSE. It adds no state, no
+// cache and no second lookup: it is the same sync.Map load against the same key
+// that the promote path writes and the boot replay restores.
+//
+// THE TWO ACCESSORS ARE ALREADY ONE SOURCE OF TRUTH, and keeping them that way
+// is the standing constraint on this file. staged_enforce.go's
+// stagedConceptIds (memql#3983) enumerates e.promotedAuthored under
+// conceptDataStagedPrefix; this loads e.promotedAuthored under
+// conceptDataStagedKey, which composes that same prefix. One map, one key
+// namespace, two directions of the same question -- membership here,
+// enumeration there. Neither may grow a cache, a snapshot or a mirror of the
+// other; TestConceptDataIsStagedIsTheSameAnswerAsTheTier pins the membership
+// half of that, and stagedConceptIds carries its own prefix-drift test for the
+// enumeration half, because a drifted prefix fails OPEN.
+//
+// # It is handed OUT as a func, not reached FOR
+//
+// component/harness sits BELOW component/memql in the module graph and cannot
+// import it, and the vector integrations hold no engine reference. Both take
+// the predicate as an injected `func(conceptId string) bool` -- PluginContext
+// for the plug-ins, a constructor parameter for the harness readers -- wired
+// from this method in app/. That is the tree's standing rule for state that
+// crosses a boundary (CLAUDE.md: it does NOT travel implicitly), and it is what
+// keeps this per-ENGINE rather than a package global whose value would depend
+// on which engine started last.
+//
+// A nil predicate at a call site is a WIRING failure, and every factory that
+// takes one refuses to construct without it rather than defaulting to "nothing
+// is staged" -- the default that reads as working and publishes.
+func (e *MemQLEngine) ConceptDataIsStaged(conceptId string) bool {
+	return e.conceptDataIsStaged(conceptId)
+}
+
 // markConceptDataStaged withholds a promoted concept's rows from the ordinary
 // read path while leaving the concept registered, resolvable and open to writes.
 // Idempotent.

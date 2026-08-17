@@ -7,7 +7,9 @@ import "testing"
 // registers under the name "chat" and exposes the recentChat capability so
 // integration.chat.recentChat resolves on any product-agnostic engine node.
 func TestChatIntegrationExposesRecentChat(t *testing.T) {
-	i := NewIntegration(nil) // nil bun callback: registration shape only
+	// nil bun callback + a never-staged predicate: registration shape only,
+	// no read is issued.
+	i := NewIntegration(nil, func(string) bool { return false })
 	if got := i.IntegrationName(); got != "chat" {
 		t.Fatalf("IntegrationName() = %q, want %q", got, "chat")
 	}

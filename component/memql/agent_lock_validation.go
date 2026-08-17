@@ -153,6 +153,14 @@ type agentRoleLockSet struct {
 //
 // Returns "" when neither path yields a value; the caller treats that
 // as "no enforcement available, pass through."
+// staged-data: MUST-NOT-GATE -- this resolves WHICH role lock to enforce, and
+// gated it resolves to the wrong one (epic memql#3974, task memql#3984).
+//
+// A miss returns "" rather than an error, so a staged role row does not stop
+// the validation -- it makes the validation run against no role at all, or
+// against whatever the caller supplied. Read together with fetchAgentRole
+// below: this one picks the lock, that one reads it, and both fail toward
+// LESS enforcement.
 func (e *MemQLEngine) resolveAgentRoleSlug(ctx context.Context, payload map[string]any, mutationId string) (string, error) {
 	if slug, ok := payload["roleSlug"].(string); ok {
 		if s := strings.TrimSpace(slug); s != "" {
@@ -197,6 +205,19 @@ func (e *MemQLEngine) resolveAgentRoleSlug(ctx context.Context, payload map[stri
 // once at startup -- a small in-engine cache would cut this query
 // out of the hot mutation path. Held as a follow-up; v1 keeps the
 // validator self-contained.
+// staged-data: MUST-NOT-GATE -- SECURITY, and it fails OPEN (epic memql#3974,
+// task memql#3984).
+//
+// This reads a role's lockedDomainIds / lockedToolSlugs -- the set an agent
+// bound to that role may NOT be given. Not-found returns (nil, nil), which the
+// caller reads as "no lock", so gating this hands an agent bound to a staged
+// role exactly the tools the lock exists to withhold. Hiding the ROLE row does
+// not hide the agent; it removes the restriction on it.
+//
+// The general shape, worth stating once: an authorization input is not a read
+// the tier is talking about. Nothing here reaches a reader -- the rows are
+// consumed to make a decision -- so withholding them cannot protect anyone and
+// can only corrupt the decision.
 func (e *MemQLEngine) fetchAgentRole(ctx context.Context, slug string) (*agentRoleLockSet, error) {
 	db := e.database()
 	if db == nil {

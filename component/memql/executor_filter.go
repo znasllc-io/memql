@@ -233,6 +233,27 @@ func combinedFilterOrderExprs(sorter *compiledSort) []string {
 
 // executeCombinedFilterQuery executes a query using a combined SQL filter.
 // This is similar to executeFilterQuery but doesn't require a ComparisonExpression node.
+// staged-data: GATE -- and the gate for this seam is memql#3983's, not this
+// file's (epic memql#3974; the direct-SQL inventory is memql#3984).
+//
+// This is one of the two ENGINE SEAMS, so unlike the hand-rolled reads in
+// integrations/ it does go through the parser: memql#3983 ANDs a
+// `row.concept != <staged>` conjunct into plan.Root before the filter is
+// compiled, and separately admits every emitted row against its own concept.
+// The `filter` argument arrives here already carrying that term.
+//
+// A second, local check here would be a SECOND source of truth over the same
+// rows -- and a per-seam one, which is worse than a per-module one, because the
+// two would be edited by different changes. Adjudicated as GATE, enforced one
+// layer up, deliberately not enforced twice.
+//
+// The load-bearing detail, recorded because an SQL-only reading of this seam is
+// wrong: latestMatchingNodes reloads each scanned candidate's true latest
+// version through loadLatestNodes, which filters on id and an optional
+// createdAt and NOTHING ELSE, and then INSTALLS that version as the result. So
+// the predicate has to survive into the in-process re-check as well, which is
+// why memql#3983 spells it as a comparison Go can evaluate and co-gates the
+// swap directly. See the note on loadLatestNodes.
 func (e *MemQLEngine) executeCombinedFilterQuery(ctx context.Context, expr ExpressionNode, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
 	db := e.database()
 	if db == nil {
@@ -2337,6 +2358,9 @@ func provenanceLeafFromJSON(raw json.RawMessage, leaf string) string {
 // reaches it, and no caller reads a short result as exhaustion. What its
 // callers DO read is an id's absence, as a dangling reference -- see the scan
 // comment below.
+// staged-data: GATE -- the second engine seam, enforced by memql#3983's plan
+// injection plus its per-row gate, exactly as executeCombinedFilterQuery is.
+// See the note there for why this file adds no second check of its own.
 func (e *MemQLEngine) executeFilterQuery(ctx context.Context, cmp *ComparisonExpression, filter compiledExpression, timestamp *time.Time, target int, sorter *compiledSort) ([]memorynodes.MemoryNode, error) {
 	db := e.database()
 	if db == nil {

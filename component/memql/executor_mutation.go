@@ -1321,6 +1321,22 @@ func (e *MemQLEngine) fetchNodesByNodeFieldValues(ctx context.Context, conceptNa
 	return nodes, nil
 }
 
+// staged-data: GATE -- and this is the read that makes an SQL-only reading of
+// the whole tier wrong (epic memql#3974; enforcement is memql#3983's).
+//
+// It filters on `id IN (?)` and an optional `createdAt <= ?` and nothing else:
+// no concept, no filter, no authz. Its one caller, latestMatchingNodes, then
+// INSTALLS what comes back as the result row, overwriting the version the scan
+// selected. So a predicate that lives only in the scan's WHERE clause is a
+// predicate this function can hand a row straight around, and a gate proved
+// only against the emitted SQL is green while leaking.
+//
+// memql#3983 closes it twice on purpose -- the injected conjunct is spelled so
+// the in-process re-check can evaluate it, AND the swapped-in candidate is
+// admitted directly -- because the first depends on the caller's expression
+// still carrying the term, and the unbound plans are exactly the ones where it
+// does not. Adjudicated GATE here, enforced there; a third check in this
+// function would be a third place to keep in step.
 func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timestamp *time.Time) (map[string]memorynodes.MemoryNode, error) {
 	db := e.database()
 	if db == nil {
@@ -1363,6 +1379,10 @@ func (e *MemQLEngine) loadLatestNodes(ctx context.Context, ids []string, timesta
 	return result, nil
 }
 
+// staged-data: MUST-NOT-GATE -- the ruling memql#3985 already recorded below,
+// carried here in memql#3984's machine-readable form so the read-site sweep can
+// see that it was made. Same reasoning, one statement of it.
+//
 // checkNodeExists reports whether any version of (concept, id) is stored. Its
 // caller is previewInsert, which derives a CONTENT-ADDRESSED id from the
 // normalized payload and reports back whether that id is already taken.

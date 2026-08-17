@@ -48,6 +48,7 @@ type Integration struct {
 	Logger            *slog.Logger
 	dbGetter          func() *sql.DB
 	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
+	stagedConcept     func(conceptId string) bool
 }
 
 // New constructs an actionsearch integration.
@@ -60,6 +61,10 @@ func New(logger *slog.Logger) *Integration {
 
 // SetDBGetter injects the lazy DB handle getter.
 func (i *Integration) SetDBGetter(f func() *sql.DB) { i.dbGetter = f }
+
+// SetStagedConceptPredicate injects the staged-DATA visibility question
+// (epic memql#3974, task memql#3984).
+func (i *Integration) SetStagedConceptPredicate(f func(conceptId string) bool) { i.stagedConcept = f }
 
 // SetEmbeddingProvider injects the provider registry lookup.
 func (i *Integration) SetEmbeddingProvider(f func(name string) (memql.EmbeddingAIProvider, error)) {
@@ -98,6 +103,20 @@ func (i *Integration) searchHandler(ctx context.Context, args map[string]any, ta
 	if err != nil {
 		return nil, err
 	}
+	// staged-data: GATE -- see the note on searchSQL for why the check is here
+	// rather than in the statement. searchActions feeds the planner's
+	// REUSE/ADAPT/SYNTHESIZE decision, so a staged action is one the planner
+	// could select and dispatch.
+	if i.stagedConcept == nil {
+		return nil, fmt.Errorf("actionSearch.searchActions: staged-concept predicate not wired; " +
+			"refusing to search rather than answer as if nothing were staged")
+	}
+	if i.stagedConcept(memorynodes.ConceptActionsAction) {
+		i.Logger.Info("actionSearch.searchActions: action data is STAGED; returning no rows",
+			"concept", memorynodes.ConceptActionsAction)
+		return nil, nil
+	}
+
 	if i.dbGetter == nil || i.dbGetter() == nil {
 		return nil, fmt.Errorf("actionSearch.searchActions: database not configured")
 	}
@@ -178,6 +197,14 @@ func (i *Integration) resolveParams(ctx context.Context, args map[string]any, ta
 //	$1 query vector literal
 //	$2 owner user id ('' = unscoped, dev only)
 //	$3 limit k
+//
+// staged-data: GATE -- enforced in searchHandler, not here. The `latest` CTE
+// pins one FIXED concept, so the question has a constant answer per call and is
+// cheapest asked before the round-trip. It also avoids the trap the inventory
+// flagged at this exact statement: the CTE projects four expressions and
+// `concept` is not one of them, so an outer conjunct would not compile -- and
+// putting one on the outer SELECT would be wrong even if it did, because it
+// drops the id rather than falling through.
 const searchSQL = `
 WITH latest AS (
     SELECT DISTINCT ON (id)

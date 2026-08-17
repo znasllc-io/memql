@@ -99,6 +99,15 @@ func (e *MemQLEngine) validateCognitionUtteranceWriteAuthorization(ctx context.C
 	return nil
 }
 
+// staged-data: MUST-NOT-GATE -- an AUTHORIZATION INPUT whose miss is a hard
+// refusal (epic memql#3974, task memql#3984).
+//
+// The caller uses this payload to decide whether the actor may write as the
+// named participant. A miss returns "participant %q not found", so gating it
+// does not withhold a row from anyone -- it REFUSES a legitimate write, with a
+// message naming an absence that is not true. The row never leaves the process;
+// it is consumed to make a decision, and the only thing a gate can change here
+// is whether that decision is right.
 func (e *MemQLEngine) getLatestParticipantPayload(ctx context.Context, participantId string) (map[string]any, error) {
 	db := e.database()
 	if db == nil {
@@ -165,6 +174,13 @@ func matchesAuthenticatedIdentity(participantUserId, actor string, identity auth
 // getAgentRole returns the role ("specialist" or "assistant") for
 // the agent row with the given id, looking up the latest version.
 // Returns "" when the agent is not found or the role field is absent.
+//
+// staged-data: MUST-NOT-GATE -- the sibling of getLatestParticipantPayload
+// above, and the one that fails the other way (epic memql#3974, task
+// memql#3984). Its miss is "" rather than an error, so gating it does not
+// refuse the write -- it runs the utterance rule against an agent whose role is
+// unknown, which is a different rule from the one the agent's row asks for.
+// Again: an authorization input, consumed rather than returned.
 func (e *MemQLEngine) getAgentRole(ctx context.Context, agentId string) (string, error) {
 	db := e.database()
 	if db == nil {

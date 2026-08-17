@@ -37,15 +37,59 @@ const (
 // integration.chat.recentChat, which the recentChat builtin in
 // dsl/cognition/builtins.memql references via @executor.
 type Integration struct {
-	bun func() *bun.DB
+	bun           func() *bun.DB
+	stagedConcept func(conceptId string) bool
 }
 
 // NewIntegration constructs the integration. The bun callback is
 // invoked lazily so the integration can be wired before the database
 // is up; capabilities fail with a clear error when the callback
 // returns nil.
-func NewIntegration(bunCallback func() *bun.DB) *Integration {
-	return &Integration{bun: bunCallback}
+//
+// stagedConcept is the staged-DATA visibility question (epic memql#3974,
+// task memql#3984) and is a REQUIRED constructor parameter rather than a
+// SetX injector, because every read below is gated on it and a nil one would
+// silently answer "nothing is staged". See withheldAsStaged.
+func NewIntegration(bunCallback func() *bun.DB, stagedConcept func(conceptId string) bool) *Integration {
+	return &Integration{bun: bunCallback, stagedConcept: stagedConcept}
+}
+
+// withheldAsStaged reports whether a read of `concept` must return nothing
+// because that concept's DATA is staged (epic memql#3974).
+//
+// # Why a Go pre-check rather than a SQL conjunct
+//
+// Every read in this file pins ONE concept with `Where("concept = ?", ...)`,
+// and staging is a pure function of the concept (memql#3980), so
+// `concept = C AND C not staged` is either `concept = C` or the empty set --
+// which is what an early return computes, exactly rather than approximately.
+//
+// Two of the reads below then fold their rows through a `seen` map to pick the
+// latest version per id. That fold is precisely why the check must NOT be a
+// SQL conjunct: a conjunct removes rows BEFORE the fold, so the fold would
+// pick an OLDER version as "latest" instead of skipping the id -- the quietest
+// failure in this whole class, because the caller gets a plausible row rather
+// than no row. Deciding before the query cannot produce it.
+//
+// # Why every read here, when v1:cognition:utterance cannot be staged today
+//
+// Staging is set only by the authored-promote path, so an embedded engine
+// concept never carries it and these gates are structural. They are still
+// worth their lines: the alternative is that the day a chat-adjacent concept
+// becomes author-promotable, five reads that feed LLM context have to be found
+// again by someone who was not here for this issue. readByKeyword in
+// particular is an unbounded `ILIKE '%...%'` over conversation text with no
+// owner predicate of its own.
+//
+// Returns an error only when the predicate was never wired. That is a boot
+// misconfiguration, and a node that cannot answer "is this staged" must not
+// answer it "no".
+func (c *Integration) withheldAsStaged(concept string) (bool, error) {
+	if c.stagedConcept == nil {
+		return false, fmt.Errorf("chat.recentChat: staged-concept predicate not wired; "+
+			"refusing to read %s rather than answer as if nothing were staged", concept)
+	}
+	return c.stagedConcept(concept), nil
 }
 
 // IntegrationName implements memql.IntegrationProvider.
@@ -114,6 +158,11 @@ func (c *Integration) handle(ctx context.Context, args map[string]any, _ int) ([
 }
 
 func (c *Integration) readRecent(ctx context.Context, partitionId string, count int) ([]memorynodes.MemoryNode, error) {
+	// staged-data: GATE -- utterances go straight into LLM context. See
+	// withheldAsStaged for why the check is here and not in the WHERE clause.
+	if withheld, err := c.withheldAsStaged(memorynodes.ConceptCognitionUtterance); err != nil || withheld {
+		return nil, err
+	}
 	var nodes []memorynodes.MemoryNode
 	err := c.bun().NewSelect().
 		Model(&nodes).
@@ -129,6 +178,12 @@ func (c *Integration) readRecent(ctx context.Context, partitionId string, count 
 }
 
 func (c *Integration) readByKeyword(ctx context.Context, partitionId, keyword string) ([]memorynodes.MemoryNode, error) {
+	// staged-data: GATE -- free-text `ILIKE '%...%'` over conversation content
+	// with no owner predicate of its own; the highest-leverage read in the file
+	// for anyone probing what a staged concept holds. See withheldAsStaged.
+	if withheld, err := c.withheldAsStaged(memorynodes.ConceptCognitionUtterance); err != nil || withheld {
+		return nil, err
+	}
 	var nodes []memorynodes.MemoryNode
 	err := c.bun().NewSelect().
 		Model(&nodes).
@@ -145,6 +200,11 @@ func (c *Integration) readByKeyword(ctx context.Context, partitionId, keyword st
 }
 
 func (c *Integration) readByTime(ctx context.Context, partitionId, from, to string) ([]memorynodes.MemoryNode, error) {
+	// staged-data: GATE -- same stream as readRecent, windowed. See
+	// withheldAsStaged.
+	if withheld, err := c.withheldAsStaged(memorynodes.ConceptCognitionUtterance); err != nil || withheld {
+		return nil, err
+	}
 	q := c.bun().NewSelect().
 		Model((*memorynodes.MemoryNode)(nil)).
 		Where("concept = ?", memorynodes.ConceptCognitionUtterance).
@@ -169,6 +229,11 @@ func (c *Integration) readByTime(ctx context.Context, partitionId, from, to stri
 }
 
 func (c *Integration) getSpaceContext(ctx context.Context, partitionId string) ([]memorynodes.MemoryNode, error) {
+	// staged-data: GATE -- the space row's title / goal / architecture are
+	// rendered into the agent's prompt. See withheldAsStaged.
+	if withheld, err := c.withheldAsStaged(memorynodes.ConceptCognitionSpace); err != nil || withheld {
+		return nil, err
+	}
 	var node memorynodes.MemoryNode
 	err := c.bun().NewSelect().
 		Model(&node).
@@ -203,6 +268,12 @@ func (c *Integration) getSpaceContext(ctx context.Context, partitionId string) (
 }
 
 func (c *Integration) listParticipants(ctx context.Context, partitionId string) ([]memorynodes.MemoryNode, error) {
+	// staged-data: GATE -- the roster the agent is told it is talking to. This
+	// is one of the two reads whose Go-side `seen` fold makes a SQL conjunct
+	// actively wrong rather than merely redundant; see withheldAsStaged.
+	if withheld, err := c.withheldAsStaged(memorynodes.ConceptCognitionParticipant); err != nil || withheld {
+		return nil, err
+	}
 	var nodes []memorynodes.MemoryNode
 	err := c.bun().NewSelect().
 		Model(&nodes).

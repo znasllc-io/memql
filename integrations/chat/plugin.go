@@ -1,6 +1,10 @@
 package chat
 
-import "github.com/znasllc-io/memql/component/memql"
+import (
+	"fmt"
+
+	"github.com/znasllc-io/memql/component/memql"
+)
 
 // init self-registers the chat integration as a plug-in. Always on:
 // every node-type binary that handles agent dispatch carries this so
@@ -11,6 +15,11 @@ import "github.com/znasllc-io/memql/component/memql"
 // integration.chat.recentChat with zero product Go.
 func init() {
 	memql.RegisterPlugin("chat", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
-		return NewIntegration(pctx.BunDB), nil
+		// REFUSE rather than default (epic memql#3974): "cannot tell whether a
+		// concept is staged" must never resolve to "nothing is staged".
+		if pctx.ConceptDataIsStaged == nil {
+			return nil, fmt.Errorf("chat plug-in: no ConceptDataIsStaged in plugin context")
+		}
+		return NewIntegration(pctx.BunDB, pctx.ConceptDataIsStaged), nil
 	})
 }

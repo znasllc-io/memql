@@ -77,7 +77,11 @@ func (a *App) setupHarnessReconciler() {
 		return a.db.BunDB()
 	}
 
-	reader := harness.NewBunStepReader(dbProvider)
+	// The staged-DATA predicate (epic memql#3974) reaches component/harness by
+	// hand because that module sits below component/memql and cannot import
+	// it. Called THROUGH the engine rather than snapshotted so it observes the
+	// live staged set rather than whatever was true at wiring time.
+	reader := harness.NewBunStepReader(dbProvider, a.engine.ConceptDataIsStaged)
 	writer := harness.NewEngineWriter(&CognitionEngineAdapter{Engine: a.engine})
 	dispatcher := harness.NewFuncDispatcher(a.harnessInnerLoop())
 

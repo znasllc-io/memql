@@ -45,6 +45,7 @@ type Integration struct {
 	engine            memql.IntegrationEngineAccess
 	dbGetter          func() *sql.DB
 	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
+	stagedConcept     func(conceptId string) bool
 }
 
 // New constructs a knowledge integration. Dependencies are wired by the
@@ -58,6 +59,11 @@ func New(logger *slog.Logger) *Integration {
 // the createDocumentChunk mutation via the normal DSL path (which
 // handles partition stamping, id generation, and row insertion).
 func (i *Integration) SetEngine(e memql.IntegrationEngineAccess) { i.engine = e }
+
+// SetStagedConceptPredicate injects the staged-DATA visibility question
+// (epic memql#3974, task memql#3984). Consumed by queryChunksForDomain, which
+// produces the chunks an agent grounds and CITES from.
+func (i *Integration) SetStagedConceptPredicate(f func(conceptId string) bool) { i.stagedConcept = f }
 
 // SetDBGetter wires the lazy database handle used for the cosine
 // similarity query in lookup and the vector insert in ingest.

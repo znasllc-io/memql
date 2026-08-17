@@ -150,6 +150,10 @@ func (e *MemQLEngine) actorOwnsOrPrivileged(ctx context.Context, ownerUserId, ac
 // id. Returns (nil, nil) when no row exists yet. Mirrors
 // getLatestHarnessStepPayload -- the planner concept is not in the
 // filesystem-concept const list, so the concept id is the literal string.
+// staged-data: MUST-NOT-GATE -- a PRIOR-STATE read for the Plan status rules,
+// same shape as the harness-step and forge-request lookups (epic memql#3974,
+// task memql#3984). A hidden prior Plan makes an illegal status transition read
+// as a fresh insert, so the transition is admitted rather than refused.
 func (e *MemQLEngine) getLatestPlanPayload(ctx context.Context, planID string) (map[string]any, error) {
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")

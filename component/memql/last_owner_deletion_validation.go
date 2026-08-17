@@ -129,6 +129,23 @@ func (e *MemQLEngine) validateLastOwnerNotDeleted(ctx context.Context, payload m
 // Two steps for the reason validateAgentRoleSlugUnique documents: rows are
 // versioned, so "has ever been an owner" and "is an owner now" are different
 // questions and only the LATEST version of each id answers the second.
+//
+// staged-data: MUST-NOT-GATE -- withholding rows here converts "I cannot see
+// every owner" into a confident "there are no other owners", and the caller
+// treats that as definitive: `remaining > 0` is the entire gate, so an
+// under-count refuses a legitimate deactivation for a reason no operator can
+// reproduce (they can SEE the other owner; the count cannot). That is the exact
+// conflation the error path 20 lines above exists to refuse -- it returns rather
+// than guessing precisely because "could not tell" must never read as an answer,
+// and a staged predicate would smuggle an unreadable row back in wearing a
+// definite one's clothes. The count must be over EVERY owner row or it is not
+// the question being asked. Same reasoning as countConceptRows
+// (authoring_concept_retire.go), which reads storage under no actor for the
+// same reason: a decision counter that scopes its own input answers "how many
+// can I see" when the caller asked "how many are there". Note also that
+// v1:identity:user is a CORE concept and cannot carry the staged marker at all
+// -- the marker is only ever set by the durable promote path -- so gating here
+// would be inert in production AND wrong in principle.
 func (e *MemQLEngine) countOtherActiveOwners(ctx context.Context, excludeID string) (int, error) {
 	db := e.database()
 	if db == nil {

@@ -125,14 +125,26 @@ type EmbedFunc func(ctx context.Context, text string) ([]float32, error)
 // agent's capability embedding (the cognition fitScore generalized to a
 // cheap per-(step,agent) vector compare).
 type BunAgentRoster struct {
-	db    func() *bun.DB
-	embed EmbedFunc
+	db            func() *bun.DB
+	embed         EmbedFunc
+	stagedConcept func(conceptId string) bool
 }
 
 // NewBunAgentRoster builds a roster over a lazily-resolved bun handle + an
 // embedding func.
-func NewBunAgentRoster(db func() *bun.DB, embed EmbedFunc) *BunAgentRoster {
-	return &BunAgentRoster{db: db, embed: embed}
+//
+// stagedConcept answers the staged-DATA visibility question (epic memql#3974,
+// task memql#3984) and is REQUIRED, for the reason NewBunStepReader records:
+// this module cannot reach the engine, so the answer has to be handed in, and
+// an optional parameter would make omitting it invisible.
+//
+// This constructor has NO in-tree caller today -- the roster is exported
+// planner-adapter API that a product wires -- which is exactly why the
+// parameter is positional and required rather than a setter. A downstream
+// caller gets a COMPILE error naming the new argument; a setter it never
+// learned about would leave ListAgents silently ungated forever.
+func NewBunAgentRoster(db func() *bun.DB, embed EmbedFunc, stagedConcept func(conceptId string) bool) *BunAgentRoster {
+	return &BunAgentRoster{db: db, embed: embed, stagedConcept: stagedConcept}
 }
 
 func (r *BunAgentRoster) handle() *bun.DB {
@@ -145,6 +157,20 @@ func (r *BunAgentRoster) handle() *bun.DB {
 // ListAgents returns the owner's non-deleted agents (latest version per
 // id). Reads the capability fields the route/upgrade decision needs.
 func (r *BunAgentRoster) ListAgents(ctx context.Context, ownerUserID string) ([]ExistingAgent, error) {
+	// staged-data: GATE -- this read has no owner predicate in SQL at all
+	// (ownership is filtered in the loop below), so it scans EVERY agent row
+	// in the cluster. A staged agent surfacing here becomes selectable and
+	// dispatchable by the planner. The check is in Go, not in the WHERE
+	// clause, because the loop folds versions through a `seen` map: a SQL
+	// conjunct would remove rows before the fold and elect an OLDER version as
+	// "latest" instead of skipping the id.
+	if r.stagedConcept == nil {
+		return nil, fmt.Errorf("harness roster: staged-concept predicate not wired; " +
+			"refusing to list agents rather than answer as if nothing were staged")
+	}
+	if r.stagedConcept(conceptAgent) {
+		return nil, nil
+	}
 	db := r.handle()
 	if db == nil {
 		return nil, fmt.Errorf("harness roster: database not configured")

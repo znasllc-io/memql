@@ -156,6 +156,14 @@ func (e *MemQLEngine) validateAndStampParticipantPayload(ctx context.Context, pa
 // id in Go. Spaces typically carry fewer than 50 participants over their
 // lifetime, so a full scan + Go-side fold is acceptable -- and it avoids
 // dialect-specific DISTINCT ON wiring through bun.
+// staged-data: MUST-NOT-GATE -- a CAP that under-counts admits past the limit
+// (epic memql#3974, task memql#3984).
+//
+// Every quota read in this file has the same shape: the rows are counted to
+// decide whether one more may be created, and hiding some of them does not
+// withhold anything from a reader -- it raises the ceiling silently. Here it
+// admits more AI participants into a space than the space is configured to
+// hold, and the excess is invisible in the very count meant to bound it.
 func (e *MemQLEngine) countActiveAIParticipantsForUser(ctx context.Context, partitionId, forUserId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
@@ -262,6 +270,16 @@ func humanCapExceeded(activeCount, maxHumans int) bool {
 // spaceMaxHumans reads the latest version of the space row and returns
 // its maxHumans, falling back to defaultMaxHumansPerSpace when the row
 // is missing the field or carries a non-positive value.
+//
+// staged-data: MUST-NOT-GATE -- this is a CONFIG read whose miss path is a
+// SILENT DEFAULT, which makes it the quietest of the quota sites (epic
+// memql#3974, task memql#3984).
+//
+// The other two under-count and admit past a real limit. This one substitutes
+// defaultMaxHumansPerSpace for the limit the operator actually configured, and
+// returns no error while doing it -- so the cap that gets enforced is a
+// different number from the one the space says, with nothing anywhere naming
+// the substitution.
 func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, partitionId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")
@@ -304,6 +322,9 @@ func (e *MemQLEngine) spaceMaxHumans(ctx context.Context, partitionId string) (i
 // excludeId (the participant id about to be inserted) so an idempotent
 // re-join of the same member is not counted twice. Mirrors the scan +
 // Go-side dedup approach of countActiveAIParticipantsForUser.
+// staged-data: MUST-NOT-GATE -- the human half of the same cap; see
+// countActiveAIParticipantsForUser. An under-count admits past the limit rather
+// than withholding anything from a reader.
 func (e *MemQLEngine) countActiveHumanParticipants(ctx context.Context, partitionId, excludeId string) (int, error) {
 	if e == nil {
 		return 0, fmt.Errorf("engine is nil")

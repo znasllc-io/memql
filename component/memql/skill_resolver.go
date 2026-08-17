@@ -37,6 +37,18 @@ type SkillBundle struct {
 // shape calls before reading capabilities: replier resolution, the
 // cognition fit-score, the conductor's per-agent block, the agent
 // factory's createSpecialist / extendSpecialist mutations.
+// staged-data: MUST-NOT-GATE -- a skill row is agent CONFIGURATION, not content
+// (epic memql#3974, task memql#3984).
+//
+// This resolves the union of knowledge domains, tools and live sources an
+// agent's declared skills grant it. A skill row it cannot see is silently
+// dropped from the union -- the loop below skips ids it did not find -- so
+// gating it does not withhold anything from a reader; it removes tools and
+// knowledge domains from an agent that was configured to have them. The
+// operator sees the agent decline work it should be able to do, with nothing
+// naming a staged skill as the cause. This exact silent-drop is what
+// skill_catalog_reconcile.go was written to stop happening for a different
+// reason; reintroducing it here would undo that.
 func (e *MemQLEngine) ResolveSkills(ctx context.Context, skillIds []string) (SkillBundle, error) {
 	if e == nil || len(skillIds) == 0 {
 		return SkillBundle{}, nil

@@ -68,6 +68,13 @@ type AssistantSkillReconcileReport struct {
 // each row's capabilities.skillIds. Idempotent and merge-only; see the
 // file header for the full contract. Best-effort: a per-row failure is
 // logged + recorded and the pass continues.
+// staged-data: MUST-NOT-GATE -- a RECONCILER, and a reconciler that cannot see
+// a row re-creates it (epic memql#3974, task memql#3984).
+//
+// This runs on every cluster boot. Its read is the "does this already exist"
+// half of an idempotency check, so hiding a staged row makes the reconciler
+// write a second one over the top of it -- on every boot, indefinitely. The
+// read is not a disclosure surface; it is what stops the write.
 func (m *SeedMaterializer) reconcileAssistantSkills(ctx context.Context) (AssistantSkillReconcileReport, error) {
 	report := AssistantSkillReconcileReport{}
 	if m == nil || m.engine == nil {

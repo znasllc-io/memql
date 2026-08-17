@@ -115,6 +115,16 @@ func (e *MemQLEngine) resolveActorRank(ctx context.Context, identity auth.UserId
 // lookupRoleRankBySlug reads the latest v1:rbac:role row for a slug and returns
 // its rank. Returns (0,false) when the catalog has no row for the slug or the
 // DB is unavailable.
+// staged-data: MUST-NOT-GATE -- and the reason is the opposite of the one it
+// looks like (epic memql#3974, task memql#3984).
+//
+// This reads a custom role's rank for the rank-bound check, so it reads as a
+// privilege-escalation surface and a reviewer's instinct is to gate it. The
+// resolution above it is documented FAIL-CLOSED: an unresolvable rank denies.
+// So gating this does not admit anything -- it produces a FALSE DENIAL, and an
+// operator holding a staged custom role is locked out of actions their role
+// grants, with the failure looking like a permissions bug rather than a
+// visibility one. MUST-NOT-GATE on functionality, not on security.
 func (e *MemQLEngine) lookupRoleRankBySlug(ctx context.Context, slug string) (int, bool) {
 	db := e.database()
 	if db == nil {

@@ -62,6 +62,7 @@ type Integration struct {
 	dbGetter          func() *sql.DB
 	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
 	partitionFunc     func(ctx context.Context) string
+	stagedConcept     func(conceptId string) bool
 }
 
 // New constructs a similarity integration.
@@ -76,6 +77,11 @@ func New(logger *slog.Logger) *Integration {
 // integrations/knowledge/plugin.go for the reason this is lazy
 // (bun.DB isn't live until MemoryNodesDatabase.Start has fired).
 func (i *Integration) SetDBGetter(f func() *sql.DB) { i.dbGetter = f }
+
+// SetStagedConceptPredicate injects the staged-DATA visibility question
+// (epic memql#3974, task memql#3984). See similarToHandler for why this
+// integration is the one that most needs it.
+func (i *Integration) SetStagedConceptPredicate(f func(conceptId string) bool) { i.stagedConcept = f }
 
 // SetEmbeddingProvider injects the provider registry lookup.
 func (i *Integration) SetEmbeddingProvider(f func(name string) (memql.EmbeddingAIProvider, error)) {
@@ -132,6 +138,50 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	if strings.TrimSpace(concept) == "" {
 		return nil, fmt.Errorf("similarity.similarTo: concept is required")
 	}
+
+	// staged-data: GATE -- this is the general RAG surface, and it is the ONE
+	// hand-rolled read in the tree whose target concept is a caller ARGUMENT
+	// rather than a fixed engine concept. Every other gated site here is pinned
+	// to something like v1:cognition:utterance and can only ever be reached by
+	// a staged concept if that concept becomes author-promotable; `similarTo()`
+	// (dsl/common/builtins.memql) takes the concept from the DSL call, so a
+	// newly promoted, still-staged, vector-indexed concept reaches an agent's
+	// context THROUGH HERE on the first call, with no further change to
+	// anything. Rows returned by this handler go straight into a prompt.
+	//
+	// THE GATE IS A GO PRE-CHECK, NOT AN `AND concept != ...` CONJUNCT, AND
+	// THAT IS THE CORRECT SHAPE RATHER THAN THE LAZY ONE. Both statements below
+	// pin exactly one concept inside the `latest` CTE (`WHERE concept = $2`),
+	// and staging is a pure function of the concept (memql#3980 measured the
+	// row-marked alternatives and rejected them), so
+	//
+	//	WHERE concept = C AND C NOT IN S   ==   WHERE concept = C, if C not in S
+	//	                                   ==   the empty set,     if C in S
+	//
+	// which is precisely what returning early computes. It is exact, not an
+	// approximation. It also disposes of the three hazards a conjunct would
+	// have to survive here: the predicate would have to go INSIDE the CTE (a
+	// conjunct on the outer SELECT drops the id instead of falling through);
+	// the CTE would have to project `concept` for the outer form to reference;
+	// and the version-fallthrough the inventory warns about cannot arise at
+	// all, because a row id is `{concept}:{shortId}` -- every version of one id
+	// shares one concept, so an id is wholly staged or wholly not, and there is
+	// no "newest unstaged version" to fall through to.
+	//
+	// Empty result, not an error: `similarTo` over a concept with no matching
+	// vectors already returns nothing, and a staged concept must be
+	// indistinguishable from one that has not been written to yet. An error
+	// would tell the caller the concept EXISTS and is being withheld.
+	if i.stagedConcept == nil {
+		return nil, fmt.Errorf("similarity.similarTo: staged-concept predicate not wired; " +
+			"refusing to search rather than answer as if nothing were staged")
+	}
+	if i.stagedConcept(concept) {
+		i.Logger.Info("similarity.similarTo: concept data is STAGED; returning no rows",
+			"concept", concept)
+		return nil, nil
+	}
+
 	providerName, _ := args["provider"].(string)
 	if providerName == "" {
 		providerName = defaultProvider

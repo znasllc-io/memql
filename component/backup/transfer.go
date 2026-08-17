@@ -91,6 +91,12 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 // Paged because a cluster's row count is unbounded and a single materialised
 // result set is not.
 //
+// staged-data: MUST-NOT-GATE -- gating this DESTROYS DATA, silently and
+// permanently, and it is the worst instance in the set memql#3984 inventoried.
+// The full argument is the paragraph below; it is worth adding only that this
+// gate does not act alone -- CountRows is the compounding half, and one sweep
+// that "adds the predicate everywhere" produces both.
+//
 // UNFILTERED, AND THAT IS LOAD-BEARING (memql#3985). Whole table, every concept,
 // every version -- there is no WHERE clause here and none may be added. In
 // particular do NOT teach this the staged-DATA tier (epic memql#3974): a backup
@@ -107,6 +113,12 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 // rather than by code. Pinned by
 // TestBackupCarriesTheStagedFlagSoARestoreCannotResurrectStagedRowsAsLive and
 // TestExportIsUnfilteredAcrossConcepts in staged_data_db_test.go.
+//
+// One clarification the marking model does not cover, because it is about the
+// EXPORT rather than the restore: ModelTableExpr parameterises this scan over
+// SecretMemoryNodes as well, so any predicate anyone did add here would have to
+// be valid on both tables. That is a complication, not the argument. The
+// argument is that the rows do not come back.
 func eachRow(ctx context.Context, db bun.IDB, table string, fn func(Row) error) error {
 	const page = 2000
 	offset := 0
@@ -253,6 +265,9 @@ func Restore(ctx context.Context, db bun.IDB, r io.Reader, masterKey string) (Re
 // Used by restore to refuse a non-empty target. Cheap on purpose -- it answers
 // "is there anything here" rather than producing a census, and a restore that
 // asked a more expensive question would be slower for no better decision.
+//
+// staged-data: MUST-NOT-GATE -- and this is the half that makes the pair worse
+// than either site alone (memql#3984's inventory).
 //
 // UNFILTERED, for a sharper reason than eachRow's (memql#3985). This is the
 // guard, so narrowing it does not merely lose data -- it removes the thing that

@@ -38,6 +38,15 @@ import (
 	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
+// The two concepts this file's statements scan, named so the staged-DATA gate
+// (epic memql#3974) asks about the same string the SQL matches on. Written as
+// constants rather than repeated literals because the gate and the WHERE
+// clause disagreeing about a concept id is a silent no-op, not a failure.
+const (
+	conceptKnowledgeDocumentChunk = "v1:knowledge:documentChunk"
+	conceptKnowledgeDocument      = "v1:knowledge:document"
+)
+
 // embedChunkHandler resolves one chunk's text, embeds it, and writes the
 // vector to node_vectors keyed by the chunk id. Idempotent: a chunk that
 // already carries a 'content' vector is acknowledged without re-embedding
@@ -239,6 +248,20 @@ type chunkRow struct {
 }
 
 // loadChunk reads the latest version of one documentChunk by id.
+//
+// staged-data: MUST-NOT-GATE -- this feeds the WRITE side of embedding, not a
+// reader (epic memql#3974, task memql#3984).
+//
+// Its only caller is embedChunk, which turns a nil chunk into
+// `chunk %q not found` and stops. So gating it never returns chunk text to
+// anyone; it refuses to EMBED a chunk that exists, and an unembedded chunk is
+// one that stays unretrievable after its concept goes live -- with nothing
+// scheduled to come back for it. The retrieval side, where chunk text actually
+// reaches an agent, is queryChunksForDomain, and that one IS gated.
+//
+// The inventory filed this INDIFFERENT on the ground that it fails loudly
+// rather than silently. Loud is better than silent and still not a reason to
+// gate a write-path read whose only effect would be to strand data.
 func (i *Integration) loadChunk(ctx context.Context, chunkId string) (*chunkRow, error) {
 	row := i.db().QueryRowContext(
 		ctx,
@@ -271,15 +294,57 @@ func (i *Integration) loadChunk(ctx context.Context, chunkId string) (*chunkRow,
 // query would miss them), and a chunk is excluded only when its parent
 // Document is validationStatus='rejected' or its own validationStatus is
 // 'rejected'. DISTINCT ON keeps the latest version of each chunk id.
+//
+// staged-data: GATE -- and this statement is the only one in the tree that
+// scans TWO concepts, so it takes two decisions rather than one.
+//
+//	documentChunk staged -> return nothing. These are the chunks an agent
+//	  grounds and CITES from; they reach a prompt verbatim.
+//	document staged      -> the correlated NOT EXISTS must find nothing, so
+//	  the suppression it drives becomes vacuously true and the chunk passes.
+//
+// The second half is the interesting one and it was decided rather than
+// defaulted. The subquery returns no document ROWS -- it consumes them -- so
+// leaving it ungated leaks only one bit per chunk, whether a hidden rejected
+// parent exists. That is the smaller leak. It is still the wrong rule, and the
+// reason is sharper than "smaller leak versus larger":
+//
+// The chunks at stake are LIVE ROWS OF A CONCEPT THAT IS NOT STAGED. Leaving
+// the suppression ungated means their absence from the result is caused by a
+// row nobody can observe. A staged row that still suppresses live results is
+// not invisible -- it is UNOBSERVABLE BUT LOAD-BEARING, which is strictly
+// harder to reason about than either "visible" or "absent", and it leaves the
+// author of the next seam with two incompatible readings of what staged means.
+// One rule survives the choice: a staged concept's rows are visible to nobody,
+// including to a suppression.
+//
+// The price is returning chunks whose hidden parent had rejected them. Bounded:
+// those chunks are gated by the first half whenever documentChunk is staged, so
+// the pair is only reachable when exactly one of the two concepts is.
+//
+// Implemented as a `$3::boolean` guard INSIDE the subquery rather than by
+// building two statement strings: the guard makes the scan empty exactly where
+// a concept conjunct would, keeps one statement to read, and cannot drift from
+// the outer query the way a second string could.
 func (i *Integration) queryChunksForDomain(
 	ctx context.Context,
 	domainId string,
 	documentId string,
 ) ([]chunkRow, error) {
+	if i.stagedConcept == nil {
+		return nil, fmt.Errorf("knowledge.queryChunksForDomain: staged-concept predicate not wired; " +
+			"refusing to read rather than answer as if nothing were staged")
+	}
+	if i.stagedConcept(conceptKnowledgeDocumentChunk) {
+		return nil, nil
+	}
+	documentsReadable := !i.stagedConcept(conceptKnowledgeDocument)
+
 	// chunk.payload.domainId is the BARE domain slug by contract (see
 	// docs/public/concepts/identifiers.md); documentId is a canonical
 	// v1:knowledge:document id (relationship fields canonicalize at
-	// insert). Parameters: $1 domainId, $2 documentId ("" = no scope).
+	// insert). Parameters: $1 domainId, $2 documentId ("" = no scope),
+	// $3 whether v1:knowledge:document rows may be read at all.
 	rows, err := i.db().QueryContext(
 		ctx,
 		`SELECT DISTINCT ON (chunk.id)
@@ -298,13 +363,14 @@ func (i *Integration) queryChunksForDomain(
 		     OR chunk.payload->>'documentId' = ''
 		     OR NOT EXISTS (
 		       SELECT 1 FROM "MemoryNodes" doc
-		       WHERE doc.concept = 'v1:knowledge:document'
+		       WHERE $3::boolean
+		         AND doc.concept = 'v1:knowledge:document'
 		         AND doc.id = chunk.payload->>'documentId'
 		         AND doc.payload->>'validationStatus' = 'rejected'
 		     )
 		   )
 		 ORDER BY chunk.id, chunk."createdAt" DESC`,
-		domainId, documentId,
+		domainId, documentId, documentsReadable,
 	)
 	if err != nil {
 		return nil, err
@@ -354,6 +420,22 @@ func (i *Integration) hasVector(ctx context.Context, nodeId string) (bool, error
 // Counts run against node_vectors (the source of truth for "is this
 // retrievable") rather than a stored flag, so the rollup self-heals if a
 // vector was added or removed out of band.
+//
+// staged-data: MUST-NOT-GATE -- gating this reports "complete" over chunks that
+// are not embedded, which is the answer that stops anything coming back for
+// them (epic memql#3974, task memql#3984).
+//
+// The rollup is what drives the backfill: `partial` is the signal that work
+// remains. Hide the staged chunks and the derived-table count sees zero
+// outstanding, the Document is stamped `complete`, and the backfill never runs
+// -- so when the concept goes live its chunks are present, unembedded and
+// unretrievable, and the status field says otherwise.
+//
+// Shape note, because it is the other reason a conjunct here is wrong: the
+// counts come from a LEFT JOIN over a derived table, so a predicate on the
+// outer aggregate is either a no-op or skews `total` and `embedded` by
+// different amounts -- turning a wrong-but-consistent answer into an
+// inconsistent one.
 func (i *Integration) rollupDocumentEmbeddingStatus(ctx context.Context, documentId string) error {
 	if documentId == "" {
 		return nil

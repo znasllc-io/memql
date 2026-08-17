@@ -98,6 +98,10 @@ type SkillCatalogReconcileReport struct {
 // Runs after the global materialization pass (so a freshly-materialized
 // row counts as "already OK") and is best-effort: a failure is logged and
 // boot continues, exactly like reconcileAssistantSkills (#1443).
+// staged-data: MUST-NOT-GATE -- a RECONCILER; see reconcileAssistantSkills.
+// Its read is the idempotency half of a boot-time write, so a hidden row is
+// re-created rather than left alone, once per boot forever (epic memql#3974,
+// task memql#3984).
 func (m *SeedMaterializer) reconcileSkillCatalog(ctx context.Context) (SkillCatalogReconcileReport, error) {
 	report := SkillCatalogReconcileReport{}
 	if m == nil || m.engine == nil || m.registry == nil {

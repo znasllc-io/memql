@@ -78,6 +78,22 @@ func (r *TraceReader) Trace(ctx context.Context, planID string) (Trace, error) {
 }
 
 // planEvents reads every version of the plan row (one per transition).
+//
+// staged-data: MUST-NOT-GATE -- and the same ruling covers stepEvents and
+// observationEvents below (epic memql#3974, task memql#3984).
+//
+// These three assemble an AUDIT TRACE, and a trace with holes does not read as
+// "some rows were withheld" -- it reads as "this never happened". That is a
+// worse outcome than disclosure: an operator reconstructing what a plan did
+// would conclude a transition never occurred, and the absence carries no marker
+// saying otherwise.
+//
+// Note also that these reads deliberately take EVERY version rather than the
+// latest (the ASC ordering and the per-version TraceEvent below are the point),
+// so they are not a read of current state at all. The tier withholds current
+// rows from the ordinary read path; the history of transitions is a different
+// question, asked by a different consumer, for a purpose the tier does not
+// speak to.
 func (r *TraceReader) planEvents(ctx context.Context, db *bun.DB, planID string) ([]TraceEvent, error) {
 	var nodes []memorynodes.MemoryNode
 	err := db.NewSelect().
@@ -106,6 +122,9 @@ func (r *TraceReader) planEvents(ctx context.Context, db *bun.DB, planID string)
 }
 
 // stepEvents reads every version of every step belonging to the plan.
+//
+// staged-data: MUST-NOT-GATE -- see planEvents; an audit trace with holes reads
+// as "this never happened".
 func (r *TraceReader) stepEvents(ctx context.Context, db *bun.DB, planID string) ([]TraceEvent, error) {
 	var nodes []memorynodes.MemoryNode
 	err := db.NewSelect().
@@ -136,6 +155,9 @@ func (r *TraceReader) stepEvents(ctx context.Context, db *bun.DB, planID string)
 
 // observationEvents reads all observations for the plan. Observations are
 // append-only (one row per event), so there are no versions to fold.
+//
+// staged-data: MUST-NOT-GATE -- see planEvents; an audit trace with holes reads
+// as "this never happened".
 func (r *TraceReader) observationEvents(ctx context.Context, db *bun.DB, planID string) ([]TraceEvent, error) {
 	var nodes []memorynodes.MemoryNode
 	err := db.NewSelect().

@@ -166,6 +166,22 @@ func run(ctx context.Context, dsn string, execute bool) error {
 // seed-materialized agent row. The DISTINCT ON keeps one row per
 // id; ORDER BY descending createdAt within the group puts the
 // latest version first.
+//
+// staged-data: MUST-NOT-GATE -- and the same ruling covers
+// loadAIParticipantRows and executePlan below, and audit.go's
+// countReferencesByAgentID (epic memql#3974, task memql#3984).
+//
+// This is a REPAIR TOOL. It reads the current state of the graph, computes a
+// dedupe plan from it, and then rewrites rows. A repair tool that cannot see
+// every row does not repair less -- it plans against a partial picture and
+// then ACTS on that plan, so a hidden duplicate is not skipped, it is
+// mis-resolved: the surviving row is chosen from the rows the tool could see,
+// and the ones it could not are left pointing at something the sweep just
+// rewrote.
+//
+// The general rule this instance belongs to: the tier withholds rows from the
+// ORDINARY READ PATH. An operator-run maintenance tool is not that path, it is
+// the mechanism of last resort for fixing it, and it must see storage.
 func loadSeedAgentRows(ctx context.Context, db *sql.DB) ([]AgentRow, error) {
 	const q = `
 SELECT DISTINCT ON (id)
@@ -202,6 +218,8 @@ ORDER BY id, "createdAt" DESC`
 // agents keeps the result small even on large clusters and means
 // we don't accidentally touch participants tied to user-created
 // agents.
+// staged-data: MUST-NOT-GATE -- see loadSeedAgentRows; a repair tool that
+// cannot see every row plans against a partial picture and then acts on it.
 func loadAIParticipantRows(ctx context.Context, db *sql.DB, agents []AgentRow) ([]ParticipantRow, error) {
 	if len(agents) == 0 {
 		return nil, nil
@@ -242,6 +260,9 @@ ORDER BY id, "createdAt" DESC`
 // executePlan runs both deletes inside one transaction. Either
 // both succeed or neither does -- partial cleanup would leave the
 // DB in a more confusing state than the starting condition.
+// staged-data: MUST-NOT-GATE -- see loadSeedAgentRows. This is the half that
+// WRITES, so a partial read here does not produce a smaller repair, it produces
+// a wrong one.
 func executePlan(ctx context.Context, db *sql.DB, plan Plan) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
