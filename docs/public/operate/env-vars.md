@@ -101,8 +101,8 @@ Where `COMPONENT` is the subsystem that consumes the value:
 | `IDENTITY_`     | In-house identity service (auth subsystem) -- both the service itself and the per-node verifier.   | `MEMQL_IDENTITY_BASE_URL`, `MEMQL_IDENTITY_VERIFIER_BASE_URL`, `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`.|
 | `ANAM_` / `SIMLI_` | Avatar vendors (lip-synced video). Used by the voice-agent avatar and the direct/Guide avatar (`integrations/avatardirect` + `integrations/avatarvendor`). | `MEMQL_ANAM_API_KEY`, `MEMQL_SIMLI_API_KEY`. |
 | `POLYPHON_`     | Polyphon voice helpers (room provider + /memql/audio path).                                | `MEMQL_POLYPHON_VOICE_PROVIDER`, `MEMQL_POLYPHON_LIVEKIT_URL`.                               |
-| `SERVER_`       | HTTP transport (listen address, public path, CORS).                                        | `SERVER_ADDRESS`, `MEMQL_SERVER_PUBLIC_PATH`.                                          |
-| `SERVICE_`      | Service-level metadata (logging, name).                                                    | `SERVICE_NAME`, `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`.                        |
+| `MEMQL_SERVER_` | HTTP transport (listen address, timeouts, public path, CORS).                              | `MEMQL_SERVER_ADDRESS`, `MEMQL_SERVER_PUBLIC_PATH`.                                          |
+| `MEMQL_SERVICE_`| Service-level metadata (logging, name).                                                    | `MEMQL_SERVICE_NAME`, `MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`.                        |
 
 Frontend (`VITE_*` prefix is added by Vite to mark "safe to ship to
 the browser"):
@@ -297,16 +297,21 @@ them.
 | Variable                  | Default       | Purpose                                                                            |
 |---------------------------|---------------|------------------------------------------------------------------------------------|
 | `MEMQL_GRPC_ADDRESS`      | `:50051`      | MemqlService gRPC listen address.                                                  |
-| `SERVER_ADDRESS`          | per-node      | HTTP listen address. Per-binary defaults: bff `0.0.0.0:8088`, cognition `8086`, planner `8087`, agent `8089`. |
+| `MEMQL_SERVER_ADDRESS`    | `:8085`       | HTTP listen address. The SAME default on every node type -- this row used to claim per-binary defaults of bff `0.0.0.0:8088`, cognition `8086`, planner `8087`, agent `8089`, and no binary has ever listened on any of them (memql#3892). In Kubernetes the `containerPort` and Service must move with it. Legacy name `SERVER_ADDRESS` still accepted. |
 | `MEMQL_SERVER_PUBLIC_PATH` | `/`           | Base path prefix for HTTP handlers. Legacy name `SERVER_PUBLIC_PATH` still accepted (memql#3831). |
-| `SERVER_ALLOWED_ORIGINS`  | `*` in dev    | CORS allowed origins (comma- or space-separated).                                  |
+| `MEMQL_SERVER_ALLOWED_ORIGINS` | `*`      | CORS allowed origins for the generic HTTP middleware (comma- or space-separated). `*` is served WITHOUT credentials. Identity has its own list -- see `MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS`. Legacy name `SERVER_ALLOWED_ORIGINS` still accepted. |
+| `MEMQL_SERVER_READ_TIMEOUT_MS` | `15000`  | `http.Server` ReadTimeout. Legacy name `SERVER_READ_TIMEOUT_MS` still accepted. |
+| `MEMQL_SERVER_READ_HEADER_TIMEOUT_MS` | `5000` | `http.Server` ReadHeaderTimeout -- the Slowloris bound. Legacy name `SERVER_READ_HEADER_TIMEOUT_MS` still accepted. |
+| `MEMQL_SERVER_WRITE_TIMEOUT_MS` | `15000` | `http.Server` WriteTimeout. Legacy name `SERVER_WRITE_TIMEOUT_MS` still accepted. |
+| `MEMQL_SERVER_IDLE_TIMEOUT_MS` | `60000`  | `http.Server` IdleTimeout. Legacy name `SERVER_IDLE_TIMEOUT_MS` still accepted. |
+| `MEMQL_SERVER_SHUTDOWN_TIMEOUT_MS` | `5000` | Graceful-shutdown budget for the HTTP server, spent after the drain delay and the in-flight wait. Legacy name `SERVER_SHUTDOWN_TIMEOUT_MS` still accepted. |
 
 #### Logging
 
 | Variable                                         | Default | Purpose                                                                              |
 |--------------------------------------------------|---------|--------------------------------------------------------------------------------------|
-| `SERVICE_NAME`                                   | per-node `memQL-bff` etc. | Logged on every record; useful for routing.                              |
-| `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`         | `info`  | Service-level log level (`debug`, `info`, `warn`, `error`).                          |
+| `MEMQL_SERVICE_NAME`                             | `memQL` | Logged on every record; useful for routing. Every deployed node sets the same value -- the "per-node `memQL-bff`" this row used to claim is not what the manifests do (memql#3892). Legacy name `SERVICE_NAME` still accepted. |
+| `MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`   | `info`  | Service-level log level (`debug`, `info`, `warn`, `error`). Legacy name `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL` still accepted. |
 | `MEMORY_ENGINE_CAPABILITIES_LOGGING_LOG_LEVEL`   | `info`  | MemQL engine log level. Independent of the service logger.                           |
 
 #### Database tuning

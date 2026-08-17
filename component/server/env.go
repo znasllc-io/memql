@@ -39,7 +39,29 @@ type (
 )
 
 const (
-	serverEnvPrefix              = "SERVER"
+	// serverEnvPrefix carries the MEMQL_ prefix the env convention requires
+	// (memql#2106), so the names this composes are MEMQL_SERVER_ADDRESS,
+	// MEMQL_SERVER_ALLOWED_ORIGINS and the timeout family.
+	//
+	// IT USED TO BE A BARE "SERVER", AND THAT IS WHY memql#3892 WAS FILED AS A
+	// DEAD-VARIABLE BUG. The issue measured `grep -rn 'SERVER_ADDRESS'
+	// --include='*.go'` returning nothing and concluded the variable was set on
+	// every pod and read by no Go code. The read is real; it is the NAME that
+	// does not exist in the source. It is composed at run time from this prefix
+	// and a key held in a struct field (`reader.String(keys.Address)`), so no
+	// grep for the literal can find it -- and neither can envscan, which lists
+	// these very lines in its unresolvable residual (memql#3834).
+	//
+	// That is the whole reason the family went unregistered: TestOwnedVarsArePrefixed
+	// refuses a non-MEMQL_ registry entry, so the pre-convention spelling could
+	// not be registered, and the drift gate that would have noticed cannot see a
+	// prefix-composed read. Two blind spots covering for each other, which is the
+	// shape memql#3831 named and this is another instance of.
+	//
+	// The legacy spellings keep working: genesis.ApplyLegacyEnvAliases bridges
+	// each SERVER_* name onto its MEMQL_SERVER_* counterpart at boot, before any
+	// config is read.
+	serverEnvPrefix              = "MEMQL_SERVER"
 	serverLoggerLevelKey         = "CAPABILITIES_LOGGING_LOG_LEVEL"
 	serverLegacyLoggerLevelKey   = "LOGGER_LEVEL"
 	serverFallbackLoggerLevelKey = "LOG_LEVEL"

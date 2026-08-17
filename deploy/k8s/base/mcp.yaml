@@ -95,7 +95,7 @@ spec:
                 name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
-            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "mcp" }
             - { name: MEMQL_NODE_ADDRESS, value: "mcp:50060" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -111,7 +111,7 @@ spec:
             - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50060" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
-            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             # --- MCP remote transport (child B env surface) ---
             - { name: MEMQL_MCP_TRANSPORT, value: "http" }
             - { name: MEMQL_MCP_HTTP_ADDR, value: ":8090" }
@@ -142,7 +142,7 @@ spec:
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
-            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }

@@ -25,7 +25,17 @@ type (
 )
 
 const (
-	serviceEnvPrefix            = "SERVICE"
+	// serviceEnvPrefix carries the MEMQL_ prefix the env convention requires
+	// (memql#2106): the names this composes are MEMQL_SERVICE_NAME and
+	// MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL.
+	//
+	// It was a bare "SERVICE" and went unregistered for the reason
+	// component/server/env.go's serverEnvPrefix records at length: the key is a
+	// struct field, so the composed name appears nowhere in the source and
+	// neither grep nor envscan can attribute the read (memql#3892, memql#3834).
+	//
+	// genesis.ApplyLegacyEnvAliases bridges the SERVICE_* spellings at boot.
+	serviceEnvPrefix            = "MEMQL_SERVICE"
 	capabilitiesLoggingLevelKey = "CAPABILITIES_LOGGING_LOG_LEVEL"
 	legacyLoggerLevelKey        = "LOGGER_LEVEL"
 	fallbackLoggerLevelKey      = "LOG_LEVEL"

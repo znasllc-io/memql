@@ -62,7 +62,7 @@ spec:
                 name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
-            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "voice" }
             - { name: MEMQL_NODE_ADDRESS, value: "voice:50059" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -89,7 +89,7 @@ spec:
             - { name: MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL, value: "wss://livekit.example.com" }
             - { name: MEMQL_POLYPHON_LIVEKIT_API_KEY, valueFrom: { secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_API_KEY } } }
             - { name: MEMQL_POLYPHON_LIVEKIT_API_SECRET, valueFrom: { secretKeyRef: { name: livekit-secrets, key: MEMQL_POLYPHON_LIVEKIT_API_SECRET } } }
-            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
             # Deployment-specific placeholder; a product stack's overlay patches the real host.
@@ -99,7 +99,7 @@ spec:
             # SSL_CERT_DIR covers 0.9.0 images; MEMQL_HTTP_TLS_CA_FILE the explicit path at 0.9.1+.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
-            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }

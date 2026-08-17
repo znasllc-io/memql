@@ -36,6 +36,37 @@ var LegacyAliases = map[string]string{
 	"MEMQL_MEMORY_ENGINE_MAX_WINDOW":       "MEMORY_ENGINE_MAX_WINDOW",
 	"MEMQL_SERVER_PUBLIC_PATH":             "SERVER_PUBLIC_PATH",
 
+	// The SERVER_* / SERVICE_* families (memql#3892). Same vintage and same
+	// blind spot as the six above, found one layer deeper: these are read
+	// through env.NewEnvReader(prefix).String(keys.Field), so the composed name
+	// exists in no source file. memql#3892 was filed on the strength of a grep
+	// for the literal returning nothing, and concluded the variables were set on
+	// every pod and read by nothing -- when in fact SERVER_ADDRESS sets the HTTP
+	// listen address on every node and SERVER_ALLOWED_ORIGINS feeds the CORS
+	// middleware. Deleting them, which is what "dead variable" implies, would
+	// have removed working operator knobs.
+	//
+	// The whole family is aliased rather than only the three that deploy/ sets:
+	// the prefix constant renames all of them at once, so an operator who had
+	// set SERVER_WRITE_TIMEOUT_MS would otherwise find it silently ignored.
+	// That includes the two deprecated log-level spellings the readers' own
+	// fallback chain accepts -- their compat lives inside the reader, which the
+	// prefix change moves out from under them.
+	"MEMQL_SERVER_ADDRESS":                         "SERVER_ADDRESS",
+	"MEMQL_SERVER_ALLOWED_ORIGINS":                 "SERVER_ALLOWED_ORIGINS",
+	"MEMQL_SERVER_READ_TIMEOUT_MS":                 "SERVER_READ_TIMEOUT_MS",
+	"MEMQL_SERVER_READ_HEADER_TIMEOUT_MS":          "SERVER_READ_HEADER_TIMEOUT_MS",
+	"MEMQL_SERVER_WRITE_TIMEOUT_MS":                "SERVER_WRITE_TIMEOUT_MS",
+	"MEMQL_SERVER_IDLE_TIMEOUT_MS":                 "SERVER_IDLE_TIMEOUT_MS",
+	"MEMQL_SERVER_SHUTDOWN_TIMEOUT_MS":             "SERVER_SHUTDOWN_TIMEOUT_MS",
+	"MEMQL_SERVER_CAPABILITIES_LOGGING_LOG_LEVEL":  "SERVER_CAPABILITIES_LOGGING_LOG_LEVEL",
+	"MEMQL_SERVER_LOGGER_LEVEL":                    "SERVER_LOGGER_LEVEL",
+	"MEMQL_SERVER_LOG_LEVEL":                       "SERVER_LOG_LEVEL",
+	"MEMQL_SERVICE_NAME":                           "SERVICE_NAME",
+	"MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL": "SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL",
+	"MEMQL_SERVICE_LOGGER_LEVEL":                   "SERVICE_LOGGER_LEVEL",
+	"MEMQL_SERVICE_LOG_LEVEL":                      "SERVICE_LOG_LEVEL",
+
 	// Epic 7.3 (memql#2106).
 
 	"MEMQL_AI_ANTHROPIC_API_KEY":                            "MEMQL_SI_ANTHROPIC_API_KEY",
