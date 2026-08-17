@@ -123,6 +123,18 @@ func (a *App) pluginContext() memql.PluginContext {
 		ResolveSystemSecret: func(ctx context.Context, name string) (string, error) {
 			return a.engine.ResolveSystemSecret(ctx, name)
 		},
+		// Staged-DATA visibility for the plug-ins that hand-roll SQL
+		// (epic memql#3974, task memql#3984). Lazy like every other callback
+		// here, and deliberately a call THROUGH the engine rather than a
+		// snapshot: the staged set changes when a concept is promoted or
+		// trained, and a value captured at wiring time would answer with
+		// whatever was true at boot forever after.
+		ConceptDataIsStaged: func(conceptId string) bool {
+			if a.engine == nil {
+				return false
+			}
+			return a.engine.ConceptDataIsStaged(conceptId)
+		},
 		Providers: a.engine.Providers(),
 		Policies:  a.engine.Policies(),
 		Agents:    a.engine.Agents(),

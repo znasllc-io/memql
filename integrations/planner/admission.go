@@ -71,6 +71,17 @@ func decideAdmission(runningCount, cap int) bool {
 // currently running and owned by the account. MemoryNodes is an append-only
 // hypertable (PK (id, createdAt)), so the DISTINCT ON picks each Plan's current
 // version before the status / owner filter.
+//
+// staged-data: MUST-NOT-GATE -- this is the SPEND CONTROL, and an under-count
+// admits past the cap (epic memql#3974, task memql#3984).
+//
+// The number is compared against the account's concurrency cap and nothing
+// else; the Plan rows never leave the process. Hide some of them and the
+// account runs more concurrent Plans than it is allowed to, each of which
+// drives LLM calls -- so the failure is billed, not merely wrong. A read that
+// exists to bound a resource cannot be made to see less of it.
+//
+// The same ruling covers anyWaitingQuery and pickOldestWaitingQuery below.
 const countRunningQuery = `WITH latest AS (
     SELECT DISTINCT ON (id) id, payload
     FROM "MemoryNodes"
@@ -161,6 +172,13 @@ func accountLockKey(accountId string) int32 {
 // anyWaitingQuery is the lock-free fast path: does the account have ANY Plan
 // parked at waitingForSlot? When not (the overwhelmingly common case -- no
 // queue), AdmitNext skips the advisory lock + count entirely.
+//
+// staged-data: MUST-NOT-GATE -- this probe is what wakes the queue, so a Plan
+// it cannot see STARVES PERMANENTLY (epic memql#3974, task memql#3984). When
+// this answers "nothing waiting", AdmitNext returns immediately and never looks
+// again until the next slot-freeing event; a parked Plan hidden from it is
+// never admitted, by anything, ever. It does not become visible when the
+// concept goes live either -- nothing re-runs the probe on that transition.
 const anyWaitingQuery = `WITH latest AS (
     SELECT DISTINCT ON (id) id, payload
     FROM "MemoryNodes"
@@ -175,6 +193,11 @@ LIMIT 1`
 // pickOldestWaitingQuery selects the FIFO head of the account's waiting queue:
 // the longest-parked Plan, ordered by when it entered waitingForSlot (the
 // createdAt of its current version).
+//
+// staged-data: MUST-NOT-GATE -- this picks the FIFO HEAD, so a hidden Plan is
+// not delayed, it is SKIPPED (epic memql#3974, task memql#3984). Gated, the
+// longest-waiting Plan is passed over in favour of a newer one and the queue's
+// ordering guarantee is quietly broken for as long as the concept is staged.
 const pickOldestWaitingQuery = `WITH latest AS (
     SELECT DISTINCT ON (id) id, payload, "createdAt"
     FROM "MemoryNodes"

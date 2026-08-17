@@ -2,6 +2,7 @@ package harnessrecall
 
 import (
 	"database/sql"
+	"fmt"
 
 	"github.com/znasllc-io/memql/component/memql"
 )
@@ -22,7 +23,14 @@ func init() {
 			// cannot embed the query text. Opt out cleanly.
 			return nil, nil
 		}
+		// REFUSE rather than default (epic memql#3974): nil means this node
+		// cannot tell whether a concept's rows are staged, and "cannot tell"
+		// must never resolve to "nothing is staged".
+		if pctx.ConceptDataIsStaged == nil {
+			return nil, fmt.Errorf("harnessRecall plug-in: no ConceptDataIsStaged in plugin context")
+		}
 		integ := New(pctx.Logger)
+		integ.SetStagedConceptPredicate(pctx.ConceptDataIsStaged)
 		integ.SetDBGetter(func() *sql.DB {
 			bunDB := pctx.BunDB()
 			if bunDB == nil {

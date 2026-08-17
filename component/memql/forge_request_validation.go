@@ -327,6 +327,16 @@ func forgeActorRole(ctx context.Context) string {
 // getLatestForgeRequestPayload loads the latest version of a
 // v1:forge:request row by id. Returns (nil, nil) when no row exists yet
 // (a fresh insert). Mirrors getLatestHarnessStepPayload.
+// staged-data: MUST-NOT-GATE -- a PRIOR-STATE read for a status-transition
+// rule, and gating it makes an illegal transition look like a fresh insert
+// (epic memql#3974, task memql#3984).
+//
+// A nil prior is the create case, so the state machine is skipped entirely and
+// whatever status the write carries is accepted. Note also the comment just
+// above this function: the lookup deliberately matches both the canonical and
+// the raw id form so the prior version is found regardless of spelling. Gating
+// it defeats the stated intent of the line above it -- it reintroduces exactly
+// the "prior not found" outcome that lookup was widened to prevent.
 func (e *MemQLEngine) getLatestForgeRequestPayload(ctx context.Context, requestID string) (map[string]any, error) {
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")

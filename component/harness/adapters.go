@@ -67,12 +67,20 @@ func (d *FuncDispatcher) Dispatch(ctx context.Context, step StepView) (map[strin
 // the latest version per id in Go (mirrors the scan+fold pattern in
 // cognition_participant_validation.go).
 type BunStepReader struct {
-	db func() *bun.DB
+	db            func() *bun.DB
+	stagedConcept func(conceptId string) bool
 }
 
 // NewBunStepReader builds a reader over a lazily-resolved bun handle.
-func NewBunStepReader(db func() *bun.DB) *BunStepReader {
-	return &BunStepReader{db: db}
+//
+// stagedConcept answers the staged-DATA visibility question (epic memql#3974,
+// task memql#3984). It is a REQUIRED parameter rather than an optional setter:
+// component/harness sits BELOW component/memql in the module graph and cannot
+// reach the engine for the answer, so the caller in app/ has to hand it over,
+// and a signature that made it optional would make forgetting it invisible.
+// Every read on this type refuses rather than assuming "nothing is staged".
+func NewBunStepReader(db func() *bun.DB, stagedConcept func(conceptId string) bool) *BunStepReader {
+	return &BunStepReader{db: db, stagedConcept: stagedConcept}
 }
 
 func (r *BunStepReader) handle() *bun.DB {
@@ -82,9 +90,39 @@ func (r *BunStepReader) handle() *bun.DB {
 	return r.db()
 }
 
+// withheldAsStaged reports whether a read of `concept` must return nothing.
+//
+// A Go pre-check, not a SQL conjunct, and for the reason the whole set of
+// gated hand-rolled reads shares: every statement on this type pins ONE
+// concept with `Where("concept = ?", ...)`, and staging is a pure function of
+// the concept (memql#3980), so deciding before the query produces exactly the
+// result an in-query conjunct would. StepsForPlan additionally folds its rows
+// through a `seen` map to pick the latest version per id, and a SQL conjunct
+// would strip rows BEFORE that fold -- making it elect an OLDER version as
+// "latest" rather than skip the id, which is the quietest possible wrong
+// answer.
+func (r *BunStepReader) withheldAsStaged(concept string) (bool, error) {
+	if r == nil || r.stagedConcept == nil {
+		return false, fmt.Errorf("harness reader: staged-concept predicate not wired; "+
+			"refusing to read %s rather than answer as if nothing were staged", concept)
+	}
+	return r.stagedConcept(concept), nil
+}
+
 // StepsForPlan returns the latest version of each step for planID and the
 // plan's partition.
 func (r *BunStepReader) StepsForPlan(ctx context.Context, planID string) ([]StepView, string, error) {
+	// staged-data: GATE -- a staged step is one the reconciler would claim and
+	// dispatch. See withheldAsStaged; the `seen` fold below is why this is not
+	// a WHERE clause.
+	//
+	// BEFORE the database check, here and in the two below, because the answer
+	// does not need a database: asking a question of the connection that is not
+	// about the connection makes the gate untestable without one, and a gate
+	// nothing exercises is a gate nobody has watched work.
+	if withheld, err := r.withheldAsStaged(memorynodes.ConceptHarnessStep); err != nil || withheld {
+		return nil, "", err
+	}
 	db := r.handle()
 	if db == nil {
 		return nil, "", fmt.Errorf("harness reader: database not configured")
@@ -135,6 +173,10 @@ func (r *BunStepReader) StepsForPlan(ctx context.Context, planID string) ([]Step
 
 // PlanStatus returns the latest plan status, or "" when absent.
 func (r *BunStepReader) PlanStatus(ctx context.Context, planID string) (string, error) {
+	// staged-data: GATE -- see withheldAsStaged.
+	if withheld, err := r.withheldAsStaged(memorynodes.ConceptHarnessPlan); err != nil || withheld {
+		return "", err
+	}
 	db := r.handle()
 	if db == nil {
 		return "", fmt.Errorf("harness reader: database not configured")
@@ -162,6 +204,12 @@ func (r *BunStepReader) PlanStatus(ctx context.Context, planID string) (string, 
 
 // PlanView returns the latest plan projection (owner + goal + status).
 func (r *BunStepReader) PlanView(ctx context.Context, planID string) (PlanView, bool, error) {
+	// staged-data: GATE -- see withheldAsStaged. The `found=false` return is
+	// the same answer a plan that was never written produces, which is what a
+	// staged concept has to be indistinguishable from.
+	if withheld, err := r.withheldAsStaged(memorynodes.ConceptHarnessPlan); err != nil || withheld {
+		return PlanView{}, false, err
+	}
 	db := r.handle()
 	if db == nil {
 		return PlanView{}, false, fmt.Errorf("harness reader: database not configured")

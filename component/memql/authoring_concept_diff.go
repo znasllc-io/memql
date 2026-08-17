@@ -790,6 +790,26 @@ func (e *MemQLEngine) countConceptRowsWithFieldValueIn(ctx context.Context, conc
 
 // countLatestConceptRows runs one predicate over the latest version of every row
 // of a concept.
+//
+// staged-data: MUST-NOT-GATE -- this count decides whether a BREAKING SCHEMA
+// CHANGE is refused, and gating it makes the damage arrive later rather than
+// preventing it (epic memql#3974, task memql#3984).
+//
+// Gated, a concept whose rows are staged reports zero affected. The refusal
+// does not fire, the narrowed field or dropped enum value lands, and the rows
+// PUBLISH afterwards into a schema with no place for their values. Nothing is
+// wrong at the moment of the change; it goes wrong at the transition the tier
+// exists to make safe, which is the worst possible time for it.
+//
+// The paragraph above this function already rejects a narrower filter for
+// exactly this reason -- soft-deleted rows are counted, because "a guess in a
+// number an operator is about to act on is worse than a number that is simply
+// 'every row'". Same argument, same answer.
+//
+// Note also that this is Count() over the `latest` subquery, so even the
+// "correct" placement -- the predicate inside the collapse -- would still be
+// wrong here. The shape has no right answer because the question does not want
+// one.
 func (e *MemQLEngine) countLatestConceptRows(ctx context.Context, conceptId, predicate string, args []any) (int64, bool) {
 	db := e.database()
 	if db == nil {

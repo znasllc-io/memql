@@ -202,6 +202,22 @@ func (e *MemQLEngine) conceptRowCounter() conceptRowCounter {
 // rows there (it backs the separate SecretConcept registry, which authoring
 // cannot reach), so counting it would be counting a table this decision can
 // never have rows in.
+// staged-data: MUST-NOT-GATE -- this count decides RETIRE vs REMOVE, so gating
+// it REMOVES a concept that holds ten thousand rows (epic memql#3974, task
+// memql#3984).
+//
+// The file header above already settles this in its own words and this tier
+// does not get an exception from it: the count "reads STORAGE, not the query
+// path, under no actor at all", because "a count taken under the demoting owner
+// would answer 'how many rows can I see', and the outcome of the demote would
+// depend on WHO ASKED". A staged predicate is that same scoping under a
+// different name -- it answers "how many rows are currently visible" for a
+// question that has to be "how many rows exist".
+//
+// Consequence in full: staged rows count as zero, zero routes to REMOVE, the
+// registry entry goes and the name is freed, and rule 1 above -- data must
+// never be made unreachable by an operation whose name suggests it affects only
+// a definition -- is violated by the very check written to enforce it.
 func (e *MemQLEngine) countConceptRows(ctx context.Context, conceptId string) (int64, error) {
 	db := e.database()
 	if db == nil {

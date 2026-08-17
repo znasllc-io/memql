@@ -1728,6 +1728,18 @@ func (i *Integration) seedStandardDomainsHandler(ctx context.Context, args map[s
 // id is already present. Uses direct SQL rather than going through
 // engine.Execute + shape parsing because the seed path runs at every
 // startup and needs to be cheap + unambiguous.
+//
+// staged-data: MUST-NOT-GATE -- SEED IDEMPOTENCY, and it runs at EVERY startup
+// (epic memql#3974, task memql#3984).
+//
+// The whole purpose of this read is "do not write this again". Hide a staged
+// row and the answer is false, the seed writes a duplicate, and it does so on
+// every boot for as long as the concept stays staged. For the chunk-level
+// siblings below the same loop also re-EMBEDS what it re-creates, so the cost
+// is a recurring vendor bill on top of the duplicate rows.
+//
+// This ruling covers chunkExistsForSource, purgeChunksForSource and
+// chunkExistsById below, which are the same seed pass.
 func (i *Integration) domainExists(ctx context.Context, domainId string) bool {
 	if i.db() == nil {
 		return false
@@ -1749,6 +1761,9 @@ func (i *Integration) domainExists(ctx context.Context, domainId string) bool {
 // chunkExistsForSource returns true if at least one chunk row exists
 // for the given domain+sourceRef. Uses direct SQL because we don't have
 // a .memql query for this lookup and it's a ~microsecond check.
+//
+// staged-data: MUST-NOT-GATE -- see domainExists. Gated, every startup
+// re-ingests and re-embeds the same corpus.
 func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, sourceRef string) bool {
 	if i.db() == nil {
 		return false
@@ -1773,6 +1788,22 @@ func (i *Integration) chunkExistsForSource(ctx context.Context, domainId, source
 // the only live copy for its sourceRef. Direct SQL (not a DSL
 // mutation) because seeds run before automations are scheduled and
 // we're already doing direct SQL for the sibling lookups.
+//
+// staged-data: MUST-NOT-GATE -- gating the SELECT subquery inside the
+// node_vectors DELETE STRANDS VECTORS, and stranded vectors keep serving
+// deleted content (epic memql#3974, task memql#3984).
+//
+// The two statements are a pair: the first deletes the embeddings for a
+// (domain, sourceRef), the second deletes the chunks themselves. Gate only the
+// subquery in the first and the chunk rows still go, while their node_vectors
+// rows stay -- and a dangling vector still satisfies the JOIN in similarTo /
+// findSimilar / recall, so text that was deleted keeps being retrieved into
+// agent context. The gate meant to withhold content would be the reason
+// deleted content survives.
+//
+// The second statement is a DELETE and so is a write, outside this tier's
+// subject (memql#3985) -- it is classified here because it lives in the same
+// function and the pair only makes sense ruled on together.
 func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, sourceRef string) error {
 	if i.db() == nil {
 		return nil
@@ -1813,6 +1844,10 @@ func (i *Integration) purgeChunksForSource(ctx context.Context, domainId, source
 // chunkIdFor returns the BARE hash; the stored row id is the
 // concept-qualified form the engine composes at insert
 // (v1:knowledge:documentChunk:<hash>), so match on that.
+//
+// staged-data: MUST-NOT-GATE -- see domainExists. This is the per-chunk
+// idempotency check; gated, it re-ingests and re-embeds every seed chunk on
+// every boot.
 func (i *Integration) chunkExistsById(ctx context.Context, chunkId string) bool {
 	if i.db() == nil {
 		return false

@@ -26,9 +26,15 @@ func init() {
 		if pctx.Engine == nil {
 			return nil, fmt.Errorf("knowledge plug-in: no Engine in plugin context")
 		}
+		// REFUSE rather than default (epic memql#3974): "cannot tell whether a
+		// concept is staged" must never resolve to "nothing is staged".
+		if pctx.ConceptDataIsStaged == nil {
+			return nil, fmt.Errorf("knowledge plug-in: no ConceptDataIsStaged in plugin context")
+		}
 
 		integ := New(pctx.Logger)
 		integ.SetEngine(pctx.Engine)
+		integ.SetStagedConceptPredicate(pctx.ConceptDataIsStaged)
 		integ.SetDBGetter(func() *sql.DB {
 			bunDB := pctx.BunDB()
 			if bunDB == nil {

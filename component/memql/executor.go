@@ -94,6 +94,19 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 	return err
 }
 
+// staged-data: MUST-NOT-GATE -- this store backs loadPriorPayload, and gating
+// it turns a PARTIAL UPDATE into a silent CREATE (epic memql#3974, task
+// memql#3984).
+//
+// loadPriorPayload reads the latest stored version of (concept, id) through
+// this call and reports exists=false when nothing comes back. On that answer
+// the mutation path takes the create branch, so every field the caller did not
+// restate is dropped -- from a write the user believes is a partial update, on
+// a row that is still sitting in the table. Withholding a row from a
+// READ-MERGE does not hide it; it overwrites it with less.
+//
+// Note the direction: the rows this returns never leave the process here. They
+// are an input to a merge, not an answer to a reader.
 func (s *bunStore) QueryMemoryNodes(ctx context.Context, params memorynodes.QueryParams) ([]memorynodes.MemoryNode, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("memory engine database not configured")

@@ -19,8 +19,17 @@ func init() {
 		if pctx.ResolvePartitionFromContext == nil {
 			return nil, fmt.Errorf("similarity plug-in: no ResolvePartitionFromContext in plugin context")
 		}
+		// REFUSE rather than default (epic memql#3974). A nil predicate means
+		// "this node cannot tell whether a concept's data is staged", and the
+		// only safe reading of that is a boot failure -- the alternative,
+		// treating nil as "nothing is staged", is a node that serves staged
+		// rows into agent context and looks completely healthy doing it.
+		if pctx.ConceptDataIsStaged == nil {
+			return nil, fmt.Errorf("similarity plug-in: no ConceptDataIsStaged in plugin context")
+		}
 
 		integ := New(pctx.Logger)
+		integ.SetStagedConceptPredicate(pctx.ConceptDataIsStaged)
 		integ.SetDBGetter(func() *sql.DB {
 			bunDB := pctx.BunDB()
 			if bunDB == nil {

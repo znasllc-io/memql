@@ -201,6 +201,15 @@ func agentRoleSlugConflict(candidateId string, candidateActive bool, holders []a
 // and step two resolves only those ids to their latest version. A row that has
 // since renamed away is excluded there, on a set bounded by the number of rows
 // that ever held one slug rather than by the size of the concept.
+// staged-data: MUST-NOT-GATE -- the gate CREATES the violation it would then be
+// unable to detect (epic memql#3974, task memql#3984).
+//
+// This is the uniqueness probe: it looks for an existing active role holding
+// the slug so the write can be refused. Hide the staged row and the probe finds
+// nothing, the write is admitted, and the cluster now holds two active roles on
+// one slug -- one of which is the very row the probe could not see, so the
+// duplicate is invisible to the next probe as well. The read is not a
+// disclosure surface; it is the thing keeping a second row out.
 func (e *MemQLEngine) activeAgentRoleRowsForSlug(ctx context.Context, slug string) ([]agentRoleSlugRow, error) {
 	db := e.database()
 	if db == nil {

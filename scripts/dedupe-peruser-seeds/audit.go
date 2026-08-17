@@ -170,6 +170,11 @@ func auditAgentReferences(ctx context.Context, db *sql.DB, plan Plan) error {
 // The path is read from JSONB via the postgres `->>` operator
 // chain. Nested paths (`source.agentId`) translate to
 // `payload->'source'->>'agentId'`.
+// staged-data: MUST-NOT-GATE -- this counts the inbound references a row about
+// to be deleted still has, so an under-count is the tool concluding a row is
+// SAFE TO REMOVE when something still points at it (epic memql#3974, task
+// memql#3984). See loadSeedAgentRows in main.go for the general rule: an
+// operator-run repair tool is not the ordinary read path and must see storage.
 func countReferencesByAgentID(ctx context.Context, db *sql.DB, ref agentRefConcept, doomedIDs []string) (map[string]int, error) {
 	expr, err := jsonPathExpr("payload", ref.Path)
 	if err != nil {

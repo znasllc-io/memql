@@ -111,6 +111,32 @@ func (db *MemoryNodesDatabase) CreateMemoryNode(ctx context.Context, node *Memor
 	return nil
 }
 
+// staged-data: MUST-NOT-GATE -- and the same ruling covers LoadMemoryNode and
+// FindMemoryNodes below (epic memql#3974, task memql#3984).
+//
+// Gating here would create a SECOND SOURCE OF TRUTH for concept visibility, in
+// the one module that cannot see the first. The staged set lives on the ENGINE
+// (memql#3980 keys it per canonical id in MemQLEngine.promotedAuthored);
+// component/database sits below component/memql in the module graph and cannot
+// import it, so a gate in this file would have to reimplement or re-derive the
+// set. Two derivations of "which concepts are staged" agree on the day they are
+// written and diverge afterwards, and the divergence that publishes rows is
+// invisible from outside -- which is precisely the failure this tier is built
+// to prevent.
+//
+// The precedent is already here and points the same way: component/memql's
+// bunStore.QueryMemoryNodes is a near-verbatim duplicate of FindMemoryNodes,
+// lives one module up, and is ADJUDICATED there -- MUST-NOT-GATE, because it
+// backs loadPriorPayload's read-merge, with the reasoning recorded on it. Two
+// copies of one read, one ruling, made where the state is visible. A ruling
+// made here would be made without the state and could not be kept in step.
+//
+// Second, narrower fact, recorded because it changes what a future reader
+// should do rather than what they should think: these three have ZERO in-tree
+// callers. That does NOT make them safe to ignore -- MemoryNodesDatabase is
+// exported and something could wire it as a Store tomorrow, silently inheriting
+// this decision. It makes the gate belong at that wiring, where the engine is
+// in scope, and not here.
 func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, createdBy string, limit int) ([]MemoryNode, error) {
 	bunDB := db.bun()
 	if bunDB == nil {
@@ -133,6 +159,9 @@ func (db *MemoryNodesDatabase) ListRecentMemoryNodes(ctx context.Context, create
 	return nodes, nil
 }
 
+// staged-data: MUST-NOT-GATE -- see ListRecentMemoryNodes above; a gate in this
+// module would be a second, un-synchronisable source of truth for the staged
+// set, which lives on the engine.
 func (db *MemoryNodesDatabase) LoadMemoryNode(ctx context.Context, id string) (*MemoryNode, error) {
 	trimmedId := strings.TrimSpace(id)
 	if trimmedId == "" {
@@ -162,6 +191,11 @@ func (db *MemoryNodesDatabase) LoadMemoryNode(ctx context.Context, id string) (*
 	return &node, nil
 }
 
+// staged-data: MUST-NOT-GATE -- see ListRecentMemoryNodes above. This one is
+// the clearest case of the three: component/memql's bunStore.QueryMemoryNodes
+// is a near-verbatim copy of this function living one module up, and that copy
+// is where the ruling is recorded, because that is where the staged set is
+// visible.
 func (db *MemoryNodesDatabase) FindMemoryNodes(ctx context.Context, params QueryParams) ([]MemoryNode, error) {
 	bunDB := db.bun()
 	if bunDB == nil {

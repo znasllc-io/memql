@@ -30,6 +30,7 @@ type Integration struct {
 	dbGetter          func() *sql.DB
 	embeddingProvider EmbeddingProviderFunc
 	partitionFunc     PartitionFunc
+	stagedConcept     func(conceptId string) bool
 }
 
 // New creates a new embedding integration.
@@ -57,6 +58,12 @@ func (i *Integration) SetEmbeddingProvider(fn EmbeddingProviderFunc) { i.embeddi
 
 // SetPartitionFunc sets the function that resolves the active partition from context.
 func (i *Integration) SetPartitionFunc(fn PartitionFunc) { i.partitionFunc = fn }
+
+// SetStagedConceptPredicate injects the staged-DATA visibility question
+// (epic memql#3974, task memql#3984). findSimilar takes its concept from the
+// DSL call, so this is the surface an authored, still-staged concept reaches
+// first.
+func (i *Integration) SetStagedConceptPredicate(fn func(conceptId string) bool) { i.stagedConcept = fn }
 
 // IntegrationName returns the stable identifier for this integration.
 func (i *Integration) IntegrationName() string { return "embedding" }
@@ -178,12 +185,41 @@ func (i *Integration) embedHandler(ctx context.Context, args map[string]any, _ i
 }
 
 // findSimilarHandler queries node_vectors for nodes similar to a text query.
+//
+// staged-data: GATE -- the highest-exposure hand-rolled read in the tree. This
+// is the DSL-callable `findSimilar` tool: its `concept` comes from the CALLER,
+// and the rows it returns go straight into LLM context. A newly promoted,
+// still-staged, vector-indexed concept reaches an agent through here on the
+// first call with no further change anywhere.
+//
+// The check is a Go pre-check rather than a conjunct in the statement, for the
+// reason recorded at integrations/similarity/capabilities.go: the query pins one
+// concept, staging is a pure function of the concept (memql#3980), so deciding
+// before the round-trip produces exactly the result an in-query conjunct would.
+//
+// Sequencing note: the statement below gets its LATEST-VERSION COLLAPSE from
+// memql#3984's other half (PR #4037), and that ordering is load-bearing rather
+// than incidental -- an uncollapsed join returns an ARBITRARY version of an id,
+// and a visibility predicate answered about the wrong version is not a
+// visibility predicate. The gate here is concept-grain, so it is correct either
+// way, which is why the two halves could land independently.
 func (i *Integration) findSimilarHandler(ctx context.Context, args map[string]any, target int) ([]memorynodes.MemoryNode, error) {
 	text, _ := args["text"].(string)
 	concept, _ := args["concept"].(string)
 	vectorField, _ := args["vectorField"].(string)
 	if text == "" || concept == "" {
 		return nil, fmt.Errorf("findSimilar: text and concept are required")
+	}
+	if i.stagedConcept == nil {
+		return nil, fmt.Errorf("findSimilar: staged-concept predicate not wired; " +
+			"refusing to search rather than answer as if nothing were staged")
+	}
+	if i.stagedConcept(concept) {
+		// Empty, not an error: a staged concept has to be indistinguishable
+		// from one nothing has been written to. An error would disclose that
+		// it exists and is being withheld.
+		i.Logger.Info("findSimilar: concept data is STAGED; returning no rows", "concept", concept)
+		return nil, nil
 	}
 	if vectorField == "" {
 		vectorField = "profile"

@@ -219,6 +219,18 @@ func (c *FairnessCron) passForFairness(ctx context.Context, accountId, planId st
 
 // --- across-account read SQL (mirrors admission.go's latest-version CTE) ---
 
+// staged-data: MUST-NOT-GATE -- the fairness cron's view of who is waiting, and
+// an account whose waiters are hidden is one the cron never frees a slot for
+// (epic memql#3974, task memql#3984). It is the same under-count failure as
+// admission.go's cap reads, pointed the other way: there the number lets too
+// much through, here it holds a queue closed.
+//
+// Shape note, recorded because it is the one place a mechanically appended
+// conjunct is a SYNTAX ERROR rather than merely wrong: this statement ends in
+// `GROUP BY acct`, so a term glued onto the end does not compile. That is the
+// cheapest possible failure and it is worth saying only because it is the one a
+// sweep would hit first and "fix" by moving the term somewhere that does
+// compile and does the wrong thing.
 const fairnessAccountsWithWaitersQuery = `WITH latest AS (
     SELECT DISTINCT ON (id) id, payload
     FROM "MemoryNodes"
@@ -230,6 +242,11 @@ WHERE payload->>'status' = 'waitingForSlot'
   AND coalesce(payload->>'requestedBy', '') <> ''
 GROUP BY acct`
 
+// staged-data: MUST-NOT-GATE -- the running set the cron passes a long-held
+// Plan out of, to free a slot for the queue (epic memql#3974, task memql#3984).
+// A running Plan hidden from this is never considered for the pass, so it holds
+// its slot indefinitely while the accounts waiting behind it are the ones the
+// cron exists to unblock.
 const fairnessRunningSlotsQuery = `WITH latest AS (
     SELECT DISTINCT ON (id) id, payload
     FROM "MemoryNodes"

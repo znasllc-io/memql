@@ -30,6 +30,13 @@ import (
 // databases + the CI fixture set. The function still ships the
 // per-row transform so the moment we accumulate production data the
 // migration path is in tree.
+// staged-data: MUST-NOT-GATE -- a MIGRATION must see every row, by definition
+// (epic memql#3974, task memql#3984).
+//
+// This is one-shot: nothing re-runs it per row. A row it does not see is a row
+// that never gets its new shape, and when the staged concept later goes live
+// its rows are in the old shape with nothing left to convert them. The gate
+// does not delay the migration for those rows; it skips them permanently.
 func (e *MemQLEngine) MigrateAgentsToSkills(ctx context.Context) (MigrationReport, error) {
 	if e == nil {
 		return MigrationReport{}, fmt.Errorf("skill migration: nil engine")

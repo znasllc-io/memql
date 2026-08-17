@@ -102,6 +102,7 @@ context still observes live state.
 | `ResolveSystemVariable` | `func(ctx, name) (string, error)` | instance-wide plaintext variable |
 | `ResolveSecret` | `func(ctx, name) (string, error)` | partition-scoped encrypted secret, falling back to the global |
 | `ResolveSystemSecret` | `func(ctx, name) (string, error)` | instance-wide encrypted secret |
+| `ConceptDataIsStaged` | `func(conceptId string) bool` | whether a concept's ROWS are staged -- present and addressable, withheld from the ordinary read path until the concept is trained |
 | `Providers` | `*ProviderRegistry` | AI provider registry (stable pointer) |
 | `Policies` | `*PolicyRegistry` | AI Router policy registry (stable pointer) |
 | `Agents` | `*AgentRegistry` | DSL-declared agent registry (stable pointer) |
@@ -109,6 +110,36 @@ context still observes live state.
 `ResolvePartitionFromContext` is the sanctioned way for a pack to scope work to
 a tenant: `partition` is the canonical tenant scope. The dedicated
 partition-scoping reference lands with issue 2.2.
+
+**`ConceptDataIsStaged` is required reading for any pack that issues a
+hand-rolled `SELECT` against `"MemoryNodes"`** (epic memql#3974). A pack that
+goes through `Engine.Execute` inherits the engine's enforcement automatically --
+the staged predicate is injected into the plan and every emitted row is gated.
+Raw SQL passes through neither, so nothing is injected into it and this callback
+is the *whole* of the enforcement for that read.
+
+Two rules, both learned the expensive way:
+
+- **Refuse when it is `nil`.** A factory that treats a missing callback as
+  "nothing is staged" produces a node that serves withheld rows and looks
+  completely healthy doing it. Every core plug-in that consumes it returns an
+  error from its factory instead.
+- **Ask it in Go, before building the statement, rather than appending a
+  conjunct.** Visibility is a pure function of the CONCEPT, and a statement that
+  pins one concept is either wholly admissible or wholly empty -- so an early
+  return is exact, not an approximation. A conjunct additionally has to land
+  INSIDE a latest-version CTE (outside, it drops the id instead of falling
+  through), cannot be appended after a `GROUP BY` at all, and must not run
+  before a Go-side `seen` fold -- which would make the fold elect an older
+  version as "latest" rather than skip the id.
+
+And the part that is easy to get backwards: **do not gate a read whose rows
+never leave the process.** Counts behind a quota, prior-state reads behind a
+read-merge or a state machine, idempotency probes, migrations, audit traces and
+backup exports all consume rows to make a decision. Withholding rows there does
+not protect anyone -- it corrupts the decision, and in the backup case destroys
+data. See `staged_read_site_classification_test.go` in the repository root,
+which fails the build on a hand-rolled read nobody has ruled on.
 
 ---
 

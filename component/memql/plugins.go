@@ -109,6 +109,25 @@ type PluginContext struct {
 	// policies/v1/*.memql. Same stability contract as Providers.
 	Policies *PolicyRegistry
 
+	// ConceptDataIsStaged reports whether a concept's ROWS are STAGED --
+	// present, addressable, open to writes, and withheld from the ordinary read
+	// path until the concept is trained (epic memql#3974).
+	//
+	// Every plug-in that issues a HAND-ROLLED read against "MemoryNodes" must
+	// consult this before returning rows. The DSL seams get the same fact from
+	// the engine directly (memql#3983); a plug-in's raw SQL passes through
+	// neither the parser nor the filter path, so nothing is injected into it and
+	// this callback is the whole of the enforcement there.
+	//
+	// Wired from (*MemQLEngine).ConceptDataIsStaged, which is a one-line export
+	// of the tier's own lookup -- one staged set, one door. A factory that needs
+	// it must REFUSE to construct when it is nil rather than treating nil as
+	// "nothing is staged": that default reads as working and publishes rows the
+	// tier exists to withhold.
+	//
+	// Additive to the Plugin SDK surface, so PluginContractVersion does not move.
+	ConceptDataIsStaged func(conceptId string) bool
+
 	// Agents is the registry of DSL-declared agents loaded from
 	// dsl/agents/v1/*.memql by LoadUnifiedAgents. The agents
 	// integration's `agent(name, args)` builtin handler reads this to

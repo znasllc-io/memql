@@ -83,6 +83,7 @@ type Integration struct {
 
 	dbGetter          func() *sql.DB
 	embeddingProvider func(name string) (memql.EmbeddingAIProvider, error)
+	stagedConcept     func(conceptId string) bool
 }
 
 // New constructs a recall integration.
@@ -96,6 +97,12 @@ func New(logger *slog.Logger) *Integration {
 // SetDBGetter injects the lazy DB handle getter (bun.DB isn't live
 // until MemoryNodesDatabase.Start has fired).
 func (i *Integration) SetDBGetter(f func() *sql.DB) { i.dbGetter = f }
+
+// SetStagedConceptPredicate injects the staged-DATA visibility question
+// (epic memql#3974, task memql#3984). recall() takes its source concept from
+// the DSL call, so -- like similarTo -- an authored, still-staged concept can
+// reach it without any further change to this file.
+func (i *Integration) SetStagedConceptPredicate(f func(conceptId string) bool) { i.stagedConcept = f }
 
 // SetEmbeddingProvider injects the provider registry lookup.
 func (i *Integration) SetEmbeddingProvider(f func(name string) (memql.EmbeddingAIProvider, error)) {
@@ -173,6 +180,22 @@ func (i *Integration) recallHandler(ctx context.Context, args map[string]any, ta
 	p, err := i.resolveParams(ctx, args, target)
 	if err != nil {
 		return nil, err
+	}
+
+	// staged-data: GATE -- see the note on recallSQL. recall() is the harness
+	// memory surface and its rows go into an agent's working context, so a
+	// staged concept must answer here exactly as an unwritten one does: empty,
+	// not an error, because an error discloses that the concept exists and is
+	// being withheld. Refuse only when the predicate was never wired -- a node
+	// that cannot answer the question must not answer it "no".
+	if i.stagedConcept == nil {
+		return nil, fmt.Errorf("harnessRecall.recall: staged-concept predicate not wired; " +
+			"refusing to recall rather than answer as if nothing were staged")
+	}
+	if i.stagedConcept(p.concept) {
+		i.Logger.Info("harnessRecall.recall: concept data is STAGED; returning no rows",
+			"concept", p.concept)
+		return nil, nil
 	}
 
 	if i.dbGetter == nil || i.dbGetter() == nil {
@@ -322,6 +345,14 @@ func (i *Integration) resolveParams(ctx context.Context, args map[string]any, ta
 // join. Cosine similarity is `1 - (embedding <=> qv)`; the recency
 // term is `exp(-ln2 * age / halfLife)`; the combined score is the
 // weighted sum. One round-trip, one table family, no app-side merge.
+//
+// staged-data: GATE -- enforced in recallHandler, NOT in this statement, and
+// the placement is the point. `latest` pins ONE concept (`WHERE concept = $2`,
+// bound from the caller's `concept` arg), so "is this concept staged" is
+// answerable before the statement is built, and answering it there makes the
+// CTE empty exactly when a conjunct inside the CTE would have. Putting it in
+// the SQL would need `concept` added to the CTE's projection for no gain and
+// would spend a round-trip to learn what the caller already told us.
 const recallSQL = `
 WITH latest AS (
     SELECT DISTINCT ON (id) id, "createdAt", payload

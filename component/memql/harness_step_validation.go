@@ -171,6 +171,11 @@ func (e *MemQLEngine) validateHarnessStepTransition(ctx context.Context, payload
 
 // getLatestHarnessStepPayload loads the latest version of a step row by
 // id. Returns (nil, nil) when no row exists yet (a fresh insert).
+// staged-data: MUST-NOT-GATE -- a PRIOR-STATE read for the step state machine
+// (epic memql#3974, task memql#3984). A nil prior is treated as "brand-new
+// step", so only the must-start-in-`pending` rule runs and every transition
+// rule is skipped. Gating this does not hide a step; it lets one move to a
+// status the machine forbids.
 func (e *MemQLEngine) getLatestHarnessStepPayload(ctx context.Context, stepID string) (map[string]any, error) {
 	if e == nil {
 		return nil, fmt.Errorf("engine is nil")
