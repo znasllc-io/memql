@@ -74,7 +74,7 @@ func resolveShapeBoundConcept(concepts memoryNodes.Registry, shape *ShapeDefinit
 	if err == nil {
 		return c, nil
 	}
-	domain := RootDomainFromFilePath(shape.Origin)
+	domain := NamespaceFromFilePath(shape.Origin)
 	if domain == "" {
 		return nil, err
 	}

@@ -332,7 +332,7 @@ func buildCandidateConcept(c SandboxConstruct) (string, *memoryNodes.Concept, er
 	// to say which namespace it belongs to.
 	var id string
 	var err error
-	if dir := RootDomainFromFilePath(c.Origin); dir != "" {
+	if dir := NamespaceFromFilePath(c.Origin); dir != "" {
 		id, err = languageAst.AssembleConceptIdFromDeclInDir(decl, dir, namespacePin(memqldsl.Tree(), dir))
 	} else {
 		id, err = languageAst.AssembleConceptIdFromDecl(decl)

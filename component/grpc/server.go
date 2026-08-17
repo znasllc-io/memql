@@ -2113,7 +2113,13 @@ func (s *streamSession) handleSubscribe(envelope *memqlv1.MemqlClientMessage, ms
 // string carrying no dots / whitespace / wildcards (any of which would
 // corrupt the composed graph.node.<action>.<concept> topic). Empty concept
 // (all concepts) is handled by the caller and never reaches here.
-var graphConceptPattern = regexp.MustCompile(`^v[0-9]+:[a-z0-9]+:[a-zA-Z0-9_:]+$`)
+// The domain segment admits `/` since memql#3898: a namespace is a directory
+// PATH, so a concept declared in a subdirectory is `v1:agents/tools:widget`.
+// The arity is unchanged (version:domain:entity) -- the path lives inside the
+// domain segment precisely so it stays that way. A slash is still refused
+// everywhere the comment above says it must be: it appears in no topic
+// grammar, and dots / whitespace / wildcards remain rejected.
+var graphConceptPattern = regexp.MustCompile(`^v[0-9]+:[a-z0-9/]+:[a-zA-Z0-9_:]+$`)
 
 // composeSubscriptionPatterns turns a SubscribeMsg into the bus topic
 // pattern(s) the server registers, enforcing the #2460 wire contract:

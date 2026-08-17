@@ -22,7 +22,10 @@ import (
 // compiles filters -- so every assertion below is on the RESOLVED CONCEPT, never
 // on compile success. Compile success is what the bug already produces.
 //
-// The domain in these fixtures is `agents` (nestedForeignOrigin), and the stub
+// The namespace in these fixtures is `agents/tools` (nestedForeignOrigin) -- the
+// file's whole directory path, since memql#3898 made a subdirectory its own
+// namespace. Aliasing is what these tests are about; the origin is only the
+// setting. And the stub
 // registry holds a same-named concept in two namespaces, which is the whole
 // shape of the problem in four lines.
 
@@ -31,7 +34,7 @@ import (
 // The aliased name binds the FOREIGN concept; the bare name still binds this
 // domain's. Neither is a compile-success assertion.
 func TestAliasedImportLetsOneFileMeanBoth(t *testing.T) {
-	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents:widget"}}
+	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents/tools:widget"}}
 
 	const aliased = `use tools.concepts.{ widget as toolsWidget }
 
@@ -71,10 +74,10 @@ mutate widget probeLocal {
 	if err != nil {
 		t.Fatalf("bare name alongside an aliased import must still resolve ambiently: %v", err)
 	}
-	if got := local.MutationTemplate.Concept; got != "v1:agents:widget" {
+	if got := local.MutationTemplate.Concept; got != "v1:agents/tools:widget" {
 		t.Errorf("bare name bound %q, want %q -- once a file aliases the foreign concept, a "+
 			"bare name means this domain's again. Binding the import here would be the capture "+
-			"the alias exists to remove.", got, "v1:agents:widget")
+			"the alias exists to remove.", got, "v1:agents/tools:widget")
 	}
 }
 
@@ -84,7 +87,7 @@ mutate widget probeLocal {
 // to NAME THE ALIAS, because a reader who hits it has no other route to the fix
 // -- the syntax is new.
 func TestUnaliasedCapturingImportIsRefused(t *testing.T) {
-	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents:widget"}}
+	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents/tools:widget"}}
 
 	const src = `use tools.concepts.{ widget }
 
@@ -101,13 +104,13 @@ mutate widget probeWrite {
 	if err == nil {
 		t.Fatal("an unaliased import of a name this domain ALSO declares was admitted. That is " +
 			"the silent capture: every bare `widget` in the file binds v1:tools:widget, " +
-			"including constructs that wanted v1:agents:widget, and the compile reports OK.")
+			"including constructs that wanted v1:agents/tools:widget, and the compile reports OK.")
 	}
 	if !strings.Contains(err.Error(), "as <name>") {
 		t.Errorf("the refusal does not name the alias as the fix, so a reader has the finding "+
 			"and no route to it -- and the syntax is new, so they cannot be expected to know:\n%v", err)
 	}
-	if !strings.Contains(err.Error(), "v1:agents:widget") {
+	if !strings.Contains(err.Error(), "v1:agents/tools:widget") {
 		t.Errorf("the refusal does not name the LOCAL concept being captured, which is the "+
 			"fact that makes the import ambiguous:\n%v", err)
 	}
@@ -121,7 +124,7 @@ mutate widget probeWrite {
 // captured. A guard that fired on them would be a corpus-wide migration for a
 // problem those files do not have.
 func TestUnaliasedImportOfANonCollidingNameStillWorks(t *testing.T) {
-	// No v1:agents:widget this time -- only the foreign one exists.
+	// No v1:agents/tools:widget this time -- only the foreign one exists.
 	reg := stubRegistry{ids: []string{"v1:tools:widget"}}
 
 	const src = `use tools.concepts.{ widget }

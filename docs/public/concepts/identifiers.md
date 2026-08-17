@@ -56,6 +56,14 @@ Where:
   `dsl/<namespace>/concepts.memql`: the `@version` major flows into
   the `v1:` prefix, `@namespace` supplies the domain, and the
   declaration header supplies the entity name.
+
+  **Three segments, always** -- `core/id.ParseNodeId` reads the version
+  segment plus exactly two more, and everything downstream splits ids
+  through it. A concept declared in a SUBDIRECTORY does not add a fourth:
+  its namespace is the directory PATH and the path lives inside the domain
+  segment, so `dsl/agents/tools/` yields `v1:agents/tools:widget` and the
+  arity is unchanged (memql#3898). The domain may therefore contain `/`;
+  it never contains a colon.
 - **shortId** -- a per-instance identifier, often a UUID but
   sometimes a deterministic content hash or a human-readable slug
   (`bff-local`, `general_assistant`).
@@ -109,9 +117,11 @@ The recogniser is one shared regex,
 `memqlengine.WireCanonicalIdPattern()`:
 
 ```
-^v[0-9]+:[a-z0-9]+:[a-zA-Z0-9_]+:.+
+^v[0-9]+:[a-z0-9/]+:[a-zA-Z0-9_]+:.+
 ```
 
+The namespace class admits `/` because a namespace is a directory PATH: a
+concept declared in a subdirectory is `v1:agents/tools:widget` (memql#3898).
 The trailing `:.+` **requires** a 4th (shortId) segment, so a bare
 3-segment concept TYPE (`v1:cognition:space`) does NOT match and is
 preserved -- concept ids and subscription topics stay canonical (see the

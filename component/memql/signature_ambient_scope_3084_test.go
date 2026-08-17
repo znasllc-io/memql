@@ -53,9 +53,16 @@ func (s stubRegistry) Get(name string) (*memoryNodes.Concept, error) {
 
 const nestedForeignOrigin = "agents/tools/probe.memql"
 
-// TestSignatureAmbientBind_NestedOriginUsesRootDomain is the failing-before /
-// passing-after assertion, and it asserts on the MUTATION WRITE TARGET rather
+// TestSignatureAmbientBind_NestedOriginUsesItsOwnNamespace is the failing-before
+// / passing-after assertion, and it asserts on the MUTATION WRITE TARGET rather
 // than on BoundConcept.
+//
+// RENAMED AND RE-AIMED BY memql#3898. It asserted the origin's ROOT domain,
+// which was right while boot assembled ids from the first path segment. A
+// subdirectory is now its own namespace, so `agents/tools/probe.memql` binds
+// `v1:agents/tools:widget`. What the test was really protecting is unchanged
+// and still asserted below: the hint is NOT the last path segment, so a foreign
+// domain literally named `tools` is never reachable ambiently from here.
 //
 // That distinction is the whole point. There are two signature resolution
 // sites: one rewrites the AST (the write target, the query filter) and one
@@ -64,8 +71,8 @@ const nestedForeignOrigin = "agents/tools/probe.memql"
 // `BoundConcept == ""` while `MutationTemplate.Concept` was still
 // `v1:tools:widget` -- so the defect survived a fix whose test only looked at
 // BoundConcept. Asserting the write target is what makes this test able to fail.
-func TestSignatureAmbientBind_NestedOriginUsesRootDomain(t *testing.T) {
-	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents:widget"}}
+func TestSignatureAmbientBind_NestedOriginUsesItsOwnNamespace(t *testing.T) {
+	reg := stubRegistry{ids: []string{"v1:tools:widget", "v1:agents/tools:widget"}}
 
 	src := `mutate widget probeWrite {
   args {
@@ -84,12 +91,14 @@ func TestSignatureAmbientBind_NestedOriginUsesRootDomain(t *testing.T) {
 	if fn.MutationTemplate == nil {
 		t.Fatal("mutation template missing")
 	}
-	// Pre-fix this is "v1:tools:widget": the hint was the LAST path segment.
-	if got := fn.MutationTemplate.Concept; got != "v1:agents:widget" {
-		t.Errorf("mutation write target = %q, want %q -- the ambient hint must come from the origin's ROOT domain (assembly's first path segment), not its last", got, "v1:agents:widget")
+	// The hint is the file's NAMESPACE -- the whole directory path. It is not
+	// the LAST segment, which would bind the foreign "v1:tools:widget" also in
+	// this registry, and that is the hazard this test exists for.
+	if got := fn.MutationTemplate.Concept; got != "v1:agents/tools:widget" {
+		t.Errorf("mutation write target = %q, want %q -- the ambient hint is the origin's own namespace (its whole directory path), never its last segment", got, "v1:agents/tools:widget")
 	}
-	if got := fn.BoundConcept; got != "v1:agents:widget" {
-		t.Errorf("BoundConcept = %q, want %q -- both signature sites must agree", got, "v1:agents:widget")
+	if got := fn.BoundConcept; got != "v1:agents/tools:widget" {
+		t.Errorf("BoundConcept = %q, want %q -- both signature sites must agree", got, "v1:agents/tools:widget")
 	}
 }
 
@@ -150,15 +159,15 @@ func TestSignatureAmbientBind_QueryFilterIsGated(t *testing.T) {
 		t.Error("query with a foreign ambient signature bind must be refused, got nil error")
 	}
 
-	// Admitted, and bound to the ROOT domain's concept rather than the
-	// subdirectory-named one.
+	// Admitted, and bound to the file's OWN namespace rather than to the
+	// foreign domain that shares its last path segment (memql#3898).
 	fn, err := tryParseNewFunctionSyntax("probeRead", "query", src,
-		nestedForeignOrigin, stubRegistry{ids: []string{"v1:tools:widget", "v1:agents:widget"}})
+		nestedForeignOrigin, stubRegistry{ids: []string{"v1:tools:widget", "v1:agents/tools:widget"}})
 	if err != nil {
-		t.Fatalf("same-domain ambient query bind must load: %v", err)
+		t.Fatalf("same-namespace ambient query bind must load: %v", err)
 	}
-	if got := fn.BoundConcept; got != "v1:agents:widget" {
-		t.Errorf("query BoundConcept = %q, want %q", got, "v1:agents:widget")
+	if got := fn.BoundConcept; got != "v1:agents/tools:widget" {
+		t.Errorf("query BoundConcept = %q, want %q", got, "v1:agents/tools:widget")
 	}
 	// The filter the engine actually executes must name the same id. Reading it
 	// off the rendered expression rather than off BoundConcept is deliberate:
