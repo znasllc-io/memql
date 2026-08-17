@@ -75,7 +75,7 @@ Concepts below. Read this table before you read either.
 | Recorded as | `v1:authoring:construct.status` = `staged` | `v1:authoring:construct.conceptDataStaged`, a **sibling boolean** |
 | Can a concept be it? | **no** — refused by name | **only** a concept can |
 | Registered cluster-wide? | no. It resolves for its author alone and is not broadcast | **yes** — registered, resolvable, and it accepts writes |
-| Who can reach it | its author | its ROWS: nobody, today. See below |
+| Who can reach it | its author | its ROWS: nobody on the ordinary read path, and the **cluster owner** through an explicitly staged-scoped read (memql#4040). See below |
 | What makes it live | Promote / Train | training the concept |
 
 They are not two flavours of one idea. The difference is the **subject**. A
@@ -409,10 +409,33 @@ which then gets its own opportunity to spell it wrong. So the predicate is a
 an absent escape hatch versus a partial one that appears to work and silently
 does not, and the absent one is the honest answer.
 
-**The consequence, stated plainly: an operator trains a concept without being
-able to inspect what is queued under it first, and training is one-way.** There
-is no un-train that re-hides rows. The explicitly staged-scoped read is tracked
-as memql#4040.
+**That constraint turned out to be narrower than it read, and memql#4040 built
+the escape hatch without loosening the ruling.** What the parse path refuses is a
+`context.Context`, not a *value that came from one*: `executeWith` already reads
+the call origin (memql#2800) and the ambient envelope (memql#3024) off the
+request once and hands them down as parameters, precisely so the injectors stay
+ctx-free. The staged scope rides the same way. The predicate is still a constant
+— now a constant of the *resolved scope* rather than of the staged set alone —
+and no injector gained a context.
+
+So an operator can inspect what is queued before training it:
+
+- **The caller declares it, per read.** `memql.ContextWithStagedScope(ctx, ids…)`
+  names the concepts whose staged rows this read may see. Nothing is inferred
+  from identity: the cluster owner's *ordinary* read still sees no staged rows.
+- **The cluster owner may use it.** Authorization is identity-derived and
+  resolved once, up front, where the actor exists — deliberately separated from
+  the predicate, which never sees an identity. An unauthorized declaration
+  resolves to the empty scope wherever it is read, and `Execute` refuses it
+  explicitly rather than returning an ordinary read the caller cannot tell apart
+  from "nothing is staged".
+- **The row gate honours it too**, through the same function the pushdown uses. A
+  scope honoured by one seam and not the other would return *some* staged rows
+  and not others.
+
+It is Go-level, which is exactly as far as the staging side reaches — nothing on
+the wire stages a concept either (see the table below). Training remains one-way:
+there is no un-train that re-hides rows.
 
 #### Rows persist. There is no TTL, and that absence is defended
 
@@ -482,7 +505,7 @@ Not yet, so do not assume it:
 |---|---|
 | memql#3985 | The **write chokepoint**. A write to a staged concept still publishes its `node.created` event, and that event carries the whole row payload flattened into it. Suppression has to happen at the publish site — the event bus has no actor and no authorization hook, so withholding the read while emitting the event publishes the row to every in-process subscriber and calls it hidden (ruled on memql#3979) |
 | memql#3986 | The **transition and its cross-node propagation**. The marker is set on the node that promoted and re-derived by every node at *its own* next boot; it is not broadcast, so a peer that has not restarted since does not have it. There is also no train-this-concept's-data operation yet: the only un-staging path is a re-promote writing a new construct row with the flag false, which the "a live row wins" fold resolves as live |
-| memql#4040 | The **staged-scoped read**, as above |
+| memql#3984 (partial) | The **repack blind spot** is closed for `integration.chat.recentChat` (memql#4029) and `PluginContext.AdmitSourceRow` is the door any other direct reader uses, but the wider inventory of hand-rolled `MemoryNodes` reads is still open |
 | memql#3984 | The **direct-SQL reads**. A read issued inside a Go executor never passes through a plan, so neither the injected predicate nor the row gate sees it |
 
 There is also no editor action, no MCP tool and no wire message that stages a

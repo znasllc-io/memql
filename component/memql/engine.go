@@ -11,7 +11,6 @@ import (
 
 	"github.com/uptrace/bun"
 
-	"github.com/znasllc-io/memql/core/component"
 	"github.com/znasllc-io/memql/component/bus"
 	concept "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/component/events"
@@ -19,6 +18,7 @@ import (
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/provenance"
 	"github.com/znasllc-io/memql/core/common"
+	"github.com/znasllc-io/memql/core/component"
 )
 
 // MemQLEngine is the default implementation of the MemQLEngine interface.
@@ -564,7 +564,23 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 	// absent keys a negated predicate could read as true.
 	ambient := buildAmbientEnvelope(ctx, e)
 
-	plan, err := e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, ambient)
+	// memql#4040: the explicitly staged-scoped read. Third value read ONCE here
+	// from the context and handed to the ctx-free parse path, by the same route
+	// and for the same reason as the origin and the ambient envelope above.
+	//
+	// The REFUSAL is separate from the RESOLUTION on purpose. stagedScopeFor
+	// intersects the caller's declaration with their authorization and is what
+	// makes the mechanism safe -- it answers the empty scope to an unauthorized
+	// caller no matter which entry point they arrived through, including ones
+	// that never call the line below. This call only upgrades that silence into
+	// an error, because "you may not" and "nothing is staged" are answers a
+	// caller must be able to tell apart.
+	if err := e.refuseUnauthorizedStagedScope(ctx); err != nil {
+		return nil, err
+	}
+	stagedScope := e.stagedScopeFor(ctx)
+
+	plan, err := e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, ambient, stagedScope)
 	if err != nil {
 		return nil, err
 	}
@@ -666,7 +682,7 @@ func (e *MemQLEngine) executeWith(ctx context.Context, query string, fns *Functi
 		// as binding NO concept: nothing was injected into this plan because
 		// there was no binding to inject from, so the row gate is the whole of
 		// the enforcement for them.
-		result.setOutput(nodesToMap(e.filterStagedNodes(filterRowAuthzBuiltinNodes(ctx, nodes))))
+		result.setOutput(nodesToMap(e.filterStagedNodes(ctx, filterRowAuthzBuiltinNodes(ctx, nodes))))
 		e.emitQueryExecutedEvent(startTime, result, false)
 		return result, nil
 	}
@@ -996,6 +1012,23 @@ func (e *MemQLEngine) planCacheSignature(ctx context.Context, plan *QueryPlan) s
 	signature := canonicalExpression(plan.Root)
 	if plan.RowAuthzInjected || e.planReferencesActor(plan.Root) || planIsUnbound(plan) {
 		signature = "actor:" + actorCacheKeyComponent(ctx) + "\x1f" + signature
+	}
+	// An explicitly staged-scoped read must not share a cache entry with an
+	// ordinary one (memql#4040), and the reason is narrower and nastier than it
+	// looks. staged_enforce.go argues that the injected conjunct is part of
+	// plan.Root, so a staged and an unstaged read cannot collide -- true, until
+	// a SCOPE covers every staged concept. Then there is nothing left to
+	// exclude, the predicate is EMPTY, and plan.Root is byte-identical to what
+	// an ordinary caller produces when nothing is staged at all. The operator's
+	// staged-inclusive result would be cached under that signature and served to
+	// the next caller: every gate correct, rows published anyway.
+	//
+	// Same reasoning as planIsUnbound above (memql#3350) -- the row gate makes
+	// the result caller-dependent, so the key has to be. Appended ONLY for a
+	// non-empty scope, so every ordinary read's key is byte-identical to what it
+	// was before this term existed.
+	if scope := e.stagedScopeFor(ctx); !scope.IsEmpty() {
+		signature = "stagedScope:" + scope.signature() + "\x1f" + signature
 	}
 	return signature
 }

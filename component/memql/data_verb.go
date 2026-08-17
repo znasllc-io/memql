@@ -70,6 +70,12 @@ func (e *MemQLEngine) DataVerbFor(ctx context.Context, query string) string {
 		false, // allowInline -- matches Execute
 		auth.OriginFromContext(ctx),
 		buildAmbientEnvelope(ctx, e),
+		// The zero staged scope, deliberately (memql#4040). This function
+		// classifies a query as a READ or a WRITE and discards the plan; the
+		// staged conjunct changes which rows a read returns, never which verb
+		// it is. Resolving a scope here would authorize one for a call that
+		// executes nothing.
+		StagedScope{},
 	)
 	if err != nil || plan == nil {
 		return auth.VerbRead

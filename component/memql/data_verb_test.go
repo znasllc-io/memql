@@ -132,7 +132,7 @@ func TestDataVerbForClassifiesEveryDSLMutationAsAWrite(t *testing.T) {
 			continue
 		}
 		call := name + "()"
-		if _, err := eng.parseWithFunctionsAmbient(call, eng.functions, nil, false, auth.OriginClient, nil); err != nil {
+		if _, err := eng.parseWithFunctionsAmbient(call, eng.functions, nil, false, auth.OriginClient, nil, StagedScope{}); err != nil {
 			continue
 		}
 		checked++

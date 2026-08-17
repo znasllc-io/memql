@@ -12,6 +12,7 @@ package memql
 // between the SQL scan and the in-process re-check.
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -54,9 +55,9 @@ func TestStagedKeyPrefixMatchesTierKeyBuilder(t *testing.T) {
 
 func TestStagedConceptIdsIsNilWhenNothingIsStaged(t *testing.T) {
 	e := &MemQLEngine{}
-	require.Nil(t, e.stagedConceptIds())
+	require.Nil(t, e.stagedConceptIds(StagedScope{}))
 
-	predicate, err := e.stagedVisibilityPredicate()
+	predicate, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.NoError(t, err)
 	require.Nil(t, predicate, "nothing staged must inject nothing at all -- the empty set is the common case and has to stay free")
 }
@@ -70,17 +71,17 @@ func TestStagedConceptIdsEnumeratesEveryMarkedConceptSorted(t *testing.T) {
 	// Sorted, so the cache signature is stable rather than dependent on
 	// sync.Map iteration order. stagedTestConceptB ("...:space") sorts before
 	// stagedTestConceptA ("...:utterance").
-	require.Equal(t, []string{stagedTestConceptB, stagedTestConceptA}, e.stagedConceptIds())
+	require.Equal(t, []string{stagedTestConceptB, stagedTestConceptA}, e.stagedConceptIds(StagedScope{}))
 
 	// Other promoted markers share the map and must not be mistaken for staged
 	// concepts -- the prefix is what separates them.
 	e.promotedAuthored.Store("concept:"+stagedTestLive, promotedMarker{})
 	e.promotedAuthored.Store(conceptRetiredKey(stagedTestLive), promotedMarker{})
-	require.Equal(t, []string{stagedTestConceptB, stagedTestConceptA}, e.stagedConceptIds(),
+	require.Equal(t, []string{stagedTestConceptB, stagedTestConceptA}, e.stagedConceptIds(StagedScope{}),
 		"only the conceptDataStaged: namespace may feed the read gate")
 
 	e.clearConceptDataStaging(stagedTestConceptA)
-	require.Equal(t, []string{stagedTestConceptB}, e.stagedConceptIds())
+	require.Equal(t, []string{stagedTestConceptB}, e.stagedConceptIds(StagedScope{}))
 }
 
 // TestStagedPredicateIsEvaluableInBothCompilers is THE test this change exists
@@ -98,7 +99,7 @@ func TestStagedPredicateIsEvaluableInBothCompilers(t *testing.T) {
 	e := &MemQLEngine{}
 	e.markConceptDataStaged(stagedTestConceptA)
 
-	predicate, err := e.stagedVisibilityPredicate()
+	predicate, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.NoError(t, err)
 	require.NotNil(t, predicate)
 	// The plan path runs this immediately after injection; the predicate is
@@ -132,7 +133,7 @@ func TestStagedPredicateRejectsEveryStagedConceptInTheSet(t *testing.T) {
 	e.markConceptDataStaged(stagedTestConceptA)
 	e.markConceptDataStaged(stagedTestConceptB)
 
-	predicate, err := e.stagedVisibilityPredicate()
+	predicate, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.NoError(t, err)
 	require.NoError(t, rewriteFilterFieldRefs(predicate))
 	_, isConjunction := predicate.(*LogicalExpression)
@@ -188,11 +189,11 @@ func TestStagedPredicateCacheSurvivesTheFieldRewrite(t *testing.T) {
 	e.markConceptDataStaged(stagedTestConceptA)
 	e.markConceptDataStaged(stagedTestConceptB)
 
-	first, err := e.stagedVisibilityPredicate()
+	first, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.NoError(t, err)
 	require.NoError(t, rewriteFilterFieldRefs(first))
 
-	second, err := e.stagedVisibilityPredicate()
+	second, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.NoError(t, err)
 
 	// The second caller must receive the AUTHORED form, untouched by the first
@@ -226,7 +227,7 @@ func TestEnforceStagedDataInjectsWithoutABoundConcept(t *testing.T) {
 		Value:    "some-id",
 	}
 	plan := &QueryPlan{Root: root} // no BoundConcept, on purpose
-	require.NoError(t, e.enforceStagedDataOnPlan(plan))
+	require.NoError(t, e.enforceStagedDataOnPlan(plan, StagedScope{}))
 
 	conjunction, ok := plan.Root.(*LogicalExpression)
 	require.True(t, ok, "an unbound plan must still receive the conjunct")
@@ -242,7 +243,7 @@ func TestEnforceStagedDataIsANoOpWhenNothingIsStaged(t *testing.T) {
 		Value:    "some-id",
 	}
 	plan := &QueryPlan{Root: root}
-	require.NoError(t, e.enforceStagedDataOnPlan(plan))
+	require.NoError(t, e.enforceStagedDataOnPlan(plan, StagedScope{}))
 	require.Same(t, root, plan.Root,
 		"an installation with nothing staged must produce a byte-identical plan, so no result-cache signature moves")
 }
@@ -274,15 +275,15 @@ func TestAdmitStagedRow(t *testing.T) {
 	e := &MemQLEngine{}
 	e.markConceptDataStaged(stagedTestConceptA)
 
-	require.False(t, e.admitStagedRow(stagedTestNode("a", stagedTestConceptA)))
-	require.True(t, e.admitStagedRow(stagedTestNode("b", stagedTestLive)))
-	require.True(t, e.admitStagedRow(stagedTestNode("c", "  "+stagedTestLive+"  ")),
+	require.False(t, e.admitStagedRow(StagedScope{}, stagedTestNode("a", stagedTestConceptA)))
+	require.True(t, e.admitStagedRow(StagedScope{}, stagedTestNode("b", stagedTestLive)))
+	require.True(t, e.admitStagedRow(StagedScope{}, stagedTestNode("c", "  "+stagedTestLive+"  ")),
 		"the concept is trimmed before the lookup, matching conceptDataIsStaged")
-	require.True(t, e.admitStagedRow(stagedTestNode("d", "")),
+	require.True(t, e.admitStagedRow(StagedScope{}, stagedTestNode("d", "")),
 		"a row with no concept is by definition not a row of a staged concept; admitRowAuthzBuiltinResult records the same decision for the same reason")
 
 	e.clearConceptDataStaging(stagedTestConceptA)
-	require.True(t, e.admitStagedRow(stagedTestNode("a", stagedTestConceptA)),
+	require.True(t, e.admitStagedRow(StagedScope{}, stagedTestNode("a", stagedTestConceptA)),
 		"clearing the marker must make the rows live again with no restart")
 }
 
@@ -294,7 +295,7 @@ func TestFilterStagedSetAndNodes(t *testing.T) {
 		"a": stagedTestNode("a", stagedTestConceptA),
 		"b": stagedTestNode("b", stagedTestLive),
 	}
-	filtered := e.filterStagedSet(set)
+	filtered := e.filterStagedSet(context.Background(), set)
 	require.Len(t, filtered, 1)
 	require.Contains(t, filtered, "b")
 
@@ -303,13 +304,13 @@ func TestFilterStagedSetAndNodes(t *testing.T) {
 		stagedTestNode("b", stagedTestLive),
 		stagedTestNode("c", stagedTestConceptA),
 	}
-	kept := e.filterStagedNodes(nodes)
+	kept := e.filterStagedNodes(context.Background(), nodes)
 	require.Len(t, kept, 1)
 	require.Equal(t, "b", kept[0].ID)
 
 	// Nothing staged -> the input is returned untouched, allocating nothing.
 	clean := []memorynodes.MemoryNode{stagedTestNode("b", stagedTestLive)}
-	require.Equal(t, len(clean), len(e.filterStagedNodes(clean)))
+	require.Equal(t, len(clean), len(e.filterStagedNodes(context.Background(), clean)))
 }
 
 // TestStagedPredicateRefusesAnUnrenderableConceptId pins the fail-CLOSED
@@ -320,7 +321,7 @@ func TestStagedPredicateRefusesAnUnrenderableConceptId(t *testing.T) {
 	e := &MemQLEngine{}
 	e.markConceptDataStaged(`v1:x:y"injected`)
 
-	_, err := e.stagedVisibilityPredicate()
+	_, err := e.stagedVisibilityPredicate(StagedScope{})
 	require.Error(t, err)
 	require.Contains(t, strings.ToLower(err.Error()), "staged-data")
 
@@ -329,6 +330,6 @@ func TestStagedPredicateRefusesAnUnrenderableConceptId(t *testing.T) {
 		Operator: OpEq,
 		Value:    "x",
 	}}
-	require.Error(t, e.enforceStagedDataOnPlan(plan),
+	require.Error(t, e.enforceStagedDataOnPlan(plan, StagedScope{}),
 		"the refusal must propagate to the plan, not be swallowed into an ungated read")
 }
