@@ -132,47 +132,52 @@ The exact value is documented in the
 and the Microsoft Azure Storage SDK docs — it is public, hardcoded in
 Azurite itself, and safe to use locally.
 
-The in-cluster hostname is `azurite` (the k8s Service name). This value
-is stamped into `~/Downloads/local.genesis.env` so `make genesis-seal`
-bundles it into the sealed envelope and the seeded `memql-secrets` Secret
-(`make up` / `make secrets`) lands it onto the agent pod. See
-#806 for the full wiring.
+The in-cluster hostname is `azurite` (the k8s Service name).
+`scripts/k3d/seed-secrets.sh` writes it onto the `memql-secrets` Secret
+(`make up` / `make secrets`), which the agent pod reads via `envFrom`.
+See #806 for the full wiring.
 
 ### Staging
 
 Staging uses the real `stmemqlstaging` storage account in
 `rg-memql-staging`. The connection string is provisioned by the
 `scripts/deploy/provision-blob-staging.sh` script (see #807). It is
-not shared with local dev — each env carries its own sealed envelope.
+not shared with local dev — each install carries its own secret material.
 
 ### Prod (deferred)
 
 Prod uses a separate account in the production resource group,
-provisioned when prod goes live. The provisioning script and genesis
+provisioned when prod goes live. The provisioning script and the delivery
 runbook from staging (#807) apply directly; only the account name and
 resource group change. Tracked in #809.
 
-## 4. Delivering the connection string (genesis envelope)
+## 4. Delivering the connection string
 
-The connection string is a **shared cluster secret** — it follows the
-genesis envelope process, not ad-hoc `kubectl set env`.
+The connection string is a **shared cluster secret**, and it reaches the
+pods by the one path every other config value does (epic memql#3958): as a
+KEY on the `memql-secrets` Secret. Not ad-hoc `kubectl set env`.
 
-Canonical steps (staging example; local dev mirrors this with
-`local.genesis.env`):
+> **This section used to describe re-sealing a genesis envelope** — edit a
+> plaintext `.env`, run `make genesis-seal`, re-store the sealed
+> `genesis-b64` blob in Key Vault and in a `genesis` k8s secret. That
+> mechanism no longer exists.
 
-1. Edit `~/Downloads/staging.genesis.env` — add or update:
-   ```
-   MEMQL_AZURE_STORAGE_CONNECTION_STRING=<connection string>
-   MEMQL_AZURE_BLOB_CONTAINER=attachments
-   ```
-2. Seal the envelope:
+Canonical steps (cloud example; local dev writes the same keys through
+`scripts/k3d/seed-secrets.sh`):
+
+1. Put each value in Key Vault:
    ```bash
-   make genesis-seal ENV_FILE=~/Downloads/staging.genesis.env
+   az keyvault secret set --vault-name kv-memql-staging \
+     --name memql-azure-storage-connection-string --value "<connection string>"
+   az keyvault secret set --vault-name kv-memql-staging \
+     --name memql-azure-blob-container --value "attachments"
    ```
-3. Re-store the sealed `genesis-b64` value in:
-   - Key Vault (the canonical source of record), and
-   - The `genesis` Kubernetes secret on the agent node.
-4. Roll the agent pods so they pick up the new secret:
+2. Declare each as a `remoteRef` in
+   `deploy/external-secrets/externalsecret-memql.yaml` so ESO reconciles it
+   onto `memql-secrets`. **An undeclared key is a key nothing reconciles** —
+   that is exactly what made the identity signing seed a latent outage
+   (memql#3960).
+3. Roll the agent pods so they pick up the new value:
    ```bash
    kubectl rollout restart deployment/memql-agent -n memql
    ```
@@ -181,9 +186,8 @@ The vars must reach the **agent node** — that is the binary that runs
 the workbench integration, the attachment upload handler, and
 computer-use uploads. Verify injection via `app/transport_agent.go`.
 
-Do NOT use `kubectl set env` directly — that creates config drift
-outside the genesis envelope and breaks the sealed-secret source of
-truth.
+Do NOT use `kubectl set env` directly — that creates config drift outside
+Key Vault and breaks the declared source of truth.
 
 ## 5. Cluster mode -- local validation
 
@@ -234,7 +238,7 @@ When the workbench node is promoted to a dedicated AKS Deployment:
    workbench Service.
 
 4. Ensure the agent Deployment receives `MEMQL_AZURE_STORAGE_CONNECTION_STRING`
-   and `MEMQL_AZURE_BLOB_CONTAINER` from the genesis secret (step 4
+   and `MEMQL_AZURE_BLOB_CONTAINER` from `memql-secrets` (step 4
    above).
 
 ## 7. What's not yet implemented

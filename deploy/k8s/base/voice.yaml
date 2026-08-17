@@ -61,7 +61,6 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
             - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "voice" }
             - { name: MEMQL_NODE_ADDRESS, value: "voice:50059" }

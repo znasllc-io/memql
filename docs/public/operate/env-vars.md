@@ -19,7 +19,7 @@ owner: znas
 
 `scripts/secrets/manifest.yaml` is the authoritative registry of **every**
 environment variable memQL reads (Epic 7 / memql#2104). One file drives three
-consumers so they can never drift: genesis sealing, the cockpit Configuration
+consumers so they can never drift: the seal floor, the cockpit Configuration
 screen, and boot-time fail-fast validation. Each entry carries `component`,
 `scope` (`node` / `global` / `partition`), `kind`, `required` (node types that
 need it at boot, `"all"` = every node), `default`, and `description`. The small
@@ -59,15 +59,20 @@ Two limits worth knowing before you trust a green result:
 
 memQL splits configuration into two tiers:
 
-1. **Bootstrap envelope** -- a small set of OS environment variables the
+1. **Bootstrap values** -- a small set of OS environment variables the
    process must see *before* it can read anything else. Things like
    "where is Postgres", "what node am I", "what's the master encryption
-   key". Locally these are seeded into k8s Secrets by `make up`
-   (`scripts/k3d/seed-secrets.sh`) from the genesis envelope and mounted
-   into the pods by the manifests in `deploy/k8s/overlays/local`; in
-   staging/prod they ride the AKS deploy manifests + the cluster Secret.
-   There is no encrypted-at-rest path for these -- they live in plain env
-   inside the pod.
+   key". They arrive by ONE path (epic memql#3958): as KEYS on the
+   `memql-secrets` Secret every node `envFrom`s. Locally `make up`
+   (`scripts/k3d/seed-secrets.sh`) writes them; in the cloud External
+   Secrets reconciles them from Key Vault. There is no encrypted-at-rest
+   path for these -- they live in plain env inside the pod.
+
+   > There used to be a second path: a sealed **genesis envelope**
+   > (`MEMQL_GENESIS_B64`) that each pod decrypted in-process at boot,
+   > applying ~150 vars set-if-absent. It is gone, along with its sealing
+   > CLI and its `.znas` format. If a runbook tells you to seal one, it is
+   > describing a mechanism that no longer exists.
 2. **Concept storage** -- everything else. API keys, OAuth client
    secrets, model defaults, feature flags, mail-sender addresses, and
    any tunable a tenant might want to override. These live in four
@@ -364,7 +369,7 @@ For the identity binary (`-tags identity`):
 | `MEMQL_IDENTITY_KEY_DIR`                        | `var/identity/keys`      | On-disk Ed25519 keypair directory (file-key mode).                                                                   |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`             | none (required in prod)  | Master secret (>=16 bytes) wrapping the private key (file-key mode).                                                 |
 | `MEMQL_IDENTITY_REGISTRATION_MODE`              | `open`                   | `open` / `domain_restricted` / `invite_only` / `waitlist`.                                                           |
-| `MEMQL_DISCOVERY_GRPC_ENDPOINT`                 | the identity host + a scheme-appropriate port | The dial address published as `grpcEndpoint` in `GET /.well-known/memql-config.json`. **A bare `host[:port]`, never a URL** -- a scheme is read for its port and then dropped, and a value that cannot be read as a host falls back to the default. Set it to the FRONT DOOR (`api.<domain>:443`), the only host whose ingress carries gRPC to the bff; the default derives the identity host, which serves HTTP only. Declared in `deploy/k8s/base/identity.yaml` and patched per overlay, so a stale value in an operator's genesis envelope cannot reach the wire (memql#3399). |
+| `MEMQL_DISCOVERY_GRPC_ENDPOINT`                 | the identity host + a scheme-appropriate port | The dial address published as `grpcEndpoint` in `GET /.well-known/memql-config.json`. **A bare `host[:port]`, never a URL** -- a scheme is read for its port and then dropped, and a value that cannot be read as a host falls back to the default. Set it to the FRONT DOOR (`api.<domain>:443`), the only host whose ingress carries gRPC to the bff; the default derives the identity host, which serves HTTP only. Declared in `deploy/k8s/base/identity.yaml` and patched per overlay, so a stale value in an operator's local environment cannot reach the wire (memql#3399). |
 | `MEMQL_DISCOVERY_CLIENT_ID`                     | the first registered client | The OAuth `client_id` published as `clientId` in the same document.                                              |
 | `MEMQL_DISCOVERY_CLUSTER_NAME`                  | the identity host        | The human-readable default name published as `clusterName` in the same document.                                     |
 
@@ -409,7 +414,7 @@ delivery).
 | `MEMQL_STT_MIN_CONFIDENCE`     | `0.6`            | Floor a streaming FINAL transcript's confidence must clear to be emitted. OpenAI Realtime finals carry `1.0` and always pass, relying on server-VAD + the empty/denylist filters. Also gates a no-speech denylist of well-known silence hallucinations ("thank you", "thanks for watching", ...) so they're dropped only when confidence is low. `0` disables the confidence + denylist gates (empty-text drop still applies). |
 | `MEMQL_OPENAI_REALTIME_MODEL`  | empty            | Realtime model id; falls back to `MEMQL_POLYPHON_OPENAI_ASR_MODEL`.                    |
 | `MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS` | `600`          | Trailing-silence window (ms) the OpenAI server VAD requires before declaring end-of-utterance on the streaming ASR path. Lower = snappier finals; higher = better tolerance for mid-sentence pauses. See `docs/public/operate/voice-eou-tuning.md`. |
-| `POLYPHON_VOICE_LANGUAGE`      | `en`             | BCP-47 language for the voice-agent's ASR sessions (the realtime path narrows it to the ISO-639-1 primary subtag). |
+| `MEMQL_POLYPHON_VOICE_LANGUAGE` | `en`            | BCP-47 language for the voice-agent's ASR sessions (the realtime path narrows it to the ISO-639-1 primary subtag). Legacy name `POLYPHON_VOICE_LANGUAGE` still accepted (memql#3834). |
 | `MEMQL_WHISPER_MODEL`          | `whisper-1`      | Used when `MEMQL_STT_PROVIDER=openai-whisper`.                                   |
 | `MEMQL_POLYPHON_VOICE_PROVIDER`      | `openai`         | Voice provider for the `/memql/audio` WebSocket path. |
 | `MEMQL_POLYPHON_OPENAI_ASR_MODEL`    | none             | OpenAI ASR model for the `/memql/audio` path.                                    |
@@ -570,10 +575,10 @@ The yaml only matters for the **operator concept-seeding workflow**
 
 ### Where the yaml lives in the bootstrap chain
 
-The bootstrap envelope (including `MEMQL_MASTER_KEY`) is seeded into a
-k8s Secret by `make up` (`scripts/k3d/seed-secrets.sh`) from the genesis
-envelope and mounted into the pods by `deploy/k8s/overlays/local`, so
-every pod has the key in env from first boot. The yaml is only used by
+The bootstrap values (including `MEMQL_MASTER_KEY`) are seeded onto the
+`memql-secrets` Secret by `make up` (`scripts/k3d/seed-secrets.sh`) and
+reach the pods via `envFrom`, so every pod has the key in env from first
+boot. The yaml is only used by
 the concept-seeding step:
 
 1. `make secrets-seed` runs `go run ./scripts/secrets seed`, which

@@ -102,7 +102,6 @@ readonly KNOWN_GO_MOD_DIRS=(
 	"component/fileprocessor"
 	"component/frontdoor"
 	"component/envregistry"
-	"component/genesis"
 	"component/grpc"
 	"component/grpc/gen"
 	"component/harness"

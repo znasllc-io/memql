@@ -9,7 +9,6 @@ import (
 
 	"github.com/znasllc-io/memql/app"
 	"github.com/znasllc-io/memql/component/envregistry"
-	"github.com/znasllc-io/memql/component/genesis"
 	"github.com/znasllc-io/memql/component/server"
 	"github.com/znasllc-io/memql/component/service"
 	"github.com/znasllc-io/memql/core/buildinfo"
@@ -38,26 +37,23 @@ func main() {
 
 	serviceLogger := mustCreateServiceLogger()
 
-	// Cloud A2 secrets model: when MEMQL_GENESIS_AUTOLOAD=true, decrypt
-	// the genesis envelope IN-PROCESS (from MEMQL_GENESIS_B64 or a
-	// sealed file) and apply each entry SET-IF-ABSENT, so Container App
-	// overrides that are already set in the environment win. This is the
-	// base config layer and must run before any component reads its
-	// config. Fail closed: a misconfigured auto-load is fatal -- booting
-	// on a half-applied/wrong config is worse than not booting. When the
-	// flag is unset this is a no-op (local dev's env_file path is
-	// untouched).
-	if res, err := genesis.AutoloadFromEnv(); err != nil {
-		fatalWithLoggerFn(serviceLogger, "genesis envelope auto-load failed", "err", err)
-	} else if res.Enabled {
-		serviceLogger.Info("genesis envelope auto-loaded",
-			"source", res.Source,
-			"applied", len(res.Applied),
-			"skipped", len(res.Skipped))
-	}
+	// CONFIG HAS ONE DELIVERY PATH (epic memql#3958). A sealed genesis
+	// envelope used to be decrypted in-process here and applied
+	// set-if-absent, as a second source beside the k8s Secret every node
+	// envFroms. It bought nothing the Secret did not already deliver --
+	// seeding works locally via seed-secrets.sh and in the cloud via ESO --
+	// and it cost a sealing CLI, a decrypt tool, this boot hook, an
+	// eleven-Deployment kustomize patch and a .znas file format. Its own
+	// tooling also wrote `export MEMQL_MASTER_KEY=` into a world-readable
+	// ~/.bashrc, which is the defect memql#3519 named while that key still
+	// doubled as an authenticator.
+	//
+	// What replaced its one irreplaceable job -- getting an owner back into a
+	// cluster they are locked out of -- is the recovery key (memql#3964),
+	// which authenticates and decrypts nothing.
 
-	// Layer repo-root /.env on top of whatever the host shell + genesis
-	// envelope already painted into the process environment. Local
+	// Layer repo-root /.env on top of whatever the host shell already
+	// painted into the process environment. Local
 	// dev relies on this to flip knobs (verbose observability, debug
 	// flags, ...) without re-sealing the envelope; production simply
 	// has no .env file and the call is a no-op.

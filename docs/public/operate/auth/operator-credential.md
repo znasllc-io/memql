@@ -17,8 +17,8 @@ three interceptor paths in `app/transport.go`.
 
 | | `MEMQL_MASTER_KEY` | `MEMQL_OPERATOR_KEY` |
 |---|---|---|
-| Job | **Decrypts** the genesis env envelope and DSL-resolved secrets | **Authenticates** operator tooling to the cluster |
-| Used by | `component/secret`, `component/genesis`, `secretResolve` | `component/grpc/operator_stream_interceptor.go` |
+| Job | **Decrypts** DSL-resolved secrets at rest | **Authenticates** operator tooling to the cluster |
+| Used by | `component/secret`, `secretResolve` | `component/grpc/operator_stream_interceptor.go` |
 | Needed by | any node that opens the envelope | any node that should accept operator streams |
 | If unset | the node cannot decrypt its config | operator streams are refused (safe) |
 
@@ -31,7 +31,7 @@ rotate."*
 That reasoning is about **host filesystem access**, and it stopped describing
 where the value actually lived:
 
-- `genesis-seal --sync-shell` **defaulted to true** and appended
+- the envelope's sealing CLI **defaulted to `--sync-shell=true`** and appended
   `export MEMQL_MASTER_KEY=...` to `~/.bashrc` and `~/.zshrc`, preserving each
   file's existing permission bits -- so on a typical `0644` dotfile the key was
   readable by every local account, and travelled into dotfile backups, sync
@@ -59,7 +59,7 @@ the highest-value credential in the system. `--sync-shell` now defaults to
 openssl rand -hex 32
 ```
 
-`genesis-seal` deliberately does **not** mint this key. It owns the envelope;
+The envelope's sealing CLI deliberately did **not** mint this key. It owned the envelope;
 coupling the two again -- even only by generating both in one place -- is how
 they became one value the first time.
 
@@ -135,18 +135,27 @@ it deliberately rather than mid-incident.
 
 ### Rotating the MASTER key (the expensive one)
 
-Unchanged by this issue, and worth stating because the two used to be
-conflated. Rotating `MEMQL_MASTER_KEY` re-seals the genesis envelope and every
-secret sealed under it:
+Worth stating because the two used to be conflated. `MEMQL_MASTER_KEY`
+**decrypts and never authenticates**; rotating it means re-encrypting every
+secret sealed under it.
 
-1. `genesis-seal --env-file <plaintext .env>` under the new key
-   (`--sync-source` rewrites the source `.env`'s own line to match).
-2. Update `memql-genesis-b64` **and** `memql-master-key` in Key Vault together
-   -- the envelope and the key that opens it are one unit and must move as one.
-3. Roll every node that opens the envelope.
+> **This procedure changed with epic memql#3958.** It used to be "re-seal the
+> genesis envelope and move `memql-genesis-b64` and `memql-master-key` in Key
+> Vault together, because the envelope and the key that opens it are one unit".
+> There is no envelope any more -- config has one delivery path, the
+> `memql-secrets` Secret -- so the coupled move and the "a node holding the new
+> envelope and the old key cannot boot" hazard are both gone with it.
 
-A node holding the new envelope and the old key cannot boot. Sequence it as
-"both values, then restart", never one at a time.
+What remains under the key is `v1:platform:globalSecret` rows
+(`component/secret`'s `Encrypt` / `Decrypt`). Rotating it is therefore a data
+migration rather than a config change:
+
+1. Re-encrypt every affected row under the new key.
+2. Update `memql-master-key` in Key Vault.
+3. Roll the nodes that decrypt.
+
+A node holding the new key cannot read rows sealed under the old one, so
+sequence it as "re-encrypt, then swap, then restart".
 
 ---
 

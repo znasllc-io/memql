@@ -1371,7 +1371,7 @@ func resolvePlanFunctionsWithAmbient(plan *QueryPlan, functions *FunctionRegistr
 
 	var snapshot map[string]*Function
 	if functions != nil {
-		snapshot = functions.Snapshot()
+		snapshot = functions.LookupIndex()
 	}
 	validator := newFunctionValidatorWithAmbient(snapshot, specs, origin, ambient)
 

@@ -17,7 +17,7 @@ green-before-deploy parity gate that gates every roll.
 
 This is the *lifecycle* companion to the cluster/secrets/promotion reference in
 [`deploy-bundle-runbook.md`](./deploy-bundle-runbook.md) (topology, `make deploy`,
-genesis envelope, the digest bump). Read that for *what* deploys; read
+secret seeding, the digest bump). Read that for *what* deploys; read
 this for *how a node enters and leaves rotation cleanly* during one.
 
 ---

@@ -100,7 +100,7 @@ func (r *SpecRegistry) add(spec *Spec) error {
 	if spec == nil {
 		return fmt.Errorf("spec is nil")
 	}
-	return r.Registry.Add(spec.Name, spec)
+	return r.Registry.Add(QualifyConstruct(ConstructNamespaceForOrigin(spec.Origin), spec.Name), spec)
 }
 
 func validateSpecName(name string) error {

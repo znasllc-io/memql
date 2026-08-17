@@ -337,17 +337,17 @@ func LoadConfig(getenv Getenv) (Config, error) {
 	cfg.AvatarVendor = strings.ToLower(get("MEMQL_AVATAR_VENDOR", "anam"))
 	cfg.AnamAPIKey = get("MEMQL_ANAM_API_KEY", "")
 	cfg.SimliAPIKey = get("MEMQL_SIMLI_API_KEY", "")
-	cfg.AnamDefaultPersonaID = get("ANAM_DEFAULT_PERSONA_ID", "")
-	cfg.AnamDefaultAvatarID = get("ANAM_DEFAULT_AVATAR_ID", "")
-	cfg.AnamDefaultPersonaNm = get("ANAM_DEFAULT_PERSONA_NAME", "Assistant")
+	cfg.AnamDefaultPersonaID = get("MEMQL_ANAM_DEFAULT_PERSONA_ID", "")
+	cfg.AnamDefaultAvatarID = get("MEMQL_ANAM_DEFAULT_AVATAR_ID", "")
+	cfg.AnamDefaultPersonaNm = get("MEMQL_ANAM_DEFAULT_PERSONA_NAME", "Assistant")
 
-	cfg.LogLevel = strings.ToUpper(get("VOICE_AGENT_LOG_LEVEL", "INFO"))
+	cfg.LogLevel = strings.ToUpper(get("MEMQL_VOICE_AGENT_LOG_LEVEL", "INFO"))
 
 	// Cascade / labeled-transcript clients (#1355). Empty model values fall
 	// back to the openai package defaults.
 	cfg.CascadeASRModel = get("MEMQL_POLYPHON_OPENAI_ASR_MODEL", "")
 	cfg.CascadeTTSModel = get("MEMQL_POLYPHON_OPENAI_TTS_MODEL", "")
-	cfg.VoiceLanguage = get("POLYPHON_VOICE_LANGUAGE", "en")
+	cfg.VoiceLanguage = get("MEMQL_POLYPHON_VOICE_LANGUAGE", "en")
 
 	if cfg.VoiceExecutor != "cascade" && cfg.VoiceExecutor != "realtime" {
 		return Config{}, fmt.Errorf(

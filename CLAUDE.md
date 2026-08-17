@@ -100,7 +100,10 @@ memQL/
 │   ├── node/          Distributed node system (identity, peer mesh, bootstrap)
 │   ├── architecture/  Auto-generated architecture model (UML/C4 from source)
 │   ├── observe/       Per-invocation observability runtime (FQN-keyed)
-│   ├── genesis/       Sealed env envelope + repo-root .env override (localenv.go)
+│   ├── envregistry/   Env-var registry: manifest, boot validation, domain
+│   │                  derivations, legacy aliases, repo-root .env override
+│   │                  (localenv.go). Was `genesis/` until memql#3963; the
+│   │                  sealed-envelope half it shared a directory with is gone
 │   └── ...            (memql, grpc, events, database, server, auth, edge, etc.)
 ├── core/              Shared utilities (logger, env, id)
 │   └── dslfs/         MEMQL_DSL_PATH on-disk override / embedded FS picker
@@ -1340,6 +1343,17 @@ See [docs/public/operate/auth/](docs/public/operate/auth/):
   token over the network. No fallback -- a cluster that has not been seeded
   `MEMQL_OPERATOR_KEY` refuses operator streams rather than accepting the old
   one. Rotation sequencing for both keys lives here.
+- [recovery-key.md](docs/public/operate/auth/recovery-key.md) -- the owner
+  BREAK-GLASS credential (epic memql#3958): `mql_rec_<43>`, SHA-256 at rest,
+  bound to one owner, minted automatically with its plaintext never logged, and
+  claimed on demand from inside the identity pod. It authorizes exactly one
+  action -- register a passkey as that owner -- and is REFUSED while the owner
+  still holds a usable sign-in route, which is what keeps it a break-glass key
+  rather than a second password. Single-use: redeeming spends it and mints an
+  unclaimed successor in the same breath, so a leaked key is worth one passkey
+  registration and the cluster is never without a route back in. What replaced
+  the sealed genesis envelope's one irreplaceable job, without a second bearer
+  that also decrypts config.
 - [service-account-jwt.md](docs/public/operate/auth/service-account-jwt.md) --
   the `class="service_account"` machine identity (#691): the deploy
   gate / automation credential that verifies on the BFF/mesh via

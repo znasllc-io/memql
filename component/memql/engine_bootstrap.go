@@ -327,7 +327,34 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// unfiltered full-concept query read -- that work belongs in a query
 	// `filter` / SQL pushdown, not an in-memory scan. Mirrors the dead-logic
 	// lint's warning severity; load is unaffected.
-	warnInMemoryCollectionScans(e.Logger, functionRegistry.Snapshot())
+	// LookupIndex, not Snapshot (memql#3897): the lint resolves a logic body's
+	// call target by the BARE name the author wrote (`functions[call.Name]`),
+	// so a qualified-only map would make every call unresolvable and silence
+	// the lint completely rather than failing loudly.
+	warnInMemoryCollectionScans(e.Logger, functionRegistry.LookupIndex())
+
+	// FLAT-KIND REFERENCE RESOLUTION (memql#3897). Runs here, after every
+	// registry is populated, because load order across namespaces is not
+	// defined -- a query in `cognition` may call a builtin in `common` that
+	// loaded later, and resolving during load would make the answer depend on
+	// file order. Second pass over a complete registry, like
+	// resolveRelationshipTargets is for concepts.
+	//
+	// ZERO REWRITES IS THE EXPECTED RESULT on a tree with no cross-namespace
+	// name collisions, and that is not a no-op: every reference already
+	// resolves through the registry's bare-name floor. The pass becomes
+	// load-bearing the moment a product DSL bundle declares a construct whose
+	// name a core construct also uses -- which is the state memql#3897 exists
+	// to make possible.
+	if rewrites := resolveConstructReferences(
+		functionRegistry, specRegistry, shapeRegistry, e.prompts, baseloader.ReadAll(e.Logger),
+		// Logger is PROMOTED through the embedded *component.Component, so it
+		// has to be guarded on the Component too -- a Component-less engine
+		// panics on the promoted field (#2674).
+	); rewrites > 0 && e.Component != nil && e.Logger != nil {
+		e.Logger.Info("memql.constructReferences: qualified cross-namespace references",
+			"component", "memql.constructReferences", "rewrites", rewrites)
+	}
 
 	// Capability catalog + authored-action validation (construct-invocation
 	// epic #2322, Story 8 / memql#2330). The DSL `capability` declarations are

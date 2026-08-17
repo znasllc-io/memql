@@ -36,7 +36,7 @@ func TestToolSchema1630_ArgConceptTypesReconciled(t *testing.T) {
 	if _, _, err := LoadUnifiedFunctions(logger, registry, memoryNodes.DefaultRegistry()); err != nil {
 		t.Fatalf("LoadUnifiedFunctions: %v", err)
 	}
-	snapshot := registry.Snapshot()
+	snapshot := registry.LookupIndex()
 
 	schemaFor := func(t *testing.T, mutation string) interface {
 		Validate(any) error

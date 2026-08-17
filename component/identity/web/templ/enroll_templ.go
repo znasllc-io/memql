@@ -8,14 +8,39 @@ package webtempl
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// EnrollData drives GET /enroll?code=... -- the page a single-use enrolment
-// link lands on (memql#3408).
+import "strings"
+
+// EnrollData drives GET /enroll?code=... and GET /recover?code=... -- the two
+// pages a passkey-registration credential lands on (memql#3408, memql#3968).
 //
-// Two shapes in one component: the live enrolment card, and one of four
-// distinct refusals. They share a template because they share a URL and a
-// layout, not because they are the same page -- Rejection is what picks.
+// Two shapes in one component: the live card, and one of several distinct
+// refusals. They share a template because they share a layout and a ceremony,
+// not because they are the same page -- Rejection is what picks.
+//
+// ONE COMPONENT FOR BOTH ROUTES, GENERALISED RATHER THAN FORKED. A second
+// template and a second driver script for /recover would be a copy of the
+// WebAuthn ceremony -- the base64url helpers, the create() call, the error
+// mapping -- and the copy would drift on the surface where drift is least
+// visible. The ceremony is identical; only the Authorization scheme and the
+// wording differ, so only those are variables.
 type EnrollData struct {
 	Layout LayoutData
+
+	// AuthScheme is the HTTP Authorization scheme the browser presents the
+	// code under: "Enrolment" or "Recovery". Rendered into a data attribute
+	// and read by enroll.js. Empty defaults to "Enrolment", so every existing
+	// caller is unchanged.
+	AuthScheme string
+
+	// LiveHeading overrides the live card's title. Named apart from Heading
+	// below, which is the REJECTION card's title -- two headings on two
+	// mutually exclusive shapes of one page, and collapsing them would put the
+	// refusal's words on the live card.
+	LiveHeading string
+
+	// SingleUseNote is an extra line under the live card. /recover uses it to
+	// say that spending the key mints a replacement; /enroll leaves it empty.
+	SingleUseNote string
 
 	// Rejection is "" on the live path. Otherwise it is the machine-readable
 	// state: "invalid", "expired", "already-used" or "revoked". Rendered into
@@ -39,6 +64,22 @@ type EnrollData struct {
 
 	// ExpiresIn is a rendered duration ("14 minutes"), live path only.
 	ExpiresIn string
+}
+
+// AuthSchemeOrDefault is the scheme the browser presents the code under.
+func (d EnrollData) AuthSchemeOrDefault() string {
+	if s := strings.TrimSpace(d.AuthScheme); s != "" {
+		return s
+	}
+	return "Enrolment"
+}
+
+// HeadingOrDefault is the live card's title.
+func (d EnrollData) HeadingOrDefault() string {
+	if h := strings.TrimSpace(d.LiveHeading); h != "" {
+		return h
+	}
+	return "Set up your passkey"
 }
 
 // Enroll renders the enrolment page.
@@ -100,7 +141,7 @@ func Enroll(data EnrollData) templ.Component {
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.Rejection)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 57, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 98, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var3)
 				if templ_7745c5c3_Err != nil {
@@ -113,7 +154,7 @@ func Enroll(data EnrollData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Heading)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 61, Col: 41}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 102, Col: 41}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -126,7 +167,7 @@ func Enroll(data EnrollData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(data.Message)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 62, Col: 40}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 103, Col: 40}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -144,7 +185,7 @@ func Enroll(data EnrollData) templ.Component {
 					var templ_7745c5c3_Var6 string
 					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(data.NextStep)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 64, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 105, Col: 59}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 					if templ_7745c5c3_Err != nil {
@@ -160,49 +201,94 @@ func Enroll(data EnrollData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"card\" data-enroll-state=\"valid\"><h1 class=\"card-title\">Set up your passkey</h1><p class=\"text-muted\">A passkey signs you in with the unlock you already use on this device -- Touch ID, Windows Hello, or your screen lock. There is nothing to remember and nothing to type.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"card\" data-enroll-state=\"valid\" data-auth-scheme=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var7 string
+				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.ResolveAttributeValue(data.AuthSchemeOrDefault())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 109, Col: 92}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var7)
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><h1 class=\"card-title\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var8 string
+				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(data.HeadingOrDefault())
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 110, Col: 52}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</h1><p class=\"text-muted\">A passkey signs you in with the unlock you already use on this device -- Touch ID, Windows Hello, or your screen lock. There is nothing to remember and nothing to type.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				if data.AccountLabel != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<p class=\"text-small text-subtle mt-2\">This will be added to <strong>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<p class=\"text-small text-subtle mt-2\">This will be added to <strong>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var7 string
-					templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(data.AccountLabel)
+					var templ_7745c5c3_Var9 string
+					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(data.AccountLabel)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 77, Col: 55}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 118, Col: 55}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</strong>.</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</strong>.</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 				if data.ExpiresIn != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<p class=\"text-small text-subtle\">This link is single-use and expires in ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<p class=\"text-small text-subtle\">This link is single-use and expires in ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var8 string
-					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(data.ExpiresIn)
+					var templ_7745c5c3_Var10 string
+					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(data.ExpiresIn)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 82, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 123, Col: 61}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, ".</p>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, ".</p>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div class=\"mt-2\"><button type=\"button\" id=\"enroll-start\" class=\"btn btn-primary\">Create passkey</button></div><p id=\"enroll-status\" class=\"text-small mt-2\" role=\"status\" aria-live=\"polite\"></p></div>")
+				if data.SingleUseNote != "" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<p class=\"text-small text-subtle\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var11 string
+					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(data.SingleUseNote)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `enroll.templ`, Line: 127, Col: 59}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</p>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<div class=\"mt-2\"><button type=\"button\" id=\"enroll-start\" class=\"btn btn-primary\">Create passkey</button></div><p id=\"enroll-status\" class=\"text-small mt-2\" role=\"status\" aria-live=\"polite\"></p></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

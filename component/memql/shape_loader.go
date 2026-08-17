@@ -61,7 +61,7 @@ func (r *ShapeRegistry) Upsert(shape *ShapeDefinition) error {
 	if shape == nil {
 		return fmt.Errorf("shape is nil")
 	}
-	return r.Registry.Upsert(shape.Name, shape)
+	return r.Registry.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(shape.Origin), shape.Name), shape)
 }
 
 // add registers a shape definition (error on duplicate).
@@ -69,7 +69,7 @@ func (r *ShapeRegistry) add(shape *ShapeDefinition) error {
 	if shape == nil {
 		return fmt.Errorf("shape is nil")
 	}
-	return r.Registry.Add(shape.Name, shape)
+	return r.Registry.Add(QualifyConstruct(ConstructNamespaceForOrigin(shape.Origin), shape.Name), shape)
 }
 
 // Get retrieves a shape by name. Returns (nil, false) when not

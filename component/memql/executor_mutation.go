@@ -50,6 +50,12 @@ type writeMeta struct {
 	// already-predefined role even if the caller tries to flip the flag
 	// to false in the same delta (memql#2070).
 	priorPredefined bool
+	// priorUserRole is the prior row's v1:identity:user `role` (empty when
+	// absent), captured before the delta overwrites it so the last-owner
+	// deletion guard judges a PARTIAL update correctly (memql#3967).
+	// `deleteUserHard` writes `active: false` and nothing else, so without
+	// this the guard would see no role at all and pass every deletion.
+	priorUserRole string
 	// priorBaseTier is the prior row's healing `tier`==base flag (false
 	// when absent), captured before the delta overwrites it so the
 	// self-healing base-tier immutability guard can reject a write that
@@ -607,6 +613,10 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 			// guard can reject an edit that targets an already-base-tier
 			// override even if the delta flips tier to overlay.
 			meta.priorBaseTier = isBaseTier(priorPayload["tier"])
+			// Capture the PRIOR user role before the delta overwrites it
+			// (memql#3967) so the last-owner deletion guard can tell an owner
+			// from anybody else on a partial `active: false` update.
+			meta.priorUserRole = stringFromAny(priorPayload["role"])
 			// Capture the PRIOR valid flag (memql#2143) so the self-healing
 			// blast-radius validation guard only gates the valid false->true
 			// ACCEPT transition, not a re-write of an already-accepted override.
@@ -869,6 +879,22 @@ func (e *MemQLEngine) executeWrite(ctx context.Context, mutation MutationNode, r
 	// `@rowAuthz` declaration answers.
 	if conceptMeta.Name == conceptIdentityIdentity {
 		if err := e.validateIdentityCredentialActorScope(ctx, payload, actor); err != nil {
+			return nil, meta, err
+		}
+	}
+	// Last-owner deletion guard (memql#3967): a write that would leave the
+	// cluster with NO active owner is refused. accountDeletionSweep calls
+	// deleteUserHard unconditionally for every user whose cooldown elapsed, and
+	// nothing counted owners -- so the last one could be swept away, after
+	// which nothing could promote a replacement (promoting an owner requires an
+	// owner) and any recovery key bound to them became permanently
+	// unredeemable.
+	//
+	// Deliberately NOT actor-gated, unlike its neighbours above: the sweep is a
+	// system actor, and the sweep is the caller this exists to stop. See
+	// last_owner_deletion_validation.go.
+	if conceptMeta.Name == conceptIdentityUser {
+		if err := e.validateLastOwnerNotDeleted(ctx, payload, mutation.ID, meta.priorUserRole); err != nil {
 			return nil, meta, err
 		}
 	}

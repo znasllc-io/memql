@@ -115,8 +115,8 @@ func TestOwnedVarsArePrefixed(t *testing.T) {
 // no source file -- which is why a grep concluded SERVER_ADDRESS was read by
 // nothing while it was in fact setting the HTTP listen address on every node.
 func TestLegacyAliasesCount(t *testing.T) {
-	if len(LegacyAliases) != 109 {
-		t.Fatalf("LegacyAliases has %d entries, want 109 (the Epic 7.3 rename map, minus the memql#3453 removal, plus the six pre-convention renames in memql#3831 and the fourteen SERVER_*/SERVICE_* renames in memql#3892)", len(LegacyAliases))
+	if len(LegacyAliases) != 114 {
+		t.Fatalf("LegacyAliases has %d entries, want 114 (the Epic 7.3 rename map, minus the memql#3453 removal, plus the six pre-convention renames in memql#3831 and the fourteen SERVER_*/SERVICE_* renames in memql#3892, and the five voice-agent renames in memql#3834)", len(LegacyAliases))
 	}
 	seenLegacy := map[string]bool{}
 	for newName, legacy := range LegacyAliases {

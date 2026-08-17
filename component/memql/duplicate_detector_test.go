@@ -30,12 +30,20 @@ func TestNoDuplicateConstructs(t *testing.T) {
 	t.Fatal(b.String())
 }
 
-// TestDetectDuplicateConstructs_Fixture exercises the detector on
-// synthetic sources: it must (a) catch a genuine same-registry
-// collision, (b) NOT flag an automation and a same-named logic (they
-// land in different registries), and (c) NOT flag a nested logic
-// step-invocation inside an automation body as a top-level logic
-// declaration.
+// TestDetectDuplicateConstructs_Fixture exercises the detector on synthetic
+// sources: it must (a) catch a genuine collision -- the same name twice in the
+// SAME namespace, (b) NOT flag the same name in two DIFFERENT namespaces, which
+// memql#3897 made legal, (c) NOT flag an automation and a same-named logic (they
+// land in different registries), and (d) NOT flag a nested logic
+// step-invocation inside an automation body as a top-level logic declaration.
+//
+// (b) is the one that changed, and it is the whole point of memql#3897. The
+// gate refused a duplicate TREE-WIDE, which was right while the twelve flat
+// kinds shared one registry keyed by the bare name -- the second declaration
+// really did overwrite the first. Now the key is `<namespace>.<name>`, so both
+// coexist and each resolves to its own. Refusing that IS the constraint the
+// issue exists to remove: it is what stopped a product DSL bundle declaring a
+// construct whose name the engine had already used.
 func TestDetectDuplicateConstructs_Fixture(t *testing.T) {
 	fileA := baseloader.RawFile{
 		Path: "alpha/shapes.memql",
@@ -81,23 +89,63 @@ logic syncThing {
 `,
 	}
 
-	dups := DetectDuplicateConstructs([]baseloader.RawFile{fileA, fileB, fileC, fileD})
+	// The SAME name twice in the SAME namespace -- still a real collision,
+	// because both land on one key and the second silently wins.
+	fileE := baseloader.RawFile{
+		Path: "alpha/moreShapes.memql",
+		Content: `
+@row
+shape widget alphaOnly {
+  row.id
+}
+`,
+	}
+	fileF := baseloader.RawFile{
+		Path: "alpha/evenMoreShapes.memql",
+		Content: `
+@row
+shape widget alphaOnly {
+  name
+}
+`,
+	}
 
-	// Exactly one duplicate: the widgetFull shape across two files.
-	if len(dups) != 1 {
-		t.Fatalf("expected exactly 1 duplicate (widgetFull shape), got %d: %v", len(dups), dups)
+	dups := DetectDuplicateConstructs([]baseloader.RawFile{fileA, fileB, fileC, fileD, fileE, fileF})
+
+	// widgetFull is declared in alpha AND beta -- two namespaces, so NOT a
+	// duplicate. This is memql#3897's first acceptance bullet.
+	for _, d := range dups {
+		if d.Name == "widgetFull" {
+			t.Fatalf("two namespaces declaring the same flat construct must NOT be a "+
+				"collision -- the registry is keyed <namespace>.<name> and each resolves to "+
+				"its own (memql#3897). Refusing this is the constraint that stopped a product "+
+				"DSL bundle naming a construct the engine had already named: %v", d)
+		}
 	}
-	got := dups[0]
-	if got.Group != "shapes" || got.Name != "widgetFull" {
-		t.Fatalf("expected [shapes] widgetFull, got [%s] %s", got.Group, got.Name)
+
+	// alphaOnly is declared twice in ALPHA -- one key, silent last-wins, still
+	// refused.
+	var same *DuplicateConstruct
+	for i := range dups {
+		if dups[i].Name == "alphaOnly" {
+			same = &dups[i]
+		}
 	}
-	if len(got.Origins) != 2 {
-		t.Fatalf("expected 2 origins, got %d: %v", len(got.Origins), got.Origins)
+	if same == nil {
+		t.Fatalf("the same name twice in ONE namespace is still a silent last-wins "+
+			"overwrite and must still be caught, got %v", dups)
 	}
-	sort.Strings(got.Origins)
-	if !strings.Contains(got.Origins[0], "alpha/shapes.memql") ||
-		!strings.Contains(got.Origins[1], "beta/shapes.memql") {
-		t.Fatalf("origins should name both shape files, got %v", got.Origins)
+	if same.Group != "shapes" || same.Namespace != "alpha" {
+		t.Fatalf("expected [shapes] alphaOnly in namespace alpha, got [%s] %s in %q",
+			same.Group, same.Name, same.Namespace)
+	}
+	if len(same.Origins) != 2 {
+		t.Fatalf("expected 2 origins, got %d: %v", len(same.Origins), same.Origins)
+	}
+	sort.Strings(same.Origins)
+	if !strings.Contains(same.Origins[0], "alpha/evenMoreShapes.memql") ||
+		!strings.Contains(same.Origins[1], "alpha/moreShapes.memql") {
+		t.Fatalf("origins should name both alpha files, got %v", same.Origins)
 	}
 
 	// The automation `syncThing` and the top-level logic `syncThing` land

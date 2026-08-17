@@ -39,7 +39,7 @@ the stable ReplicaSet — recovery is automatic and needs no human step.
 
 ## 2. Secret recovery (Key Vault → ESO)
 
-The sealed genesis envelope + master key + DSN live in **Key Vault**
+The master key + operator key + identity signing seed + DSN live in **Key Vault**
 (`kv-memql-staging`); External Secrets (Phase 5) reconciles them into
 `memql-secrets`. Losing the in-cluster Secret is recovered by re-sync, not by
 hunting for the values.

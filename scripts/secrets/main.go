@@ -1,35 +1,31 @@
 // scripts/secrets is a slim operator tool invoked internally by
-// memQL's dev-refresh flow. The authoring of secrets/variables now
-// lives in `memql-cockpit genesis init`; this tool's only job is to
-// (1) decrypt a genesis.znas blob to a temporary .env for docker
-// compose and (2) read that .env and seed manifest-listed entries
-// into a running memQL as concept rows.
+// memQL's dev-refresh flow. Its only job is to read a .env file and
+// seed manifest-listed entries into a running memQL as concept rows.
+//
+// THE `decrypt` SUBCOMMAND IS GONE (epic memql#3958). It opened a
+// genesis.znas envelope into a temp .env, and there is no envelope any
+// more: config has one delivery path, the k8s Secret every node
+// envFroms. secret.OpenBlob lost its last caller with it.
 //
 // Subcommands:
 //
-//	decrypt --in <path>
-//	         Open a ZNAS envelope. Writes the plaintext to a fresh
-//	         O_EXCL temp file (mode 0600) and prints the path on
-//	         stdout. Requires MEMQL_MASTER_KEY in env. (The local k3d
-//	         flow seeds the envelope into k8s Secrets via
-//	         scripts/k3d/seed-secrets.sh instead.)
-//
 //	seed --env-file <path>
-//	         Read the (decrypted) .env file, walk memql's manifest at
+//	         Read the .env file, walk memQL's manifest at
 //	         scripts/secrets/manifest.yaml, and upsert manifest-listed
 //	         entries into the running memQL as v1:platform:global*
 //	         rows. Entries in the .env that are NOT in the manifest
 //	         are ignored -- they're bootstrap-only env vars consumed
-//	         from the genesis envelope / k8s Secrets, not concept rows.
+//	         from k8s Secrets, not concept rows.
 //
 //	health   Quick gRPC handshake check against the running memQL.
 //
 // All authoring previously done by `secrets init / set / delete /
 // edit / export / variable-set / variable-delete / list / master-key`
-// has been retired; use `memql-cockpit genesis init` instead.
+// has been retired.
 //
 // Required env:
-//   - MEMQL_MASTER_KEY  for decrypt + seed
+//   - MEMQL_MASTER_KEY  for seed (it DECRYPTS values at rest; it
+//     authenticates nothing -- memql#3519)
 //   - MEMQL_GRPC_ENDPOINT  default https://bff.${MEMQL_IDENTITY_BOOTSTRAP_DOMAIN:-memql.localhost}:443
 package main
 
@@ -84,8 +80,6 @@ func main() {
 
 	var err error
 	switch sub {
-	case "decrypt":
-		err = cmdDecrypt(args)
 	case "seed":
 		err = cmdSeed(logger, args)
 	case "health":
@@ -105,23 +99,18 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprint(os.Stderr, `memQL secrets seed/decrypt tool (internal)
+	fmt.Fprint(os.Stderr, `memQL secrets seed tool (internal)
 
 Subcommands:
-  decrypt --in <path>
-            Open a ZNAS envelope, write plaintext to a fresh temp
-            file (mode 0600), print its path on stdout. Requires
-            MEMQL_MASTER_KEY.
   seed --env-file <path>
-            Push manifest-listed entries from a decrypted .env into
-            the running memQL. Requires MEMQL_MASTER_KEY.
+            Push manifest-listed entries from a .env into the running
+            memQL. Requires MEMQL_MASTER_KEY.
   health    Quick gRPC handshake check. Prints "ok" or an error.
 
-Authoring of genesis.znas / .env values lives in
-  memql-cockpit genesis init
-
 Env:
-  MEMQL_MASTER_KEY      required for decrypt + seed
+  MEMQL_MASTER_KEY      required for seed. It DECRYPTS values at rest
+                        and authenticates nothing (memql#3519); the
+                        operator bearer is MEMQL_OPERATOR_KEY.
   MEMQL_GRPC_ENDPOINT   default https://bff.memql.localhost:443
 `)
 }
@@ -184,56 +173,6 @@ func loadEnvFile(path string) (map[string]string, error) {
 		out[name] = value
 	}
 	return out, nil
-}
-
-// ---------------------------------------------------------------------
-// decrypt
-// ---------------------------------------------------------------------
-
-// cmdDecrypt opens a ZNAS envelope and writes the plaintext to a
-// freshly-created temp file in $TMPDIR (or /tmp), printing the path
-// on stdout. Owning the path here -- rather than letting the caller
-// pass --out -- closes a symlink/TOCTOU window: os.CreateTemp uses
-// O_CREAT|O_EXCL so a pre-planted symlink at a predictable PID-based
-// path cannot trick this code into writing the plaintext to an
-// attacker-chosen file.
-func cmdDecrypt(args []string) error {
-	flags := parseFlags(args)
-	in := flags["in"]
-	if in == "" {
-		return fmt.Errorf("decrypt: --in <path> is required")
-	}
-	if os.Getenv(secret.EnvMasterKey) == "" {
-		return fmt.Errorf("decrypt: %s must be set in env", secret.EnvMasterKey)
-	}
-	envelope, err := os.ReadFile(in)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", in, err)
-	}
-	plaintext, err := secret.OpenBlob(envelope)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", in, err)
-	}
-	f, err := os.CreateTemp("", "memql-genesis-*.env")
-	if err != nil {
-		return fmt.Errorf("create temp: %w", err)
-	}
-	if err := f.Chmod(0o600); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return fmt.Errorf("chmod %s: %w", f.Name(), err)
-	}
-	if _, err := f.Write(plaintext); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return fmt.Errorf("write %s: %w", f.Name(), err)
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return fmt.Errorf("close %s: %w", f.Name(), err)
-	}
-	fmt.Println(f.Name())
-	return nil
 }
 
 // ---------------------------------------------------------------------

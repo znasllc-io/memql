@@ -56,11 +56,11 @@ points at (#2186).
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | the Cloud project key/secret (voice-agent pair) | `livekit-secrets` |
 | `MEMQL_POLYPHON_LIVEKIT_URL` / `_PUBLIC_URL` | the same Cloud project URL | `livekit-secrets` |
 | `MEMQL_POLYPHON_LIVEKIT_API_KEY` / `_API_SECRET` | the same Cloud project key/secret (telephony + token-minter pair) | `livekit-secrets` |
-| `MEMQL_TELEPHONY_TELNYX_API_KEY` | Telnyx v2 API key | genesis envelope (global-scope secret) |
-| `MEMQL_TELEPHONY_TELNYX_CONNECTION_ID` | the Telnyx Connection pointing at the Cloud SIP URI | genesis envelope |
+| `MEMQL_TELEPHONY_TELNYX_API_KEY` | Telnyx v2 API key | `memql-secrets` (global-scope secret) |
+| `MEMQL_TELEPHONY_TELNYX_CONNECTION_ID` | the Telnyx Connection pointing at the Cloud SIP URI | `memql-secrets` |
 | `MEMQL_TELEPHONY_SIP_EDGE_URI` | **unset/empty** — see below | n/a |
-| `MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS` | outbound trunk dial target (Telnyx Outbound Voice Profile) | genesis envelope |
-| `MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME` / `_PASSWORD` | outbound trunk credentials | genesis envelope |
+| `MEMQL_TELEPHONY_OUTBOUND_SIP_ADDRESS` | outbound trunk dial target (Telnyx Outbound Voice Profile) | `memql-secrets` |
+| `MEMQL_TELEPHONY_OUTBOUND_AUTH_USERNAME` / `_PASSWORD` | outbound trunk credentials | `memql-secrets` |
 
 **Why `MEMQL_TELEPHONY_SIP_EDGE_URI` is empty on the Cloud plane.** On the
 self-hosted plane it points at the in-cluster `livekit/sip` edge. On Cloud,
@@ -97,8 +97,8 @@ kubectl exec -n memql deploy/voice-agent -- sh -c 'echo "$LIVEKIT_URL"'   # -> w
 kubectl logs -n memql deploy/bff --tail 100 | grep -i livekit              # token mint against the cloud URL
 ```
 
-The Telnyx + outbound creds are global-scope secrets delivered via the genesis
-envelope (`MEMQL_GENESIS_AUTOLOAD`); seed them into your dev envelope to enable
+The Telnyx + outbound creds are global-scope secrets delivered on the
+`memql-secrets` Secret; seed them there (`make secrets`) to enable
 telephony locally (see [env-vars.md](env-vars.md)).
 
 ## 2. Provision inbound on LiveKit Cloud

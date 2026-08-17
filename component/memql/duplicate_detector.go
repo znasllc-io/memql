@@ -55,6 +55,7 @@ import (
 
 	languageParser "github.com/znasllc-io/memql/component/language/parser"
 	"github.com/znasllc-io/memql/component/memql/baseloader"
+	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // DuplicateConstruct is one (group, name) collision: the same construct
@@ -63,15 +64,23 @@ import (
 // keyword), sorted, so the ERROR log and the failing test point at both
 // sides of the collision.
 type DuplicateConstruct struct {
-	Group   string   // runtime-registry group ("functions", "shapes", ...)
-	Name    string   // the colliding construct name
-	Origins []string // "<keyword> <path>" per declaration, sorted + deduped
+	Group string // runtime-registry group ("functions", "shapes", ...)
+	// Namespace is the one namespace both declarations are in (memql#3897).
+	// A collision is now per-namespace, so this is never a comparison between
+	// two of them -- two namespaces declaring the same name is legal.
+	Namespace string
+	Name      string   // the colliding construct name
+	Origins   []string // "<keyword> <path>" per declaration, sorted + deduped
 }
 
 // String renders a one-line summary for logs + test failures.
 func (d DuplicateConstruct) String() string {
-	return fmt.Sprintf("[%s] %q declared in %d places: %s",
-		d.Group, d.Name, len(d.Origins), strings.Join(d.Origins, " | "))
+	ns := d.Namespace
+	if ns == "" {
+		ns = "<no namespace>"
+	}
+	return fmt.Sprintf("[%s] %q declared %d times in namespace %s: %s",
+		d.Group, d.Name, len(d.Origins), ns, strings.Join(d.Origins, " | "))
 }
 
 // structFormKeywordGroups maps each struct-form construct keyword to the
@@ -119,11 +128,23 @@ func DetectDuplicateConstructs(files []baseloader.RawFile) []DuplicateConstruct 
 	// key = group + "\x00" + name -> set of "<keyword> <path>" origins.
 	origins := map[string]map[string]struct{}{}
 
+	// KEYED PER NAMESPACE (memql#3897). The S5 gate refused a duplicate
+	// tree-wide, which was correct while the twelve flat kinds shared ONE
+	// registry keyed by the bare name -- a second `spaceParticipants` really did
+	// overwrite the first. The registry is keyed `<namespace>.<name>` now, so
+	// two namespaces declaring the name is a legal, resolvable state and the
+	// gate must not refuse it: refusing it IS the constraint memql#3897 exists
+	// to remove, and it is the one that stopped a product DSL bundle naming any
+	// construct the engine had already named.
+	//
+	// What the gate still catches is the collision that remains real: the SAME
+	// name declared twice in the SAME namespace, which is still a silent
+	// last-wins overwrite.
 	record := func(group, name, keyword, path string) {
 		if name == "" {
 			return
 		}
-		key := group + "\x00" + name
+		key := group + "\x00" + dslfs.NamespaceFromFilePath(path) + "\x00" + name
 		set := origins[key]
 		if set == nil {
 			set = map[string]struct{}{}
@@ -156,21 +177,25 @@ func DetectDuplicateConstructs(files []baseloader.RawFile) []DuplicateConstruct 
 		if len(set) < 2 {
 			continue
 		}
-		parts := strings.SplitN(key, "\x00", 2)
+		parts := strings.SplitN(key, "\x00", 3)
 		list := make([]string, 0, len(set))
 		for o := range set {
 			list = append(list, o)
 		}
 		sort.Strings(list)
 		out = append(out, DuplicateConstruct{
-			Group:   parts[0],
-			Name:    parts[1],
-			Origins: list,
+			Group:     parts[0],
+			Namespace: parts[1],
+			Name:      parts[2],
+			Origins:   list,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Group != out[j].Group {
 			return out[i].Group < out[j].Group
+		}
+		if out[i].Namespace != out[j].Namespace {
+			return out[i].Namespace < out[j].Namespace
 		}
 		return out[i].Name < out[j].Name
 	})

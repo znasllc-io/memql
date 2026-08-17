@@ -3437,6 +3437,7 @@ message IdentityAdminMsg {
     IssueEnrolmentLinkRequest issue_enrolment_link = 16;
     RevokeEnrolmentLinkRequest revoke_enrolment_link = 17;
     SetOAuthClientCorsOriginsRequest set_oauth_client_cors_origins = 18;
+    RotateRecoveryKeyRequest rotate_recovery_key = 19;
   }
 }
 
@@ -3472,6 +3473,20 @@ message IdentityAdminResult {
   // fetch it. Empty for every other operation and for every refusal. A
   // console must show it once and hold it nowhere else.
   string enrolment_url = 7;
+  // The recovery key, set by rotate_recovery_key ONLY (memql#3970).
+  //
+  // The SECOND field on this reply that carries a credential, and it earns the
+  // exception the same way enrolment_url does: the key IS that call's product,
+  // the plaintext exists nowhere else (only its SHA-256 hash is persisted),
+  // and no later request can fetch it. Empty for every other operation and for
+  // every refusal.
+  //
+  // A SEPARATE FIELD rather than reusing enrolment_url, even though only one
+  // is ever set. They are different credentials with different lifetimes and
+  // different handling, and a console that read one field would have to
+  // remember which request it sent to know what it was holding. The type
+  // system should carry that instead.
+  string recovery_key = 8;
 }
 
 // UpdateUserProfileRequest sets a person's directory fields. Replaces
@@ -3588,6 +3603,29 @@ message IssueEnrolmentLinkRequest {
 message RevokeEnrolmentLinkRequest {
   // The v1:identity:enrolmentToken row id.
   string enrolment_token_id = 1;
+}
+
+// RotateRecoveryKeyRequest mints a replacement owner recovery key and retires
+// the current one (memql#3970).
+//
+// WHY AN OWNER NEEDS THIS AT ALL. The recovery key is minted automatically and
+// its plaintext is never logged, so an operator who lost the value they were
+// shown -- or who never claimed it -- has a live break-glass credential nobody
+// holds. That is not a lockout, but it is a credential doing no work. Rotating
+// mints one they can actually store.
+//
+// It is also the response to a suspected leak, which is why the operation is
+// available to a signed-in owner rather than only inside the pod: the person
+// who needs it most urgently is the one who can still sign in.
+//
+// The predecessor is DEACTIVATED, not deleted, and rotated_from on the new row
+// records the lineage -- so an operator can follow the chain of custody
+// without reconstructing it from timestamps.
+message RotateRecoveryKeyRequest {
+  // The owner whose key to rotate. Empty means the cluster's owner when there
+  // is exactly one; with several owners it is required, because picking one
+  // would hand the caller a credential for an account they did not name.
+  string user_id = 1;
 }
 
 // SetOAuthClientCorsOriginsRequest grants or revokes CREDENTIALED cross-origin

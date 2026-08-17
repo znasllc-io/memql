@@ -1249,6 +1249,48 @@ func (s *Store) OwnerUserIds(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
+// HasSignInRoute reports whether a NAMED user still holds an active credential
+// they could sign in with -- a magic-link identity or a passkey, and nothing
+// else.
+//
+// THE BREAK-GLASS PREDICATE (memql#3967). Recovery-key redemption is refused
+// whenever this returns true: the key exists for an owner who has lost every
+// way back in, and a key redeemable while an ordinary sign-in still works is
+// not a break-glass credential, it is a second password for the account.
+//
+// IT MUST BE THE NAMED-USER VARIANT, AND THIS IS THE TRAP. `signInIdentitiesForSelf`
+// filters `userId==actor.userId`, and the redeem path runs PRE-ACTOR -- the key
+// is the credential, so no AccessContext exists yet. The self variant would
+// therefore return ZERO ROWS for every caller, report every account as having
+// no sign-in route, and FAIL OPEN: every redemption allowed, on an account
+// whose owner can sign in perfectly well. `signInIdentitiesForUser` takes the
+// user id as an argument and is the variant Store.HasClaimedOwner already uses
+// for exactly this reason.
+//
+// A RECOVERY KEY IS NOT A SIGN-IN ROUTE and must never be counted as one. The
+// query filters `identityIsMagicLink || identityIsPasskey`; adding
+// `identityIsRecoveryKey` to it would make an active key satisfy the gate that
+// guards its own redemption, so the key would permanently refuse itself. Said
+// here, on the trait, and on the concept -- three places, because every
+// individual edit that would break it looks reasonable.
+//
+// Error-returning by design: a DB failure must surface as "unknown" so the
+// caller can fail SAFE. For this predicate failing safe means REFUSING the
+// redemption, not allowing it -- the opposite direction from HasClaimedOwner's
+// caller, and the reason both return an error rather than a bare bool.
+func (s *Store) HasSignInRoute(ctx context.Context, userId string) (bool, error) {
+	userId = strings.TrimSpace(userId)
+	if userId == "" {
+		return false, fmt.Errorf("identity.store: has sign-in route: userId required")
+	}
+	creds, err := s.executeAndExtractInternal(ctx,
+		fmt.Sprintf(`query signInIdentitiesForUser(userId: %s)`, dslJSONString(userId)))
+	if err != nil {
+		return false, fmt.Errorf("identity.store: has sign-in route: %w", err)
+	}
+	return len(creds) > 0, nil
+}
+
 // HasClaimedOwner reports whether the cluster's owner has ever AUTHENTICATED --
 // the question memql#1864's self-heal actually wanted, and the one the
 // auto-bootstrap guard asks (memql#3591).

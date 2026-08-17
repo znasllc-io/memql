@@ -731,7 +731,7 @@ jobs:
         # for most dsl PRs; the change extends it to `.tmpl`/`.pin`-only ones.
         # Still bounded by `any .go change sets RUN_GO, which makes RUN_GATES
         # false`, which is the part that actually caps the cost.
-        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./component/genesis/... ./scripts/... ./test/dslconformance/... ./examples/...
+        run: go test -count=1 -timeout=300s ./ ./cmd/envscan/... ./component/architecture/... ./component/envregistry/... ./scripts/... ./test/dslconformance/... ./examples/...
 
       # --- pure-Go lanes (go bucket) -- build first to warm the cache ---
       #

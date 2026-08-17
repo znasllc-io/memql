@@ -741,7 +741,7 @@ func withSyntheticExemption(t *testing.T, key string) {
 }
 
 // Six memQL-owned keys predated the MEMQL_ prefix convention. Registering one
-// failed component/genesis's TestOwnedVarsArePrefixed; omitting one failed
+// failed component/envregistry's TestOwnedVarsArePrefixed; omitting one failed
 // forward drift. They are renamed now (memql#3831), but an exemption nobody
 // reads is how a gap becomes permanent, so these tests still pin that an
 // exemption is visible, that it is not laundered through `external`, and that

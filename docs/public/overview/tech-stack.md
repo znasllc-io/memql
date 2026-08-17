@@ -147,7 +147,7 @@ for the operator-side narrative.
 ### Service Accounts
 
 - AKS pulls images from ACR (`acrmemql.azurecr.io`)
-- Secrets managed via the genesis A2 sealed envelope + Azure Key Vault
+- Secrets managed via the `memql-secrets` Secret, reconciled from Azure Key Vault by External Secrets
   (the operator's own vault); see [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
 - Environment variables injected at runtime
 
@@ -171,7 +171,7 @@ for the operator-side narrative.
 - Reset the local database if migrations conflict: `make down && make up`
 - Use debug logging (enabled by default in the local overlay)
 - Test automations and functions locally before deploying
-- Secrets are seeded into k8s Secrets by `make up` (from the genesis envelope); re-seed with `make secrets`
+- Secrets are seeded into the `memql-secrets` k8s Secret by `make up`; re-seed with `make secrets`
 
 ---
 
@@ -318,10 +318,11 @@ for the full design.
   the per-cluster selection in `~/.memql/clusters.yaml`.
 
 **Cloud (AKS):**
-- Shared secrets (DSN, master key, identity signing seed) ride the
-  genesis A2 sealed envelope (`MEMQL_GENESIS_B64` in the `memql-secrets`
-  Secret), backed up in Azure Key Vault (`kv-memql-<env>`). Per-node,
-  non-secret config lives in the k8s manifest env. See
+- Shared secrets (DSN, master key, operator key, identity signing seed)
+  are KEYS on the `memql-secrets` Secret, reconciled from Azure Key Vault
+  by External Secrets (`deploy/external-secrets/`). One delivery path
+  (epic memql#3958); the sealed genesis envelope that used to be a second
+  one is gone. Per-node, non-secret config lives in the k8s manifest env. See
   [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
   for the canonical add/rotate flow.
 - Everything else lives in memQL's `v1:platform:globalSecret` /

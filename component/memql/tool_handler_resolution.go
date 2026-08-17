@@ -77,7 +77,7 @@ func validateToolHandlerTargets(tools *ToolRegistry, functions *FunctionRegistry
 	if tools == nil || functions == nil {
 		return nil
 	}
-	snapshot := tools.Snapshot()
+	snapshot := tools.LookupIndex()
 	names := make([]string, 0, len(snapshot))
 	for name := range snapshot {
 		names = append(names, name)

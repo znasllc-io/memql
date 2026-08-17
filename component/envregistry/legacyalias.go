@@ -67,6 +67,22 @@ var LegacyAliases = map[string]string{
 	"MEMQL_SERVICE_LOGGER_LEVEL":                   "SERVICE_LOGGER_LEVEL",
 	"MEMQL_SERVICE_LOG_LEVEL":                      "SERVICE_LOG_LEVEL",
 
+	// The voice-agent's pre-convention names (memql#3834). Same vintage as the
+	// six above and found the same way: they were INVISIBLE to the drift gate,
+	// here because the voice agent reads through an injected getter -- a local
+	// closure over a `Getenv` the caller supplies -- which memql#3818's helper
+	// discovery could not see one scope down. The keys were plain string
+	// literals at every call site the whole time.
+	//
+	// The LiveKit trio found beside them is NOT renamed and is not here: those
+	// are LiveKit's own convention rather than memQL's name to change, which is
+	// why they sit in envscan's `external` list beside LIVEKIT_PUBLIC_URL.
+	"MEMQL_ANAM_DEFAULT_PERSONA_ID":   "ANAM_DEFAULT_PERSONA_ID",
+	"MEMQL_ANAM_DEFAULT_AVATAR_ID":    "ANAM_DEFAULT_AVATAR_ID",
+	"MEMQL_ANAM_DEFAULT_PERSONA_NAME": "ANAM_DEFAULT_PERSONA_NAME",
+	"MEMQL_POLYPHON_VOICE_LANGUAGE":   "POLYPHON_VOICE_LANGUAGE",
+	"MEMQL_VOICE_AGENT_LOG_LEVEL":     "VOICE_AGENT_LOG_LEVEL",
+
 	// Epic 7.3 (memql#2106).
 
 	"MEMQL_AI_ANTHROPIC_API_KEY":                            "MEMQL_SI_ANTHROPIC_API_KEY",

@@ -373,7 +373,7 @@ func (e *MemQLEngine) evaluateFunctionsExpression(ctx context.Context) ([]memory
 		return nil, err
 	}
 
-	snapshot := e.functions.Snapshot()
+	snapshot := e.functions.LookupIndex()
 	if snapshot == nil {
 		snapshot = make(map[string]*Function)
 	}

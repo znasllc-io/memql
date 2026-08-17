@@ -84,7 +84,7 @@ is the default transport, so no transport env is needed:
 GOWORK=off make mcp            # -> bin/memql-mcp (engine node, no product DSL)
 
 # Register it with Claude Code as a local subprocess. The binary runs the full
-# engine, so it needs the engine env (DB DSN + genesis) the same way any node
+# engine, so it needs the engine env (DB DSN + memql-secrets) the same way any node
 # does -- the simplest path is to point it at your local k3d cluster database
 # (via the postgres port-forward, make db).
 claude mcp add memql-local -- /absolute/path/to/bin/memql-mcp

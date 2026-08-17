@@ -102,6 +102,18 @@ var external = map[string]bool{
 	// voice-agent hand to the cloud media plane. The memQL-owned equivalent is
 	// MEMQL_POLYPHON_LIVEKIT_PUBLIC_URL; this bare form is the third-party knob.
 	"LIVEKIT_PUBLIC_URL": true,
+	// The rest of LiveKit's own credential trio, surfaced when memql#3834's
+	// local-closure pass made the voice-agent's injected getter resolvable.
+	// SAME CATEGORY AS THE LINE ABOVE, and the evidence is in the tree rather
+	// than in a judgement call: integrations/telephony/plugin.go reads
+	// `firstEnv("LIVEKIT_URL", "MEMQL_POLYPHON_LIVEKIT_URL")` -- the bare name
+	// FIRST because it is what LiveKit's own CLI and SDKs expect an operator to
+	// have set, and the MEMQL_ name second because that is the one memQL owns.
+	// Renaming these (the exit memql#3831 prescribes for a pre-convention name)
+	// would be wrong here: it is not memQL's name to change.
+	"LIVEKIT_URL":        true,
+	"LIVEKIT_API_KEY":    true,
+	"LIVEKIT_API_SECRET": true,
 }
 
 // externalPrefixes are key prefixes owned by the CI / build / Go
