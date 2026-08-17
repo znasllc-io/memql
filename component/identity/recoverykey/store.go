@@ -8,9 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/znasllc-io/memql/component/auth"
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 	"github.com/znasllc-io/memql/component/identity"
 	langparser "github.com/znasllc-io/memql/component/language/parser"
+	memqlengine "github.com/znasllc-io/memql/component/memql"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -159,7 +161,7 @@ func (s *Store) Create(ctx context.Context, identityId, ownerUserId, keyHash, mi
 		langparser.QuoteString(mintedBy),
 		langparser.QuoteString(rotatedFrom),
 	)
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	if _, err := s.executeServerOnly(ctx, q); err != nil {
 		return fmt.Errorf("recoverykey.Store.Create: %w", err)
 	}
 	return nil
@@ -180,7 +182,7 @@ func (s *Store) Claim(ctx context.Context, identityId, claimedFromIP string, at 
 		langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)),
 		langparser.QuoteString(claimedFromIP),
 	)
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	if _, err := s.executeServerOnly(ctx, q); err != nil {
 		return fmt.Errorf("recoverykey.Store.Claim: %w", err)
 	}
 	return nil
@@ -206,7 +208,7 @@ func (s *Store) Redeem(ctx context.Context, identityId, redeemedFromIP string, a
 		langparser.QuoteString(at.UTC().Format(time.RFC3339Nano)),
 		langparser.QuoteString(redeemedFromIP),
 	)
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	if _, err := s.executeServerOnly(ctx, q); err != nil {
 		return fmt.Errorf("recoverykey.Store.Redeem: %w", err)
 	}
 	return nil
@@ -227,7 +229,7 @@ func (s *Store) Deactivate(ctx context.Context, identityId string) error {
 		return errors.New("recoverykey.Store.Deactivate: identityId required")
 	}
 	q := fmt.Sprintf(`mutation deactivateRecoveryKey(identityId:%s)`, langparser.QuoteString(BareSlug(identityId)))
-	if _, err := s.Engine.Execute(ctx, q); err != nil {
+	if _, err := s.executeServerOnly(ctx, q); err != nil {
 		return fmt.Errorf("recoverykey.Store.Deactivate: %w", err)
 	}
 	return nil
@@ -304,6 +306,64 @@ func (s *Store) Resolve(ctx context.Context, plain string) (*Row, State, error) 
 	return row, row.State(), nil
 }
 
+// executeServerOnly runs one construct on a context stamped server-initiated.
+//
+// EVERY construct this store issues is @serverOnly -- both reads
+// (activeRecoveryKeys, recoveryKeyByHash) and all four writes
+// (createRecoveryKeyIdentity, claimRecoveryKey, redeemRecoveryKey,
+// deactivateRecoveryKey). The engine refuses a @serverOnly construct unless
+// auth.OriginFromContext says the call is server-initiated
+// (component/memql/engine.go), so this is the one thing standing between the
+// annotation and a feature that cannot run at all.
+//
+// It was missing, and the cost was the whole credential rather than one call:
+// the boot invariant could not take its read, so no cluster minted an owner
+// recovery key; `memql recovery-key claim` exited 1; owner rotation failed;
+// and the redeem path could not resolve a presented key. Every affected
+// cluster booted with no break-glass route for its owner, degraded to a WARN
+// that nothing surfaces.
+//
+// # Why a helper rather than six inline stamps
+//
+// call_origin.go prefers the stamp INLINE at the one Execute that needs it, so
+// the marked context dies at that call. This keeps that property and adds
+// one: the helper returns a RESULT, never a context, so there is no value a
+// later frame could inherit the mark from. A context-returning wrapper would
+// be the laundering shape call_origin_conformance_test.go names as the gap it
+// cannot see; this cannot be used that way, because there is nothing to hold.
+//
+// It also makes a partial stamp unrepresentable. Six copies of the stamp is
+// six chances for the seventh operation to be written without one, which is
+// the failure mode that arrives later and reads as a typo.
+//
+// # Why this store may stamp at all, including from the wire
+//
+// Two of the three call sites are plainly server-initiated: the boot invariant
+// (invariant.go) and `memql recovery-key claim`, neither of which has a
+// request in scope. The third does: component/identity/http/webauthn_recovery.go
+// calls Resolve on an UNAUTHENTICATED request context, which is exactly the
+// shape call_origin.go warns about.
+//
+// What earns it is the argument. recoveryKeyByHash filters on a DIGEST of a
+// secret the caller had to present, computed by Resolve rather than supplied
+// by it -- so naming a row is a possession proof, not an identifier a caller
+// can choose, and there is nothing to enumerate. That is the opposite of
+// workerTokensForUser, whose caller-supplied userId is why THAT allowlist
+// entry needs a caller-scope test and this one does not.
+//
+// activeRecoveryKeys does take a caller-supplied userId, and no wire path
+// reaches it: its three callers resolve the owner themselves (the invariant,
+// the CLI) or sit downstream of the owner/admin gate asserted by
+// component/identity/adminops/gate_test.go. The rows it returns carry no
+// directory PII -- a recovery-key row is a hash, a binding and some
+// timestamps, and never the plaintext, which this package has nowhere to put.
+//
+// Pinned by store_internal_origin_test.go, which drives all six operations
+// with a client-origin context and asserts the engine saw internal.
+func (s *Store) executeServerOnly(ctx context.Context, q string) (*memqlengine.ExecuteResult, error) {
+	return s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), q)
+}
+
 // queryRows runs a projected query and converts every returned row.
 //
 // Both shapes are handled for the reason enrolment.Store.LookupByHash records:
@@ -311,7 +371,7 @@ func (s *Store) Resolve(ctx context.Context, plain string) (*Row, State, error) 
 // Bundle.Nodes, and which axis is populated depends on the projection rather
 // than on the caller.
 func (s *Store) queryRows(ctx context.Context, q string) ([]*Row, error) {
-	res, err := s.Engine.Execute(ctx, q)
+	res, err := s.executeServerOnly(ctx, q)
 	if err != nil {
 		return nil, err
 	}

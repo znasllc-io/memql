@@ -87,6 +87,26 @@ func (s *Service) RotateRecoveryKey(ctx context.Context, userId string) Result {
 	}
 
 	recStore := &recoverykey.Store{Engine: s.Engine, Logger: s.Logger}
+
+	// writeCtx carries the system CREDENTIAL actor, and every WRITE below uses
+	// it while every audit emit keeps `ctx` -- the same split adminops.go makes
+	// for node-token revoke, and for the same reason twice over.
+	//
+	// It is REQUIRED: `recovery_key` is a machineCredentialIdentityType, so the
+	// memql#2513 guard admits a write only from role=="system" or a
+	// "system:"-prefixed actor. The caller here is a signed-in owner or admin,
+	// so without this every rotation is refused -- the guard does not care that
+	// the human is privileged, only that a human is not a system actor. (Nor
+	// would ContextWithSystemActor help: it stamps role="owner" plus an email,
+	// and ActorFromToken prefers email over subject, so it fails both arms too.)
+	//
+	// And it is CORRECT rather than a workaround: who rotated the key is
+	// already recorded twice, in the audit event this function emits under the
+	// caller's own context and in the row's `mintedBy`, which is passed
+	// act.userID below. Nothing is lost by the row's createdBy naming the
+	// credential service, which is what every other machine credential does.
+	writeCtx := identity.ContextWithSystemCredentialActor(ctx)
+
 	live, err := recStore.ActiveForUser(ctx, target)
 	if err != nil {
 		return s.finish(ctx, identity.AuditCategoryAdmin, "recovery_key_rotated", act, target,
@@ -113,7 +133,7 @@ func (s *Service) RotateRecoveryKey(ctx context.Context, userId string) Result {
 	// CREATE FIRST. Retiring the predecessor before the replacement exists
 	// would leave a window with no live recovery key, and a failure in between
 	// would leave it that way permanently.
-	if err := recStore.Create(ctx, newId, target, hash, act.userID, rotatedFrom, recoverykey.DefaultLabel); err != nil {
+	if err := recStore.Create(writeCtx, newId, target, hash, act.userID, rotatedFrom, recoverykey.DefaultLabel); err != nil {
 		return s.finish(ctx, identity.AuditCategoryAdmin, "recovery_key_rotated", act, target,
 			user.PrimaryEmail, detail, "", err)
 	}
@@ -121,12 +141,12 @@ func (s *Service) RotateRecoveryKey(ctx context.Context, userId string) Result {
 	// right now, so the row must stop being freely re-mintable. Skipping this
 	// would let the boot invariant replace a key the operator had already
 	// written down.
-	if err := recStore.Claim(ctx, newId, "", s.Now()); err != nil {
+	if err := recStore.Claim(writeCtx, newId, "", s.Now()); err != nil {
 		return s.finish(ctx, identity.AuditCategoryAdmin, "recovery_key_rotated", act, target,
 			user.PrimaryEmail, detail, "", fmt.Errorf("stamp claimed: %w", err))
 	}
 	for _, old := range live {
-		if err := recStore.Deactivate(ctx, old.ID); err != nil {
+		if err := recStore.Deactivate(writeCtx, old.ID); err != nil {
 			// The replacement is already live and already shown. Failing the
 			// whole call here would tell the caller the rotation did not
 			// happen when it did, and they would rotate again -- so this is

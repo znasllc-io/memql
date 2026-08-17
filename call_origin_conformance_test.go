@@ -94,12 +94,55 @@ func TestOnlyAllowlistedPackagesStampInternalOrigin(t *testing.T) {
 	// stamps client explicitly on the untrusted branch rather than passing the
 	// parent through.
 	allowed := map[string]string{
-		"app":                      "identity integration wiring at boot; no request in scope",
-		"component/auth":           "defines the stamp, and resolves an identity from claims before any actor exists",
-		"component/automations":    "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
-		"component/identity":       "identity store internals, server-initiated",
+		"app":                         "identity integration wiring at boot; no request in scope",
+		"component/auth":              "defines the stamp, and resolves an identity from claims before any actor exists",
+		"component/automations":       "trusted automation dispatch; the untrusted branch stamps CLIENT (memql#2879)",
+		"component/identity":          "identity store internals, server-initiated",
 		"component/identity/adminops": "identity-admin write surface -- REQUEST-DERIVED, one of the two exceptions here; its precondition (every path is downstream of the owner/admin gate in the same function) is asserted by component/identity/adminops/gate_test.go, memql#3324",
-		"component/identity/pat":   "personal-access-token store, server-initiated",
+		"component/identity/pat":      "personal-access-token store, server-initiated",
+		// REQUEST-DERIVED, and the THIRD exception. The redeem path
+		// (component/identity/http/webauthn_recovery.go) calls Store.Resolve on
+		// an UNAUTHENTICATED request context -- the shape call_origin.go warns
+		// about in as many words. The other two callers are plainly
+		// server-initiated: the boot invariant and `memql recovery-key claim`,
+		// neither with a request in scope.
+		//
+		// Added because the ENTIRE break-glass surface is @serverOnly -- both
+		// reads and all four writes -- and the store stamped none of it, so
+		// every call was refused and the credential was inert. Not degraded:
+		// no cluster minted an owner recovery key, claim exited 1, and redeem
+		// could not resolve a presented key. Every gate was green while that
+		// was true, which is why TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin
+		// (test/dslconformance) now asks the converse question this list
+		// cannot: not "may this package stamp" but "does the caller that MUST
+		// stamp actually do so".
+		//
+		// What earns the exception is the ARGUMENT, and it is a different
+		// argument from workertoken's below -- so it gets a different check,
+		// not a copied one:
+		//   - recoveryKeyByHash filters on a DIGEST of a secret the caller had
+		//     to present, and Resolve computes that digest itself rather than
+		//     accepting one. Naming a row is a possession proof, not an
+		//     identifier a caller can choose; there is nothing to enumerate.
+		//     That is why this needs no analogue of
+		//     component/grpc/worker_token_caller_scope_test.go -- there is no
+		//     caller-supplied id to scope.
+		//   - activeRecoveryKeys DOES take a caller-supplied userId, and no
+		//     wire path reaches it: the invariant and the CLI resolve the owner
+		//     themselves, and adminops.RotateRecoveryKey sits downstream of the
+		//     owner/admin gate asserted by component/identity/adminops/gate_test.go.
+		//   - The rows carry no directory PII -- a recovery-key row is a hash,
+		//     a binding and some timestamps. Never the plaintext: Row has
+		//     nowhere to put one.
+		//
+		// The stamp lands on a context scoped to ONE call and is structurally
+		// unable to escape: executeServerOnly returns a RESULT, never a
+		// context, so no later frame can inherit the mark. Pinned by
+		// component/identity/recoverykey/store_internal_origin_test.go, which
+		// drives all six operations with a client-origin context, and by
+		// component/memql's TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses,
+		// which asserts the engine refuses client origin and admits internal.
+		"component/identity/recoverykey": "break-glass recovery-key store -- REQUEST-DERIVED on the redeem path; earned by the argument being a digest of a presented secret rather than a caller-chosen id, asserted by component/identity/recoverykey/store_internal_origin_test.go",
 		// REQUEST-DERIVED, and the SECOND exception -- not, as the first draft
 		// of this entry said, "a credential store whose reads are
 		// server-initiated by construction, same as the pat entry above". The

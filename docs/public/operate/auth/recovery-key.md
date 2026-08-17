@@ -174,6 +174,48 @@ had it leaves, or on any suspicion of a leak. It costs nothing.
 | This recovery key was replaced | Somebody rotated the key, retiring this one | Use the key from the most recent rotation |
 | You can still sign in normally | The break-glass gate. The account has a working route in | Sign in as usual, then add a passkey. Keep this key |
 
+### When `claim` itself fails
+
+Two outcomes of `memql recovery-key claim` are not failures, and one is:
+
+| Output | What happened | Do this |
+|---|---|---|
+| `recoveryKeyState=awaitingOwner`, exit 0 | No owner exists yet, so there is nothing to bind a key to. Expected on a cluster nobody has signed into | Nothing. Claim it after the first sign-in |
+| A key on stdout, exit 0 | Worked | Store it somewhere the cluster is not |
+| `function "activeRecoveryKeys" is server-only and cannot be called by a client`, exit 1 | The store reached the engine on a context that did not say the call was server-initiated | Not an operator problem — it is an engine defect. See below |
+
+That last one is worth naming precisely, because it presented as a single
+failing install step and was not one. The whole break-glass surface is
+`@serverOnly` — both reads and all four writes — and the engine refuses a
+`@serverOnly` construct unless the call is stamped server-initiated. When
+`component/identity/recoverykey` stamped none of it, the credential was not
+degraded, it was **inert**: the boot invariant could not take its read, so no
+cluster minted a key at all; claim exited 1; rotation failed; and redeem could
+not resolve a presented key. The only symptom on a running cluster was one WARN
+per boot —
+
+```
+identity: recovery-key invariant did not complete; this cluster may have no
+break-glass route for its owner
+```
+
+— which is why the useful check is not "did the install step pass" but "does
+this cluster have a live key". To ask directly:
+
+```bash
+kubectl logs -n memql deploy/identity | grep -c 'recovery-key invariant did not complete'
+```
+
+Anything other than `0` means this cluster has no break-glass route, whatever
+its install record says. Both halves are now pinned by tests — the stamp itself
+(`component/identity/recoverykey/store_internal_origin_test.go`), the engine's
+refusal and admission
+(`component/memql`'s `TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses`),
+and the class
+(`test/dslconformance`'s `TestEveryGoCallerOfAServerOnlyConstructStampsInternalOrigin`,
+which fails the build for any Go caller of a `@serverOnly` construct that does
+not stamp).
+
 ---
 
 ## What this is not

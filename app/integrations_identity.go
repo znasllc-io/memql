@@ -572,7 +572,25 @@ func (a *App) ensureOwnerRecoveryKey(ctx context.Context, store *identity.Store)
 	// (epic memql#1925) -- and a dropped lock here means two replicas each mint
 	// a live owner credential, which is the exact failure the lock exists for.
 	getDB := a.directDBGetter()
-	res, err := recoverykey.EnsureForAllOwners(identity.ContextWithSystemActor(ctx), recoverykey.EnsureOptions{
+	// THE CREDENTIAL ACTOR, NOT THE SERVICE ACTOR, and the distinction is the
+	// difference between this invariant working and doing nothing at all.
+	//
+	// `recovery_key` is one of the machineCredentialIdentityTypes, so the
+	// memql#2513 guard admits the write only from a SYSTEM actor --
+	// isSystemActor wants role=="system" or an actor string prefixed
+	// "system:". ContextWithSystemActor satisfies neither: it stamps
+	// role="owner", and it sets an email, which ActorFromToken PREFERS over
+	// the subject -- so the actor resolves to "system@identity.memql.local"
+	// and the "system:identity-svc" subject that would have passed the prefix
+	// check is never consulted. ContextWithSystemCredentialActor sets
+	// role="system" with no email, which is what it exists for; its doc
+	// comment names this guard by name.
+	//
+	// The failure this caused was silent and total. The mint died here on
+	// every boot, so no cluster ever had a break-glass key, and the only trace
+	// was one WARN per boot. Attribution is unaffected: who minted the key is
+	// carried by the payload's `mintedBy` (below), not by the actor.
+	res, err := recoverykey.EnsureForAllOwners(identity.ContextWithSystemCredentialActor(ctx), recoverykey.EnsureOptions{
 		DB: func() *sql.DB {
 			bdb := getDB()
 			if bdb == nil {
