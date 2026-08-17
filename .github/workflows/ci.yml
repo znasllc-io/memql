@@ -1324,6 +1324,19 @@ jobs:
       # package is growing into its budget, and the answer is to split the
       # package by concern -- it boots a full engine per db-gated test, which is
       # the actual cost driver and the thing worth changing.
+      #
+      # THE 600s BUDGET WAS BREACHED, NOT WARNED ABOUT (memql#4075). On
+      # 2026-08-17 a green run on main printed `used 628s of its 600s budget`
+      # -- step time including compile, i.e. the test binary finishing at
+      # ~595-599s of exactly 600 -- and the next PR (#4074, touching no Go this
+      # lane compiles) drew two slow runners in a row and panicked at 10m both
+      # times, each panic naming whichever 1-second test held the clock. That
+      # is memql#3257's signature repeating at the doubled number: no headroom
+      # means it goes red on SOME run no matter what anyone committed, and the
+      # author blamed is never the cause. So 600 -> 900 is the recorded BRIDGE,
+      # not a burial of the rule above: the warn machinery needs headroom to
+      # exist before it can warn, and the split (memql#4075) remains the fix
+      # for the cost itself.
       # Kept as two PLAIN `go test` blocks on purpose. scripts/cidb/dbgate_test.go
       # derives this lane's selector by parsing literal `./`-prefixed arguments
       # out of these `run:` blocks, and treats a block containing a shell control
@@ -1343,8 +1356,8 @@ jobs:
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=600s ./component/memql/...
-          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
+          go test -count=1 -timeout=900s ./component/memql/...
+          echo "headroom: component/memql used $((SECONDS - start))s of its 900s budget"
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --
       # integrations/embedding (memql#4037) and component/backup, when its
