@@ -110,6 +110,15 @@ func TestFindSimilarReturnsEachIdOnceAtItsLatestVersion(t *testing.T) {
 	integration.SetEmbeddingProvider(func(string) (memql.EmbeddingAIProvider, error) {
 		return stubEmbeddingProvider{vec: basisVector(0)}, nil
 	})
+	// Nothing is staged, stated explicitly rather than left to a default.
+	//
+	// The staged-data gate (memql#3984) FAILS CLOSED: an unwired predicate
+	// refuses the search rather than answering as if nothing were staged, so
+	// this line is required and not boilerplate. Wiring it to a constant false
+	// is also what keeps this test about the SUBJECT it names -- the
+	// latest-version collapse (memql#4037) -- rather than about staging, which
+	// has its own coverage. If it ever needs to vary, that is a different test.
+	integration.SetStagedConceptPredicate(func(string) bool { return false })
 
 	args := map[string]any{
 		// Unique per suite so the embedding_cache row this call writes cannot
