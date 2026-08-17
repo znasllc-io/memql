@@ -151,79 +151,20 @@ func Fingerprint(s string) string {
 	return "..." + s[len(s)-4:]
 }
 
-// ---------------------------------------------------------------------
-// Whole-blob seal / open (for on-disk artifacts like genesis.znas)
-// ---------------------------------------------------------------------
-
-// BlobMagic is the 4-byte ASCII prefix that identifies every sealed blob.
-const BlobMagic = "ZNAS"
-
-// Version + algorithm tags carried in the blob header. Bumping the
-// version tag is how this package signals a forward-incompatible
-// envelope change; OpenBlob refuses any version it doesn't recognize.
-const (
-	BlobVersion       byte = 0x01
-	BlobAlgoSecretbox byte = 0x01
-)
-
-// blobHeaderLen is the fixed-size prefix before the nonce:
-// 4B magic + 1B version + 1B algo + 2B reserved.
-const blobHeaderLen = 8
-
-// SealBlob seals plaintext into a self-describing envelope ready to
-// write to disk verbatim. Uses the master key from MEMQL_MASTER_KEY
-// and a fresh CSPRNG nonce; two seals of identical plaintext produce
-// different outputs. Errors only on missing/invalid master key or a
-// CSPRNG read failure.
-func SealBlob(plaintext []byte) ([]byte, error) {
-	key, err := masterKey()
-	if err != nil {
-		return nil, err
-	}
-	var nonce [nonceLen]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return nil, fmt.Errorf("secret.SealBlob: read nonce: %w", err)
-	}
-	sealed := secretbox.Seal(nil, plaintext, &nonce, key)
-
-	out := make([]byte, 0, blobHeaderLen+nonceLen+len(sealed))
-	out = append(out, []byte(BlobMagic)...)
-	out = append(out, BlobVersion, BlobAlgoSecretbox, 0x00, 0x00)
-	out = append(out, nonce[:]...)
-	out = append(out, sealed...)
-	return out, nil
-}
-
-// OpenBlob reverses SealBlob. Returns a descriptive error for bad
-// magic, unsupported version, unknown algorithm, truncated envelope,
-// missing master key, or authentication failure (wrong key or
-// tampered bytes).
-func OpenBlob(envelope []byte) ([]byte, error) {
-	if len(envelope) < blobHeaderLen+nonceLen {
-		return nil, fmt.Errorf("secret.OpenBlob: envelope too short (%d bytes; need >= %d)", len(envelope), blobHeaderLen+nonceLen)
-	}
-	if string(envelope[0:4]) != BlobMagic {
-		return nil, fmt.Errorf("secret.OpenBlob: bad magic (got %q, want %q)", envelope[0:4], BlobMagic)
-	}
-	if envelope[4] != BlobVersion {
-		return nil, fmt.Errorf("secret.OpenBlob: unsupported format version %d (this binary supports %d)", envelope[4], BlobVersion)
-	}
-	if envelope[5] != BlobAlgoSecretbox {
-		return nil, fmt.Errorf("secret.OpenBlob: unknown algorithm %d (this binary supports %d=secretbox)", envelope[5], BlobAlgoSecretbox)
-	}
-	// envelope[6:8] reserved; ignored.
-
-	key, err := masterKey()
-	if err != nil {
-		return nil, err
-	}
-	var nonce [nonceLen]byte
-	copy(nonce[:], envelope[blobHeaderLen:blobHeaderLen+nonceLen])
-	sealed := envelope[blobHeaderLen+nonceLen:]
-
-	opened, ok := secretbox.Open(nil, sealed, &nonce, key)
-	if !ok {
-		return nil, fmt.Errorf("secret.OpenBlob: authenticated decryption failed (wrong key or tampered envelope)")
-	}
-	return opened, nil
-}
+// THE WHOLE-BLOB SEAL/OPEN PAIR IS GONE (epic memql#3958).
+//
+// SealBlob / OpenBlob, the "ZNAS" envelope format, BlobMagic, BlobVersion and
+// the header-length constant existed for exactly one caller: the sealed genesis
+// envelope, which sealed a developer's .env under MEMQL_MASTER_KEY so a node
+// could decrypt it back into its own environment at boot. Config has ONE
+// delivery path now -- the k8s Secret every node envFroms -- so nothing seals a
+// blob and nothing opens one.
+//
+// Encrypt / Decrypt STAY, and the distinction is worth stating plainly because
+// deleting the wrong pair would take the secrets store with it: those are the
+// per-VALUE functions behind v1:platform:globalSecret, a live feature with live
+// rows. What went is the whole-FILE pair.
+//
+// MEMQL_MASTER_KEY itself also stays, and stays DECRYPT-ONLY. memql#3519 split
+// decrypting from authenticating; the operator bearer is MEMQL_OPERATOR_KEY.
+// Nothing in this epic re-merges them.

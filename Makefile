@@ -183,10 +183,11 @@ node-token:
 .PHONY: identity-signing-key
 
 ## Generate a fresh base64 Ed25519 signing seed for IDENTITY_SIGNING_KEY_B64
-## (znasllc-io/memql#550). Seal the printed value into the genesis envelope
+## (znasllc-io/memql#550). Put the printed value on memql-secrets -- the Key
+## Vault entry ESO reads in the cloud (memql#3960), or `make secrets` locally --
 ## so every identity replica derives the same key + JWKS (enables identity
 ## HA / multi-replica without an RWO key PVC). Rotate by re-generating,
-## re-sealing, and rolling the deployment.
+## writing the new value, and rolling the deployment.
 ##   make identity-signing-key
 identity-signing-key:
 	@head -c 32 /dev/urandom | base64
@@ -796,14 +797,15 @@ tag-submodules:
 # k3d import). A hand-built `docker build` image fed neither path.
 
 # ---------------------------------------------------------------------------
-# Genesis envelope / dev tooling
+# Dev tooling
 # ---------------------------------------------------------------------------
-# Authoring of env vars / secrets lives in `memql-cockpit genesis init`
-# (writes ~/.memql/genesis.znas). `make up` seeds the decrypted envelope
-# into the k3d cluster's k8s Secrets via scripts/k3d/seed-secrets.sh.
+# Config has ONE delivery path (epic memql#3958): the memql-secrets Secret.
+# `make secrets` seeds it locally via scripts/k3d/seed-secrets.sh; ESO
+# reconciles it from Key Vault in the cloud. The sealed genesis envelope, its
+# `genesis-seal` target and its .znas format are gone.
 
 ##@ Dev tooling
-.PHONY: install-deps genesis-seal env-registry-sync env-registry-check
+.PHONY: install-deps env-registry-sync env-registry-check
 .PHONY: setup-agents verify-agents
 
 ## Regenerate the embedded env-registry manifest snapshot
@@ -818,17 +820,6 @@ env-registry-sync:
 ## The shared classifier behind the CI gate (memql#2105).
 env-registry-check:
 	$(GO) run ./cmd/envscan -check
-
-## Seal a plaintext .env into ~/.memql/genesis.znas (the encrypted
-## envelope scripts/k3d/seed-secrets.sh decrypts into k8s Secrets at
-## `make up`). Headless equivalent of the cockpit's first-launch genesis
-## wizard: parse + manifest-validate + encrypt under MEMQL_MASTER_KEY
-## (reused from your environment when present, generated + printed on
-## first use).
-##   make genesis-seal ENV_FILE=~/Downloads/local.genesis.env
-genesis-seal:
-	@test -n "$(ENV_FILE)" || { echo "usage: make genesis-seal ENV_FILE=/path/to/local.genesis.env"; exit 1; }
-	$(GO) run ./cmd/genesis-seal --env-file=$(ENV_FILE)
 
 ## Install + verify every build-time tool the dev workflow needs:
 ## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when

@@ -21,8 +21,9 @@ var embeddedManifest []byte
 // Two requiredness axes are deliberately separate:
 //
 //   - Optional drives the SEAL FLOOR (`Names()`): the strict-superset
-//     set a developer's .env must cover before `genesis-seal` will
-//     produce an envelope. It stays a small curated set so registering
+//     set a developer's .env must cover. It outlived the sealing CLI that
+//     enforced it (epic memql#3958) and is now the floor `scripts/secrets
+//     seed` and the drift gate read. It stays a small curated set so registering
 //     the full ~240-var universe here does not break local sealing --
 //     every newly-registered entry sets `optional: true`.
 //   - Required drives BOOT VALIDATION (#2108): the node types that must

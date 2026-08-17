@@ -22,7 +22,7 @@
 # state (it is signed by that machine's mkcert CA and is only trusted there),
 # it must survive `git clean`, and it must be shared by every checkout /
 # worktree of the repo on that machine. $HOME/.memql/ is where the local
-# cluster already keeps operator state (genesis.znas, worker.yaml).
+# cluster already keeps operator state (worker.yaml, certs).
 #
 # This is NOT a capability script -- it declares constants and is sourced.
 

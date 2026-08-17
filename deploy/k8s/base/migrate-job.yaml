@@ -45,7 +45,6 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            # NO MEMQL_GENESIS_AUTOLOAD HERE, and the absence is deliberate
             # (memql#3961). This Job is the one workload in the tree that NO
             # overlay can patch: the kustomization deliberately keeps one-shot
             # Jobs out of the resource graph ("Jobs don't belong in the

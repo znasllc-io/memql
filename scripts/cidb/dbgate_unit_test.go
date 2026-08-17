@@ -1241,7 +1241,7 @@ func TestNamesSharedTestDB(t *testing.T) {
 		"postgres://host/db",                           // ditto
 		"postgres://main",                              // ditto
 		"postgres://direct",                            // ditto
-		"postgres://tiger-cloud-prod",                  // component/genesis/autoload_test.go
+		"postgres://tiger-cloud-prod",                  // a DSN-shaped literal in a test fixture
 		"postgres://local-dev",                         // ditto
 		"postgres://x",                                 // component/envregistry/bootvalidate_test.go
 		"postgres://legacy",                            // component/envregistry/legacyalias_test.go

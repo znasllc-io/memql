@@ -145,16 +145,25 @@ deployed code reads in the same release). Split a destructive change across
 releases: (1) add the new shape + write both, (2) backfill + switch reads,
 (3) a later release drops the old shape once nothing reads it.
 
-## Secrets (genesis A2)
+## Secrets
 
-Five keys in `memql-secrets`: `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY` (memql#3519 -- a DIFFERENT value; it authenticates, the master key decrypts), `MEMQL_GENESIS_B64`,
-`MEMQL_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`. With
-`MEMQL_GENESIS_AUTOLOAD=true`, each pod decrypts the sealed envelope in-process
-at boot and applies ~150 vars set-if-absent; the per-pod overrides (node type,
-mesh addresses, the DSNs) win. Every DB-connecting node mounts the Secret via
-`envFrom: secretRef: memql-secrets`, so a key added here reaches all pods (no
-manifest change). See `secret.example.yaml` for the imperative
-`kubectl create secret` recipe and the Azure Key Vault CSI alternative.
+`memql-secrets` is **the** config delivery path (epic memql#3958). Every key a
+node needs at boot is a key ON this Secret: `MEMQL_MASTER_KEY` (it DECRYPTS),
+`MEMQL_OPERATOR_KEY` (memql#3519 -- a DIFFERENT value; it AUTHENTICATES),
+`MEMQL_IDENTITY_SIGNING_KEY_B64` + `..._CREATED_AT`, `MEMQL_NODE_BOOTSTRAP_TOKEN`,
+`MEMQL_DATABASE_DSN`, `MEMORY_NODES_DATABASE_DIRECT_DSN`.
+
+There used to be a second path: `MEMQL_GENESIS_B64` carried a sealed envelope
+each pod decrypted in-process at boot, applying ~150 vars set-if-absent. It is
+gone, along with its sealing CLI, its autoload hook and its `.znas` format. What
+it was genuinely load-bearing for -- getting a locked-out owner back in -- is now
+the recovery key (memql#3964), which authenticates and decrypts nothing.
+
+Every DB-connecting node mounts the Secret via `envFrom: secretRef:
+memql-secrets`, so a key added here reaches all pods (no manifest change). See
+`secret.example.yaml` for the imperative `kubectl create secret` recipe and the
+Azure Key Vault CSI alternative; the cloud reconciles it from Key Vault through
+`deploy/external-secrets/`.
 
 ### Hybrid connection-pool endpoint split (epic [#1925](https://github.com/znasllc-io/memql/issues/1925))
 
