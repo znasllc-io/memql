@@ -132,12 +132,12 @@ type AvatarPlan struct {
 	PersonaID string
 
 	// AvatarID is the Anam bare avatar (face-model) id for the default
-	// ephemeral path (ANAM_DEFAULT_AVATAR_ID) when no personaId is available.
+	// ephemeral path (MEMQL_ANAM_DEFAULT_AVATAR_ID) when no personaId is available.
 	// Unused by Simli.
 	AvatarID string
 
 	// DisplayName is the ephemeral persona name shown for the avatar
-	// (ANAM_DEFAULT_PERSONA_NAME). Vendor-cosmetic.
+	// (MEMQL_ANAM_DEFAULT_PERSONA_NAME). Vendor-cosmetic.
 	DisplayName string
 
 	// APIKey is the vendor API key the REST calls authenticate with.
