@@ -76,6 +76,26 @@ func (o Options) now() time.Time {
 // concatenating the spill into w happen after it is released, because w may be
 // a slow or remote sink and a transaction held open across it would pin the
 // oldest xmin -- blocking vacuum cluster-wide for as long as the write takes.
+//
+// KEYSET PAGING WAS THE OTHER CANDIDATE and is rejected on purpose, because it
+// looks strictly cheaper and is not. Seeking on (createdAt, id) > the last row
+// emitted closes BOTH shifts above without holding anything open, since a write
+// before the cursor moves no later row past it -- and for a 30-minute export
+// against a live cluster, holding no snapshot is a real advantage.
+//
+// What it cannot give is a point in TIME. Each page would be read from a
+// different state, so rows written during the export appear or not depending on
+// where the cursor had reached, and the file is a smear across the run rather
+// than an image of an instant. For most readers that is a fine trade; for a
+// backup it is the whole product. A restore from a smeared export can
+// reconstruct a graph that never existed -- a row referencing a sibling that was
+// written after the cursor passed its position, so the reference is present and
+// the target is not. That is worse than the bug being fixed here, because it
+// cannot be found by counting.
+//
+// So: the snapshot's cost is vacuum pressure for the duration of the reads, and
+// it is accepted knowingly. If that ever becomes the binding constraint, the
+// answer is to make the READS shorter, not to give up the instant.
 func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifest, error) {
 	if db == nil {
 		return Manifest{}, errors.New("backup: export: nil database")
