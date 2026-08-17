@@ -87,7 +87,37 @@
 // the plugin, identity, cognition -- and none of them pointed at the version.
 // Bumping this is the release step; skipping it spends somebody's afternoon.
 //
-// Refs: #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
+// BUMPED TO v0.19.0 (memql#4059). 262 commits accumulated behind v0.18.0, and
+// the two failures that surfaced are the two this comment keeps recording: a
+// stale pin does not fail like a stale pin, and neither symptom named the
+// version.
+//
+// The first was not the pin's fault, and is worth stating because it is the
+// mirror image of the pin problem. `install.cloneStack` reported DONE, with the
+// correct commit on its envelope, over a directory holding a .git and no files
+// -- an earlier install had been interrupted mid-clone, and every check the
+// script made was a REF check. The install then failed at `clusterUp` with
+// "it is a git checkout, but not of memQL", which is a true sentence about the
+// wrong problem: it was memQL, with nothing checked out of it. Fixed in
+// scripts/install/clone-stack.sh, and the reason it belongs in this release is
+// that the repair only reaches an operator through a release.
+//
+// The second is the skew this pin exists to prevent, and v0.18.0 is the release
+// that demonstrates it best. `AuthoringValidateBundleMsg.origin` landed SIX
+// HOURS after the v0.18.0 tag was cut, so no release carries it; a plugin built
+// past the tag sends it, the cluster refuses it, and because the WebSocket
+// bridge decodes with unknown fields on, the refusal severs the session instead
+// of failing one request. The operator sees `ERROR (validate): stream closed`
+// and nothing says their cluster is simply older than their plugin. See
+// version/skewHint.ts, which exists only because the pin was allowed to go
+// stale.
+//
+// This bump also carries the cluster across the v0.18.0 upgrade barrier
+// (version/barriers.ts): the database becomes a CloudNativePG cluster, so a
+// machine already installed at v0.18.0 does NOT move here without the runbook.
+// A fresh install has nothing to carry and crosses it for free.
+//
+// Refs: #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
  * The release tag an install checks out unless told otherwise.
@@ -95,7 +125,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.18.0";
+export const DEFAULT_STACK_TAG = "v0.19.0";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).
