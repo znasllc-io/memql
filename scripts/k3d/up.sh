@@ -74,6 +74,7 @@ cap_spec_param "extra-ports"    "additional host:container loadbalancer port map
 cap_spec_param "app-project"    "ArgoCD AppProject the Application belongs to"
 cap_spec_param "image-registry" "registry to pull node images from (default: the overlay's own, i.e. locally built)"
 cap_spec_param "image-tag"      "tag for those images; required with --image-registry"
+cap_spec_param "db-image-tag"   "tag for the DATABASE OPERAND image, which is versioned on the PostgreSQL axis and MUST start with the PostgreSQL major -- CNPG parses it (default: the pinned release operand)"
 cap_spec_param "domain"         "front-door apex the cluster is served at (default: memql.localhost)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
@@ -128,7 +129,19 @@ OPERATOR_STACK_READY=false
 WORKLOADS_READY=false
 IMAGE_REGISTRY=""
 IMAGE_TAG=""
+DB_IMAGE_TAG=""
 SECRETS_SEEDED=false
+
+# The database operand image, which is versioned on the PostgreSQL axis rather
+# than the engine's -- see kustomize_image_overrides for what conflating them
+# cost (memql#4063).
+#
+# The DEFAULT is a release tag cut by .github/workflows/build-db-image.yml and
+# is the same value deploy/k8s/overlays/cloud pins, deliberately: an install and
+# a cloud deploy running different database operands would be a difference in
+# the SHAPE of the system, which environment-parity.md does not allow.
+readonly DB_IMAGE_NAME="memql-db"
+readonly DEFAULT_DB_IMAGE_TAG="16.15-timescaledb-2.29.1"
 
 #=============================================================================
 # OUTPUT HELPERS -- delegate to the capability runtime (all logs to STDERR)
@@ -512,8 +525,27 @@ YAML
 #
 # THE KEYS ARE READ OUT OF THE OVERLAY, never listed here. kustomize matches an
 # override on the name as it appears in the BASE manifests, and the overlay
-# already names all eight. A hand-kept list in this script would be a second
+# already names every node. A hand-kept list in this script would be a second
 # copy that silently stops covering a node the day one is added.
+#
+# THE DATABASE OPERAND IS NOT A NODE, AND CONFLATING THE TWO BROKE THE INSTALL
+# (memql#4063). Discovering names by matching `memql-*` is right for nodes and
+# wrong for `memql-db`, which CloudNativePG added to the overlay when the
+# database became a CNPG Cluster -- so the sweep silently widened to cover an
+# image on a DIFFERENT VERSION AXIS. It still has to be overridden (the
+# overlay's `16-dev` is a `make db-image` artifact an installer never built,
+# exactly like `memql-bff:local`), but with the operand's own tag:
+#
+#   CNPG parses a PostgreSQL version off `spec.imageName` and REFUSES what it
+#   cannot read. Stamping the engine release on it produced
+#     Cluster "memql-db" is invalid: spec.imageName: Invalid value:
+#     "ghcr.io/znasllc-io/memql-db:0.19.0": Unsupported PostgreSQL version.
+#   which is an admission-webhook rejection, so the Cluster is never created,
+#   `memql-db-rw` never resolves, and every node fails readiness against a DNS
+#   error naming nothing. The whole install reports "workloadsReady did not
+#   hold" and points at nothing.
+#
+# So the sweep still finds the names, and the TAG is chosen per image.
 function kustomize_image_overrides() {
     [[ -n "$IMAGE_REGISTRY" ]] || return 0
 
@@ -528,8 +560,19 @@ function kustomize_image_overrides() {
         cap_fail 5 "no node images found in ${kustomization}; --image-registry has nothing to override"
     fi
     for name in $names; do
+        local base tag
+        base="$(basename "$name")"
+        if [[ "$base" == "$DB_IMAGE_NAME" ]]; then
+            # Defaulted at the point of use as well as in main(), so no caller
+            # can emit an UNTAGGED operand -- which kustomize would render as a
+            # bare `memql-db`, and CNPG would reject for the same unreadable
+            # -version reason, one indirection further from the cause.
+            tag="${DB_IMAGE_TAG:-$DEFAULT_DB_IMAGE_TAG}"
+        else
+            tag="$IMAGE_TAG"
+        fi
         out+="
-      - ${name}=${IMAGE_REGISTRY}/$(basename "$name"):${IMAGE_TAG}"
+      - ${name}=${IMAGE_REGISTRY}/${base}:${tag}"
     done
     printf '      images:%s\n' "$out"
 }
@@ -954,8 +997,24 @@ function main() {
     DOMAIN="$(cap_param domain "$MEMQL_LOCAL_DOMAIN")"
     IMAGE_REGISTRY="$(cap_param image-registry "")"
     IMAGE_TAG="$(cap_param image-tag "")"
+    DB_IMAGE_TAG="$(cap_param db-image-tag "$DEFAULT_DB_IMAGE_TAG")"
     if [[ -n "$IMAGE_REGISTRY" && -z "$IMAGE_TAG" ]]; then
         cap_fail 2 "--image-registry needs --image-tag: an untagged override would follow a moving tag, which is the opposite of what pinning an install means"
+    fi
+    # REFUSED HERE rather than at apply time, because CNPG's rejection arrives
+    # as an ArgoCD SyncError on a Cluster that is simply never created -- the
+    # install then fails several steps later reporting only that the workloads
+    # never became ready (memql#4063).
+    #
+    # The test is CNPG's OWN rule -- "Versions 13 or newer are supported" -- and
+    # not a second copy of this repo's PG_MAJOR, which
+    # TestLocalDatabaseImageTagStartsWithThePostgresMajor already owns. Checking
+    # only for a LEADING DIGIT would be the seductive wrong answer: `0.19.0`
+    # starts with one, parses as major 0, and is exactly the engine-release tag
+    # that caused this. A leading `v` fails for the same reason `dev` does --
+    # CNPG reads the major off the front and tolerates no prefix.
+    if [[ ! "$DB_IMAGE_TAG" =~ ^([0-9]+) ]] || (( ${BASH_REMATCH[1]} < 13 )); then
+        cap_fail 2 "invalid --db-image-tag '${DB_IMAGE_TAG}': the database operand tag MUST begin with a supported PostgreSQL major, 13 or newer (e.g. 16.15-timescaledb-2.29.1). CNPG parses the version off Cluster.spec.imageName and refuses what it cannot read -- an engine release like '0.19.0' parses as major 0, and a 'v' prefix does not parse at all. The database is then never created and every node fails readiness on a DNS lookup of memql-db-rw"
     fi
     require_checkout "$REPO_ROOT"
     # Derived from REPO_ROOT, so it is resolved AFTER the param, not before.
