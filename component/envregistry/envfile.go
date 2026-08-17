@@ -90,18 +90,11 @@ func parseEnv(r io.Reader, label string) ([]EnvEntry, error) {
 	}
 	return out, nil
 }
-
-// ParseEnvReader parses .env content from an arbitrary reader, labelling
-// errors with the caller's own name for the source.
-//
-// DEAD EXPORT -- it has no callers. It was exported for the sealed-envelope
-// code in the old component/genesis, which parsed DECRYPTED BYTES rather than a
-// file on disk and so could not go through ParseEnvFile. The envelope is gone
-// (memql#3966) and this package is component/envregistry now (memql#3963), so
-// the condition the original comment set for retiring it -- "unreferenced again
-// when the envelope goes" -- is met. Removing it changes the exported surface
-// and so forces an architecture-model regeneration; tracked separately rather
-// than folded into a documentation sweep.
-func ParseEnvReader(r io.Reader, label string) ([]EnvEntry, error) {
-	return parseEnv(r, label)
-}
+// ParseEnvReader was here, and was deleted in memql#4055 rather than
+// unexported. It wrapped parseEnv, which ParseEnvFile already calls, so
+// unexporting would have left an unreferenced private wrapper -- and the
+// pre-release rule is to delete what is no longer needed rather than keep a
+// shim. Its own doc comment set the retirement condition ("it becomes
+// unreferenced again when the envelope goes, memql#3966"), epic memql#3958
+// deleted the envelope, and the condition was met. parseEnv is the reader-shaped
+// entry point a future caller should re-export from, not resurrect from git.
