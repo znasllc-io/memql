@@ -10,10 +10,19 @@
 // That would have deleted the gate rather than moved it.
 //
 // A memQL mutation cannot carry a role predicate. `filter` is a read
-// construct; there is no mutation-side spec, and row-authz enforcement is
-// inert by construction (TestRowAuthzIsInert, memql#2920). So the owner/admin
-// rule these writes ran under was the templ console's HTTP ROUTE and nothing
-// else:
+// construct and there is no mutation-side spec. Row-authz does not fill the
+// gap either, for two reasons that survive it having become real: it enforces
+// OWNERSHIP (memql#3174 refuses a write whose target row's declared owner is
+// not the actor), which is the wrong axis for writes whose entire purpose is
+// an admin editing SOMEBODY ELSE'S row; and `v1:identity:user` deliberately
+// declares no tier at all -- `owned` would narrow an admin's user list to the
+// admin's own row and break the pre-actor lookups that build the actor in the
+// first place (memql#3349 / #3350, argued at the concept in
+// dsl/identity/concepts.memql). This comment used to say instead that
+// enforcement did not exist, which had been false since memql#3172 (swept in
+// memql#3987) and made the gate below look like a stopgap for something about
+// to arrive. It is not. So the owner/admin rule these writes ran under was the
+// templ console's HTTP ROUTE and nothing else:
 //
 //   - updateUser is @serverOnly (memql#2991) -- it names a target id AND takes
 //     a payload SPLAT that can carry `role`, so validateMutationCallerArgs is

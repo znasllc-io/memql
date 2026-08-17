@@ -2331,8 +2331,10 @@ mutate identity updateIdentity {
 /// predicate ties args.userId to actor.userId, `role` is a plain settable enum carrying no
 /// @internal / @serverSet, and a payload SPLAT names no fields at all -- so
 /// validateMutationCallerArgs is structurally blind to it and would be even if `role` were
-/// annotated. Row-authz enforcement is inert by construction (TestRowAuthzIsInert, memql#2920), so
-/// nothing else covered it either. A client could name any user id and any role.
+/// annotated. Row-authz covered nothing here either -- when this was written it applied nothing
+/// anywhere, and now that it does (memql#3172 / #3174) `v1:identity:user` still declares no tier,
+/// deliberately and permanently enough to be argued at the concept (memql#3349 / #3350). A client
+/// could name any user id and any role.
 ///
 /// @serverOnly is the right gate rather than a stop-gap, because this mutation has exactly one
 /// legitimate caller: the identity admin server (component/identity/admin/handlers.go), which

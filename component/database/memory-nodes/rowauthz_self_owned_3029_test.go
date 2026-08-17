@@ -19,8 +19,14 @@ import (
 // Ruled by the operator in memql#2803: add an `owner="id"` form, chosen over a
 // new tier keyword because it needs no new vocabulary and reads identically.
 //
-// STATIC ONLY. This changes what can be declared and checked, never what is
-// enforced -- TestRowAuthzIsInert stays green and unmodified.
+// STATIC ONLY. This changes what can be DECLARED and checked, never how the
+// declaration is applied. The line here used to add that the Phase 1 gate
+// "stays green and unmodified", which was true when written and stopped being
+// so when memql#3172 landed read-path enforcement and retired that gate in one
+// commit (swept in memql#3987). Enforcement is real -- component/memql/
+// rowauthz_enforce.go, plus memql#3174's write guard -- and what watches it is
+// TestRowAuthzEnforcementLandGate. The static/applied split this file sits on
+// is unaffected either way, which is why the tests below are unchanged.
 
 func TestValidateRowAuthz_AcceptsSelfOwnedId(t *testing.T) {
 	// A concept with NO payload property named `id` -- which is every

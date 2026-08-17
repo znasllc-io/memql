@@ -335,15 +335,16 @@ func ownerProvenanceFor(concept, field string, mutations []*Function) OwnerProve
 		// A lowered AST node there is the normal shape, and classifyTemplateValue
 		// fails CLOSED on one it cannot read (memql#2840), which is the
 		// behaviour this gate wants.
-		// Compared as a literal, deliberately. The definition of this value
-		// is langparser.RowAuthzSelfOwnedField, but naming that symbol here
-		// puts this file on the row-authz surface, and TestRowAuthzIsInert
-		// then demands it be added to the allow-list. That gate is a safety
-		// property about ENFORCEMENT, and this file is a static analyzer that
-		// a test drives -- widening the list for it would trade a real
-		// invariant for a cosmetic one. memql#3029 requires the gate to stay
-		// green and unmodified, so the literal stays and the constant is
-		// named here in prose instead.
+		// Compared as a literal, and the reason for that has EXPIRED. The
+		// definition of this value is langparser.RowAuthzSelfOwnedField;
+		// naming that symbol here would have put this file on Phase 1's
+		// allow-list of the files permitted to touch the row-authz surface at
+		// all, and a static analyzer a test drives did not belong on a list
+		// about ENFORCEMENT. memql#3172 retired that allow-list in the commit
+		// that landed enforcement, so nothing now argues for the duplicate --
+		// it is leftover rather than a deliberate exception (memql#3987). The
+		// constant is still named here in prose so the two spellings stay
+		// findable from each other.
 		if field == "id" {
 			switch classifyTemplateValue(tmpl.IDTemplate) {
 			case provStamp:

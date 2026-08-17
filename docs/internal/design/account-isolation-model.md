@@ -15,13 +15,13 @@ owner: znas
 > operator UI is memql#3322.
 >
 > Everything asserted here about engine behaviour was read off the code in this
-> checkout, not off the operator docs. Several published pages still describe
-> `v1:identity:partitionAccess` and partition-as-isolation-boundary as live
-> (`docs/public/operate/auth/access-model.md`), and
-> `docs/public/operate/auth/per-row-authz-audit.md` still calls `@rowAuthz`
-> inert. Both are stale — see "What the docs get wrong" at the bottom. That
-> staleness is tracked as memql#3305; this note works around it rather than
-> fixing those pages.
+> checkout, not off the operator docs. `docs/public/operate/auth/access-model.md`
+> still describes `v1:identity:partitionAccess` and
+> partition-as-isolation-boundary as live — stale, tracked as memql#3305, and
+> this note works around it rather than fixing the page. A second entry sat here
+> saying `docs/public/operate/auth/per-row-authz-audit.md` understated
+> `@rowAuthz`; that one is RESOLVED (memql#3350). See "What the docs get wrong"
+> at the bottom for both.
 >
 > **Update (memql#3700 D12): parked, not stale.** The cluster front-door
 > design chose per-cluster-per-customer as the isolation model (D1 — one
@@ -392,15 +392,20 @@ partition selector lacked.
 
 ### What the docs get wrong (memql#3305)
 
-Do not calibrate against these until they are fixed:
+Do not calibrate against these until they are fixed. One since has been, and
+stays listed with its resolution rather than vanishing:
 
 - `docs/public/operate/auth/access-model.md` documents
   `v1:identity:partitionAccess` as a live concept with a field list. It does not
   exist.
-- `docs/public/operate/auth/per-row-authz-audit.md` says "**Nothing is
-  enforced**" of `@rowAuthz` and describes Phase 1 as inert. Read-path
-  enforcement landed as memql#3172 and the write guard as memql#3174; the same
-  page's `updateUser` discussion already contradicts its own status section.
+- `docs/public/operate/auth/per-row-authz-audit.md` used to understate
+  `@rowAuthz` here, contradicting its own `updateUser` discussion one section
+  later. **RESOLVED by memql#3350**: that page's status section now reads "the
+  tier IS enforced (memql#3172 / #3174 / #3175)" and carries a correction
+  notice of its own. The entry is kept, resolved rather than deleted, because
+  §4 of this note was written against the broken version and a reader tracing
+  that disagreement should find its outcome here rather than re-deriving it
+  (memql#3987).
 
 ---
 

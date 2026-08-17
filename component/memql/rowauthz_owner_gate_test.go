@@ -52,9 +52,14 @@ import (
 //
 // # WHAT THIS GATE IS NOT
 //
-// It does not enforce anything at read time; no predicate is injected
-// and no query result changes (memql#2920/#2921 remain inert). It
-// gates the CONSISTENCY of a declaration against the write path.
+// It is a static check and not a runtime one: THIS gate injects no
+// predicate and changes no result set. That is a statement about the
+// gate. The parenthetical here used to extend it to memql#2920/#2921
+// as a whole, which stopped being true when Phase 3 landed read-path
+// enforcement (memql#3172; swept in memql#3987) -- a declared tier now
+// does change what reads return, and TestRowAuthzEnforcementLandGate
+// is what watches that. What this gate does is check the CONSISTENCY
+// of a declaration against the write path.
 func TestDeclaredOwnerFieldsAreServerStamped(t *testing.T) {
 	// Load SKIPS are load-bearing here, and discarding them is the
 	// mistake memql#2909 was filed to fix -- "memqllint's engine-parity
