@@ -414,7 +414,7 @@ delivery).
 | `MEMQL_STT_MIN_CONFIDENCE`     | `0.6`            | Floor a streaming FINAL transcript's confidence must clear to be emitted. OpenAI Realtime finals carry `1.0` and always pass, relying on server-VAD + the empty/denylist filters. Also gates a no-speech denylist of well-known silence hallucinations ("thank you", "thanks for watching", ...) so they're dropped only when confidence is low. `0` disables the confidence + denylist gates (empty-text drop still applies). |
 | `MEMQL_OPENAI_REALTIME_MODEL`  | empty            | Realtime model id; falls back to `MEMQL_POLYPHON_OPENAI_ASR_MODEL`.                    |
 | `MEMQL_POLYPHON_OPENAI_VAD_SILENCE_MS` | `600`          | Trailing-silence window (ms) the OpenAI server VAD requires before declaring end-of-utterance on the streaming ASR path. Lower = snappier finals; higher = better tolerance for mid-sentence pauses. See `docs/public/operate/voice-eou-tuning.md`. |
-| `POLYPHON_VOICE_LANGUAGE`      | `en`             | BCP-47 language for the voice-agent's ASR sessions (the realtime path narrows it to the ISO-639-1 primary subtag). |
+| `MEMQL_POLYPHON_VOICE_LANGUAGE` | `en`            | BCP-47 language for the voice-agent's ASR sessions (the realtime path narrows it to the ISO-639-1 primary subtag). Legacy name `POLYPHON_VOICE_LANGUAGE` still accepted (memql#3834). |
 | `MEMQL_WHISPER_MODEL`          | `whisper-1`      | Used when `MEMQL_STT_PROVIDER=openai-whisper`.                                   |
 | `MEMQL_POLYPHON_VOICE_PROVIDER`      | `openai`         | Voice provider for the `/memql/audio` WebSocket path. |
 | `MEMQL_POLYPHON_OPENAI_ASR_MODEL`    | none             | OpenAI ASR model for the `/memql/audio` path.                                    |

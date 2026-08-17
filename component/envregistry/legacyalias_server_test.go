@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// The SERVER_* / SERVICE_* bridge (memql#3892).
+// The SERVER_* / SERVICE_* bridge (memql#3892) and the voice-agent's five (memql#3834).
 //
 // Moved here from component/genesis with its subject (memql#3963): the
 // registry half of that package -- the manifest, boot validation, domain
@@ -40,6 +40,13 @@ func TestServerServiceLegacyAliasesBridge(t *testing.T) {
 		{"SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL", "MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL", "debug"},
 		{"SERVICE_LOGGER_LEVEL", "MEMQL_SERVICE_LOGGER_LEVEL", "warn"},
 		{"SERVICE_LOG_LEVEL", "MEMQL_SERVICE_LOG_LEVEL", "error"},
+		// The voice-agent's five (memql#3834). Same vintage, found by the same
+		// kind of blind spot: an injected getter rather than a struct field.
+		{"ANAM_DEFAULT_PERSONA_ID", "MEMQL_ANAM_DEFAULT_PERSONA_ID", "persona-1"},
+		{"ANAM_DEFAULT_AVATAR_ID", "MEMQL_ANAM_DEFAULT_AVATAR_ID", "avatar-1"},
+		{"ANAM_DEFAULT_PERSONA_NAME", "MEMQL_ANAM_DEFAULT_PERSONA_NAME", "Assistant"},
+		{"POLYPHON_VOICE_LANGUAGE", "MEMQL_POLYPHON_VOICE_LANGUAGE", "en"},
+		{"VOICE_AGENT_LOG_LEVEL", "MEMQL_VOICE_AGENT_LOG_LEVEL", "DEBUG"},
 	}
 
 	for _, tc := range cases {

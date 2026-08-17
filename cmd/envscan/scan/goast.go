@@ -81,10 +81,22 @@ var envHelperShape = regexp.MustCompile(`^env[A-Z][A-Za-z0-9]*$`)
 // 8 of which pass "" -- where the "suffix" simply IS the whole key, and where
 // eleven live operator knobs sat invisible.
 //
-// What is still NOT resolved: a prefix from a parameter or a struct field, which
-// needs the reader value followed across call boundaries -- the interprocedural
-// analysis this scanner deliberately does not do. Those sites stay COUNTED, and
-// that counting is what memql#3818 added: before it they were the worst of the
+// A STRUCT-FIELD prefix resolves too now (memql#3834 step 3). `ServerEnvLoader`
+// and its siblings hold the prefix in a field and the key suffixes in a second
+// struct, so the composed name appeared in no source file at all -- which is how
+// SERVER_ADDRESS came to be read by every node, documented as live, and reported
+// by nothing (memql#3892). collectStructFieldConsts reads those tables.
+//
+// What is still NOT resolved: a prefix that is genuinely MULTI-VALUED -- one
+// loader function called by several packages, each passing its own prefix, so
+// there is no single key for the site to have. `component/database`,
+// `integrations/` and `integrations/email` are the live examples. Those sites
+// stay COUNTED and their residual line now says the suffix DID resolve and names
+// it, so a reader knows the answer is at the construction site rather than here.
+// Resolving them would mean emitting one key per caller, which is a different
+// analysis and a different output shape.
+//
+// That counting is what memql#3818 added: before it these were the worst of the
 // three read classes -- not a read, and not a residual either, so the summary
 // line omitted them and the limitation lived only in a package comment. A
 // checker that reports only what it found makes a pass indistinguishable from a
@@ -269,6 +281,41 @@ type goIndex struct {
 	// would go stale the first time somebody wrote another one, and would do
 	// so silently -- which is this scanner's entire defect class.
 	keyHelpers map[string]map[string]int
+
+	// structFields maps a package directory to the string constants its
+	// composite literals assign to each FIELD NAME -- the "name table"
+	// memql#3834 step 3 names, in the struct form this tree actually uses:
+	//
+	//	defaultServerEnvKeys = ServerEnvKeys{Address: "ADDRESS", ...}
+	//	...
+	//	reader.String(keys.Address)                  // -> "ADDRESS"
+	//	env.NewEnvReader(loader.Prefix)              // -> "MEMQL_SERVER"
+	//
+	// WHY THIS IS THE BIGGEST REMAINING SHAPE. 32 of the 56 unresolvable
+	// EnvReader sites keyed off a struct field, and so did the PREFIX for a
+	// whole package at a time -- which is worse than it sounds, because an
+	// unresolved prefix makes every suffix under it unresolvable too. It is
+	// what memql#3818's file header meant by "a prefix from a parameter or a
+	// struct field, which is what this deliberately declined to do".
+	//
+	// KEYED ON THE FIELD NAME, PER PACKAGE, NOT ON THE TYPE. Resolving the
+	// type of `keys` in `reader.String(keys.Address)` needs go/types, and this
+	// scanner deliberately has none (see the file header: type checking needs
+	// a buildable configuration per build tag). The field name alone is enough
+	// BECAUSE OF THE AMBIGUITY RULE below, which is what keeps it honest
+	// rather than lucky.
+	//
+	// AMBIGUITY IS ABSENCE, exactly as it is for constants. If two composite
+	// literals in one package assign different strings to the same field name,
+	// the field resolves to NOTHING and the site stays in the residual. So the
+	// failure mode of the weaker keying is a site that stays unresolved -- the
+	// state it was already in -- and never a confidently wrong key, which is
+	// the one outcome this scanner exists to prevent.
+	//
+	// Literals inside FUNCTION BODIES count, not just package-level ones:
+	// `LoadServerEnvOptions(ServerEnvLoader{Prefix: serverEnvPrefix})` is a
+	// call argument, and it is the only place that prefix is ever stated.
+	structFields map[string]stringConsts
 }
 
 // goFile is one parsed source file.
@@ -317,6 +364,7 @@ func indexGo(root string) (*goIndex, error) {
 		consts:       map[string]stringConsts{},
 		pkgName:      map[string]string{},
 		readerFields: map[string]map[string]bool{},
+		structFields: map[string]stringConsts{},
 	}
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
@@ -351,6 +399,10 @@ func indexGo(root string) (*goIndex, error) {
 	}
 
 	idx.collectPackageConsts()
+	// AFTER the constants: a field is routinely set FROM one
+	// (`Prefix: serverEnvPrefix`), so the constant table has to be complete
+	// before the field table is built from it.
+	idx.collectStructFieldConsts()
 	idx.collectReaderFields()
 	idx.collectEnvKeyHelpers()
 	return idx, nil
@@ -437,6 +489,57 @@ func (idx *goIndex) collectPackageConsts() {
 	}
 }
 
+// collectStructFieldConsts fills idx.structFields from every composite
+// literal in the module, package by package (memql#3834 step 3).
+//
+// Walks the WHOLE file rather than only its top-level declarations, because the
+// literal that states a prefix is typically an argument at a call site:
+//
+//	return LoadServerEnvOptions(ServerEnvLoader{Prefix: serverEnvPrefix})
+//
+// Only KEYED elements are read (`Field: value`). A positional literal --
+// `ServerEnvKeys{"ADDRESS", ...}` -- names no field and is skipped rather than
+// matched by position: position is exactly the thing that silently changes
+// meaning when somebody reorders a struct.
+//
+// The value is folded through the ordinary resolver, so a field set from a
+// constant (`Prefix: serverEnvPrefix`) resolves as readily as one set from a
+// literal. It runs AFTER collectPackageConsts for that reason.
+func (idx *goIndex) collectStructFieldConsts() {
+	for _, f := range idx.files {
+		table := idx.structFields[f.dir]
+		if table == nil {
+			table = stringConsts{}
+			idx.structFields[f.dir] = table
+		}
+		quals := idx.qualifiers(f)
+		ast.Inspect(f.ast, func(n ast.Node) bool {
+			lit, ok := n.(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			for _, elt := range lit.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				key, ok := kv.Key.(*ast.Ident)
+				if !ok {
+					continue
+				}
+				r := &resolver{idx: idx, dir: f.dir, quals: quals}
+				// depth 1, not 0: a field whose value is itself a struct field
+				// would recurse through this same table, and the existing depth
+				// bound is what stops a cycle.
+				if value, why := r.fold(kv.Value, 1); why == "" {
+					table.bind(key.Name, value)
+				}
+			}
+			return true
+		})
+	}
+}
+
 // stringLiteral reports whether expr is a plain string literal, and its
 // unquoted value.
 func stringLiteral(expr ast.Expr) (*ast.BasicLit, string, bool) {
@@ -501,6 +604,17 @@ func (r *resolver) fold(expr ast.Expr, depth int) (string, string) {
 		}
 		dir, ok := r.packageDir(qual.Name)
 		if !ok {
+			// Not a package qualifier, so this is a FIELD selector -- the name
+			// table shape (memql#3834 step 3). Resolve it through the field
+			// constants this package's composite literals state.
+			if b, ok := r.idx.structFields[r.dir][e.Sel.Name]; ok {
+				if b.conflicting {
+					return "", fmt.Sprintf("%s.%s: the field %s is assigned two different string values "+
+						"in this package, so no single value is correct",
+						qual.Name, e.Sel.Name, e.Sel.Name)
+				}
+				return b.value, ""
+			}
 			return "", fmt.Sprintf("%s.%s is a field or method value rather than an imported constant",
 				qual.Name, e.Sel.Name)
 		}
@@ -705,6 +819,194 @@ func (idx *goIndex) collectEnvKeyHelpers() {
 			})
 		}
 	}
+}
+
+// localEnvHelpers finds, within ONE declaration, the local closures that read
+// the environment, and the index of the parameter each takes the key on
+// (memql#3834 step 3, the "injected getter" half).
+//
+// THE SHAPE, which is `integrations/voice/agent/config.go` verbatim:
+//
+//	func LoadConfig(getenv Getenv) (Config, error) {
+//	    if getenv == nil { getenv = os.Getenv }
+//	    get := func(key, def string) string { return trim(getenv(key)) }
+//	    ...
+//	    cfg.RealtimeModel = get("MEMQL_REALTIME_MODEL", "gpt-realtime-2")
+//	}
+//
+// WHY THIS IS WORTH A PASS. The keys here are STRING LITERALS at the call site
+// -- nothing is computed, nothing is assembled. What was invisible was only
+// that `get` reads the environment, because the reader is injected for
+// testability and the helper is a closure rather than a named function.
+// collectEnvKeyHelpers finds exactly this rule at package level and could not
+// see it one scope down. Twenty-five live operator knobs sat behind that gap:
+// the whole MEMQL_REALTIME_* family plus MEMQL_VOICE_EXECUTOR,
+// MEMQL_VOICE_AUTOJOIN, MEMQL_AVATAR_VENDOR and MEMQL_GRPC_ADDR.
+//
+// TWO HOPS, RESOLVED IN ORDER. First the READERS: an identifier assigned
+// os.Getenv / os.LookupEnv (`getenv = os.Getenv`) is one, and so is a
+// package-level key helper. Then the HELPERS: a closure whose body passes one
+// of its own string parameters to a reader. A closure is admitted only if its
+// reader was already known, so the chain cannot bootstrap itself from nothing.
+//
+// SAME STRICTNESS AS THE PACKAGE-LEVEL PASS, and for the same reason: a false
+// positive here does not yield "no answer", it yields a confidently wrong one.
+// The parameter must be declared `string`, the identifier reaching the reader
+// must be that exact parameter, and a shadowing local of the same name
+// disqualifies it.
+func (idx *goIndex) localEnvHelpers(dir string, decl ast.Decl) map[string]int {
+	readers := map[string]bool{}
+	ast.Inspect(decl, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, rhs := range assign.Rhs {
+			if i >= len(assign.Lhs) {
+				break
+			}
+			sel, ok := rhs.(*ast.SelectorExpr)
+			if !ok {
+				continue
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "os" {
+				continue
+			}
+			if sel.Sel.Name != "Getenv" && sel.Sel.Name != "LookupEnv" {
+				continue
+			}
+			if lhs, ok := assign.Lhs[i].(*ast.Ident); ok && lhs.Name != "_" {
+				readers[lhs.Name] = true
+			}
+		}
+		return true
+	})
+	if len(readers) == 0 {
+		return nil
+	}
+
+	helpers := map[string]int{}
+	ast.Inspect(decl, func(n ast.Node) bool {
+		assign, ok := n.(*ast.AssignStmt)
+		if !ok {
+			return true
+		}
+		for i, rhs := range assign.Rhs {
+			if i >= len(assign.Lhs) {
+				break
+			}
+			lit, ok := rhs.(*ast.FuncLit)
+			if !ok || lit.Body == nil || lit.Type.Params == nil {
+				continue
+			}
+			name, ok := assign.Lhs[i].(*ast.Ident)
+			if !ok || name.Name == "_" {
+				continue
+			}
+			if at, ok := closureKeyParam(lit, readers, idx.keyHelpers[dir]); ok {
+				helpers[name.Name] = at
+			}
+		}
+		return true
+	})
+	if len(helpers) == 0 {
+		return nil
+	}
+	return helpers
+}
+
+// closureKeyParam reports which of a closure's own string parameters it passes
+// to an env reader, if any.
+func closureKeyParam(lit *ast.FuncLit, readers map[string]bool, pkgHelpers map[string]int) (int, bool) {
+	params := map[string]int{}
+	pos := 0
+	for _, field := range lit.Type.Params.List {
+		id, isIdent := field.Type.(*ast.Ident)
+		isString := isIdent && id.Name == "string"
+		for _, name := range field.Names {
+			if isString && name.Name != "_" {
+				params[name.Name] = pos
+			}
+			pos++
+		}
+		if len(field.Names) == 0 {
+			pos++
+		}
+	}
+	if len(params) == 0 {
+		return 0, false
+	}
+
+	// A local of the same name inside the closure means the identifier that
+	// reaches the reader may not be the parameter.
+	shadowed := map[string]bool{}
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		switch d := n.(type) {
+		case *ast.AssignStmt:
+			if d.Tok != token.DEFINE {
+				return true
+			}
+			for _, lhs := range d.Lhs {
+				if id, ok := lhs.(*ast.Ident); ok {
+					shadowed[id.Name] = true
+				}
+			}
+		case *ast.ValueSpec:
+			for _, name := range d.Names {
+				shadowed[name.Name] = true
+			}
+		}
+		return true
+	})
+
+	found := -1
+	ast.Inspect(lit.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		// Either a bare reader identifier (`getenv(key)`) or a package-level
+		// helper already discovered by collectEnvKeyHelpers.
+		at := 0
+		switch fn := call.Fun.(type) {
+		case *ast.Ident:
+			if readers[fn.Name] {
+				at = 0
+			} else if i, ok := pkgHelpers[fn.Name]; ok {
+				at = i
+			} else {
+				return true
+			}
+		case *ast.SelectorExpr:
+			pkg, ok := fn.X.(*ast.Ident)
+			if !ok || pkg.Name != "os" {
+				return true
+			}
+			if fn.Sel.Name != "Getenv" && fn.Sel.Name != "LookupEnv" {
+				return true
+			}
+		default:
+			return true
+		}
+		if at >= len(call.Args) {
+			return true
+		}
+		id, ok := call.Args[at].(*ast.Ident)
+		if !ok {
+			return true
+		}
+		index, isParam := params[id.Name]
+		if !isParam || shadowed[id.Name] {
+			return true
+		}
+		found = index
+		return true
+	})
+	if found < 0 {
+		return 0, false
+	}
+	return found, true
 }
 
 // collectReaderFields records every struct field declared with type
@@ -972,14 +1274,25 @@ func readerCallee(call *ast.CallExpr, f goFile, idents map[string]bool, fields m
 // readerWhy explains a reader site. It states the MECHANISM rather than a
 // failure, because nothing about the site is malformed: the full key genuinely
 // is not written down here.
-func readerWhy(f goFile, arg ast.Expr) string {
-	if _, value, ok := stringLiteral(arg); ok {
-		return fmt.Sprintf("env.NewEnvReader suffix read: the full key is the reader's constructor "+
-			"prefix + %q, and reader prefixes are not resolved (they would need the reader value "+
-			"traced from its construction site)", value)
+//
+// IT NAMES WHICH HALF IS MISSING, which is not cosmetic (memql#3834). A reader
+// key is prefix + suffix, and after the struct-field pass the suffix usually
+// folds -- `reader.String(keys.DSN)` resolves "DSN" perfectly well and it is
+// the PREFIX that is unknown. The old wording said "neither the prefix nor the
+// suffix is resolved here" for every non-literal argument, which sent a reader
+// looking at the call site when the answer is at the construction site, or the
+// other way round. A residual that misdescribes itself is worse than a bigger
+// one that does not: it is the same defect this scanner exists to stop, wearing
+// the scanner's own output.
+func readerWhy(f goFile, arg ast.Expr, r *resolver) string {
+	suffix, why := r.fold(arg, 0)
+	if why == "" {
+		return fmt.Sprintf("env.NewEnvReader suffix read: the suffix resolves to %q, but the reader's "+
+			"constructor prefix does not -- that prefix comes from a parameter or a struct field set "+
+			"by a caller, so this one function reads a different key for each of them", suffix)
 	}
-	return fmt.Sprintf("env.NewEnvReader read whose key argument (%s) is not a literal either, so "+
-		"neither the reader's prefix nor the suffix is resolved here", exprText(f, arg))
+	return fmt.Sprintf("env.NewEnvReader read where NEITHER half resolves: the key argument (%s) "+
+		"does not fold (%s), and the reader's constructor prefix is not traced either", exprText(f, arg), why)
 }
 
 // scanFile finds every read-shaped call in one file and folds its key.
@@ -1005,6 +1318,9 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 		}
 		readerIdents := collectReaderIdents(decl)
 		readerPrefixes := r.collectReaderPrefixes(decl)
+		// Per DECLARATION, not per package: a closure's scope is the function
+		// it is written in, and two functions may both declare a `get`.
+		localHelpers := idx.localEnvHelpers(f.dir, decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok {
@@ -1035,13 +1351,13 @@ func (idx *goIndex) scanFile(f goFile) ([]Read, []Unresolvable) {
 					Arg:      exprText(f, arg),
 					File:     f.rel,
 					Line:     f.fset.Position(arg.Pos()).Line,
-					Why:      readerWhy(f, arg),
+					Why:      readerWhy(f, arg, r),
 					MoreArgs: len(call.Args) > 1,
 				})
 				return true
 			}
 
-			callee, argPos, ok := idx.readCalleeWithHelpers(call, r, f)
+			callee, argPos, ok := idx.readCalleeWithHelpers(call, r, f, localHelpers)
 			if !ok || len(call.Args) <= argPos {
 				return true
 			}
@@ -1154,13 +1470,20 @@ func (idx *goIndex) collectLocals(f goFile, quals map[string]string, decl ast.De
 // FIRST and wins. Those are the component/config env* helpers, already correct;
 // letting a discovered entry override one would change a working attribution on
 // the strength of a heuristic.
-func (idx *goIndex) readCalleeWithHelpers(call *ast.CallExpr, r *resolver, f goFile) (string, int, bool) {
+func (idx *goIndex) readCalleeWithHelpers(call *ast.CallExpr, r *resolver, f goFile, locals map[string]int) (string, int, bool) {
 	if callee, ok := readCallee(call); ok {
 		return callee, 0, true
 	}
 
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
+		// A local closure that reads env, discovered per declaration. Checked
+		// FIRST: a closure shadows a package-level function of the same name,
+		// so preferring the package one would attribute the key to whichever
+		// happened to be listed first.
+		if argIndex, ok := locals[fun.Name]; ok {
+			return fun.Name, argIndex, true
+		}
 		// Same-package call: the helper is declared in this file's own
 		// directory.
 		if argIndex, ok := idx.keyHelpers[f.dir][fun.Name]; ok {
