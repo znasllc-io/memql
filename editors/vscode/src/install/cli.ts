@@ -42,6 +42,17 @@
 // one route that reopens it). A second copy of that rule here would be a second
 // place for it to be wrong, and wrong in a way that reads as success.
 //
+// THE RULE HOLDS FOR THE CHECKOUT AND NOT YET FOR THE IMAGES (memql#4068).
+// A branch install's `recordedCheckout()` returns a commit and no tag, and the
+// image tag is derived separately -- with no tag to derive from it falls back
+// to DEFAULT_STACK_TAG, so a repair run from a NEWER plugin build replays the
+// recorded commit against a different release's engine images. Pre-existing,
+// identical in the extension's own repair flow, and out of scope for the verb;
+// the fix is to record the resolved image tag at install time and replay that,
+// rather than deriving it a second time. A TAG install is unaffected, which is
+// the common case and is verified: with the pin at v0.19.1, repairing a
+// v0.19.0 receipt still plans --tag=v0.19.0 and --image-tag=0.19.0.
+//
 // WHAT MOVED, AND WHY (memql#3469). The ORCHESTRATION -- the plan functions,
 // the child environment, the decision to load a graph and execute it -- now
 // lives in ./session.ts, because the "+" button needed to start an install
