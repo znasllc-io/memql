@@ -54,7 +54,11 @@ test("a receipt written by a run carrying both link steps holds neither URL", as
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "memql-receipt-"));
   const file = path.join(dir, "install-receipt.json");
   try {
-    // Exactly what the two scripts emit on their success paths.
+    // The shape the two scripts emit on their success paths. The token BODIES
+    // are deliberately low-entropy placeholders rather than realistic random
+    // strings: what every assertion below keys on is the URL prefix and the
+    // `mql_enr_` marker, and a realistic body is a secret-shaped literal in a
+    // tracked file -- which the repository's own gitleaks gate flags, correctly.
     await appendReceiptEntry(file, "install", entry({
       stepId: "magicLink",
       script: "install.magicLink",
@@ -63,7 +67,7 @@ test("a receipt written by a run carrying both link steps holds neither URL", as
         namespace: "memql",
         email: "owner@example.test",
         linkState: "recovered",
-        link: "https://identity.memql.localhost/auth/complete?token=abcdef0123456789abcdef0123456789",
+        link: "https://identity.memql.localhost/auth/complete?token=PLACEHOLDER-NOT-A-TOKEN",
         candidates: 1,
       },
     }));
@@ -75,7 +79,7 @@ test("a receipt written by a run carrying both link steps holds neither URL", as
         namespace: "memql",
         target: "identity",
         email: "owner@example.test",
-        enrolUrl: "https://identity.memql.localhost/enroll?code=mql_enr_0123456789abcdefghijklmnopqrstuvwxyzABCDEFG",
+        enrolUrl: "https://identity.memql.localhost/enroll?code=mql_enr_PLACEHOLDER-NOT-A-TOKEN",
         ownerClaimed: true,
         enrolmentState: "minted",
       },
@@ -113,7 +117,7 @@ test("withholding leaves every other value in its original JSON type", () => {
     hostnames: ["api.memql.localhost", "identity.memql.localhost"],
     pins: { k3d: "v5.6.0" },
     caroot: "/home/operator/.memql/mkcert",
-    enrolUrl: "https://identity.memql.localhost/enroll?code=mql_enr_x",
+    enrolUrl: "https://identity.memql.localhost/enroll?code=mql_enr_PLACEHOLDER",
   });
 
   assert.equal(typeof out.cluster, "string");
@@ -182,8 +186,8 @@ test("a removal target survives a path longer than the run log's length cap", ()
 test("the two predicates still agree about an actual credential", () => {
   const cases: Array<[string, unknown]> = [
     ["enrolUrl", "https://identity.memql.localhost/enroll?code=mql_enr_x"],
-    ["link", "https://identity.memql.localhost/auth/complete?token=x"],
-    ["apiKey", "sk-ant-0123456789"],
+    ["link", "https://identity.memql.localhost/auth/complete?token=PLACEHOLDER"],
+    ["apiKey", "sk-ant-PLACEHOLDER"],
     ["token", "short"],
   ];
   for (const [name, value] of cases) {
