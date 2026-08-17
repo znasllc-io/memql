@@ -563,6 +563,7 @@ var BoundConcepts = map[string]string{
 	"touchDeviceCodePoll":                   "v1:identity:deviceCode",
 	"touchSession":                          "v1:identity:authSession",
 	"touchWorkspace":                        "v1:workbench:workspace",
+	"trainConstructConceptData":             "v1:authoring:construct",
 	"upcomingEvents":                        "v1:calendar:calendarEvent",
 	"updateAccount":                         "v1:identity:account",
 	"updateAgent":                           "v1:agents:agent",

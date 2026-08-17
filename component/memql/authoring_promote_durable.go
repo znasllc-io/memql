@@ -318,10 +318,18 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 	}
 
 	// The memql#3974 staged-DATA tier, resolved for this construct: stamp the row
-	// and mark the concept when the caller asked for it, clear any stale marker
-	// when they did not. A no-op for every non-concept kind, and INERT for now --
-	// nothing reads the marker until memql#3983 wires the read seams.
-	if err := e.applyConceptDataStagingOnPromote(persistCtx, store, c, constructId, cfg.stageConceptData); err != nil {
+	// and mark the concept when the intent holds, clear any stale marker when it
+	// does not. A no-op for every non-concept kind.
+	//
+	// THE INTENT IS NOT cfg.stageConceptData ALONE (memql#3986, RULING (a) in
+	// staged_transition.go). conceptDataStageIntent is `asked for it OR already
+	// staged`, because a promote that said NOTHING about staging used to publish
+	// every row the concept had accumulated: the new row lands unstamped, "a live
+	// row wins" resolves the concept live, and an author who edited a schema has
+	// disclosed their data. A re-promote now CARRIES THE STAGING FORWARD, which
+	// leaves the named transition as the only way out of staged -- which is what
+	// makes it a transition rather than one of two doors.
+	if err := e.applyConceptDataStagingOnPromote(persistCtx, store, c, constructId, e.conceptDataStageIntent(c, cfg.stageConceptData)); err != nil {
 		return err
 	}
 
