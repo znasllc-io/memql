@@ -235,7 +235,13 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	// gate in rowauthz_enforce_gate_test.go re-derives that at PR head),
 	// so the only rows it can drop are ones an unbound read reached
 	// around the declaration.
-	return filterRowAuthzSet(ctx, set), nil
+	//
+	// Staged-DATA enforcement rides immediately after it (memql#3983). The two
+	// gates answer different questions about the same row -- row-authz asks
+	// "may THIS CALLER see it", staging asks "is it visible to ANYONE yet" --
+	// and staging is the outer one: a staged row is withheld from every
+	// caller, so no authz answer can readmit it.
+	return e.filterStagedSet(filterRowAuthzSet(ctx, set)), nil
 }
 
 func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
@@ -1027,6 +1033,19 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 	// alone: its predicate is a relationship spec, and with no filter
 	// having run there is nothing to defer the join to.
 	if !admitRowAuthzTraversal(ctx, node) {
+		return nil
+	}
+
+	// Staged-DATA enforcement, graph-expansion path (memql#3983). Same
+	// argument as the row-authz gate directly above, and it is the argument
+	// this epic leans on hardest: traversal never enters
+	// evaluateExpressionSet, so the injected conjunct is structurally
+	// unreachable here and the ROW is all there is. The row names its concept
+	// and staging is a pure function of the concept, so the gate is exact.
+	//
+	// Placed before addNode and before the recursion, so a staged row neither
+	// lands in the bundle nor is traversed THROUGH.
+	if !e.admitStagedRow(node) {
 		return nil
 	}
 
