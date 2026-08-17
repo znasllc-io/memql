@@ -87,8 +87,76 @@ func (r *Registry[T]) Has(name string) bool {
 	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	_, ok := r.byName[key]
+	if _, ok := r.byName[key]; ok {
+		return true
+	}
+	_, ok := r.resolveBareLocked(key)
 	return ok
+}
+
+// --- namespaced keys (memql#3897) ---------------------------------------
+//
+// Entries are keyed `<namespace>.<name>` for anything loaded from a file, and
+// by the bare name for the engine-internal constructs that have no origin. That
+// is what lets two namespaces declare a `plan` -- the constraint memql#3897 was
+// opened to remove, and the one that made a product DSL bundle unable to name a
+// construct the engine had already named.
+//
+// # Why a bare lookup still resolves
+//
+// A reference inside a compiled body is looked up at EXECUTION time, from a
+// context that has no idea which file it came from -- `newFunctionValidator(
+// fns.Snapshot(), nil)` in engine.go builds its view per query, and the only
+// "origin" it carries is auth.CallOrigin. Load-time resolution rewrites those
+// references to their qualified form (see component/memql's construct scope),
+// and this is the floor underneath it: a reference the rewriter did not reach
+// still resolves, PROVIDED the name is unambiguous.
+//
+// So the failure mode of an incomplete rewrite is the behaviour this tree
+// already had, rather than a construct that stops resolving. What is NOT
+// tolerated is ambiguity: once two namespaces declare the name, a bare lookup
+// has no correct answer and picking one would be exactly the silent capture
+// memql#3802 fixed for concepts -- the wrong construct bound, with OK=true. It
+// is an error naming both namespaces instead.
+
+// resolveBareLocked finds the single namespaced entry whose name half matches a
+// bare key. Caller holds at least the read lock.
+//
+// Returns ok=false when nothing matches AND when more than one does. The second
+// case is the important one: a guess here is a silently wrong construct.
+func (r *Registry[T]) resolveBareLocked(bare string) (string, bool) {
+	if strings.Contains(bare, ".") {
+		return "", false // already qualified; a miss is a miss
+	}
+	var found string
+	suffix := "." + bare
+	for key := range r.byName {
+		if !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		if found != "" {
+			return "", false // ambiguous
+		}
+		found = key
+	}
+	if found == "" {
+		return "", false
+	}
+	return found, true
+}
+
+// bareCandidatesLocked lists every namespaced key matching a bare name, so an
+// ambiguity error can name them. Caller holds at least the read lock.
+func (r *Registry[T]) bareCandidatesLocked(bare string) []string {
+	suffix := "." + bare
+	var out []string
+	for key := range r.byName {
+		if strings.HasSuffix(key, suffix) {
+			out = append(out, key)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Lookup returns the entry by name. The returned value is cloned
@@ -106,7 +174,14 @@ func (r *Registry[T]) Lookup(name string) (*T, bool) {
 	defer r.mu.RUnlock()
 	item, ok := r.byName[key]
 	if !ok || item == nil {
-		return nil, false
+		resolved, found := r.resolveBareLocked(key)
+		if !found {
+			return nil, false
+		}
+		item = r.byName[resolved]
+		if item == nil {
+			return nil, false
+		}
 	}
 	return r.clone(item), true
 }
@@ -126,9 +201,96 @@ func (r *Registry[T]) Get(name string) (*T, error) {
 	defer r.mu.RUnlock()
 	item, ok := r.byName[key]
 	if !ok || item == nil {
-		return nil, fmt.Errorf("%s %q not found", r.kindLabel(), key)
+		resolved, found := r.resolveBareLocked(key)
+		if !found {
+			// AMBIGUITY IS ITS OWN ERROR, not a "not found" (memql#3897).
+			// Two namespaces declaring the name is the state this change
+			// exists to allow, so the refusal has to name them and say how
+			// to disambiguate -- otherwise the first product bundle to
+			// collide with a core name reads it as the construct having
+			// vanished.
+			if candidates := r.bareCandidatesLocked(key); len(candidates) > 1 {
+				return nil, fmt.Errorf("%s %q is declared in %d namespaces (%s) -- "+
+					"name it as <namespace>.%s, or import it with an alias",
+					r.kindLabel(), key, len(candidates), strings.Join(candidates, ", "), key)
+			}
+			return nil, fmt.Errorf("%s %q not found", r.kindLabel(), key)
+		}
+		item = r.byName[resolved]
+		if item == nil {
+			return nil, fmt.Errorf("%s %q not found", r.kindLabel(), key)
+		}
 	}
 	return r.clone(item), nil
+}
+
+// LookupIndex is Snapshot plus a BARE ALIAS for every unambiguous name
+// (memql#3897).
+//
+// WHY IT EXISTS AS A SECOND METHOD. Snapshot has two kinds of consumer and the
+// namespaced key broke exactly one of them:
+//
+//	for _, fn := range r.Snapshot()      iteration -- key shape is irrelevant
+//	snapshot[someBareName]               KEYED LOOKUP -- was a direct map hit
+//
+// The keyed consumers are the ones resolving a construct reference out of a
+// compiled body, from a context with no namespace (`newFunctionValidator(
+// fns.Snapshot(), nil)`), so a qualified-only map turns every such reference
+// into "not found". This gives them a map where both spellings work.
+//
+// AN AMBIGUOUS NAME GETS NO BARE KEY, deliberately, which is the same rule Get
+// enforces: two namespaces declaring it means a bare reference has no correct
+// answer, and the consumer's own "not found" is the right outcome -- far better
+// than binding whichever one the map iteration happened to reach, which is the
+// silent capture memql#3802 fixed for concepts.
+//
+// Counting consumers must keep using Snapshot: this map is deliberately larger
+// than the registry.
+func (r *Registry[T]) LookupIndex() map[string]*T {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if len(r.byName) == 0 {
+		return nil
+	}
+	// TWO PASSES, because an alias must never overwrite or evict a REAL entry.
+	// An engine-internal construct with no origin occupies the bare key
+	// legitimately; a single-pass version that treated the collision as
+	// ambiguity would delete it and take a working construct out of scope.
+	out := make(map[string]*T, len(r.byName)*2)
+	for key, item := range r.byName {
+		if item != nil {
+			out[key] = r.clone(item)
+		}
+	}
+	candidates := map[string]string{}
+	ambiguous := map[string]bool{}
+	for key, item := range r.byName {
+		if item == nil {
+			continue
+		}
+		bare := nameHalf(key)
+		if bare == key {
+			continue // already unnamespaced; it IS the bare key
+		}
+		if _, real := r.byName[bare]; real {
+			continue // a real unnamespaced entry owns this key
+		}
+		if _, seen := candidates[bare]; seen {
+			ambiguous[bare] = true
+			continue
+		}
+		candidates[bare] = key
+	}
+	for bare, key := range candidates {
+		if ambiguous[bare] {
+			continue
+		}
+		out[bare] = out[key]
+	}
+	return out
 }
 
 // Snapshot returns a cloned map of all entries. Empty registry
@@ -211,7 +373,12 @@ func (r *Registry[T]) Add(name string, item *T) error {
 		return fmt.Errorf("%s is nil", r.kindLabel())
 	}
 	if r.validate != nil {
-		if err := r.validate(name); err != nil {
+		// The NAME half, not the key (memql#3897). A key is
+		// `<namespace>.<name>` and every per-construct validator checks
+		// camelCase -- so validating the key would refuse every namespaced
+		// entry for containing a dot and a lowercase namespace, which is the
+		// key's own required shape.
+		if err := r.validate(nameHalf(name)); err != nil {
 			return err
 		}
 	}
@@ -222,6 +389,18 @@ func (r *Registry[T]) Add(name string, item *T) error {
 	}
 	r.byName[name] = r.clone(item)
 	return nil
+}
+
+// nameHalf is the construct name inside a `<namespace>.<name>` key.
+//
+// Split at the LAST dot: a namespace is a directory PATH and may contain more
+// than one segment, while a construct name never contains a dot -- the parsers
+// refuse it -- so the last dot is unambiguously the join.
+func nameHalf(key string) string {
+	if i := strings.LastIndex(key, "."); i >= 0 {
+		return key[i+1:]
+	}
+	return key
 }
 
 // Upsert inserts or replaces an entry. Used by unified loaders.
@@ -236,7 +415,7 @@ func (r *Registry[T]) Upsert(name string, item *T) error {
 		return fmt.Errorf("%s name is required", r.kindLabel())
 	}
 	if r.validate != nil {
-		if err := r.validate(name); err != nil {
+		if err := r.validate(nameHalf(name)); err != nil {
 			return err
 		}
 	}

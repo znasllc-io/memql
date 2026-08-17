@@ -361,7 +361,7 @@ func (r *ToolRegistry) Upsert(tool *Tool) error {
 	if tool == nil {
 		return fmt.Errorf("tool is nil")
 	}
-	return r.Registry.Upsert(tool.Name, tool)
+	return r.Registry.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(tool.Origin), tool.Name), tool)
 }
 
 // add inserts a tool into the registry. Errors when the name is
@@ -370,7 +370,7 @@ func (r *ToolRegistry) add(tool *Tool) error {
 	if tool == nil {
 		return fmt.Errorf("tool is nil")
 	}
-	return r.Registry.Add(tool.Name, tool)
+	return r.Registry.Add(QualifyConstruct(ConstructNamespaceForOrigin(tool.Origin), tool.Name), tool)
 }
 
 // validateToolName ensures a tool name follows the camelCase convention.

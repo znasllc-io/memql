@@ -1106,7 +1106,7 @@ func (e *MemQLEngine) executeLogicFunctionCall(ctx context.Context, call *Functi
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(fns.Snapshot(), nil)
+	validator := newFunctionValidator(fns.LookupIndex(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}
@@ -1173,7 +1173,7 @@ func (e *MemQLEngine) executeMutationFunctionCall(ctx context.Context, call *Fun
 	}
 
 	// Validate args using the function's args-block schema.
-	validator := newFunctionValidator(fns.Snapshot(), nil)
+	validator := newFunctionValidator(fns.LookupIndex(), nil)
 	if err := validator.validateFunctionArgs(fn, args); err != nil {
 		return nil, err
 	}

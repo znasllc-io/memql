@@ -292,7 +292,7 @@ func (r *FunctionRegistry) add(fn *Function) error {
 	if fn == nil {
 		return fmt.Errorf("function is nil")
 	}
-	return r.Registry.Add(fn.Name, fn)
+	return r.Registry.Add(QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name), fn)
 }
 
 // Upsert inserts a function or replaces an existing entry with the
@@ -304,7 +304,7 @@ func (r *FunctionRegistry) Upsert(fn *Function) error {
 	if fn == nil {
 		return fmt.Errorf("function is nil")
 	}
-	return r.Registry.Upsert(fn.Name, fn)
+	return r.Registry.Upsert(QualifyConstruct(ConstructNamespaceForOrigin(fn.Origin), fn.Name), fn)
 }
 
 func validateFunctionName(name string) error {
