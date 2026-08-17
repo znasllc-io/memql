@@ -258,6 +258,16 @@ func TestConceptDataStaged_SurvivesARestart(t *testing.T) {
 // inverted to "a staged row wins" passes the two-row case and fails here, while
 // a fold that simply dropped the live check passes here and fails there. One
 // case alone cannot tell an inversion from a correct implementation.
+//
+// THE LIVE ROW IS WRITTEN BY A SECOND ENGINE (memql#3986). It used to be a plain
+// re-promote on the SAME engine, which no longer produces one: a re-promote now
+// CARRIES THE STAGING FORWARD rather than publishing the rows by omission (see
+// RULING (a) in staged_transition.go), so that construction would stamp its row
+// too. A promote on a node whose marker does not know about the staging still
+// writes an unstamped row -- that is the bounded window carry-forward leaves,
+// which the marker-based intent cannot close and which this fixture now pins
+// rather than assumes away. The ASSERTION is unchanged; only how the two
+// disagreeing rows come to exist is.
 func TestConceptDataStagedReplay_ALiveRowWins(t *testing.T) {
 	e := promoteConceptEngine(t)
 	stagedPromote := promoteConceptForDataStaging(t, e, WithConceptDataStaged())
@@ -275,8 +285,9 @@ func TestConceptDataStagedReplay_ALiveRowWins(t *testing.T) {
 		t.Fatalf("a lone stamped row resolved as LIVE (%d replayed): the fold is inverted, and every staged concept is visible after a restart", staged)
 	}
 
-	// THE CASE: a later ordinary promote appends a second, unstamped row.
-	livePromote := promoteConceptForDataStaging(t, e)
+	// THE CASE: a later ordinary promote, on a node that never saw the staging,
+	// appends a second, unstamped row.
+	livePromote := promoteConceptForDataStaging(t, promoteConceptEngine(t))
 	both := rehydrateStoreFrom(stagedPromote, livePromote)
 
 	fresh := promoteConceptEngine(t)

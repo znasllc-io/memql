@@ -12058,7 +12058,7 @@ func SoftDeleteWorkerInvocationBuild(args SoftDeleteWorkerInvocationArgs) string
 	return b.String()
 }
 
-// StageConstructConceptData -- Mark a promoted CONCEPT construct row's DATA staged (epic memql#3974): the concept stays REGISTERED and resolvable and keeps accepting writes, and only the VISIBILITY of the rows under it is withheld until it is trained. status is deliberately left alone, and for the same reason retireConstructConcept leaves it alone: a status-retired row is SKIPPED by the boot re-hydration, so the concept would not re-register at all and its staged rows would be unreadable rather than staged. It is equally deliberately not `status: staged`, which belongs to the construct-staging tier (memql#3928) and means the opposite kind of thing -- resolution scoped to one author -- on a kind (`concept`) that tier refuses outright. There is no inverse mutation here yet: the staged -> live transition is memql#3986, and until it lands the un-staging path is the same one conceptRetired uses, a re-promote writing a NEW construct row with this false, which the `a live row wins` fold resolves as live.
+// StageConstructConceptData -- Mark a promoted CONCEPT construct row's DATA staged (epic memql#3974): the concept stays REGISTERED and resolvable and keeps accepting writes, and only the VISIBILITY of the rows under it is withheld until it is trained. status is deliberately left alone, and for the same reason retireConstructConcept leaves it alone: a status-retired row is SKIPPED by the boot re-hydration, so the concept would not re-register at all and its staged rows would be unreadable rather than staged. It is equally deliberately not `status: staged`, which belongs to the construct-staging tier (memql#3928) and means the opposite kind of thing -- resolution scoped to one author -- on a kind (`concept`) that tier refuses outright. The inverse is trainConstructConceptData below (memql#3986); a re-promote is NOT one, because a promote carries the staging forward rather than dropping it -- see that mutation's note.
 //
 // Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["stageConstructConceptData"] in generated_concepts.go).
 type StageConstructConceptDataArgs struct {
@@ -12461,6 +12461,28 @@ func TouchWorkspaceBuild(args TouchWorkspaceArgs) string {
 	b.WriteString("mutation touchWorkspace(")
 	b.WriteString("workspaceId: ")
 	b.WriteString(quoteMemQL(args.WorkspaceId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TrainConstructConceptData -- Make a staged CONCEPT construct row's DATA live (memql#3986): the rows written under the concept while it was staged stop being withheld and join the ordinary read path, in place, with no row rewritten -- visibility is concept-grain, so the flag on this row is the whole of it. The exact inverse of stageConstructConceptData above, and the ONLY inverse: it exists because a re-promote deliberately does NOT un-stage. Under the `a live row wins` fold an unstamped row resolves the concept as live, so a promote that said nothing about staging used to publish every row an author had accumulated -- a disclosure caused by an edit to a SCHEMA, silent, and not undoable. The promote path now carries the staging forward instead, which leaves this mutation as the single named door out of staged. status is left alone here exactly as its sibling leaves it alone, and for the same reason: this is a statement about the visibility of rows, not about whether the construct re-registers. Every stamped row for the concept is written, not just one -- the fold would already resolve live off a single cleared row, but a row left stamped keeps asserting on the review surfaces that data is withheld when it is not.
+//
+// Bound concept: v1:authoring:construct (machine-readable: BoundConcepts["trainConstructConceptData"] in generated_concepts.go).
+type TrainConstructConceptDataArgs struct {
+	ConstructId string
+}
+
+// TrainConstructConceptData calls the engine mutation trainConstructConceptData.
+func (qc *QueryClient) TrainConstructConceptData(ctx context.Context, args TrainConstructConceptDataArgs) (*Result, error) {
+	call := TrainConstructConceptDataBuild(args)
+	return qc.executeNamed(ctx, "trainConstructConceptData", call)
+}
+
+func TrainConstructConceptDataBuild(args TrainConstructConceptDataArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation trainConstructConceptData(")
+	b.WriteString("constructId: ")
+	b.WriteString(quoteMemQL(args.ConstructId))
 	b.WriteString(")")
 	return b.String()
 }
