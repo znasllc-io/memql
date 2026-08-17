@@ -141,14 +141,20 @@ type PromoteBundleResult struct {
 // and AUDITS it as an override. It affects nothing else -- every other refusal
 // this path can produce (core-first, a failed compile, a broken invariant) is
 // unmoved by it, because none of them is a judgement about data.
-func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource, origin string, allowBreaking bool) (PromoteBundleResult, error) {
-	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource, origin, allowBreaking)
+//
+// opts carries the memql#3974 staged-DATA intent (WithConceptDataStaged), which
+// is a different axis from allowBreaking and deliberately not a second bool
+// beside it -- see PromoteDurableOption in authoring_concept_staged.go. Passing
+// none is the ordinary promote: every concept lands with its rows LIVE, exactly
+// as before the tier existed.
+func (e *MemQLEngine) PromoteBundleDurable(ctx context.Context, owner, bundleSource, origin string, allowBreaking bool, opts ...PromoteDurableOption) (PromoteBundleResult, error) {
+	return e.promoteBundleDurableWithStore(ctx, &enginePromoteStore{engine: e}, owner, bundleSource, origin, allowBreaking, opts...)
 }
 
 // promoteBundleDurableWithStore is the store-driven core of PromoteBundleDurable,
 // split out so it is unit testable with a fake promoteStore (no live DB), exactly
 // like promoteConstructDurableWithStore.
-func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource, origin string, allowBreaking bool) (PromoteBundleResult, error) {
+func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store promoteStore, owner, bundleSource, origin string, allowBreaking bool, opts ...PromoteDurableOption) (PromoteBundleResult, error) {
 	owner = strings.TrimSpace(owner)
 	if owner == "" {
 		return PromoteBundleResult{}, fmt.Errorf("authoring: durable promote requires an authenticated owner")
@@ -201,7 +207,7 @@ func (e *MemQLEngine) promoteBundleDurableWithStore(ctx context.Context, store p
 			// the splitter surfaced but the compiler skipped); leave it out.
 			continue
 		}
-		if perr := e.promoteConstructDurableWithStore(ctx, store, gate, owner, ac); perr != nil {
+		if perr := e.promoteConstructDurableWithStore(ctx, store, gate, owner, ac, opts...); perr != nil {
 			result.OK = false
 			// The diffs go out on the FAILURE reply too, and that is the whole
 			// point of collecting them structurally: a breaking refusal IS a
@@ -233,11 +239,21 @@ type promoteStore interface {
 	// copy of one mutation call, and the two would drift the first time either
 	// gained a field.
 	CreatePromoteConstruct(ctx context.Context, constructId, bundleId, kind, name, targetNamespace, source, status string) error
+	// StageConstructConceptData stamps the concept-only `conceptDataStaged` flag
+	// on a v1:authoring:construct row and leaves `status` ACTIVE (epic
+	// memql#3974). A separate call rather than another CreatePromoteConstruct
+	// parameter for the reason the status parameter is NOT the model here: status
+	// says which tier the CONSTRUCT is in and the boot walk routes on it, while
+	// this says whether the concept's ROWS are visible and the boot walk must
+	// still register the concept for that question to mean anything. Folding the
+	// two into one argument would be one field with two subjects.
+	StageConstructConceptData(ctx context.Context, constructId string) error
 }
 
 // promoteConstructDurableWithStore is the store-driven core, split out so it is
 // unit testable with a fake promoteStore (no live DB).
-func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, store promoteStore, gate *conceptPromoteGate, owner string, c *AuthoredConstruct) error {
+func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, store promoteStore, gate *conceptPromoteGate, owner string, c *AuthoredConstruct, opts ...PromoteDurableOption) error {
+	cfg := newPromoteDurableConfig(opts...)
 	if c == nil {
 		return fmt.Errorf("authoring: durable promote requires a construct")
 	}
@@ -299,6 +315,14 @@ func (e *MemQLEngine) promoteConstructDurableWithStore(ctx context.Context, stor
 	targetNamespace := promoteTargetNamespace(c)
 	if err := store.CreatePromoteConstruct(persistCtx, constructId, bundleId, c.Kind, c.Name, targetNamespace, c.Source, string(BundleActive)); err != nil {
 		return fmt.Errorf("authoring: persist promote construct: %w", err)
+	}
+
+	// The memql#3974 staged-DATA tier, resolved for this construct: stamp the row
+	// and mark the concept when the caller asked for it, clear any stale marker
+	// when they did not. A no-op for every non-concept kind, and INERT for now --
+	// nothing reads the marker until memql#3983 wires the read seams.
+	if err := e.applyConceptDataStagingOnPromote(persistCtx, store, c, constructId, cfg.stageConceptData); err != nil {
+		return err
 	}
 
 	if e.Component != nil && e.Logger != nil {
@@ -411,6 +435,28 @@ func (e *MemQLEngine) RehydratePromotedConstructs(ctx context.Context) (Rehydrat
 		return result, nil
 	}
 	result.ConceptsRetired = retired
+
+	// The same shape again for the memql#3974 staged-DATA tier: a concept whose
+	// rows are staged comes back REGISTERED and writable, with only the
+	// visibility of its rows withheld, and the walk above cannot express that
+	// either -- it registers a row or skips it. See
+	// applyPersistedConceptDataStaging for why the fold is over canonical ids and
+	// why a LIVE row wins.
+	//
+	// A replay failure is reported but does NOT fail the re-hydration, and here
+	// the direction of that choice matters more than it does above: failing open
+	// leaves staged rows VISIBLE until the next boot, which an operator can see
+	// and withdraw again, where a boot that stopped would take the whole node
+	// down over a visibility flag.
+	dataStaged, serr := e.applyPersistedConceptDataStaging(ctx, store)
+	if serr != nil {
+		if e.Component != nil && e.Logger != nil {
+			e.Logger.Error("could not replay promoted-concept staged data at re-hydration; a staged concept's rows may be visible until the next boot",
+				"component", "memql.engine", "error", serr)
+		}
+		return result, nil
+	}
+	result.ConceptsDataStaged = dataStaged
 	return result, nil
 }
 
@@ -439,6 +485,14 @@ type RehydrateResult struct {
 	// will refuse a write, which is the difference an operator reading the boot
 	// log needs to see.
 	ConceptsRetired int `json:"conceptsRetired,omitempty"`
+	// ConceptsDataStaged counts promoted concepts that came back REGISTERED AND
+	// WRITABLE with their ROWS STAGED (epic memql#3974) -- present, addressable,
+	// and withheld from the ordinary read path until the concept is trained.
+	// Counted in Rehydrated too, because they were re-registered; reported
+	// separately because "12 re-hydrated" would otherwise be the only thing an
+	// operator saw about an installation where some of the data those concepts
+	// own is deliberately invisible.
+	ConceptsDataStaged int `json:"conceptsDataStaged,omitempty"`
 }
 
 // promoteRehydrateStore is the narrow graph surface the boot re-hydration needs:
@@ -868,6 +922,25 @@ func (s *enginePromoteStore) CreatePromoteConstruct(ctx context.Context, constru
 		return err
 	}
 	return nil
+}
+
+// StageConstructConceptData stamps the concept-only staged-DATA flag (epic
+// memql#3974) through the dedicated stageConstructConceptData mutation. The
+// caller has already put the owner's envelope on the context (the promote path's
+// persistCtx), so this runs under exactly the envelope that wrote the row it is
+// stamping -- the #954 mutation reads actor.userId for the per-row authz owner,
+// and a stamp under a different actor would simply match no row.
+//
+// NAMED ARGS, not the `name({...})` object-literal wrapper: that form was
+// REMOVED from the grammar (memql#2335) and the parser refuses it, so a call
+// written that way fails on a live engine while every fake-store unit test
+// passes -- which is exactly how the neighbouring create calls stayed broken
+// until memql#3757 drove this store against a real database.
+func (s *enginePromoteStore) StageConstructConceptData(ctx context.Context, constructId string) error {
+	_, err := s.engine.Execute(ctx, mutationCall("stageConstructConceptData",
+		[2]string{"constructId", constructId},
+	))
+	return err
 }
 
 // enginePromoteRehydrateStore is the production promoteRehydrateStore. The

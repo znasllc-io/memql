@@ -53,6 +53,14 @@ shape construct constructFull {
   // projects ONLY the paths it lists, so a field missing here is a field the
   // re-hydration cannot see, whatever the row stores.
   conceptRetired
+  // conceptDataStaged is the same class of field (epic memql#3974): the boot
+  // re-hydration folds it per canonical concept id to decide whether a promoted
+  // concept's rows are visible, and the fold's silent direction is the one where
+  // the field reads false. Listed here to keep the projection in step with the
+  // row for every consumer that receives the SHAPED form -- the SDK, the wire,
+  // the review surfaces -- rather than only the sparse stored payload the
+  // in-process boot walk happens to read today.
+  conceptDataStaged
   catalogued
   catalogKey
   catalogMatchText
