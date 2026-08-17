@@ -55,6 +55,7 @@ readonly DB_GATED_TREES=(
 	"component/automations"
 	"component/grpc"
 	"integrations/cognition"
+	"integrations/embedding"
 	"integrations/planner"
 	"examples/referencepack"
 )
