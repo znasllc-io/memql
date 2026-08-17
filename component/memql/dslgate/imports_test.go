@@ -1,9 +1,9 @@
 package dslgate
 
 import (
+	"sort"
 	"strings"
 	"testing"
-	"testing/fstest"
 )
 
 // imports_test.go -- znasllc-io/memql#3803.
@@ -14,17 +14,25 @@ import (
 // pin both the rule and the two mistakes that made the FIRST measurement of its
 // cost wrong by a factor of 300.
 
+// gateOn runs the gate over an in-memory corpus.
+//
+// Paths are SORTED before the scan, matching what every real caller supplies:
+// both entry points source their file set from dslfs.WalkMemqlFiles, which
+// returns sorted paths. Pass 1 of the gate resolves a duplicate declaration
+// first-wins, so an unordered corpus would make a duplicate's attributed
+// namespace depend on Go's map iteration order and flake this suite.
 func gateOn(t *testing.T, files map[string]string) []Violation {
 	t.Helper()
-	tree := fstest.MapFS{}
-	for p, src := range files {
-		tree[p] = &fstest.MapFile{Data: []byte(src)}
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
 	}
-	got, err := scanCrossNamespaceImports(tree)
-	if err != nil {
-		t.Fatalf("scanCrossNamespaceImports: %v", err)
+	sort.Strings(paths)
+	corpus := make([]SourceFile, 0, len(paths))
+	for _, p := range paths {
+		corpus = append(corpus, SourceFile{Path: p, Content: files[p]})
 	}
-	return got
+	return scanCrossNamespaceImports(corpus)
 }
 
 // TestCrossNamespaceReferenceNeedsAnImport is the rule.

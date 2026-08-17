@@ -20,16 +20,42 @@ package memql
 //
 // Only CONTRACT gates live here -- authorization scoping, retired operators the
 // engine still honours, the `row.` namespace that decides whether a filter
-// compiles to a table column or a JSONB path. House-style gates (naming,
-// redundant annotations, canonical short forms) stay in test/dslconformance:
-// failing a fleet's boot over a convention would be worse than the convention
-// drifting. The rules themselves live in component/memql/dslgate, which the
-// conformance tests delegate to, so there is one detector rather than two that
-// drift.
+// compiles to a table column or a JSONB path, and the cross-namespace import
+// rule. House-style gates (naming, redundant annotations, canonical short forms)
+// stay in test/dslconformance: failing a fleet's boot over a convention would be
+// worse than the convention drifting. The rules themselves live in
+// component/memql/dslgate, which the conformance tests delegate to, so there is
+// one detector rather than two that drift.
 //
-// Cost: ~85ms over the 214-file embedded tree, once per Init, on top of a load
-// that already takes seconds. Measured rather than assumed, because a check
-// that runs on every node's boot path earns the measurement.
+// # The whole corpus goes in one call (memql#4051)
+//
+// This used to loop dslgate.ScanSource per file, which can only express per-file
+// rules -- and one gate is not one. GateCrossNamespaceImport (memql#3803) asks
+// whether a reference crosses a namespace boundary, which depends on where the
+// referenced name is DECLARED, so no single file answers it. It therefore lived
+// on dslgate.ScanTree, whose only caller was a conformance test, which meant the
+// rule was enforced over THIS repo's dsl/ at PR time and over a MEMQL_DSL_PATH
+// product bundle nowhere at all -- reproducing, for one gate, the exact
+// asymmetry this file was written to abolish.
+//
+// memql#4051 ruled that a gap rather than a deliberate exemption. The cost
+// argument for leaving it out ("strict boot may not want to pay for the merged
+// tree") did not survive being checked: boot ALREADY holds the merged tree --
+// `files` is baseloader.ReadAll's output, read for the duplicate detector on the
+// next line of Init -- so the corpus pass adds no walk, no open and no read.
+//
+// Cost, measured over the 206-file embedded tree on the dev machine, once per
+// Init, on top of a load that already takes seconds:
+//
+//	per-file gates   ~43ms
+//	cross-namespace  ~79ms   (memql#4051)
+//	total           ~121ms
+//
+// The corpus gate is the more expensive half because it makes two passes over
+// every file -- one to find declarations, one to find references -- where the
+// per-file gates make one. Stated rather than rounded away, because a check on
+// every node's boot path earns the measurement, and because the next person
+// weighing a gate against boot time should see what this one actually cost.
 
 import (
 	"fmt"
@@ -70,12 +96,20 @@ func contractGateOptions(functions *FunctionRegistry) dslgate.Options {
 
 // recordContractGateProblems scans every file in the merged tree and records
 // each violation on the load report, returning them for the caller to log.
+//
+// It hands dslgate the WHOLE set in one call rather than looping ScanSource
+// per file, and that is the load-bearing part (memql#4051). A per-file loop can
+// only run per-file rules, which left the cross-namespace-import gate
+// (memql#3803) enforced by a conformance test over this repo's own dsl/ and by
+// nothing at all over a MEMQL_DSL_PATH product bundle -- the exact asymmetry
+// this file was written to abolish. `files` is already the merged set the
+// loaders register from, so passing it whole costs no extra read.
 func recordContractGateProblems(report *LoadReport, files []baseloader.RawFile, functions *FunctionRegistry) []dslgate.Violation {
-	opts := contractGateOptions(functions)
-	var out []dslgate.Violation
+	corpus := make([]dslgate.SourceFile, 0, len(files))
 	for _, f := range files {
-		out = append(out, dslgate.ScanSource(f.Path, f.Content, opts)...)
+		corpus = append(corpus, dslgate.SourceFile{Path: f.Path, Content: f.Content})
 	}
+	out := dslgate.ScanFiles(corpus, contractGateOptions(functions))
 	for _, v := range out {
 		name := v.Construct
 		if name == "" {

@@ -2465,7 +2465,13 @@ is. Name collisions across namespaces are resolved by **aliasing**
 
 That is the model. memql#3803 closed the enforcement half and memql#3897 the
 registry half, so it now holds for every construct kind rather than for
-`concept` alone.
+`concept` alone. memql#4051 then moved the enforcement onto the **boot** path:
+the rule is corpus-level (it asks where a name is *declared*), boot ran a
+per-file scan, so for a while it was checked by CI over this repository's `dsl/`
+and by nothing at all over a product bundle mounted at `MEMQL_DSL_PATH`. It now
+lands on the `LoadReport` like every other contract gate, so a bundle carrying
+an unimported cross-namespace reference is refused by strict boot and surfaced
+offline by `cmd/memqllint`.
 
 ### The model is Go's, and a namespace is a PATH
 
