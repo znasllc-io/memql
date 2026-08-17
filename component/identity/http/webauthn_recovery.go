@@ -186,7 +186,22 @@ func recoveryTargetId(row *recoverykey.Row) string {
 // over it would be strictly worse -- it would deny recovery to somebody who is
 // locked out, in order to preserve a future recovery they cannot use yet.
 func (s *Server) spendRecoveryKey(r *http.Request, row *recoverykey.Row, sourceIP string) error {
-	ctx := identity.ContextWithSystemActor(r.Context())
+	// The system CREDENTIAL actor, not the service actor. `recovery_key` is a
+	// machineCredentialIdentityType, so the memql#2513 guard admits these
+	// writes only from role=="system" or a "system:"-prefixed actor.
+	// ContextWithSystemActor is neither -- it stamps role="owner" and an
+	// email, and ActorFromToken prefers email over subject, so the actor comes
+	// out as "system@identity.memql.local". Under it BOTH writes below were
+	// refused: the redemption never stamped, so a spent key stayed usable, and
+	// no successor was ever minted. Every sibling credential writer here
+	// (webauthn_register.go, pair.go, node_bootstrap.go, badge_grant.go) uses
+	// the credential actor for the same reason.
+	//
+	// It also overrides rather than deferring, which matters here: r.Context()
+	// carries no authenticated user (this endpoint IS the authentication), but
+	// ContextWithSystemActor would return the context UNCHANGED if it ever
+	// did, silently attributing a credential write to whoever was signed in.
+	ctx := identity.ContextWithSystemCredentialActor(r.Context())
 	store := &recoverykey.Store{Engine: s.Store.Engine, Logger: s.Logger}
 	if err := store.Redeem(ctx, row.ID, sourceIP, time.Now().UTC()); err != nil {
 		return err

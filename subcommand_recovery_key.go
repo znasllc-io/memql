@@ -112,9 +112,18 @@ func runRecoveryKeyClaim(args []string) int {
 	defer stopPATDependencies(deps)
 
 	// The CLI path is unauthenticated by design (operator exec), so stamp the
-	// system actor: the engine's per-row authz gate and the memql#2513
-	// credential-actor guard both require one for a credential row.
-	ctx, cancel := context.WithTimeout(identity.ContextWithSystemActor(context.Background()), 30*time.Second)
+	// system CREDENTIAL actor: the engine's per-row authz gate and the
+	// memql#2513 credential-actor guard both require one for a credential row.
+	//
+	// It must be ContextWithSystemCredentialActor specifically, and this line
+	// said so while calling ContextWithSystemActor -- which does not satisfy
+	// the guard it names. That actor stamps role="owner" and an email, and
+	// ActorFromToken PREFERS email over subject, so the actor resolves to
+	// "system@identity.memql.local": not role=="system", and not prefixed
+	// "system:". Both arms of isSystemActor fail and every write here is
+	// refused. The credential actor sets role="system" with no email, which is
+	// exactly the shape the guard admits.
+	ctx, cancel := context.WithTimeout(identity.ContextWithSystemCredentialActor(context.Background()), 30*time.Second)
 	defer cancel()
 
 	store := &identity.Store{Engine: engine, Logger: logger}
