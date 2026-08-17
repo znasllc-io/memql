@@ -521,6 +521,106 @@ export function recordedStackTag(receipt: Receipt | null): string {
 }
 
 /**
+ * The COMMIT a previous run actually checked out (memql#3901).
+ *
+ * WHY A SECOND READER RATHER THAN A WIDER `recordedStackTag`. The two answer
+ * different questions and only one of them has an answer on every install:
+ *
+ *   WHICH RELEASE -- `recordedStackTag`, and it is EMPTY for a branch install
+ *   because there is no release. Widening it to return "main" would be worse
+ *   than returning nothing: `installPlan` derives the node image tag from it
+ *   (`imageTagFor`), and `memql-bff:main` is not a tag anything publishes.
+ *
+ *   WHICH CODE -- this, and it is set on every path, because clone-stack.sh
+ *   resolves whatever it was given to a SHA before checking anything out.
+ *
+ * That split is what lets `main` be an install choice at all without giving up
+ * the property clone-stack.sh's tag-only refusal was protecting: "what is
+ * installed on this machine" stays answerable a week later, as a commit for a
+ * branch install and as a tag for a tag install -- never as a bare moving ref.
+ *
+ * Read from the RESULT rather than the params, and that is the point: the params
+ * carry what was ASKED for (`--branch=main`, which has moved since), the result
+ * carries what was RESOLVED. A repair replays this value, so replaying it must
+ * not become an upgrade -- memql#3605's property, which is exactly what a repair
+ * from `--branch=main` would have broken.
+ */
+export function recordedStackCommit(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "stackCheckout");
+  const commit = entry?.result?.commit;
+  return typeof commit === "string" ? commit.trim() : "";
+}
+
+/**
+ * What KIND of ref a previous run was asked for: "tag", "branch", "commit", or
+ * "" when the receipt predates memql#3901 or records no checkout.
+ *
+ * The caller needs this to know which question to ask. A repair of a tag install
+ * replays the tag (unchanged, and immutable by convention); a repair of a branch
+ * install must replay the commit, or "repair" silently means "upgrade to
+ * whatever main is today".
+ *
+ * An OLD receipt returns "" and the caller falls back to the tag, which is
+ * correct by construction: every install written before this existed was a tag
+ * install, because nothing else was possible.
+ */
+export function recordedStackRefKind(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "stackCheckout");
+  const kind = entry?.result?.refKind;
+  return typeof kind === "string" ? kind.trim() : "";
+}
+
+/** What a repair must ask `install.cloneStack` for to reproduce a recorded install. */
+export interface RecordedCheckout {
+  /** The release tag to replay, or "" when the recorded install was not from one. */
+  tag: string;
+  /** The commit to replay, or "" when replaying the tag is correct. */
+  commit: string;
+  /** Short human label for the run record: the tag, or an abbreviated commit. */
+  label: string;
+}
+
+/**
+ * How to reproduce the checkout a receipt describes (memql#3901).
+ *
+ * ONE FUNCTION BECAUSE IT IS ONE RULE, and getting it wrong is silent. A repair
+ * is defined as "return the cluster to the state its receipt describes" -- it is
+ * not an upgrade, and upgrading is a different verb the operator picks by name
+ * (memql#3605). Which value reproduces that state depends on what was installed:
+ *
+ *   TAG INSTALL -> replay the TAG. Unchanged behaviour, and right because a
+ *   release tag is immutable by convention, so the tag still names the same
+ *   commit. Also what every pre-memql#3901 receipt is, which is why an unknown
+ *   refKind falls here rather than erroring: nothing else was possible then.
+ *
+ *   BRANCH INSTALL -> replay the COMMIT. Replaying `--branch=main` would check
+ *   out wherever main is TODAY, so "repair" would silently mean "upgrade" --
+ *   memql#3605's exact failure, arriving by the one route that reopens it.
+ *
+ *   COMMIT INSTALL -> replay the commit, which is trivially the same thing.
+ *
+ * Returning both fields rather than a discriminated union keeps the caller's job
+ * to "pass whichever is non-empty", which is what `installPlan` already does
+ * with every other param via `present()`.
+ */
+export function recordedCheckout(receipt: Receipt | null): RecordedCheckout {
+  const tag = recordedStackTag(receipt);
+  const commit = recordedStackCommit(receipt);
+  const kind = recordedStackRefKind(receipt);
+
+  if (kind === "branch" || kind === "commit") {
+    return { tag: "", commit, label: commit === "" ? "" : commit.slice(0, 7) };
+  }
+  // A tag install, or a receipt written before refKind existed. Prefer the tag;
+  // fall back to the commit so a receipt that somehow recorded only the latter
+  // still reproduces something rather than silently reinstalling the pin.
+  if (tag !== "") return { tag, commit: "", label: tag };
+  return { tag: "", commit, label: commit === "" ? "" : commit.slice(0, 7) };
+}
+
+/**
  * The DOMAIN a previous run installed under (memql#3736).
  *
  * Scanned across every entry rather than read off one named step, because the
