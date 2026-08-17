@@ -30,6 +30,8 @@ func dispatchSubcommand(args []string) (bool, int) {
 		return true, runPATSubcommand(args[1:])
 	case "enrolment-token":
 		return true, runEnrolmentTokenSubcommand(args[1:])
+	case "recovery-key":
+		return true, runRecoveryKeySubcommand(args[1:])
 	case "backup":
 		return true, runBackupSubcommand(args[1:])
 	case "voice-agent-token":

@@ -175,6 +175,38 @@ action issueEnrolmentLink {
   )
 }
 
+// Backend: scripts/install/recovery-key.sh. Writes ONE row inside the cluster
+// (a hashed recovery key) and nothing on the host, so like issueEnrolmentLink
+// the graph step declares containedBy: clusterUp rather than a receipt of its
+// own -- tearing the cluster down takes the row with it.
+//
+// The credential it reveals is the LAST resort: every other credential this
+// install produces assumes the owner can sign in, and this one is the answer
+// to all of them being gone. It is refused on any day it is not needed
+// (memql#3967), which is what keeps it a break-glass key rather than a second
+// password.
+/// Claim the cluster's owner recovery key and reveal it once, so a fresh install ends with a
+/// break-glass credential the operator can store off-cluster.
+action claimRecoveryKey {
+  args {
+    local     boolean!
+    userId    string
+    context   string
+    namespace string
+    target    string
+    binary    string
+  }
+  capability script(
+    script: "install.recoveryKey",
+    local: args.local,
+    user-id: args.userId,
+    context: args.context,
+    namespace: args.namespace,
+    target: args.target,
+    binary: args.binary
+  )
+}
+
 // =============================================================================
 //   Placement (mutating)
 // =============================================================================

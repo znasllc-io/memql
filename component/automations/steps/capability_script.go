@@ -99,6 +99,7 @@ var capabilityScriptAllowlist = map[string]string{
 	"install.verifyFrontDoor":   "scripts/install/verify-frontdoor.sh",
 	"install.magicLink":         "scripts/install/magic-link.sh",
 	"install.enrolmentLink":     "scripts/install/enrolment-link.sh",
+	"install.recoveryKey":       "scripts/install/recovery-key.sh",
 	"install.removeArtifact":    "scripts/install/remove-artifact.sh",
 
 	// Tenant lifecycle (epic memql#3852, task memql#3853). The deterministic

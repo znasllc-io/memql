@@ -48,6 +48,7 @@ import (
 	"github.com/znasllc-io/memql/component/identity"
 	"github.com/znasllc-io/memql/component/identity/abuse"
 	"github.com/znasllc-io/memql/component/identity/enrolment"
+	"github.com/znasllc-io/memql/component/identity/recoverykey"
 	"github.com/znasllc-io/memql/component/identity/webauthn"
 )
 
@@ -395,6 +396,20 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 			return
 		}
 	}
+	// The recovery arm's equivalent (memql#3968), spent before the persist for
+	// the identical reason spelled out just above -- and with more at stake,
+	// since a live recovery key that has already produced a passkey is a replay
+	// window on the cluster owner's account.
+	if enroller.Recovery != nil {
+		if err := s.spendRecoveryKey(r, enroller.Recovery, sourceIP); err != nil {
+			s.logErr("recovery: redeem stamp failed", err)
+			s.auditPasskey(r, "passkey_registration_denied", userId, recoveryTargetId(enroller.Recovery),
+				identity.AuditOutcomeFailure, "recovery_redeem_failed", nil)
+			writeJSON(w, http.StatusInternalServerError, WebAuthnRegisterFinishResponse{
+				ErrorCode: "persist_failed", Error: "recovery redeem: " + err.Error()})
+			return
+		}
+	}
 
 	// A passkey row is a credential row, so the memql#2513 credential-actor
 	// guard admits only a system actor. This handler runs under the
@@ -428,6 +443,16 @@ func (s *Server) handleWebAuthnRegisterFinish(w http.ResponseWriter, r *http.Req
 		registrationDetail["enrolmentTokenId"] = enrolmentTargetId(enroller.Enrolment)
 		registrationDetail["enrolmentIssuedBy"] = enroller.Enrolment.IssuedBy
 	}
+	if enroller.Recovery != nil {
+		// The single highest-value line this audit trail carries. A passkey
+		// appearing on the OWNER's account because a break-glass credential was
+		// spent is an event somebody should be able to find later without
+		// reconstructing it from timestamps.
+		registrationDetail["authorizedBy"] = "recoveryKey"
+		registrationDetail["recoveryKeyId"] = recoveryTargetId(enroller.Recovery)
+		registrationDetail["recoveryKeyMintedBy"] = enroller.Recovery.MintedBy
+		registrationDetail["recoveryKeyClaimedAt"] = enroller.Recovery.ClaimedAt.UTC().Format(time.RFC3339)
+	}
 	s.auditPasskey(r, "passkey_registered", userId, canonicalId, identity.AuditOutcomeSuccess, "", registrationDetail)
 
 	writeJSON(w, http.StatusOK, WebAuthnRegisterFinishResponse{
@@ -452,12 +477,17 @@ type passkeyEnroller struct {
 	// step spends it; the begin step does not, so reloading the page mid-way
 	// does not burn the link.
 	Enrolment *enrolment.Row
+	// Recovery is non-nil when an owner recovery key authorized the ceremony
+	// (memql#3968). Same lifecycle as Enrolment above: spent at finish, never
+	// at begin. At most one of the two is ever set -- they are different
+	// Authorization schemes and a request carries one scheme.
+	Recovery *recoverykey.Row
 }
 
 // requirePasskeyEnroller resolves who will own the credential, or writes the
 // refusal and returns ok=false.
 //
-// TWO AUTHORITIES, AND ONLY TWO.
+// THREE AUTHORITIES, AND ONLY THREE.
 //
 //  1. The caller's own user-class session (memql#3406). User-class only, for
 //     the same reason the badge grant is: a passkey enrolment binds a NEW way
@@ -467,18 +497,32 @@ type passkeyEnroller struct {
 //     `Authorization: Enrolment mql_enr_<...>`. This is the authority that
 //     exists for someone who has NO session yet -- which is the entire point:
 //     it is how a first credential is obtainable with no mailbox.
+//  3. An owner recovery key (memql#3968), presented as
+//     `Authorization: Recovery mql_rec_<...>`. The break-glass authority, for
+//     the cluster owner who has lost every sign-in route. Unlike the other
+//     two it is GATED on that being true: redemption is refused while the
+//     bound owner can still sign in normally (memql#3967), because a key
+//     usable at any time is not a break-glass credential, it is a second
+//     password.
+//
+// (The doc above said "TWO AUTHORITIES, AND ONLY TWO" until memql#3968 added
+// the third. Three is still a closed set, and each arm reads the owner off a
+// server-side row rather than off a caller argument.)
 //
 // The owner is read off the token's row, never off a caller-supplied
 // argument, so a leaked token can only ever add a credential to the one
 // account it was minted for.
 //
-// The enrolment arm is checked first because it is unambiguous: a request
-// carrying `Authorization: Enrolment ...` is not also carrying a Bearer, and
-// falling through to requireBearer would answer it with a misleading
-// "Authorization: Bearer <token> required".
+// The two credential arms are checked FIRST because they are unambiguous: a
+// request carrying `Authorization: Enrolment ...` or `Authorization: Recovery
+// ...` is not also carrying a Bearer, and falling through to requireBearer
+// would answer it with a misleading "Authorization: Bearer <token> required".
 func (s *Server) requirePasskeyEnroller(w http.ResponseWriter, r *http.Request, deniedAction string) (passkeyEnroller, bool) {
 	if plain := strings.TrimSpace(extractAuthScheme(r, AuthSchemeEnrolment)); plain != "" {
 		return s.requireEnrolmentToken(w, r, deniedAction, plain)
+	}
+	if plain := strings.TrimSpace(extractAuthScheme(r, AuthSchemeRecovery)); plain != "" {
+		return s.requireRecoveryKey(w, r, deniedAction, plain)
 	}
 
 	caller, ok := s.requireBearer(w, r)

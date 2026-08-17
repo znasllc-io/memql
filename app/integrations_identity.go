@@ -424,6 +424,59 @@ func (a *App) integrationsIdentity() {
 		return out, nil
 	}, auditLogger)
 
+	// Owner recovery redeem (memql#3968 + the memql#3967 gate).
+	//
+	// THE GATE LIVES IN THIS ADAPTER because answering "does this owner still
+	// have a usable sign-in route" needs the engine, and component/identity/web
+	// stays engine-free. The web package gets a STATE and never a reason to ask.
+	//
+	// The adapter reports state only -- no plaintext, no hash. And it reports
+	// NO ACCOUNT LABEL on any refusal, for the reason the enrolment adapter
+	// above records: telling an anonymous holder of a dead credential whose
+	// account it belonged to turns a stale key into an account-existence
+	// oracle. That matters more here, because the account in question is the
+	// cluster owner's.
+	recoveryStore := &recoverykey.Store{Engine: a.engine, Logger: a.Logger}
+	webSrv.SetResolveRecovery(func(ctx context.Context, plainKey string) (identityweb.RecoveryResolution, error) {
+		row, state, err := recoveryStore.Resolve(ctx, plainKey)
+		if err != nil {
+			return identityweb.RecoveryResolution{}, err
+		}
+		out := identityweb.RecoveryResolution{State: identityweb.RecoveryState(state)}
+		if row == nil {
+			return out, nil
+		}
+		out.RecoveryKeyId = recoverykey.CanonicalId(row.ID)
+		owner := strings.TrimSpace(row.BoundOwnerUserId)
+		if owner == "" {
+			owner = strings.TrimSpace(row.UserId)
+		}
+		out.UserId = owner
+		if state != recoverykey.StateValid {
+			return out, nil
+		}
+
+		// THE BREAK-GLASS GATE. Refused while the bound owner can still sign
+		// in normally -- otherwise the key is a second password rather than a
+		// break-glass credential. Fail CLOSED on an error: an unknown answer
+		// must refuse, because allowing on "I could not tell" is precisely the
+		// state an attacker who can disrupt a read would want.
+		hasRoute, routeErr := store.HasSignInRoute(ctx, owner)
+		if routeErr != nil {
+			return identityweb.RecoveryResolution{}, routeErr
+		}
+		if hasRoute {
+			out.State = identityweb.RecoveryNotNeeded
+			return out, nil
+		}
+
+		out.AccountLabel = owner
+		if u, lookupErr := store.LookupUserById(ctx, owner); lookupErr == nil && u != nil && u.PrimaryEmail != "" {
+			out.AccountLabel = u.PrimaryEmail
+		}
+		return out, nil
+	}, auditLogger)
+
 	// /me/devices passkey management (memql#3409). The SAME
 	// *webauthn.Store the registration ceremony builds per-request in
 	// component/identity/http -- so the list a user manages here and the
