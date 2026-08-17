@@ -327,7 +327,11 @@ func (e *MemQLEngine) Init(concepts concept.Registry) error {
 	// unfiltered full-concept query read -- that work belongs in a query
 	// `filter` / SQL pushdown, not an in-memory scan. Mirrors the dead-logic
 	// lint's warning severity; load is unaffected.
-	warnInMemoryCollectionScans(e.Logger, functionRegistry.Snapshot())
+	// LookupIndex, not Snapshot (memql#3897): the lint resolves a logic body's
+	// call target by the BARE name the author wrote (`functions[call.Name]`),
+	// so a qualified-only map would make every call unresolvable and silence
+	// the lint completely rather than failing loudly.
+	warnInMemoryCollectionScans(e.Logger, functionRegistry.LookupIndex())
 
 	// FLAT-KIND REFERENCE RESOLUTION (memql#3897). Runs here, after every
 	// registry is populated, because load order across namespaces is not

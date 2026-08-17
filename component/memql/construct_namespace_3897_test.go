@@ -339,3 +339,60 @@ func TestADecoratedOriginYieldsThePlainNamespace(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// a BARE reference is the documented authoring surface and must keep resolving
+// ---------------------------------------------------------------------------
+
+// TestBareConjunctResolvesForANamespacedSpec is the regression guard for the
+// defect this migration actually shipped, which db-tests caught and no non-DB
+// test would have.
+//
+// `filter ... && isActiveRecord` is the DOCUMENTED authoring surface -- a bare
+// spec name is a filter conjunct, per authoring-rules -- so namespacing the
+// registry must not quietly turn it into a language change. It nearly did:
+// several consumers build a FLAT map from the registry and then key into it by
+// the bare name an author wrote, and a qualified-only map turns every one of
+// those into "unknown spec" for a construct that is registered and healthy:
+//
+//	engine.go       globalSpecs -> specValidator.globals   -> "unknown spec"
+//	engine.go       specs       -> applyShapeTemplate
+//	authoring_session.go  the authored-spec overlay
+//	collection_scan_lint.go     functions[call.Name]       -> lint goes silent
+//
+// The registry's own Get/Has/Lookup already fell back to a unique bare match;
+// these bypass it by copying the map out first. LookupIndex is the map that
+// carries both spellings, and this asserts the property those consumers depend
+// on rather than the call sites, so a NEW consumer built the same wrong way
+// fails here rather than in a DB lane nobody can run locally.
+func TestBareConjunctResolvesForANamespacedSpec(t *testing.T) {
+	reg := newSpecRegistry()
+	// Exactly the fixture shape that caught this: a tree mounted under its own
+	// domain, so the spec's key is `<domain>.<name>` and never the bare name.
+	spec := &Spec{Name: "labelScopedIsRespondsAsAgent", Origin: "rel3656/specs.memql"}
+	if err := reg.add(spec); err != nil {
+		t.Fatalf("registering the fixture spec: %v", err)
+	}
+
+	// What the registry answers directly.
+	if !reg.Has("labelScopedIsRespondsAsAgent") {
+		t.Error("Has must resolve the bare name of an unambiguously-namespaced spec")
+	}
+
+	// And what a consumer that copies the map out sees. THIS is the half that
+	// broke: Snapshot is keyed only by `<ns>.<name>`.
+	if _, ok := reg.Snapshot()["labelScopedIsRespondsAsAgent"]; ok {
+		t.Error("Snapshot is expected to be qualified-only -- if it starts carrying bare " +
+			"keys, LookupIndex is redundant and this test is measuring nothing")
+	}
+	idx := reg.LookupIndex()
+	if idx["labelScopedIsRespondsAsAgent"] == nil {
+		t.Fatal("a bare spec conjunct is the documented authoring surface (`filter ... && " +
+			"isActiveRecord`). A consumer keying a flat map by that name must still find the " +
+			"spec, or namespacing the registry has silently become a LANGUAGE change.")
+	}
+	if idx["rel3656.labelScopedIsRespondsAsAgent"] == nil {
+		t.Error("the qualified key must be present too -- it is what a cross-namespace " +
+			"reference resolves to")
+	}
+}

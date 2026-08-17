@@ -384,7 +384,11 @@ func (e *MemQLEngine) buildAuthoredFunctionOverlay(owner string, staged, reg *Au
 func (e *MemQLEngine) buildAuthoredSpecOverlay(owner string, staged, reg *AuthoredRuntimeRegistry) map[string]*Spec {
 	overlay := make(map[string]*Spec)
 	if e.specs != nil {
-		for name, spec := range e.specs.Snapshot() {
+		// LookupIndex (memql#3897): this overlay is KEYED INTO by the bare name
+		// an author writes as a filter conjunct, so it must carry both the
+		// namespaced key and the bare spelling. Snapshot alone would make every
+		// bare conjunct in an authored construct read as an unknown spec.
+		for name, spec := range e.specs.LookupIndex() {
 			overlay[name] = spec
 		}
 	}
