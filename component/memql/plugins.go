@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/uptrace/bun"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 	"github.com/znasllc-io/memql/core/common"
 )
 
@@ -127,6 +128,35 @@ type PluginContext struct {
 	//
 	// Additive to the Plugin SDK surface, so PluginContractVersion does not move.
 	ConceptDataIsStaged func(conceptId string) bool
+
+	// AdmitSourceRow reports whether one row read DIRECTLY from the node store
+	// may be shown to this caller -- the per-row authorization gate, applied to
+	// the rows a plug-in fetched itself (memql#4029).
+	//
+	// The sibling of ConceptDataIsStaged above, answering the OTHER question
+	// about the same row: that one asks "is this concept's data visible to
+	// anyone yet", this one asks "may THIS caller see this row". A hand-rolled
+	// read needs both, because it passes through neither the parser nor the
+	// filter path and nothing is injected into it.
+	//
+	// IT MUST BE APPLIED TO THE ROWS AS FETCHED, before they are folded,
+	// summarized or repacked. Both of the engine's row-authz mechanisms resolve
+	// the tier from a CONCEPT, so a capability that reads real rows and returns
+	// a synthetic node stamped with its own concept defeats them by
+	// construction: the gate is asked about the summary's made-up concept, finds
+	// no tier declared, and admits. Fixing that after the repack is not possible
+	// -- the summary no longer carries the per-row payload an `owned` tier reads
+	// or the per-row identity a `granted` tier needs.
+	//
+	// Wired from memql.AdmitSourceRow, a one-line delegation to the same gate
+	// the engine's own seams use -- one gate, one door. Fail-CLOSED: an
+	// undecidable tier is denied, because a hand-rolled SELECT carries no
+	// injected conjunct and no join for it to defer to. A factory that needs it
+	// must REFUSE to construct when it is nil, for the same reason
+	// ConceptDataIsStaged does.
+	//
+	// Additive to the Plugin SDK surface, so PluginContractVersion does not move.
+	AdmitSourceRow func(ctx context.Context, node memorynodes.MemoryNode) bool
 
 	// Agents is the registry of DSL-declared agents loaded from
 	// dsl/agents/v1/*.memql by LoadUnifiedAgents. The agents

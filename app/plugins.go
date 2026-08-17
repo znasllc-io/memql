@@ -135,8 +135,19 @@ func (a *App) pluginContext() memql.PluginContext {
 			}
 			return a.engine.ConceptDataIsStaged(conceptId)
 		},
-		Providers: a.engine.Providers(),
-		Policies:  a.engine.Policies(),
-		Agents:    a.engine.Agents(),
+		// Per-row authorization for the same hand-rolled reads (memql#4029).
+		// The sibling of the callback above -- that one asks whether a
+		// concept's data is visible to anyone yet, this one whether THIS
+		// caller may see this row.
+		//
+		// Wired straight to the package-level function rather than through
+		// the engine, because the gate resolves a tier from the concept
+		// registry and holds no per-engine state; there is nothing for a
+		// snapshot to go stale against. The caller identity it reads comes
+		// from the ctx passed at each call, not from wiring time.
+		AdmitSourceRow: memql.AdmitSourceRow,
+		Providers:      a.engine.Providers(),
+		Policies:       a.engine.Policies(),
+		Agents:         a.engine.Agents(),
 	}
 }

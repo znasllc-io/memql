@@ -20,6 +20,14 @@ func init() {
 		if pctx.ConceptDataIsStaged == nil {
 			return nil, fmt.Errorf("chat plug-in: no ConceptDataIsStaged in plugin context")
 		}
-		return NewIntegration(pctx.BunDB, pctx.ConceptDataIsStaged), nil
+		// REFUSE for the same reason (memql#4029): every read here repacks real
+		// graph rows into a synthetic node, which defeats the engine's
+		// concept-keyed row gate by construction, so this predicate is the whole
+		// of the per-row authorization on this path. "Cannot tell whether this
+		// caller may see this row" must never resolve to "yes".
+		if pctx.AdmitSourceRow == nil {
+			return nil, fmt.Errorf("chat plug-in: no AdmitSourceRow in plugin context")
+		}
+		return NewIntegration(pctx.BunDB, pctx.ConceptDataIsStaged, pctx.AdmitSourceRow), nil
 	})
 }

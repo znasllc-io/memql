@@ -22,6 +22,42 @@ Integrations are **protocol adapters**. They bridge external services (OpenAI vo
 - Business logic (deciding who responds, building conversation history)
 - Data mutations (inserting records, updating nodes)
 
+### A capability that reads rows DIRECTLY must gate them itself
+
+A hand-rolled `bun.NewSelect()` against `"MemoryNodes"` passes through neither
+the parser nor the filter path, so **nothing the engine injects reaches it**.
+Two `PluginContext` callbacks are the whole of the enforcement on that path, and
+a factory that needs either must **refuse to construct** when it is nil rather
+than default:
+
+| Callback | Question | Default that must never be taken |
+|---|---|---|
+| `ConceptDataIsStaged` | Is this concept's data visible to anyone yet? (epic memql#3974) | "nothing is staged" |
+| `AdmitSourceRow` | May **this caller** see **this row**? (memql#4029) | "yes" |
+
+**Apply `AdmitSourceRow` to the rows AS FETCHED — before folding, summarizing
+or repacking them.** Both of the engine's row-authz mechanisms resolve the tier
+from a *concept*: filter injection from `plan.BoundConcept`, the row gate from
+the row's own concept. So a capability that reads real rows and returns a
+**synthetic** node stamped with its own concept defeats both by construction —
+the gate is asked about the made-up concept, finds no tier declared, and admits.
+It fails silently and in the admitting direction. `integration.chat.recentChat`
+did exactly this with `v1:cognition:utterance` text.
+
+Repairing it after the repack is not possible: the summary carries no top-level
+owner field for an `owned` tier to read, no per-row identity for `granted`, a
+synthesized id, and often rows from more than one concept. The fetched rows are
+the last point on the path where the question is answerable.
+
+**If your reader dedups versions per id, gate INSIDE the fold, after the id is
+marked seen** — gating the slice first lets a denied *latest* version fall
+through to an admitted *older* one, which hands the caller a stale row instead
+of no row. See `foldActiveParticipants` in `integrations/chat/recent_chat.go`.
+
+Note this makes a read *correct*, not *scoped*: the gate filters after the
+fetch and adds no caller predicate to the SQL. Routing the read through the
+authorized path is the wider inventory (memql#3984).
+
 ### IntegrationProvider Interface
 
 All integrations that embed the base `Integration` struct should implement `IntegrationProvider`:
