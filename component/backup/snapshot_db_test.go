@@ -32,9 +32,11 @@ package backup
 // page boundary therefore has to fall.
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -266,6 +268,90 @@ func TestExportRefusesACallerTransactionWithNoSnapshot(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read committed") {
 		t.Fatalf("refusal should name the isolation level it found, got: %v", err)
+	}
+}
+
+// TestExportSpansBothTablesUnderOneSnapshot runs the two-table export against a
+// real database, which nothing had ever done.
+//
+// This is the SAME gap memql#4043 was filed about, one path over. That issue's
+// ORDER BY defect survived because "no test in component/backup had ever run
+// Export against a database" -- format_test.go and compatibility_test.go both
+// build []Row by hand and exercise the stream encoder, so the package looked
+// well covered while the statement that talks to Postgres was never executed.
+// staged_data_db_test.go closed that for the MemoryNodes path and left
+// IncludeSecrets untouched: no test in this package sets it at all, so the
+// SecretMemoryNodes half of a real export had still never run.
+//
+// It matters more now than it did before this change, because the two tables
+// used to be two independent reads and are now two reads inside ONE
+// transaction. A backup that omitted every identity row would restore a cluster
+// nobody can sign into -- and per Options.IncludeSecrets, that failure surfaces
+// long after the restore, as an unexplained empty account list.
+func TestExportSpansBothTablesUnderOneSnapshot(t *testing.T) {
+	db, ctx := stagedBackupTx(t)
+
+	graphID, _ := seedStagedConstructRow(t, ctx, db)
+
+	secretID := fmt.Sprintf("v1:identity:identity:snapshot-4043-%d", os.Getpid())
+	secret := &memoryNodes.MemoryNode{
+		ID:         secretID,
+		CreatedAt:  time.Now().UTC().Truncate(time.Microsecond),
+		CreatedBy:  "system:backup-snapshot-test",
+		Concept:    "v1:identity:identity",
+		Type:       "object",
+		Schema:     json.RawMessage(`{"v":1}`),
+		Payload:    json.RawMessage(`{"identityType":"api_key","sealed":"opaque"}`),
+		Metadata:   json.RawMessage(`{}`),
+		Provenance: json.RawMessage(`{"mutation":"backupSnapshotTest"}`),
+	}
+	// Rolled back with the caller's transaction, so no cleanup delete.
+	if _, err := db.NewInsert().Model(secret).
+		ModelTableExpr("? AS mn", bun.Ident(TableSecretMemoryNodes)).Exec(ctx); err != nil {
+		t.Fatalf("seed secret row: %v", err)
+	}
+
+	var buf bytes.Buffer
+	manifest, err := Export(ctx, db, &buf, Options{
+		EngineVersion:  "0.0.0-test",
+		Domain:         "memql.localhost",
+		IncludeSecrets: true,
+	})
+	if err != nil {
+		t.Fatalf("export with IncludeSecrets: %v", err)
+	}
+
+	byTable := map[string]map[string]bool{}
+	r, err := NewReader(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatalf("read back the export: %v", err)
+	}
+	for {
+		row, err := r.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("stream: %v", err)
+		}
+		if byTable[row.Table] == nil {
+			byTable[row.Table] = map[string]bool{}
+		}
+		byTable[row.Table][row.ID] = true
+	}
+
+	if !byTable[TableMemoryNodes][graphID] {
+		t.Errorf("graph row %q is missing from the export", graphID)
+	}
+	if !byTable[TableSecretMemoryNodes][secretID] {
+		t.Errorf("secret row %q is missing from the export -- a restore from this backup would "+
+			"produce a cluster with NO identities", secretID)
+	}
+	if !manifest.IncludesSecrets {
+		t.Error("manifest does not record that secrets were included")
+	}
+	if n := manifest.Counts[TableSecretMemoryNodes]; n < 1 {
+		t.Errorf("manifest counts %d SecretMemoryNodes rows, want at least the one just seeded", n)
 	}
 }
 
