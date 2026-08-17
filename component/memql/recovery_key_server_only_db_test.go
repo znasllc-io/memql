@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/znasllc-io/memql/component/auth"
+	langparser "github.com/znasllc-io/memql/component/language/parser"
 )
 
 // recovery_key_server_only_db_test.go -- the ENGINE half of the recovery-key
@@ -44,6 +45,14 @@ func TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T)
 	// refusal side alone, which is the half that was never broken.
 	const probeId = "rk-serveronly-probe"
 
+	// Quoted through langparser.QuoteString rather than %q, for the reason
+	// TestDSLCallStringsDoNotUseGoQuoting gives: %q emits escapes the memQL
+	// lexer rejects, so one control byte would make the statement unparseable
+	// rather than merely wrong. The value here is inert, but the gate is about
+	// the pattern -- a test that models the call form incorrectly teaches the
+	// next copy of it the same mistake.
+	quotedProbe := langparser.QuoteString(probeId)
+
 	cases := []struct {
 		// construct is the @serverOnly name, and the string the refusal must
 		// name -- so a test that starts passing for another reason is visible.
@@ -66,26 +75,26 @@ func TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T)
 		},
 		{
 			construct: "createRecoveryKeyIdentity",
-			call: fmt.Sprintf(`mutation createRecoveryKeyIdentity(identityId:%q,userId:"user-rk-probe",`+
+			call: fmt.Sprintf(`mutation createRecoveryKeyIdentity(identityId:%s,userId:"user-rk-probe",`+
 				`label:"probe",keyHash:"probe-hash",boundOwnerUserId:"user-rk-probe",`+
-				`mintedBy:"test",rotatedFrom:"")`, probeId),
+				`mintedBy:"test",rotatedFrom:"")`, quotedProbe),
 			exposure: "self-minting an owner-equivalent credential -- the most severe of the six",
 		},
 		{
 			construct: "claimRecoveryKey",
-			call: fmt.Sprintf(`mutation claimRecoveryKey(identityId:%q,claimedAt:"2026-08-17T12:00:00Z",`+
-				`claimedFromIP:"203.0.113.7")`, probeId),
+			call: fmt.Sprintf(`mutation claimRecoveryKey(identityId:%s,claimedAt:"2026-08-17T12:00:00Z",`+
+				`claimedFromIP:"203.0.113.7")`, quotedProbe),
 			exposure: "stamping somebody else's key as claimed, which is the signal an operator holds it",
 		},
 		{
 			construct: "redeemRecoveryKey",
-			call: fmt.Sprintf(`mutation redeemRecoveryKey(identityId:%q,redeemedAt:"2026-08-17T12:00:00Z",`+
-				`redeemedFromIP:"203.0.113.7")`, probeId),
+			call: fmt.Sprintf(`mutation redeemRecoveryKey(identityId:%s,redeemedAt:"2026-08-17T12:00:00Z",`+
+				`redeemedFromIP:"203.0.113.7")`, quotedProbe),
 			exposure: "spending another owner's key, denying them the route back in",
 		},
 		{
 			construct: "deactivateRecoveryKey",
-			call:      fmt.Sprintf(`mutation deactivateRecoveryKey(identityId:%q)`, probeId),
+			call:      fmt.Sprintf(`mutation deactivateRecoveryKey(identityId:%s)`, quotedProbe),
 			exposure:  "retiring another owner's key -- a silent lockout with no audit of who did it",
 		},
 	}
