@@ -1,0 +1,944 @@
+name: install-cluster-e2e
+
+# The half of the install that install-e2e.yml cannot reach: THE CLUSTER LANE.
+#
+# install-e2e.yml holds the install/uninstall receipt to account on a clean
+# machine, and says so honestly in its own header -- including the admission
+# this workflow exists to retire:
+#
+#   > THE CLUSTER LANE DOES NOT RUN. clusterUp / seedBootstrap / frontDoor /
+#   > magicLink need a real k3d cluster reconciled by ArgoCD from images this
+#   > workflow does not build. So two of the four surfaces -- dockerImages and
+#   > k3dClusters -- are TRIVIALLY unchanged here.
+#
+# Every install bug of the last few months lived in that uncovered half --
+# a manifest never cut into a release (memql#3703), a migration race
+# (memql#3879), a serial roll budget (memql#3880), a repair that silently
+# upgraded (memql#3605), a `.git` with no files reported as DONE (memql#4059) --
+# and install-e2e.yml was green on all of them. It could not have been anything
+# else: nothing it ran could reach the code those bugs were in.
+#
+# What changed is that the engine images and the database operand are published
+# and PUBLIC (ghcr.io/znasllc-io/memql-<node>, ghcr.io/znasllc-io/memql-db), so
+# `k3d.up --image-registry=... --image-tag=...` pulls a whole cluster without
+# building anything. The install path already passes exactly those flags
+# (session.ts `installPlan`, stackPin.ts `DEFAULT_IMAGE_REGISTRY`), so running
+# the graph here runs the operator's install, not a CI-shaped imitation of it.
+#
+# ============================ WHAT THIS PROVES ============================
+#
+#   * THE WHOLE INSTALL GRAPH EXECUTES, all sixteen steps, in dependency order,
+#     against the REAL capability scripts -- including the seven that
+#     install-e2e.yml structurally cannot reach: localCA, browserTrust,
+#     clusterUp, seedBootstrap, frontDoor, magicLink, enrolmentLink and
+#     recoveryKey.
+#   * `clusterUp` reaches `workloadsReady`. That is the graph's own verify --
+#     `resultTrue result.workloadsReady` -- and it is worth naming because
+#     `wait_for_workloads` in scripts/k3d/up.sh is deliberately NON-FATAL: the
+#     script exits 0 with the flag false, and the GRAPH is what turns that into
+#     a failure. Nothing else in CI evaluates that verify.
+#   * THE FOUR SURFACES COME BACK. The same before/install/uninstall/after diff
+#     install-e2e.yml runs, but with `dockerImages` and `k3dClusters` carrying
+#     real content on the way through instead of being trivially unchanged.
+#   * A REPAIR REPLAYS, IT DOES NOT UPGRADE (memql#3605, memql#3901). The repair
+#     leg installs, repairs, and then checks two independent consequences: the
+#     receipt still names the commit that was installed, and `clusterUp` is
+#     still recorded `preExisting: false` -- the ratchet, without which the
+#     uninstall REFUSES to delete a cluster memQL created and the operator is
+#     left running `k3d cluster delete` by hand.
+#   * AN UPGRADE MOVES THE CHECKOUT AND SURVIVES IT. The upgrade leg installs a
+#     released version, moves the cluster to the revision under test, and then
+#     uninstalls it -- so a receipt that lost track of anything across the move
+#     shows up as drift rather than as a cluster somebody has to find later.
+#
+# ========================== WHAT IT DOES NOT PROVE ========================
+#
+# Be honest about the gaps rather than let a green tick imply more than it is.
+# Each of these is a real limit, not a caveat:
+#
+#   * IT DOES NOT RUN THE ENGINE UNDER TEST. The images come from GHCR at the
+#     newest PUBLISHED release; a pull request's Go changes are not in them.
+#     What this lane exercises against a real cluster is the MANIFESTS
+#     (deploy/k8s/**), the SCRIPTS (scripts/install/**, scripts/k3d/**) and the
+#     INSTALLER (editors/vscode/src/install/**) -- which is exactly the path
+#     filter below, and exactly where the bugs listed above lived. It is the
+#     same deliberate skew a `main` install carries (see imageTagForVersion):
+#     two thirds of the fixes arrive, the engine binary is not one of them.
+#   * IT DOES NOT RUN FOR A FORK'S PULL REQUEST. ArgoCD reconciles the revision
+#     under test by fetching it from github.com/znasllc-io/memql.git, and a
+#     fork's branch is not there. The jobs are skipped rather than run against
+#     the wrong tree; see the `if:` on the job.
+#   * `dockerImages` IS NOT FULLY REVERSIBLE, and this lane narrows rather than
+#     waives that. `k3d cluster delete` removes containers and networks, never
+#     images, so k3d's own three (rancher/k3s, k3d-proxy, k3d-tools) survive the
+#     teardown. The final assertion therefore fails on any drift at all in the
+#     other three surfaces, and on that surface fails on anything that is not
+#     one of k3d's own images -- so a memQL image left behind is still a red
+#     lane. Nothing else is exempt.
+#   * THE TRUST STORE IS STILL NOT A SURFACE. Unlike install-e2e.yml this lane
+#     RUNS localCA -- it has to, because clusterUp depends on it and a skipped
+#     dependency removes the entire cluster half of the graph. So `mkcert
+#     -install` writes a CA into the runner's system trust store, and only the
+#     CA FILES (under ~/.memql/mkcert, inside the memqlHome surface) are checked
+#     back. The trust-store entry itself is invisible here, exactly as it is
+#     there.
+#   * THE PROVIDER KEY IS NOT A REAL ONE. Same local stub, same reasoning as
+#     install-e2e.yml: `providerKey` is a GATE every mutating step depends on,
+#     so skipping it would remove the whole install through the graph's own
+#     edges. The cluster is seeded with a key that is not an Anthropic key,
+#     which is fine because no step in the install graph makes a model call.
+#   * ONE PLATFORM, ONE TOPOLOGY. ubuntu-latest / linux-amd64, single k3d
+#     server, one replica per Deployment. It says nothing about the 2-replica
+#     mesh the cloud runs (`make up SERVERS=2` + `make scale N=2`).
+#   * LIVEKIT IS ABSENT, so seed-secrets.sh scales voice and voice-agent to 0
+#     and the readiness wait skips them. The voice lane is not covered.
+#
+# ===================== WHY A SEPARATE FILE, NOT MORE JOBS =================
+#
+# install-e2e.yml is the cheap lane: two jobs, no cluster, minutes. This one
+# pulls a cluster's worth of images three times over. Putting them in one file
+# would tie together the two things that most need to differ -- the TRIGGER
+# (this lane wants `schedule:` and a wider path set, and must NOT run on every
+# PR that touches an install script) and the CONCURRENCY GROUP (which is keyed
+# on `github.workflow`, so a docs-shaped push would cancel a cluster run
+# mid-reconcile, and the run that replaced it would start from a runner with no
+# memory of the cluster the cancelled one left behind).
+#
+# The legs are a MATRIX rather than three copies of one job, and that satisfies
+# the reasoning install-e2e.yml records for keeping `refused-key` a separate
+# job -- "sharing a baseline directory between two assertions that are exact
+# opposites is how one silently starts proving the other's claim". Each matrix
+# leg is its own job on its own runner with its own baseline, its own k3d
+# cluster and its own receipt; nothing is shared but the YAML. `fail-fast:
+# false` because a failing leg must not cancel the evidence the others were
+# about to produce.
+
+on:
+  # NIGHTLY is the primary trigger: this is a slow lane whose value is catching
+  # the skew between main, the published images and the manifests, which
+  # accumulates on a clock rather than on a diff.
+  schedule:
+    - cron: "0 3 * * *"
+  # ...plus the four trees whose changes cannot be checked any other way. NOT
+  # every pull request: an install-script edit already has install-e2e.yml, and
+  # a lane this expensive on every PR would be paid for by turning it off.
+  pull_request:
+    paths:
+      - "scripts/install/**"
+      - "scripts/k3d/**"
+      - "deploy/k8s/**"
+      - "editors/vscode/src/install/**"
+      - ".github/workflows/install-cluster-e2e.yml"
+  workflow_dispatch:
+    inputs:
+      from-version:
+        description: >-
+          The released version the UPGRADE leg installs first. Empty reads the
+          installer's own pin (DEFAULT_STACK_TAG in stackPin.ts).
+        required: false
+        default: ""
+      to-version:
+        description: >-
+          What the UPGRADE leg moves to. Empty means the revision under test,
+          which is the useful default while only one release is published; set
+          both to run a true release-to-release upgrade.
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  cluster:
+    # A FORK'S PULL REQUEST IS SKIPPED, NOT RUN. ArgoCD fetches the revision
+    # under test from this repository; a fork's branch is not in it, so the
+    # reconcile would either fail confusingly or -- worse -- fall back to
+    # something that is not the code under review. A skipped job says so; a
+    # green one against the wrong tree would not.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    name: ${{ matrix.leg }}
+    runs-on: ubuntu-latest
+    # A HANG BOUND, NOT A BUDGET, and the four numbers in this file NEST.
+    #
+    # The intended cost is ~15-20 minutes per leg (image pull, ArgoCD reconcile,
+    # readiness wait, teardown). What this value has to survive is the WORST
+    # case, and the worst case is a sum of budgets that must fit inside each
+    # other or the outer one truncates a wait that was about to succeed --
+    # reported, unhelpfully, as whatever the inner step was doing:
+    #
+    #   argocd-timeout 480s + operator 480s + workload 720s = 1680s  (clusterUp)
+    #                                            --timeout = 1800s  (per step)
+    #                                      timeout-minutes =   50m  (the job)
+    #
+    # Fifty rather than forty because the upgrade leg runs clusterUp twice; the
+    # second is mostly no-ops (ArgoCD is installed, the operators exist, the
+    # workloads are already Available) but it is not free. A timeout tight
+    # enough to cancel a healthy run turns a slow morning into a red gate, which
+    # is the headroom convention scripts/ci/workflow_timeout_test.go records.
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        leg:
+          # install -> assert -> uninstall -> diff. The base case.
+          - round-trip
+          # ...and then a repair in the middle, which must replay rather than
+          # upgrade, and must leave the cluster removable.
+          - repair
+          # install a RELEASE, move to the revision under test, then uninstall.
+          - upgrade
+    env:
+      # THE REVISION ARGOCD RECONCILES. The pull-request head SHA rather than
+      # `github.sha`, which for a `pull_request` event is the ephemeral merge
+      # commit -- it exists in this repository's object store but on no branch,
+      # so a default-refspec fetch (which is what ArgoCD's repo-server does)
+      # will not find it. The head SHA is the tip of a real branch here, which
+      # is also why the fork case above is excluded rather than handled.
+      REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+      # The domain the whole install is built around. Passed EXPLICITLY rather
+      # than left to default, because it is the value four steps must agree on
+      # -- the hosts block, the certificate, the front-door probe and the
+      # cluster's own memql-domain ConfigMap -- and three of them disagreeing is
+      # silent (memql#3590, memql#3593).
+      DOMAIN: memql.localhost
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No `fetch-depth: 0` here, unlike install-e2e.yml. That workflow TAGS
+        # its own checkout and installs from it, so it needs the history. This
+        # one installs from the real remote at a real revision, and uses the
+        # workspace only as `--root` -- the tree the capability scripts and the
+        # graph documents are read from, which is the whole point: the SCRIPTS
+        # under test are the pull request's even though the images are not.
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+
+      # WHICH VERSIONS THE UPGRADE LEG MOVES BETWEEN.
+      #
+      # The default `from` is READ OUT OF THE INSTALLER'S OWN PIN rather than
+      # written down here. DEFAULT_STACK_TAG is what a wizard install checks out
+      # today, so "the release an operator already has" is exactly the version
+      # this lane should be upgrading FROM -- and bumping the pin is already a
+      # documented release step (stackPin.ts says so at length), so the default
+      # follows a release without anybody remembering this file.
+      #
+      # The default `to` is the REVISION UNDER TEST, which is what makes this
+      # leg useful while only one release is published: it answers "can a
+      # v0.19.0 cluster be moved onto the code we are about to merge". When a
+      # second release exists, dispatch with both inputs (or set the repository
+      # variables) for a true release-to-release upgrade; nothing else changes.
+      #
+      # Fails closed: a `sed` that finds nothing means the constant was renamed,
+      # and silently falling back to a hardcoded tag is how this lane would
+      # start upgrading from a version nobody ships.
+      - name: Resolve the version pair
+        id: versions
+        # Through `env:`, never interpolated into the script body. A dispatch
+        # input is a value somebody types, and `${{ }}` substitution happens
+        # before the shell sees the line -- so a quote in an input would be
+        # shell syntax rather than a string. The same reason `matrix.leg` is
+        # read this way below.
+        env:
+          INPUT_FROM: ${{ inputs.from-version }}
+          INPUT_TO: ${{ inputs.to-version }}
+          VAR_FROM: ${{ vars.INSTALL_CLUSTER_E2E_FROM_VERSION }}
+          VAR_TO: ${{ vars.INSTALL_CLUSTER_E2E_TO_VERSION }}
+        run: |
+          set -euo pipefail
+          from="${INPUT_FROM:-}"
+          [ -n "$from" ] || from="${VAR_FROM:-}"
+          if [ -z "$from" ]; then
+            from="$(sed -n 's/^export const DEFAULT_STACK_TAG = "\(.*\)";$/\1/p' \
+              editors/vscode/src/install/stackPin.ts)"
+          fi
+          if [ -z "$from" ]; then
+            echo "ERROR: could not read DEFAULT_STACK_TAG out of stackPin.ts and no" >&2
+            echo "       from-version was given. Refusing to guess a version to upgrade from." >&2
+            exit 1
+          fi
+          to="${INPUT_TO:-}"
+          [ -n "$to" ] || to="${VAR_TO:-}"
+          echo "from=$from" >> "$GITHUB_OUTPUT"
+          echo "to=$to" >> "$GITHUB_OUTPUT"
+          echo "INFO: upgrade leg: ${from} -> ${to:-the revision under test (${REVISION})}"
+          if [ -n "$to" ] && [ "$to" = "$from" ]; then
+            echo "ERROR: from-version and to-version are the same (${from}); the upgrade leg" >&2
+            echo "       would move nothing and pass for the wrong reason." >&2
+            exit 1
+          fi
+
+      # THE PACKAGE INDEX, refreshed here rather than by the installer.
+      #
+      # `install.nssTools` runs `apt-get install -y libnss3-tools` and
+      # deliberately does not update the index first -- a capability script that
+      # refreshed a machine's package lists would be doing more than it was
+      # asked, and on an operator's machine it would be doing it without
+      # consent. On a runner whose image is a few days old that install 404s.
+      # So the LANE refreshes the index, before the baseline, where it is a
+      # property of the environment rather than of the installer.
+      - name: Refresh the package index the install will use
+        run: sudo apt-get update -qq
+
+      # Identical reasoning to install-e2e.yml, and it matters MORE here:
+      # install.binary's pre-existence flag is PATH-WIDE, so the runner's
+      # preinstalled kubectl would make the receipt say our copy pre-existed,
+      # remove-artifact.sh would refuse to delete it, and the memqlHome surface
+      # would legitimately fail to come back -- a red lane about the runner
+      # image rather than about memQL.
+      - name: Take preinstalled pinned tools out of the way
+        run: |
+          set -euo pipefail
+          for tool in k3d kubectl mkcert; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              found="$(command -v "$tool")"
+              sudo mv "$found" "$RUNNER_TEMP/${tool}.preinstalled"
+              echo "moved preinstalled $tool aside (was $found)"
+            fi
+          done
+
+      - name: Build the install CLI
+        working-directory: editors/vscode
+        run: |
+          npm ci
+          npm run build:install-cli
+
+      # ALL THREE SNAPSHOTS RUN THE SAME WAY, and neither half of that is
+      # cosmetic.
+      #
+      # UNDER SUDO, because the install runs under sudo and leaves files this
+      # user cannot read: `mkcert` writes rootCA-key.pem mode 0400 root-owned,
+      # and `_sha256_of` would abort the whole snapshot on it. install-e2e.yml
+      # never meets this because it SKIPS localCA; this lane cannot.
+      #
+      # WITH ~/.memql/bin ON PATH, because `surface_k3d_clusters` asks
+      # `command -v k3d` and reports `<k3d not installed>` when it cannot find
+      # one -- and the k3d the installer places lands in a directory no shell
+      # has heard of. Without this the k3dClusters surface would report the same
+      # string before, during and after, and the one surface this workflow
+      # exists to start exercising would be exercised by nothing.
+      #
+      # The BEFORE snapshot takes the same shape deliberately: a baseline
+      # gathered differently from what it is compared against is not a baseline.
+      - name: Snapshot the machine BEFORE
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$HOME/.memql/bin:$PATH" \
+            ./scripts/install/e2e-baseline.sh --mode=snapshot --out="$RUNNER_TEMP/before.txt"
+
+      # THE PROVIDER STUB, identical to install-e2e.yml's. Started AFTER the
+      # baseline deliberately: it is a process, not an artifact, and it touches
+      # none of the four surfaces. Bound to 127.0.0.1 so nothing off this runner
+      # can reach it.
+      - name: Start the provider stub the key gate verifies against
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/provider-stub.py" <<'PY'
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+
+          class Handler(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  # Only the path the script actually asks for. Answering
+                  # everything 200 would hide the day it starts asking for
+                  # something else.
+                  ok = self.path == "/v1/models"
+                  self.send_response(200 if ok else 404)
+                  self.send_header("content-type", "application/json")
+                  self.end_headers()
+                  self.wfile.write(b'{"data":[]}')
+
+              def log_message(self, *args):
+                  pass
+
+          HTTPServer(("127.0.0.1", 8099), Handler).serve_forever()
+          PY
+          python3 "$RUNNER_TEMP/provider-stub.py" &
+          echo $! > "$RUNNER_TEMP/provider-stub.pid"
+          for _ in $(seq 1 50); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8099/v1/models; then
+              echo "provider stub is answering"
+              exit 0
+            fi
+            sleep 0.2
+          done
+          echo "ERROR: the provider stub never came up" >&2
+          exit 1
+
+      - name: Write the stub key file
+        run: printf 'not-a-real-key-the-stub-ignores-it\n' > "$RUNNER_TEMP/provider-key"
+
+      # ====================================================================
+      # THE INSTALL
+      # ====================================================================
+      #
+      # Run as root: hostsBlock writes /etc/hosts and browserTrust installs a
+      # package. HOME is preserved so ~/.memql stays the directory the
+      # before/after snapshots describe, and so k3d's kubeconfig lands where the
+      # later steps look for it.
+      #
+      # Nothing is skipped. install-e2e.yml skips localCA; this lane cannot,
+      # because clusterUp DEPENDS on it and a skipped step blocks its dependents
+      # (that is the graph's own semantics, and it is what makes the
+      # provider-key gate a gate). Skipping it here would delete the cluster
+      # half of the graph -- the half this workflow exists for.
+      #
+      # `--commit` rather than `--tag`: the checkout, and therefore ArgoCD's
+      # target revision, is the code under review. The upgrade leg starts from a
+      # release instead, which is the only difference between the legs here.
+      #
+      # The step timeouts are generous on purpose. clusterUp pulls a whole
+      # cluster's images on a cold runner; a timeout that fires during a
+      # legitimate pull would report a broken installer.
+      - name: Install
+        env:
+          # The workload readiness budget inside scripts/k3d/up.sh, which has no
+          # flag of its own and defaults to 300s. A cold runner pulling nine
+          # engine images, cert-manager, CloudNativePG, ArgoCD and TimescaleDB
+          # will not be ready in five minutes, and the failure it produces reads
+          # as "workloadsReady did not hold" with no mention of a clock.
+          MEMQL_K3D_WORKLOAD_TIMEOUT: 720s
+          MEMQL_K3D_OPERATOR_TIMEOUT: "480"
+          FROM_VERSION: ${{ steps.versions.outputs.from }}
+          LEG: ${{ matrix.leg }}
+        run: |
+          set -euo pipefail
+          if [ "$LEG" = "upgrade" ]; then
+            # The released cluster an operator already has. --tag also pins the
+            # node images to that release (imageTagFor), so this really is the
+            # previous version and not this one wearing an old checkout.
+            ref_flag="--tag=${FROM_VERSION}"
+          else
+            ref_flag="--commit=${REVISION}"
+          fi
+          echo "INFO: installing with ${ref_flag}"
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js install \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              "$ref_flag" \
+              --domain="$DOMAIN" \
+              --owner-email=ci@example.com \
+              --owner-first-name=Continuous \
+              --owner-last-name=Integration \
+              --provider-key-file="$RUNNER_TEMP/provider-key" \
+              --param=providerKey.base-url=http://127.0.0.1:8099 \
+              --param=clusterUp.argocd-timeout=480 \
+              --timeout=1800 \
+              --json > "$RUNNER_TEMP/install-report.json"
+          # Everything the run wrote is root-owned, including the receipt, and
+          # every step after this one runs as the runner. install-e2e.yml's
+          # first real execution died exactly here and produced no evidence
+          # about the thing it exists to test. Only the receipt and the report:
+          # ~/.memql stays root-owned on purpose, because the uninstall also
+          # runs under sudo and must remove what the install created as the user
+          # that created it.
+          sudo chown "$(id -u):$(id -g)" \
+            "$RUNNER_TEMP/install-receipt.json" "$RUNNER_TEMP/install-report.json"
+
+      - name: Show what the install recorded
+        run: jq . "$RUNNER_TEMP/install-receipt.json"
+
+      # ====================================================================
+      # POSITIVE CONTROL: a cluster was actually built
+      # ====================================================================
+      #
+      # A command reporting success is not evidence that state changed, and this
+      # lane has two ways to pass while doing nothing: the graph could stop
+      # early with its dependents skipped-as-satisfied, or the surfaces could
+      # come back clean because nothing ever touched them. Both look like a
+      # green round trip.
+      #
+      # So this asserts the ARTIFACT twice over, from two independent records:
+      # what the RECEIPT says each step reported about the machine, and which
+      # SURFACES the machine's own fingerprint says moved.
+      - name: The install built a cluster, and the receipt says so
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/install-receipt.json"
+
+          # The LAST entry for a step, which is the one that got furthest: the
+          # receipt is append-and-upsert and a retried step has more than one.
+          # `// "MISSING"` will not do here: jq's alternative operator treats
+          # `false` as empty, so a recorded `preExisting: false` -- the exact
+          # value two assertions below are about -- would read as absent and
+          # the check would fail on a receipt that is correct.
+          field() {
+            jq -r --arg id "$1" --arg path "$2" '
+              ([.entries[] | select(.stepId == $id)] | last // {})
+              | getpath($path | split("."))
+              | if . == null then "MISSING" else tostring end' "$receipt"
+          }
+
+          fail=0
+          expect() {
+            local what="$1" got="$2" want="$3"
+            if [ "$got" = "$want" ]; then
+              echo "[x] ${what} = ${got}"
+            else
+              echo "[ ] ERROR: ${what} = ${got} (expected ${want})" >&2
+              fail=1
+            fi
+          }
+
+          # clusterUp's own verify. Worth asserting again here rather than
+          # trusting the run's exit code, because scripts/k3d/up.sh reports this
+          # false and still EXITS 0 -- the graph is what fails on it, and this
+          # line is what fails if that ever stops being true.
+          expect "clusterUp.result.workloadsReady" "$(field clusterUp result.workloadsReady)" "true"
+          # The cluster was CREATED by this install, not adopted from something
+          # already on the machine. `create_cluster` skips rather than fails
+          # when a cluster of the same name exists, so an adopted cluster is a
+          # silent state -- and the uninstall would then refuse to delete it.
+          expect "clusterUp.preExisting" "$(field clusterUp preExisting)" "false"
+          expect "seedBootstrap.result.bootstrapComplete" \
+            "$(field seedBootstrap result.bootstrapComplete)" "true"
+          expect "frontDoor.result.allPassed" "$(field frontDoor result.allPassed)" "true"
+
+          cluster="$(field clusterUp result.cluster)"
+          if [ "$cluster" = "MISSING" ] || [ -z "$cluster" ]; then
+            echo "[ ] ERROR: clusterUp recorded no cluster name, so the uninstall has nothing to remove" >&2
+            fail=1
+          else
+            echo "[x] clusterUp.result.cluster = ${cluster}"
+          fi
+
+          exit "$fail"
+
+      - name: The install actually changed the machine, on the surfaces that matter
+        run: |
+          set -uo pipefail
+          set +e
+          sudo -E env "HOME=$HOME" "PATH=$HOME/.memql/bin:$PATH" \
+            ./scripts/install/e2e-baseline.sh --mode=compare \
+              --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/during.txt" \
+            > "$RUNNER_TEMP/during.json"
+          rc=$?
+          set -e
+          sections="$(jq -r '.result.differingSections | join(" ")' "$RUNNER_TEMP/during.json")"
+          echo "differing sections: ${sections:-<none>}"
+          if [ "$rc" -eq 0 ]; then
+            echo "ERROR: the install left the machine identical -- the round trip below would prove nothing" >&2
+            exit 1
+          fi
+          # THE POINT OF THIS LANE, stated as an assertion. install-e2e.yml can
+          # only ever see hosts and memqlHome move; if these two do not, the
+          # cluster half did not run and everything below is a round trip over
+          # the same ground the cheap lane already covers.
+          for required in dockerImages k3dClusters; do
+            case " ${sections} " in
+              *" ${required} "*) echo "[x] ${required} changed, as a cluster install must" ;;
+              *) echo "[ ] ERROR: ${required} did not change -- no cluster was built" >&2; exit 1 ;;
+            esac
+          done
+
+      # ====================================================================
+      # LEG: repair
+      # ====================================================================
+      #
+      # A repair is the INSTALL graph re-run with the parameters the receipt
+      # recorded -- `cli.js repair`, which derives them through
+      # `recordedCheckout()` rather than reimplementing the rule. See cli.ts.
+      #
+      # The provider stub's base URL is passed again because it is a per-run
+      # step param, not something an install records as one of its answers.
+      - name: Repair
+        if: matrix.leg == 'repair'
+        env:
+          MEMQL_K3D_WORKLOAD_TIMEOUT: 720s
+          MEMQL_K3D_OPERATOR_TIMEOUT: "480"
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js repair \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --param=providerKey.base-url=http://127.0.0.1:8099 \
+              --param=clusterUp.argocd-timeout=480 \
+              --timeout=1800 \
+              --json > "$RUNNER_TEMP/repair-report.json"
+          sudo chown "$(id -u):$(id -g)" \
+            "$RUNNER_TEMP/install-receipt.json" "$RUNNER_TEMP/repair-report.json"
+
+      - name: The repair replayed, and left the cluster removable
+        if: matrix.leg == 'repair'
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/install-receipt.json"
+          # `// "MISSING"` will not do here: jq's alternative operator treats
+          # `false` as empty, so a recorded `preExisting: false` -- the exact
+          # value two assertions below are about -- would read as absent and
+          # the check would fail on a receipt that is correct.
+          field() {
+            jq -r --arg id "$1" --arg path "$2" '
+              ([.entries[] | select(.stepId == $id)] | last // {})
+              | getpath($path | split("."))
+              | if . == null then "MISSING" else tostring end' "$receipt"
+          }
+          fail=0
+
+          # (1) IT REPLAYED THE RECORDED CHECKOUT. The repair run overwrites
+          # stackCheckout's entry, so what is in the receipt NOW is what the
+          # repair asked for. A repair that fell through to the installer's
+          # pinned release would show `tag` here instead -- which is memql#3605
+          # exactly, and it is invisible in every other signal: the run is
+          # green, the cluster is healthy, and it is running different code.
+          commit="$(field stackCheckout params.commit)"
+          if [ "$commit" = "$REVISION" ]; then
+            echo "[x] the repair replayed --commit=${commit}"
+          else
+            echo "[ ] ERROR: the repair asked for commit '${commit}', not the installed ${REVISION}." >&2
+            echo "    A repair that installs a different version is an upgrade wearing a repair's name." >&2
+            fail=1
+          fi
+          tag="$(field stackCheckout params.tag)"
+          if [ "$tag" != "MISSING" ] && [ -n "$tag" ]; then
+            echo "[ ] ERROR: the repair passed --tag=${tag}; the recorded install was a commit." >&2
+            fail=1
+          fi
+
+          # (2) THE PRE-EXISTENCE VERDICT RATCHETED. `clusterUp` re-runs against
+          # a cluster that now exists and reports clusterCreated=false, whose
+          # derivation is "preExisting: true" -- and the receipt must keep the
+          # ORIGINAL false. If it does not, `refuse_if_pre_existing` is an
+          # unconditional exit 3 and the uninstall below preserves a cluster
+          # memQL created. The k3dClusters diff at the end of this leg is the
+          # second, independent proof of the same property.
+          expect_pre="$(field clusterUp preExisting)"
+          if [ "$expect_pre" = "false" ]; then
+            echo "[x] clusterUp.preExisting is still false after a repair"
+          else
+            echo "[ ] ERROR: clusterUp.preExisting became '${expect_pre}' after the repair." >&2
+            echo "    The uninstall will now REFUSE to delete a cluster memQL created (memql#3605)." >&2
+            fail=1
+          fi
+
+          if ! jq -e '.ok == true' "$RUNNER_TEMP/repair-report.json" >/dev/null; then
+            echo "[ ] ERROR: the repair run itself did not report ok" >&2
+            fail=1
+          fi
+          exit "$fail"
+
+      # ====================================================================
+      # LEG: upgrade
+      # ====================================================================
+      #
+      # Re-running the install graph with a DIFFERENT version is what an upgrade
+      # is: the checkout moves, ArgoCD reconciles the new manifests, the node
+      # images follow the new tag. There is no third graph and no upgrade verb;
+      # the operator picks the version by name, which is precisely the
+      # distinction the repair leg above defends.
+      - name: Upgrade
+        if: matrix.leg == 'upgrade'
+        env:
+          MEMQL_K3D_WORKLOAD_TIMEOUT: 720s
+          MEMQL_K3D_OPERATOR_TIMEOUT: "480"
+          TO_VERSION: ${{ steps.versions.outputs.to }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TO_VERSION" ]; then
+            ref_flag="--tag=${TO_VERSION}"
+          else
+            ref_flag="--commit=${REVISION}"
+          fi
+          echo "INFO: upgrading with ${ref_flag}"
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js install \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              "$ref_flag" \
+              --domain="$DOMAIN" \
+              --owner-email=ci@example.com \
+              --owner-first-name=Continuous \
+              --owner-last-name=Integration \
+              --provider-key-file="$RUNNER_TEMP/provider-key" \
+              --param=providerKey.base-url=http://127.0.0.1:8099 \
+              --param=clusterUp.argocd-timeout=480 \
+              --timeout=1800 \
+              --json > "$RUNNER_TEMP/upgrade-report.json"
+          sudo chown "$(id -u):$(id -g)" \
+            "$RUNNER_TEMP/install-receipt.json" "$RUNNER_TEMP/upgrade-report.json"
+
+      - name: The upgrade moved the checkout, and the cluster survived it
+        if: matrix.leg == 'upgrade'
+        env:
+          FROM_VERSION: ${{ steps.versions.outputs.from }}
+          TO_VERSION: ${{ steps.versions.outputs.to }}
+        run: |
+          set -euo pipefail
+          receipt="$RUNNER_TEMP/install-receipt.json"
+          # `// "MISSING"` will not do here: jq's alternative operator treats
+          # `false` as empty, so a recorded `preExisting: false` -- the exact
+          # value two assertions below are about -- would read as absent and
+          # the check would fail on a receipt that is correct.
+          field() {
+            jq -r --arg id "$1" --arg path "$2" '
+              ([.entries[] | select(.stepId == $id)] | last // {})
+              | getpath($path | split("."))
+              | if . == null then "MISSING" else tostring end' "$receipt"
+          }
+          fail=0
+
+          # THE MOVE ITSELF. Without this the leg passes whenever the second run
+          # is a no-op -- which is what an upgrade that silently kept the old
+          # checkout looks like from the outside: green, healthy, unchanged.
+          want="${TO_VERSION:-$REVISION}"
+          got_tag="$(field stackCheckout params.tag)"
+          got_commit="$(field stackCheckout params.commit)"
+          if [ "$got_tag" = "$want" ] || [ "$got_commit" = "$want" ]; then
+            echo "[x] the checkout now names ${want}"
+          else
+            echo "[ ] ERROR: after the upgrade the checkout names tag='${got_tag}' commit='${got_commit}'," >&2
+            echo "    not ${want}. The cluster was not moved." >&2
+            fail=1
+          fi
+          if [ "$got_tag" = "$FROM_VERSION" ]; then
+            echo "[ ] ERROR: the checkout is still at ${FROM_VERSION}" >&2
+            fail=1
+          fi
+
+          # ...and it is still a working cluster afterwards, which is the half
+          # an upgrade actually breaks (new manifests over old data).
+          expect_ready="$(field clusterUp result.workloadsReady)"
+          if [ "$expect_ready" = "true" ]; then
+            echo "[x] clusterUp.result.workloadsReady still holds after the move"
+          else
+            echo "[ ] ERROR: workloadsReady is '${expect_ready}' after the upgrade" >&2
+            fail=1
+          fi
+          # The ratchet again: two installs over one cluster, and the second one
+          # found it already there.
+          if [ "$(field clusterUp preExisting)" != "false" ]; then
+            echo "[ ] ERROR: clusterUp.preExisting flipped during the upgrade (memql#3605)" >&2
+            fail=1
+          fi
+          exit "$fail"
+
+      # ====================================================================
+      # THE UNINSTALL, AND THE ASSERTION
+      # ====================================================================
+
+      - name: Uninstall
+        run: |
+          set -euo pipefail
+          sudo -E env "HOME=$HOME" "PATH=$PATH" \
+            node editors/vscode/dist-install/cli.js uninstall \
+              --root="$GITHUB_WORKSPACE" \
+              --receipt="$RUNNER_TEMP/install-receipt.json" \
+              --timeout=1800 \
+              --json > "$RUNNER_TEMP/uninstall-report.json"
+          sudo chown "$(id -u):$(id -g)" "$RUNNER_TEMP/uninstall-report.json"
+
+      # EVERYTHING ABOVE IS SETUP FOR THIS STEP.
+      #
+      # Three of the four surfaces must be byte-identical to the baseline, and
+      # that is asserted with no exceptions at all. The fourth, dockerImages,
+      # carries ONE narrow and named exemption: `k3d cluster delete` removes
+      # containers and networks and never images, so k3d's own node images
+      # survive a teardown that removed everything memQL put there.
+      #
+      # The exemption is written as an allowlist of image REPOSITORIES rather
+      # than as "ignore dockerImages", because the difference matters: a memQL
+      # image, a database operand or anything else left in the daemon still
+      # fails this lane. A blanket waiver would have turned the one surface this
+      # workflow was written to start exercising back into the surface nothing
+      # checks.
+      - name: Snapshot the machine AFTER, and diff
+        run: |
+          set -uo pipefail
+          set +e
+          sudo -E env "HOME=$HOME" "PATH=$HOME/.memql/bin:$PATH" \
+            ./scripts/install/e2e-baseline.sh --mode=compare \
+              --baseline="$RUNNER_TEMP/before.txt" --out="$RUNNER_TEMP/after.txt" \
+            > "$RUNNER_TEMP/after.json"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "SUCCESS: the machine is byte-identical to its baseline on all four surfaces."
+            exit 0
+          fi
+
+          drifted="$(jq -r '.result.differingSections[]' "$RUNNER_TEMP/after.json")"
+          echo "sections that drifted: ${drifted:-<none named>}"
+          if [ -z "$drifted" ]; then
+            # The compare said the machine drifted and then named no surface,
+            # which means the two snapshots differ somewhere the section
+            # accounting does not describe. Fail closed: the alternative is a
+            # green tick over a difference nobody has looked at.
+            echo "ERROR: the snapshots differ but no section was named -- read the diff above." >&2
+            exit 1
+          fi
+          for section in $drifted; do
+            if [ "$section" != "dockerImages" ]; then
+              echo "ERROR: ${section} did not return to its baseline -- the receipt did not take everything back." >&2
+              exit 1
+            fi
+          done
+
+          # dockerImages alone. Read the section out of both snapshots and look
+          # at what actually differs, line by line.
+          section_of() { sed -n '/^\[dockerImages\]$/,/^\[k3dClusters\]$/p' "$1"; }
+          removed="$(diff <(section_of "$RUNNER_TEMP/before.txt") <(section_of "$RUNNER_TEMP/after.txt") | sed -n 's/^< //p' || true)"
+          added="$(diff <(section_of "$RUNNER_TEMP/before.txt") <(section_of "$RUNNER_TEMP/after.txt") | sed -n 's/^> //p' || true)"
+
+          if [ -n "$removed" ]; then
+            echo "ERROR: the install REMOVED images that were on this machine before it ran:" >&2
+            printf '  %s\n' "$removed" >&2
+            exit 1
+          fi
+
+          fail=0
+          while IFS= read -r line; do
+            if [ -z "$line" ]; then continue; fi
+            repo="${line%%:*}"
+            case "$repo" in
+              rancher/k3s|docker.io/rancher/k3s|ghcr.io/k3d-io/*)
+                echo "[x] left behind by k3d's own teardown, which does not claim images: ${line}"
+                ;;
+              *)
+                echo "[ ] ERROR: this image survived the uninstall and is not one of k3d's: ${line}" >&2
+                fail=1
+                ;;
+            esac
+          done <<< "$added"
+          if [ "$fail" -ne 0 ]; then
+            echo "ERROR: an image the installer pulled is still in the local daemon." >&2
+            exit 1
+          fi
+          echo "SUCCESS: the three reversible surfaces are byte-identical; only k3d's own images remain."
+
+      # THE SURFACE GOES BLIND EXACTLY WHERE IT MATTERS MOST, so this asks
+      # docker directly.
+      #
+      # `surface_k3d_clusters` reports `<k3d not installed>` when it cannot find
+      # a k3d binary -- which after a successful uninstall is TRUE, because the
+      # uninstall removed it. So the one arrangement the diff below cannot see
+      # is "the binary went and the cluster stayed": both snapshots read
+      # `<k3d not installed>` and the surface matches. That is not a hypothetical
+      # arrangement, it is precisely what a broken pre-existence ratchet
+      # produces (memql#3605) -- `remove-artifact.sh` REFUSES the cluster on
+      # `--pre-existing=true` while every other removal proceeds.
+      #
+      # A k3d cluster is a set of docker containers named `k3d-<cluster>-*`, and
+      # docker is here whatever the installer did with its own binaries.
+      #
+      # AFTER the diff, not before it: the diff is the primary assertion and it
+      # is what writes after.txt, so running this first would cost the evidence
+      # on every run this catches something.
+      - name: No cluster survived the uninstall
+        run: |
+          set -euo pipefail
+          left="$(docker ps -a --format '{{.Names}}' --filter 'name=^k3d-' || true)"
+          if [ -n "$left" ]; then
+            echo "ERROR: the uninstall left a k3d cluster behind:" >&2
+            printf '  %s\n' $left >&2
+            echo "    A refused removal reads as success on the k3dClusters surface once the" >&2
+            echo "    k3d binary is gone, which is why this check does not use it." >&2
+            exit 1
+          fi
+          echo "SUCCESS: no k3d containers remain."
+
+      # ====================================================================
+      # EVIDENCE AND TEARDOWN
+      # ====================================================================
+
+      # HAND THE EVIDENCE BACK, WHATEVER HAPPENED.
+      #
+      # Everything the CLI wrote under sudo is root-owned and mode 0600 (the
+      # receipt is written that way deliberately -- it is a record of an
+      # install, and `writeAtomic` does not widen it). The steps above chown the
+      # files they need on the success path; this is the FAILURE path, where the
+      # evidence matters most and where those steps did not run.
+      #
+      # Without it a failed install uploads nothing: `actions/upload-artifact`
+      # runs as the runner, and a 0600 root-owned receipt is simply unreadable
+      # to it. The artifact would be empty for exactly the runs somebody needs
+      # to read.
+      - name: Hand the evidence back to the runner
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP" || true
+
+      # A failed cluster lane is unreadable without the cluster's own account of
+      # itself, and the runner is thrown away the moment this job ends. Best
+      # effort throughout: this step must never be the reason a run is red.
+      - name: Cluster diagnostics
+        if: failure()
+        run: |
+          set +e
+          export PATH="$HOME/.memql/bin:$PATH"
+          {
+            echo "=== k3d clusters ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster list
+            # The node's allocatable versus what the manifests request. A
+            # hosted runner is 4 cores and 16 GB, and the failure that shape
+            # produces is pods Pending on `Insufficient cpu` -- which arrives as
+            # "workloadsReady did not hold" and names nothing.
+            echo "=== node capacity and allocation ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe nodes
+            echo "=== pods ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A -o wide
+            echo "=== argocd applications ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get applications -A -o wide
+            echo "=== recent events ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get events -A --sort-by=.lastTimestamp | tail -60
+            echo "=== pods that are not Running ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl get pods -A \
+              --field-selector=status.phase!=Running -o wide
+            echo "=== the memql namespace, described ==="
+            sudo -E env "HOME=$HOME" "PATH=$PATH" kubectl describe pods -n memql
+          } > "$RUNNER_TEMP/diagnostics.txt" 2>&1
+          cat "$RUNNER_TEMP/diagnostics.txt"
+          exit 0
+
+      # A NO-OP TODAY, AND KEPT ANYWAY. On a hosted runner the machine is
+      # destroyed with the job, so nothing can leak. The day this lane moves to
+      # a self-hosted runner -- which is the obvious answer to how slow it is --
+      # a failed run that left `memql` behind would silently ADOPT that cluster
+      # on the next run: `create_cluster` skips rather than fails when a cluster
+      # of the name already exists, so the next install would report success
+      # over somebody else's cluster and the leg after it would delete it.
+      # `if: always()` and after the diff, never before it.
+      - name: Tear the cluster down whatever happened
+        if: always()
+        run: |
+          set +e
+          export PATH="$HOME/.memql/bin:$PATH"
+          # A successful uninstall already removed the binary, which is the
+          # common case and not worth a `command not found` in the log.
+          if command -v k3d >/dev/null 2>&1; then
+            sudo -E env "HOME=$HOME" "PATH=$PATH" k3d cluster delete memql
+          else
+            echo "no k3d binary on PATH -- the uninstall took it, so there is nothing to tear down"
+          fi
+          exit 0
+
+      - name: Stop the provider stub
+        if: always()
+        run: |
+          pid_file="$RUNNER_TEMP/provider-stub.pid"
+          [ -f "$pid_file" ] || exit 0
+          kill "$(cat "$pid_file")" 2>/dev/null || true
+
+      - name: Upload the receipt, the reports and the snapshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: install-cluster-e2e-${{ matrix.leg }}-evidence
+          path: |
+            ${{ runner.temp }}/before.txt
+            ${{ runner.temp }}/during.txt
+            ${{ runner.temp }}/after.txt
+            ${{ runner.temp }}/during.json
+            ${{ runner.temp }}/after.json
+            ${{ runner.temp }}/install-receipt.json
+            ${{ runner.temp }}/install-report.json
+            ${{ runner.temp }}/repair-report.json
+            ${{ runner.temp }}/upgrade-report.json
+            ${{ runner.temp }}/uninstall-report.json
+            ${{ runner.temp }}/diagnostics.txt
+          if-no-files-found: warn

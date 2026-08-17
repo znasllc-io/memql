@@ -35,13 +35,27 @@ name: install-e2e
 #
 # Be honest about the gaps rather than let a green tick imply more than it is:
 #
-#   * THE CLUSTER LANE DOES NOT RUN. clusterUp / seedBootstrap / frontDoor /
-#     magicLink need a real k3d cluster reconciled by ArgoCD from images this
-#     workflow does not build. So two of the four surfaces -- dockerImages and
-#     k3dClusters -- are TRIVIALLY unchanged here: nothing that ran could have
-#     touched them. They are still snapshotted and diffed, because the day the
-#     cluster lane does run they are the surfaces that matter, and a diff that
-#     only exists when it is convenient proves nothing.
+#   * THE CLUSTER LANE DOES NOT RUN HERE. clusterUp / seedBootstrap /
+#     frontDoor / magicLink need a real k3d cluster reconciled by ArgoCD, which
+#     this workflow does not build. So two of the four surfaces -- dockerImages
+#     and k3dClusters -- are TRIVIALLY unchanged here: nothing that ran could
+#     have touched them. They are still snapshotted and diffed, because a diff
+#     that only exists when it is convenient proves nothing.
+#
+#     IT RUNS IN `.github/workflows/install-cluster-e2e.yml` (nightly, plus
+#     pull requests touching scripts/install, scripts/k3d, deploy/k8s or the
+#     installer). That lane executes the WHOLE graph against the published
+#     GHCR images, so the two surfaces above carry real content on the way
+#     through, and it adds a repair leg and an upgrade leg. It is a separate
+#     workflow because it is a separate cost and a separate trigger; this one
+#     stays cheap and runs on every install-script change. What that lane still
+#     does not prove is written in its own header, at the same length as this.
+#
+#     THE SPLIT IS BY COST, NOT BY SCOPE. Do not "consolidate" a cluster
+#     assertion into this file: the moment a job here needs a cluster, the lane
+#     that gates every install-script edit stops being cheap enough to keep on
+#     `pull_request`, and the first thing that happens after that is somebody
+#     narrows its paths.
 #   * THE PROVIDER KEY IS NOT A REAL ONE. providerKey runs against a LOCAL
 #     STUB answering `GET /v1/models` with 200, not against Anthropic -- a
 #     fork's pull request cannot hold a real key.

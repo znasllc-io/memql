@@ -1,4 +1,4 @@
-// The CLI harness: `cli.js install` and `cli.js uninstall`.
+// The CLI harness: `cli.js install`, `cli.js uninstall` and `cli.js repair`.
 //
 // The graph, the runner and the executor between them describe an install
 // completely except for the handful of values that CANNOT be pinned in a
@@ -26,6 +26,22 @@
 //                           the operator: only the install knows where the
 //                           artifact landed and whether it was already there.
 //
+// THE THIRD VERB (memql#3901, memql#3605). `repair` is not a third graph --
+// GraphKind is `install | uninstall` and nothing else -- it is the INSTALL
+// graph run with the parameters a previous run recorded. Every step verifies
+// itself first and skips when already satisfied, so re-running the graph over a
+// cluster that stopped answering IS the repair; see runInstall's doc comment,
+// which has said so since #3357. What the verb adds is the one thing that
+// separates a repair from an upgrade: where its parameters come from.
+//
+// They come from `recordedCheckout()` and its siblings in receipt.ts, CALLED
+// rather than reimplemented. That function encodes a rule with a silent failure
+// mode -- a tag install replays its tag, a BRANCH install must replay the
+// resolved COMMIT, because replaying `--branch=main` checks out wherever main is
+// today and turns "repair" into "upgrade" (memql#3605's exact failure, by the
+// one route that reopens it). A second copy of that rule here would be a second
+// place for it to be wrong, and wrong in a way that reads as success.
+//
 // WHAT MOVED, AND WHY (memql#3469). The ORCHESTRATION -- the plan functions,
 // the child environment, the decision to load a graph and execute it -- now
 // lives in ./session.ts, because the "+" button needed to start an install
@@ -41,7 +57,17 @@
 import * as path from "node:path";
 
 import { graphDocumentPath, loadGraphFile, type Graph, type GraphKind, type Step } from "./graph.js";
-import { defaultReceiptPath } from "./receipt.js";
+import {
+  defaultReceiptPath,
+  readReceipt,
+  recordedCheckout,
+  recordedDomain,
+  recordedOwner,
+  recordedProvider,
+  recordedProviderKeyFile,
+  type Receipt,
+} from "./receipt.js";
+import { looksLikeProviderKey, REDACTED } from "./secrets.js";
 import { type ExecEvent, type ExecutionReport, type StepPlan } from "./executor.js";
 import {
   installPlan,
@@ -63,7 +89,7 @@ export class CliError extends Error {}
  * two output modes. Everything else is a run input and lives in SessionOptions.
  */
 export interface CliOptions extends SessionOptions {
-  command: "install" | "uninstall";
+  command: "install" | "uninstall" | "repair";
   json: boolean;
   dryRun: boolean;
 }
@@ -74,6 +100,14 @@ const VALUE_FLAGS: Record<string, keyof CliOptions> = {
   receipt: "receiptFile",
   "tool-dir": "toolDir",
   tag: "tag",
+  // The EXACT commit to check out, which outranks --tag. See
+  // SessionOptions.commit: a repair reads it off the receipt, and the
+  // cluster-lane CI job passes the revision under test so ArgoCD reconciles
+  // THAT tree rather than the pinned release. Not a thing to reach for by
+  // hand -- `--tag` is how a person names a version -- but the value has to be
+  // expressible from a terminal for anything but the wizard to install a
+  // revision that is not a release.
+  commit: "commit",
   repo: "repo",
   "image-registry": "imageRegistry",
   "provider-key-file": "providerKeyFile",
@@ -89,8 +123,10 @@ const DEFAULT_ROOT = path.resolve(__dirname, "..", "..", "..");
 
 export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions {
   const [command, ...rest] = argv;
-  if (command !== "install" && command !== "uninstall") {
-    throw new CliError(`usage: cli.js install|uninstall [flags] (got ${command ? JSON.stringify(command) : "nothing"})`);
+  if (command !== "install" && command !== "uninstall" && command !== "repair") {
+    throw new CliError(
+      `usage: cli.js install|uninstall|repair [flags] (got ${command ? JSON.stringify(command) : "nothing"})`,
+    );
   }
 
   const opts: CliOptions = {
@@ -156,15 +192,131 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
     (opts as unknown as Record<string, string>)[field] = value;
   }
 
+  // A REPAIR MAY NOT BE HANDED A VERSION (memql#3605). A repair returns the
+  // cluster to the state its receipt describes; upgrading is a different verb,
+  // which the operator picks by name. Silently preferring the recorded ref over
+  // a `--tag` the operator typed would be the safe behaviour and the confusing
+  // one -- the flag would appear to work and do nothing -- so the flag is
+  // refused where it can only mean something the verb does not do.
+  if (opts.command === "repair" && (opts.tag !== undefined || opts.commit !== undefined)) {
+    throw new CliError(
+      "repair takes no --tag/--commit: it replays the checkout the receipt recorded, " +
+        "and installing a different version is `install`, not `repair`",
+    );
+  }
+
   return opts;
+}
+
+/**
+ * A repair's run inputs: the install graph's, as a previous run recorded them.
+ *
+ * ONE RULE, STATED ONCE: **the receipt answers, and the command line may only
+ * supply what the receipt does not carry.** A repair is defined as returning
+ * the cluster to the state its receipt describes, so every value it needs is
+ * already a recorded fact; the flags remain useful only for the run inputs no
+ * install records (`--root`, `--receipt`, `--timeout`, `--param`, `--skip`).
+ *
+ * Each reader below is the one the extension's Repair button calls, and calling
+ * them rather than re-deriving from `entry.params` is the point of this
+ * function existing at all:
+ *
+ *   - `recordedCheckout` decides tag-versus-commit. A tag install replays its
+ *     tag; a BRANCH install must replay the resolved COMMIT, because replaying
+ *     `--branch=main` checks out wherever main is today and makes "repair" mean
+ *     "upgrade" (memql#3605, reopened by the route memql#3901 added).
+ *   - `recordedProvider` travels with `recordedProviderKeyFile`: re-asserting
+ *     the default vendor over a recorded OpenAI key verifies it against
+ *     Anthropic and reports exit 3, REFUSED -- "the key is bad", about a key
+ *     that is fine (memql#3473).
+ *   - `recordedOwner` + `recordedDomain` are what `seedBootstrap` refuses an
+ *     incomplete set of (znasllc-io#3888, memql#3736). The refusal is right;
+ *     a caller that reached it with three empty strings was wrong.
+ *
+ * REFUSES RATHER THAN GUESSES, twice, and both refusals name the remedy:
+ *
+ *   NO RECORDED CHECKOUT -- `installPlan` would fall through to
+ *   DEFAULT_STACK_TAG, so a repair would silently install whatever version this
+ *   build pins. That is the failure this verb exists to make unreachable, so it
+ *   is refused where it starts rather than where it lands.
+ *
+ *   NO USABLE KEY PATH -- the run cannot pass wave 2 (`providerKey` gates every
+ *   mutating step), and the failure it would produce is exit 2, whose guidance
+ *   reads "a fault in memQL rather than in your machine". Say the true thing
+ *   before anything runs. `--provider-key-file` still supplies it, because a
+ *   path the receipt never carried is not a value the receipt is overriding.
+ */
+export function repairOptions(opts: CliOptions, receipt: Receipt | null): CliOptions {
+  if (receipt === null) {
+    throw new CliError(
+      `no receipt at ${opts.receiptFile} -- a repair replays a recorded install, and there is ` +
+        `no record here. Install rather than repair.`,
+    );
+  }
+
+  const checkout = recordedCheckout(receipt);
+  if (checkout.tag === "" && checkout.commit === "") {
+    throw new CliError(
+      "the receipt records no checkout, so a repair has nothing to replay -- it would fall " +
+        "back to this build's pinned release, which is an install, not a repair. Install instead.",
+    );
+  }
+
+  const keyFile = opts.providerKeyFile || usableKeyPath(recordedProviderKeyFile(receipt));
+  if (keyFile === "") {
+    throw new CliError(
+      "the receipt records no usable AI-provider key path. Install rather than repair, so the " +
+        "key can be collected and verified, or pass --provider-key-file.",
+    );
+  }
+
+  const owner = recordedOwner(receipt);
+  return {
+    ...opts,
+    tag: checkout.tag || undefined,
+    commit: checkout.commit || undefined,
+    provider: recordedProvider(receipt) || opts.provider,
+    providerKeyFile: keyFile,
+    domain: recordedDomain(receipt) || opts.domain,
+    ownerEmail: owner.email || opts.ownerEmail,
+    ownerFirstName: owner.firstName || opts.ownerFirstName,
+    ownerLastName: owner.lastName || opts.ownerLastName,
+  };
+}
+
+/**
+ * A recorded `--key-file` value, or "" when it is not one.
+ *
+ * The receipt can hold something that is not a path: the redaction marker where
+ * an operator pasted a key into the key-FILE box (memql#3545), or -- on a
+ * receipt written before that guard existed -- the key itself. Handing either
+ * to `--key-file` produces a confusing failure deep in the run; treating it as
+ * "nothing recorded" produces the honest refusal above.
+ *
+ * The same two lines the wizard applies (`usablePath` in addClusterPanel.ts).
+ * Duplicated rather than shared because that file imports `vscode`, which this
+ * one must not; the shared half -- what a key looks like -- is imported.
+ */
+function usableKeyPath(recorded: string): string {
+  if (recorded === REDACTED) return "";
+  return looksLikeProviderKey(recorded) ? "" : recorded;
 }
 
 // --------------------------------------------------------------------------
 // running
 // --------------------------------------------------------------------------
 
-export async function run(opts: CliOptions, log: (line: string) => void = (l) => console.error(l)): Promise<number> {
-  const kind: GraphKind = opts.command === "install" ? "install" : "uninstall";
+export async function run(
+  rawOpts: CliOptions,
+  log: (line: string) => void = (l) => console.error(l),
+): Promise<number> {
+  // REPAIR IS THE INSTALL GRAPH (see the header). The only difference is where
+  // its parameters come from, and that resolution happens HERE -- before the
+  // dry run, so `repair --dry-run` prints the plan a repair would actually
+  // execute rather than the plan an install would.
+  const opts =
+    rawOpts.command === "repair" ? repairOptions(rawOpts, await readReceipt(rawOpts.receiptFile)) : rawOpts;
+  const kind: GraphKind = opts.command === "uninstall" ? "uninstall" : "install";
 
   // The dry run stays here rather than moving into the session, because it is
   // PRINTING -- and for uninstall it is now printed from the same structured

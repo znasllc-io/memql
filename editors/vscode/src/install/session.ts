@@ -83,11 +83,17 @@ export interface SessionOptions {
   /**
    * An exact commit, which OUTRANKS `tag` when set.
    *
-   * The repair path, and only the repair path (memql#3901). A repair of a
-   * branch install cannot replay `--branch=main` -- main has moved, so "repair"
-   * would mean "upgrade", which is exactly the failure memql#3605 fixed for
-   * tags. `repairSessionOptions` reads the resolved commit off the receipt and
-   * puts it here.
+   * The repair path (memql#3901). A repair of a branch install cannot replay
+   * `--branch=main` -- main has moved, so "repair" would mean "upgrade", which
+   * is exactly the failure memql#3605 fixed for tags. `cli.ts`'s
+   * `repairOptions` reads the resolved commit off the receipt via
+   * `recordedCheckout` and puts it here.
+   *
+   * And ONE OTHER CALLER, deliberately: the cluster-lane CI job passes the
+   * revision under test (`--commit` on the CLI), so ArgoCD reconciles the
+   * manifests in the commit being reviewed rather than the ones in this build's
+   * pinned release. Without it a `deploy/k8s/**` change is invisible to the one
+   * lane that runs a cluster.
    */
   commit?: string;
   repo?: string;
