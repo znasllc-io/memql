@@ -40,7 +40,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "Dispatching build-engine-images for version ${TAG}"
+          # TWO CONVENTIONS, ONE RELEASE (memql#4061). Git tags carry the `v`
+          # -- clone-stack.sh checks out exactly `v0.19.0` -- and image tags do
+          # not. `imageTagFor()` in the extension strips it, so an install pins
+          # ghcr.io/znasllc-io/memql-bff:0.19.0, and build-engine-images uses
+          # this input VERBATIM as the tag it pushes.
+          #
+          # So forwarding the tag unchanged builds `memql-bff:v0.19.0`: a green
+          # build, an immutable tag burned at the wrong name, and every pod of
+          # the release in ImagePullBackOff. Strip it here, where the release
+          # event is the only thing that knows the value came from a ref.
+          VERSION="${TAG#v}"
+          echo "Dispatching build-engine-images for version ${VERSION} (release tag ${TAG})"
           gh workflow run build-engine-images.yml \
             --repo "$GITHUB_REPOSITORY" \
-            -f version="$TAG"
+            -f version="$VERSION"
