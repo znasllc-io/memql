@@ -760,6 +760,48 @@ test("an explicit tag moves the images with it", async () => {
   }
 });
 
+// A RECORDED image tag OUTRANKS the derivation (memql#4068). The repair path
+// replays what the receipt says the cluster ran rather than deriving it a second
+// time, because the second derivation reads a version a branch install
+// deliberately does not have and falls through to this build's pin. The
+// end-to-end repair cases live in installMainBranch.test.ts; this pins the plan
+// half, including that the recorded value wins over a version in the same
+// session -- which is the state a repair is actually in.
+test("a recorded image tag outranks anything the session would derive", () => {
+  const plan = installPlan(options({ tag: "v9.9.9", imageTag: "0.17.1" }));
+  assert.equal(paramsFor(plan, "clusterUp", "k3d.up")["image-tag"], "0.17.1");
+
+  // Blank means "nothing recorded", not "an empty --image-tag". k3d.up refuses
+  // `--image-registry` without a tag (exit 2), so passing an empty one would
+  // trade a silent wrong version for a loud broken install.
+  const blank = installPlan(options({ tag: "v9.9.9", imageTag: "   " }));
+  assert.equal(paramsFor(blank, "clusterUp", "k3d.up")["image-tag"], "9.9.9");
+});
+
+// THE WIZARD'S SIDE OF THE SAME FIELD, and the reason it is tested here rather
+// than in the panel: `webview/addClusterPanel.ts` imports `vscode`, which the
+// unit lane excludes by design, so a field missing from the object it builds is
+// invisible to every test. That is memql#3560 exactly -- `tag` was simply absent
+// from that literal for the whole life of the wizard's install path -- and
+// `installSessionOptions` exists on this side of the line so the audit is
+// possible at all.
+test("the wizard's answers carry the recorded image tag through to the run", () => {
+  const opts = installSessionOptions({
+    root: REPO_ROOT,
+    receiptFile: path.join(mkdtempSync(path.join(os.tmpdir(), "memql-imagetag-")), "receipt.json"),
+    provider: "anthropic",
+    providerKeyFile: "/tmp/key",
+    domain: "memql.localhost",
+    ownerEmail: "op@example.test",
+    ownerFirstName: "Op",
+    ownerLastName: "Erator",
+    tag: "v9.9.9",
+    imageTag: "0.17.1",
+  });
+  assert.equal(opts.imageTag, "0.17.1", "the wizard's repair would derive its own images instead");
+  assert.equal(paramsFor(installPlan(opts), "clusterUp", "k3d.up")["image-tag"], "0.17.1");
+});
+
 // -----------------------------------------------------------------------------
 // the domain the operator typed (memql#3590)
 // -----------------------------------------------------------------------------

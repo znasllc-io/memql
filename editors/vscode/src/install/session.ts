@@ -107,6 +107,27 @@ export interface SessionOptions {
   /** Registry the node images come from; see DEFAULT_IMAGE_REGISTRY. */
   imageRegistry?: string;
   /**
+   * The node-image tag to use VERBATIM, instead of deriving one (memql#4068).
+   *
+   * The repair path, and the exact sibling of `commit` above. `commit` exists
+   * because a repair must replay the CODE a receipt recorded rather than
+   * re-resolve a ref that has moved; this exists because it must replay the
+   * IMAGES too, rather than re-derive them from a version a branch install does
+   * not have. `imageTagForVersion` falls back to DEFAULT_STACK_TAG when handed
+   * nothing, so re-deriving turned every repair of a branch install into an
+   * upgrade to whatever release the running plugin build pinned -- silently, and
+   * with the recorded commit's manifests still reconciling underneath it.
+   *
+   * `cli.ts`'s `repairOptions` and the wizard's repair path both read it off the
+   * receipt through `recordedCheckout`, which carries it beside the ref for the
+   * reason that function's comment gives.
+   *
+   * Empty or unset means "derive", which is right for a fresh install (there is
+   * nothing recorded) and is the only answer available for a receipt whose
+   * install never reached `clusterUp`.
+   */
+  imageTag?: string;
+  /**
    * A PATH, never the key itself.
    *
    * argv is world-readable in `ps`, so a flag carrying the key would publish it
@@ -174,6 +195,16 @@ export interface WizardAnswers {
   tag?: string;
   /** See SessionOptions.commit -- set only by a repair replaying a branch install. */
   commit?: string;
+  /**
+   * See SessionOptions.imageTag -- set only by a repair, replaying the images
+   * the receipt recorded rather than deriving them again (memql#4068).
+   *
+   * It is on the WIZARD's answers as well as the CLI's options for memql#3560's
+   * reason: the panel builds its run through `installSessionOptions`, and a
+   * field this type does not carry is one the panel cannot pass however
+   * carefully it is written.
+   */
+  imageTag?: string;
   /** See SessionOptions.latestRelease -- images for a `main` install. */
   latestRelease?: string;
   timeoutMs?: number;
@@ -209,6 +240,7 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     ownerLastName: answers.ownerLastName,
     tag: answers.tag,
     commit: answers.commit,
+    imageTag: answers.imageTag,
     latestRelease: answers.latestRelease,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
@@ -391,6 +423,25 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         params = present({
           "repo-root": stackDir,
           "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
+          // REPLAYED WHEN THE RECEIPT HAS ONE, DERIVED OTHERWISE (memql#4068).
+          //
+          // The derivation below is right for an INSTALL, where the operator has
+          // just chosen a version and there is nothing recorded to replay. It is
+          // wrong for a REPAIR, and wrong in a way that reads as success: a
+          // branch install's recorded checkout is a commit and an EMPTY tag, so
+          // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the
+          // repaired cluster reconciled the recorded commit's manifests against
+          // whatever release THIS plugin build pins. An upgrade nobody asked for
+          // -- exactly what memql#3605 defines a repair as never being -- plus a
+          // manifest/image skew nobody chose.
+          //
+          // ONE DERIVATION, and it stays here. `opts.imageTag` is not a second
+          // derivation, it is the FIRST one's recorded output being replayed:
+          // `recordedImageTag` reads back the `--image-tag` this very line
+          // produced on the run being repaired. Deriving it a second time from a
+          // second set of inputs is the defect; reading the answer back is the
+          // fix, and it is the same shape as memql#3901's `commit`.
+          //
           // CONVERTED, not passed through: git tags carry the `v` and image
           // tags do not. See imageTagFor.
           //
@@ -400,7 +451,9 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // newest images that exist, which is the newest published release.
           // The version picker states that skew rather than hiding it. See
           // imageTagForVersion.
-          "image-tag": imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+          "image-tag":
+            (opts.imageTag ?? "").trim() ||
+            imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
           // The FOURTH consumer of the typed domain (memql#3593). The other
           // three place it on the MACHINE -- the hosts block, the certificate,
           // the front-door probe. This one places it in the CLUSTER: k3d.up

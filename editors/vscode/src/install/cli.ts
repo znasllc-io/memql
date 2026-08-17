@@ -42,16 +42,17 @@
 // one route that reopens it). A second copy of that rule here would be a second
 // place for it to be wrong, and wrong in a way that reads as success.
 //
-// THE RULE HOLDS FOR THE CHECKOUT AND NOT YET FOR THE IMAGES (memql#4068).
-// A branch install's `recordedCheckout()` returns a commit and no tag, and the
-// image tag is derived separately -- with no tag to derive from it falls back
-// to DEFAULT_STACK_TAG, so a repair run from a NEWER plugin build replays the
-// recorded commit against a different release's engine images. Pre-existing,
-// identical in the extension's own repair flow, and out of scope for the verb;
-// the fix is to record the resolved image tag at install time and replay that,
-// rather than deriving it a second time. A TAG install is unaffected, which is
-// the common case and is verified: with the pin at v0.19.1, repairing a
-// v0.19.0 receipt still plans --tag=v0.19.0 and --image-tag=0.19.0.
+// THE RULE COVERS THE IMAGES TOO (memql#4068). It did not, and the gap was the
+// same rule broken in a second place: a branch install's `recordedCheckout()`
+// returns a commit and no TAG -- deliberately, there is no release -- and the
+// image tag was DERIVED from that same empty tag rather than replayed, so it
+// fell through to DEFAULT_STACK_TAG and a repair run from a newer plugin build
+// reconciled the recorded commit's manifests against a different release's
+// engine images. The fix is `recordedCheckout().imageTag`: the resolved value
+// the install already recorded, replayed rather than derived a second time. A
+// TAG install was unaffected throughout, because its derivation and its record
+// agree by construction -- which is why nothing noticed -- and that case is
+// pinned in installMainBranch.test.ts so a fix for one cannot regress the other.
 //
 // WHAT MOVED, AND WHY (memql#3469). The ORCHESTRATION -- the plan functions,
 // the child environment, the decision to load a graph and execute it -- now
@@ -235,7 +236,11 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  *   - `recordedCheckout` decides tag-versus-commit. A tag install replays its
  *     tag; a BRANCH install must replay the resolved COMMIT, because replaying
  *     `--branch=main` checks out wherever main is today and makes "repair" mean
- *     "upgrade" (memql#3605, reopened by the route memql#3901 added).
+ *     "upgrade" (memql#3605, reopened by the route memql#3901 added). It also
+ *     carries the recorded IMAGE tag, which is the same rule about the other
+ *     half of a release: with no tag to derive from, the images fell back to
+ *     this build's pin and the repair upgraded them alone, leaving the recorded
+ *     commit's manifests running against another release's engine (memql#4068).
  *   - `recordedProvider` travels with `recordedProviderKeyFile`: re-asserting
  *     the default vendor over a recorded OpenAI key verifies it against
  *     Anthropic and reports exit 3, REFUSED -- "the key is bad", about a key
@@ -286,6 +291,12 @@ export function repairOptions(opts: CliOptions, receipt: Receipt | null): CliOpt
     ...opts,
     tag: checkout.tag || undefined,
     commit: checkout.commit || undefined,
+    // The IMAGES the recorded install ran, replayed rather than re-derived
+    // (memql#4068). `undefined` when the receipt carries none -- a receipt
+    // written before `--image-tag` existed, or an install that failed before
+    // `clusterUp` -- and `installPlan` then derives, which is the only answer
+    // available and the correct one for the tag installs those receipts are.
+    imageTag: checkout.imageTag || undefined,
     provider: recordedProvider(receipt) || opts.provider,
     providerKeyFile: keyFile,
     domain: recordedDomain(receipt) || opts.domain,
