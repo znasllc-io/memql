@@ -896,6 +896,18 @@ export class AddClusterPanel {
           // reopens it.
           tag: recordedCheckout(priorReceipt).tag || inputs.version,
           commit: recordedCheckout(priorReceipt).commit,
+          // AND THE IMAGES THAT CHECKOUT RAN AGAINST (memql#4068). The two lines
+          // above replay the recorded CODE; without this one the node images
+          // were derived again, from the empty tag a branch install's record
+          // deliberately carries, and fell through to DEFAULT_STACK_TAG. So a
+          // repair from a newer plugin build reconciled the recorded commit's
+          // manifests against a different release's engine -- an upgrade the
+          // operator did not ask for, and a skew nobody chose.
+          //
+          // Empty on a fresh install, where there is nothing recorded and
+          // `installPlan`'s own derivation from the chosen version is the right
+          // answer.
+          imageTag: recordedCheckout(priorReceipt).imageTag,
           // Only ever consulted for a `main` install, to pick node images that
           // exist. See imageTagForVersion.
           latestRelease: this.latestRelease(),

@@ -92,7 +92,7 @@ function surface_hosts() {
 # Files only, sorted, each with its digest. See the header for why directories
 # are deliberately not part of this surface.
 function surface_memql_home() {
-    local home="$1" f rel
+    local home="$1" f rel any=0
     printf '[memqlHome]\n'
     if [[ ! -d "$home" ]]; then
         printf 'absent\n'
@@ -100,9 +100,32 @@ function surface_memql_home() {
     fi
     while IFS= read -r f; do
         [[ -z "$f" ]] && continue
+        any=1
         rel="${f#"${home}"/}"
         printf '%s  %s\n' "$(_sha256_of "$f")" "$rel"
     done < <(find "$home" -type f 2>/dev/null | LC_ALL=C sort)
+
+    # AN EMPTY ~/.memql READS AS `absent`, and the two must not be
+    # distinguishable -- the header already says this surface is FILES, not
+    # directories, and the implementation contradicted it in exactly one case.
+    # A missing directory printed `absent`; a directory that still existed with
+    # nothing in it printed NOTHING AT ALL, so the two states differed by a
+    # line and a clean round trip failed with `-absent` and no `+` beside it.
+    #
+    # The directory legitimately survives, so the fix belongs here rather than
+    # in the uninstall: `~/.memql` is also where the plugin keeps state no
+    # install step created and no uninstall should take -- `runs/` (the run
+    # records that are the evidence for what happened) and `clusters.yaml`.
+    # Pruning it wholesale would delete an operator's history to satisfy a
+    # fingerprint. The install's own artifacts under it are removed and their
+    # directories pruned, which is what the promise actually covers.
+    #
+    # `bin/` was always the example in the header. This is the same argument
+    # one level up, and it took a real cluster round trip to notice, because
+    # nothing before it had ever emptied ~/.memql without also removing it.
+    if [[ "$any" -eq 0 ]]; then
+        printf 'absent\n'
+    fi
 }
 
 function surface_docker_images() {

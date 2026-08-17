@@ -13,7 +13,9 @@
 #   hostsEntries  the installer's marked block inside the hosts file at --path
 #                 (required, never defaulted: an uninstall must not guess which
 #                 hosts file to edit)
-#   mkcertCA      the local mkcert CA (mkcert -uninstall + the rootCA files)
+#   mkcertCA      EVERYTHING install.mkcert wrote: the local CA (mkcert
+#                 -uninstall + the rootCA files + its marker) AND the front-door
+#                 pair it issued at --cert-file / --key-file
 #   stack         the local k3d cluster named --cluster
 #   images        locally built/imported images matching --image-prefix
 #
@@ -31,6 +33,16 @@
 #
 #   Anything that is not PLAINLY false ("false"/"0"/"no"/absent) refuses. A
 #   garbled receipt value is a reason to stop, not a reason to delete.
+#
+#   THE ONE PATH THAT DOES NOT CONSULT IT is the front-door pair under
+#   kind=mkcertCA, and the omission is deliberate rather than missed
+#   (memql#4071). A receipt carries ONE verdict per step, and this step's is
+#   `result.caPreExisting` -- a fact about the CA, in a different directory,
+#   whose answer differs from the pair's in both directions. So the pair is
+#   gated on something strictly stronger and artifact-local: the provenance
+#   marker the issuing run wrote beside it. No marker, no removal. Do not
+#   "restore" the flag check there; it would answer a question about the wrong
+#   file.
 #
 # Removing something already gone is a successful no-op with changed=false: an
 # uninstall that fails on a missing artifact makes a half-finished install
@@ -66,6 +78,10 @@ source "${SCRIPT_DIR}/../lib/elevate.sh"
 
 # The provenance marker mkcert-setup.sh writes beside a CA it created.
 readonly MEMQL_CA_MARKER=".memql-created"
+# ...and the one it writes beside a front-door pair it issued (memql#4071).
+# Different filename, same job; see the mkcert-setup.sh header for why the two
+# artifacts may not share one.
+readonly MEMQL_PAIR_MARKER=".memql-issued"
 
 _CAP_PRUNED=()
 cap_init "install.removeArtifact" \
@@ -76,6 +92,8 @@ cap_spec_param "path"         "filesystem target (binary path, or the hosts file
 cap_spec_param "dest"         "alias for --path, for receipts that spell it that way"
 cap_spec_param "marker"       "hosts block marker (default memql; matches '# BEGIN <marker>')"
 cap_spec_param "caroot"       "mkcert CA root directory (default: whatever 'mkcert -CAROOT' reports)"
+cap_spec_param "cert-file"    "front-door certificate install.mkcert issued (kind=mkcertCA; nothing is removed without it)"
+cap_spec_param "key-file"     "its private key"
 cap_spec_param "cluster"      "k3d cluster name for kind=stack (default memql)"
 cap_spec_param "image-prefix" "repository prefix for kind=images (default memql)"
 cap_spec_param "prune-empty-parents" "after removing, rmdir up to two now-empty parent dirs (flag)"
@@ -327,8 +345,102 @@ function remove_hosts_entries() {
 # KIND: mkcertCA
 #=============================================================================
 
+# _RA_PAIR_REMOVED records whether the front-door pair went, so the envelope can
+# say so even when the CA half finds nothing to do (or refuses).
+_RA_PAIR_REMOVED=false
+
+# remove_issued_pair <cert> <key>
+#
+# The other half of what install.mkcert wrote (memql#4071): the front-door
+# certificate and its PRIVATE KEY. `kind=mkcertCA` used to mean the CA alone, so
+# an uninstall reported OK on all seven steps and left ~/.memql/certs/dev.key on
+# a machine that had had no ~/.memql at all before the install.
+#
+# THREE DECISIONS, each of which could reasonably have gone the other way:
+#
+# 1. IT RIDES kind=mkcertCA RATHER THAN BECOMING ITS OWN KIND. A receipt kind
+#    needs an install step to write it, and a step carries exactly one receipt
+#    (graph.go) while graph_test.go refuses a second uninstall step reversing the
+#    same install step -- so its own kind would mean SPLITTING install.mkcert in
+#    two. That split is not available: the pair is issued by the CA this same
+#    process has just trusted, in one mkcert invocation, and is worthless signed
+#    by any other. It would also put two checkboxes in front of the operator for
+#    one decision.
+#
+# 2. THE PATHS ARE PARAMETERS WITH NO DEFAULT. scripts/lib/localtls.sh knows
+#    where the pair lives and this script could source it -- but a removal that
+#    defaults to $HOME/.memql/certs/dev.crt reaches into the real home of anyone
+#    who runs it with no flags, `go test` included. The uninstall passes what the
+#    install RECORDED (result.certFile / result.keyFile via REMOVAL_TARGETS in
+#    editors/vscode/src/install/receipt.ts), which is both safer and more
+#    accurate: an operator who issued to a custom path gets that path back.
+#    Nothing recorded means nothing to remove -- the same conclusion
+#    hostsEntries reaches, for the same reason.
+#
+# 3. THE MARKER IS THE ONLY AUTHORITY, and `--pre-existing` is not consulted
+#    here. That flag carries this step's single verdict, `result.caPreExisting`,
+#    which is a fact about the CA in another directory; the two answers differ in
+#    both directions (see the mkcert-setup.sh header). So key material is removed
+#    only where memQL can PROVE it wrote it, and the proof is the marker the
+#    issuing run left beside it. No marker, no removal, and the run says so
+#    rather than deciding quietly.
+function remove_issued_pair() {
+    local cert="$1" key="$2"
+
+    # No certificate path is no marker path either, so there is nothing that
+    # could authorise a deletion. Reported, not assumed: this is also the state a
+    # hand-run `--kind=mkcertCA` with no flags is in.
+    if [[ -z "$cert" ]]; then
+        cap_info "No --cert-file given -- leaving any front-door pair alone."
+        return 0
+    fi
+
+    local marker
+    marker="$(dirname "$cert")/${MEMQL_PAIR_MARKER}"
+
+    # Absence before the guard -- see remove_binary (memql#3583).
+    if [[ ! -e "$cert" && ! -e "$key" && ! -e "$marker" ]]; then
+        cap_info "No front-door pair at ${cert} -- nothing to remove."
+        return 0
+    fi
+
+    if [[ ! -f "$marker" ]]; then
+        cap_info "No ${MEMQL_PAIR_MARKER} beside ${cert}: memQL did not issue this pair, so it stays."
+        return 0
+    fi
+
+    local targets=("$cert" "$marker")
+    [[ -n "$key" ]] && targets+=("$key")
+    rm -f "${targets[@]}" || cap_fail 5 "could not remove the front-door pair at ${cert}"
+    _RA_PAIR_REMOVED=true
+    cap_changed
+    cap_info "Removed the front-door certificate and key memQL issued (${cert})."
+    # The certs directory is ours and nothing else lives in it, so it goes the
+    # way ~/.memql/bin does -- under the same opt-in flag, with the same bounds.
+    # The CAROOT deliberately does NOT get this treatment: it can be a machine
+    # location (~/.local/share/mkcert) whose shape memQL does not own.
+    prune_empty_parents "$cert"
+}
+
 function remove_mkcert_ca() {
-    local caroot="$1"
+    local caroot="$1" cert="$2" key="$3"
+
+    # THE PAIR GOES FIRST, and the order is load-bearing. The CA half can end in
+    # `cap_fail 3` -- an operator's own CA, which memQL must not take -- and
+    # cap_fail exits. Removing the pair afterwards would mean never removing it
+    # on exactly the machines where the two provenance answers differ, which is
+    # the case this whole marker scheme exists to get right.
+    remove_issued_pair "$cert" "$key"
+    # Published as its own field rather than folded into `removed`, which keeps
+    # meaning THE CA: two artifacts under one kind cannot share one boolean, and
+    # a caller reading "removed" would otherwise learn nothing about the half it
+    # cares about. Set here so every exit below carries it, refusals included.
+    cap_result_set_raw pairRemoved "$_RA_PAIR_REMOVED"
+
+    local pair_note=""
+    if [[ "$_RA_PAIR_REMOVED" == "true" ]]; then
+        pair_note="; front-door pair removed"
+    fi
 
     if [[ -z "$caroot" ]]; then
         # No receipt value to go on. Resolving CAROOT is a read, and the guard
@@ -359,7 +471,7 @@ function remove_mkcert_ca() {
     # had not been there for an hour.
     if [[ ! -f "${caroot}/rootCA.pem" ]]; then
         cap_info "No CA at ${caroot} -- nothing to remove."
-        finish mkcertCA "$caroot" false "already absent"
+        finish mkcertCA "$caroot" false "already absent${pair_note}"
     fi
 
     if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
@@ -377,7 +489,7 @@ function remove_mkcert_ca() {
 
     cap_changed
     cap_info "Removed the mkcert CA at ${caroot}."
-    finish mkcertCA "$caroot" true "uninstalled and CA files removed"
+    finish mkcertCA "$caroot" true "uninstalled and CA files removed${pair_note}"
 }
 
 #=============================================================================
@@ -468,11 +580,16 @@ function main() {
     cap_handle_meta "$@"
     cap_parse_flags "$@"
 
-    local kind path marker caroot cluster prefix
+    local kind path marker caroot cert key cluster prefix
     kind="$(cap_param kind)"
     path="$(cap_param path "$(cap_param dest)")"
     marker="$(cap_param marker memql)"
     caroot="$(cap_param caroot)"
+    # NO DEFAULT, deliberately -- see remove_issued_pair. Every other path here
+    # takes its target from the receipt too; this is the only one whose default
+    # would be a file in the invoking user's home.
+    cert="$(cap_param cert-file)"
+    key="$(cap_param key-file)"
     cluster="$(cap_param cluster memql)"
     prefix="$(cap_param image-prefix memql)"
     _RA_PRE_EXISTING="$(cap_param pre-existing)"
@@ -483,7 +600,7 @@ function main() {
         binary)       remove_binary "$path" ;;
         checkout)     remove_checkout "$path" ;;
         hostsEntries) remove_hosts_entries "$path" "$marker" ;;
-        mkcertCA)     remove_mkcert_ca "$caroot" ;;
+        mkcertCA)     remove_mkcert_ca "$caroot" "$cert" "$key" ;;
         stack)        remove_stack "$cluster" ;;
         images)       remove_images "$prefix" ;;
         *) cap_fail 2 "unknown kind: ${kind} (supported: binary, checkout, hostsEntries, mkcertCA, stack, images)" ;;

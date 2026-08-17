@@ -216,6 +216,50 @@ test("removalParams -- each artifact kind names its own target", () => {
   });
 });
 
+test("removalParams hands the mkcertCA removal the pair as well as the CA", () => {
+  // memql#4071. `install.mkcert` writes in TWO directories -- the CA in CAROOT
+  // and the front-door pair wherever --cert-file pointed -- and the uninstall
+  // passed only the first. remove-artifact.sh removed the CA, reported OK, and
+  // left ~/.memql/certs/dev.key on a machine that had had no ~/.memql at all
+  // before the install.
+  //
+  // The paths come from the RECEIPT rather than from a default, and that is
+  // deliberate on both sides: a default would point at the invoking user's real
+  // home, and the recorded value is also right for an operator who issued
+  // somewhere else.
+  assert.deepEqual(
+    removalParams(
+      entry({
+        receipt: "mkcertCA",
+        result: {
+          caroot: "/home/dev/.memql/mkcert",
+          certFile: "/home/dev/.memql/certs/dev.crt",
+          keyFile: "/home/dev/.memql/certs/dev.key",
+        },
+      }),
+    ),
+    {
+      kind: "mkcertCA",
+      caroot: "/home/dev/.memql/mkcert",
+      "cert-file": "/home/dev/.memql/certs/dev.crt",
+      "key-file": "/home/dev/.memql/certs/dev.key",
+      "pre-existing": "false",
+    },
+  );
+});
+
+test("removalParams still removes the CA when no run recorded a pair", () => {
+  // None of the three mkcertCA targets is `required`, and the certificate is why
+  // it must stay that way: a missing certFile means "no pair was recorded", not
+  // "nothing to do". Making it required would return null and skip the whole
+  // step, leaving the CA in the trust store (memql#4071).
+  assert.deepEqual(removalParams(entry({ receipt: "mkcertCA", result: { caroot: "/c" } })), {
+    kind: "mkcertCA",
+    caroot: "/c",
+    "pre-existing": "false",
+  });
+});
+
 test("removalParams carries the pre-existence verdict faithfully", () => {
   // This flag is the last wall between an uninstall and a developer's own
   // k3d cluster. remove-artifact.sh refuses on true; the receipt must say so.

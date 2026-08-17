@@ -31,7 +31,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 
+import { parseCliArgs, repairOptions, type CliOptions } from "../src/install/cli.js";
 import { installPlan, type SessionOptions } from "../src/install/session.js";
+import { REDACTED } from "../src/install/secrets.js";
 import {
   DEFAULT_STACK_TAG,
   MAIN_BRANCH_CHOICE,
@@ -42,6 +44,7 @@ import {
 import {
   emptyReceipt,
   recordedCheckout,
+  recordedImageTag,
   recordedStackCommit,
   recordedStackRefKind,
   recordedStackTag,
@@ -245,6 +248,300 @@ test("no receipt answers nothing rather than guessing", () => {
   assert.equal(replay.tag, "");
   assert.equal(replay.commit, "");
   assert.equal(replay.label, "");
+});
+
+// ---------------------------------------------------------------------------
+// the repair VERB -- `cli.js repair`
+// ---------------------------------------------------------------------------
+//
+// The tests above pin the RULE (`recordedCheckout`) and the PLAN
+// (`installPlan`). What they cannot see is a caller that has both in hand and
+// wires them together wrongly -- which is the whole surface of a repair, and
+// which had exactly one implementation until the CLI grew a second: the wizard,
+// behind a `vscode` import that the unit lane excludes by design.
+//
+// That is the same shape as memql#3560, where `tag` was simply absent from the
+// wizard's object literal and every install from the "+" button died while the
+// CLI's worked. So the CLI verb calls `recordedCheckout` rather than deriving
+// the ref itself, and these tests assert the end-to-end flags, because a repair
+// that quietly reinstalls this build's pin looks exactly like a repair that
+// worked.
+
+/**
+ * A receipt as a completed install writes one, minus what a test overrides.
+ *
+ * `clusterParams` is UNDEFINED by default rather than `{}`, and the difference
+ * is the whole of the memql#4068 fallback: a receipt with no `clusterUp` entry
+ * at all is what an install that never got that far -- or one written before
+ * the installer passed `--image-tag` -- actually looks like, and a repair of one
+ * has nothing to replay and must fall back to deriving.
+ */
+function recordedInstall(
+  checkout: Record<string, unknown>,
+  checkoutParams: Record<string, string> = {},
+  providerParams: Record<string, string> = {},
+  clusterParams?: Record<string, string>,
+): Receipt {
+  const receipt = receiptWith(checkout, checkoutParams);
+  if (clusterParams !== undefined) {
+    receipt.entries.push({
+      stepId: "clusterUp",
+      script: "k3d.up",
+      receipt: "stack",
+      preExisting: false,
+      params: { cluster: "memql", ...clusterParams },
+      result: { cluster: "memql", clusterCreated: true, workloadsReady: true },
+      changed: true,
+      recordedAt: "2026-08-16T00:00:00.000Z",
+    });
+  }
+  receipt.entries.push({
+    stepId: "providerKey",
+    script: "install.verifyProviderKey",
+    receipt: "",
+    preExisting: false,
+    params: { "key-file": "/home/dev/.memql/key", provider: "openai", ...providerParams },
+    result: { valid: true },
+    changed: false,
+    recordedAt: "2026-08-16T00:00:00.000Z",
+  });
+  receipt.entries.push({
+    stepId: "seedBootstrap",
+    script: "install.seedBootstrap",
+    receipt: "",
+    preExisting: false,
+    params: {
+      domain: "lab.example.com",
+      "owner-email": "dev@example.com",
+      "owner-first-name": "Dev",
+      "owner-last-name": "Eloper",
+    },
+    result: { bootstrapComplete: true },
+    changed: true,
+    recordedAt: "2026-08-16T00:00:00.000Z",
+  });
+  return receipt;
+}
+
+/** `cli.js repair <argv>`, parsed. */
+function repairArgs(argv: string[] = []): CliOptions {
+  return parseCliArgs(["repair", "--receipt=/nonexistent/install-receipt.json", ...argv]);
+}
+
+test("repair is a verb, and it refuses to be handed a version", () => {
+  assert.equal(parseCliArgs(["repair"]).command, "repair");
+  // Upgrading is a different verb, picked by name. A `--tag` that appeared to
+  // be accepted and was then silently overridden by the receipt would be worse
+  // than the refusal: it reads as an upgrade that worked.
+  assert.throws(() => parseCliArgs(["repair", "--tag=v9.9.9"]), /repair takes no --tag/);
+  assert.throws(() => parseCliArgs(["repair", "--commit=" + "a".repeat(40)]), /repair takes no --tag/);
+  // ...and install still takes both.
+  assert.equal(parseCliArgs(["install", "--tag=v9.9.9"]).tag, "v9.9.9");
+  assert.equal(parseCliArgs(["install", "--commit=" + "a".repeat(40)]).commit, "a".repeat(40));
+});
+
+test("a repair of a BRANCH install plans --commit, through the verb", () => {
+  // THE FAILURE THE VERB EXISTS TO MAKE UNREACHABLE (memql#3605 by memql#3901's
+  // route). If `repairOptions` read the tag instead of asking
+  // `recordedCheckout`, a branch install's empty tag would fall through to
+  // DEFAULT_STACK_TAG here and "repair" would mean "install the pinned
+  // release" -- green, quiet, and an upgrade.
+  const receipt = recordedInstall({ tag: "", ref: "main", refKind: "branch", commit: "d".repeat(40) }, { branch: "main" });
+  const params = paramsFor(repairOptions(repairArgs(), receipt), "stackCheckout", "install.cloneStack");
+  assert.equal(params.commit, "d".repeat(40));
+  assert.equal(params.tag, undefined, "replaying the pin would be an upgrade wearing a repair's name");
+  assert.equal(params.branch, undefined, "replaying --branch=main checks out wherever main is today");
+});
+
+test("a repair of a TAG install replays that tag, not this build's pin", () => {
+  const receipt = recordedInstall({ tag: "v0.17.1", ref: "v0.17.1", refKind: "tag", commit: "e".repeat(40) }, { tag: "v0.17.1" });
+  const params = paramsFor(repairOptions(repairArgs(), receipt), "stackCheckout", "install.cloneStack");
+  assert.equal(params.tag, "v0.17.1");
+  assert.notEqual(params.tag, DEFAULT_STACK_TAG, "a newer extension must not upgrade what it repairs");
+  assert.equal(params.commit, undefined, "a release tag is immutable by convention; replaying it is enough");
+});
+
+// ---------------------------------------------------------------------------
+// ...AND THE IMAGES IT RAN (memql#4068)
+// ---------------------------------------------------------------------------
+//
+// The two tests above pin the CHECKOUT half of "a repair returns the cluster to
+// the state its receipt describes". That half held; the images half did not,
+// and the gap is exactly the shape of a branch install.
+//
+// `recordedCheckout()` answers a branch install with a COMMIT and an EMPTY tag
+// -- deliberately, because there is no release, and answering "main" would send
+// `imageTagFor` a branch name. The image tag was then derived a SECOND time from
+// that same empty tag, which falls straight through to DEFAULT_STACK_TAG. So a
+// repair run from a newer plugin build replayed the recorded commit's manifests
+// against a DIFFERENT release's engine images: an upgrade nobody asked for (the
+// thing memql#3605 refuses) plus a manifest/image skew nobody chose.
+//
+// The fix is the same shape as memql#3901's: record the RESOLVED value and
+// replay it, rather than deriving it again somewhere else. So these tests assert
+// against the derivation itself -- `notEqual(planned, imageTagForVersion(...))`
+// is the statement "nobody re-derived", and it is the assertion that fails if
+// someone reintroduces the second derivation.
+
+test("a repair of a BRANCH install replays the recorded IMAGE tag, not this build's pin", () => {
+  // THE BUG. Recorded: a branch install of v0.17.1's images. This build pins
+  // something newer, and the derivation has no tag to work from.
+  const receipt = recordedInstall(
+    { tag: "", ref: "main", refKind: "branch", commit: "d".repeat(40) },
+    { branch: "main" },
+    {},
+    { "image-tag": "0.17.1" },
+  );
+  const opts = repairOptions(repairArgs(), receipt);
+  const params = paramsFor(opts, "clusterUp", "k3d.up");
+
+  assert.equal(
+    params["image-tag"],
+    "0.17.1",
+    "a repair planned images the receipt does not describe -- the checkout was replayed and the images were not",
+  );
+  assert.notEqual(
+    params["image-tag"],
+    imageTagFor(DEFAULT_STACK_TAG),
+    "replaying this build's pin is an upgrade wearing a repair's name",
+  );
+  // The load-bearing one: it must not merely HAPPEN to agree, it must not have
+  // been derived at all. Re-deriving from a branch install's empty tag is the
+  // defect, and this is the assertion that catches its return.
+  assert.notEqual(
+    params["image-tag"],
+    imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+    "the image tag was derived a second time rather than replayed from the receipt",
+  );
+});
+
+test("a repair of a TAG install replays its recorded image tag too", () => {
+  // THE CASE THAT ALREADY WORKED, pinned so a fix for branch installs cannot
+  // regress it. A tag install's derivation and its recorded tag agree by
+  // construction, which is precisely why nothing here noticed the branch case.
+  const receipt = recordedInstall(
+    { tag: "v0.17.1", ref: "v0.17.1", refKind: "tag", commit: "e".repeat(40) },
+    { tag: "v0.17.1" },
+    {},
+    { "image-tag": "0.17.1" },
+  );
+  const params = paramsFor(repairOptions(repairArgs(), receipt), "clusterUp", "k3d.up");
+  assert.equal(params["image-tag"], "0.17.1");
+  assert.notEqual(
+    params["image-tag"],
+    imageTagFor(DEFAULT_STACK_TAG),
+    "a newer plugin build must not move the images of what it repairs",
+  );
+});
+
+test("a receipt that never recorded an image tag falls back to deriving one", () => {
+  // EVERY RECEIPT WRITTEN BEFORE `--image-tag` EXISTED, and every install that
+  // failed before clusterUp. There is nothing to replay, so the derivation is
+  // the only answer available -- and for a tag install it is the right one.
+  const receipt = recordedInstall(
+    { tag: "v0.17.1", ref: "v0.17.1", refKind: "tag", commit: "e".repeat(40) },
+    { tag: "v0.17.1" },
+  );
+  const opts = repairOptions(repairArgs(), receipt);
+  const params = paramsFor(opts, "clusterUp", "k3d.up");
+  assert.equal(params["image-tag"], "0.17.1");
+  assert.equal(
+    params["image-tag"],
+    imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+    "with nothing recorded the plan must derive, not pass an empty --image-tag",
+  );
+});
+
+test("the recorded image tag is read off clusterUp, and travels with the checkout", () => {
+  // WHERE IT COMES FROM. `--image-tag` is a `clusterUp` param, not a
+  // `stackCheckout` one, and it is read from the PARAMS rather than the result
+  // -- k3d.up reports no image tag on its envelope, and the param is already
+  // the resolved value because `installPlan` resolves before it builds the flag.
+  const branch = recordedInstall(
+    { tag: "", ref: "main", refKind: "branch", commit: "d".repeat(40) },
+    { branch: "main" },
+    {},
+    { "image-tag": "0.17.1" },
+  );
+  assert.equal(recordedImageTag(branch), "0.17.1");
+
+  // ...and it rides in the same struct as the ref, so a caller that replays the
+  // checkout cannot replay only half of what the receipt describes.
+  const replay = recordedCheckout(branch);
+  assert.equal(replay.commit, "d".repeat(40));
+  assert.equal(replay.tag, "");
+  assert.equal(replay.imageTag, "0.17.1");
+
+  // A tag install carries both halves too.
+  const tagged = recordedCheckout(
+    recordedInstall(
+      { tag: "v0.17.1", refKind: "tag", commit: "e".repeat(40) },
+      { tag: "v0.17.1" },
+      {},
+      { "image-tag": "0.17.1" },
+    ),
+  );
+  assert.equal(tagged.tag, "v0.17.1");
+  assert.equal(tagged.imageTag, "0.17.1");
+
+  // Nothing recorded is "" rather than a guess, on both routes into it.
+  assert.equal(recordedImageTag(recordedInstall({ refKind: "tag", commit: "f".repeat(40) })), "");
+  assert.equal(recordedCheckout(recordedInstall({ tag: "v0.17.1" }, { tag: "v0.17.1" })).imageTag, "");
+  assert.equal(recordedImageTag(null), "");
+  assert.equal(recordedCheckout(null).imageTag, "");
+});
+
+test("a repair restores the answers the operator is never asked for again", () => {
+  // seedBootstrap refuses an INCOMPLETE owner set, correctly: a partial seed
+  // brings the cluster up green and leaves the operator at a login page for an
+  // account that was never created (znasllc-io#3888). A repair collects none of
+  // this, so it all has to come off the receipt.
+  const opts = repairOptions(
+    repairArgs(),
+    recordedInstall({ tag: "v0.19.0", refKind: "tag", commit: "f".repeat(40) }, { tag: "v0.19.0" }),
+  );
+  assert.deepEqual(paramsFor(opts, "seedBootstrap", "install.seedBootstrap"), {
+    domain: "lab.example.com",
+    "owner-email": "dev@example.com",
+    "owner-first-name": "Dev",
+    "owner-last-name": "Eloper",
+    "registration-mode": "invite_only",
+    provider: "openai",
+    "provider-key-file": "/home/dev/.memql/key",
+  });
+  // The VENDOR travels with the key path. Re-asserting the default over a
+  // recorded OpenAI key verifies it against Anthropic and reports exit 3 --
+  // REFUSED, "the key is bad" -- about a key that is fine (memql#3473).
+  assert.deepEqual(paramsFor(opts, "providerKey", "install.verifyProviderKey"), {
+    "key-file": "/home/dev/.memql/key",
+    provider: "openai",
+  });
+  // And the domain reaches all four of its consumers, not just the two that
+  // used to get it (memql#3593).
+  assert.match(paramsFor(opts, "hostsBlock", "install.hostsEntries").hostnames!, /api\.lab\.example\.com/);
+  assert.equal(paramsFor(opts, "clusterUp", "k3d.up").domain, "lab.example.com");
+});
+
+test("a repair refuses rather than guesses, and every refusal names the remedy", () => {
+  // Each of these would otherwise start a run that cannot finish, and fail deep
+  // inside it with an exit code whose guidance says "a fault in memQL rather
+  // than in your machine" -- which would be a lie in all three cases.
+  assert.throws(() => repairOptions(repairArgs(), null), /no receipt .*Install rather than repair/s);
+
+  const noCheckout = recordedInstall({});
+  assert.throws(() => repairOptions(repairArgs(), noCheckout), /records no checkout/);
+
+  const pastedKey = recordedInstall(
+    { tag: "v0.19.0", refKind: "tag", commit: "a".repeat(40) },
+    { tag: "v0.19.0" },
+    { "key-file": REDACTED },
+  );
+  assert.throws(() => repairOptions(repairArgs(), pastedKey), /no usable AI-provider key path/);
+
+  // ...but a path the receipt never carried is not a value the receipt is
+  // overriding, so the flag still supplies it.
+  const supplied = repairOptions(repairArgs(["--provider-key-file=/tmp/key"]), pastedKey);
+  assert.equal(paramsFor(supplied, "providerKey", "install.verifyProviderKey")["key-file"], "/tmp/key");
 });
 
 // ---------------------------------------------------------------------------

@@ -662,8 +662,8 @@ test("every required param is supplied by the graph or the plan", async () => {
   );
 });
 
-/** The params a capability script declares it cannot run without. */
-async function requiredParams(scriptPath: string): Promise<string[]> {
+/** A capability script's declared param surface, read off `--print-spec`. */
+async function specParams(scriptPath: string): Promise<{ name: string; required?: boolean }[]> {
   const out = await new Promise<string>((resolve, reject) => {
     const child = spawn(scriptPath, ["--print-spec"], { stdio: ["ignore", "pipe", "ignore"] });
     let stdout = "";
@@ -671,8 +671,17 @@ async function requiredParams(scriptPath: string): Promise<string[]> {
     child.on("error", reject);
     child.on("close", () => resolve(stdout));
   });
-  const spec = JSON.parse(out) as { params?: { name: string; required?: boolean }[] };
-  return (spec.params ?? []).filter((p) => p.required === true).map((p) => p.name);
+  return (JSON.parse(out) as { params?: { name: string; required?: boolean }[] }).params ?? [];
+}
+
+/** The params a capability script declares it cannot run without. */
+async function requiredParams(scriptPath: string): Promise<string[]> {
+  return (await specParams(scriptPath)).filter((p) => p.required === true).map((p) => p.name);
+}
+
+/** Every flag a capability script will accept -- anything else is an exit 2. */
+async function declaredParams(scriptPath: string): Promise<string[]> {
+  return (await specParams(scriptPath)).map((p) => p.name);
 }
 
 test("the root a packaged run passes is NOT the script's own parent", async () => {
@@ -749,6 +758,48 @@ test("an explicit tag moves the images with it", async () => {
   if (decision.action === "run") {
     assert.equal(decision.params["image-tag"], "9.9.9");
   }
+});
+
+// A RECORDED image tag OUTRANKS the derivation (memql#4068). The repair path
+// replays what the receipt says the cluster ran rather than deriving it a second
+// time, because the second derivation reads a version a branch install
+// deliberately does not have and falls through to this build's pin. The
+// end-to-end repair cases live in installMainBranch.test.ts; this pins the plan
+// half, including that the recorded value wins over a version in the same
+// session -- which is the state a repair is actually in.
+test("a recorded image tag outranks anything the session would derive", () => {
+  const plan = installPlan(options({ tag: "v9.9.9", imageTag: "0.17.1" }));
+  assert.equal(paramsFor(plan, "clusterUp", "k3d.up")["image-tag"], "0.17.1");
+
+  // Blank means "nothing recorded", not "an empty --image-tag". k3d.up refuses
+  // `--image-registry` without a tag (exit 2), so passing an empty one would
+  // trade a silent wrong version for a loud broken install.
+  const blank = installPlan(options({ tag: "v9.9.9", imageTag: "   " }));
+  assert.equal(paramsFor(blank, "clusterUp", "k3d.up")["image-tag"], "9.9.9");
+});
+
+// THE WIZARD'S SIDE OF THE SAME FIELD, and the reason it is tested here rather
+// than in the panel: `webview/addClusterPanel.ts` imports `vscode`, which the
+// unit lane excludes by design, so a field missing from the object it builds is
+// invisible to every test. That is memql#3560 exactly -- `tag` was simply absent
+// from that literal for the whole life of the wizard's install path -- and
+// `installSessionOptions` exists on this side of the line so the audit is
+// possible at all.
+test("the wizard's answers carry the recorded image tag through to the run", () => {
+  const opts = installSessionOptions({
+    root: REPO_ROOT,
+    receiptFile: path.join(mkdtempSync(path.join(os.tmpdir(), "memql-imagetag-")), "receipt.json"),
+    provider: "anthropic",
+    providerKeyFile: "/tmp/key",
+    domain: "memql.localhost",
+    ownerEmail: "op@example.test",
+    ownerFirstName: "Op",
+    ownerLastName: "Erator",
+    tag: "v9.9.9",
+    imageTag: "0.17.1",
+  });
+  assert.equal(opts.imageTag, "0.17.1", "the wizard's repair would derive its own images instead");
+  assert.equal(paramsFor(installPlan(opts), "clusterUp", "k3d.up")["image-tag"], "0.17.1");
 });
 
 // -----------------------------------------------------------------------------
@@ -864,4 +915,82 @@ test("the hosts block carries the apex as well as the subdomains", () => {
   const plan = installPlan(options({ domain: "memql.example.test" }));
   const hosts = (paramsFor(plan, "hostsBlock", "install.hostsEntries")["hostnames"] ?? "").split(",");
   assert.ok(hosts.includes("memql.example.test"), `the apex is missing from ${hosts.join(",")}`);
+});
+
+// -----------------------------------------------------------------------------
+// the CA the install created (memql#4069)
+// -----------------------------------------------------------------------------
+//
+// `localCA` pins a CAROOT rather than inheriting mkcert's own -- a snap-packaged
+// editor resolves it out of a revision-scoped XDG directory that moves on the
+// next refresh (memql#3576). `clusterUp` then issues the FRONT-DOOR certificate
+// through the very same capability, nested two scripts down (k3d.up ->
+// seed-secrets.sh -> install.mkcert), and passed no CAROOT at all. So the CA the
+// install created and the CA the cluster's certificate was signed by were
+// decided independently, and they agree only by accident:
+//
+//   clean machine (CI) -- no CA where mkcert looks, so the nested call REFUSES
+//     and the install dies at clusterUp, naming a prerequisite the install had
+//     satisfied one step earlier under a different root.
+//   developer machine -- an earlier `make up` left a CA in the default root, so
+//     the nested call finds one and succeeds. The cluster is then fronted by a
+//     certificate from a CA the installer neither created nor removes, and
+//     nothing says so.
+//
+// The second is the reason this is asserted as an EQUALITY rather than as
+// "clusterUp passes something": any value that is merely present would still be
+// wrong in the silent case.
+test("clusterUp issues the front-door certificate from the CA localCA created", () => {
+  const plan = installPlan(options());
+  const ca = paramsFor(plan, "localCA", "install.mkcert")["caroot"] ?? "";
+  const cluster = paramsFor(plan, "clusterUp", "k3d.up")["caroot"] ?? "";
+
+  assert.ok(ca, "localCA pins no CAROOT at all -- the premise of this test has moved");
+  assert.equal(
+    cluster,
+    ca,
+    `clusterUp was given caroot=${JSON.stringify(cluster)} while localCA created its CA in ` +
+      `${JSON.stringify(ca)}. The nested install.mkcert call then falls back to mkcert's own ` +
+      `default root: absent on a clean machine (the install fails at clusterUp), somebody ` +
+      `else's CA on a developer machine (it succeeds and says nothing)`,
+  );
+});
+
+// The inverse of the required-params audit above, and the half that was missing.
+// That one catches a param the scripts NEED and nothing supplies; this one
+// catches a param the plan supplies and no script DECLARES -- which is not a
+// warning but an immediate `cap_fail 2 unknown flag`, at the step that passed
+// it. Passing `--caroot` to k3d.up before k3d.up declared it would have turned
+// memql#4069 into a different clusterUp failure rather than a fix.
+test("every param the plan supplies is a flag the script declares", async () => {
+  const graphDoc = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const plan = installPlan(
+    installSessionOptions({
+      root: REPO_ROOT,
+      receiptFile: path.join(mkdtempSync(path.join(os.tmpdir(), "memql-audit-")), "receipt.json"),
+      provider: "anthropic",
+      providerKeyFile: "/tmp/key",
+      domain: "memql.localhost",
+      ownerEmail: "op@example.test",
+      ownerFirstName: "Op",
+      ownerLastName: "Erator",
+    }),
+  );
+
+  const undeclared: string[] = [];
+  for (const step of graphDoc.steps) {
+    const decision = plan(step);
+    assert.equal(decision.action, "run", `${step.id} was not planned as a run`);
+    if (decision.action !== "run") continue;
+    const declared = new Set(await declaredParams(capabilityScriptPath(step.script, REPO_ROOT)));
+    for (const name of [...Object.keys(step.params ?? {}), ...Object.keys(decision.params)]) {
+      if (!declared.has(name)) undeclared.push(`${step.id} (${step.script}): --${name}`);
+    }
+  }
+
+  assert.deepEqual(
+    undeclared,
+    [],
+    `these steps would fail immediately with "unknown flag":\n  ${undeclared.join("\n  ")}`,
+  );
 });

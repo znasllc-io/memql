@@ -117,7 +117,21 @@
 // machine already installed at v0.18.0 does NOT move here without the runbook.
 // A fresh install has nothing to carry and crosses it for free.
 //
-// Refs: #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
+// v0.19.1 carries the OWNER RECOVERY KEY, which was inert on every cluster
+// v0.19.0 installed (#4066). Both halves of the break-glass credential were
+// refused by the engine: the @serverOnly reads because nothing stamped internal
+// origin, and every credential write because it used the system SERVICE actor
+// rather than the system CREDENTIAL actor the memql#2513 guard admits. So a
+// v0.19.0 install reaches its last step, `recoveryKey`, and fails there -- and
+// even if that step were skipped, the cluster would be left with no break-glass
+// route for its owner, announced only in a WARN nothing surfaces.
+//
+// That makes this bump load-bearing rather than housekeeping: the fix is ENGINE
+// code, so it arrives in the node images, and the images an install pulls are
+// the ones this tag names. Leaving the pin at v0.19.0 would leave every new
+// install with the broken credential no matter what main contains.
+//
+// Refs: #4066 #4063 #4059 #3998 #3990 #3879 #3880 #3703 #3602 #3600 #3593 #3560 #3375 #3363 #3357
 
 /**
  * The release tag an install checks out unless told otherwise.
@@ -125,7 +139,7 @@
  * Overridden per run by `SessionOptions.tag` (`--tag` on the CLI). Applied in
  * `installPlan`, so no front end can forget it.
  */
-export const DEFAULT_STACK_TAG = "v0.19.0";
+export const DEFAULT_STACK_TAG = "v0.19.1";
 
 /**
  * The value the version picker carries for "the tip of main" (memql#3901).

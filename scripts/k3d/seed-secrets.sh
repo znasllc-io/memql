@@ -73,6 +73,7 @@ cap_spec_param "domain"    "front-door apex; seeded as the memql-domain ConfigMa
 cap_spec_param "tls-cert"  "front-door TLS certificate path (issued with mkcert when absent)"
 cap_spec_param "tls-key"   "front-door TLS private key path (issued with mkcert when absent)"
 cap_spec_param "mkcert"    "path to the mkcert binary used to issue the front-door pair"
+cap_spec_param "caroot"    "mkcert CAROOT the front-door pair is issued from, passed through to install.mkcert (default: whatever mkcert reports)"
 cap_spec_param "allow-missing-certutil" "proceed without browser (NSS) trust on Linux, passed through to install.mkcert (flag)"
 cap_spec_param "mkcert-setup" "path to the install.mkcert capability that decides reuse vs reissue (default: alongside this script)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ from (default: this script's own repository)"
@@ -94,6 +95,15 @@ SEEDED_COUNT=0
 TLS_CERT=""
 TLS_KEY=""
 MKCERT_BIN=""
+# WHICH CERTIFICATE AUTHORITY the front-door pair is signed by (memql#4069).
+# Empty is the default and means "whatever install.mkcert resolves from
+# `mkcert -CAROOT`" -- which is what `make up` / `make secrets` want and what
+# every run did before this param existed. The INSTALLER passes a value, because
+# it does not use mkcert's default root: it pins ~/.memql/mkcert so a
+# snap-packaged editor cannot strand the CA in a revision-scoped XDG directory
+# that moves on the next refresh (memql#3576). See ensure_front_door_pair for
+# what happened while this did not travel.
+MKCERT_CAROOT=""
 ALLOW_MISSING_CERTUTIL=""
 TLS_CERT_SOURCE="none"   # existing | issued | reissued
 # Did anything actually READ the resulting certificate's names? Reported by the
@@ -659,12 +669,40 @@ function ensure_front_door_pair() {
     # (mkcert absent, certutil absent, a password with no terminal to ask on),
     # so a hardcoded "mkcert is not installed" here would be wrong two times in
     # three (memql#3560).
+    #
+    # AND THE CAROOT TRAVELS WITH IT (memql#4069). install.mkcert takes
+    # --caroot, and with none it resolves `mkcert -CAROOT` -- the machine
+    # default. That is right for `make up` (nothing here pins a root, so the
+    # operator's own mkcert answers) and WRONG for the installer, which
+    # deliberately does not use the machine default: its localCA step creates
+    # the CA under ~/.memql/mkcert. While this value did not travel, the two
+    # halves of one install disagreed about which CA exists, and disagreed
+    # differently depending on the machine:
+    #
+    #   a clean machine -- nothing in the default root, so install.mkcert
+    #     refuses (exit 3 -> our exit 4 below) and the whole install dies at
+    #     clusterUp, naming a prerequisite localCA had satisfied one step
+    #     earlier under a root this call never looked in. Every leg of the CI
+    #     cluster lane failed exactly here.
+    #   a machine that has run `make up` -- a CA is already in the default root,
+    #     so this succeeds and the cluster's front door is served by a
+    #     certificate from a CA THE INSTALLER DID NOT CREATE and will not remove
+    #     on uninstall (removal is gated on the `.memql-created` marker beside
+    #     the key material). Nothing warns. That silence is the worse half.
+    #
+    # Passed only when non-empty, so absence stays absence: an empty --caroot=
+    # would resolve identically today, but spelling "no override" as a flag with
+    # an empty value invites a future reader to treat it as a value. The inner
+    # quotes are load-bearing -- a CAROOT is a PATH and may contain a space;
+    # `${VAR:+--caroot=$VAR}` would hand install.mkcert two arguments and a
+    # truncated root, which fails as "no CA there" and reads like this very bug.
     local rc=0 child=""
     child="$(CAP_PARAMS_STDIN= bash "$gen" \
         --hostnames="$FRONT_DOOR_HOSTNAMES" \
         --cert-file="$TLS_CERT" \
         --key-file="$TLS_KEY" \
         --mkcert="$MKCERT_BIN" \
+        ${MKCERT_CAROOT:+--caroot="${MKCERT_CAROOT}"} \
         ${ALLOW_MISSING_CERTUTIL:+--allow-missing-certutil} \
         </dev/null)" || rc=$?
 
@@ -685,7 +723,13 @@ function ensure_front_door_pair() {
         # certificate signed by a CA this machine no longer has is one nothing
         # trusts, so seeding it would put an untrusted edge in front of the
         # cluster exactly as a missing secret does.
-        3) cap_fail 4 "no mkcert root CA exists on this machine yet. Creating one writes to the system trust store, so it is a deliberate one-time step -- run it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh --confirm=install-memql-ca" ;;
+        # THE REMEDY CARRIES THE CAROOT when one was given (memql#4069), because
+        # the root is exactly what this refusal is about. Without it the advice
+        # says "create a CA" and creates it in the machine default -- a
+        # different root from the one this run was told to use, so the next run
+        # refuses identically and the operator has been handed a command that
+        # cannot work twice in a row.
+        3) cap_fail 4 "no mkcert root CA exists in ${MKCERT_CAROOT:-the default mkcert CAROOT} yet. Creating one writes to the system trust store, so it is a deliberate one-time step -- run it, then re-run 'make secrets':  bash scripts/install/mkcert-setup.sh${MKCERT_CAROOT:+ --caroot=$MKCERT_CAROOT} --confirm=install-memql-ca" ;;
         *) cap_fail 5 "resolving the front-door certificate failed (install.mkcert exit ${rc}); see the log above." ;;
     esac
 
@@ -1085,6 +1129,13 @@ function main() {
     TLS_CERT="$(cap_param tls-cert "${MEMQL_LOCAL_TLS_CERT:-$MEMQL_LOCAL_TLS_DEFAULT_CERT}")"
     TLS_KEY="$(cap_param tls-key   "${MEMQL_LOCAL_TLS_KEY:-$MEMQL_LOCAL_TLS_DEFAULT_KEY}")"
     MKCERT_BIN="$(cap_param mkcert "${MEMQL_MKCERT_BIN:-mkcert}")"
+    # NO ENVIRONMENT DEFAULT, unlike its neighbours -- deliberately. The caller
+    # that needs a non-default CAROOT is the install graph, which passes the
+    # value it already resolved for its own localCA step; anything else wants
+    # mkcert's own answer. An env tier here would be a second place for the root
+    # to be decided, which is the shape of the defect this param exists to close
+    # (memql#4069).
+    MKCERT_CAROOT="$(cap_param caroot "")"
     # Passed straight through to install.mkcert, which refuses (exit 4) on Linux
     # without certutil because browsers read the NSS store and a front door no
     # browser trusts is not a front door. That refusal now reaches every `make

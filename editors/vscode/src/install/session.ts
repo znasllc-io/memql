@@ -83,11 +83,17 @@ export interface SessionOptions {
   /**
    * An exact commit, which OUTRANKS `tag` when set.
    *
-   * The repair path, and only the repair path (memql#3901). A repair of a
-   * branch install cannot replay `--branch=main` -- main has moved, so "repair"
-   * would mean "upgrade", which is exactly the failure memql#3605 fixed for
-   * tags. `repairSessionOptions` reads the resolved commit off the receipt and
-   * puts it here.
+   * The repair path (memql#3901). A repair of a branch install cannot replay
+   * `--branch=main` -- main has moved, so "repair" would mean "upgrade", which
+   * is exactly the failure memql#3605 fixed for tags. `cli.ts`'s
+   * `repairOptions` reads the resolved commit off the receipt via
+   * `recordedCheckout` and puts it here.
+   *
+   * And ONE OTHER CALLER, deliberately: the cluster-lane CI job passes the
+   * revision under test (`--commit` on the CLI), so ArgoCD reconciles the
+   * manifests in the commit being reviewed rather than the ones in this build's
+   * pinned release. Without it a `deploy/k8s/**` change is invisible to the one
+   * lane that runs a cluster.
    */
   commit?: string;
   repo?: string;
@@ -100,6 +106,27 @@ export interface SessionOptions {
   latestRelease?: string;
   /** Registry the node images come from; see DEFAULT_IMAGE_REGISTRY. */
   imageRegistry?: string;
+  /**
+   * The node-image tag to use VERBATIM, instead of deriving one (memql#4068).
+   *
+   * The repair path, and the exact sibling of `commit` above. `commit` exists
+   * because a repair must replay the CODE a receipt recorded rather than
+   * re-resolve a ref that has moved; this exists because it must replay the
+   * IMAGES too, rather than re-derive them from a version a branch install does
+   * not have. `imageTagForVersion` falls back to DEFAULT_STACK_TAG when handed
+   * nothing, so re-deriving turned every repair of a branch install into an
+   * upgrade to whatever release the running plugin build pinned -- silently, and
+   * with the recorded commit's manifests still reconciling underneath it.
+   *
+   * `cli.ts`'s `repairOptions` and the wizard's repair path both read it off the
+   * receipt through `recordedCheckout`, which carries it beside the ref for the
+   * reason that function's comment gives.
+   *
+   * Empty or unset means "derive", which is right for a fresh install (there is
+   * nothing recorded) and is the only answer available for a receipt whose
+   * install never reached `clusterUp`.
+   */
+  imageTag?: string;
   /**
    * A PATH, never the key itself.
    *
@@ -168,6 +195,16 @@ export interface WizardAnswers {
   tag?: string;
   /** See SessionOptions.commit -- set only by a repair replaying a branch install. */
   commit?: string;
+  /**
+   * See SessionOptions.imageTag -- set only by a repair, replaying the images
+   * the receipt recorded rather than deriving them again (memql#4068).
+   *
+   * It is on the WIZARD's answers as well as the CLI's options for memql#3560's
+   * reason: the panel builds its run through `installSessionOptions`, and a
+   * field this type does not carry is one the panel cannot pass however
+   * carefully it is written.
+   */
+  imageTag?: string;
   /** See SessionOptions.latestRelease -- images for a `main` install. */
   latestRelease?: string;
   timeoutMs?: number;
@@ -203,6 +240,7 @@ export function installSessionOptions(answers: WizardAnswers): SessionOptions {
     ownerLastName: answers.ownerLastName,
     tag: answers.tag,
     commit: answers.commit,
+    imageTag: answers.imageTag,
     latestRelease: answers.latestRelease,
     stepParams: {},
     timeoutMs: answers.timeoutMs,
@@ -309,6 +347,26 @@ export function frontDoorFor(domain: string): FrontDoor | undefined {
 }
 
 /**
+ * WHERE THIS INSTALL'S CERTIFICATE AUTHORITY LIVES -- derived once, for every
+ * step that needs it (memql#4069).
+ *
+ * Two steps run install.mkcert. `localCA` creates the CA; `clusterUp` reaches
+ * it again two scripts down (k3d.up -> seed-secrets.sh -> install.mkcert) to
+ * issue the front-door certificate. They have to name the SAME root, and a
+ * second copy of `path.join(HOME, DEFAULT_CAROOT_DIR)` is not the same thing as
+ * one derivation used twice: the copies agree until someone edits one.
+ *
+ * The bug this closes was the version with no second copy at all -- clusterUp
+ * passed nothing, so the nested call fell back to `mkcert -CAROOT`. On CI that
+ * root is empty and the install died at clusterUp; on a developer machine an
+ * earlier `make up` had left a CA there, so it succeeded and the cluster was
+ * fronted by a certificate from a CA the installer neither created nor removes.
+ */
+function pinnedCaroot(): string {
+  return path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR);
+}
+
+/**
  * The install plan: the run-time half of each step's params.
  *
  * Nothing here is invented for a step the graph already pins. seedBootstrap
@@ -365,6 +423,25 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         params = present({
           "repo-root": stackDir,
           "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
+          // REPLAYED WHEN THE RECEIPT HAS ONE, DERIVED OTHERWISE (memql#4068).
+          //
+          // The derivation below is right for an INSTALL, where the operator has
+          // just chosen a version and there is nothing recorded to replay. It is
+          // wrong for a REPAIR, and wrong in a way that reads as success: a
+          // branch install's recorded checkout is a commit and an EMPTY tag, so
+          // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the
+          // repaired cluster reconciled the recorded commit's manifests against
+          // whatever release THIS plugin build pins. An upgrade nobody asked for
+          // -- exactly what memql#3605 defines a repair as never being -- plus a
+          // manifest/image skew nobody chose.
+          //
+          // ONE DERIVATION, and it stays here. `opts.imageTag` is not a second
+          // derivation, it is the FIRST one's recorded output being replayed:
+          // `recordedImageTag` reads back the `--image-tag` this very line
+          // produced on the run being repaired. Deriving it a second time from a
+          // second set of inputs is the defect; reading the answer back is the
+          // fix, and it is the same shape as memql#3901's `commit`.
+          //
           // CONVERTED, not passed through: git tags carry the `v` and image
           // tags do not. See imageTagFor.
           //
@@ -374,7 +451,9 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // newest images that exist, which is the newest published release.
           // The version picker states that skew rather than hiding it. See
           // imageTagForVersion.
-          "image-tag": imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
+          "image-tag":
+            (opts.imageTag ?? "").trim() ||
+            imageTagForVersion(opts.tag ?? "", opts.latestRelease ?? ""),
           // The FOURTH consumer of the typed domain (memql#3593). The other
           // three place it on the MACHINE -- the hosts block, the certificate,
           // the front-door probe. This one places it in the CLUSTER: k3d.up
@@ -386,6 +465,23 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // up for something else, which is memql#3593 exactly: a domain that
           // resolves and then answers as the wrong site.
           domain: opts.domain,
+          // THE SAME CA `localCA` CREATED, not whichever one mkcert finds
+          // (memql#4069). k3d.up seeds the cluster's front-door TLS secret, and
+          // it does that by calling install.mkcert again through
+          // seed-secrets.sh. That nested call passed no CAROOT, so it resolved
+          // `mkcert -CAROOT` -- a root this install never wrote to.
+          //
+          // The graph already declares the dependency on localCA; this is, once
+          // more, the value finally flowing along it. Failing on a clean machine
+          // was the cheap half: three CI legs died at clusterUp naming a
+          // prerequisite localCA had satisfied one step earlier. The expensive
+          // half is silent -- on a machine that has run `make up`, the default
+          // root already holds a CA, so the certificate is issued from it and
+          // the cluster is fronted by an authority the installer neither created
+          // nor removes on uninstall (removal is gated on the `.memql-created`
+          // marker beside the key material). Nothing warns; the install reports
+          // success.
+          caroot: pinnedCaroot(),
         });
         break;
       case "hostsBlock":
@@ -404,7 +500,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // And issued for the DOMAIN THAT WAS TYPED (memql#3590): a certificate
         // covering someone else's front door is an untrusted front door.
         params = present({
-          caroot: path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR),
+          caroot: pinnedCaroot(),
           hostnames: frontDoor?.certNames.join(","),
         });
         break;

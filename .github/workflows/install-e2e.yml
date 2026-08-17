@@ -35,13 +35,27 @@ name: install-e2e
 #
 # Be honest about the gaps rather than let a green tick imply more than it is:
 #
-#   * THE CLUSTER LANE DOES NOT RUN. clusterUp / seedBootstrap / frontDoor /
-#     magicLink need a real k3d cluster reconciled by ArgoCD from images this
-#     workflow does not build. So two of the four surfaces -- dockerImages and
-#     k3dClusters -- are TRIVIALLY unchanged here: nothing that ran could have
-#     touched them. They are still snapshotted and diffed, because the day the
-#     cluster lane does run they are the surfaces that matter, and a diff that
-#     only exists when it is convenient proves nothing.
+#   * THE CLUSTER LANE DOES NOT RUN HERE. clusterUp / seedBootstrap /
+#     frontDoor / magicLink need a real k3d cluster reconciled by ArgoCD, which
+#     this workflow does not build. So two of the four surfaces -- dockerImages
+#     and k3dClusters -- are TRIVIALLY unchanged here: nothing that ran could
+#     have touched them. They are still snapshotted and diffed, because a diff
+#     that only exists when it is convenient proves nothing.
+#
+#     IT RUNS IN `.github/workflows/install-cluster-e2e.yml` (nightly, plus
+#     pull requests touching scripts/install, scripts/k3d, deploy/k8s or the
+#     installer). That lane executes the WHOLE graph against the published
+#     GHCR images, so the two surfaces above carry real content on the way
+#     through, and it adds a repair leg and an upgrade leg. It is a separate
+#     workflow because it is a separate cost and a separate trigger; this one
+#     stays cheap and runs on every install-script change. What that lane still
+#     does not prove is written in its own header, at the same length as this.
+#
+#     THE SPLIT IS BY COST, NOT BY SCOPE. Do not "consolidate" a cluster
+#     assertion into this file: the moment a job here needs a cluster, the lane
+#     that gates every install-script edit stops being cheap enough to keep on
+#     `pull_request`, and the first thing that happens after that is somebody
+#     narrows its paths.
 #   * THE PROVIDER KEY IS NOT A REAL ONE. providerKey runs against a LOCAL
 #     STUB answering `GET /v1/models` with 200, not against Anthropic -- a
 #     fork's pull request cannot hold a real key.
@@ -66,6 +80,23 @@ name: install-e2e
 #     writes a CA into the system trust store, which is a fifth surface this
 #     snapshot does not describe, and a partial round trip there would be
 #     worse than none.
+#
+#     AND THE SKIP COSTS MORE THAN THE TRUST STORE, which is the part that was
+#     not written down and cost memql#4071. A `--skip` removes the step's
+#     ARTIFACTS from this diff as well as its side effects, so nothing localCA
+#     writes is created here and the round trip cannot fail on any of it. It
+#     did not: `localCA` also issues the front-door pair into ~/.memql/certs --
+#     inside the memqlHome surface, the one this lane checks most closely --
+#     and its reversal removed the CA and left the certificate and PRIVATE KEY
+#     behind. The uninstall reported OK on all seven steps.
+#
+#     The step is covered by install-cluster-e2e.yml, which cannot skip it
+#     (clusterUp depends on it) and is where the leftover was finally seen. That
+#     division of labour is now a gate rather than a habit:
+#     TestEveryInstallStepIsExercisedByARoundTrip
+#     (scripts/install/graph/round_trip_coverage_test.go) fails the build if a
+#     receipt-writing step is skipped by EVERY round-trip lane. Adding a
+#     `--skip=` here is fine; adding the same one there is not.
 #   * THE SNAPSHOT IS NOT A WHOLE-FILESYSTEM DIFF. It describes four named
 #     surfaces. Anything the installer touched outside them -- a kubeconfig,
 #     apt state, $HOME outside ~/.memql -- is invisible to it.
@@ -211,6 +242,15 @@ jobs:
       - name: Install
         run: |
           set -euo pipefail
+          # --skip=localCA NARROWS WHAT THIS ROUND TRIP CAN PROVE, and the
+          # narrowing is not limited to the trust store it is here for: the
+          # step's ARTIFACTS are never created either, so the diff below cannot
+          # fail on any of them. memql#4071 lived in that gap -- the front-door
+          # private key localCA writes into ~/.memql/certs survived the
+          # uninstall, in the one surface this lane watches hardest, and this
+          # lane was green throughout. install-cluster-e2e.yml runs the step
+          # unskipped; TestEveryInstallStepIsExercisedByARoundTrip keeps it that
+          # way. Read the header note before adding another --skip.
           sudo -E env "HOME=$HOME" "PATH=$PATH" \
             node editors/vscode/dist-install/cli.js install \
               --root="$GITHUB_WORKSPACE" \
@@ -404,6 +444,9 @@ jobs:
         run: |
           set -uo pipefail
           set +e
+          # --skip=localCA is carried here because this job must differ from the
+          # round-trip job in ONE thing only. See that job's note, and the
+          # header, for what the skip costs (memql#4071).
           sudo -E env "HOME=$HOME" "PATH=$PATH" \
             node editors/vscode/dist-install/cli.js install \
               --root="$GITHUB_WORKSPACE" \

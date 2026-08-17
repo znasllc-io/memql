@@ -374,30 +374,54 @@ async function writeAtomic(file: string, contents: string): Promise<void> {
  *
  * `required` says the script exits 2 without the flag. Where it is false the
  * script has its own default and omitting the flag is fine.
+ *
+ * A LIST PER KIND, because one artifact class does not always mean one file
+ * (memql#4071). `install.mkcert` writes a CA in one directory AND the front-door
+ * pair in another, and the reversal has to be handed both or it takes back half
+ * of what the step wrote -- which is exactly what it did, leaving a private key
+ * at ~/.memql/certs/dev.key after an uninstall that reported OK on every step.
  */
-const REMOVAL_TARGETS: Record<
-  string,
-  { flag: string; resultField: string; paramField?: string; required: boolean }
-> = {
+interface RemovalTarget {
+  flag: string;
+  resultField: string;
+  paramField?: string;
+  required: boolean;
+}
+
+const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
   // install.binary reports the installed file as result.path.
-  binary: { flag: "path", resultField: "path", required: true },
+  binary: [{ flag: "path", resultField: "path", required: true }],
   // install.cloneStack reports the checkout directory as result.dest, and is
   // invoked with --dest naming the same directory.
-  checkout: { flag: "path", resultField: "dest", paramField: "dest", required: true },
+  checkout: [{ flag: "path", resultField: "dest", paramField: "dest", required: true }],
   // install.hostsEntries reports the file it edited as result.hostsFile, and is
   // invoked with --hosts-file. The graph pins neither, so a run that failed
   // before writing leaves nothing to go on -- which is the correct answer,
   // because a block that was never written is not there to remove.
-  hostsEntries: {
-    flag: "path",
-    resultField: "hostsFile",
-    paramField: "hosts-file",
-    required: true,
-  },
-  // install.mkcert reports the CA directory as result.caroot.
-  mkcertCA: { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
+  hostsEntries: [
+    {
+      flag: "path",
+      resultField: "hostsFile",
+      paramField: "hosts-file",
+      required: true,
+    },
+  ],
+  // install.mkcert reports the CA directory as result.caroot, and the pair it
+  // issued as result.certFile / result.keyFile.
+  //
+  // NOT required, and the difference from `binary` above is worth stating: a
+  // missing certFile must not veto the whole removal, because the CA half still
+  // has work to do. remove-artifact.sh then leaves any pair alone, which is the
+  // right answer for a run that never recorded issuing one. The pair is removed
+  // only where memQL can prove it wrote it -- the marker beside it, not this
+  // entry's single `preExisting` verdict, which is a fact about the CA.
+  mkcertCA: [
+    { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
+    { flag: "cert-file", resultField: "certFile", paramField: "cert-file", required: false },
+    { flag: "key-file", resultField: "keyFile", paramField: "key-file", required: false },
+  ],
   // k3d.up reports the cluster it created as result.cluster.
-  stack: { flag: "cluster", resultField: "cluster", paramField: "cluster", required: false },
+  stack: [{ flag: "cluster", resultField: "cluster", paramField: "cluster", required: false }],
 };
 
 /**
@@ -426,8 +450,7 @@ const REMOVAL_TARGETS: Record<
 export function removalParams(entry: ReceiptEntry): Record<string, string> | null {
   if (!entry.receipt) return null;
   const params: Record<string, string> = { kind: entry.receipt };
-  const target = REMOVAL_TARGETS[entry.receipt];
-  if (target) {
+  for (const target of REMOVAL_TARGETS[entry.receipt] ?? []) {
     const value = recordedTarget(entry, target);
     if (value !== "") {
       params[target.flag] = value;
@@ -572,12 +595,76 @@ export function recordedStackRefKind(receipt: Receipt | null): string {
   return typeof kind === "string" ? kind.trim() : "";
 }
 
-/** What a repair must ask `install.cloneStack` for to reproduce a recorded install. */
+/**
+ * The IMAGE tag a previous run's cluster was actually brought up with (memql#4068).
+ *
+ * WHY IT IS RECORDED RATHER THAN DERIVED A SECOND TIME. `installPlan` resolves
+ * the node-image tag once, from the version the operator chose, and hands it to
+ * `clusterUp` as `--image-tag`. Deriving it AGAIN at repair time is the same
+ * mistake `recordedCheckout` was written to stop being made about the checkout,
+ * and it produced the same silent failure by the same route:
+ *
+ *   `imageTagForVersion` falls back to DEFAULT_STACK_TAG when it is handed no
+ *   version -- and a BRANCH install's `recordedCheckout()` answers with a commit
+ *   and an EMPTY tag, deliberately, because there is no release to name. So the
+ *   fallback fired on every repair of a branch install: the recorded commit's
+ *   manifests reconciled against a DIFFERENT release's engine images. Two harms
+ *   at once, and neither announces itself -- an upgrade the operator did not ask
+ *   for (which memql#3605 defines a repair as never being) and a manifest/image
+ *   skew nobody chose (memql#3602's failure mode, arriving through the button
+ *   labelled "repair").
+ *
+ * READ FROM THE PARAMS, and this is the OPPOSITE choice from
+ * `recordedStackCommit` just above -- for the same underlying reason, which is
+ * worth stating because the asymmetry looks like an inconsistency. What matters
+ * is which side holds the RESOLVED value. For the checkout, the param carries
+ * what was ASKED (`--branch=main`, which has moved since) and the result carries
+ * what git resolved it to, so the result wins. For the image tag there is
+ * nothing to resolve downstream: `installPlan` resolves it BEFORE the flag is
+ * built, k3d.up reports no image tag on its envelope at all, and the param is
+ * therefore the only record of it -- and already the exact value that ran.
+ *
+ * WHICH ALSO MEANS THIS WORKS ON RECEIPTS THAT PREDATE THE FIX. `--image-tag`
+ * has been passed to `clusterUp` since memql#3572, so any receipt whose install
+ * reached that step already carries the answer; nothing had ever read it back.
+ * A receipt from an install that failed EARLIER carries nothing, and returns ""
+ * -- which is the honest answer, and the caller falls back to deriving.
+ *
+ * A FAILED `clusterUp` STILL COUNTS. `executor.record` writes an entry for every
+ * step that produced an envelope, failed ones included, and the params on it are
+ * the ones that run was invoked with. A repair after a cluster that came up
+ * half-way should replay the images that half-built cluster was asked for, not
+ * whichever release this plugin build happens to pin today.
+ */
+export function recordedImageTag(receipt: Receipt | null): string {
+  if (!receipt) return "";
+  const entry = entryFor(receipt, "clusterUp");
+  const tag = entry?.params?.["image-tag"];
+  return typeof tag === "string" ? tag.trim() : "";
+}
+
+/**
+ * What a repair must replay to reproduce the install a receipt describes: which
+ * CODE, and which IMAGES.
+ *
+ * BOTH IN ONE STRUCT, DELIBERATELY (memql#4068). The two used to be a struct and
+ * a separate derivation, and every caller that remembered the first forgot the
+ * second -- which is not a coincidence, because the first is the one with the
+ * name that sounds like the whole answer. Handing a caller a single object it
+ * already destructures is what makes "replayed the checkout, re-derived the
+ * images" stop being a state anyone can reach by omission.
+ */
 export interface RecordedCheckout {
   /** The release tag to replay, or "" when the recorded install was not from one. */
   tag: string;
   /** The commit to replay, or "" when replaying the tag is correct. */
   commit: string;
+  /**
+   * The node-image tag to replay, or "" when the receipt records none and the
+   * caller must derive one. A `clusterUp` fact riding in a struct otherwise
+   * about `stackCheckout`, for the reason the interface comment gives.
+   */
+  imageTag: string;
   /** Short human label for the run record: the tag, or an abbreviated commit. */
   label: string;
 }
@@ -601,23 +688,35 @@ export interface RecordedCheckout {
  *
  *   COMMIT INSTALL -> replay the commit, which is trivially the same thing.
  *
- * Returning both fields rather than a discriminated union keeps the caller's job
- * to "pass whichever is non-empty", which is what `installPlan` already does
- * with every other param via `present()`.
+ * Returning the two ref fields rather than a discriminated union keeps the
+ * caller's job to "pass whichever is non-empty", which is what `installPlan`
+ * already does with every other param via `present()`.
+ *
+ * AND THE IMAGES TRAVEL WITH IT (memql#4068). The rule above decides which CODE
+ * a repair replays; it said nothing about which node images that code runs
+ * against, and nothing else did either -- the image tag was derived a second
+ * time, from a tag a branch install deliberately does not have, and fell through
+ * to whatever release the running plugin build pinned. That defect arrived with
+ * branch installs and only ever affected them (memql#3901): before that every
+ * recorded checkout carried a tag, so the second derivation happened to agree
+ * with the first. Carrying `imageTag` here rather than leaving it to each caller
+ * is the structural half of the fix -- the rule is still one rule, and it is now
+ * the whole answer.
  */
 export function recordedCheckout(receipt: Receipt | null): RecordedCheckout {
   const tag = recordedStackTag(receipt);
   const commit = recordedStackCommit(receipt);
   const kind = recordedStackRefKind(receipt);
+  const imageTag = recordedImageTag(receipt);
 
   if (kind === "branch" || kind === "commit") {
-    return { tag: "", commit, label: commit === "" ? "" : commit.slice(0, 7) };
+    return { tag: "", commit, imageTag, label: commit === "" ? "" : commit.slice(0, 7) };
   }
   // A tag install, or a receipt written before refKind existed. Prefer the tag;
   // fall back to the commit so a receipt that somehow recorded only the latter
   // still reproduces something rather than silently reinstalling the pin.
-  if (tag !== "") return { tag, commit: "", label: tag };
-  return { tag: "", commit, label: commit === "" ? "" : commit.slice(0, 7) };
+  if (tag !== "") return { tag, commit: "", imageTag, label: tag };
+  return { tag: "", commit, imageTag, label: commit === "" ? "" : commit.slice(0, 7) };
 }
 
 /**

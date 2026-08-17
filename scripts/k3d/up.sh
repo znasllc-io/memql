@@ -76,6 +76,7 @@ cap_spec_param "image-registry" "registry to pull node images from (default: the
 cap_spec_param "image-tag"      "tag for those images; required with --image-registry"
 cap_spec_param "db-image-tag"   "tag for the DATABASE OPERAND image, which is versioned on the PostgreSQL axis and MUST start with the PostgreSQL major -- CNPG parses it (default: the pinned release operand)"
 cap_spec_param "domain"         "front-door apex the cluster is served at (default: memql.localhost)"
+cap_spec_param "caroot"         "mkcert CAROOT the front-door certificate is issued from, forwarded to secret seeding (default: whatever mkcert reports)"
 cap_spec_param "project-manifest" "path to the AppProject manifest to apply (downstream repos pass their own)"
 cap_spec_param "repo-root"      "the memQL checkout to read deploy/ and the target revision from (default: this script's own repository)"
 cap_spec_param "no-secrets"     "skip secret seeding (flag)"                        ""
@@ -112,6 +113,17 @@ PROJECT_MANIFEST="${MEMQL_K3D_PROJECT_MANIFEST:-}"
 # generated YAML and `kubectl apply -k` on a clean checkout still works.
 readonly OVERLAY_DEFAULT_DOMAIN="memql.localhost"
 DOMAIN="$OVERLAY_DEFAULT_DOMAIN"
+
+# The CAROOT the front-door certificate is issued from -- resolved in main() and
+# forwarded verbatim to seed-secrets.sh, which forwards it to install.mkcert
+# (memql#4069). This script never reads it: it is a value in transit, exactly
+# like --repo-root, and for the same reason -- the step that DECIDED it
+# (install.mkcert, run by the graph's localCA step) and the step that has to
+# honour it are two scripts apart, so anything not carried is re-derived, and a
+# re-derivation of "where is this machine's CA" is wrong on precisely the
+# machines that need it. Empty means mkcert's own default, which is what `make
+# up` wants and what every run did before this existed.
+MKCERT_CAROOT=""
 
 # k3d cluster config
 K3D_SERVERS="${MEMQL_K3D_SERVERS:-1}"
@@ -801,7 +813,18 @@ function seed_secrets() {
     # that mounts memql-ca stalled in ContainerCreating forever while the
     # install reported success. memql#3491 threaded this value into k3d.up and
     # stopped there; it has to reach the script that actually reads deploy/.
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" --repo-root="${REPO_ROOT}" --domain="${DOMAIN}" >&2
+    # --caroot TRAVELS for the same reason, one layer further down (memql#4069).
+    # seed-secrets.sh does not issue the front-door pair either -- it delegates
+    # to install.mkcert, which resolves `mkcert -CAROOT` when told nothing. The
+    # installer does not use that root (its localCA step creates the CA under
+    # ~/.memql/mkcert), so with the value dropped here the install either failed
+    # outright on a machine with no CA in the default root -- which is what
+    # killed every leg of the CI cluster lane -- or, on a machine that had run
+    # `make up`, silently issued the cluster's certificate from a CA it neither
+    # created nor removes. Empty stays empty: `make up` passes none and gets the
+    # machine default, exactly as before.
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="${NAMESPACE}" --repo-root="${REPO_ROOT}" --domain="${DOMAIN}" \
+        ${MKCERT_CAROOT:+--caroot="${MKCERT_CAROOT}"} >&2
     SECRETS_SEEDED=true
 }
 
@@ -900,7 +923,17 @@ function gate_voice_lane_post_sync() {
             return 0
         fi
     done
-    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --repo-root="${REPO_ROOT}" --gate-voice-lane-only >&2 || true
+    # --caroot rides along here too, and it is INERT today: --gate-voice-lane-only
+    # returns from seed-secrets.sh before check_prerequisites, before the domain
+    # is resolved and before the front-door pair is touched at all, so nothing on
+    # this path can read it. It is passed anyway, for the reason --repo-root is
+    # (which is equally inert here): the defect being fixed IS a value that
+    # failed to travel, and a call site that omits it is where the next omission
+    # starts -- one of these two grows a certificate read and nobody rereads the
+    # other. A flag that costs nothing is cheaper than a rule about which call
+    # sites are allowed to drop it (memql#4069).
+    bash "${SCRIPT_DIR}/seed-secrets.sh" --namespace="$NAMESPACE" --repo-root="${REPO_ROOT}" --gate-voice-lane-only \
+        ${MKCERT_CAROOT:+--caroot="${MKCERT_CAROOT}"} >&2 || true
 }
 
 # require_checkout <dir> -- refuse a root that is not a real memQL checkout.
@@ -995,6 +1028,11 @@ function main() {
     # puts a value. The env tier is the FLAG'S DEFAULT, per the capability
     # contract: cap_param has no env tier of its own.
     DOMAIN="$(cap_param domain "$MEMQL_LOCAL_DOMAIN")"
+    # No env tier and no default: an unset CAROOT means "let install.mkcert
+    # resolve the machine's own", which is the answer for every run that is not
+    # an install. The install graph passes the root its localCA step created
+    # (memql#4069); see seed_secrets for what dropping it cost.
+    MKCERT_CAROOT="$(cap_param caroot "")"
     IMAGE_REGISTRY="$(cap_param image-registry "")"
     IMAGE_TAG="$(cap_param image-tag "")"
     DB_IMAGE_TAG="$(cap_param db-image-tag "$DEFAULT_DB_IMAGE_TAG")"
