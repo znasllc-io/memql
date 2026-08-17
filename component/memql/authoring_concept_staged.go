@@ -3,14 +3,19 @@ package memql
 // authoring_concept_staged.go -- the STAGED DATA tier (epic memql#3974, task
 // memql#3980): a promoted concept whose ROWS are not yet visible.
 //
-// THE TIER IS INERT IN THIS FILE'S FIRST FORM, AND THAT IS DELIBERATE. Nothing
-// here filters a read, refuses a write, or suppresses an event. What lands is
-// the STATE and the machinery that carries it -- the durable flag, the in-memory
-// marker, the promote-side write, the boot replay -- so the seams that will
-// consume it have something true to consume. Read enforcement is memql#3983, the
-// write chokepoint is memql#3985, the staged -> live transition is memql#3986.
-// Adding any of them here would mean shipping a visibility rule before the state
-// it reads has ever been observed to survive a restart.
+// THE TIER WAS INERT IN THIS FILE'S FIRST FORM, DELIBERATELY, AND IS NOT ANY
+// MORE. What lands HERE is still only the STATE and the machinery that carries
+// it -- the durable flag, the in-memory marker, the promote-side write, the boot
+// replay -- and nothing in this file filters a read, refuses a write or
+// suppresses an event. But the seams that consume it have since landed, so the
+// state is live: `conceptDataIsStaged` is read by the read enforcement in
+// `staged_enforce.go` (memql#3983) and by the write chokepoint in
+// `staged_write.go` (memql#3985). The staged -> live transition is memql#3986.
+//
+// The original ordering was the point and is worth keeping: shipping a
+// visibility rule before the state it reads had been observed to survive a
+// restart would have meant debugging two things at once. That is why this file
+// consulted nothing when it landed -- not because the tier was decorative.
 //
 // # Why a sibling boolean, and not a `status` value
 //
@@ -106,10 +111,12 @@ func conceptDataStagedKey(conceptId string) string { return "conceptDataStaged:"
 // are STAGED -- present and addressable, withheld from the ordinary read path
 // until the concept is trained.
 //
-// INERT AS OF memql#3980: nothing consults it yet. It is a single sync.Map load
-// against a key built by one concatenation because of where memql#3983 will
-// consult it from -- the read seams, per plan -- and a predicate that has to be
-// cheap after it is wired is cheaper to write cheap now.
+// CONSULTED ON EVERY READ AND EVERY WRITE, which is why it is a single sync.Map
+// load against a key built by one concatenation. That shape was chosen in
+// memql#3980 while nothing called it yet, anticipating the read seams; it is now
+// reached from `stagedConceptIds` (memql#3983) on the read path and from the
+// write chokepoint (memql#3985), so the cheapness is load-bearing rather than
+// speculative. Keep it allocation-free.
 func (e *MemQLEngine) conceptDataIsStaged(conceptId string) bool {
 	if e == nil || strings.TrimSpace(conceptId) == "" {
 		return false
@@ -198,9 +205,17 @@ func (e *MemQLEngine) clearConceptDataStaging(conceptId string) {
 // --- the promote-side intent -------------------------------------------------
 
 // PromoteDurableOption is an optional instruction to the durable promote path.
-// EXPORTED because the callers that will pass one are outside this package (the
-// gRPC durable-promote handler, memql#3987), while the config it writes into
-// stays unexported so the set of instructions remains this package's to define.
+// EXPORTED because the callers that will pass one are outside this package (a
+// gRPC durable-promote handler), while the config it writes into stays
+// unexported so the set of instructions remains this package's to define.
+//
+// NO SUCH CALLER EXISTS YET, and the citation here used to name memql#3987 --
+// which turned out to be the docs-and-boot-gate task and built no wire surface.
+// Neither did memql#3986, whose PR states "no wire contract change". So nothing
+// on the wire stages a concept today: `WithConceptDataStaged()` has zero
+// non-test callers, and the tier is reachable only from Go. Naming an issue that
+// was never going to build it is worse than naming none, because it reads as
+// tracked work.
 //
 // Variadic rather than a fourth positional bool, and that is a review decision
 // worth recording: `allowBreaking` is already a positional bool on the same

@@ -33,14 +33,31 @@
 // stay as tests in test/dslconformance. Failing a fleet's boot over a
 // convention would be a worse outcome than the convention drifting.
 //
-// # How load-time enforcement works
+// # How load-time enforcement works, and which gates it does NOT reach
 //
-// MemQLEngine.Init runs ScanTree over the merged tree and records every
-// violation on the LoadReport as a skip, so strict boot REFUSES rather than
-// warns, with MEMQL_DSL_ALLOW_SKIPS as the operator break-glass -- the same
-// mechanism a construct that fails to parse already goes through. cmd/memqllint
-// runs the engine's Init over a mounted bundle, so a bundle author sees these
-// offline before the deploy rather than as a CrashLoop after it.
+// MemQLEngine.Init calls ScanSource ONCE PER FILE. recordContractGateProblems
+// (component/memql/contract_gates.go) walks the same merged []baseloader.RawFile
+// the loaders register from and records every violation on the LoadReport as a
+// skip, so strict boot REFUSES rather than warns, with MEMQL_DSL_ALLOW_SKIPS as
+// the operator break-glass -- the same mechanism a construct that fails to parse
+// already goes through. cmd/memqllint runs the engine's Init over a mounted
+// bundle, so a bundle author sees these offline before the deploy rather than as
+// a CrashLoop after it.
+//
+// ScanTree is NOT on that path. It is the tree-level entry point, and its only
+// caller in this repository is test/dslconformance/dslgate_delegation_test.go.
+// This file said "Init runs ScanTree" until memql#3987, and the difference is
+// not pedantry: ScanTree runs one gate ScanSource structurally cannot, because
+// whether a reference crosses a namespace boundary depends on where the
+// referenced name is DECLARED, which one file cannot answer (memql#3803). So
+// GateCrossNamespaceImport is enforced by TEST over this repo's own corpus, and
+// a MEMQL_DSL_PATH product bundle -- the tree with the fewest other gates on it,
+// which is the whole reason this package exists -- does not run it at boot.
+//
+// The rule that follows for a NEW gate: a per-file gate refuses boot, a
+// tree-level one does not. Adding a tree-level gate without wiring the tree into
+// Init buys a conformance test, not a load-time contract, and the comment
+// describing it has to say which one it bought.
 //
 // # One detector
 //
@@ -160,6 +177,10 @@ var UserScopeSelectionExemptions = map[string]string{
 // every RegisterTree overlay, and MEMQL_DSL_PATH product domains are mounted
 // through exactly that call -- so one scan covers every source a node loads
 // from.
+//
+// BOOT DOES NOT CALL THIS. MemQLEngine.Init drives ScanSource per file; this
+// entry point exists for callers holding the whole tree, and its only caller
+// here is the conformance test. See the package comment for what that costs.
 func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
 	if tree == nil {
 		return nil, nil

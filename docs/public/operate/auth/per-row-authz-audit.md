@@ -177,8 +177,9 @@ Rules:
 > the command printed nothing. Both are fixed below; do not calibrate
 > against any copy of this page that still says the tier is inert.
 
-A declared tier is enforced on four paths. Read the behaviour off these
-files, not off prose:
+A declared tier is enforced at the seams below -- and one further gate rides in
+the same seams without being a tier at all, listed last so it is not mistaken for
+one. Read the behaviour off these files, not off prose:
 
 | Mechanism | File | Covers |
 |---|---|---|
@@ -187,6 +188,7 @@ files, not off prose:
 | Anonymous refusal | same file (`refuseRowAuthzWithoutActor`) | a read carrying no caller identity **errors** rather than comparing against `""` and returning rows owned by nobody |
 | Write guard | `component/memql/rowauthz_write_guard.go` | `update` / status-flip / a raw `insert(` onto an existing id -- the engine resolves the target row and refuses when its owner is not the actor |
 | Create stamping | `component/memql/rowauthz_insert_stamp.go` | the raw-`insert(` create path that bypasses accept/stamp |
+| Staged-data visibility | `component/memql/staged_enforce.go` (`admitStagedRow`, `filterStagedSet`, `filterStagedNodes`, `enforceStagedDataOnPlan`) | **NOT a `@rowAuthz` tier.** Rows of a concept whose DATA is staged (epic memql#3974). It asks *"is this row visible to anyone yet"* where the tier asks *"may this caller see it"*, so it rides **outside** the authz gate and no authz answer can readmit a row it withheld -- see [Staged-data visibility](#staged-data-visibility-memql3974) |
 
 Escapes from the **write** guard are enumerated in exactly one place
 (`rowAuthzWriteEscape`): internal origin stamped per-write by an
@@ -209,6 +211,145 @@ boot **warning** naming every undeclared concept, and the undeclared
 population is pinned shrink-only by
 `component/memql/rowauthz_undeclared_gate_test.go`. Escalation to a load
 error is a later phase, once the tree is clean.
+
+### Staged-data visibility (memql#3974)
+
+The last row of the table above is a **different question asked at the same
+seams**, and the distinction has to survive being read quickly: the tier asks
+*may this caller see this row*, staged-data asks *is this row visible to anyone
+yet*. Staged-data is the outer of the two -- a staged row is withheld from every
+caller, so no authorization answer readmits it -- and it is applied immediately
+after the tier for exactly that reason.
+
+The mechanism: a promoted concept can carry `conceptDataStaged` on its
+`v1:authoring:construct` row, and while it does, the rows written under it are
+present, addressable and withheld from the ordinary read path until the concept
+is **trained**. The lifecycle is documented from the authoring side in
+[Training constructs into a running cluster](../../language/training.md#staged-data-rows-can-arrive-before-the-concept-is-trained).
+Note before reading further that `staged` names two unrelated things in this
+codebase; that page's
+[disambiguation table](../../language/training.md#two-things-are-called-staged-and-they-disagree-about-the-subject)
+is the one to read first.
+
+#### The architecture INVERTS this document's
+
+For a declared tier, **filter injection is the primary mechanism** and row
+admission covers the residue -- the unbound reads and graph expansion, where
+there is no filter to AND a term into.
+
+For staged data it is the other way round, and the emphasis is not stylistic:
+
+- **The row gate is the correctness mechanism.** memql#3977 measured the marking
+  models and chose concept-grain: there is no staged marker on the rows at all,
+  so visibility is a pure function of the CONCEPT -- and every row carries its
+  concept. A gate reading `node.Concept` therefore decides staging correctly with
+  no injection whatsoever, and it inherits the property the row-authz gate beside
+  it already documents at `component/memql/executor.go:225-230`: it is "immune to
+  how the filter was spelled: naming a row by id, a top-level `||` and a negated
+  concept all reach it identically."
+- **The injected conjunct is a pushdown optimization.** It exists so the engine
+  does not FETCH rows the gate would then discard. A pushdown is allowed to be
+  incomplete. It is not allowed to be wrong.
+
+#### It is deliberately NOT gated on a bound concept
+
+`enforceStagedDataOnPlan` does not copy `enforceRowAuthzOnPlan`'s early return on
+an empty `plan.BoundConcept`, and that is the single most important difference
+between the two injectors.
+
+Row-authz **must** resolve a binding, because the tier is a per-concept
+declaration and there is nothing to resolve it from otherwise. The staged
+predicate binds nothing -- it names the staged set directly, so it is exactly as
+meaningful on a raw client-supplied query string, on a `concept==A || concept==B`
+union, and on a bound query. Requiring a binding would have reproduced the
+top-level-builtin hole memql#3982 had just closed, on the same fifth of the tree.
+
+#### `undecidable` here means UNPLACEABLE, not UNCOVERED
+
+Read this before quoting the shadow-mode figure at anyone.
+
+Staged-data shadow mode (memql#3981) is modelled on the row-authz shadow mode
+below, but it asks a different question. Row-authz asks *is the predicate already
+implied by what the author wrote*, which only makes sense because that predicate
+is a function of the caller and an author can have hand-written it. The staged
+predicate is a CONSTANT over a column every row carries, so there is nothing for
+implication to turn on. What is left to decide statically is whether the
+predicate can be **placed** on this construct at all.
+
+Regenerate rather than trust the number:
+
+```bash
+go test ./component/memql/ -run TestStagedDataShadowMeasuresTheTree -v
+```
+
+At the run the enforcement ruling was taken against, 115 of 619 measured
+constructs came back `undecidable` -- 82 builtins and 33 logic functions, all of
+them constructs that bind no concept.
+
+**That does NOT mean a fifth of the tree is ungated at runtime.** It means a
+STATICALLY PLACED predicate cannot reach those constructs, which is a fact about
+the pushdown and not about coverage. Both halves have to be said, because each
+alone is misleading:
+
+- The injector does not require a binding (previous section), so it is not the
+  case that nothing is injected for an unbound read.
+- The row gate is reached from the concept on the row, so a read that bypasses
+  the filter path **entirely** is still gated -- which is precisely what
+  memql#3982 made true for the top-level builtin at `plan.Root`, and why the row
+  gate is trustworthy for this population.
+
+The verdict named `would-hide` is the mechanism WORKING, which is the other
+inversion: in row-authz `would-narrow` is the alarming verdict, here hiding is
+the designed behaviour and `undecidable` is the alarming one.
+
+#### The population that neither mechanism reaches
+
+A read issued **inside a Go executor** goes to storage without passing a plan, so
+neither the injected conjunct nor the row gate sees it. That population is
+inventoried by memql#3984, and the inventory is deliberately a CLASSIFICATION
+rather than a blanket requirement -- memql#3978 ruled that some of those reads
+must be **prohibited** from carrying the predicate, not merely exempted from it.
+The concrete case: the counters that decide retire-versus-remove and that refuse
+a breaking schema change read storage under no actor at all, so staged rows are
+inside their counts. Make them carry the staged predicate and a concept holding
+ten thousand staged rows counts as empty -- it becomes removable rather than
+retirable, and a breaking schema change lands unrefused against rows about to be
+made live under a schema they do not satisfy. A check that mechanically required
+the predicate everywhere would not prevent that bug; it would create it.
+
+#### Three implementation constraints, each load-bearing
+
+- **No `context.Context`, by ruling.** The predicate is injected from
+  `parseWithFunctionsAmbient`, which has none, and memql#3976 explicitly declines
+  to give `enforceRowAuthzOnPlan` one -- the three recorded justifications for its
+  context-freedom stand unamended. The predicate is therefore a constant, which is
+  what keeps the actor-less callers out of the special-case business: an
+  automation starting from `context.Background()` under a synthetic system actor
+  gets the same answer as anybody else, and internal origin does not become an
+  accidental staged-read grant. The price is that there is no scope to widen, so
+  **a staged row is presently reachable by nothing at all**; the explicitly
+  staged-scoped read memql#3976 called for is deferred to memql#4040.
+- **An SQL-only predicate would not survive the read path.** Both filtered seams
+  return through `latestMatchingNodes`, which reloads each candidate's true latest
+  version through a query filtering on `id` and `createdAt` and nothing else, then
+  swaps it in. A predicate that existed only in emitted SQL would be defeated by
+  that swap while every test stayed green. Two things close it: the predicate is
+  evaluable in Go, so the re-check rejects the swapped-in candidate, and the swap
+  is co-gated by `admitStagedRow` directly.
+- **The spelling is a chain of `!=`, never `out`.** `out` compiles to a tidy
+  `concept NOT IN (...)` and HARD-ERRORS in the in-process re-check, which
+  implements equality and inequality only on that intrinsic -- so it would not
+  leak, it would break every read the moment any concept was staged. The
+  conjunction of `!=` terms is the one spelling both halves accept.
+
+On NULL-safety -- the standing warning on this path is the `isNotDeleted` bug,
+where a plain SQL `<>` yielded NULL rather than true for a row that never carried
+the key and silently excluded every such row. Concept-grain sidesteps it
+STRUCTURALLY rather than mitigating it: the predicate references `concept`, a
+`notnull` column every row has and no row can leave absent, and there is no
+"every existing row carries no marker" hazard because there is no marker. The
+comparison is tightened to `IS DISTINCT FROM` regardless, so the guarantee rests
+on the operator rather than on a schema annotation staying true.
 
 ### Concepts that cannot carry a tier (memql#3349 / memql#3350)
 

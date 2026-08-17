@@ -61,6 +61,38 @@ stage — a staged concept would be a row nothing ever reads. Train the concept,
 then stage the constructs bound to it. That is the ordinary shape anyway: the
 noun is the part you want everyone to agree on.
 
+### Two things are called staged, and they disagree about the subject
+
+Everything above is the **staged construct** tier (epic memql#3928). There is a
+second tier that shares the word and means something else: **staged data** (epic
+memql#3974), which is the subject of
+[Staged data](#staged-data-rows-can-arrive-before-the-concept-is-trained) under
+Concepts below. Read this table before you read either.
+
+| | Staged **construct** (memql#3928) | Staged **data** (memql#3974) |
+|---|---|---|
+| What is staged | the construct's **resolution scope** | the **visibility of a concept's rows** |
+| Recorded as | `v1:authoring:construct.status` = `staged` | `v1:authoring:construct.conceptDataStaged`, a **sibling boolean** |
+| Can a concept be it? | **no** — refused by name | **only** a concept can |
+| Registered cluster-wide? | no. It resolves for its author alone and is not broadcast | **yes** — registered, resolvable, and it accepts writes |
+| Who can reach it | its author | its ROWS: nobody, today. See below |
+| What makes it live | Promote / Train | training the concept |
+
+They are not two flavours of one idea. The difference is the **subject**. A
+staged construct is a definition the cluster has not shown to anybody — the
+omitted broadcast *is* the tier. Staged data is a concept the cluster has fully
+published, whose rows are held back. So a concept is the one thing that cannot
+be staged in the first sense and the only thing that can be staged in the
+second, and a reader who carries one meaning into the other section will
+conclude the opposite of the truth in both directions.
+
+The collision is also why staged data is a sibling boolean rather than another
+`status` value, and that would be true even if the name were free. The boot
+re-hydration routes on `status`; a value it skips leaves the concept
+unregistered; rows addressed by a name the engine no longer knows are not
+withheld, they are **lost**. That is the argument `conceptRetired` already made
+(memql#3756), arriving at the same answer for the same reason.
+
 ---
 
 ## Saving is not promoting
@@ -295,6 +327,172 @@ through the classifier at all.
 
 This follows the same house rule the tool-declaration gates set: a silent
 degrade is not permissive, it is confidently wrong.
+
+### Staged data: rows can arrive before the concept is trained
+
+> **This is not the staged tier from the top of the page.** See
+> [Two things are called staged](#two-things-are-called-staged-and-they-disagree-about-the-subject).
+> Here, the concept is fully published and only its ROWS are withheld.
+
+A cluster could already be taught a concept while running. What it could not do
+is accept **data** ahead of that moment — rows written against a concept nobody
+had trained yet had nowhere to be. Epic memql#3974 gives them somewhere.
+
+A promoted concept can carry `conceptDataStaged` on its `v1:authoring:construct`
+row. While it does, the rows written under it are **present, addressable, and
+withheld from the ordinary read path**, and training the concept makes them live
+in place. Nothing is copied and no id is remapped: every node of an installation
+already shares one PostgreSQL + TimescaleDB substrate, so becoming live is a
+change of visibility, not of location.
+
+Note what is **not** withheld. The concept registers into the one shared concept
+registry, resolves for every caller, and keeps accepting writes exactly as any
+other promoted concept does.
+
+#### Visibility is a property of the CONCEPT, and of nothing smaller
+
+There is **no marker on the rows at all**. That is a measured ruling
+(memql#3977), taken against a real TimescaleDB container reproducing the live
+DDL — `compress_segmentby = 'concept'` included — with every chunk compressed
+before anything was timed, at 10,000 staged rows:
+
+| Model | Transition | Decompresses? | Later reads |
+|---|---|---|---|
+| **concept-grain (chosen)** | **11 ms**, one row written elsewhere | **no** | unchanged, 7–12 ms |
+| row marker, `UPDATE` | 116–142 ms | **yes** | unchanged |
+| row marker, append a new version | 74 ms | no | **29–36 ms, permanently** |
+
+Two results decided it, and neither is the millisecond column.
+
+**Every row-marked model has to decompress.** That is proven rather than
+inferred: with `timescaledb.enable_dml_decompression` set to false the `UPDATE`
+does not run slowly, it hard-errors with *"UPDATE/DELETE is disabled on
+compressed chunks"*. `compress_segmentby = 'concept'` puts every row of one
+concept in one compressed segment, so marking that concept's rows means
+rewriting the segment. Afterwards the affected chunks sit **partially**
+compressed with roughly 46x heap inflation — and `chunk_compression_stats`
+reports them `Compressed` throughout, so the view an operator would naturally
+check cannot see the state at all.
+
+**Concept-grain is the only candidate whose cost does not scale with the number
+of staged rows.** The transition is one row written to the concept's own
+`v1:authoring:construct` record; 10,000 staged rows and 10,000,000 cost the
+same. Every other model is O(rows). The epic's premise is that data arrives
+*before* the concept is trained, so the row count at transition time is
+unbounded by construction.
+
+The append-a-new-version model is the near-miss worth naming, because it avoids
+decompression entirely and a reasonable person proposes it. It loses on the read
+side: it doubles the version history permanently, so the latest-version collapse
+for that concept stays 3–5x slower forever, and it rewrites every row's
+`createdAt`, which leaves the staged version permanently reachable through an
+`asOf` read positioned before the transition — the opposite of what the tier is
+for.
+
+#### A staged row is currently reachable by NOTHING
+
+This is the sharpest thing to know about the tier as it stands, and it is
+written down rather than left to be discovered.
+
+The audience ruling (memql#3976) has two halves. The first — a staged row is
+invisible on the ordinary read path to **every** caller, its own author included
+— shipped. The second — that it stays reachable through a read which
+**explicitly asks** for staged rows, with that scope set by the caller on the
+read and never inferred from who is asking — did not.
+
+The reason is the constraint that ruling turns on. The visibility predicate is
+injected at a point that has no `context.Context`, and the ruling forbids giving
+it one: a predicate derived from caller identity would have to be threaded into
+every read seam, including the reads a Go executor issues directly, each of
+which then gets its own opportunity to spell it wrong. So the predicate is a
+**constant**, and a constant has no scope to widen. The choice on the table was
+an absent escape hatch versus a partial one that appears to work and silently
+does not, and the absent one is the honest answer.
+
+**The consequence, stated plainly: an operator trains a concept without being
+able to inspect what is queued under it first, and training is one-way.** There
+is no un-train that re-hides rows. The explicitly staged-scoped read is tracked
+as memql#4040.
+
+#### Rows persist. There is no TTL, and that absence is defended
+
+A concept nobody ever trains keeps its staged rows indefinitely (memql#3978).
+
+That is a ruling, not an oversight. Graph rows carry no retention policy at all
+today, and the absence is deliberate and already guarded — the version-history
+migration states outright that versions are never evicted on a timer, and a test
+fails if a retention policy is ever added to it. A staged-row TTL would be the
+first timer that deletes graph rows, and it would arrive by the side door.
+
+It would also discard data somebody staged on purpose. Load a dataset, get
+pulled onto something else for a quarter, come back to train it, find it
+silently gone. Staging exists to *hold* data until someone is ready; a tier that
+discards what it is holding has inverted its own purpose.
+
+The lifecycle already has the right verb for a concept nobody wants, and it is
+the demote rule above. Staged rows need no separate disposal rule, because they
+are rows and that rule is about rows.
+
+#### Demote does not re-stage
+
+Withdrawing a concept that has rows **retires** it, exactly as described above.
+It does not push its rows back into staging (memql#3978).
+
+Staging is a *pre-publication* state; un-publishing is a different operation and
+it already has a ruling — a demoted-with-rows concept stays registered and its
+rows stay readable, precisely so a demote does not strand data. Re-hiding them
+would be an outage wearing a lifecycle transition's clothes, and it would look
+reversible while being irreversible in practice: with no row-grain marker,
+nothing records which rows were live before the demote.
+
+#### Staged rows COUNT, and they must
+
+Two decisions above turn on a row count — whether a demote **retires** the
+concept or **removes** it, and whether a schema change is refused as breaking.
+Staged rows are inside both counts.
+
+They are today, for free, because both counters read **storage** rather than the
+query path, under no actor at all. That predates this epic and has its own
+reason: a count taken through the query path answers *"how many rows can I
+see"*, which would make the outcome depend on who asked.
+
+The change to guard against is a future one, and it will look like a cleanup —
+routing those counters through the query path "for consistency", or having a
+land-time check mechanically require the staged predicate on every read of the
+row table. Either would make a concept holding 10,000 staged rows count as
+**empty**, and two things follow immediately: the concept becomes *removable*
+rather than retirable, freeing a name ten thousand rows are still addressed by,
+and a breaking schema change lands unrefused against rows that are about to be
+made live under a schema they do not satisfy.
+
+So these counters are not merely exempt from the staged predicate — they are
+**prohibited** from carrying it, with the prohibition enforced rather than
+commented (memql#3984). A check that mechanically required the predicate
+everywhere would not prevent that bug. It would create it.
+
+#### What is built, and what is not
+
+Shipped: the tier itself (memql#3980) — the durable flag, the in-memory marker,
+the promote-side write and the boot replay — and read enforcement (memql#3983),
+which is what makes a staged concept's rows actually stop coming back.
+
+Not yet, so do not assume it:
+
+| Task | What is missing today |
+|---|---|
+| memql#3985 | The **write chokepoint**. A write to a staged concept still publishes its `node.created` event, and that event carries the whole row payload flattened into it. Suppression has to happen at the publish site — the event bus has no actor and no authorization hook, so withholding the read while emitting the event publishes the row to every in-process subscriber and calls it hidden (ruled on memql#3979) |
+| memql#3986 | The **transition and its cross-node propagation**. The marker is set on the node that promoted and re-derived by every node at *its own* next boot; it is not broadcast, so a peer that has not restarted since does not have it. There is also no train-this-concept's-data operation yet: the only un-staging path is a re-promote writing a new construct row with the flag false, which the "a live row wins" fold resolves as live |
+| memql#4040 | The **staged-scoped read**, as above |
+| memql#3984 | The **direct-SQL reads**. A read issued inside a Go executor never passes through a plan, so neither the injected predicate nor the row gate sees it |
+
+There is also no editor action, no MCP tool and no wire message that stages a
+concept's data. The mutation exists and the durable promote path takes the
+intent; nothing operator-facing passes it.
+
+The full read-side mechanism — where the predicate is injected, why the row gate
+rather than the predicate is the correctness mechanism, and what it does not
+cover — is in
+[Per-row authorization audit](../operate/auth/per-row-authz-audit.md#staged-data-visibility-memql3974).
 
 ---
 
