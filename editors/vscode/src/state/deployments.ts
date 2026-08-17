@@ -78,6 +78,17 @@ export interface Instance {
    */
   version?: string;
   connected: boolean;
+  /**
+   * Remote: the record the Deploy button ships -- the newest CUT-but-unshipped
+   * deployment (memql#4017). Absent when nothing is cut, when the records could
+   * not be read, and always for a local instance, which has no deploy pipeline.
+   *
+   * It lives on the instance rather than being re-derived at the click so that
+   * what ships is the record the page RENDERED. Deriving it again later means
+   * deriving it from a catalog that may have moved -- which is right almost
+   * always and wrong for whichever operator loses a race with a second cut.
+   */
+  pendingDeploymentId?: string;
 }
 
 /**
@@ -259,6 +270,13 @@ export interface RemoteInstanceInput {
    */
   deployments?: DeploymentRecord[];
   currentDeploymentId?: string;
+  /**
+   * The record the Deploy button ships
+   * (`deploymentHistory.pendingDeploymentId`). Empty when nothing is cut, and
+   * absent when no records were read at all -- both land as no target on the
+   * instance, because there is no record to name in either case.
+   */
+  pendingDeploymentId?: string;
 }
 
 /**
@@ -269,6 +287,10 @@ export interface RemoteInstanceInput {
  * tell an operator mid-deploy that the cluster is already there. Which record
  * is current is `deploymentHistory.currentDeploymentId`'s judgement and is not
  * re-derived here.
+ *
+ * The ship target is the same arrangement: `pendingDeploymentId` decides which
+ * record is cut-but-unshipped and this carries the answer. Two derivations over
+ * one record list, neither of them made twice.
  */
 export function remoteInstance(input: RemoteInstanceInput): Instance {
   const current = (input.currentDeploymentId ?? "").trim();
@@ -277,6 +299,7 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
       ? ""
       : (indexDeployments(input.deployments ?? []).get(current)?.version ?? "");
   const domain = (input.domain ?? "").trim();
+  const pending = (input.pendingDeploymentId ?? "").trim();
   return {
     name: input.name,
     kind: "remote",
@@ -284,6 +307,7 @@ export function remoteInstance(input: RemoteInstanceInput): Instance {
     presence: remotePresence(input.reachable),
     ...(version !== "" ? { version } : {}),
     connected: input.connected,
+    ...(pending !== "" ? { pendingDeploymentId: pending } : {}),
   };
 }
 

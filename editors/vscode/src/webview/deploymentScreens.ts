@@ -247,6 +247,36 @@ ${plan}
 // the remote instance
 // ---------------------------------------------------------------------------
 
+/**
+ * WHICH record "Deploy" ships, named on the page (memql#4017).
+ *
+ * The button used to ship `runs[0]` -- the newest record in the catalog the
+ * page last read -- re-derived at the CLICK. The id is now resolved when the
+ * page is BUILT (`Instance.pendingDeploymentId`), so what ships is the record
+ * the operator was looking at; printing it is the other half, and it is why
+ * there is no modal. A confirmation naming the target tells them after they
+ * have decided; a line above the button tells them before.
+ *
+ * DRAWN ONLY WHERE THE DEPLOY ACTION IS. A reader sees the deployment history
+ * and none of the actions (deploy/actions.ts, `visibleActions`); telling them
+ * nothing is cut would answer a question their page never raised.
+ *
+ * The version is a courtesy, not the identity: it comes off the run list this
+ * page already rendered, and is simply omitted when the record is not in it.
+ * The ID is what the ship names and what an audit line will carry.
+ */
+function shipTargetLine(input: RemoteOverviewInput): string {
+  if (!input.pipeline.actions.some((action) => action.id === "deploy")) return "";
+  const target = (input.instance.pendingDeploymentId ?? "").trim();
+  if (target === "") {
+    return `<p class="notice">Nothing is cut, so Deploy has no record to ship. Cut a version first.</p>`;
+  }
+  const version = input.runs.find((run) => run.id === target)?.toVersion ?? "";
+  return `<p class="notice">Deploy ships ${escapeHtml(target)}${
+    version === "" ? "" : ` (${escapeHtml(version)})`
+  }.</p>`;
+}
+
 export interface RemoteOverviewInput {
   instance: Instance;
   runs: readonly Run[];
@@ -345,6 +375,7 @@ ${outcome}
 ${upgradeButton(input.upgrade)}
 <h2>${escapeHtml(pipeline.title)}</h2>
 <p class="lede">${escapeHtml(pipeline.detail)}</p>
+${shipTargetLine(input)}
 ${actions}
 <h2>Deployments</h2>
 ${runs}`;

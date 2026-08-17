@@ -43,13 +43,17 @@ type FakeConn = Connection & {
   terminate(): void;
 };
 
-function fakeConn(nodeId: string): FakeConn {
+function fakeConn(nodeId: string, engineVersion = ""): FakeConn {
   let resolveDone!: () => void;
   const donePromise = new Promise<void>((resolve) => {
     resolveDone = resolve;
   });
   const conn = {
     nodeId,
+    // What ServerHello stated (memql#3998). "" is the default because that is
+    // what an engine predating the field states, which is every cluster
+    // installed before it.
+    engineVersion,
     wasClosed: false,
     // Identity markers so a test can assert WHICH connection the manager is
     // handing out (or that it is handing out none).
@@ -346,6 +350,30 @@ test("a dropped connection stops handing out query and subscription clients", as
 
   assert.equal(manager.query, undefined, "a dead socket must not back a query client");
   assert.equal(manager.subscriptions, undefined);
+});
+
+test("the engine version the handshake stated is readable off the manager", async () => {
+  // The fifth version source (memql#4018) reads this. It is exposed as a getter
+  // over `conn` rather than cached, for the same reason `query` is: the manager
+  // drops the connection the instant the socket dies, and a cached build fact
+  // would go on describing a cluster this editor is no longer talking to.
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x", "v0.19.0")));
+  assert.equal(manager.engineVersion, undefined, "nothing is connected yet");
+
+  await manager.connect(cluster("a"));
+  assert.equal(manager.engineVersion, "v0.19.0");
+
+  await manager.disconnect();
+  assert.equal(manager.engineVersion, undefined, "a torn-down connection states nothing");
+});
+
+test("an engine predating the handshake field reports an empty string, not undefined", async () => {
+  // The two answers mean different things and the version collector relies on
+  // the distinction being preserved: "" is "this cluster answered and it does
+  // not carry the field", undefined is "there is no connection to ask".
+  const manager = new ConnectionManager(() => Promise.resolve(fakeConn("x")));
+  await manager.connect(cluster("a"));
+  assert.equal(manager.engineVersion, "");
 });
 
 test("a done() from a superseded connection cannot clobber the newer connection", async () => {

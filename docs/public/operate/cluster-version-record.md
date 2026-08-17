@@ -102,7 +102,7 @@ normalise, coerce, or reject what it is given.
 
 ## Record quality: a write may not downgrade
 
-The learners write through this key from four sources, and they do not
+The learners write through this key from five sources, and they do not
 agree in trustworthiness. The rule is that a write happens only when the
 value **differs** and **does not downgrade record quality**: a value that
 is not release-shaped never overwrites one that is.
@@ -110,6 +110,35 @@ is not release-shaped never overwrites one that is.
 Without that rule, an install receipt naming `v0.18.0` would be replaced
 by a live connection reporting the build stamp `0.15.0-1737072000` -- a
 strictly worse record, written by a strictly more recent observation.
+
+### The five sources, most trustworthy first
+
+| Source | What it actually knows |
+|---|---|
+| `handshake` | `ServerHello.engine_version` -- the release the engine binary was **cut from**, stamped in at link time |
+| `receipt` | what the install wizard **checked out**, on this machine, at one moment |
+| `argocd` | the `targetRevision` the manifests **ask for**. Legitimately a branch name |
+| `deployControl` | the resolved lockfile's version -- the deployment **record**. Absent for a local cluster |
+| `live` | `memqlVersion()` over a connection: the same fact as `handshake`, reached through the DSL |
+
+Quality still outranks trust: a branch name from the most trusted source
+loses to a real tag from the least. The order above only decides between
+values that each name a release.
+
+**`handshake` ranks first because it is the only one that cannot
+disagree with the binary serving the connection.** Every other source
+describes something adjacent to the running engine and can drift from
+it -- the checkout can be moved after the install, the manifests can ask
+for something that has not reconciled, the deployment record can outlive
+what it deployed. So when the handshake and the install receipt both
+name a release and the two differ, the receipt is the stale one.
+
+Two answers from this source are non-answers, and neither needs a rule
+of its own. A cluster whose engine predates the field states `""`, which
+is dropped before ranking; a binary not cut from a release states `dev`,
+which is not release-shaped and so can never land on a recorded release.
+Both were true of the entire fleet on the day the source was added,
+which is why it changed no cluster's record until one was upgraded.
 
 ## Preservation guarantees: the two tools differ
 

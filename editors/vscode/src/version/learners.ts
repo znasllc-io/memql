@@ -1,8 +1,12 @@
 // Learning what release a cluster is running, and deciding whether to record it.
 //
-// Four sources can answer, and they disagree structurally rather than
-// occasionally, because none of them was built for this question:
+// Five sources can answer, and they disagree structurally rather than
+// occasionally, because only one of them was built for this question:
 //
+//   handshake      `ServerHello.engine_version` -- the release the engine
+//                  binary was CUT FROM, stamped into it at link time
+//                  (`core/buildinfo`) and stated on connect (memql#3998).
+//                  Ranked FIRST; see below.
 //   receipt        what the install wizard checked out (`recordedStackTag`).
 //                  A genuine release tag, but a record of ONE MOMENT -- the
 //                  cluster may have been moved since by other means.
@@ -12,12 +16,11 @@
 //                  was precisely that fact outliving the branch.
 //   deployControl  `GetDeploymentStatus.version` / `engine_version`, from the
 //                  resolved lockfile. Absent for a local cluster.
-//   live           `memqlVersion()` over a connection. The most DIRECT
-//                  evidence and ranked LAST anyway, because today it returns
-//                  the `0.15.0-<epoch>` stamp `Dockerfile:178-180` writes over
-//                  the VERSION file. memql#3998 is what makes it honest; this
-//                  module needs no change when it does, because the quality
-//                  rule below already lets a real release through.
+//   live           `memqlVersion()` over a connection. Direct evidence, ranked
+//                  LAST anyway, because on an engine predating memql#3998 it
+//                  returns the `0.15.0-<epoch>` stamp `Dockerfile:178-180`
+//                  writes over the VERSION file. The quality rule below is what
+//                  lets a real release through once it is honest.
 //
 // So the rule cannot be "the newest observation wins". It is:
 //
@@ -31,13 +34,29 @@
 // the only thing on disk that can answer "is this cluster behind?", which is
 // the whole point of recording a version at all.
 //
+// WHY `handshake` OUTRANKS THE RECEIPT (memql#4018). Every other source
+// describes something ADJACENT to the running binary, and each can legitimately
+// disagree with it: the receipt records what the installer PULLED, which drifts
+// the moment anything moves the checkout; `argocd` records what the manifests
+// ASK for, not what is running; `deployControl` records the deployment RECORD;
+// and `live` reaches the same fact the handshake states, through the DSL rather
+// than the connect. `engine_version` is a build fact the running process cannot
+// be told and cannot get wrong -- the only value here that cannot disagree with
+// the binary actually serving the connection. So when it and the receipt both
+// name a release and the two differ, the receipt is the stale one.
+//
+// Its two non-answers need no special case, which is why adding it changed
+// nothing else in this file. An engine predating memql#3998 states "", dropped
+// before ranking; a binary not cut from a release states "dev", which is not
+// release-shaped and so cannot land on a recorded release under rule 3.
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go).
 
 import { Latest, type LatestToken } from "../async/latest.js";
 import type { ClusterConfig } from "../clusters/model.js";
 import { isReleaseShaped } from "./compare.js";
 
-export type VersionSource = "receipt" | "argocd" | "deployControl" | "live";
+export type VersionSource = "handshake" | "receipt" | "argocd" | "deployControl" | "live";
 
 export interface VersionCandidate {
   readonly source: VersionSource;
@@ -45,9 +64,15 @@ export interface VersionCandidate {
   readonly value: string;
 }
 
-// Most trustworthy first. See the header for why `live` is last despite being
-// the most direct evidence.
-const SOURCE_RANK: readonly VersionSource[] = ["receipt", "argocd", "deployControl", "live"];
+// Most trustworthy first. See the header for why `handshake` is first and why
+// `live` is last despite both reading a live cluster.
+const SOURCE_RANK: readonly VersionSource[] = [
+  "handshake",
+  "receipt",
+  "argocd",
+  "deployControl",
+  "live",
+];
 
 function rankOf(source: VersionSource): number {
   const i = SOURCE_RANK.indexOf(source);
