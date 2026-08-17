@@ -250,7 +250,7 @@ func (e *MemQLEngine) demoteConceptFromLiveRegistry(ctx context.Context, name st
 			name, e.concepts)
 	}
 
-	conceptId, err := e.resolvePromotedConceptId(name)
+	conceptId, err := e.resolvePromotedConceptId("demote", name)
 	if err != nil {
 		return DemoteOutcome{}, err
 	}
@@ -266,6 +266,17 @@ func (e *MemQLEngine) demoteConceptFromLiveRegistry(ctx context.Context, name st
 		// RETIRE. Everything stays: the registry entry (so reads resolve), the
 		// promotion marker (so the concept is still recognisably author-owned,
 		// and a later demote can still find it). Only writes stop.
+		//
+		// THE STAGED-DATA MARKER STAYS TOO, UNTOUCHED (epic memql#3974, ruled in
+		// memql#3986). Retirement and staging answer different questions -- may
+		// rows be WRITTEN, may rows be READ -- and a concept in both states is a
+		// coherent thing: rows accumulated while it was staged, and the
+		// definition since withdrawn. Clearing the staging here would publish
+		// them, which is the opposite of what withdrawing a definition can mean;
+		// deepening it would be equally arbitrary. The train transition
+		// (TrainConceptData) is what publishes them, and it works on a retired
+		// concept precisely so an author is never forced to re-open a concept to
+		// writes in order to read data they already hold.
 		e.markConceptRetired(conceptId)
 		outcome.Outcome = DemoteOutcomeRetired
 		if e.Component != nil && e.Logger != nil {
@@ -282,6 +293,17 @@ func (e *MemQLEngine) demoteConceptFromLiveRegistry(ctx context.Context, name st
 	}
 	e.promotedAuthored.Delete("concept:" + conceptId)
 	e.clearConceptRetirement(conceptId)
+	// AND the staged-data marker (epic memql#3974, ruled in memql#3986). This is
+	// the branch where the two states stop being independent, and only this one:
+	// the concept is now UNREGISTERED, so a marker keyed to its canonical id
+	// names something nothing can resolve. Every other marker this branch holds
+	// is deleted for that reason and this one is no different -- a read seam
+	// consulting a marker for an absent concept is misled by state that outlived
+	// its subject, which is exactly what memql#3980's replay declines to create
+	// when it skips status-retired rows. Reaching here with a marker set requires
+	// a staged concept with ZERO rows under it, which is the concept nobody ever
+	// wrote to; there is no data whose visibility this can decide.
+	e.clearConceptDataStaging(conceptId)
 	outcome.Outcome = DemoteOutcomeRemoved
 	if e.Component != nil && e.Logger != nil {
 		e.Logger.Info("authored concept removed from the live concept registry (no rows were ever written under it)",
@@ -331,9 +353,9 @@ func (e *MemQLEngine) removeConceptFromLiveRegistry(registry *memoryNodes.Memory
 	return nil
 }
 
-// resolvePromotedConceptId maps what a demote CALLER has -- the declaration name
-// out of the bundle source, or off a persisted construct row -- onto the
-// canonical id the registry and the promotion marker are keyed by.
+// resolvePromotedConceptId maps what a CALLER has -- the declaration name out of
+// the bundle source, or off a persisted construct row -- onto the canonical id
+// the registry and the promotion marker are keyed by.
 //
 // The two identities are the whole difficulty. `concept trainedWidget` in a
 // source registers as `v1:trainingns:trainedWidget`; a demote arrives naming
@@ -349,9 +371,21 @@ func (e *MemQLEngine) removeConceptFromLiveRegistry(registry *memoryNodes.Memory
 // whose ids end in the same segment -- is refused naming both ids, rather than
 // picking one. Demoting the wrong concept is the single most expensive mistake
 // this path can make.
-func (e *MemQLEngine) resolvePromotedConceptId(name string) (string, error) {
+//
+// op NAMES THE OPERATION IN THE REFUSAL, and it is a parameter rather than the
+// hard-coded "demote" it was because a second caller arrived: the staged-data
+// transition (memql#3986, staged_transition.go) needs exactly this resolution
+// AND exactly this gate -- the "not an author-promoted construct" refusal is what
+// makes a sealed CORE concept unreachable from either path, since a core concept
+// carries no promotion marker. Telling an operator who ran a train that their
+// "demote" was refused would send them to look at the wrong operation.
+//
+// The refusal's WORDING after the operation name is unchanged and must stay so:
+// the cross-node demote subscriber treats "not an author-promoted construct" as
+// its idempotency signal.
+func (e *MemQLEngine) resolvePromotedConceptId(op, name string) (string, error) {
 	notPromoted := fmt.Errorf(
-		"authoring: demote concept %q: not an author-promoted construct (demotion cannot remove a core construct)", name)
+		"authoring: %s concept %q: not an author-promoted construct (demotion cannot remove a core construct)", op, name)
 
 	if _, promoted := e.promotedAuthored.Load("concept:" + name); promoted {
 		return name, nil
@@ -377,8 +411,8 @@ func (e *MemQLEngine) resolvePromotedConceptId(name string) (string, error) {
 		return matches[0], nil
 	default:
 		return "", fmt.Errorf(
-			"authoring: demote concept %q: the name is ambiguous -- %s are both promoted and both end in %q; demote by canonical id",
-			name, strings.Join(matches, " and "), name)
+			"authoring: %s concept %q: the name is ambiguous -- %s are both promoted and both end in %q; address it by canonical id",
+			op, name, strings.Join(matches, " and "), name)
 	}
 }
 

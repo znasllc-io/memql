@@ -121,9 +121,30 @@ const authoringPromotePattern = "authoring.promote.#"
 // so the propagation path and the restart path share one re-registration code
 // path. Idempotent + core-first.
 func (e *MemQLEngine) rehydratePromotedBundleNow(ctx context.Context, store promoteRehydrateStore, owner, bundleId string) (RehydrateResult, error) {
-	return rehydratePromotedBundleWithStore(ctx, store, owner, bundleId,
+	res, err := rehydratePromotedBundleWithStore(ctx, store, owner, bundleId,
 		withRehydratePromote(e.recompileAndPromoteRow),
 		withRehydrateStage(e.recompileAndStageRow))
+	if err != nil {
+		return res, err
+	}
+	// RE-REGISTERING A CONCEPT SAYS NOTHING ABOUT WHETHER ITS ROWS ARE VISIBLE
+	// (epic memql#3974, task memql#3986). The walk above registers what the rows
+	// name and stops there, so before this a peer receiving a staged promote came
+	// away with the concept resolvable and its staged rows believed live -- and a
+	// peer receiving the staged -> live TRANSITION came away with nothing at all,
+	// because the transition writes no new construct and re-registering the same
+	// one is a no-op.
+	//
+	// The staged-data state is a field on the construct rows this bundle's
+	// broadcast is already about, so it is resolved here, on the same event,
+	// rather than through a topic of its own. It runs AFTER the re-registration
+	// for the boot replay's reason: "registered, and its rows withheld" has no
+	// meaning for a concept nothing can resolve.
+	//
+	// Deliberately not part of RehydrateResult and deliberately not able to fail
+	// this call -- see resolveConceptDataStagingAfterBroadcast.
+	e.resolveConceptDataStagingAfterBroadcast(ctx, store, owner, bundleId)
+	return res, nil
 }
 
 // rehydratePromotedBundleWithStore is the store-driven core for a single-bundle
