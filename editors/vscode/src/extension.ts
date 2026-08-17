@@ -52,6 +52,11 @@ import {
   type SignInTokenStore,
 } from './auth/signin.js';
 import {
+  OfferMemory,
+  decidePasskeyOffer,
+  passkeyOfferMessage,
+} from './auth/passkeyOffer.js';
+import {
   ClusterCredentialStore,
   persistSignIn,
   reconcileClusterCredentials,
@@ -157,6 +162,7 @@ import { SITE_CONCEPT, portalTarget } from './clusters/portalUrl.js';
 import { isCatalogUri } from './constructs/catalogTarget.js';
 import { roleVisibility } from './deploy/actions.js';
 import { DeployControlClient } from '@znasllc-io/memql-sdk-core/deploy';
+import { IdentityAdminClient } from '@znasllc-io/memql-sdk-core/identityadmin';
 import { DataTreeProvider } from './views/dataTree.js';
 import { ConstructsTreeProvider, type ConstructNode } from './views/constructsTree.js';
 import { ReadonlyMarker } from './constructs/readonlyDecorations.js';
@@ -171,6 +177,11 @@ import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/
 
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
+
+// Which clusters the operator has declined passkey enrolment on (memql#3902).
+// Module-scoped so it lives exactly as long as the extension host does: a
+// decline is for this session, not a preference written to disk. See OfferMemory.
+const passkeyOfferMemory = new OfferMemory();
 
 // activate wires the extension's TWO INDEPENDENT SURFACES: the language client
 // and the runtime surface (Clusters / Concepts / Runs).
@@ -2618,9 +2629,93 @@ async function signInToCluster(
         }
       }
       void window.showInformationMessage(`memQL: signed in to "${cluster.name}".`);
+      // The second half of memql#3885's three-state table (memql#3902). Runs
+      // here and nowhere earlier because passkey state is only knowable to an
+      // AUTHENTICATED caller -- there is deliberately no unauthenticated way to
+      // ask whether an account has one, since that is an enumeration oracle.
+      //
+      // NOT AWAITED. The sign-in is finished and reported; whether the operator
+      // also wants a passkey is a separate conversation, and holding the
+      // progress notification open across it would make an optional offer look
+      // like a step of the sign-in.
+      void offerPasskeyEnrolment(cluster);
       return true;
     }
   );
+}
+
+/**
+ * Offer to enrol a passkey when the operator who just signed in has none.
+ *
+ * AN OFFER, NOT A GATE, and silent whenever it cannot tell (see
+ * decidePasskeyOffer): this fires on the heels of a sign-in the operator asked
+ * for and got, so a diagnostic here reports a problem they do not have.
+ *
+ * The link is MINTED, never replayed. It is single-use and short-lived, so a
+ * stored one would fail in a way that reads as the feature being broken -- the
+ * same reasoning `memql.clusters.takeOwnership` records for the pre-sign-in
+ * path, which mints through the capability script because at that point there
+ * is no credential to mint with. Here there is one, so it goes over the
+ * authenticated stream instead.
+ */
+async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
+  const conns = connections;
+  const query = conns?.query;
+  const dispatcher = conns?.dispatcher;
+  if (query === undefined || dispatcher === undefined) return;
+
+  const decision = await decidePasskeyOffer(
+    cluster.name,
+    {
+      whoAmI: async () => {
+        const access = await query.getMyAccess();
+        return access === null
+          ? null
+          : { userId: access.userId, clusterRole: String(access.clusterRole ?? '') };
+      },
+      // No userId argument BY DESIGN: the row set comes from
+      // userId==actor.userId, so this cannot be pointed at a stranger's
+      // authenticators (memql#3178).
+      countOwnPasskeys: async () => {
+        const result = await query.executeNamed('passkeysForSelf', 'passkeysForSelf()');
+        return result.rows.length;
+      },
+    },
+    passkeyOfferMemory
+  );
+  if (!decision.offer) return;
+
+  const choice = await window.showInformationMessage(
+    passkeyOfferMessage(displayLabel(cluster)),
+    'Enrol a passkey',
+    'Not now'
+  );
+  if (choice !== 'Enrol a passkey') {
+    // Remembered for the session on an explicit decline AND on a dismissal:
+    // closing the notification is an answer, and re-asking on the next connect
+    // is how a prompt teaches people to dismiss it without reading.
+    passkeyOfferMemory.decline(cluster.name);
+    return;
+  }
+
+  try {
+    const admin = new IdentityAdminClient(dispatcher);
+    const minted = await window.withProgress(
+      { location: ProgressLocation.Notification, title: 'memQL: minting an enrolment link...' },
+      () => admin.issueEnrolmentLink(decision.userId)
+    );
+    // asExternalUri first, for the reason every other opener in this file does
+    // it: under Remote-SSH or Codespaces the extension host is a different
+    // machine from the operator's browser.
+    const external = (await env.asExternalUri(Uri.parse(minted.url))).toString(true);
+    await env.openExternal(Uri.parse(external));
+  } catch (err) {
+    // LOUD here, unlike the decision above: the operator asked for this one, so
+    // silence would leave them waiting for a browser tab that is not coming.
+    void window.showErrorMessage(
+      `memQL: could not mint an enrolment link -- ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
 }
 
 // promptForCluster collects a cluster with native inputs rather than a webview:
