@@ -315,6 +315,26 @@ export function frontDoorFor(domain: string): FrontDoor | undefined {
 }
 
 /**
+ * WHERE THIS INSTALL'S CERTIFICATE AUTHORITY LIVES -- derived once, for every
+ * step that needs it (memql#4069).
+ *
+ * Two steps run install.mkcert. `localCA` creates the CA; `clusterUp` reaches
+ * it again two scripts down (k3d.up -> seed-secrets.sh -> install.mkcert) to
+ * issue the front-door certificate. They have to name the SAME root, and a
+ * second copy of `path.join(HOME, DEFAULT_CAROOT_DIR)` is not the same thing as
+ * one derivation used twice: the copies agree until someone edits one.
+ *
+ * The bug this closes was the version with no second copy at all -- clusterUp
+ * passed nothing, so the nested call fell back to `mkcert -CAROOT`. On CI that
+ * root is empty and the install died at clusterUp; on a developer machine an
+ * earlier `make up` had left a CA there, so it succeeded and the cluster was
+ * fronted by a certificate from a CA the installer neither created nor removes.
+ */
+function pinnedCaroot(): string {
+  return path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR);
+}
+
+/**
  * The install plan: the run-time half of each step's params.
  *
  * Nothing here is invented for a step the graph already pins. seedBootstrap
@@ -392,6 +412,23 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // up for something else, which is memql#3593 exactly: a domain that
           // resolves and then answers as the wrong site.
           domain: opts.domain,
+          // THE SAME CA `localCA` CREATED, not whichever one mkcert finds
+          // (memql#4069). k3d.up seeds the cluster's front-door TLS secret, and
+          // it does that by calling install.mkcert again through
+          // seed-secrets.sh. That nested call passed no CAROOT, so it resolved
+          // `mkcert -CAROOT` -- a root this install never wrote to.
+          //
+          // The graph already declares the dependency on localCA; this is, once
+          // more, the value finally flowing along it. Failing on a clean machine
+          // was the cheap half: three CI legs died at clusterUp naming a
+          // prerequisite localCA had satisfied one step earlier. The expensive
+          // half is silent -- on a machine that has run `make up`, the default
+          // root already holds a CA, so the certificate is issued from it and
+          // the cluster is fronted by an authority the installer neither created
+          // nor removes on uninstall (removal is gated on the `.memql-created`
+          // marker beside the key material). Nothing warns; the install reports
+          // success.
+          caroot: pinnedCaroot(),
         });
         break;
       case "hostsBlock":
@@ -410,7 +447,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         // And issued for the DOMAIN THAT WAS TYPED (memql#3590): a certificate
         // covering someone else's front door is an untrusted front door.
         params = present({
-          caroot: path.join(process.env.HOME ?? "", DEFAULT_CAROOT_DIR),
+          caroot: pinnedCaroot(),
           hostnames: frontDoor?.certNames.join(","),
         });
         break;
