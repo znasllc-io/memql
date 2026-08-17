@@ -34,7 +34,7 @@ import {
   type RunItemStatus,
   type RunKind,
 } from "./deployments.js";
-import { finishRun, mintRunId, recordRunItem, startRun } from "./runLog.js";
+import { finishRun, finishRunSettled, mintRunId, recordRunItem, startRun } from "./runLog.js";
 
 export interface RunRecorderOptions {
   /** Where the records live -- runLog.defaultRunsDir() in production. */
@@ -219,9 +219,16 @@ export class RunRecorder {
    */
   async finish(status?: Run["status"]): Promise<Run> {
     const finishedAt = this.clock();
-    const resolved = status ?? settleRunStatus(this.run);
     await this.guard(async () => {
-      this.run = await finishRun(this.dir, this.run, resolved, finishedAt);
+      // The DERIVED status is settled inside the write lock, over the merged
+      // items, rather than over `this.run` -- which can be missing a step that
+      // a concurrent `recordRunItem` landed on disk, and settled to "running"
+      // for a run whose every item had finished. An explicitly supplied status
+      // is a fact the caller owns and is written as given.
+      this.run =
+        status === undefined
+          ? await finishRunSettled(this.dir, this.run, finishedAt, settleRunStatus)
+          : await finishRun(this.dir, this.run, status, finishedAt);
     });
     return this.run;
   }

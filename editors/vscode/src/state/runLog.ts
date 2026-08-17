@@ -356,7 +356,12 @@ export async function writeRun(dir: string, run: Run): Promise<void> {
  * authority on the header, which only it can change. The same split the
  * receipt's own read-modify-write makes.
  */
-async function mutateRun(dir: string, run: Run, mutate: (items: RunItem[]) => RunItem[]): Promise<Run> {
+async function mutateRun(
+  dir: string,
+  run: Run,
+  mutate: (items: RunItem[]) => RunItem[],
+  settle?: (merged: Run) => Run,
+): Promise<Run> {
   const file = runFilePath(dir, run.id);
   const next = await serialise(file, async () => {
     await fs.mkdir(dir, { recursive: true });
@@ -372,8 +377,12 @@ async function mutateRun(dir: string, run: Run, mutate: (items: RunItem[]) => Ru
       onDisk = null;
     }
     const merged: Run = { ...run, items: mutate(onDisk?.items ?? run.items) };
-    await writeAtomic(file, serializeRun(merged));
-    return merged;
+    // Anything DERIVED from the items has to be derived HERE, inside the lock,
+    // from the merged set that is about to be written -- never from the
+    // caller's snapshot. See finishRunSettled for what that cost.
+    const settled = settle === undefined ? merged : settle(merged);
+    await writeAtomic(file, serializeRun(settled));
+    return settled;
   });
   await pruneRunsDir(dir);
   return next;
@@ -448,6 +457,49 @@ export async function finishRun(
   finishedAt: string,
 ): Promise<Run> {
   return mutateRun(dir, { ...run, status, finishedAt }, (items) => items);
+}
+
+/**
+ * Closes a run at a status DERIVED from the items actually being written.
+ *
+ * THE DISTINCTION THAT MATTERS, and the bug it fixes. `finishRun` above takes a
+ * status the caller already knows -- an abort, a run that could not start. This
+ * one is for the ordinary ending, where the status is a function of what the
+ * steps did, and the only correct place to evaluate that function is inside the
+ * lock, over the MERGED items.
+ *
+ * Deriving it from the caller's in-memory run instead is wrong in a way that
+ * leaves no error behind. Steps are recorded concurrently: each `recordRunItem`
+ * starts from the recorder's `run` field and assigns the merged result back, so
+ * two overlapping records lose one another's update in memory while the FILE
+ * converges correctly -- that is the whole reason `mutateRun` re-reads and
+ * merges. A close that settled over that snapshot saw an item still `pending`,
+ * concluded "running", and then wrote it alongside the on-disk items, every one
+ * of them terminal.
+ *
+ * The record produced is self-contradictory and permanent: `finishedAt` set,
+ * seven items `ok`, `status: "running"`. Nothing re-opens it -- the activation
+ * sweep only closes runs with no verdict, and this one has a timestamp -- and
+ * `runsToPrune` never prunes a non-terminal run, so it renders a spinner beside
+ * a finished install for as long as the file exists. The operator sees work
+ * that succeeded reported as still in flight, and no amount of reloading helps.
+ *
+ * Taking `settle` as a parameter rather than importing the rule keeps the
+ * meaning of a status ("any failure fails the run") in the model beside the
+ * other status rules, and keeps this module about persistence.
+ */
+export async function finishRunSettled(
+  dir: string,
+  run: Run,
+  finishedAt: string,
+  settle: (merged: Run) => RunStatus,
+): Promise<Run> {
+  return mutateRun(
+    dir,
+    { ...run, finishedAt },
+    (items) => items,
+    (merged) => ({ ...merged, status: settle(merged) }),
+  );
 }
 
 /**
