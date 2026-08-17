@@ -147,6 +147,33 @@ func renderKustomization(t *testing.T, dir string) string {
 		}
 		return string(out)
 	}
+	// IN CI, A MISSING RENDERER IS A FAILURE, NOT A SKIP.
+	//
+	// A developer without kubectl should get a skip: this gate is not what they
+	// are working on, and the siblings under deploy/k8s/overlays/local behave
+	// the same way. But CI is the only place this gate's verdict is load-bearing,
+	// and the whole reason it exists is that #4063 reached a release with every
+	// other gate green -- so "silently verified nothing" is precisely the state
+	// it must not be allowed to reach there.
+	//
+	// The trigger is GITHUB'S OWN `CI` VARIABLE rather than a memQL knob. A knob
+	// only this test honours is one more thing to remember to set, and the
+	// failure mode of forgetting is exactly the silence being closed here.
+	// GitHub Actions sets CI=true on every runner, so this needs no workflow
+	// change and cannot drift out of sync with one.
+	//
+	// It is reachable: `./scripts/...` is in ci.yml's gate-inputs selector, and
+	// the hosted ubuntu image ships kubectl today. That is the point -- if a
+	// future runner image drops it, this goes RED and names the fix, instead of
+	// the gate quietly retiring itself and nobody noticing until the next
+	// operand-shaped bug ships.
+	if os.Getenv("CI") != "" {
+		t.Fatal("neither kustomize nor kubectl is on PATH, and this is CI. " +
+			"A skip here would verify NOTHING -- and verifying nothing while reporting green " +
+			"is the failure this gate was written to stop (memql#4063 shipped with every other " +
+			"gate green). Install a renderer in the job that runs ./scripts/... -- the hosted " +
+			"ubuntu image has shipped kubectl, so if this fires the image changed.")
+	}
 	t.Skip("neither kustomize nor kubectl is installed; cannot render the overlay " +
 		"(this machine keeps them in ~/.memql/bin -- put it on PATH). A skip here has verified NOTHING.")
 	return ""
