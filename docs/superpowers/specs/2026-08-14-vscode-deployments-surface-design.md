@@ -356,7 +356,7 @@ No form at any point.
 
 When connected, read the portal's `systemOwned` `v1:platform:site` row and open
 its hostname. Otherwise compose `https://api.<domain>/portal/`, which is where
-`component/genesis/domain.go:72` puts it today.
+`component/envregistry/domain.go:72` puts it today.
 
 Reading the row rather than hard-coding the path is what keeps this correct
 when memql#3711 moves the portal to its own origin.

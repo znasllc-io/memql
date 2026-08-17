@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/envregistry"
 )
 
 // fakeInjectStore is an in-memory injectStore. `present` seeds the
@@ -26,7 +26,7 @@ func (f *fakeInjectStore) valuePresent(_ context.Context, _, name string) (bool,
 	return f.present[name], nil
 }
 
-func (f *fakeInjectStore) insertVariableDefault(_ context.Context, c genesis.InjectableDefault) error {
+func (f *fakeInjectStore) insertVariableDefault(_ context.Context, c envregistry.InjectableDefault) error {
 	if f.insertErr != nil {
 		return f.insertErr
 	}
@@ -34,7 +34,7 @@ func (f *fakeInjectStore) insertVariableDefault(_ context.Context, c genesis.Inj
 	return nil
 }
 
-func (f *fakeInjectStore) insertSecretDefault(_ context.Context, c genesis.InjectableDefault) error {
+func (f *fakeInjectStore) insertSecretDefault(_ context.Context, c envregistry.InjectableDefault) error {
 	if f.insertErr != nil {
 		return f.insertErr
 	}
@@ -42,13 +42,13 @@ func (f *fakeInjectStore) insertSecretDefault(_ context.Context, c genesis.Injec
 	return nil
 }
 
-func testManifest() *genesis.Manifest {
-	return &genesis.Manifest{
-		Secrets: []genesis.ManifestEntry{
+func testManifest() *envregistry.Manifest {
+	return &envregistry.Manifest{
+		Secrets: []envregistry.ManifestEntry{
 			{Name: "SECRET_DEFAULT", Scope: "global", Kind: "integration", Default: "s-default"},
 			{Name: "SECRET_NO_DEFAULT", Scope: "global"}, // skipped: no default
 		},
-		Variables: []genesis.ManifestEntry{
+		Variables: []envregistry.ManifestEntry{
 			{Name: "VAR_DEFAULT", Scope: "global", Default: "v-default"},
 			{Name: "NODE_VAR", Scope: "node", Default: "n"}, // skipped: node scope
 		},
@@ -185,8 +185,8 @@ func TestInjectConceptName(t *testing.T) {
 		{false, "partition", "v1:platform:partitionVariable"},
 	}
 	for _, c := range cases {
-		got := injectConceptName(genesis.InjectableDefault{
-			Entry:    genesis.ManifestEntry{Scope: c.scope},
+		got := injectConceptName(envregistry.InjectableDefault{
+			Entry:    envregistry.ManifestEntry{Scope: c.scope},
 			IsSecret: c.isSecret,
 		})
 		if got != c.want {
@@ -198,15 +198,15 @@ func TestInjectConceptName(t *testing.T) {
 // TestInjectMutationIds confirms the injected row id matches the
 // operator seed tool's id formula so the two paths converge on one row.
 func TestInjectMutationIds(t *testing.T) {
-	gv := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "MEMQL_EMAIL_FROM_NAME", Scope: "global"}}
+	gv := envregistry.InjectableDefault{Entry: envregistry.ManifestEntry{Name: "MEMQL_EMAIL_FROM_NAME", Scope: "global"}}
 	if mut, id := variableMutationFor(gv); mut != "setGlobalVariable" || id != "var-global-memql-email-from-name" {
 		t.Errorf("global var: got (%q,%q), want (setGlobalVariable, var-global-memql-email-from-name)", mut, id)
 	}
-	pv := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "FOO_BAR", Scope: "partition"}}
+	pv := envregistry.InjectableDefault{Entry: envregistry.ManifestEntry{Name: "FOO_BAR", Scope: "partition"}}
 	if mut, id := variableMutationFor(pv); mut != "setPartitionVariable" || id != "var-foo-bar" {
 		t.Errorf("partition var: got (%q,%q), want (setPartitionVariable, var-foo-bar)", mut, id)
 	}
-	gs := genesis.InjectableDefault{Entry: genesis.ManifestEntry{Name: "SOME_SECRET", Scope: "global"}, IsSecret: true}
+	gs := envregistry.InjectableDefault{Entry: envregistry.ManifestEntry{Name: "SOME_SECRET", Scope: "global"}, IsSecret: true}
 	if mut, id := secretMutationFor(gs); mut != "setGlobalSecret" || id != "secret-global-some-secret" {
 		t.Errorf("global secret: got (%q,%q), want (setGlobalSecret, secret-global-some-secret)", mut, id)
 	}

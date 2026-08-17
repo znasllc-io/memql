@@ -6,7 +6,7 @@
 # OAuth registered clients were all pinned here. Every one of them is the same
 # fact -- the cluster's domain -- spelled a different way, and they are derived
 # now from the single MEMQL_DOMAIN key of the memql-domain ConfigMap by
-# component/genesis/domain.go at boot.
+# component/envregistry/domain.go at boot.
 #
 # That matters because missing one was not a visible failure. memql#3315 was a
 # single forgotten CORS origin and it presented as sign-in dying with an empty

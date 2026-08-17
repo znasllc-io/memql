@@ -366,7 +366,7 @@ domain-shaped setting is derived at boot — so no file under `deploy/` names a
 domain except the Ingress hosts, which carry a committed default.
 
 The domain reaches both sides through ONE derivation: `cmd/frontdoorhosts`
-composes the Ingress hosts from it, and `component/genesis/domain.go` composes
+composes the Ingress hosts from it, and `component/envregistry/domain.go` composes
 the issuer, CORS origins, redirect URIs and MCP public URL from it, both through
 `component/frontdoor`. Two copies of that rule would be two copies that can
 disagree, and the disagreement is an issuer nothing is served at — which fails

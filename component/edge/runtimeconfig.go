@@ -32,7 +32,7 @@ const runtimeConfigPath = "/runtime-config.json"
 type RuntimeConfig struct {
 	// IdentityURL is the browser-reachable identity-service origin (the OIDC
 	// issuer). Read from the same env every verifier-consuming node already
-	// carries -- component/genesis/domain.go's ApplyDomainDerivations sets
+	// carries -- component/envregistry/domain.go's ApplyDomainDerivations sets
 	// it once at boot -- never re-derived here.
 	IdentityURL string `json:"identityUrl"`
 	// IdentityAPIBaseURL is the base a client uses for the identity JSON
@@ -103,7 +103,7 @@ func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool)
 }
 
 // registeredClient mirrors ONE entry of MEMQL_IDENTITY_REGISTERED_CLIENTS --
-// the same wire shape component/genesis/domain.go serializes. A read-only,
+// the same wire shape component/envregistry/domain.go serializes. A read-only,
 // minimal reflection of that shape: this package never writes the variable
 // and never imports the much heavier component/identity Config it belongs
 // to, which the edge has no other reason to depend on.
@@ -121,7 +121,7 @@ type registeredClient struct {
 // the requesting site's own hostname against the cluster's already-derived
 // client registry -- never from a name this package recognises. Site #1's
 // row happens to resolve to its seeded client id here only because
-// component/genesis/domain.go registered that site's own callback URI under
+// component/envregistry/domain.go registered that site's own callback URI under
 // that same id; a customer site's row resolves through the exact same
 // lookup once ITS hostname is registered the same way, and an unregistered
 // site's row resolves to "" -- not a special case, the same code path
@@ -148,7 +148,7 @@ func clientIDForHostname(hostname string, registeredClientsJSON string) string {
 }
 
 // identityURLFromEnv resolves the browser-reachable identity-service origin
-// from the same env component/genesis/domain.go's ApplyDomainDerivations
+// from the same env component/envregistry/domain.go's ApplyDomainDerivations
 // already sets at boot. Shared by runtimeConfigForSite (identityUrl /
 // identityApiBaseUrl above) and csp.go's identityOriginFromEnv (connect-src)
 // so the document and the policy can never name two different identity

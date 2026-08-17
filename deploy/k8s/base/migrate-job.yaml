@@ -45,7 +45,26 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
+            # NO MEMQL_GENESIS_AUTOLOAD HERE, and the absence is deliberate
+            # (memql#3961). This Job is the one workload in the tree that NO
+            # overlay can patch: the kustomization deliberately keeps one-shot
+            # Jobs out of the resource graph ("Jobs don't belong in the
+            # kustomization -- they're one-shot"), and scripts/k3d/bringup.sh
+            # applies this file directly with `kubectl apply -f -`. So the
+            # local overlay's patches/genesis-autoload-off.yaml -- which turns
+            # the flag off for all ten node Deployments -- has no way to reach
+            # it, and carrying `true` here meant every local bring-up on a
+            # machine with no hand-authored ~/.memql/genesis.znas died at step
+            # 5/6 with "migrate Job did not complete", on an otherwise entirely
+            # healthy cluster whose schema the identity boot-migration had
+            # already applied.
+            #
+            # Nothing is lost in the cloud either. This container reads the
+            # database DSN and the master key, and both are declared keys on
+            # memql-secrets in their own right rather than envelope passengers
+            # (deploy/external-secrets/externalsecret-memql.yaml). Autoload is
+            # set-if-absent, so for this workload it was only ever a no-op that
+            # could fail.
             - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             # Stamp a distinct, attributable application_name on this one-shot
             # Job's Postgres backend so a pg_stat_activity triage can never

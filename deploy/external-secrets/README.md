@@ -15,15 +15,42 @@ secret material. **External Secrets Operator** reconciles `memql-secrets` from
    Secret/memql-secrets (memql ns)  ── envFrom ──►  every pod
 ```
 
-## The genesis-envelope boundary (unchanged)
+## What ESO delivers
 
-ESO owns the **k8s Secret** that carries `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY`, `MEMQL_GENESIS_B64`
-(the sealed A2 envelope), and `MEMQL_DATABASE_DSN`. It does **not** change
-the genesis envelope itself: the A2 envelope stays the **app-internal**
-shared-secret bootstrap (`component/secret/`, `component/genesis/`), autoloaded
-at boot. To rotate a shared secret you still re-seal the envelope (DEPLOYMENT_STRATEGY
-§4) and push the new blob to **Key Vault** — ESO then propagates it to the
-cluster Secret on the next refresh, replacing the manual `kubectl patch` step.
+ESO owns the **k8s Secret** every pod `envFrom`s. Two `ExternalSecret` objects
+contribute to it, both `creationPolicy: Merge`, and consumers cannot tell —
+a node reads `memql-secrets` and neither knows nor cares how many objects
+assembled it.
+
+| Object | Keys |
+|---|---|
+| `memql-secrets` | `MEMQL_MASTER_KEY`, `MEMQL_OPERATOR_KEY`, `MEMQL_GENESIS_B64` (the sealed A2 envelope), `MEMQL_DATABASE_DSN` |
+| `memql-secrets-identity` (memql#3960) | `MEMQL_IDENTITY_SIGNING_KEY_B64`, `MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT`, `MEMQL_NODE_BOOTSTRAP_TOKEN`, `MEMORY_NODES_DATABASE_DIRECT_DSN` |
+
+**The split is load-bearing, not tidiness.** ESO fails a whole `ExternalSecret`
+when any single `remoteRef` cannot be resolved. Adding the second group's keys
+to the first object would mean one missing Key Vault entry stalls
+`MEMQL_MASTER_KEY` and the DSN along with them; split, a missing entry stalls
+only the keys that are actually missing.
+
+**Why the second group exists at all.** `MEMQL_IDENTITY_SIGNING_KEY_B64` must
+be byte-identical on every identity replica or JWKS diverges and roughly half
+of all authentication fails (memql#3400). It was reaching the cloud *only* by
+riding inside the sealed envelope, or by an operator hand-adding a key outside
+ESO — which `creationPolicy: Merge` permits and nothing records. Declaring it
+here is what makes deleting the envelope safe.
+
+## The genesis-envelope boundary
+
+ESO does **not** change the genesis envelope itself: the A2 envelope is the
+**app-internal** shared-secret bootstrap (`component/secret/`,
+`component/genesis/`), autoloaded at boot. To rotate a shared secret you re-seal
+the envelope and push the new blob to **Key Vault** — ESO then propagates it to
+the cluster Secret on the next refresh, replacing the manual `kubectl patch`
+step.
+
+> The envelope is being removed entirely (epic memql#3958): once `MEMQL_GENESIS_B64`
+> is gone, config has one delivery path and this section goes with it.
 
 ## Files
 

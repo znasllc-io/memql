@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsRecoveryKey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -2294,4 +2294,90 @@ query enrolmentToken enrolmentTokenByHash {
   }
   filter  tokenHash==args.tokenHash
   shape   enrolmentTokenFull
+}
+
+// ---- queries/v1/identity/recoveryKeyByHash.memql ----
+
+// recoveryKeyByHash
+// =================
+//
+// The redeem path's one lookup: hash the presented `Authorization: Recovery`
+// bearer and find the row (memql#3964).
+//
+// IT DECLARES NO @rowAuthz TIER, AND THAT IS THE SAME ARGUMENT
+// enrolmentTokenByHash RECORDS, not an oversight. This read runs PRE-ACTOR by
+// construction: the key IS the credential, and it exists precisely so a person
+// holding no other credential can obtain one. At lookup time `actor.userId` is
+// the empty string, so ANY owner tier would compare the row's userId against
+// "" , match nothing, and turn every redemption into a silent "invalid" -- a
+// break-glass credential that never works, failing in the one direction nobody
+// tests.
+//
+// It is registered in component/memql/rowauthz_undeclared_gate_test.go naming
+// this issue, so the position is stated rather than merely occupied.
+//
+// The compensating controls are the ones the enrolment token uses: the lookup
+// is by a 256-bit digest, the per-IP passkeyLimiter guards both ceremony
+// halves (memql#3971), and every outcome is audited.
+//
+// NOTE IT DOES NOT FILTER isActiveRecord. A redeemed row is deactivated, and
+// resolving it anyway is what lets the redeem path answer "this key was
+// already used" instead of "invalid" -- the same four-state honesty
+// enrolment.State provides, and the same reason a replay is distinguishable
+// from a scanner in the audit trail.
+
+/// Recovery-key lookup by keyHash for the `Authorization: Recovery` redeem path. Returns the row in
+/// EVERY state (claimed / redeemed / deactivated included) so the caller can report which one.
+///
+/// Why actor.userId scoping is not the fix: this read runs BEFORE any actor exists. The key IS the
+/// credential, and it exists precisely so an owner holding no other credential can obtain one, so
+/// at lookup time actor.userId is the empty string. A self-scoped filter would compare the row's
+/// userId against "", match nothing, and turn every redemption into a silent "invalid" -- a
+/// break-glass credential that never works, failing in the one direction nobody tests. Same
+/// circularity enrolmentTokenByHash records; registered in rowauthz_undeclared_gate_test.go.
+@unbounded("recovery key by unique keyHash -- a credential lookup bounded to a single row")
+@serverOnly
+query identity recoveryKeyByHash {
+  args {
+    keyHash  string!
+  }
+  filter  identityIsRecoveryKey && credentials.keyHash==args.keyHash
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/activeRecoveryKeys.memql ----
+
+// activeRecoveryKeys
+// ==================
+//
+// Backs the standing mint INVARIANT (memql#3965): "if a cluster owner exists
+// and there is no active recovery key, mint one". This is the read half of
+// that check, taken under the advisory lock so two identity replicas cannot
+// both conclude "none exists" and both mint.
+//
+// Pre-actor for the same reason its sibling is: the invariant is evaluated
+// during identity boot, in the same first-run window as activeUsers and
+// signInIdentitiesForUser.
+//
+// `isActiveRecord` is the whole predicate that makes this an existence check
+// rather than a history query: a redeemed key is deactivated, so it does not
+// count, which is exactly what causes the successor to be minted.
+
+/// Every active recovery key. Backs the first-boot mint invariant -- a non-empty result means the
+/// cluster already has a live break-glass route and nothing should be minted.
+///
+/// Why actor.userId scoping is not the fix: the sole caller is the identity node's own boot-time
+/// invariant, running under the system actor in the same first-run window as activeUsers and
+/// signInIdentitiesForUser, so actor.userId is empty and a self-scoped filter would report every
+/// cluster as having no recovery key -- and the invariant would mint a duplicate on every boot.
+/// The userId it does filter on is passed by the caller, which resolved the cluster owner itself.
+@serverOnly
+query identity activeRecoveryKeys {
+  args {
+    userId  string!
+  }
+  filter   identityIsRecoveryKey && userId==args.userId && isActiveRecord
+  sort     "row.createdAt", "desc"
+  paginate 50
+  shape    identityFull
 }

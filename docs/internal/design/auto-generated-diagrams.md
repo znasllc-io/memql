@@ -170,7 +170,7 @@ Genesis seals secrets + variables into an encrypted envelope. For local developm
 - At process start, every binary (memql, memql-cockpit) calls `genesis.ApplyLocalOverride(".")` which applies each line via `os.Setenv` BEFORE the config component reads its values.
 - `MEMQL_MASTER_KEY` is the one exception: it's the trust anchor for the envelope itself; letting `.env` override it would mean a stray file silently switches which envelope is decrypted. Everything else is fair game.
 
-The implementation lives in `component/genesis/localenv.go`; `ReservedFromOverride` is the allow-list of names the override skips.
+The implementation lives in `component/envregistry/localenv.go`; `ReservedFromOverride` is the allow-list of names the override skips.
 
 ---
 
@@ -230,4 +230,4 @@ func (h *Handler) Login(ctx context.Context, user, password string) (err error) 
 - Cockpit side: [`memql-cockpit/cli/CLAUDE.md`](../../../memql-cockpit/cli/CLAUDE.md) (X:Architecture key binding)
 - Concept surfaces: `dsl/observability/concepts.memql`, `dsl/cluster/concepts.memql` (`v1:cluster:nodeType.codeReference`)
 - Hypertable: `component/database/memory-nodes/migrations/20260515000000_observability_hypertable.up.sql`
-- Genesis local override: `component/genesis/localenv.go`
+- Genesis local override: `component/envregistry/localenv.go`

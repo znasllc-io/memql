@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/genesis"
 )
 
@@ -31,7 +32,7 @@ func applySubcommandEnv(prefix string) error {
 		fmt.Fprintf(os.Stderr, "%s: genesis envelope auto-loaded (source=%s applied=%d skipped=%d)\n",
 			prefix, res.Source, len(res.Applied), len(res.Skipped))
 	}
-	if _, err := genesis.ApplyLocalOverride("."); err != nil {
+	if _, err := envregistry.ApplyLocalOverride("."); err != nil {
 		fmt.Fprintf(os.Stderr, "%s: local .env override failed: %v\n", prefix, err)
 	}
 	// Epic 7.3 (memql#2106): bridge any pre-7.3 LEGACY env names the envelope /
@@ -40,10 +41,10 @@ func applySubcommandEnv(prefix string) error {
 	// subcommand fail-fast'd on the required MEMQL_OPENAI_API_KEY on a cluster
 	// whose sealed envelope still carries the legacy OPENAI_API_KEY. nil logger:
 	// this path logs to stderr via Fprintf, not slog, so the bridge runs silently.
-	genesis.ApplyLegacyEnvAliases(nil)
+	envregistry.ApplyLegacyEnvAliases(nil)
 	// Mirrors main(): `memql env` must report the environment a node actually
 	// boots with, derivations included (memql#3593). nil logger -- this path
 	// writes to stderr via Fprintf, not slog.
-	genesis.ApplyDomainDerivations(nil)
+	envregistry.ApplyDomainDerivations(nil)
 	return nil
 }

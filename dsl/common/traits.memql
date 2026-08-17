@@ -370,6 +370,30 @@ trait identityIsPasskey {
   return identityType=="passkey"
 }
 
+// ---- identityIsRecoveryKey ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "recovery_key" -- the owner break-glass
+// credential (memql#3964). One active row per cluster, bound to one
+// owner, redeemed exactly once to register a passkey for an owner who
+// has lost every sign-in route.
+//
+// IT SITS BESIDE identityIsMagicLink AND identityIsPasskey AND IS
+// DELIBERATELY NOT USED WHERE THEY ARE. Those two are the sign-in
+// ROUTES: signInIdentitiesForUser matches them, and the break-glass
+// gate refuses redemption whenever that query returns a row. A
+// recovery key is not a route -- it is what you reach for when you
+// have none -- so adding it to that query's filter would make the key
+// permanently refuse itself. That is the single likeliest way to
+// break this feature while every individual edit looks reasonable, so
+// it is written down in three places: here, on the concept's
+// identityType description, and on the query itself.
+
+/// Matches v1:identity:identity rows with identityType=='recovery_key'.
+trait identityIsRecoveryKey {
+  return identityType=="recovery_key"
+}
+
 // ---- isDeletionScheduled ----
 //
 // Matches records that carry a non-empty deletionScheduledAt field.

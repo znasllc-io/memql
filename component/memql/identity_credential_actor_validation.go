@@ -39,6 +39,23 @@ const conceptIdentityIdentity = "v1:identity:identity"
 // material. The legitimate writer is the register/finish handler, which
 // stamps the system credential actor after verifying an attestation it
 // challenged.
+//
+// `recovery_key` is the sharpest entry on this list and arrived with the
+// variant itself (memql#3964). It is the badge argument with the stakes
+// raised: an authenticated caller able to craft
+// `mutation createRecoveryKeyIdentity(userId: <owner>, keyHash: hash(minted-by-me))`
+// would hold a valid break-glass credential for the CLUSTER OWNER, and the
+// redeem ceremony it feeds registers a passkey as that owner -- a complete
+// account takeover with no further step. It would also look entirely
+// legitimate afterwards: the row is indistinguishable from one the mint
+// invariant produced, and redeeming it is exactly the flow the credential
+// exists for.
+//
+// The break-glass gate on redemption (memql#3967 -- refuse while the owner
+// still has a usable sign-in route) does not cover this case, and it is worth
+// saying so rather than assuming defence in depth. An actor who can write
+// credential rows can also deactivate the owner's magic-link and passkey
+// identities, which is precisely the state that OPENS that gate.
 var machineCredentialIdentityTypes = map[string]bool{
 	"badge":             true,
 	"worker_token":      true,
@@ -46,6 +63,7 @@ var machineCredentialIdentityTypes = map[string]bool{
 	"voice_agent_token": true,
 	"service_account":   true,
 	"passkey":           true,
+	"recovery_key":      true,
 }
 
 // validateIdentityCredentialActorScope rejects a NON-system actor

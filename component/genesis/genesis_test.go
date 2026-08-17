@@ -1,6 +1,7 @@
 package genesis
 
 import (
+	"github.com/znasllc-io/memql/component/envregistry"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,7 +107,7 @@ func TestLoadManifest_Embedded(t *testing.T) {
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
 
-	m, err := LoadManifest("")
+	m, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -137,12 +138,12 @@ func TestEmbeddedManifest_SigningKeyOptional(t *testing.T) {
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
 
-	m, err := LoadManifest("")
+	m, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
 
-	var entry *ManifestEntry
+	var entry *envregistry.ManifestEntry
 	for i := range m.Secrets {
 		if m.Secrets[i].Name == "MEMQL_IDENTITY_SIGNING_KEY_B64" {
 			entry = &m.Secrets[i]
@@ -191,7 +192,7 @@ variables:
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	m, err := LoadManifest(path)
+	m, err := envregistry.LoadManifest(path)
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -460,7 +461,7 @@ func TestManifestEntry_RequiredFor(t *testing.T) {
 		{[]string{"identity", "bff"}, "bff", true},
 	}
 	for _, c := range cases {
-		got := ManifestEntry{Required: c.req}.RequiredFor(c.nodeType)
+		got := envregistry.ManifestEntry{Required: c.req}.RequiredFor(c.nodeType)
 		if got != c.want {
 			t.Errorf("RequiredFor(%v, %q) = %v, want %v", c.req, c.nodeType, got, c.want)
 		}
@@ -470,7 +471,7 @@ func TestManifestEntry_RequiredFor(t *testing.T) {
 func TestManifest_AllEntries_AndLookup(t *testing.T) {
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
-	m, err := LoadManifest("")
+	m, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -497,7 +498,7 @@ func TestManifest_AllEntries_AndLookup(t *testing.T) {
 func TestRegistryIntegrity(t *testing.T) {
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
-	m, err := LoadManifest("")
+	m, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -523,7 +524,7 @@ func TestRegistryIntegrity(t *testing.T) {
 func TestManifest_RequiredForNodeType(t *testing.T) {
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
-	m, err := LoadManifest("")
+	m, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
@@ -541,7 +542,7 @@ func TestManifest_RequiredForNodeType(t *testing.T) {
 }
 
 // TestEmbeddedManifestInSync guards against the embedded snapshot
-// (component/genesis/manifest.yaml) drifting from the authored registry
+// (component/envregistry/manifest.yaml) drifting from the authored registry
 // (scripts/secrets/manifest.yaml). Regenerate with
 // scripts/secrets/sync-embedded-manifest.sh after editing the authored file.
 func TestEmbeddedManifestInSync(t *testing.T) {
@@ -549,17 +550,17 @@ func TestEmbeddedManifestInSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read authored manifest: %v", err)
 	}
-	src, err := LoadManifestFromBytes(authored, "authored")
+	src, err := envregistry.LoadManifestFromBytes(authored, "authored")
 	if err != nil {
 		t.Fatalf("parse authored: %v", err)
 	}
 	t.Setenv("MEMQL_MANIFEST_PATH", "")
 	t.Setenv("MEMQL_REPO", "")
-	embedded, err := LoadManifest("")
+	embedded, err := envregistry.LoadManifest("")
 	if err != nil {
 		t.Fatalf("load embedded: %v", err)
 	}
-	names := func(m *Manifest) []string {
+	names := func(m *envregistry.Manifest) []string {
 		var out []string
 		for _, e := range m.AllEntries() {
 			out = append(out, e.Name)

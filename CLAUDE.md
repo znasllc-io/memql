@@ -160,7 +160,7 @@ memQL/
 
 **Operations:**
 - [Environment variables](docs/public/operate/env-vars.md) -- bootstrap envelope vs. concept-stored config; how to add / rotate / override
-- [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/genesis/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
+- [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/envregistry/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
 
 **Core concepts:**
 - [Architecture](docs/public/concepts/architecture.md)
@@ -614,7 +614,7 @@ resilient-mesh class of bugs. What makes it parity rather than a lookalike:
   `make up DOMAIN=lab.example.com` serves any domain the operator brings,
   seeded as the single `MEMQL_DOMAIN` key of the `memql-domain` ConfigMap
   that every node derives its issuer, CORS origins and OAuth redirect URIs
-  from at boot (`component/genesis/domain.go`), plus two
+  from at boot (`component/envregistry/domain.go`), plus two
   `kustomize.patches` on the ArgoCD Application for the Ingress hostnames
   when it differs from the committed default. **No file under `deploy/`
   names a domain.**
@@ -737,7 +737,7 @@ the product has one factor left.)
 
 `cmd/frontdoorhosts` writes
 `deploy/k8s/overlays/cloud/front-door.generated.yaml`, and
-`component/genesis/domain.go` composes the node's own issuer / CORS origins /
+`component/envregistry/domain.go` composes the node's own issuer / CORS origins /
 redirect URIs from the SAME rule through `component/frontdoor`. One derivation,
 two consumers: a second copy of the rule would disagree, and the disagreement is
 an issuer nothing is served at, which presents as "sign-in is broken" with every

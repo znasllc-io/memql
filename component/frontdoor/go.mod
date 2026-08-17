@@ -2,7 +2,7 @@
 // rationale: docs/ci-design.md, section D3.
 //
 // A leaf: the host algebra is pure string work over the standard library, and
-// it must stay that way. component/genesis derives its issuer and CORS origins
+// it must stay that way. component/envregistry derives its issuer and CORS origins
 // from the same rule the Ingress generator writes hosts with (memql#3767), so
 // anything this module grew a dependency on would be dragged into every module
 // that derives a domain.

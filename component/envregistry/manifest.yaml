@@ -26,7 +26,7 @@
 # this manifest and prompts; `make secrets-seal` seals them under
 # MEMQL_MASTER_KEY.
 #
-# Entry fields (component/genesis/manifest.go ManifestEntry):
+# Entry fields (component/envregistry/manifest.go ManifestEntry):
 #   name        -- the env var name.
 #   component   -- owning subsystem (engine, identity, ai, voice, ...).
 #   scope       -- node:      per-pod/process env from k8s/shell, NOT sealed
@@ -207,7 +207,7 @@ secrets:
   # --- legacy aliases (deprecated; resolved via ApplyLegacyEnvAliases) ---
   # Epic 7.3 / memql#2106. Registered so reverse-drift passes and the old
   # names are documented as deprecated. The boot-time shim in
-  # component/genesis/legacyalias.go copies a legacy value onto its new
+  # component/envregistry/legacyalias.go copies a legacy value onto its new
   # MEMQL_ name (set-if-absent). Remove once operators have migrated.
 
   - name: MEMQL_SI_ANTHROPIC_API_KEY
@@ -606,7 +606,7 @@ variables:
   # exactly why they could not be registered: TestOwnedVarsArePrefixed refuses a
   # non-prefixed entry that is not a legacy alias, so registering them reddened
   # that gate while omitting them reddened the drift gate. Renaming them (old
-  # names kept working as legacy aliases, component/genesis/legacyalias.go)
+  # names kept working as legacy aliases, component/envregistry/legacyalias.go)
   # dissolves the contradiction rather than exempting either side of it.
 
   - name: MEMQL_MEMORY_ENGINE_MAX_RESULTS
@@ -1617,7 +1617,7 @@ variables:
     component: platform
     scope: node
     optional: true
-    description: "The cluster's domain. Every domain-shaped identity value (base URL, expected issuer, bootstrap domain, discovery endpoint, CORS origins, OAuth redirect URIs) is derived from it set-if-absent at boot by component/genesis/domain.go; an explicitly configured value always wins. Delivered to local pods as the single key of the memql-domain ConfigMap (memql#3593)."
+    description: "The cluster's domain. Every domain-shaped identity value (base URL, expected issuer, bootstrap domain, discovery endpoint, CORS origins, OAuth redirect URIs) is derived from it set-if-absent at boot by component/envregistry/domain.go; an explicitly configured value always wins. Delivered to local pods as the single key of the memql-domain ConfigMap (memql#3593)."
 
   - name: MEMQL_IDENTITY_ACCESS_REQUEST_NOTIFY_EMAILS
     component: identity
@@ -2654,7 +2654,7 @@ variables:
   # --- legacy aliases (deprecated; resolved via ApplyLegacyEnvAliases) ---
   # Epic 7.3 / memql#2106. Registered so reverse-drift passes and the old
   # names are documented as deprecated. The boot-time shim in
-  # component/genesis/legacyalias.go copies a legacy value onto its new
+  # component/envregistry/legacyalias.go copies a legacy value onto its new
   # MEMQL_ name (set-if-absent). Remove once operators have migrated.
 
   - name: MEMQL_SI_OPENAI_PROJECT_ID

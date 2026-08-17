@@ -171,6 +171,28 @@ var credentialReadInventory = map[string]struct {
 			"there is no actor in existence -- the credential id is the only thing in the " +
 			"message that names a row."},
 
+	"recoveryKeyByHash": {classPreActor,
+		"Owner break-glass recovery-key lookup (memql#3964, @serverOnly). " +
+			"identity/recoverykey/store.go. Pre-actor in the same sense as patIdentityByKeyHash: " +
+			"the presented mql_rec_ key IS the credential, and this read is what resolves it, so " +
+			"no AccessContext exists yet and actor.userId is \"\". A tier here would not leak, it " +
+			"would BRICK the feature -- every redemption would report \"invalid\", " +
+			"indistinguishable from a typo, and a break-glass credential that has quietly never " +
+			"worked is discovered on the one day it is needed. Compensating controls are the ones " +
+			"the enrolment token uses: a 256-bit digest as the only lookup key, the per-IP " +
+			"passkeyLimiter on both ceremony halves, and an audit row on every outcome."},
+
+	// --- BOOT INVARIANT: system actor at start-up, resolves nobody. ---
+	"activeRecoveryKeys": {classBootPredicate,
+		"filter identityIsRecoveryKey && userId==args.userId && isActiveRecord (memql#3965, " +
+			"@serverOnly). Backs the mint invariant -- \"if a cluster owner exists and there is no " +
+			"active recovery key, mint one\" -- evaluated at identity boot under the system actor, " +
+			"in the same actorless window as activeUsers and signInIdentitiesForUser. NOT " +
+			"classPreActor for the same reason signInIdentitiesForUser is not: it resolves nobody " +
+			"and authenticates nothing, it answers a yes/no question about a named user. The " +
+			"userId is caller-supplied and @serverOnly is what keeps that off the wire, where it " +
+			"would let a client ask whether somebody else's account has a break-glass route."},
+
 	// --- SELF-SCOPED: already narrowed, blocked only by the concept. ---
 	"patIdentitiesForSelf": {classSelfScoped,
 		"filter userId==actor.userId (memql#3178). Strictly narrower than the " +
@@ -351,6 +373,10 @@ func TestCredentialPreActorReadsAreNamed(t *testing.T) {
 		"nodeTokenIdentityByBinding",
 		"passkeyByCredentialId",
 		"patIdentityByKeyHash",
+		// memql#3964. The sixth member, and the one whose failure mode is the
+		// least visible: the other five brick a login somebody retries, this
+		// one bricks the recovery of a locked-out cluster owner.
+		"recoveryKeyByHash",
 		"workerTokenByKeyHash",
 	}
 

@@ -31,7 +31,7 @@ express that. This design says what it becomes.
 | `localhost:5432` | Postgres | k3d serviceLB | `svc/postgres` | Debug |
 
 Cloud and downstream overlays add `app.<domain>` (a product SPA — not defined in
-this repo, but `component/genesis/domain.go` already derives its CORS origin and
+this repo, but `component/envregistry/domain.go` already derives its CORS origin and
 OAuth redirect URI), `livekit.<domain>`, and `mcp.<domain>` on :8090.
 
 ### 1.2 What actually multiplies
@@ -457,7 +457,7 @@ be regenerated when the node type lands.
 - The `7880` mapping — it points at a Deployment the local overlay deletes.
 - The three path rules on the cockpit host, replaced per §5.
 - `cockpit.<domain>` itself. No alias, no redirect (CLAUDE.md rule 2).
-- The static client list in `component/genesis/domain.go:61`. OAuth clients come
+- The static client list in `component/envregistry/domain.go:61`. OAuth clients come
   from `v1:identity:oauthClient` — the dynamic-registration store that shipped
   in #1573/#1586 and that `ClientAllowsRedirectURI` already consults alongside
   the static list. Dogfooding here is mostly deletion.
@@ -470,7 +470,7 @@ be regenerated when the node type lands.
 
 These move together or a developer's machine breaks mid-flight. Ordered:
 
-1. `component/genesis/domain.go` — derive `api.` (and the portal's own origin),
+1. `component/envregistry/domain.go` — derive `api.` (and the portal's own origin),
    keep deriving nothing else that names a host.
 2. `deploy/k8s/overlays/local` — the five rules; delete the two extra host ports.
 3. `scripts/lib/localtls.sh` — unchanged (already a wildcard), verified.

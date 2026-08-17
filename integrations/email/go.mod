@@ -45,9 +45,9 @@ require (
 	github.com/znasllc-io/memql/component/bus v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/bus/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/config v0.0.0 // indirect
+	github.com/znasllc-io/memql/component/envregistry v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/events v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/frontdoor v0.0.0 // indirect
-	github.com/znasllc-io/memql/component/genesis v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/grpc/gen v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/harness v0.0.0 // indirect
 	github.com/znasllc-io/memql/component/language v0.0.0 // indirect
@@ -88,7 +88,7 @@ replace github.com/znasllc-io/memql/component/database => ../../component/databa
 
 replace github.com/znasllc-io/memql/component/events => ../../component/events
 
-replace github.com/znasllc-io/memql/component/genesis => ../../component/genesis
+replace github.com/znasllc-io/memql/component/envregistry => ../../component/envregistry
 
 replace github.com/znasllc-io/memql/component/grpc/gen => ../../component/grpc/gen
 

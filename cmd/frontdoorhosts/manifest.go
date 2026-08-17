@@ -78,7 +78,7 @@ func header(domain string) string {
 		"# THE DOMAIN IS A COMMITTED DEFAULT, NOT A CONSTANT (memql#3593). No file under deploy/\n" +
 		"# names a real domain: the domain is a value on the memql-domain ConfigMap, which every\n" +
 		"# node derives its issuer, CORS origins and redirect URIs from at boot\n" +
-		"# (component/genesis/domain.go, threaded through component/frontdoor so the hosts below\n" +
+		"# (component/envregistry/domain.go, threaded through component/frontdoor so the hosts below\n" +
 		"# and the hosts the nodes believe in cannot disagree). An Ingress host is a Kubernetes\n" +
 		"# API object, so it has to be in the render; an install overrides these through the\n" +
 		"# ArgoCD Application's spec.source.kustomize.patches. `.localhost` is unroutable, so a\n" +

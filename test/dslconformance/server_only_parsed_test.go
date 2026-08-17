@@ -289,6 +289,39 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		// TestSetCORSOriginsStampsInternalOrigin, so the gate cannot break the
 		// surface it protects).
 		{Path: "identity/mutations.memql", Name: "setOAuthClientCORSOrigins"}: true,
+
+		// memql#3964 -- the owner recovery key, the whole break-glass surface.
+		//
+		// These five share ONE argument, and it is the argument the enrolment
+		// token already records: caller-scoping here is not merely unhelpful,
+		// it is circular. The recovery key exists precisely for an owner who
+		// has lost every sign-in route, so the actor is EMPTY at the moment
+		// these run. `userId==actor.userId` would compare the row's owner
+		// against "" and match nothing -- which does not present as an error,
+		// it presents as a break-glass credential that reports "invalid"
+		// forever. That failure is invisible until the one day it matters,
+		// which is the worst possible time to discover it.
+		//
+		// @serverOnly rather than only an undeclared tier, because there is a
+		// second thing to say: no CLIENT has any business on this surface at
+		// all. Barring it from the generated SDK means a browser cannot
+		// enumerate recovery keys, cannot deactivate one, and cannot present a
+		// keyHash it guessed. The redeem path reaches recoveryKeyByHash from
+		// identity's own HTTP handler, after the per-IP limiter, having hashed
+		// a bearer the caller proved possession of; the row id every write
+		// below uses is resolved by that handler from the verified hash and is
+		// never taken from a caller argument.
+		//
+		// activeRecoveryKeys and claimRecoveryKey have no human actor for a
+		// different reason again: their callers are the identity node's own
+		// boot-time mint invariant (memql#3965) and `memql recovery-key claim`
+		// running inside the pod, both under the system actor.
+		{Path: "identity/queries.memql", Name: "recoveryKeyByHash"}:           true,
+		{Path: "identity/queries.memql", Name: "activeRecoveryKeys"}:          true,
+		{Path: "identity/mutations.memql", Name: "createRecoveryKeyIdentity"}: true,
+		{Path: "identity/mutations.memql", Name: "claimRecoveryKey"}:          true,
+		{Path: "identity/mutations.memql", Name: "redeemRecoveryKey"}:         true,
+		{Path: "identity/mutations.memql", Name: "deactivateRecoveryKey"}:     true,
 	}
 	for k := range want {
 		if !set[k] {

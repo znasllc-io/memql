@@ -92,7 +92,7 @@ appears in a URL.**
 answered by `component/edge/runtimeconfig.go` for EVERY hosted site alike,
 not a portal branch: the cluster-wide fields (`identityUrl`,
 `identityApiBaseUrl`, `authEnabled`) come from the same domain-derived env
-`component/genesis/domain.go` sets at boot, and the one per-site field
+`component/envregistry/domain.go` sets at boot, and the one per-site field
 (`oauthClientId`) is looked up by matching the requesting site's own hostname
 against `MEMQL_IDENTITY_REGISTERED_CLIENTS` -- an unregistered site still
 gets a 200, just with an empty client id.
@@ -189,7 +189,7 @@ row's `bundleRef` (`dsl/platform/seeds.memql`), not an env var --
 `component/portal`, which used to read them. The identity-facing values
 those four variables used to configure are no longer configuration at all:
 they are DERIVED, per request, by `component/edge/runtimeconfig.go` from the
-same domain-wide env `component/genesis/domain.go` already sets
+same domain-wide env `component/envregistry/domain.go` already sets
 (`identityUrl` / `identityApiBaseUrl` / `authEnabled`) plus a lookup of the
 requesting site's own hostname against `MEMQL_IDENTITY_REGISTERED_CLIENTS`
 (`oauthClientId`). There is nothing left for an operator to set on the edge
@@ -214,7 +214,7 @@ Two entries an operator **must** add, or sign-in fails with a 400 at
    The callback path is the portal's own origin's `/auth/callback` -- the
    portal is site #1, served at its own hostname rather than a `/portal/`
    sub-path of another node's origin, so the redirect URI carries no mount
-   prefix. `component/genesis/domain.go` registers this automatically from
+   prefix. `component/envregistry/domain.go` registers this automatically from
    `MEMQL_DOMAIN`; a hand-rolled `MEMQL_IDENTITY_REGISTERED_CLIENTS` (a
    non-standard domain, a bespoke install) must match it byte for byte.
 

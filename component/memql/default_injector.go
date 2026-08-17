@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -15,7 +15,7 @@ import (
 // deploy (Epic 7 / memql#2109).
 //
 // The env-var registry (scripts/secrets/manifest.yaml, loaded via
-// component/genesis) carries a `default` on a handful of entries -- the
+// component/envregistry) carries a `default` on a handful of entries -- the
 // value memQL should run with when an operator never set one (e.g.
 // MEMQL_EMAIL_FROM_NAME="memQL"). This injector walks the manifest, selects
 // the entries that BOTH carry a default AND are concept-stored
@@ -46,7 +46,7 @@ import (
 // No new secret store is invented.
 type DefaultInjector struct {
 	store    injectStore
-	manifest *genesis.Manifest
+	manifest *envregistry.Manifest
 	logr     *slog.Logger
 }
 
@@ -62,14 +62,14 @@ type injectStore interface {
 	valuePresent(ctx context.Context, conceptName, name string) (bool, error)
 	// insertVariableDefault / insertSecretDefault persist the entry's
 	// default as a plaintext variable / encrypted secret row.
-	insertVariableDefault(ctx context.Context, c genesis.InjectableDefault) error
-	insertSecretDefault(ctx context.Context, c genesis.InjectableDefault) error
+	insertVariableDefault(ctx context.Context, c envregistry.InjectableDefault) error
+	insertSecretDefault(ctx context.Context, c envregistry.InjectableDefault) error
 }
 
 // NewDefaultInjector wires an injector to the engine and the loaded
 // registry manifest. Returns nil if either is nil -- the injector has
 // nothing to do without a write path or a registry to read.
-func NewDefaultInjector(engine *MemQLEngine, manifest *genesis.Manifest) *DefaultInjector {
+func NewDefaultInjector(engine *MemQLEngine, manifest *envregistry.Manifest) *DefaultInjector {
 	if engine == nil || manifest == nil {
 		return nil
 	}
@@ -83,7 +83,7 @@ func NewDefaultInjector(engine *MemQLEngine, manifest *genesis.Manifest) *Defaul
 // newDefaultInjectorWithStore builds an injector over an arbitrary
 // store. Used by tests to inject a fake; production callers use
 // NewDefaultInjector.
-func newDefaultInjectorWithStore(store injectStore, manifest *genesis.Manifest, logr *slog.Logger) *DefaultInjector {
+func newDefaultInjectorWithStore(store injectStore, manifest *envregistry.Manifest, logr *slog.Logger) *DefaultInjector {
 	return &DefaultInjector{store: store, manifest: manifest, logr: logr}
 }
 
@@ -157,7 +157,7 @@ func (di *DefaultInjector) InjectDefaults(ctx context.Context) (InjectionReport,
 // (true, nil) when it inserted the default, (false, nil) when the value
 // already existed (NO-OP), and (false, err) on an error -- in which case
 // nothing is written (conservative: leave whatever is there alone).
-func (di *DefaultInjector) injectOne(ctx context.Context, c genesis.InjectableDefault) (bool, error) {
+func (di *DefaultInjector) injectOne(ctx context.Context, c envregistry.InjectableDefault) (bool, error) {
 	conceptName := injectConceptName(c)
 
 	present, err := di.store.valuePresent(ctx, conceptName, c.Entry.Name)
@@ -209,7 +209,7 @@ func (s *engineInjectStore) valuePresent(ctx context.Context, conceptName, name 
 
 // insertVariableDefault writes the default as a plaintext
 // global/partition variable row via the canonical set* mutation.
-func (s *engineInjectStore) insertVariableDefault(ctx context.Context, c genesis.InjectableDefault) error {
+func (s *engineInjectStore) insertVariableDefault(ctx context.Context, c envregistry.InjectableDefault) error {
 	mutationName, id := variableMutationFor(c)
 	args := map[string]any{
 		"id":          id,
@@ -227,7 +227,7 @@ func (s *engineInjectStore) insertVariableDefault(ctx context.Context, c genesis
 // the same path an operator-seeded secret takes -- so no new secret
 // store is introduced. Requires MEMQL_MASTER_KEY (Encrypt errors
 // otherwise, which surfaces as a per-entry failure, not an insert).
-func (s *engineInjectStore) insertSecretDefault(ctx context.Context, c genesis.InjectableDefault) error {
+func (s *engineInjectStore) insertSecretDefault(ctx context.Context, c envregistry.InjectableDefault) error {
 	ct, fp, err := secret.Encrypt(c.Entry.Default)
 	if err != nil {
 		return fmt.Errorf("encrypt default: %w", err)
@@ -276,7 +276,7 @@ const (
 // injectConceptName resolves which v1:platform:* concept a candidate's
 // existence check + write target. Secret vs variable picks the family;
 // scope (global vs partition) picks the variant.
-func injectConceptName(c genesis.InjectableDefault) string {
+func injectConceptName(c envregistry.InjectableDefault) string {
 	if c.IsSecret {
 		if c.Entry.Scope == "partition" {
 			return "v1:platform:partitionSecret"
@@ -295,14 +295,14 @@ func injectConceptName(c genesis.InjectableDefault) string {
 // identical means the operator seed path and this injector converge on
 // the SAME row rather than producing two -- so an operator who later
 // runs `make secrets-seed` overwrites the injected default in place.
-func variableMutationFor(c genesis.InjectableDefault) (mutation string, id string) {
+func variableMutationFor(c envregistry.InjectableDefault) (mutation string, id string) {
 	if c.Entry.Scope == "global" {
 		return "setGlobalVariable", "var-global-" + slugifyInjectName(c.Entry.Name)
 	}
 	return "setPartitionVariable", "var-" + slugifyInjectName(c.Entry.Name)
 }
 
-func secretMutationFor(c genesis.InjectableDefault) (mutation string, id string) {
+func secretMutationFor(c envregistry.InjectableDefault) (mutation string, id string) {
 	if c.Entry.Scope == "global" {
 		return "setGlobalSecret", "secret-global-" + slugifyInjectName(c.Entry.Name)
 	}

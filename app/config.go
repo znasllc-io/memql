@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/znasllc-io/memql/component/config"
-	"github.com/znasllc-io/memql/component/genesis"
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/identity/verifier"
 	"github.com/znasllc-io/memql/component/metrics"
 	"github.com/znasllc-io/memql/component/server"
@@ -222,14 +222,14 @@ func (a *App) configAndAuth() {
 // supplied override path is broken, which is logged and skipped rather
 // than blocking boot on the validator itself.
 func (a *App) validateRequiredEnv() {
-	manifest, err := genesis.LoadManifest("")
+	manifest, err := envregistry.LoadManifest("")
 	if err != nil {
 		a.Logger.Warn("boot var validation skipped: could not load secrets registry", "error", err)
 		return
 	}
-	nodeType := genesis.ResolveNodeType()
-	missing := genesis.MissingRequired(nodeType, manifest, os.LookupEnv)
-	if msg := genesis.MissingRequiredError(nodeType, missing); msg != "" {
+	nodeType := envregistry.ResolveNodeType()
+	missing := envregistry.MissingRequired(nodeType, manifest, os.LookupEnv)
+	if msg := envregistry.MissingRequiredError(nodeType, missing); msg != "" {
 		a.fatal(msg, "node_type", nodeType, "missing", missing)
 	}
 }

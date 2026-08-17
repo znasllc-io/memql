@@ -402,7 +402,7 @@ patches:
   # separate copy of one fact -- and identity's own base URL, bootstrap domain,
   # discovery endpoint, CORS origins and OAuth redirect URIs were pinned again
   # in its patch. They are all DERIVED now, from the single MEMQL_DOMAIN key of
-  # the memql-domain ConfigMap, by component/genesis/domain.go at boot. This
+  # the memql-domain ConfigMap, by component/envregistry/domain.go at boot. This
   # overlay states the RELATIONSHIP and never the value, which is why no file
   # under deploy/ names a domain any more except the two Ingress hosts.
   #

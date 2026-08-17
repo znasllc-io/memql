@@ -11,6 +11,48 @@ title = "memQL gitleaks config"
 useDefault = true
 
 # -----------------------------------------------------------------------------
+# Rules
+# -----------------------------------------------------------------------------
+# The upstream default set knows nothing about memQL's own credentials, so
+# until memql#3962 this file's `useDefault = true` and zero custom rules meant
+# every bearer token this platform mints was undetectable by its own secret
+# scanner. A leaked PAT, worker token or recovery key would have passed the
+# push lane, the PR lane and the weekly schedule alike.
+
+[[rules]]
+id          = "memql-credential-token"
+description = "memQL credential bearer token (mql_<kind>_<43 base64url chars>)"
+# MATCH THE SHAPE, NOT THE CONSTANTS. Every memQL credential minter draws 32
+# CSPRNG bytes and encodes them with base64.RawURLEncoding, which is 43
+# characters with no padding -- so one shape covers all of them, including the
+# ones no constant declares. `mql_node_` is an inline literal at
+# component/identity/http/node_bootstrap.go:501 and `mql_va_` an inline literal
+# at subcommand_voice_agent_token.go:277; an enumeration of the declared
+# `TokenPrefix` constants would have missed both.
+#
+# THE QUANTIFIER IS {2,5} AND THE LOWER BOUND IS LOAD-BEARING. The eight
+# `mql_<letters>_` prefixes in the tree are, by length: va (2), acc/dvc/enr/pat/
+# rec/wkr (3), acct/node (4). A {3,5} bound reads as safe and silently omits
+# `mql_va_`, the voice-agent auxiliary bearer -- a real credential, hashed
+# SHA-256 at rest exactly like the others. Do not tighten this bound.
+#
+# `mql_acc_` is the one non-credential in that list: a three-character negative
+# fixture (`mql_acc_abc`) in component/identity/accounttoken/token_test.go. It
+# cannot match, because it has 3 body characters where the rule demands 43.
+# That is the whole reason the body length is pinned rather than open-ended:
+# the prefix alone is a namespace, and only the prefix PLUS a 43-character
+# body is a secret.
+#
+# Verified at authoring time (memql#3962): zero matches in the working tree,
+# and `git log -G` over HEAD's whole ancestry finds no commit that ever added
+# or removed a matching line -- so this rule needs no allowlist entry, and the
+# full-history lane stays green. If a future fixture trips it, read the
+# allowlist header below before touching the fixture.
+regex    = '''mql_[a-z]{2,5}_[A-Za-z0-9_-]{43}'''
+keywords = ["mql_"]
+tags     = ["memql", "credential", "bearer-token"]
+
+# -----------------------------------------------------------------------------
 # Allowlists
 # -----------------------------------------------------------------------------
 # Two shapes of entry live here, and picking the wrong one is the mistake this

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/znasllc-io/memql/component/envregistry"
 	"github.com/znasllc-io/memql/component/secret"
 )
 
@@ -114,7 +115,7 @@ type SealOptions struct {
 	// Manifest is the floor used for strict-superset validation. When
 	// non-nil, Seal returns an error if any manifest entry is missing
 	// from Entries; pass nil to skip validation (advanced callers).
-	Manifest *Manifest
+	Manifest *envregistry.Manifest
 
 	// OutPath is where the sealed genesis envelope is written.
 	OutPath string
@@ -380,7 +381,7 @@ func openBytes(data []byte, label string) ([]EnvEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("genesis: open %s: %w", label, err)
 	}
-	return parseEnv(strings.NewReader(string(plaintext)), label)
+	return envregistry.ParseEnvReader(strings.NewReader(string(plaintext)), label)
 }
 
 // LookupEnv returns the value of an entry by name, with ok=false

@@ -73,7 +73,7 @@ func TestFrontDoorPathsAreNotStale(t *testing.T) {
 // A host the generator would now produce and the file does not carry -- because
 // somebody changed the role set or the composition rule and did not regenerate
 // -- is a cluster reachable at a name nothing serves, while the engine derives
-// and advertises the new one (component/genesis/domain.go composes it through
+// and advertises the new one (component/envregistry/domain.go composes it through
 // the same package).
 //
 // `--check` writes nothing, so a failing CI run leaves the tree untouched.

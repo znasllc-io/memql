@@ -152,8 +152,8 @@ reviewed."
 **One task because it is one atomic change.** Every step below must land in a single PR: the domain derivation, the Ingress hosts, the hosts file, the probe defaults, the k3d port table and the VS Code extension all name the same thing, and a partial landing leaves a developer's machine unable to reach its own cluster.
 
 **Files:**
-- Modify: `component/genesis/domain.go:55-74`
-- Modify: `component/genesis/domain_test.go` (add cases)
+- Modify: `component/envregistry/domain.go:55-74`
+- Modify: `component/envregistry/domain_test.go` (add cases)
 - Rename: `deploy/k8s/overlays/local/cockpit-front-door.yaml` → `api-front-door.yaml`
 - Modify: `deploy/k8s/overlays/local/kustomization.yaml:53-57`
 - Delete: `deploy/k8s/overlays/local/identity-external.yaml`
@@ -169,7 +169,7 @@ reviewed."
 
 - [ ] **Step 1: Write the failing derivation test**
 
-Append to `component/genesis/domain_test.go`:
+Append to `component/envregistry/domain_test.go`:
 
 ```go
 // D4: the API edge is named for its role. Six consumers dial this endpoint --
@@ -200,7 +200,7 @@ Expected: FAIL — `MEMQL_DISCOVERY_GRPC_ENDPOINT = "cockpit.memql.localhost:443
 
 - [ ] **Step 3: Change the derivation**
 
-In `component/genesis/domain.go`, replace the `cockpit` variable and its uses:
+In `component/envregistry/domain.go`, replace the `cockpit` variable and its uses:
 
 ```go
 	identity := "https://identity." + d
@@ -422,7 +422,7 @@ Expected: two Ingresses, all probes pass, `/healthz` answers. This cannot be run
 - [ ] **Step 14: Commit**
 
 ```bash
-git add component/genesis/domain.go component/genesis/domain_test.go \
+git add component/envregistry/domain.go component/envregistry/domain_test.go \
         deploy/k8s/overlays/local/api-front-door.yaml \
         deploy/k8s/overlays/local/kustomization.yaml \
         scripts/k3d/up.sh scripts/install/hosts-entries.sh \
