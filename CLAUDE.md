@@ -36,8 +36,8 @@ make up SERVERS=2 AGENTS=1
 make scale N=2
 make status   # verify unique MEMQL_NODE_IDs + shared identity keyset
 
-# Run tests
-go test ./...
+# Run tests -- `make test`, NOT `go test ./...` (see Testing below)
+make test
 
 # Build binary (BFF is the default, no tag needed)
 go build -o bin/memql .
@@ -232,8 +232,58 @@ go build -tags planner -o bin/memql-planner .
 ```
 
 ### Testing
+
 ```bash
-go test ./...
+make test                      # the whole tree
+MEMQL_REQUIRE_DB=1 make test   # ...and make a missing database a FAILURE, not a skip
+```
+
+**Do NOT verify with `go test ./...`. It does not run the engine** (memql#4032).
+This is a multi-module workspace -- `go.work` lists 49 modules -- and a relative
+pattern resolves inside whichever module owns the directory it is rooted at.
+Measured:
+
+| Command | Packages | `component/memql`? |
+|---|---:|---|
+| `go test ./...` | 64 | **no** |
+| `go test ./component/...` | 3 | **no** |
+| `make test` (`go test github.com/znasllc-io/memql/...`) | 208 | yes |
+
+So `./...` misses `component/memql`, `component/database` and `component/language`
+-- the engine, the executor, the row-authz gates and the DSL loader. `make test`
+names the MODULE PATH instead, which is prefix-matched across every workspace
+module; `Makefile`'s `ALL_PKGS` has been that since memql#3165, and CI subtracts
+from the same selector via `scripts/ci/db-gated-packages.sh`.
+
+The failure mode is silent and confidence-INCREASING: edit `component/memql`,
+run the bare command, see `ok` across 64 packages, and report the change
+verified. Nothing in the output hints that the package you edited was never
+compiled into a test binary. `TestDocumentedTestCommandCoversTheEngine`
+(`claude_md_test_command_test.go`) fails the build if this section ever
+documents a command that misses the engine again.
+
+**A second, independent way to get a meaningless green: db-gated tests skip.**
+Every Postgres-backed case self-skips when it cannot reach a database, and
+`MEMQL_REQUIRE_DB=1` is what turns that skip into a failure
+(`component/database/dbtest`). Two traps:
+
+- **An open port 5432 is not evidence of a database.** With the k3d cluster up,
+  `k3d-memql-serverlb` publishes 5432, so the connection is accepted and then
+  EOFs -- so it does not fail fast, it fails silently as "unreachable" and every
+  db-gated case skips.
+- The default DSN is `postgres://memql:memql_dev@localhost:5432/memql`. Point
+  `MEMQL_DATABASE_DSN` at a real Postgres+TimescaleDB+pgvector, or run the
+  db-gated trees the way CI does.
+
+The trees carrying most of the engine's real coverage are owned by the
+`db-tests` lane rather than by `make test`. The set changes (it has grown twice
+since memql#4032 was filed), so ask the script rather than trusting a count
+written down here:
+
+```bash
+# what CI actually runs (the canonical set lives in the script)
+scripts/ci/db-gated-packages.sh --trees
+MEMQL_REQUIRE_DB=1 MEMQL_DATABASE_DSN=... go test -count=1 ./component/memql/...
 ```
 
 ### Image builds: LOCAL Docker for dev, BUILD SERVER for deploys (HARD RULE)
@@ -340,7 +390,7 @@ frontend coordination.
 | **Multi-node scaling** | `make scale N=2` | 2 replicas per Deployment for cross-node mesh testing, in namespace `memql` (`NAMESPACE=` overrides) |
 | **Re-seed secrets** | `make secrets` | Idempotent; use after cluster recreate |
 | **Tear down cluster** | `make down` | Delete k3d cluster (PURGE=1 also removes kubeconfig) |
-| **Run tests** | `go test ./...` | Go tests |
+| **Run tests** | `make test` | Go tests. NOT `go test ./...` -- that misses the engine's own modules (memql#4032); see Testing |
 | **Build binary** | `go build -o bin/memql .` | Build BFF binary (default) |
 | **Connect DB** | `psql postgres://memql:memql_dev@localhost:5432/memql` | Database shell (after `make up`) |
 | **Regenerate the front door** | `make frontdoor` | Both generators, in order: hosts, then paths |
