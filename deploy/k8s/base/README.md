@@ -228,8 +228,8 @@ kubectl apply -f deploy/k8s/namespace.yaml
 kubectl create secret generic memql-secrets -n memql \
   --from-literal=MEMQL_MASTER_KEY="$MEMQL_MASTER_KEY" \
   --from-literal=MEMQL_OPERATOR_KEY="$MEMQL_OPERATOR_KEY" \
-  --from-literal=MEMQL_GENESIS_B64="$(base64 < ~/.memql/genesis.znas)" \
   --from-literal=MEMQL_IDENTITY_SIGNING_KEY_B64="$MEMQL_IDENTITY_SIGNING_KEY_B64" \
+  --from-literal=MEMQL_NODE_BOOTSTRAP_TOKEN="$MEMQL_NODE_BOOTSTRAP_TOKEN" \
   --from-literal=MEMQL_DATABASE_DSN="$POOLER_DSN" \
   --from-literal=MEMORY_NODES_DATABASE_DIRECT_DSN="postgres://memql:<pw>@memql-db-rw:5432/memql"
 

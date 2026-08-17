@@ -94,12 +94,14 @@ func parseEnv(r io.Reader, label string) ([]EnvEntry, error) {
 // ParseEnvReader parses .env content from an arbitrary reader, labelling
 // errors with the caller's own name for the source.
 //
-// Exported for the sealed-envelope code in component/genesis, which parses
-// DECRYPTED BYTES rather than a file on disk and so cannot go through
-// ParseEnvFile. It was an unexported call inside one package until the
-// registry and the envelope were split apart (memql#3963); it becomes
-// unreferenced again when the envelope goes (memql#3966), at which point it
-// can go back to being unexported.
+// DEAD EXPORT -- it has no callers. It was exported for the sealed-envelope
+// code in the old component/genesis, which parsed DECRYPTED BYTES rather than a
+// file on disk and so could not go through ParseEnvFile. The envelope is gone
+// (memql#3966) and this package is component/envregistry now (memql#3963), so
+// the condition the original comment set for retiring it -- "unreferenced again
+// when the envelope goes" -- is met. Removing it changes the exported surface
+// and so forces an architecture-model regeneration; tracked separately rather
+// than folded into a documentation sweep.
 func ParseEnvReader(r io.Reader, label string) ([]EnvEntry, error) {
 	return parseEnv(r, label)
 }
