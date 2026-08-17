@@ -90,6 +90,23 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 // byte-identical -- which is what makes a backup diffable and a fixture stable.
 // Paged because a cluster's row count is unbounded and a single materialised
 // result set is not.
+//
+// UNFILTERED, AND THAT IS LOAD-BEARING (memql#3985). Whole table, every concept,
+// every version -- there is no WHERE clause here and none may be added. In
+// particular do NOT teach this the staged-DATA tier (epic memql#3974): a backup
+// is not a read, it is the copy the rows survive in, and a row omitted from an
+// export is a row DESTROYED by the next restore. The staged tier withholds rows
+// from callers asking what exists; this is not that question.
+//
+// The tier needs nothing here anyway, and the reason is worth stating because it
+// looks like an omission. Staging is marked CONCEPT-grain (memql#3977): the flag
+// is `conceptDataStaged` on a v1:authoring:construct row, and construct rows are
+// ordinary MemoryNodes rows, so this unfiltered read already carries the marker
+// along with everything it marks. A restore therefore brings the concept back
+// STAGED and cannot resurrect its rows as live -- satisfied by the marking model
+// rather than by code. Pinned by
+// TestBackupCarriesTheStagedFlagSoARestoreCannotResurrectStagedRowsAsLive and
+// TestExportIsUnfilteredAcrossConcepts in staged_data_db_test.go.
 func eachRow(ctx context.Context, db bun.IDB, table string, fn func(Row) error) error {
 	const page = 2000
 	offset := 0
@@ -97,7 +114,17 @@ func eachRow(ctx context.Context, db bun.IDB, table string, fn func(Row) error) 
 		var batch []memoryNodes.MemoryNode
 		q := db.NewSelect().Model(&batch).
 			ModelTableExpr("? AS mn", bun.Ident(table)).
-			Order("mn.\"createdAt\" ASC", "mn.id ASC").
+			// OrderExpr, not Order (memql#3985). Order() treats each argument
+			// as an identifier and quotes it, so `mn."createdAt" ASC` came out
+			// as ORDER BY "mn"."""createdAt""" ASC -- a column no table has, and
+			// every Export against a real database died on it with
+			// `column mn."createdAt" does not exist`. It survived because no
+			// test in this package had ever run Export against a database:
+			// format_test.go and compatibility_test.go both exercise the STREAM,
+			// building []Row by hand, so the one statement that had to be right
+			// was the one statement nothing executed. staged_data_db_test.go now
+			// runs it for real.
+			OrderExpr(`mn."createdAt" ASC, mn.id ASC`).
 			Limit(page).Offset(offset)
 		if err := q.Scan(ctx); err != nil {
 			return fmt.Errorf("backup: read %s at offset %d: %w", table, offset, err)
@@ -226,6 +253,14 @@ func Restore(ctx context.Context, db bun.IDB, r io.Reader, masterKey string) (Re
 // Used by restore to refuse a non-empty target. Cheap on purpose -- it answers
 // "is there anything here" rather than producing a census, and a restore that
 // asked a more expensive question would be slower for no better decision.
+//
+// UNFILTERED, for a sharper reason than eachRow's (memql#3985). This is the
+// guard, so narrowing it does not merely lose data -- it removes the thing that
+// would have stopped the loss. A concept filter added here (say, one skipping
+// staged concepts to match a staged read gate) makes a cluster whose only rows
+// are staged report ZERO; restore then concludes the target is empty and
+// proceeds to overwrite exactly those rows. One change, causing the loss and
+// disabling the check that catches it. Pinned by TestCountRowsIsUnfiltered.
 func CountRows(ctx context.Context, db bun.IDB) (int, error) {
 	total := 0
 	for _, table := range []string{TableMemoryNodes, TableSecretMemoryNodes} {

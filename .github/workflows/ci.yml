@@ -1345,11 +1345,20 @@ jobs:
           start=$SECONDS
           go test -count=1 -timeout=600s ./component/memql/...
           echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
-      - name: db-gated -- the fast five (tight budget)
+      # Named for the budget, not the count (memql#3985). It was "the fast
+      # five", and then TWO packages joined within a day of each other --
+      # integrations/embedding (memql#4037) and component/backup, when its
+      # export path got its first db-gated coverage. Neither author was wrong
+      # to leave the label; it just quietly became a number that was still
+      # being read as authoritative, in both the step name and its own echo.
+      # So the name states what the step actually asserts -- the 180s budget --
+      # which holds with room to spare: component/backup runs in ~0.5s,
+      # migrations included.
+      - name: db-gated -- the fast packages (tight budget)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=180s ./component/automations/... ./component/grpc/... ./integrations/cognition/... ./integrations/planner/... ./examples/referencepack/...
-          echo "headroom: the fast five used $((SECONDS - start))s of their 180s budget"
+          go test -count=1 -timeout=180s ./component/automations/... ./component/backup/... ./component/grpc/... ./integrations/cognition/... ./integrations/embedding/... ./integrations/planner/... ./examples/referencepack/...
+          echo "headroom: the fast packages used $((SECONDS - start))s of their 180s budget"
 
   # VS Code extension lane: run every cmd/memql-lsp drift guard over the
   # checked-in editors/vscode assets, then build the offline LSP binary

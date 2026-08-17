@@ -174,8 +174,9 @@ database being reachable.
 
 Identity's routes are mounted on the BaseRouter, so they also pass through
 `component/server`'s own generic CORS middleware, configured by
-**`SERVER_ALLOWED_ORIGINS`**. That layer knows nothing about the two sources
-above.
+**`MEMQL_SERVER_ALLOWED_ORIGINS`** (the legacy spelling `SERVER_ALLOWED_ORIGINS`
+is still bridged at boot, memql#3892). That layer knows nothing about the two
+sources above.
 
 Today it is `"*"` on identity (`deploy/k8s/base/identity.yaml`), and under a
 wildcard it deliberately emits `Access-Control-Allow-Origin` **without**
@@ -184,7 +185,7 @@ still gets its credentials header from identity's own middleware. One consequenc
 worth knowing: a *refused* origin may still see an echoed `ACAO` from this layer,
 which it can do nothing with.
 
-**Do not narrow `SERVER_ALLOWED_ORIGINS` to an explicit list on identity without
+**Do not narrow `MEMQL_SERVER_ALLOWED_ORIGINS` to an explicit list on identity without
 understanding this.** The moment it stops being `"*"`, that middleware starts
 emitting `Access-Control-Allow-Credentials: true` for every origin on its list --
 granting credentialed cross-origin access entirely outside the owner/admin gate,

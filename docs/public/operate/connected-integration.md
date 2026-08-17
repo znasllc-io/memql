@@ -209,7 +209,7 @@ bff, which a cross-origin client also crosses:
 |---|---|---|
 | `/oauth/token`, `/auth/refresh`, `/auth/logout` on identity | the admin grant above | Credentialed, so `*` buys you nothing: identity **refuses** a wildcard from either source — the boot list or a granted row — and skips it rather than failing loudly, so explicit entries beside it keep working. There is no shortcut to skip the grant with |
 | `wss://api.<domain>/memql/ws` | `MEMQL_WS_ORIGIN_PATTERNS` on the bff (`component/server/memqlws`) | **Not CORS.** A WebSocket handshake is not subject to CORS, so the server checks `Origin` itself. Unset falls back to a wildcard and logs a WARN on every upgrade — populate it in any real deployment |
-| HTTP exceptions on `api.<domain>` (for example a multipart attachment upload) | `SERVER_ALLOWED_ORIGINS` on the bff | Defaults to `*`, which here degrades to a credential-less posture rather than allowing credentialed reads. See [env-vars.md](env-vars.md) |
+| HTTP exceptions on `api.<domain>` (for example a multipart attachment upload) | `MEMQL_SERVER_ALLOWED_ORIGINS` on the bff | Defaults to `*`, which here degrades to a credential-less posture rather than allowing credentialed reads. See [env-vars.md](env-vars.md) |
 
 All three of those are on our side of the fence. There is a **fourth** place the
 same origins have to be named, on theirs — `connect-src` in the customer's own

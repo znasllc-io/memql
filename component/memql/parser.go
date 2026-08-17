@@ -210,6 +210,23 @@ func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegis
 	if err := enforceRowAuthzOnPlan(plan); err != nil {
 		return nil, err
 	}
+	// Staged-DATA enforcement, the PUSHDOWN half (epic memql#3974, task
+	// memql#3983). Rows of a concept whose data is staged are withheld from
+	// the ordinary read path; this ANDs a `row.concept!=<staged>` conjunct per
+	// staged concept so they are not FETCHED. Correctness lives in the row
+	// gates (staged_enforce.go), not here.
+	//
+	// Same position and the same reason as the row-authz injection above: it
+	// rides BEFORE rewriteFilterFieldRefs so the `row.` prefix is stripped by
+	// the pass every authored filter goes through, and it lands on plan.Root
+	// ITSELF so the result-cache signature carries it.
+	//
+	// Unlike enforceRowAuthzOnPlan this does NOT require plan.BoundConcept --
+	// the predicate names the staged set directly and binds no concept. See
+	// staged_enforce.go for why that difference is the point.
+	if err := e.enforceStagedDataOnPlan(plan); err != nil {
+		return nil, err
+	}
 	// Bare payload access (epic #2292): a filter predicates on payload
 	// properties by BARE name (the concept is bound by the query
 	// signature). Rewrite each bare, non-reserved field reference to its
