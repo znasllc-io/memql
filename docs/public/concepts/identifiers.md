@@ -117,9 +117,11 @@ The recogniser is one shared regex,
 `memqlengine.WireCanonicalIdPattern()`:
 
 ```
-^v[0-9]+:[a-z0-9]+:[a-zA-Z0-9_]+:.+
+^v[0-9]+:[a-z0-9/]+:[a-zA-Z0-9_]+:.+
 ```
 
+The namespace class admits `/` because a namespace is a directory PATH: a
+concept declared in a subdirectory is `v1:agents/tools:widget` (memql#3898).
 The trailing `:.+` **requires** a 4th (shortId) segment, so a bare
 3-segment concept TYPE (`v1:cognition:space`) does NOT match and is
 preserved -- concept ids and subscription topics stay canonical (see the
