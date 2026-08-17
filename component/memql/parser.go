@@ -60,14 +60,22 @@ func (e *MemQLEngine) parseWithFunctions(query string, fns *FunctionRegistry, sp
 // explicit. The parse path is otherwise ctx-free, so the origin rides as a
 // parameter rather than dragging a context through the parser.
 func (e *MemQLEngine) parseWithFunctionsOrigin(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin) (*QueryPlan, error) {
-	return e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, nil)
+	return e.parseWithFunctionsAmbient(query, fns, specOverlay, allowInline, origin, nil, StagedScope{})
 }
 
 // parseWithFunctionsAmbient is parseWithFunctionsOrigin carrying the ambient
-// envelope (memql#3024). It rides as a parameter for the same reason the origin
-// does: the parse path is ctx-free by design, so executeWith reads the context
-// once and hands the resolved values down. The no-envelope wrapper passes nil.
-func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin, ambient map[string]any) (*QueryPlan, error) {
+// envelope (memql#3024) and the resolved staged scope (memql#4040). Both ride as
+// parameters for the same reason the origin does: the parse path is ctx-free by
+// design, so executeWith reads the context once and hands the resolved values
+// down. The no-envelope wrapper passes nil and the zero scope.
+//
+// stagedScope is ALREADY AUTHORIZED by the time it arrives -- executeWith
+// resolves it through stagedScopeFor, which intersects the caller's declaration
+// with their permission to make it. So the predicate built from it here is a
+// constant of the plan and consults no identity, which is what keeps #3976's
+// ruling (no context in the injectors) intact while still supporting an
+// explicitly staged-scoped read. Passing the zero value is the ordinary read.
+func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegistry, specOverlay map[string]*Spec, allowInline bool, origin auth.CallOrigin, ambient map[string]any, stagedScope StagedScope) (*QueryPlan, error) {
 	if !e.canResolve() {
 		return nil, ErrEngineNotInitialized
 	}
@@ -224,7 +232,7 @@ func (e *MemQLEngine) parseWithFunctionsAmbient(query string, fns *FunctionRegis
 	// Unlike enforceRowAuthzOnPlan this does NOT require plan.BoundConcept --
 	// the predicate names the staged set directly and binds no concept. See
 	// staged_enforce.go for why that difference is the point.
-	if err := e.enforceStagedDataOnPlan(plan); err != nil {
+	if err := e.enforceStagedDataOnPlan(plan, stagedScope); err != nil {
 		return nil, err
 	}
 	// Bare payload access (epic #2292): a filter predicates on payload

@@ -326,9 +326,32 @@ the predicate everywhere would not prevent that bug; it would create it.
   what keeps the actor-less callers out of the special-case business: an
   automation starting from `context.Background()` under a synthetic system actor
   gets the same answer as anybody else, and internal origin does not become an
-  accidental staged-read grant. The price is that there is no scope to widen, so
-  **a staged row is presently reachable by nothing at all**; the explicitly
-  staged-scoped read memql#3976 called for is deferred to memql#4040.
+  accidental staged-read grant.
+
+  **The scope memql#3976 called for now exists (memql#4040), and it did not cost
+  the injectors a context.** The resolved scope rides down as a *parameter*, the
+  same route `auth.CallOrigin` (memql#2800) and the ambient envelope
+  (memql#3024) already take into that function: `executeWith` reads the request
+  once and hands the ctx-free parse path the answer. So the predicate is still a
+  constant -- just a constant of the resolved scope rather than of the staged set
+  alone. Three properties make it safe to have:
+
+  | | |
+  |---|---|
+  | **Declared, never inferred** | The caller names concept ids on the request (`memql.ContextWithStagedScope`). Being the cluster owner *authorizes* a scope; it never *grants* one, so an owner's ordinary read still sees nothing staged. |
+  | **Authorization split from the predicate** | Permission is identity-derived and resolved **once**, in `stagedScopeFor`, where the actor exists. By the time the injection site sees a scope it is already authorized, so no identity reaches the predicate. An unauthorized declaration resolves to the *empty* scope regardless of entry point, and `Execute` additionally refuses it outright rather than silently returning an ordinary read. |
+  | **Both seams honour the same set** | The conjunct (`stagedConceptIds`) and the row gate (`admitStagedRow`) resolve through one function, `stagedConceptWithheld`. A scope honoured by one and not the other would return *some* staged rows and not others, which is worse than either answer. |
+
+  It is a **cluster-owner** capability and a **Go-level** one, matching the reach
+  of the write side (`WithConceptDataStaged` has no wire surface either). The
+  concept's own owner would be the more natural authorization, but resolving it
+  means a store read inside a gate that must stay a single `sync.Map` load.
+
+  One consequence is easy to miss and is a leak if it is: the resolved scope is
+  a **result-cache key term**. A scope covering every staged concept leaves
+  nothing to exclude, so `plan.Root` is byte-identical to an ordinary caller's --
+  and without the term the operator's staged-inclusive result would be cached
+  under that key and served to the next caller.
 - **An SQL-only predicate would not survive the read path.** Both filtered seams
   return through `latestMatchingNodes`, which reloads each candidate's true latest
   version through a query filtering on `id` and `createdAt` and nothing else, then

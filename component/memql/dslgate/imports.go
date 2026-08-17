@@ -2,13 +2,9 @@ package dslgate
 
 import (
 	"fmt"
-	"io"
-	"io/fs"
 	"path"
 	"regexp"
 	"strings"
-
-	"github.com/znasllc-io/memql/core/dslfs"
 )
 
 // imports.go -- the cross-namespace import gate (memql#3803).
@@ -50,8 +46,34 @@ import (
 // It does not resolve. It reports a reference that names a construct another
 // namespace declares with no import naming it, which is the contract; binding
 // stays where binding lives. And it is deliberately CONSERVATIVE about what
-// counts as a reference -- see referenceSites -- because a false positive here
-// refuses a boot.
+// counts as a reference -- see the report() switch below -- because a false
+// positive here refuses a boot.
+//
+// # Where it is enforced (memql#4051)
+//
+// AT BOOT, over the merged corpus, like every other contract gate. That has not
+// always been true and the difference mattered: this rule is corpus-level, boot
+// drove a per-FILE entry point, so for a while it ran only in a conformance test
+// over this repository's own dsl/ tree. A product bundle mounted at
+// MEMQL_DSL_PATH -- the tree with the fewest other gates on it, and the primary
+// delivery path under platform consolidation (memql#2472) -- could carry a
+// violation, boot cleanly and be caught by nothing, while the identical
+// violation in dsl/ failed CI.
+//
+// memql#4051 asked whether that asymmetry was DELIBERATE and ruled that it was
+// not. The case for deliberate had two limbs and neither held. "A tree-level
+// scan needs the merged tree, which strict boot may not want to pay for" assumed
+// boot would have to fetch it; Init already had every file's bytes in memory, so
+// the pass costs regex time and no I/O (~79ms over 206 files -- see
+// component/memql/contract_gates.go, which records the measurement). "Product
+// bundles are trusted differently" is the opposite of why component/memql/dslgate
+// exists; its package comment argues at length that the bundle is the tree that
+// most needs the gates.
+//
+// So the entry point is dslgate.ScanFiles and the rule reads the whole corpus.
+// Do not re-express it against one file to make it cheaper: pass 1 fails OPEN on
+// a partial corpus, because a name whose declaration is missing reads as
+// declared nowhere and is passed over silently.
 
 // GateCrossNamespaceImport -- a construct references another namespace's
 // construct with no `use` naming it.
@@ -121,27 +143,29 @@ type declaredAt struct {
 	file      string
 }
 
-// scanCrossNamespaceImports is a TREE-level gate: whether a reference crosses a
-// namespace boundary cannot be answered from one file, because it depends on
+// scanCrossNamespaceImports is a CORPUS-level gate: whether a reference crosses
+// a namespace boundary cannot be answered from one file, because it depends on
 // where the referenced name is declared.
-func scanCrossNamespaceImports(tree fs.FS) ([]Violation, error) {
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		return nil, fmt.Errorf("walking DSL tree: %w", err)
-	}
-
-	code := make(map[string]string, len(paths))
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			return nil, fmt.Errorf("open %s: %w", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read %s: %w", p, readErr)
-		}
-		code[p] = codeOnly(string(raw))
+//
+// It takes the file set rather than an fs.FS (memql#4051) and that is what puts
+// it on the boot path. MemQLEngine.Init already holds every file's bytes --
+// baseloader.ReadAll read them for the loaders -- so expressing the gate against
+// those bytes costs no walk and no open, which is what dissolved the "strict
+// boot may not want to pay for the merged tree" argument for leaving this gate
+// test-only. Reading the tree itself is ScanTree's job, one layer up.
+//
+// PASS 1 IS WHY THE WHOLE SET IS REQUIRED. A reference is a violation only when
+// some file DECLARES the name in another namespace; a name declared in a file
+// the caller did not supply reads as declared nowhere, and report() returns on
+// `!known`. So a partial set fails OPEN, silently. ScanFiles' doc says this to
+// its callers; it is repeated here because this is the function whose logic
+// depends on it.
+func scanCrossNamespaceImports(files []SourceFile) []Violation {
+	paths := make([]string, 0, len(files))
+	code := make(map[string]string, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+		code[f.Path] = codeOnly(f.Content)
 	}
 
 	// Pass 1: where each construct name is declared. The S5 uniqueness gate
@@ -231,5 +255,5 @@ func scanCrossNamespaceImports(tree fs.FS) ([]Violation, error) {
 			}
 		}
 	}
-	return out, nil
+	return out
 }

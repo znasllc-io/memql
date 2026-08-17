@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/uptrace/bun"
+	memorynodes "github.com/znasllc-io/memql/component/database/memory-nodes"
 )
 
 // staged_read_gate_3984_test.go -- epic memql#3974, task memql#3984.
@@ -21,11 +22,20 @@ import (
 
 func nilBun() *bun.DB { return nil }
 
+// admitAll is the row gate wired open, so these tests observe the STAGED
+// check alone. The per-row authorization gate beside it (memql#4029) has its
+// own suite in rowauthz_repack_gate_4029_test.go.
+func admitAll(context.Context, memorynodes.MemoryNode) bool { return true }
+
+// neverStaged is the staged check wired open, the mirror of admitAll, so the
+// memql#4029 suite next door observes the AUTHORIZATION gate alone.
+func neverStaged(string) bool { return false }
+
 // TestRecentChatWithholdsStagedRows: every read answers empty when its concept
 // is staged, and does so without touching the database.
 func TestRecentChatWithholdsStagedRows(t *testing.T) {
 	ctx := context.Background()
-	c := NewIntegration(nilBun, func(string) bool { return true })
+	c := NewIntegration(nilBun, func(string) bool { return true }, admitAll)
 
 	if nodes, err := c.readRecent(ctx, "space-1", 10); err != nil || len(nodes) != 0 {
 		t.Errorf("readRecent = (%d, %v), want (0, nil)", len(nodes), err)
@@ -49,7 +59,7 @@ func TestRecentChatWithholdsStagedRows(t *testing.T) {
 // a boot misconfiguration and must be refused rather than read as "nothing is
 // staged" -- the default that looks like it works and publishes.
 func TestRecentChatRefusesWhenTheStagedPredicateIsMissing(t *testing.T) {
-	c := NewIntegration(nilBun, nil)
+	c := NewIntegration(nilBun, nil, admitAll)
 	if _, err := c.readRecent(context.Background(), "space-1", 10); err == nil ||
 		!strings.Contains(err.Error(), "not wired") {
 		t.Errorf("readRecent with no predicate = %v, want a refusal naming the unwired predicate", err)
@@ -64,7 +74,7 @@ func TestRecentChatRefusesWhenTheStagedPredicateIsMissing(t *testing.T) {
 // the observable that distinguishes the two -- so it is recovered here rather
 // than avoided.
 func TestRecentChatProceedsWhenNothingIsStaged(t *testing.T) {
-	c := NewIntegration(nilBun, func(string) bool { return false })
+	c := NewIntegration(nilBun, neverStaged, admitAll)
 	reached := false
 	func() {
 		defer func() {

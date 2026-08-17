@@ -103,6 +103,7 @@ context still observes live state.
 | `ResolveSecret` | `func(ctx, name) (string, error)` | partition-scoped encrypted secret, falling back to the global |
 | `ResolveSystemSecret` | `func(ctx, name) (string, error)` | instance-wide encrypted secret |
 | `ConceptDataIsStaged` | `func(conceptId string) bool` | whether a concept's ROWS are staged -- present and addressable, withheld from the ordinary read path until the concept is trained |
+| `AdmitSourceRow` | `func(ctx, node) bool` | whether **this caller** may see **this row**, for rows the pack read directly from the node store |
 | `Providers` | `*ProviderRegistry` | AI provider registry (stable pointer) |
 | `Policies` | `*PolicyRegistry` | AI Router policy registry (stable pointer) |
 | `Agents` | `*AgentRegistry` | DSL-declared agent registry (stable pointer) |
@@ -140,6 +141,40 @@ backup exports all consume rows to make a decision. Withholding rows there does
 not protect anyone -- it corrupts the decision, and in the backup case destroys
 data. See `staged_read_site_classification_test.go` in the repository root,
 which fails the build on a hand-rolled read nobody has ruled on.
+
+### `AdmitSourceRow` -- the same reads need per-row authorization too
+
+`ConceptDataIsStaged` answers *"is this concept's data visible to anyone yet"*.
+`AdmitSourceRow` answers the other question about the same row: *"may **this
+caller** see **this row**"* (memql#4029). A hand-rolled `SELECT` needs both, for
+the same reason: nothing the engine injects reaches it. Same `nil` rule -- refuse
+to construct rather than default to "yes".
+
+**Apply it to the rows AS FETCHED, before folding, summarizing or repacking
+them.** Both of the engine's row-authz mechanisms resolve the tier from a
+*concept*: filter injection from `plan.BoundConcept`, the row gate from the row's
+own concept. So a capability that reads real rows and returns a **synthetic**
+node under its own concept defeats both by construction -- the gate is asked
+about the made-up concept, finds no tier declared, and admits. It fails silently
+and in the *admitting* direction.
+
+There is no repairing it afterwards. A summary node has no top-level owner field
+for an `owned` tier to read, no per-row identity for `granted`, a synthesized id,
+and often carries rows from more than one concept. The fetched rows are the last
+point on the path where the question can be answered at all.
+
+**If the reader dedups versions per id, gate INSIDE the fold, after the id is
+marked seen.** Filtering the slice first lets a denied *latest* version fall
+through to an admitted *older* one, so the caller gets a stale row instead of no
+row -- the same ordering hazard as the staged conjunct above, arriving from the
+authorization side. `foldActiveParticipants` in `integrations/chat/recent_chat.go`
+is the worked example.
+
+Note what this does and does not buy: it makes a direct read **correct**, not
+**scoped**. The gate filters after the fetch and adds no caller predicate to the
+SQL, so a read narrowed only by a caller-supplied argument still fetches
+everything that argument names. Routing such reads through the authorized path is
+tracked separately (memql#3984).
 
 ---
 

@@ -254,7 +254,7 @@ func (e *MemQLEngine) evaluateExpressionSet(ctx context.Context, expr Expression
 	// "may THIS CALLER see it", staging asks "is it visible to ANYONE yet" --
 	// and staging is the outer one: a staged row is withheld from every
 	// caller, so no authz answer can readmit it.
-	return e.filterStagedSet(filterRowAuthzSet(ctx, set)), nil
+	return e.filterStagedSet(ctx, filterRowAuthzSet(ctx, set)), nil
 }
 
 func (e *MemQLEngine) evaluateExpressionSetWithContext(ctx context.Context, expr ExpressionNode, timestamp *time.Time, target int, sorter *compiledSort, conceptContext string) (map[string]memorynodes.MemoryNode, error) {
@@ -1058,7 +1058,13 @@ func (e *MemQLEngine) expandGraph(ctx context.Context, node memorynodes.MemoryNo
 	//
 	// Placed before addNode and before the recursion, so a staged row neither
 	// lands in the bundle nor is traversed THROUGH.
-	if !e.admitStagedRow(node) {
+	//
+	// The scope is resolved per expanded node (memql#4040) rather than threaded
+	// through this recursion. On the fast path -- no scope declared, which is
+	// every read on every installation not actively inspecting staged data --
+	// stagedScopeFor is a single ctx.Value lookup that returns before touching
+	// the actor envelope.
+	if !e.admitStagedRow(e.stagedScopeFor(ctx), node) {
 		return nil
 	}
 

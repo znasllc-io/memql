@@ -115,22 +115,36 @@ package memql
 // query. Requiring a binding would reproduce the hole memql#3982 just closed,
 // on the same 19% of the tree.
 //
-// # The injection site has no context.Context, and that BOUNDS the design
+// # The injection site still has no context.Context, and the scope does not
+// give it one (memql#4040)
 //
 // parseWithFunctionsAmbient takes no ctx, and enforceRowAuthzOnPlan's
-// context-freedom is recorded in three places as deliberate. Neither gains one
-// here.
+// context-freedom is recorded in three places as deliberate. Neither gained one.
 //
-// The consequence is worth stating rather than discovering: the injected
-// conjunct is sound ONLY while the audience for staged rows is NOBODY, which
-// is this epic's ruling. It is a plan-time decision and cannot consult a
-// per-read scope. If memql#3986 introduces an explicitly staged-scoped read --
-// caller-set on the read, never inferred from identity -- the conjunct must
-// become scope-aware or be skipped for those reads, because a pushdown that
-// hides rows the gate would admit is a pushdown that is wrong. stagedConceptIds
-// is the single place that decision would be made. No scope mechanism is
-// built here, deliberately: a half-wired one that the injection silently
-// defeats would be worse than none, because it would look like it works.
+// #3983 left this section reading "the injected conjunct is sound ONLY while the
+// audience for staged rows is NOBODY", and predicted that an explicitly
+// staged-scoped read would force the conjunct to become scope-aware or be
+// skipped -- "because a pushdown that hides rows the gate would admit is a
+// pushdown that is wrong". That was right, and memql#4040 took the first branch.
+//
+// It did NOT need a context to do it. The staged scope arrives as a PARAMETER,
+// resolved once by executeWith and handed down -- the identical route
+// auth.CallOrigin (memql#2800) and the ambient envelope (memql#3024) already
+// take into this same function, both of them for the stated reason that the
+// parse path is ctx-free by design and executeWith reads the context once on its
+// behalf. "The injection site has no ctx" was never the constraint; "the parse
+// path does not take one" was, and this codebase already had the answer to it
+// twice over in the signature immediately above.
+//
+// THE PUSHDOWN STILL POINTS THE SAFE WAY. Both halves resolve through
+// stagedConceptWithheld (staged_scope.go), so the conjunct excludes
+// staged-MINUS-scoped and the gate withholds staged-MINUS-scoped. The conjunct
+// therefore never hides a row the gate would admit, which is the invariant this
+// file is built on, and it remains an optimization over a correctness mechanism
+// rather than a second, disagreeing enforcement.
+//
+// stagedConceptIds is still the single place the withheld set is computed, and
+// making it scope-aware is what reached every seam at once.
 //
 // # Staleness
 //
@@ -138,11 +152,19 @@ package memql
 // concept that transitions staged -> live is reflected on the next read rather
 // than at the next restart. The RESULT cache keys off plan.Root
 // (planCacheSignature), and the conjunct is part of plan.Root, so a staged and
-// an unstaged read of the same query cannot share a cache entry. When the
+// an unstaged read of the same query cannot share a cache entry.
+//
+// THAT ARGUMENT HAS AN EXCEPTION ONCE SCOPES EXIST, and it is why
+// planCacheSignature carries a `stagedScope:` term (memql#4040). A scope
+// covering every staged concept leaves NOTHING to exclude, so the predicate is
+// empty and plan.Root is byte-identical to an ordinary caller's -- and without
+// the extra term the operator's staged-inclusive result would be cached under
+// that key and served to the next caller. When the
 // staged set is empty -- the overwhelming common case -- nothing is injected
 // and every existing signature is byte-identical to today's.
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -172,7 +194,8 @@ const conceptDataStagedPrefix = "conceptDataStaged:"
 var stagedPredicateCache sync.Map
 
 // stagedConceptIds returns the canonical ids of every concept whose DATA is
-// staged, sorted so the derived signature is stable across calls.
+// WITHHELD FROM THIS READ, sorted so the derived signature is stable across
+// calls.
 //
 // It ranges e.promotedAuthored rather than walking the concept registry
 // asking about each concept in turn: the staged markers live in that map
@@ -180,9 +203,16 @@ var stagedPredicateCache sync.Map
 // only -- a small set, empty on an install that has never used the authoring
 // path -- whereas the concept registry holds every concept the binary embeds.
 //
-// Returns nil when nothing is staged, which is the answer on essentially
+// SCOPE-AWARE since memql#4040: a concept the read explicitly scoped in is
+// staged but not withheld, so it is omitted here and no `!=` term is rendered
+// for it. The filter runs through stagedConceptWithheld -- the same function
+// admitStagedRow consults -- so the enumeration this drives and the per-row gate
+// cannot disagree about what this read may see. The zero scope is the ordinary
+// read and reproduces #3983's answer exactly.
+//
+// Returns nil when nothing is withheld, which is the answer on essentially
 // every installation and the fast path every caller here keys off.
-func (e *MemQLEngine) stagedConceptIds() []string {
+func (e *MemQLEngine) stagedConceptIds(scope StagedScope) []string {
 	if e == nil {
 		return nil
 	}
@@ -196,7 +226,8 @@ func (e *MemQLEngine) stagedConceptIds() []string {
 		if !found {
 			return true
 		}
-		if conceptId = strings.TrimSpace(conceptId); conceptId != "" {
+		if conceptId = strings.TrimSpace(conceptId); conceptId != "" &&
+			e.stagedConceptWithheld(scope, conceptId) {
 			ids = append(ids, conceptId)
 		}
 		return true
@@ -220,8 +251,8 @@ func (e *MemQLEngine) stagedConceptIds() []string {
 // concept whose id will not render into a parseable predicate is a state this
 // engine cannot enforce, and failing the read is the only honest answer:
 // returning nil would silently publish the very rows the tier withholds.
-func (e *MemQLEngine) stagedVisibilityPredicate() (ExpressionNode, error) {
-	ids := e.stagedConceptIds()
+func (e *MemQLEngine) stagedVisibilityPredicate(scope StagedScope) (ExpressionNode, error) {
+	ids := e.stagedConceptIds(scope)
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -295,11 +326,16 @@ func cloneStagedPredicate(expr ExpressionNode) ExpressionNode {
 // to the last disjunct.
 //
 // Deliberately NOT gated on plan.BoundConcept -- see the file header.
-func (e *MemQLEngine) enforceStagedDataOnPlan(plan *QueryPlan) error {
+//
+// scope arrives as a PARAMETER (memql#4040), resolved once by executeWith from
+// the request context and handed down -- the same route auth.CallOrigin
+// (memql#2800) and the ambient envelope (memql#3024) already take into this
+// ctx-free parse path. The zero scope is the ordinary read.
+func (e *MemQLEngine) enforceStagedDataOnPlan(plan *QueryPlan, scope StagedScope) error {
 	if e == nil || plan == nil || plan.Root == nil {
 		return nil
 	}
-	predicate, err := e.stagedVisibilityPredicate()
+	predicate, err := e.stagedVisibilityPredicate(scope)
 	if err != nil {
 		return err
 	}
@@ -310,33 +346,44 @@ func (e *MemQLEngine) enforceStagedDataOnPlan(plan *QueryPlan) error {
 	return nil
 }
 
-// admitStagedRow reports whether a row may be shown on the ordinary read
-// path. It is THE correctness mechanism -- see the file header.
+// admitStagedRow reports whether a row may be shown to a read that resolved
+// `scope`. It is THE correctness mechanism -- see the file header.
 //
 // A row whose concept is blank is ADMITTED, matching the identical decision
 // admitRowAuthzBuiltinResult records beside it: a row with no concept is by
 // definition not a row of a concept somebody staged, and denying it here would
 // give one row two answers depending on which seam it left through.
-func (e *MemQLEngine) admitStagedRow(node memorynodes.MemoryNode) bool {
+//
+// The scope is a PARAMETER rather than something this function reads off a
+// context, even though its callers have one. It runs per ROW, and resolving the
+// scope per row would be both wasteful and a chance for two rows of one read to
+// be decided differently. The filters below resolve once and pass it in.
+func (e *MemQLEngine) admitStagedRow(scope StagedScope, node memorynodes.MemoryNode) bool {
 	if e == nil {
 		return true
 	}
-	return !e.conceptDataIsStaged(strings.TrimSpace(node.Concept))
+	return !e.stagedConceptWithheld(scope, node.Concept)
 }
 
-// filterStagedSet drops every staged row from a fetched set. Returns the set
-// unchanged when nothing was staged, so the common case allocates nothing.
+// filterStagedSet drops every withheld row from a fetched set. Returns the set
+// unchanged when nothing was withheld, so the common case allocates nothing.
 //
 // Shaped after filterRowAuthzSet, and applied immediately after it, because
 // the two answer different questions about the same row: that gate asks "may
 // this caller see it", this one asks "is it visible to anyone yet".
-func (e *MemQLEngine) filterStagedSet(set map[string]memorynodes.MemoryNode) map[string]memorynodes.MemoryNode {
+//
+// Takes a ctx since memql#4040, to resolve the read's staged scope through
+// stagedScopeFor -- the SAME resolver executeWith uses to build the plan-time
+// conjunct, which is what stops the pushdown and the gate disagreeing about
+// what this read may see. filterRowAuthzSet beside it already takes one.
+func (e *MemQLEngine) filterStagedSet(ctx context.Context, set map[string]memorynodes.MemoryNode) map[string]memorynodes.MemoryNode {
 	if e == nil || len(set) == 0 {
 		return set
 	}
+	scope := e.stagedScopeFor(ctx)
 	var denied []string
 	for key, node := range set {
-		if !e.admitStagedRow(node) {
+		if !e.admitStagedRow(scope, node) {
 			denied = append(denied, key)
 		}
 	}
@@ -349,19 +396,22 @@ func (e *MemQLEngine) filterStagedSet(set map[string]memorynodes.MemoryNode) map
 	return set
 }
 
-// filterStagedNodes drops every staged row from a slice, leaving the slice
-// untouched when none was staged.
+// filterStagedNodes drops every withheld row from a slice, leaving the slice
+// untouched when none was withheld.
 //
 // Filters the SLICE rather than a map built from it, for the reason
 // filterRowAuthzBuiltinNodes gives: gating the producer's own output means the
 // gate cannot be routed around by a later change to how that output is keyed.
-func (e *MemQLEngine) filterStagedNodes(nodes []memorynodes.MemoryNode) []memorynodes.MemoryNode {
+//
+// Takes a ctx for the reason filterStagedSet does.
+func (e *MemQLEngine) filterStagedNodes(ctx context.Context, nodes []memorynodes.MemoryNode) []memorynodes.MemoryNode {
 	if e == nil || len(nodes) == 0 {
 		return nodes
 	}
+	scope := e.stagedScopeFor(ctx)
 	denied := 0
 	for _, node := range nodes {
-		if !e.admitStagedRow(node) {
+		if !e.admitStagedRow(scope, node) {
 			denied++
 		}
 	}
@@ -370,7 +420,7 @@ func (e *MemQLEngine) filterStagedNodes(nodes []memorynodes.MemoryNode) []memory
 	}
 	admitted := make([]memorynodes.MemoryNode, 0, len(nodes)-denied)
 	for _, node := range nodes {
-		if e.admitStagedRow(node) {
+		if e.admitStagedRow(scope, node) {
 			admitted = append(admitted, node)
 		}
 	}

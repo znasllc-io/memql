@@ -33,31 +33,40 @@
 // stay as tests in test/dslconformance. Failing a fleet's boot over a
 // convention would be a worse outcome than the convention drifting.
 //
-// # How load-time enforcement works, and which gates it does NOT reach
+// # How load-time enforcement works
 //
-// MemQLEngine.Init calls ScanSource ONCE PER FILE. recordContractGateProblems
-// (component/memql/contract_gates.go) walks the same merged []baseloader.RawFile
-// the loaders register from and records every violation on the LoadReport as a
-// skip, so strict boot REFUSES rather than warns, with MEMQL_DSL_ALLOW_SKIPS as
-// the operator break-glass -- the same mechanism a construct that fails to parse
-// already goes through. cmd/memqllint runs the engine's Init over a mounted
-// bundle, so a bundle author sees these offline before the deploy rather than as
-// a CrashLoop after it.
+// MemQLEngine.Init calls ScanFiles ONCE, over the whole merged file set.
+// recordContractGateProblems (component/memql/contract_gates.go) hands it the
+// same []baseloader.RawFile the loaders register from and records every
+// violation on the LoadReport as a skip, so strict boot REFUSES rather than
+// warns, with MEMQL_DSL_ALLOW_SKIPS as the operator break-glass -- the same
+// mechanism a construct that fails to parse already goes through. cmd/memqllint
+// runs the engine's Init over a mounted bundle, so a bundle author sees these
+// offline before the deploy rather than as a CrashLoop after it.
 //
-// ScanTree is NOT on that path. It is the tree-level entry point, and its only
-// caller in this repository is test/dslconformance/dslgate_delegation_test.go.
-// This file said "Init runs ScanTree" until memql#3987, and the difference is
-// not pedantry: ScanTree runs one gate ScanSource structurally cannot, because
-// whether a reference crosses a namespace boundary depends on where the
-// referenced name is DECLARED, which one file cannot answer (memql#3803). So
-// GateCrossNamespaceImport is enforced by TEST over this repo's own corpus, and
-// a MEMQL_DSL_PATH product bundle -- the tree with the fewest other gates on it,
-// which is the whole reason this package exists -- does not run it at boot.
+// # Why the entry point is FILES and not one file (memql#4051)
 //
-// The rule that follows for a NEW gate: a per-file gate refuses boot, a
-// tree-level one does not. Adding a tree-level gate without wiring the tree into
-// Init buys a conformance test, not a load-time contract, and the comment
-// describing it has to say which one it bought.
+// Init used to call ScanSource once per file, and one gate cannot be expressed
+// that way: whether a reference crosses a namespace boundary depends on where
+// the referenced name is DECLARED, which one file cannot answer (memql#3803). So
+// GateCrossNamespaceImport lived on ScanTree, whose only caller was a conformance
+// test -- and the asymmetry that produced was precisely the one this package
+// exists to abolish. A product bundle could carry a cross-namespace violation,
+// boot cleanly and be caught by nothing, while the identical violation in this
+// repo's dsl/ failed CI. memql#4051 ruled that a GAP rather than a deliberate
+// exemption and closed it.
+//
+// THE COST ARGUMENT FOR LEAVING IT OUT DID NOT SURVIVE CONTACT. "A tree-level
+// scan needs the merged tree, which strict boot may not want to pay for" assumes
+// boot would have to go and get it. It does not: Init already holds every file's
+// bytes in memory -- baseloader.ReadAll walked the merged tree for the duplicate
+// detector on the line below -- so the tree-level pass is regex work over bytes
+// that were already read, with no second walk and no second open.
+//
+// The rule that follows for a NEW gate: express it against ScanFiles. A gate
+// that needs only one file's text still gets the whole set and may ignore the
+// rest; a gate that needs the corpus has it. There is no longer a tier of gate
+// that boot cannot reach, and no new gate should reintroduce one.
 //
 // # One detector
 //
@@ -169,47 +178,41 @@ var UserScopeSelectionExemptions = map[string]string{
 	// the debt is paid rather than deferred.
 }
 
-// ScanTree runs every contract gate over every .memql file in tree and returns
-// the violations, ordered by file then line so boot logs and test output are
+// SourceFile is one .memql file's (path, content) pair, as the scan sees it.
+// Path is relative to the tree root, because that is what namespaceOf reads a
+// file's namespace from and what a violation is reported against.
+//
+// It duplicates baseloader.RawFile's shape rather than importing it, so the
+// rules stay independent of the loader pipeline: cmd/memqllint, the conformance
+// tests and the engine all build this from whatever they hold.
+type SourceFile struct {
+	Path    string
+	Content string
+}
+
+// ScanFiles runs every contract gate over a whole file set and returns the
+// violations, ordered by file then line so boot logs and test output are
 // deterministic.
 //
-// tree is the MERGED tree -- dsl.Tree() returns the embedded core domains plus
-// every RegisterTree overlay, and MEMQL_DSL_PATH product domains are mounted
-// through exactly that call -- so one scan covers every source a node loads
-// from.
+// THIS IS THE ENTRY POINT BOOT USES, and taking the whole set rather than one
+// file is what lets a tree-level rule refuse a boot (memql#4051). See the
+// package comment.
 //
-// BOOT DOES NOT CALL THIS. MemQLEngine.Init drives ScanSource per file; this
-// entry point exists for callers holding the whole tree, and its only caller
-// here is the conformance test. See the package comment for what that costs.
-func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
-	if tree == nil {
-		return nil, nil
-	}
-	paths, err := dslfs.WalkMemqlFiles(tree)
-	if err != nil {
-		return nil, fmt.Errorf("walking DSL tree: %w", err)
-	}
+// files must be the MERGED set -- embedded core domains plus every RegisterTree
+// overlay, which is where MEMQL_DSL_PATH product domains arrive -- so that one
+// scan covers every source a node loads from. A partial set is not merely a
+// weaker check for the cross-namespace gate: it is a WRONG one, because a
+// reference whose declaration was not in the set reads as naming nothing and is
+// silently passed over.
+func ScanFiles(files []SourceFile, opts Options) []Violation {
 	var out []Violation
-	for _, p := range paths {
-		f, openErr := tree.Open(p)
-		if openErr != nil {
-			return nil, fmt.Errorf("open %s: %w", p, openErr)
-		}
-		raw, readErr := io.ReadAll(f)
-		f.Close()
-		if readErr != nil {
-			return nil, fmt.Errorf("read %s: %w", p, readErr)
-		}
-		out = append(out, ScanSource(p, string(raw), opts)...)
+	for _, f := range files {
+		out = append(out, ScanSource(f.Path, f.Content, opts)...)
 	}
-	// The cross-namespace import gate is TREE-level, not per-file: whether a
+	// The cross-namespace import gate is CORPUS-level, not per-file: whether a
 	// reference crosses a boundary depends on where the referenced name is
 	// declared, which one file cannot answer (memql#3803).
-	crossNs, nsErr := scanCrossNamespaceImports(tree)
-	if nsErr != nil {
-		return nil, nsErr
-	}
-	out = append(out, crossNs...)
+	out = append(out, scanCrossNamespaceImports(files)...)
 
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].File != out[j].File {
@@ -220,7 +223,37 @@ func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
 		}
 		return out[i].Gate < out[j].Gate
 	})
-	return out, nil
+	return out
+}
+
+// ScanTree reads every .memql file in tree and delegates to ScanFiles.
+//
+// It is the convenience entry for a caller holding an fs.FS rather than the
+// bytes -- the conformance tests and any offline tool. It performs the I/O and
+// nothing else: the rules live behind ScanFiles, so this cannot become a second
+// implementation that disagrees with the one boot runs.
+func ScanTree(tree fs.FS, opts Options) ([]Violation, error) {
+	if tree == nil {
+		return nil, nil
+	}
+	paths, err := dslfs.WalkMemqlFiles(tree)
+	if err != nil {
+		return nil, fmt.Errorf("walking DSL tree: %w", err)
+	}
+	files := make([]SourceFile, 0, len(paths))
+	for _, p := range paths {
+		f, openErr := tree.Open(p)
+		if openErr != nil {
+			return nil, fmt.Errorf("open %s: %w", p, openErr)
+		}
+		raw, readErr := io.ReadAll(f)
+		f.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("read %s: %w", p, readErr)
+		}
+		files = append(files, SourceFile{Path: p, Content: string(raw)})
+	}
+	return ScanFiles(files, opts), nil
 }
 
 // ScanSource runs every contract gate over one file's source.

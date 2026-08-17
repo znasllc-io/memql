@@ -435,7 +435,7 @@ func TestReadsOfAGrantCarryTheInjectedOwnerTerm(t *testing.T) {
 
 	ambient := buildAmbientEnvelope(ctx, eng)
 	plan, err := eng.parseWithFunctionsAmbient(`query agentAuthorizationsForSelf()`,
-		eng.functions, nil, false, auth.OriginFromContext(ctx), ambient)
+		eng.functions, nil, false, auth.OriginFromContext(ctx), ambient, StagedScope{})
 	require.NoError(t, err)
 
 	if !plan.RowAuthzInjected {

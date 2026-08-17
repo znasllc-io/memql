@@ -37,8 +37,9 @@ const (
 // integration.chat.recentChat, which the recentChat builtin in
 // dsl/cognition/builtins.memql references via @executor.
 type Integration struct {
-	bun           func() *bun.DB
-	stagedConcept func(conceptId string) bool
+	bun            func() *bun.DB
+	stagedConcept  func(conceptId string) bool
+	admitSourceRow func(ctx context.Context, node memorynodes.MemoryNode) bool
 }
 
 // NewIntegration constructs the integration. The bun callback is
@@ -50,8 +51,17 @@ type Integration struct {
 // task memql#3984) and is a REQUIRED constructor parameter rather than a
 // SetX injector, because every read below is gated on it and a nil one would
 // silently answer "nothing is staged". See withheldAsStaged.
-func NewIntegration(bunCallback func() *bun.DB, stagedConcept func(conceptId string) bool) *Integration {
-	return &Integration{bun: bunCallback, stagedConcept: stagedConcept}
+//
+// admitSourceRow is the PER-ROW AUTHORIZATION question (memql#4029), required
+// for the same reason and refused the same way. The two are siblings: one asks
+// whether a concept's rows are visible to anyone yet, the other whether THIS
+// caller may see this row. See admitted.
+func NewIntegration(
+	bunCallback func() *bun.DB,
+	stagedConcept func(conceptId string) bool,
+	admitSourceRow func(ctx context.Context, node memorynodes.MemoryNode) bool,
+) *Integration {
+	return &Integration{bun: bunCallback, stagedConcept: stagedConcept, admitSourceRow: admitSourceRow}
 }
 
 // withheldAsStaged reports whether a read of `concept` must return nothing
@@ -92,6 +102,67 @@ func (c *Integration) withheldAsStaged(concept string) (bool, error) {
 	return c.stagedConcept(concept), nil
 }
 
+// admitted drops every row this caller may not see, from a slice of rows AS
+// FETCHED (memql#4029).
+//
+// # Why the gate has to run HERE, and cannot run on what this file returns
+//
+// Every capability in this file is a REPACK: it reads real graph rows and emits
+// a synthetic node stamped `chat.recentChat` whose payload carries a summary of
+// them -- for wrapUtterances, the utterance text itself. Both of the engine's
+// row-authz mechanisms resolve the tier from a CONCEPT (filter injection from
+// plan.BoundConcept, the row gate from the row's own concept), so the gate that
+// runs on this capability's output is asked about `chat.recentChat`. That
+// concept declares no tier, so it admits -- and whatever tier
+// v1:cognition:utterance, space or participant declares is never consulted,
+// because no row bearing those concepts ever leaves this file.
+//
+// The rows still carry their real concept, id and payload at the moment they
+// come back from bun. That is the last point on the path where the question is
+// answerable, so this is where it is asked. Stamping a source concept on the
+// summary instead would be worse than useless: the summary has no top-level
+// owner field for an `owned` tier to read, no per-row identity for `granted`,
+// a synthesized id, and in the general case rows from more than one concept.
+//
+// # Why this is not redundant with the staged check above
+//
+// They answer different questions about the same row and neither implies the
+// other. `withheldAsStaged` asks whether the concept's data is visible to
+// ANYONE yet -- one answer for every caller, decided before the query runs.
+// This asks whether THIS caller may see THIS row, which is per row, per caller,
+// and decidable only after the fetch. The engine stacks its own two gates in
+// exactly this order for exactly this reason (filterStagedSet applied over
+// filterRowAuthzSet).
+//
+// # Why every read, when none of these concepts declares a tier today
+//
+// v1:cognition:utterance, space and participant declare no @rowAuthz tier, so
+// this gate admits everything it is shown right now and the change is
+// structural. That is the same argument withheldAsStaged makes for itself two
+// functions up, and it holds for the same reason: the alternative is that the
+// day one of these concepts declares a tier -- or the day this file grows a
+// sixth read -- five reads that feed LLM context have to be found again by
+// someone who was not here for this issue.
+//
+// Refuses when the predicate was never wired, matching withheldAsStaged: a node
+// that cannot answer "may this caller see this row" must not answer it "yes".
+func (c *Integration) admitted(ctx context.Context, nodes []memorynodes.MemoryNode) ([]memorynodes.MemoryNode, error) {
+	if c.admitSourceRow == nil {
+		return nil, fmt.Errorf("chat.recentChat: per-row authorization gate not wired; " +
+			"refusing the read rather than returning rows that passed no authorization")
+	}
+	if len(nodes) == 0 {
+		return nodes, nil
+	}
+	out := make([]memorynodes.MemoryNode, 0, len(nodes))
+	for _, n := range nodes {
+		if c.admitSourceRow(ctx, n) {
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
 // IntegrationName implements memql.IntegrationProvider.
 func (c *Integration) IntegrationName() string { return "chat" }
 
@@ -103,13 +174,13 @@ func (c *Integration) Capabilities() []memql.IntegrationCapability {
 			Description: "Read recent utterances + space context. Five operations: readRecent / readByKeyword / readByTime / getSpaceContext / listParticipants. Read-only.",
 			Handler:     c.handle,
 			ArgsSchema: map[string]string{
-				"partitionId":   "string (required)",
-				"agentId":   "string (optional, audit only)",
-				"operation": "string (required) -- readRecent / readByKeyword / readByTime / getSpaceContext / listParticipants",
-				"count":     "int (optional) -- readRecent",
-				"keyword":   "string (optional) -- readByKeyword",
-				"fromTime":  "string (optional, ISO-8601) -- readByTime",
-				"toTime":    "string (optional, ISO-8601) -- readByTime",
+				"partitionId": "string (required)",
+				"agentId":     "string (optional, audit only)",
+				"operation":   "string (required) -- readRecent / readByKeyword / readByTime / getSpaceContext / listParticipants",
+				"count":       "int (optional) -- readRecent",
+				"keyword":     "string (optional) -- readByKeyword",
+				"fromTime":    "string (optional, ISO-8601) -- readByTime",
+				"toTime":      "string (optional, ISO-8601) -- readByTime",
 			},
 		},
 	}
@@ -174,7 +245,11 @@ func (c *Integration) readRecent(ctx context.Context, partitionId string, count 
 	if err != nil {
 		return nil, fmt.Errorf("chat.recentChat.readRecent: %w", err)
 	}
-	return wrapUtterances(nodes, "readRecent"), nil
+	admitted, err := c.admitted(ctx, nodes)
+	if err != nil {
+		return nil, err
+	}
+	return wrapUtterances(admitted, "readRecent"), nil
 }
 
 func (c *Integration) readByKeyword(ctx context.Context, partitionId, keyword string) ([]memorynodes.MemoryNode, error) {
@@ -196,7 +271,11 @@ func (c *Integration) readByKeyword(ctx context.Context, partitionId, keyword st
 	if err != nil {
 		return nil, fmt.Errorf("chat.recentChat.readByKeyword: %w", err)
 	}
-	return wrapUtterances(nodes, "readByKeyword"), nil
+	admitted, err := c.admitted(ctx, nodes)
+	if err != nil {
+		return nil, err
+	}
+	return wrapUtterances(admitted, "readByKeyword"), nil
 }
 
 func (c *Integration) readByTime(ctx context.Context, partitionId, from, to string) ([]memorynodes.MemoryNode, error) {
@@ -225,7 +304,11 @@ func (c *Integration) readByTime(ctx context.Context, partitionId, from, to stri
 	if err := q.Scan(ctx, &nodes); err != nil {
 		return nil, fmt.Errorf("chat.recentChat.readByTime: %w", err)
 	}
-	return wrapUtterances(nodes, "readByTime"), nil
+	admitted, err := c.admitted(ctx, nodes)
+	if err != nil {
+		return nil, err
+	}
+	return wrapUtterances(admitted, "readByTime"), nil
 }
 
 func (c *Integration) getSpaceContext(ctx context.Context, partitionId string) ([]memorynodes.MemoryNode, error) {
@@ -246,12 +329,24 @@ func (c *Integration) getSpaceContext(ctx context.Context, partitionId string) (
 		return nil, fmt.Errorf("chat.recentChat.getSpaceContext: %w", err)
 	}
 
+	// The query already pins the LATEST version (id + createdAt DESC + Limit 1),
+	// so the row gated here is the row that decides. Denied means no context
+	// node at all rather than an empty one: a summary whose every field is nil
+	// still tells the agent the space exists.
+	admitted, err := c.admitted(ctx, []memorynodes.MemoryNode{node})
+	if err != nil {
+		return nil, err
+	}
+	if len(admitted) == 0 {
+		return nil, nil
+	}
+
 	var payload map[string]any
 	_ = json.Unmarshal(node.Payload, &payload)
 
 	out := map[string]any{
 		"operation":    "getSpaceContext",
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 		"title":        payload["title"],
 		"goal":         payload["goal"],
 		"status":       payload["status"],
@@ -285,40 +380,13 @@ func (c *Integration) listParticipants(ctx context.Context, partitionId string) 
 		return nil, fmt.Errorf("chat.recentChat.listParticipants: %w", err)
 	}
 
-	seen := make(map[string]struct{})
-	type entry struct {
-		id          string
-		displayName string
-		kind        string
-	}
-	var entries []entry
-	for _, n := range nodes {
-		if _, dup := seen[n.ID]; dup {
-			continue
-		}
-		seen[n.ID] = struct{}{}
-		var p map[string]any
-		_ = json.Unmarshal(n.Payload, &p)
-		status, _ := p["status"].(string)
-		if !strings.EqualFold(status, "active") {
-			continue
-		}
-		typ, _ := p["participantType"].(string)
-		dn, _ := p["displayName"].(string)
-		entries = append(entries, entry{id: n.ID, displayName: dn, kind: typ})
-	}
-
-	items := make([]map[string]any, 0, len(entries))
-	for _, e := range entries {
-		items = append(items, map[string]any{
-			"participantId":   e.id,
-			"displayName":     e.displayName,
-			"participantKind": e.kind,
-		})
+	items, err := c.foldActiveParticipants(ctx, nodes)
+	if err != nil {
+		return nil, err
 	}
 	out := map[string]any{
 		"operation":    "listParticipants",
-		"partitionId":      partitionId,
+		"partitionId":  partitionId,
 		"participants": items,
 		"count":        len(items),
 	}
@@ -330,6 +398,64 @@ func (c *Integration) listParticipants(ctx context.Context, partitionId string) 
 		CreatedAt: time.Now().UTC(),
 		Payload:   bytes,
 	}}, nil
+}
+
+// foldActiveParticipants collapses the participant rows -- which arrive
+// `createdAt DESC`, several versions per id -- down to one entry per active
+// participant, applying the per-row authorization gate on the way.
+//
+// # THE ORDER OF THE THREE STEPS IS THE WHOLE FUNCTION (memql#4029)
+//
+// dedup -> gate -> status, in that order, and each boundary is load-bearing:
+//
+//  1. DEDUP BEFORE GATE. The rows are newest-first, so the FIRST row for an id
+//     is its latest version and the only one whose verdict is current. Gating
+//     the slice first and folding the survivors would let a DENIED latest
+//     version fall through to an ADMITTED older one -- the caller is handed a
+//     stale row instead of no row, which is the quietest failure available
+//     here, because a plausible answer is worse than an empty one. Marking
+//     `seen` before the gate is what makes a denial drop the id outright rather
+//     than reveal its predecessor. This is the authorization-side twin of the
+//     hazard withheldAsStaged records for the staged check.
+//  2. GATE BEFORE STATUS. `status` is domain filtering, not authorization.
+//     Reading a field off a row this caller may not see is the wrong way round
+//     even when nothing is emitted from it.
+//
+// Extracted from listParticipants so the ordering has a test that does not need
+// a database, since it is the part of this file most likely to be "simplified"
+// into a pre-filter by someone who reads the gate as a plain slice filter.
+//
+// Refuses when the gate was never wired, matching admitted.
+func (c *Integration) foldActiveParticipants(ctx context.Context, nodes []memorynodes.MemoryNode) ([]map[string]any, error) {
+	if c.admitSourceRow == nil {
+		return nil, fmt.Errorf("chat.recentChat: per-row authorization gate not wired; " +
+			"refusing the read rather than returning rows that passed no authorization")
+	}
+	seen := make(map[string]struct{}, len(nodes))
+	items := make([]map[string]any, 0, len(nodes))
+	for _, n := range nodes {
+		if _, dup := seen[n.ID]; dup {
+			continue
+		}
+		seen[n.ID] = struct{}{}
+		if !c.admitSourceRow(ctx, n) {
+			continue
+		}
+		var p map[string]any
+		_ = json.Unmarshal(n.Payload, &p)
+		status, _ := p["status"].(string)
+		if !strings.EqualFold(status, "active") {
+			continue
+		}
+		typ, _ := p["participantType"].(string)
+		dn, _ := p["displayName"].(string)
+		items = append(items, map[string]any{
+			"participantId":   n.ID,
+			"displayName":     dn,
+			"participantKind": typ,
+		})
+	}
+	return items, nil
 }
 
 func wrapUtterances(nodes []memorynodes.MemoryNode, op string) []memorynodes.MemoryNode {

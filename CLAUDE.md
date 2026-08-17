@@ -1785,15 +1785,28 @@ concept id.
 `component/memql/dslgate`, and over this repo's corpus by
 `test/dslconformance/conformance_test.go`, which runs the same detector):
 
-> **Where these rules are enforced (memql#3629).** The CONTRACT gates --
-> retired operator forms, the two `row.` namespace rules, the per-row authz
-> user-scope bucket, and the admin-gate composition rule -- run inside
-> `MemQLEngine.Init`, land on the `LoadReport`, and are refused by strict boot
-> (`MEMQL_DSL_ALLOW_SKIPS` is the break-glass). That is what covers a **product
-> DSL bundle** mounted at `MEMQL_DSL_PATH`, which no Go test in this repo
-> walks; `cmd/memqllint` runs the same `Init` offline. House-style gates
-> (naming, redundant annotations, canonical short forms) stay test-only --
-> failing a fleet's boot over a convention would be worse than the drift.
+> **Where these rules are enforced (memql#3629, memql#4051).** The CONTRACT
+> gates -- retired operator forms, the two `row.` namespace rules, the per-row
+> authz user-scope bucket, the admin-gate composition rule, and the
+> cross-namespace import rule -- run inside `MemQLEngine.Init`, land on the
+> `LoadReport`, and are refused by strict boot (`MEMQL_DSL_ALLOW_SKIPS` is the
+> break-glass). That is what covers a **product DSL bundle** mounted at
+> `MEMQL_DSL_PATH`, which no Go test in this repo walks; `cmd/memqllint` runs
+> the same `Init` offline. House-style gates (naming, redundant annotations,
+> canonical short forms) stay test-only -- failing a fleet's boot over a
+> convention would be worse than the drift.
+>
+> **The entry point is `dslgate.ScanFiles`, and it takes the whole corpus.**
+> Init used to loop `ScanSource` per file, which can express only per-file
+> rules -- so the cross-namespace import gate (memql#3803), whose question is
+> "where is this name DECLARED", could not be one of them. It lived on
+> `ScanTree`, whose only caller was a conformance test, and was therefore
+> enforced over this repo's `dsl/` at PR time and over a product bundle
+> **nowhere**. memql#4051 ruled that a gap rather than a deliberate exemption:
+> boot already holds the merged file set (`baseloader.ReadAll`), so the corpus
+> pass adds no I/O, just ~79ms of regex over bytes already read. Write a new
+> gate against `ScanFiles`; there is no longer a tier of gate that boot cannot
+> reach, and reintroducing one is the mistake to avoid.
 
 - Payload fields: **bare property** (`status`, `ownerUserId`) — never
   `<conceptName>.<field>`.

@@ -462,6 +462,12 @@ func (e *MemQLEngine) latestMatchingNodes(
 	seen := make(map[string]struct{})
 	result := make([]memorynodes.MemoryNode, 0, len(uniqueIds))
 
+	// Resolved ONCE, outside the loop (memql#4040). Per-candidate resolution
+	// would repeat an actor-envelope read for every row and, worse, would let
+	// two rows of one read be decided against two different answers if the
+	// context were ever swapped mid-scan.
+	stagedScope := e.stagedScopeFor(ctx)
+
 	for _, node := range nodes {
 		id := strings.TrimSpace(node.ID)
 		if id == "" {
@@ -492,7 +498,7 @@ func (e *MemQLEngine) latestMatchingNodes(
 		// constructs binding no concept) are exactly the ones where nothing
 		// did. Staging is a pure function of the row's concept, so asking the
 		// row directly is both cheaper and complete.
-		if !e.admitStagedRow(candidate) {
+		if !e.admitStagedRow(stagedScope, candidate) {
 			continue
 		}
 

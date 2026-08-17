@@ -84,7 +84,7 @@ func evaluableFilter(t *testing.T, eng *MemQLEngine, ctx context.Context, queryS
 	t.Helper()
 	ambient := buildAmbientEnvelope(ctx, eng)
 	plan, err := eng.parseWithFunctionsAmbient(queryString, eng.functions, nil, false,
-		auth.OriginFromContext(ctx), ambient)
+		auth.OriginFromContext(ctx), ambient, StagedScope{})
 	require.NoErrorf(t, err, "parsing %q against the loaded DSL", queryString)
 	require.NotNilf(t, plan.Root, "query %q produced no filter", queryString)
 
