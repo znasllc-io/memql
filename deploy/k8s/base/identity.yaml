@@ -96,7 +96,7 @@ spec:
                 name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
-            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "identity" }
             - { name: MEMQL_NODE_ADDRESS, value: "identity:50061" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -112,7 +112,7 @@ spec:
             - { name: MEMQL_DEPLOYMENT_ID, valueFrom: { fieldRef: { fieldPath: "metadata.labels['pod-template-hash']" } } }
             - { name: MEMQL_NODE_SERVICE_ADDRESS, value: ":50061" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
-            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             # Signing key (#550): MEMQL_IDENTITY_SIGNING_KEY_B64 arrives via the
             # memql-secrets envFrom above (as a key on the Secret, or inside the
             # sealed genesis envelope), so every replica derives the SAME Ed25519
@@ -180,7 +180,7 @@ spec:
             # rename and before this), so its redirect URI is that origin's
             # own /auth/callback.
             - { name: MEMQL_IDENTITY_REGISTERED_CLIENTS, value: '[{"clientId":"cockpit","redirectURIs":["http://127.0.0.1/cockpit/callback","http://localhost/cockpit/callback"]},{"clientId":"portal","redirectURIs":["https://portal.example.com/auth/callback"]}]' }
-            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMQL_IDENTITY_ENABLED, value: "true" }
             # Migrations run ONCE, here. Every other node has this false.
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "true" }

@@ -108,9 +108,15 @@ func TestOwnedVarsArePrefixed(t *testing.T) {
 // entry ADDS a migration path rather than removing one -- but it still belongs
 // in this guard, because the entries are what make an operator's existing
 // configuration keep working and a silent deletion would be invisible.
+//
+// 95 -> 109 in memql#3892: the SERVER_* and SERVICE_* families, which are the
+// same pre-convention vintage reached one layer deeper. Their keys live in
+// struct fields and their prefix in a constant, so the composed name appears in
+// no source file -- which is why a grep concluded SERVER_ADDRESS was read by
+// nothing while it was in fact setting the HTTP listen address on every node.
 func TestLegacyAliasesCount(t *testing.T) {
-	if len(LegacyAliases) != 95 {
-		t.Fatalf("LegacyAliases has %d entries, want 95 (the Epic 7.3 rename map, minus the memql#3453 removal, plus the six pre-convention renames in memql#3831)", len(LegacyAliases))
+	if len(LegacyAliases) != 109 {
+		t.Fatalf("LegacyAliases has %d entries, want 109 (the Epic 7.3 rename map, minus the memql#3453 removal, plus the six pre-convention renames in memql#3831 and the fourteen SERVER_*/SERVICE_* renames in memql#3892)", len(LegacyAliases))
 	}
 	seenLegacy := map[string]bool{}
 	for newName, legacy := range LegacyAliases {

@@ -917,6 +917,84 @@ variables:
     optional: true
     description: "Base URL path prefix the memQL HTTP router is mounted under. It is not cosmetic: every declared HTTP path is re-spelled through it, so the health/ready probes, the WebSocket bridge and the unauthenticated-surface boot check all resolve against the prefixed form -- a node whose probes are configured for one spelling and whose router serves the other fails to come up. Hosted sites are exempt (each site owns its whole path space). Legacy alias: SERVER_PUBLIC_PATH (memql#3831)."
 
+  # The rest of the SERVER_ family (memql#3892). These were live and
+  # unregistered for the whole life of the registry, and the reason is worth
+  # stating once here because it is a detection gap rather than an oversight:
+  # component/server/env.go reads them as env.NewEnvReader(prefix).String(keys.Field),
+  # so the composed name exists in no source file. A grep for the literal finds
+  # nothing, envscan lists the sites in its unresolvable residual (memql#3834),
+  # and the drift gate is therefore quiet about a variable that every node reads.
+
+  - name: MEMQL_SERVER_ADDRESS
+    component: transport
+    scope: node
+    default: ":8085"
+    optional: true
+    description: "HTTP listen address for this node's memQL HTTP server (the health probes, the WebSocket bridge, and whichever documented HTTP exceptions this node type serves). Default \":8085\" on EVERY node type -- there are no per-binary port defaults, despite what env-vars.md claimed until memql#3892. Changing it moves only the process's listener; in Kubernetes the containerPort and Service must move with it or the pod becomes unreachable while looking healthy to itself. Legacy alias: SERVER_ADDRESS (memql#3892)."
+
+  - name: MEMQL_SERVER_ALLOWED_ORIGINS
+    component: transport
+    scope: node
+    default: "*"
+    optional: true
+    description: "Origins the generic HTTP CORS middleware admits, comma- or space-separated. Empty or unset means \"*\", which the middleware serves WITHOUT credentials -- a credential-less posture rather than an open one. Distinct from MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS, which governs the identity service's own origin list and is the one to narrow when you mean to restrict identity. Legacy alias: SERVER_ALLOWED_ORIGINS (memql#3892)."
+
+  - name: MEMQL_SERVER_READ_TIMEOUT_MS
+    component: transport
+    scope: node
+    default: "15000"
+    optional: true
+    description: "http.Server ReadTimeout in milliseconds. Legacy alias: SERVER_READ_TIMEOUT_MS (memql#3892)."
+
+  - name: MEMQL_SERVER_READ_HEADER_TIMEOUT_MS
+    component: transport
+    scope: node
+    default: "5000"
+    optional: true
+    description: "http.Server ReadHeaderTimeout in milliseconds -- the Slowloris bound. Legacy alias: SERVER_READ_HEADER_TIMEOUT_MS (memql#3892)."
+
+  - name: MEMQL_SERVER_WRITE_TIMEOUT_MS
+    component: transport
+    scope: node
+    default: "15000"
+    optional: true
+    description: "http.Server WriteTimeout in milliseconds. Legacy alias: SERVER_WRITE_TIMEOUT_MS (memql#3892)."
+
+  - name: MEMQL_SERVER_IDLE_TIMEOUT_MS
+    component: transport
+    scope: node
+    default: "60000"
+    optional: true
+    description: "http.Server IdleTimeout in milliseconds -- how long a keep-alive connection may sit unused. Legacy alias: SERVER_IDLE_TIMEOUT_MS (memql#3892)."
+
+  - name: MEMQL_SERVER_SHUTDOWN_TIMEOUT_MS
+    component: transport
+    scope: node
+    default: "5000"
+    optional: true
+    description: "Budget in milliseconds for the HTTP server's graceful shutdown, spent after the drain delay and the in-flight wait that MEMQL_SHUTDOWN_DRAIN_DELAY_SECONDS and the grace period govern. terminationGracePeriodSeconds must exceed the sum. Legacy alias: SERVER_SHUTDOWN_TIMEOUT_MS (memql#3892)."
+
+  - name: MEMQL_SERVER_CAPABILITIES_LOGGING_LOG_LEVEL
+    component: transport
+    scope: node
+    optional: true
+    description: "slog level for the HTTP server component (debug / info / warn / error). The reader also accepts the deprecated MEMQL_SERVER_LOGGER_LEVEL and MEMQL_SERVER_LOG_LEVEL spellings, in that order, and those two carry legacy aliases of their own. Legacy alias: SERVER_CAPABILITIES_LOGGING_LOG_LEVEL (memql#3892)."
+
+  # --- service metadata ---
+
+  - name: MEMQL_SERVICE_NAME
+    component: engine
+    scope: node
+    default: "memQL"
+    optional: true
+    description: "Service name stamped on this process's structured log records. Read through the same prefix-composed path as the SERVER_ family above, which is why it too went unregistered until memql#3892. Legacy alias: SERVICE_NAME (memql#3892)."
+
+  - name: MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL
+    component: engine
+    scope: node
+    optional: true
+    description: "slog level for the process-level service logger (debug / info / warn / error). The deprecated MEMQL_SERVICE_LOGGER_LEVEL and MEMQL_SERVICE_LOG_LEVEL spellings are accepted after it, in that order. Legacy alias: SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL (memql#3892)."
+
   # --- portal ---
   #
   # MEMQL_PORTAL_DIST / MEMQL_PORTAL_OAUTH_CLIENT_ID / MEMQL_PORTAL_IDENTITY_URL /
