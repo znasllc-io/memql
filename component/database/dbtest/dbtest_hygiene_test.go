@@ -27,6 +27,51 @@ func TestSafeDSNRedactsPassword(t *testing.T) {
 	}
 }
 
+// memql#4032: "the port is open" is not evidence a database is there, and the
+// two unreachable states call for opposite next steps. The k3d load balancer
+// publishes 5432 and then EOFs partway through the Postgres handshake, so a
+// developer with the cluster up has a connection that neither succeeds nor
+// refuses -- and every db-gated case silently skips while the run reports ok.
+// The message has to tell those two apart.
+func TestReachabilityHintDistinguishesOpenPortFromNoListener(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string // a phrase that must appear; "" means no hint at all
+	}{
+		{"nothing listening", fmt.Errorf("dial tcp [::1]:15999: connect: connection refused"), "nothing is listening"},
+		{"k3d lb answers and EOFs", fmt.Errorf("EOF"), "the port is OPEN"},
+		{"wrapped EOF", fmt.Errorf("ping: %w", fmt.Errorf("unexpected EOF")), "the port is OPEN"},
+		{"peer reset", fmt.Errorf("read tcp: connection reset by peer"), "the port is OPEN"},
+		{"authentication failure is neither", fmt.Errorf(`password authentication failed for user "memql"`), ""},
+		{"nil", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := reachabilityHint(tc.err)
+			if tc.want == "" {
+				if got != "" {
+					t.Errorf("reachabilityHint(%v) = %q, want no hint -- guessing at a failure "+
+						"shape it cannot actually identify is worse than staying quiet", tc.err, got)
+				}
+				return
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("reachabilityHint(%v) = %q, want it to contain %q", tc.err, got, tc.want)
+			}
+		})
+	}
+
+	// The two hints must not be interchangeable: a developer who reads the
+	// wrong one goes and starts a database that is already running, or tears
+	// down a cluster that was never the problem.
+	refused := reachabilityHint(fmt.Errorf("connect: connection refused"))
+	eof := reachabilityHint(fmt.Errorf("EOF"))
+	if refused == eof {
+		t.Fatal("the two unreachable states produce the same message, so the distinction memql#4032 asked for is not being made")
+	}
+}
+
 func TestRequireDBParsing(t *testing.T) {
 	prev, had := os.LookupEnv(RequireDBEnv)
 	t.Cleanup(func() {

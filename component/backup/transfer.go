@@ -2,9 +2,11 @@ package backup
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -45,6 +47,55 @@ func (o Options) now() time.Time {
 // first would make a backup's memory cost scale with the database. So the rows
 // go to a temporary spill first, then the manifest and the spill are
 // concatenated into w. Constant memory, complete header.
+//
+// ONE SNAPSHOT ACROSS EVERY PAGE OF EVERY TABLE (memql#4043). eachRow pages
+// with LIMIT/OFFSET, and each page is a SEPARATE statement -- so without a
+// snapshot the pages are read from different states of the table and a
+// concurrent write before the offset shifts every later row. The two directions
+// are NOT symmetric, and only one of them is loud:
+//
+//	an INSERT before the offset shifts later rows FORWARD, so the next page
+//	re-emits a row the previous page already sent. A DUPLICATE -- caught at
+//	restore time, because Restore inserts with no ON CONFLICT against the
+//	(id, "createdAt") primary key and aborts.
+//
+//	a DELETE before the offset shifts later rows BACKWARD, so the next page's
+//	OFFSET steps over one. A SILENT OMISSION: exit 0, no error, and a manifest
+//	whose counts match the short stream because they are counted FROM it. A
+//	named row, present before the export began and never itself deleted, simply
+//	absent from the backup.
+//
+// A delete looks impossible in an append-only store, which is why the real
+// trigger is worth naming: integrations/knowledge/seed.go purges
+// v1:knowledge:documentChunk rows whenever a knowledge domain is re-seeded, and
+// those rows carry OLD createdAt values -- so they sit EARLY in this ordering,
+// exactly where the damage is done. `memql backup` does no quiescing and takes
+// no lock: it runs against a fully live cluster on a 30-minute timeout.
+//
+// The snapshot covers the READS and nothing else. Writing the manifest and
+// concatenating the spill into w happen after it is released, because w may be
+// a slow or remote sink and a transaction held open across it would pin the
+// oldest xmin -- blocking vacuum cluster-wide for as long as the write takes.
+//
+// KEYSET PAGING WAS THE OTHER CANDIDATE and is rejected on purpose, because it
+// looks strictly cheaper and is not. Seeking on (createdAt, id) > the last row
+// emitted closes BOTH shifts above without holding anything open, since a write
+// before the cursor moves no later row past it -- and for a 30-minute export
+// against a live cluster, holding no snapshot is a real advantage.
+//
+// What it cannot give is a point in TIME. Each page would be read from a
+// different state, so rows written during the export appear or not depending on
+// where the cursor had reached, and the file is a smear across the run rather
+// than an image of an instant. For most readers that is a fine trade; for a
+// backup it is the whole product. A restore from a smeared export can
+// reconstruct a graph that never existed -- a row referencing a sibling that was
+// written after the cursor passed its position, so the reference is present and
+// the target is not. That is worse than the bug being fixed here, because it
+// cannot be found by counting.
+//
+// So: the snapshot's cost is vacuum pressure for the duration of the reads, and
+// it is accepted knowingly. If that ever becomes the binding constraint, the
+// answer is to make the READS shorter, not to give up the instant.
 func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifest, error) {
 	if db == nil {
 		return Manifest{}, errors.New("backup: export: nil database")
@@ -62,10 +113,8 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 	if opts.IncludeSecrets {
 		tables = append(tables, TableSecretMemoryNodes)
 	}
-	for _, table := range tables {
-		if err := eachRow(ctx, db, table, func(r Row) error { return rows.WriteRow(r) }); err != nil {
-			return Manifest{}, err
-		}
+	if err := readTablesUnderOneSnapshot(ctx, db, tables, func(r Row) error { return rows.WriteRow(r) }); err != nil {
+		return Manifest{}, err
 	}
 	if err := rows.flush(); err != nil {
 		return Manifest{}, err
@@ -84,6 +133,80 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 	return manifest, nil
 }
 
+// readTablesUnderOneSnapshot runs fn over every row of every named table inside
+// a SINGLE repeatable-read snapshot (memql#4043). See Export for what the
+// snapshot buys and why the pages need it.
+//
+// Two branches, because bun.IDB is satisfied by both a pool and a transaction
+// and they cannot be treated alike:
+//
+//   - a POOL (*bun.DB) -- open the transaction here, at REPEATABLE READ. Also
+//     READ ONLY: an export writes nothing, and saying so lets Postgres refuse a
+//     write rather than leaving "reads only" as a property of the code above.
+//
+//   - a TRANSACTION the caller already holds -- it cannot be reopened, and this
+//     must NOT quietly accept whatever isolation it happens to have. bun's
+//     Tx.RunInTx DISCARDS its *sql.TxOptions (its parameter is literally named
+//     `_`, bun@v1.2.18 db.go:780) and opens a SAVEPOINT instead, so asking a Tx
+//     for REPEATABLE READ is accepted and ignored. Under a READ COMMITTED caller
+//     the export would page with no snapshot at all and every line of this fix
+//     would be decoration. So ask the DATABASE what is actually in effect, and
+//     refuse what cannot hold a snapshot.
+//
+// That refusal is the fail-CLOSED half and it is the point: a wrong backup is
+// worth less than no backup, because only one of the two is discovered at the
+// moment it is taken.
+func readTablesUnderOneSnapshot(ctx context.Context, db bun.IDB, tables []string, fn func(Row) error) error {
+	if tx, ok := db.(bun.Tx); ok {
+		if err := requireSnapshotIsolation(ctx, tx); err != nil {
+			return err
+		}
+		return eachTable(ctx, tx, tables, fn)
+	}
+	return db.RunInTx(ctx,
+		&sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true},
+		func(ctx context.Context, tx bun.Tx) error { return eachTable(ctx, tx, tables, fn) },
+	)
+}
+
+func eachTable(ctx context.Context, db bun.IDB, tables []string, fn func(Row) error) error {
+	for _, table := range tables {
+		if err := eachRow(ctx, db, table, fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireSnapshotIsolation refuses a caller transaction that cannot hold one
+// snapshot for its whole life.
+//
+// current_setting('transaction_isolation') reports what the SERVER is running
+// this transaction under, which is the only source that cannot be fooled by a
+// TxOptions somebody handed to a call that throws it away. Inside a savepoint it
+// reports the enclosing transaction's level -- which is exactly the case being
+// guarded, so the probe answers the question actually being asked.
+//
+// SERIALIZABLE is accepted alongside REPEATABLE READ: in Postgres it is
+// repeatable read plus predicate locking, so it holds the same single snapshot
+// and is strictly stronger for this purpose.
+func requireSnapshotIsolation(ctx context.Context, tx bun.Tx) error {
+	var level string
+	if err := tx.NewRaw(`SELECT current_setting('transaction_isolation')`).Scan(ctx, &level); err != nil {
+		return fmt.Errorf("backup: export: reading the caller transaction's isolation level: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "repeatable read", "serializable":
+		return nil
+	}
+	return fmt.Errorf(
+		"backup: export: the caller's transaction runs at %q, which takes a new snapshot per statement; "+
+			"an export pages with LIMIT/OFFSET, so a concurrent delete before the offset would silently "+
+			"omit rows from the backup. Pass the pool (*bun.DB) and let Export open its own transaction, "+
+			"or begin yours with sql.LevelRepeatableRead",
+		level)
+}
+
 // eachRow streams one table, ORDERED, and in pages.
 //
 // Ordered by (createdAt, id) so two exports of an unchanged database are
@@ -96,6 +219,15 @@ func Export(ctx context.Context, db bun.IDB, w io.Writer, opts Options) (Manifes
 // The full argument is the paragraph below; it is worth adding only that this
 // gate does not act alone -- CountRows is the compounding half, and one sweep
 // that "adds the predicate everywhere" produces both.
+//
+// NO SNAPSHOT OF ITS OWN, and that is deliberate rather than an omission
+// (memql#4043). The snapshot belongs one level up, in readTablesUnderOneSnapshot,
+// because it has to span every page of every TABLE -- a per-call transaction here
+// would give MemoryNodes and SecretMemoryNodes two different views of the same
+// instant, which is the bug in a smaller shape. Leaving this function bare is
+// also what lets TestUnsnapshottedPagingSilentlyOmitsARow reproduce the omission
+// as a standing positive control; adding a transaction here would keep that test
+// green while quietly making it measure nothing.
 //
 // UNFILTERED, AND THAT IS LOAD-BEARING (memql#3985). Whole table, every concept,
 // every version -- there is no WHERE clause here and none may be added. In

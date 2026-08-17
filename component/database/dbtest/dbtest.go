@@ -131,13 +131,13 @@ func ensureSchema(ctx context.Context, fallbackDSN string) (reachable bool, err 
 		// wanted a database; the exit names only the package. That is the
 		// trade, and it is deliberate.
 		if RequireDB() && !usedDefault {
-			return false, fmt.Errorf("dbtest: %s=1 but Postgres is UNREACHABLE at %s: %w", RequireDBEnv, SafeDSN(dsn), perr)
+			return false, fmt.Errorf("dbtest: %s=1 but Postgres is UNREACHABLE at %s: %w%s", RequireDBEnv, SafeDSN(dsn), perr, reachabilityHint(perr))
 		}
 		if RequireDB() {
 			fmt.Fprintf(os.Stderr, "dbtest: %s=1 and no %s was set; the built-in fallback %s is "+
-				"UNREACHABLE (%v). Continuing to m.Run() so each test reports its own requirement "+
+				"UNREACHABLE (%v)%s. Continuing to m.Run() so each test reports its own requirement "+
 				"-- %s still turns every one of those into a failure.\n",
-				RequireDBEnv, dsnEnv, SafeDSN(dsn), perr, RequireDBEnv)
+				RequireDBEnv, dsnEnv, SafeDSN(dsn), perr, reachabilityHint(perr), RequireDBEnv)
 		}
 		return false, nil
 	}
@@ -344,12 +344,43 @@ func SafeDSN(dsn string) string {
 // database. purpose describes the suite ("accountDeletionSweep acceptance").
 func Unreachable(t testing.TB, purpose, dsn string, err error) {
 	t.Helper()
+	hint := reachabilityHint(err)
 	if RequireDB() {
 		// Explicit return rather than relying on Fatalf's implicit
 		// Goexit: the control flow must be correct for any testing.TB,
 		// not just the stdlib one (#2680's own test caught this).
-		t.Fatalf("%s: %s=1 but Postgres is UNREACHABLE at %s: %v", purpose, RequireDBEnv, SafeDSN(dsn), err)
+		t.Fatalf("%s: %s=1 but Postgres is UNREACHABLE at %s: %v%s", purpose, RequireDBEnv, SafeDSN(dsn), err, hint)
 		return
 	}
-	t.Skipf("%s: no Postgres reachable at %s (%v) -- set %s=1 to make this a failure", purpose, SafeDSN(dsn), err, RequireDBEnv)
+	t.Skipf("%s: no Postgres reachable at %s (%v) -- set %s=1 to make this a failure%s", purpose, SafeDSN(dsn), err, RequireDBEnv, hint)
+}
+
+// reachabilityHint names the SHAPE of the failure when the two common ones are
+// distinguishable, because they call for opposite next steps and only one of
+// them looks like a mistake (memql#4032).
+//
+// "Nothing is listening" is the honest, obvious case: no database, start one.
+//
+// "Something is listening and it is not Postgres" is the dangerous one, and it
+// is the state a developer with the k3d cluster up is actually in. The k3d
+// load balancer publishes 5432, so the TCP connect SUCCEEDS -- the failure is a
+// bare EOF partway through the startup handshake rather than a refusal. That
+// does not read as "no database"; it reads as nothing at all, and every
+// db-gated case then skips while the run reports ok. Naming it is the whole
+// point: the port being open is not evidence that a database is there.
+func reachabilityHint(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "connection refused"):
+		return " (nothing is listening on that port -- no database is running there)"
+	case strings.Contains(msg, "eof"), strings.Contains(msg, "connection reset"), strings.Contains(msg, "broken pipe"):
+		return " (the port is OPEN but the peer did not complete the Postgres handshake --" +
+			" something else is listening on it. With the k3d cluster up, k3d-memql-serverlb" +
+			" publishes 5432 and answers exactly like this. Point " + dsnEnv + " at a real" +
+			" Postgres, or take the cluster down.)"
+	}
+	return ""
 }
