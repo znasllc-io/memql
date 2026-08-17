@@ -48,6 +48,7 @@ import {
 } from "./deployments.js";
 import {
   currentDeploymentId,
+  pendingDeploymentId,
   projectDeployments,
   projectNodeSpecs,
 } from "./deploymentHistory.js";
@@ -149,7 +150,11 @@ export async function buildCatalog(inputs: CatalogInputs): Promise<Catalog> {
       reachable: isConnected,
       connected: isConnected,
       ...(isConnected && remote !== undefined
-        ? { deployments: remote.records, currentDeploymentId: remote.currentId }
+        ? {
+            deployments: remote.records,
+            currentDeploymentId: remote.currentId,
+            pendingDeploymentId: remote.pendingId,
+          }
         : {}),
     });
     instances.push(instance);
@@ -197,7 +202,15 @@ async function resolveLocalRuns(inputs: CatalogInputs): Promise<Run[]> {
 
 async function resolveRemote(
   inputs: CatalogInputs,
-): Promise<{ records: ReturnType<typeof projectDeployments>; specs: ReturnType<typeof projectNodeSpecs>; currentId: string } | undefined> {
+): Promise<
+  | {
+      records: ReturnType<typeof projectDeployments>;
+      specs: ReturnType<typeof projectNodeSpecs>;
+      currentId: string;
+      pendingId: string;
+    }
+  | undefined
+> {
   if (inputs.readDeployments === undefined) return undefined;
   try {
     const raw = await inputs.readDeployments();
@@ -206,6 +219,10 @@ async function resolveRemote(
       records,
       specs: projectNodeSpecs(raw.specs),
       currentId: currentDeploymentId(records),
+      // Resolved HERE, from the same read that resolves the version, for the
+      // reason the one-pass comment above gives: two reads of the same rows let
+      // the two answers disagree about the same cluster in the same frame.
+      pendingId: pendingDeploymentId(records),
     };
   } catch {
     // A cluster that stopped answering mid-read still has an instance row; it

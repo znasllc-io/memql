@@ -771,14 +771,34 @@ export class DeploymentPanel {
     id: DeployActionId,
   ): Promise<DeployActionRequest | undefined> {
     const ask = this.deps.confirm ?? (async () => undefined);
-    const current = this.runs[0];
     switch (id) {
       case "cutVersion":
         return { id, bump: "patch", version: "" };
       case "deploy": {
-        const target = current?.id ?? "";
+        // THE RECORD THIS PAGE RENDERED, BY ID (memql#4017). `load()` resolves
+        // it (state/deploymentHistory.pendingDeploymentId) and the overview
+        // prints it above this button, so the ship names the row the operator
+        // was looking at.
+        //
+        // This took `runs[0]` -- the newest record in the catalog the page last
+        // read, re-derived at the click -- and it was wrong twice over. It was
+        // not the PENDING record, and `deploy` transitions whatever it is given
+        // pending -> in_progress without checking what it is transitioning from
+        // (component/deploycontrol/deploy.go), so a cluster whose newest record
+        // had landed re-shipped a succeeded deployment. And it was resolved at
+        // the CLICK, so two cuts against one cluster inside the reload window
+        // and the ship named the other operator's record -- the same shape
+        // #4015 removed from the upgrade path by carrying the id the cut
+        // returned. There is no cut to return one here, so the id is fixed when
+        // the page is built instead.
+        const target = this.instance?.pendingDeploymentId ?? "";
         if (target === "") {
-          this.outcome = "ERROR: there is no deployment record to ship.";
+          // REFUSE rather than fall back to another record, for the reason the
+          // remote upgrade path gives about a missing id: a pending record
+          // nobody shipped is visible, inert and easy to ship by hand, while
+          // the wrong record shipped is none of those things.
+          this.outcome =
+            "ERROR: nothing is cut, so there is no pending deployment record to ship.";
           this.render();
           return undefined;
         }

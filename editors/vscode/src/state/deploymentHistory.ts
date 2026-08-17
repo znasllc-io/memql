@@ -132,6 +132,34 @@ export function projectNodeSpecs(rows: Row[]): DeploymentNodeSpec[] {
 }
 
 /**
+ * The newest record a predicate admits, by the same total order
+ * projectDeployments sorts by.
+ *
+ * The order is re-derived here rather than taken from the caller's list: both
+ * questions below are asked of already-sorted output, and both must survive a
+ * caller that filtered or re-ordered it. Two answers, one comparison -- a
+ * second copy of the tie-break would be a second thing to keep in step.
+ */
+function newestWhere(
+  records: readonly DeploymentRecord[],
+  admits: (record: DeploymentRecord) => boolean,
+): DeploymentRecord | undefined {
+  let best: DeploymentRecord | undefined;
+  for (const record of records) {
+    if (!admits(record)) continue;
+    if (best === undefined) {
+      best = record;
+      continue;
+    }
+    const byCreated = compareDesc(record.createdAt, best.createdAt);
+    const newer =
+      byCreated !== 0 ? byCreated < 0 : record.deploymentId.localeCompare(best.deploymentId) < 0;
+    if (newer) best = record;
+  }
+  return best;
+}
+
+/**
  * The deployment the cluster is currently running: the most recently CUT
  * deployment that actually landed (see LANDED_STATUSES).
  *
@@ -141,27 +169,32 @@ export function projectNodeSpecs(rows: Row[]): DeploymentNodeSpec[] {
  * flags NOTHING as a stale-deployment orphan, because marking every node in
  * the cluster an orphan on the strength of a failed read would be worse than
  * saying nothing.
- *
- * Takes an already-sorted record list (projectDeployments' output) but does not
- * rely on the sort: it scans for the newest landed record itself, so a caller
- * that filtered or re-ordered the list cannot silently get a wrong answer.
  */
 export function currentDeploymentId(records: DeploymentRecord[]): string {
-  let best: DeploymentRecord | undefined;
-  for (const record of records) {
-    if (!LANDED_STATUSES.has(record.status)) continue;
-    if (best === undefined) {
-      best = record;
-      continue;
-    }
-    // The same total order projectDeployments sorts by, applied independently
-    // so this answer does not depend on the caller having preserved that sort.
-    const byCreated = compareDesc(record.createdAt, best.createdAt);
-    const newer =
-      byCreated !== 0 ? byCreated < 0 : record.deploymentId.localeCompare(best.deploymentId) < 0;
-    if (newer) best = record;
-  }
-  return best?.deploymentId ?? "";
+  return newestWhere(records, (record) => LANDED_STATUSES.has(record.status))?.deploymentId ?? "";
+}
+
+/**
+ * The deployment that has been CUT AND NOT SHIPPED: the newest `pending` one.
+ *
+ * This is what the Deploy button ships (memql#4017), and the status test is
+ * exact rather than "not terminal" for a reason the engine makes plain:
+ * `Deploy` transitions a record pending -> in_progress and does NOT check the
+ * status it is transitioning from (component/deploycontrol/deploy.go). So
+ * `in_progress` here would restart a deploy already in flight, and any terminal
+ * status would put a finished deployment back into one -- which is exactly what
+ * the panel did while it shipped whatever record happened to be newest.
+ *
+ * Empty when nothing is cut, which is the ordinary state of a cluster nobody is
+ * mid-deploy on. The surface says so; there is no second-choice record, because
+ * the whole point is that the operator ships the record they were shown.
+ *
+ * The counterpart to `currentDeploymentId` and independent of it: a rollback
+ * lands a NEW record on top of a version somebody cut and has not shipped, so
+ * the newest landed record and the pending one are routinely different rows.
+ */
+export function pendingDeploymentId(records: readonly DeploymentRecord[]): string {
+  return newestWhere(records, (record) => record.status === "pending")?.deploymentId ?? "";
 }
 
 /**
