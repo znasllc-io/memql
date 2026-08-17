@@ -146,6 +146,70 @@ function nameWords(name: string): string[] {
  * those two survive this filter while `link` and `enrolUrl` do not.
  */
 export function withholdsFromRunLog(name: string, value: unknown): boolean {
+  if (withholdsFromReceipt(name, value)) return true;
+  // THE LENGTH BACKSTOP IS RUN-LOG ONLY, and the asymmetry is the point --
+  // see withholdsFromReceipt for the argument. A value nobody would read as a
+  // status is worth dropping from a history an operator skims, and is NOT
+  // worth dropping from a record the uninstall reads back to find an artifact.
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return trimmed.length > 96;
+}
+
+/**
+ * Whether a result VALUE must not be written to the install RECEIPT.
+ *
+ * WHY THE RECEIPT NEEDS ITS OWN ANSWER (memql#3908). `~/.memql/install-receipt.json`
+ * stores every step's `result` verbatim, and two steps return live credentials:
+ * `enrolment-link.sh` puts an `mql_enr_` enrolment URL on `result.enrolUrl`, and
+ * `magic-link.sh` puts the owner's single-use sign-in link on `result.link`. So
+ * a plaintext single-use credential was written into a long-lived file on every
+ * install and every repair. memql#3886 built the withholding machinery and wired
+ * it to ONE consumer -- the run log -- and its own comment names `enrolUrl` as a
+ * field that must not survive. The receipt is the same argument with a
+ * LONGER-LIVED file: written once, kept for the life of the install, never
+ * rewritten, and read back by repair and uninstall.
+ *
+ * And nothing reads either field off the receipt. `enrolmentUrlFrom` read the
+ * in-memory ExecutionReport rather than the receipt, and memql#3906 removed even
+ * that -- the done screen mints on demand now. A credential persisted for no
+ * purpose at all.
+ *
+ * WHY IT IS NOT SIMPLY `withholdsFromRunLog`. That predicate ALSO drops any
+ * string longer than 96 characters, on the reasoning that "nobody is reading it
+ * as a status". True of a history an operator skims; false here. The receipt's
+ * results are read PROGRAMMATICALLY -- `recordedTarget` pulls
+ * `entry.result[target.resultField]` to tell remove-artifact.sh where the
+ * artifact is -- and every one of those fields is a filesystem PATH: `path`,
+ * `dest`, `hostsFile`, `caroot`. A `--dest` on a deep enough directory crosses
+ * 96 characters, and the consequence is not a missing log line. `removalParams`
+ * returns null for a required target it cannot find, so the uninstall step SKIPS
+ * -- silently leaving a checkout, a CA or a cluster on the machine with nothing
+ * that knows it is there. That is memql#3564's failure mode arriving by a new
+ * route.
+ *
+ * So the two gates the run log inherits from here are the ones that identify a
+ * credential rather than merely a long string:
+ *
+ *  1. The field NAME's head noun says it is one (`enrolUrl` is a url, `link` is
+ *     a link) -- which is what catches a future script returning a secret in a
+ *     shape no value test would flag.
+ *  2. The VALUE is credential-SHAPED: an http(s) URL (which carries a token in
+ *     its query whatever it is called) or a known credential prefix.
+ *
+ * The status fields survive both, deliberately and for memql#3886's reason:
+ * `enrolmentState`, `linkState` and `ownerClaimed` are the facts a stuck
+ * operator needs, and they are states rather than credentials.
+ *
+ * NESTED VALUES ARE NOT WALKED, matching `redactResult`'s decision and for its
+ * reason: a walker is one more place a credential can be reached through a shape
+ * nobody anticipated. A nested value whose own key is credential-shaped is still
+ * withheld whole by gate 1. No capability script returns a credential inside an
+ * object today -- the envelope surface is `cap_result_set` scalars plus a few
+ * raw booleans, numbers and string arrays -- and a script author who needs to
+ * would be adding the first one.
+ */
+export function withholdsFromReceipt(name: string, value: unknown): boolean {
   // THE LAST WORD, not any word. In the naming convention these fields actually
   // use, the trailing word is the head noun -- it says what the value IS, and
   // the words before it qualify which one. `enrolUrl` is a url, `apiKey` is a
@@ -163,8 +227,7 @@ export function withholdsFromRunLog(name: string, value: unknown): boolean {
   const trimmed = value.trim();
   if (trimmed === "") return false;
   if (/^https?:\/\//i.test(trimmed)) return true;
-  if (/^(sk-|mql_)/i.test(trimmed)) return true;
-  return trimmed.length > 96;
+  return /^(sk-|mql_)/i.test(trimmed);
 }
 
 /**
@@ -188,6 +251,40 @@ export function redactResult(result: Record<string, unknown>): Record<string, st
       continue;
     }
     out[name] = String(value);
+  }
+  return out;
+}
+
+/**
+ * A step's result as the install RECEIPT may keep it (memql#3908).
+ *
+ * The sibling of `redactResult`, and it exists as a sibling rather than a reuse
+ * because the two callers disagree about one thing that matters: TYPES.
+ *
+ * `redactResult` returns `Record<string, string>`. It stringifies for a log a
+ * person reads, which is right there and wrong here -- `receipt.ts:433` pulls
+ * `entry.result[target.resultField]` and every other reader is programmatic too,
+ * so stringifying would turn `ownerClaimed: true` into `"true"` and quietly
+ * change what every strict reader sees. Passing the receipt through the run
+ * log's function was therefore never a one-line option; that is the whole reason
+ * memql#3886's machinery reached only one of its two consumers.
+ *
+ * So this withholds the flagged fields and leaves everything else EXACTLY as the
+ * script emitted it: booleans stay booleans, numbers stay numbers, arrays and
+ * objects pass through by reference-free copy of the top level. A withheld field
+ * is replaced by the WITHHELD marker rather than dropped, for `redactSecrets`'
+ * reason -- "this step minted a link" is a troubleshooting fact worth keeping
+ * even when the link itself is not.
+ *
+ * `null` and `undefined` are KEPT rather than skipped, which is the other
+ * divergence from the run log: `enrolment-link.sh` reports `enrolUrl: ""` on the
+ * awaiting-first-sign-in path, and a reader distinguishing "the step reported
+ * nothing" from "the step reported an empty value" should keep being able to.
+ */
+export function withholdResult(result: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(result)) {
+    out[name] = withholdsFromReceipt(name, value) ? WITHHELD : value;
   }
   return out;
 }

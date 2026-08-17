@@ -28,7 +28,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { redactSecrets } from "./secrets.js";
+import { redactSecrets, withholdResult } from "./secrets.js";
 
 /** Bumped when the on-disk shape changes incompatibly. */
 export const RECEIPT_VERSION = 1;
@@ -248,17 +248,31 @@ export async function appendReceiptEntry(file: string, graph: string, entry: Rec
     receipt.graph = graph;
     receipt.updatedAt = new Date().toISOString();
 
-    // A SECRET NEVER REACHES THIS FILE (memql#3545). The receipt is long-lived,
-    // read back by repair and uninstall for the life of the install, and never
-    // rewritten -- so a credential that lands here does not expire and nothing
-    // cleans it up. It happened: an operator pasted an Anthropic key into the
-    // key-FILE box and it was recorded verbatim.
+    // A SECRET NEVER REACHES THIS FILE (memql#3545, memql#3908). The receipt is
+    // long-lived, read back by repair and uninstall for the life of the install,
+    // and never rewritten -- so a credential that lands here does not expire and
+    // nothing cleans it up. It happened twice, by two different routes:
     //
-    // Redacting on the WRITE rather than trusting the caller is the point.
-    // `state/addCluster.ts` refuses the value where it is typed, which is where
-    // a person can be told what to do instead; this covers every other route a
-    // param has into the receipt, including ones nobody has written yet.
-    const recorded: ReceiptEntry = { ...entry, params: redactSecrets(entry.params) };
+    //   PARAMS. An operator pasted an Anthropic key into the key-FILE box and
+    //   it was recorded verbatim (memql#3545).
+    //
+    //   RESULTS. `enrolment-link.sh` returns a live `mql_enr_` enrolment URL on
+    //   `result.enrolUrl` and `magic-link.sh` returns the owner's single-use
+    //   sign-in link on `result.link`, and every step's result was written here
+    //   verbatim -- so every install and every repair persisted a plaintext
+    //   single-use credential that NOTHING ever read back (memql#3908).
+    //
+    // Both are cleaned on the WRITE rather than by trusting the caller, and that
+    // placement is the point. `state/addCluster.ts` refuses a pasted key where it
+    // is typed, which is where a person can be told what to do instead; this
+    // covers every other route into the receipt, including ones nobody has
+    // written yet -- and for results there IS no other place, because the value
+    // comes from a script this code does not own.
+    const recorded: ReceiptEntry = {
+      ...entry,
+      params: redactSecrets(entry.params),
+      result: withholdResult(entry.result),
+    };
 
     const at = receipt.entries.findIndex((e) => e.stepId === recorded.stepId);
     if (at >= 0) {
