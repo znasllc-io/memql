@@ -83,7 +83,7 @@ spec:
                 name: memql-db-pool
           env:
             - { name: MEMQL_GENESIS_AUTOLOAD, value: "true" }
-            - { name: SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
             - { name: MEMQL_NODE_TYPE, value: "edge" }
             - { name: MEMQL_NODE_ADDRESS, value: "edge:50062" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -109,7 +109,7 @@ spec:
             # header. Registered in scripts/secrets/manifest.yaml (component: edge).
             - { name: MEMQL_EDGE_SITE_CACHE_TTL_SECONDS, value: "30" }
             - { name: MEMQL_GRPC_ADDRESS, value: ":50051" }
-            - { name: SERVER_ADDRESS, value: "0.0.0.0:8085" }
+            - { name: MEMQL_SERVER_ADDRESS, value: "0.0.0.0:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_BASE_URL, value: "https://identity:8085" }
             - { name: MEMQL_IDENTITY_VERIFIER_AUDIENCE, value: "memql" }
             # Deployment-specific placeholder; a product stack's overlay patches the real host.
@@ -118,7 +118,7 @@ spec:
             # Internal TLS: trust the cluster CA when calling https://identity:8085.
             - { name: MEMQL_HTTP_TLS_CA_FILE, value: "/etc/memql/cacerts/ca.crt" }
             - { name: SSL_CERT_DIR, value: "/etc/ssl/certs:/etc/memql/cacerts" }
-            - { name: SERVER_ALLOWED_ORIGINS, value: "*" }
+            - { name: MEMQL_SERVER_ALLOWED_ORIGINS, value: "*" }
             - { name: MEMORY_NODES_DATABASE_MIGRATE_ON_START, value: "false" }
           volumeMounts:
             - { name: memql-ca, mountPath: /etc/memql/cacerts, readOnly: true }
