@@ -47,6 +47,11 @@ case "$*" in
       esac
     done <<< "$FAKE_DEPLOYMENTS"
     exit 0 ;;
+  *"get pods"*"-o json"*)
+    # One pod not Ready, mid image pull -- the state a fresh install spends
+    # most of its wait in, and the one the narration exists to surface.
+    printf '{"items":[{"metadata":{"name":"identity-abc"},"status":{"phase":"Pending","conditions":[{"type":"Ready","status":"False"}],"containerStatuses":[{"state":{"waiting":{"reason":"ContainerCreating","message":"pulling image memql-identity"}}}]}}]}\n'
+    exit 0 ;;
   *wait*)
     for unready in $FAKE_UNREADY; do
       case "$*" in

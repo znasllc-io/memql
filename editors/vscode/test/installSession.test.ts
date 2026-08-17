@@ -711,6 +711,40 @@ test("the root a packaged run passes is NOT the script's own parent", async () =
 // where the node images come from (memql#3572)
 // -----------------------------------------------------------------------------
 
+test("clusterUp gets a fresh-pull budget, not the dev default (memql#4073)", async () => {
+  // k3d.up's workload wait defaults to 300s -- the `make dev` number, where
+  // images are already imported into the cluster. An install never has that
+  // head start: a new k3d cluster is a new containerd, so every image is
+  // pulled from GHCR over the operator's connection. Measured on a real
+  // machine, the cluster went healthy ~30s AFTER that window expired and the
+  // install reported workloadsReady=false on a machine that was fine. The
+  // budget is a ceiling, not a sleep -- a fast machine still finishes the
+  // moment the workloads are Available -- so the install plan passes the
+  // fresh-pull number unconditionally.
+  const plan = installPlan(options());
+  const decision = plan({
+    id: "clusterUp",
+    script: "k3d.up",
+    description: "",
+    elevation: "none",
+    retained: false,
+    retainedReason: "",
+    shared: false,
+    sharedReason: "",
+    verify: { kind: "scriptOk" },
+  });
+
+  assert.equal(decision.action, "run");
+  assert.equal(
+    decision.params["workload-timeout"],
+    "900",
+    "the install stopped passing a fresh-pull budget, so clusterUp falls back to " +
+      "the 300s dev default and a fresh install on a real connection times out " +
+      "while SUCCEEDING -- workloadsReady=false on a cluster that goes healthy " +
+      "seconds later",
+  );
+});
+
 test("clusterUp is told to pull published images, not locally built ones", async () => {
   // The local overlay renames every node image to `memql-<node>:local`, which
   // exists only after a developer has built and imported it. An install has

@@ -68,6 +68,7 @@ cap_spec_param "repo-url"       "git repo URL for the ArgoCD Application"
 cap_spec_param "servers"        "number of k3d server nodes"
 cap_spec_param "agents"         "number of k3d agent nodes"
 cap_spec_param "argocd-timeout" "ArgoCD readiness timeout (seconds)"
+cap_spec_param "workload-timeout" "workload Available timeout (seconds). The default suits make-dev, where images are already imported; a FRESH install pulls everything and should pass a larger budget (the plugin passes 900)"
 cap_spec_param "app-name"       "ArgoCD Application name"
 cap_spec_param "overlay-path"   "kustomize overlay path within the repo"
 cap_spec_param "extra-ports"    "additional host:container loadbalancer port mappings, comma-separated"
@@ -400,9 +401,49 @@ function scaled_up_deployments() {
 # rather than trusting that the gate ran first. Ordering alone would have fixed
 # the symptom and left it flaky: anything that scales the lane back up between
 # the gate and the wait puts the failure back.
+# what_is_not_ready -- one line per pod that is not Ready, with the container
+# state's own reason. This is the difference between a slow install and a
+# wedged one, and it was sitting unread in the API the whole time the old wait
+# stared silently at a single blocking `kubectl wait`: a pod on
+# `ContainerCreating` / `ImagePullBackOff` is downloading its world (fresh
+# clusters pull EVERYTHING -- a new k3d cluster is a new containerd, nothing is
+# cached), while one failing its startup probe with the database absent is
+# waiting on CNPG, and one stuck on a missing Secret is misconfigured. Same
+# spinner, three different next actions (memql#4073).
+function what_is_not_ready() {
+    kubectl get pods -n "$NAMESPACE" -o json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    pods = json.load(sys.stdin).get("items", [])
+except Exception:
+    sys.exit(0)
+for p in pods:
+    name = p.get("metadata", {}).get("name", "?")
+    st = p.get("status", {})
+    conds = {c.get("type"): c.get("status") for c in st.get("conditions", [])}
+    if conds.get("Ready") == "True":
+        continue
+    why = st.get("phase", "?")
+    for cs in st.get("containerStatuses", []) or st.get("initContainerStatuses", []):
+        w = cs.get("state", {}).get("waiting")
+        if w:
+            why = w.get("reason", why)
+            msg = (w.get("message") or "")[:60]
+            if msg:
+                why = f"{why}: {msg}"
+            break
+    print(f"  not ready: {name}  ({why})")
+' 2>/dev/null || kubectl get pods -n "$NAMESPACE" --no-headers 2>/dev/null | awk '$2 !~ /^([0-9]+)\/\1$/ {print "  not ready: "$1"  ("$3")"}'
+}
+
 function wait_for_workloads() {
-    local deadline="${MEMQL_K3D_WORKLOAD_TIMEOUT:-300s}" names
-    info "Waiting up to ${deadline} for the memQL workloads to become Available..."
+    # Param > env > default, resolved HERE as well as in main: tests (and any
+    # future caller) source this file and call the function directly, where
+    # main's cap_param resolution never ran. The env var historically carries
+    # a trailing "s" (CI exports 720s); accept both spellings.
+    local deadline="${WORKLOAD_TIMEOUT:-${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}}" names waited=0 tick=5 since_report=0
+    deadline="${deadline%s}"
+    info "Waiting up to ${deadline}s for the memQL workloads to become Available..."
 
     if [[ -z "$(all_deployments)" ]]; then
         warn "no Deployments in ${NAMESPACE} yet -- ArgoCD may not have applied them."
@@ -421,19 +462,42 @@ function wait_for_workloads() {
         return 0
     fi
 
-    # shellcheck disable=SC2086
-    if kubectl wait --for=condition=Available --timeout="$deadline" \
-        -n "$NAMESPACE" $names >&2; then
-        info "every memQL workload is Available."
-        WORKLOADS_READY=true
-        return 0
-    fi
+    # A POLL THAT NARRATES, not one blocking wait (memql#4073). The old shape
+    # was a single `kubectl wait --timeout=$deadline`: correct, and silent for
+    # its whole life. On a fresh install the operator watched a bare spinner
+    # for ten minutes and then read `workloadsReady=false` on a cluster that
+    # went healthy seconds later -- measured: 40 image pulls, ~27 cumulative
+    # minutes, the operand pull unable to even start until ArgoCD and the CNPG
+    # operator were themselves pulled and admitted. Every 30s of not-ready
+    # this prints WHO is not ready and WHY, so a slow pull reads as a slow
+    # pull while it happens, and a timeout's last report is its diagnosis.
+    while :; do
+        # shellcheck disable=SC2086
+        if kubectl wait --for=condition=Available --timeout=1s \
+            -n "$NAMESPACE" $names >/dev/null 2>&1; then
+            info "every memQL workload is Available (after ${waited}s)."
+            WORKLOADS_READY=true
+            return 0
+        fi
+        if (( waited >= deadline )); then
+            break
+        fi
+        if (( since_report >= 30 )) || (( waited == 0 )); then
+            info "still waiting (${waited}s/${deadline}s):"
+            what_is_not_ready >&2
+            since_report=0
+        fi
+        sleep "$tick"
+        (( waited += tick )) || true
+        (( since_report += tick )) || true
+    done
 
     WORKLOADS_READY=false
-    warn "not every workload that is scaled up became Available within ${deadline}."
+    warn "not every workload that is scaled up became Available within ${deadline}s."
     # The REASON, on stderr, where the operator is already looking. A pod stuck
     # on a missing Secret and a pod that cannot pull its image are different
     # problems with the same symptom, and the difference is in here.
+    what_is_not_ready >&2
     kubectl get pods -n "$NAMESPACE" >&2 || true
     kubectl get events -n "$NAMESPACE" --sort-by=.lastTimestamp 2>/dev/null | tail -15 >&2 || true
 }
@@ -1010,6 +1074,8 @@ function main() {
     K3D_SERVERS="$(cap_param servers "${MEMQL_K3D_SERVERS:-1}")"
     K3D_AGENTS="$(cap_param agents "${MEMQL_K3D_AGENTS:-0}")"
     ARGOCD_TIMEOUT="$(cap_param argocd-timeout "${MEMQL_K3D_ARGOCD_TIMEOUT:-300}")"
+    WORKLOAD_TIMEOUT="$(cap_param workload-timeout "${MEMQL_K3D_WORKLOAD_TIMEOUT:-300}")"
+    WORKLOAD_TIMEOUT="${WORKLOAD_TIMEOUT%s}"
     APP_NAME="$(cap_param app-name "${APP_NAME}")"
     OVERLAY_PATH="$(cap_param overlay-path "${OVERLAY_PATH}")"
     EXTRA_PORTS="$(cap_param extra-ports "${EXTRA_PORTS}")"
