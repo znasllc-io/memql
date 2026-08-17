@@ -245,17 +245,41 @@ func (r *crossRefResolver) resolves(kind, namespace, name string) bool {
 		// (core + bundle-defined concepts), disambiguated by the import's
 		// namespace segment.
 		return r.conceptResolves(namespace, name)
+	// THE FLAT KINDS RESOLVE UNDER THE IMPORT'S NAMESPACE (memql#3897), not by
+	// bare name. The namespace is right here -- it is the first half of the
+	// `use` path this check is validating -- so using it costs nothing and is
+	// the difference between agreeing with the boot loader and diverging from
+	// it the first time two namespaces declare one name.
+	//
+	// That divergence is memql#3800's exact defect: two paths implementing one
+	// resolution rule, where 45 constructs compiled at boot and every editor
+	// refused them. A bare `Has` would still work TODAY (an unambiguous name
+	// resolves either way) and would answer "not found" for an ambiguous one
+	// while boot resolved it correctly -- the same shape, arriving the first
+	// time a product bundle names a construct the engine also names.
 	case "shapes":
-		return r.engine != nil && r.engine.Shapes().Has(name)
+		return r.engine != nil && r.engine.Shapes().Has(qualifiedOrBare(namespace, name))
 	case "specs", "traits":
-		return r.engine != nil && r.engine.Specs().Has(name)
+		return r.engine != nil && r.engine.Specs().Has(qualifiedOrBare(namespace, name))
 	case "queries", "mutations", "logic", "builtins":
-		return r.engine != nil && r.engine.Functions().Has(name)
+		return r.engine != nil && r.engine.Functions().Has(qualifiedOrBare(namespace, name))
 	default:
 		// Unknown construct-kind segment: don't invent a failure for a kind
 		// this pass does not model (providers / prompts / tools / policies).
 		return true
 	}
+}
+
+// qualifiedOrBare is the key to look a flat construct up under.
+//
+// An EMPTY namespace falls back to the bare name, which is the un-namespaced key
+// space engine-internal constructs occupy -- and is also what a same-bundle
+// sibling reference has, since it names no import to take a namespace from.
+func qualifiedOrBare(namespace, name string) string {
+	if strings.TrimSpace(namespace) == "" {
+		return name
+	}
+	return QualifyConstruct(namespace, name)
 }
 
 // conceptResolves reports whether a bare concept name resolves to a concept

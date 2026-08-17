@@ -265,3 +265,77 @@ func mustAdd(t *testing.T, reg *ShapeRegistry, shape *ShapeDefinition) {
 		t.Fatalf("registering %s/%s: %v", shape.Origin, shape.Name, err)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// acceptance 5: boot loader and authoring sandbox agree -- asserted
+// ---------------------------------------------------------------------------
+
+// TestBootAndSandboxResolveThroughTheSameRule is memql#3897's fifth acceptance
+// bullet, and memql#3800 is why it is a test rather than a comment.
+//
+// There, two paths implemented one resolution rule and diverged: 45 constructs
+// compiled at boot and every editor refused them. The author saw a red squiggle
+// on code the engine was running happily, with no way to tell which was wrong.
+//
+// The rule here is ConstructScope. Boot reaches it through NewConstructScope;
+// the sandbox reaches it through constructScopeForOrigin, which differs ONLY in
+// undecorating a loader origin first. This asserts they agree -- including on a
+// decorated origin, which is the input only one of them ever sees and therefore
+// the one where a private implementation would hide.
+func TestBootAndSandboxResolveThroughTheSameRule(t *testing.T) {
+	known := map[string]bool{
+		"cognition.widgetFull":  true,
+		"tools.widgetFull":      true,
+		"common.isActiveRecord": true,
+	}
+	exists := func(key string) bool { return known[key] }
+
+	uses := []*languageAst.UseDeclaration{
+		{Parts: []string{"common", "traits"}, Names: []string{"isActiveRecord"}},
+		{
+			Parts:   []string{"tools", "shapes"},
+			Names:   []string{"widgetFull"},
+			Aliases: map[string]string{"widgetFull": "toolsWidget"},
+		},
+	}
+
+	// The same file, spelled the two ways the two paths see it.
+	for _, origin := range []string{
+		"cognition/queries.memql",
+		"unified:cognition/queries.memql:spaceParticipants", // what the loader stamps
+	} {
+		boot := NewConstructScope(undecorateOrigin(origin), uses)
+		sandbox := constructScopeForOrigin(origin, uses)
+
+		if boot.Namespace != sandbox.Namespace {
+			t.Fatalf("origin %q: boot namespace %q != sandbox %q",
+				origin, boot.Namespace, sandbox.Namespace)
+		}
+		for _, ref := range []string{"widgetFull", "toolsWidget", "isActiveRecord", "missing"} {
+			bootKey, bootOK := boot.Resolve(ref, exists)
+			sbKey, sbOK := sandbox.Resolve(ref, exists)
+			if bootKey != sbKey || bootOK != sbOK {
+				t.Errorf("origin %q, reference %q: boot resolved (%q,%v) and the sandbox "+
+					"resolved (%q,%v). Two paths, one rule -- or they diverge, which is "+
+					"memql#3800: constructs the engine runs and the editor refuses.",
+					origin, ref, bootKey, bootOK, sbKey, sbOK)
+			}
+		}
+	}
+}
+
+// A decorated origin must not leak into the namespace by either route. This is
+// the specific way the two could differ, since only the sandbox is handed one.
+func TestADecoratedOriginYieldsThePlainNamespace(t *testing.T) {
+	for _, origin := range []string{
+		"unified:agents/traits.memql:agentKindSystem",
+		"dryrun:cognition/queries.memql",
+		"cognition/queries.memql",
+	} {
+		scope := constructScopeForOrigin(origin, nil)
+		if strings.Contains(scope.Namespace, ":") {
+			t.Errorf("origin %q leaked its loader decoration into the namespace %q",
+				origin, scope.Namespace)
+		}
+	}
+}

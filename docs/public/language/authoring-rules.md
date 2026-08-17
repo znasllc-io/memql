@@ -2463,7 +2463,9 @@ Anything from another namespace must be imported with `use`, whatever kind it
 is. Name collisions across namespaces are resolved by **aliasing**
 (`use harness.concepts.{ plan as harnessPlan }`, memql#3802).
 
-That is the model, and until memql#3803 the engine enforced only a third of it.
+That is the model. memql#3803 closed the enforcement half and memql#3897 the
+registry half, so it now holds for every construct kind rather than for
+`concept` alone.
 
 ### The model is Go's, and a namespace is a PATH
 
@@ -2514,7 +2516,7 @@ Three consequences worth knowing:
 | Construct kind | Registry | Two domains may share a name? | Is `use` required for a cross-namespace reference? |
 |---|---|---|---|
 | `concept` | namespaced, `v1:<ns>:<name>` | **yes** — 4 do today | **YES**, and it is also the disambiguator: an unimported bare name resolves *ambiently* to this namespace, and a foreign one is a hard error naming the import |
-| `query`, `mutation`, `logic`, `spec`, `trait`, `shape`, `tool`, `prompt`, `provider`, `builtin`, `policy`, `seed` | flat, keyed by bare name | **no** — the S5 uniqueness gate (#2360) refuses a duplicate at load | **YES** — enforced by the `cross-namespace-import` contract gate (memql#3803). It does not *disambiguate* (a flat name is globally unique), it declares the dependency |
+| `query`, `mutation`, `logic`, `spec`, `trait`, `shape`, `tool`, `prompt`, `provider`, `builtin`, `policy`, `seed` | namespaced, `<ns>.<name>` (memql#3897) | **yes** — the S5 gate narrowed to per-namespace | **YES** — enforced by the `cross-namespace-import` contract gate (memql#3803), and it now *disambiguates* too: an unimported bare name resolves in this namespace, and an ambiguous one is refused naming both candidates |
 
 Before memql#3803 the second row read "no": a cross-domain reference to
 `statusIsActive` — which lives in `common.traits` — resolved from a bundle with
@@ -2559,19 +2561,42 @@ file that carried no `use` block at all.
 > desynchronises every string after it. Both are pinned by tests in
 > `component/memql/dslgate/imports_test.go`.
 
-### Should the flat kinds be namespaced? — ACCEPTED, not yet built
+### The flat kinds are namespaced too — BUILT (memql#3897)
 
-**Decision (2026-08-15): yes, this is the intended design.** The twelve flat
-kinds should be per-namespace like concepts, with aliasing resolving
-collisions. It is not built yet; the migration touches every flat-kind
-reference in the tree plus the registry keying, and is tracked separately.
+Every construct kind is per-namespace. The registry key is
+`<namespace>.<name>` — a dot rather than a colon, because a colon is the
+*concept id* separator and a flat construct is not a concept. The namespace
+comes from the file's origin through the same `dslfs.NamespaceFromFilePath`
+that ambient concept resolution and canonical-id assembly use, so a construct's
+namespace, a concept's namespace and the ambient scope are one answer to one
+question.
 
-**The constraint it leaves in place, stated so it is a known boundary rather
-than a surprise:** a product DSL bundle mounted at `MEMQL_DSL_PATH` **cannot
-declare a `shape`, `spec`, `query`, `trait` or any other flat-kind construct
-whose name a core construct already uses.** Every product shares one flat
-namespace with the engine, and the collision is a **load-time error the product
-cannot resolve** except by renaming its own construct. Aliasing does not help:
-two same-named flat constructs cannot coexist, so there is nothing to alias
-between. Prefix product-owned flat constructs until the migration lands.
+**So a product DSL bundle may now declare a `shape`, `spec`, `query`, `trait`
+or any other flat-kind construct whose name a core construct already uses.**
+That was a load-time error the product could not resolve except by renaming its
+own construct — and since a product *is* a DSL bundle plus a client
+(memql#2472), it was the primary delivery path hitting a constraint with no way
+around it.
+
+**And aliasing means something for these kinds now.** `use x.y.{ n as m }`
+(memql#3802) was inert here: two same-named flat constructs could not coexist,
+so there was nothing to alias between. That is the real answer to "why can't I
+alias a shape".
+
+Resolution order, which is Go's:
+
+1. the referencing file's **own namespace** — no import, same-package
+2. an explicit `use` import, including an alias
+
+A **bare** name still resolves when it is unambiguous, and that is deliberate
+rather than a leftover: a reference inside a compiled body is looked up at
+*execution* time from a context that has no file, so the bare floor is what
+keeps every existing reference working while load-time resolution qualifies
+them. An **ambiguous** bare name is refused, naming both candidates —
+resolving it to one of them would be exactly the silent capture memql#3802
+fixed for concepts.
+
+The S5 uniqueness gate (memql#2360) narrowed to match: the same name in two
+namespaces is legal; the same name twice in **one** namespace is still the
+silent last-wins overwrite it always was, and is still refused.
 
