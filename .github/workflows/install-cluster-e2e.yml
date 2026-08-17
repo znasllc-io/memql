@@ -78,10 +78,20 @@ name: install-cluster-e2e
 #   * THE TRUST STORE IS STILL NOT A SURFACE. Unlike install-e2e.yml this lane
 #     RUNS localCA -- it has to, because clusterUp depends on it and a skipped
 #     dependency removes the entire cluster half of the graph. So `mkcert
-#     -install` writes a CA into the runner's system trust store, and only the
-#     CA FILES (under ~/.memql/mkcert, inside the memqlHome surface) are checked
-#     back. The trust-store entry itself is invisible here, exactly as it is
-#     there.
+#     -install` writes a CA into the runner's system trust store, and only its
+#     FILES (~/.memql/mkcert) and the front-door pair it issues (~/.memql/certs)
+#     -- both inside the memqlHome surface -- are checked back. The trust-store
+#     entry itself is invisible here, exactly as it is there.
+#
+#     THAT IS NOT A SPARE CAVEAT: running the step unskipped is the whole
+#     difference between the two lanes, and this lane's first green run is what
+#     found memql#4071 -- the uninstall reported OK on all seven steps and left
+#     the front-door PRIVATE KEY at ~/.memql/certs/dev.key. install-e2e.yml
+#     passes `--skip=localCA`, so it never created the artifact and its diff had
+#     nothing to see. Do NOT add a `--skip` here to make a leg cheaper or
+#     greener; TestEveryInstallStepIsExercisedByARoundTrip
+#     (scripts/install/graph/round_trip_coverage_test.go) fails the build if a
+#     receipt-writing step ends up skipped by every round-trip lane.
 #   * THE PROVIDER KEY IS NOT A REAL ONE. Same local stub, same reasoning as
 #     install-e2e.yml: `providerKey` is a GATE every mutating step depends on,
 #     so skipping it would remove the whole install through the graph's own

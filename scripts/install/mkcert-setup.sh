@@ -53,6 +53,21 @@
 # capability-level one. A run that only issues a certificate against an
 # existing CA needs no confirmation, because it changes nothing shared.
 #
+# WHAT THIS LEAVES ON THE MACHINE, and why the list is written down
+# (memql#4071). Six files, in two directories:
+#
+#   $CAROOT/rootCA.pem, rootCA-key.pem   the CA
+#   $CAROOT/.memql-created               its provenance marker (memql#3576)
+#   --cert-file, --key-file              the front-door certificate and key
+#   $(dirname --cert-file)/.memql-issued the PAIR's provenance marker
+#
+# The uninstall's `kind=mkcertCA` removes exactly this set, and the equality is
+# the whole point: the graph invariants (scripts/install/graph/graph_test.go)
+# assert that this step HAS a reversal and cannot assert that the reversal covers
+# everything it WROTE. It did not -- the pair was left behind, so an uninstall
+# that reported OK on every step left a private key at ~/.memql/certs/dev.key.
+# Adding a file here means adding it there.
+#
 # This is a CAPABILITY SCRIPT: non-interactive, structured params in, a single
 # JSON result envelope on stdout, human logs on stderr, honest exit codes.
 # Contract: docs/internal/design/capability-script-contract.md
@@ -105,6 +120,31 @@ readonly CONFIRM_INSTALL_CA="install-memql-ca"
 # remove-artifact.sh, which reads it to decide whether the CA is memQL's to
 # take (memql#3576).
 readonly MEMQL_CA_MARKER=".memql-created"
+
+# THE SAME IDEA, FOR THE OTHER ARTIFACT THIS CAPABILITY WRITES (memql#4071).
+#
+# This script produces two things in two different directories: a CA in CAROOT,
+# and the front-door pair in the cert directory. The uninstall took back the
+# first and left the second, so a machine that had never had a ~/.memql before
+# the install kept ~/.memql/certs/dev.crt and, worse, dev.key -- a private key,
+# after an uninstall that reported OK on every step.
+#
+# Fixing that needs an answer to "may this pair be removed", and the step's
+# receipt cannot give one: a receipt records ONE pre-existence verdict per step,
+# and localCA's is `result.caPreExisting` -- a fact about the CA, in another
+# directory, whose answer differs from the pair's in BOTH directions. An
+# operator can hold a CA of their own while memQL issues the pair, and can hold
+# a pair of their own (a plain `make up` issues into the very same
+# ~/.memql/certs) while memQL creates the CA.
+#
+# So the pair gets its own marker, for the reasons memql#3576 gave the CA one:
+# it is written by the run that issued, it is a fact about the artifact so it is
+# stored WITH the artifact, it survives the receipt an uninstall deletes, and it
+# disappears with what it describes. A DISTINCT filename from the CA's, because
+# nothing stops an operator pointing --caroot and --cert-file at one directory,
+# and a shared marker there would let either artifact's provenance answer for
+# the other.
+readonly MEMQL_PAIR_MARKER=".memql-issued"
 
 # Flags this run was given that a remedy line has to repeat verbatim, so the
 # command handed to the operator refuses or succeeds for the same reasons the
@@ -389,6 +429,23 @@ function issue_cert() {
     fi
 }
 
+# mark_pair_as_ours <cert> -- claim the issued pair, so an uninstall may take it
+# back (memql#4071).
+#
+# Stamped AFTER the pair exists, like the CA's marker and for the same reason: a
+# run that died issuing must leave no claim on key material it did not finish
+# writing.
+#
+# The caller decides WHETHER to claim; this only writes. That split matters,
+# because the claim is only honest when the pair was created where there was
+# nothing -- see the read of `pair_on_disk` in main.
+function mark_pair_as_ours() {
+    local marker
+    marker="$(dirname "$1")/${MEMQL_PAIR_MARKER}"
+    [[ -f "$marker" ]] && return 0
+    printf 'memQL issued the front-door certificate and key beside this file.\nRemoving this file makes an uninstall leave them in place.\n' > "$marker" || true
+}
+
 #=============================================================================
 # ENTRY POINT
 #=============================================================================
@@ -495,6 +552,26 @@ function main() {
     fi
 
     local cert_issued=false reissued=false
+    # WAS THERE A PAIR HERE BEFORE THIS RUN -- read now, for the same reason
+    # coverage_before is: after issue_cert the answer is yes either way
+    # (memql#4071).
+    #
+    # EITHER file counts, not both. This decides whether memQL may later delete
+    # key material, so the conservative reading is the right one: a directory
+    # holding half a pair is a directory somebody else was using, and issuing
+    # over it does not make what was there ours.
+    #
+    # A LATER RUN MUST NOT RE-ASK THE QUESTION, which is why the answer becomes a
+    # marker on disk rather than a result field. `install.mkcert` runs at least
+    # twice per install (localCA, then again inside k3d.up's seed-secrets), and
+    # every repair runs it again; each of those finds the pair present and would
+    # report "not ours". That is the exact ratchet memql#3576 described for the
+    # CA -- a fact about the past, re-derived from the present, and wrong ever
+    # after.
+    local pair_on_disk=false
+    if [[ -f "$cert" || -f "$key" ]]; then
+        pair_on_disk=true
+    fi
     # Read ONCE, before anything is written: after issue_cert the old names are
     # gone (mkcert overwrites in place), and they are the useful half of the
     # reissue message -- they name WHICH stale domain the operator had.
@@ -524,6 +601,9 @@ function main() {
         issue_cert "$bin" "$caroot" "$cert" "$key"
         cert_issued=true
         cap_changed
+        if [[ "$pair_on_disk" != "true" ]]; then
+            mark_pair_as_ours "$cert"
+        fi
     fi
 
     # coverageVerified describes THE PAIR THIS RUN LEAVES IN PLACE: true only

@@ -374,30 +374,54 @@ async function writeAtomic(file: string, contents: string): Promise<void> {
  *
  * `required` says the script exits 2 without the flag. Where it is false the
  * script has its own default and omitting the flag is fine.
+ *
+ * A LIST PER KIND, because one artifact class does not always mean one file
+ * (memql#4071). `install.mkcert` writes a CA in one directory AND the front-door
+ * pair in another, and the reversal has to be handed both or it takes back half
+ * of what the step wrote -- which is exactly what it did, leaving a private key
+ * at ~/.memql/certs/dev.key after an uninstall that reported OK on every step.
  */
-const REMOVAL_TARGETS: Record<
-  string,
-  { flag: string; resultField: string; paramField?: string; required: boolean }
-> = {
+interface RemovalTarget {
+  flag: string;
+  resultField: string;
+  paramField?: string;
+  required: boolean;
+}
+
+const REMOVAL_TARGETS: Record<string, RemovalTarget[]> = {
   // install.binary reports the installed file as result.path.
-  binary: { flag: "path", resultField: "path", required: true },
+  binary: [{ flag: "path", resultField: "path", required: true }],
   // install.cloneStack reports the checkout directory as result.dest, and is
   // invoked with --dest naming the same directory.
-  checkout: { flag: "path", resultField: "dest", paramField: "dest", required: true },
+  checkout: [{ flag: "path", resultField: "dest", paramField: "dest", required: true }],
   // install.hostsEntries reports the file it edited as result.hostsFile, and is
   // invoked with --hosts-file. The graph pins neither, so a run that failed
   // before writing leaves nothing to go on -- which is the correct answer,
   // because a block that was never written is not there to remove.
-  hostsEntries: {
-    flag: "path",
-    resultField: "hostsFile",
-    paramField: "hosts-file",
-    required: true,
-  },
-  // install.mkcert reports the CA directory as result.caroot.
-  mkcertCA: { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
+  hostsEntries: [
+    {
+      flag: "path",
+      resultField: "hostsFile",
+      paramField: "hosts-file",
+      required: true,
+    },
+  ],
+  // install.mkcert reports the CA directory as result.caroot, and the pair it
+  // issued as result.certFile / result.keyFile.
+  //
+  // NOT required, and the difference from `binary` above is worth stating: a
+  // missing certFile must not veto the whole removal, because the CA half still
+  // has work to do. remove-artifact.sh then leaves any pair alone, which is the
+  // right answer for a run that never recorded issuing one. The pair is removed
+  // only where memQL can prove it wrote it -- the marker beside it, not this
+  // entry's single `preExisting` verdict, which is a fact about the CA.
+  mkcertCA: [
+    { flag: "caroot", resultField: "caroot", paramField: "caroot", required: false },
+    { flag: "cert-file", resultField: "certFile", paramField: "cert-file", required: false },
+    { flag: "key-file", resultField: "keyFile", paramField: "key-file", required: false },
+  ],
   // k3d.up reports the cluster it created as result.cluster.
-  stack: { flag: "cluster", resultField: "cluster", paramField: "cluster", required: false },
+  stack: [{ flag: "cluster", resultField: "cluster", paramField: "cluster", required: false }],
 };
 
 /**
@@ -426,8 +450,7 @@ const REMOVAL_TARGETS: Record<
 export function removalParams(entry: ReceiptEntry): Record<string, string> | null {
   if (!entry.receipt) return null;
   const params: Record<string, string> = { kind: entry.receipt };
-  const target = REMOVAL_TARGETS[entry.receipt];
-  if (target) {
+  for (const target of REMOVAL_TARGETS[entry.receipt] ?? []) {
     const value = recordedTarget(entry, target);
     if (value !== "") {
       params[target.flag] = value;

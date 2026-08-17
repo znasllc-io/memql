@@ -382,9 +382,15 @@ action seedClusterBootstrap {
 // anything not plainly false is an unconditional refusal, checked immediately
 // before each mutation, so a garbled receipt stops the removal rather than
 // authorising it.
+//
+// `certFile` / `keyFile` travel with `caroot` because kind=mkcertCA reverses ONE
+// install step that wrote in TWO places: the CA, and the front-door pair issued
+// against it (memql#4071). Passing the caroot alone takes back half of what the
+// step wrote and leaves a private key on the machine -- so the in-engine surface
+// carries both, rather than being a narrower way to run the same uninstall.
 /// Remove one artifact the installer created -- a pinned binary, the source checkout, the marked
-/// hosts block, the local CA, the k3d cluster or the local images -- refusing outright when the
-/// receipt says the machine already had it.
+/// hosts block, the local CA and the certificate it issued, the k3d cluster or the local images --
+/// refusing outright when the receipt says the machine already had it.
 action removeInstalledArtifact {
   args {
     kind        string!
@@ -393,6 +399,8 @@ action removeInstalledArtifact {
     dest        string
     marker      string
     caroot      string
+    certFile    string
+    keyFile     string
     cluster     string
     imagePrefix string
   }
@@ -404,6 +412,8 @@ action removeInstalledArtifact {
     dest: args.dest,
     marker: args.marker,
     caroot: args.caroot,
+    cert-file: args.certFile,
+    key-file: args.keyFile,
     cluster: args.cluster,
     image-prefix: args.imagePrefix
   )

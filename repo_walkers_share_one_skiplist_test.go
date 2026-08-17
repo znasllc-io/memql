@@ -38,6 +38,7 @@ var walkerExemptions = map[string]string{
 	"scripts/cidb/dbgate_test.go":                    "skips every dot-prefixed directory",
 	"scripts/cidb/dsnliteral_test.go":                "skips every dot-prefixed directory",
 	"scripts/citags/tags_test.go":                    "skips every dot-prefixed directory",
+	"scripts/install/mkcert_pair_round_trip_test.go": "walks a t.TempDir() the install capability scripts just wrote into -- a fixture home, not an ancestor of .claude, and it must account for EVERY file in it",
 	"scripts/k3d/up_rendered_manifest_test.go":       "copies deploy/k8s, a narrow subtree with no nested checkout -- and a COPY must skip nothing, or it renders a tree the repository does not have",
 	"test/dslconformance/callgraph_contract_test.go": "walks the DSL tree",
 }
