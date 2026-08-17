@@ -423,6 +423,20 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
         params = present({
           "repo-root": stackDir,
           "image-registry": opts.imageRegistry || DEFAULT_IMAGE_REGISTRY,
+          // A FRESH-PULL BUDGET, not the dev default (memql#4073). k3d.up's
+          // workload wait defaults to 300s, which is the `make dev` number --
+          // images already imported into the cluster. An install NEVER has
+          // that head start: a new k3d cluster is a new containerd, so every
+          // image is pulled from GHCR over the operator's own connection.
+          // Measured on a real machine: 40 pulls, ~27 cumulative minutes, and
+          // the database operand's pull could not even start until ArgoCD and
+          // the CNPG operator were themselves pulled and admitted -- the
+          // cluster went healthy at ~11 minutes, thirty seconds AFTER the
+          // 300s+overheads window expired, and the install reported
+          // workloadsReady=false on a machine that was fine. This is a
+          // ceiling, not a sleep: a fast machine still finishes the moment
+          // the workloads are Available.
+          "workload-timeout": "900",
           // REPLAYED WHEN THE RECEIPT HAS ONE, DERIVED OTHERWISE (memql#4068).
           //
           // The derivation below is right for an INSTALL, where the operator has
