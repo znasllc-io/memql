@@ -30,6 +30,65 @@ func engineBuildWorkflow(t *testing.T) string {
 	return string(raw)
 }
 
+func dispatchOnReleaseWorkflow(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	p := filepath.Join(filepath.Dir(thisFile), "..", "..", ".github", "workflows", "dispatch-engine-images-on-release.yml")
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("read dispatch-engine-images-on-release.yml: %v", err)
+	}
+	return string(raw)
+}
+
+// THE TWO TAG CONVENTIONS MEET HERE, AND NOWHERE ELSE (memql#4061).
+//
+// Git tags carry the `v` and image tags do not. `clone-stack.sh` checks out
+// `v0.19.0`; the extension's `imageTagFor()` strips the prefix, so an install
+// pins `ghcr.io/znasllc-io/memql-bff:0.19.0`. Every image that resolves today
+// is named that way.
+//
+// `build-engine-images.yml` uses its `version` input VERBATIM as the tag it
+// pushes (asserted below, because that is what makes the stripping this test
+// guards necessary rather than decorative). So the release-published dispatch
+// is the one place a ref becomes a version, and forwarding `tag_name`
+// unchanged builds `memql-bff:v0.19.0` -- a green build, an immutable tag
+// burned at a name nothing pulls, and every pod of that release in
+// ImagePullBackOff.
+//
+// It is worth a test rather than a comment because the failure is invisible
+// from the workflow run: nothing goes red, and the mismatch only surfaces later
+// as a cluster that will not start.
+func TestReleaseDispatchStripsTheTagPrefix(t *testing.T) {
+	wf := dispatchOnReleaseWorkflow(t)
+
+	if !strings.Contains(wf, "${TAG#v}") {
+		t.Error("the release dispatch must strip the leading `v` from the release tag " +
+			"before forwarding it as build-engine-images' `version` input " +
+			"(git tags carry the v, image tags do not)")
+	}
+	if strings.Contains(wf, `-f version="$TAG"`) {
+		t.Error("the release dispatch forwards the raw release tag as `version`; " +
+			"that builds memql-<node>:vX.Y.Z, which no install pulls -- forward the " +
+			"stripped value instead")
+	}
+}
+
+func TestEngineBuildWorkflowUsesTheVersionInputVerbatim(t *testing.T) {
+	// The other half of the contract above. If this ever stops being true --
+	// if the build learns to normalize the value itself -- then the stripping
+	// in the dispatch is no longer what protects the tag, and both places need
+	// re-reading together rather than one being "cleaned up" alone.
+	wf := engineBuildWorkflow(t)
+	if !strings.Contains(wf, "memql-${{ matrix.node }}:${{ inputs.version }}") {
+		t.Error("build-engine-images no longer tags images with the raw `version` input; " +
+			"re-check TestReleaseDispatchStripsTheTagPrefix, which exists because it did")
+	}
+}
+
 func TestEngineBuildWorkflowInvariants(t *testing.T) {
 	wf := engineBuildWorkflow(t)
 
