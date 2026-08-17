@@ -188,6 +188,29 @@ mutate construct retireConstructConcept {
   }
 }
 
+/// Mark a promoted CONCEPT construct row's DATA staged (epic memql#3974): the concept stays
+/// REGISTERED and resolvable and keeps accepting writes, and only the VISIBILITY of the rows under
+/// it is withheld until it is trained. status is deliberately left alone, and for the same reason
+/// retireConstructConcept leaves it alone: a status-retired row is SKIPPED by the boot
+/// re-hydration, so the concept would not re-register at all and its staged rows would be
+/// unreadable rather than staged. It is equally deliberately not `status: staged`, which belongs to
+/// the construct-staging tier (memql#3928) and means the opposite kind of thing -- resolution scoped
+/// to one author -- on a kind (`concept`) that tier refuses outright. There is no inverse mutation
+/// here yet: the staged -> live transition is memql#3986, and until it lands the un-staging path is
+/// the same one conceptRetired uses, a re-promote writing a NEW construct row with this false, which
+/// the `a live row wins` fold resolves as live.
+@actor
+mutate construct stageConstructConceptData {
+  args {
+    constructId  string!
+  }
+  update {
+    id: args.constructId
+    ownerUserId: actor.userId
+    conceptDataStaged: true
+  }
+}
+
 /// Store the cached compiled form for a construct, produced by the Gate 1 compile+bind harness
 /// (#956), so activation doesn't re-parse.
 @actor

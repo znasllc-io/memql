@@ -89,7 +89,15 @@ type AuthoringConstructRow struct {
 	// zero rows, definition withdrawn, and the row skipped by every re-hydration
 	// walk. Replayed after the walk by applyPersistedConceptRetirements.
 	ConceptRetired bool `json:"conceptRetired"`
-	Catalogued     bool `json:"catalogued"`
+	// ConceptDataStaged is the concept-only DATA-VISIBILITY state (epic
+	// memql#3974): the concept is registered, resolvable and open to writes, and
+	// the rows under it are withheld from the ordinary read path until it is
+	// trained. Distinct from Status "staged", which is the memql#3928 CONSTRUCT
+	// tier (resolution scoped to one author) and which a concept row can never
+	// carry, since that tier refuses `concept` by name. Replayed after the walk
+	// by applyPersistedConceptDataStaging.
+	ConceptDataStaged bool `json:"conceptDataStaged"`
+	Catalogued        bool `json:"catalogued"`
 	// GrammarVersion is the engine grammar epoch the source was authored
 	// under (parser.GrammarVersion, S6 #2361). Empty on legacy rows.
 	GrammarVersion string `json:"grammarVersion"`

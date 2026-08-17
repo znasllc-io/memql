@@ -97,7 +97,12 @@ type MemQLEngine struct {
 	// It also carries the concept RETIRED state, under the reserved
 	// "conceptRetired:<canonicalId>" key namespace (memql#3756) -- see
 	// authoring_concept_retire.go for why that fact belongs beside the promotion
-	// marker rather than in a map of its own.
+	// marker rather than in a map of its own -- and the concept STAGED-DATA
+	// state, under "conceptDataStaged:<canonicalId>" (epic memql#3974,
+	// authoring_concept_staged.go), for the same reason. The two concept
+	// namespaces are separate keys rather than two values of one, because a
+	// concept can be in both states at once: retired to new writes, with the rows
+	// it already holds still staged.
 	promotedAuthored sync.Map
 	// stagedAuthored holds the STAGED tier (epic memql#3928): durable authored
 	// constructs registered OWNER-SCOPED rather than into the shared registries

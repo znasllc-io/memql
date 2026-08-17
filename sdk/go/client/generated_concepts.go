@@ -539,6 +539,7 @@ var BoundConcepts = map[string]string{
 	"spaceParticipantPresence":              "v1:cognition:participant:presence",
 	"spaceParticipants":                     "v1:cognition:participant",
 	"spaceUtterances":                       "v1:cognition:utterance",
+	"stageConstructConceptData":             "v1:authoring:construct",
 	"stageInboundRequest":                   "v1:platform:inboundRequest",
 	"stageOutboundRequest":                  "v1:platform:outboundRequest",
 	"staleClusterNodes":                     "v1:cluster:node",
