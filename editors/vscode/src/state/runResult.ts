@@ -115,8 +115,18 @@ export const BUFFER_RESULT_BANNER =
  * anywhere on the machine. A result view exists to say what executed; a
  * confidently wrong sentence there is worse than none.
  */
-export const CATALOG_RESULT_BANNER =
-  "This ran the definition this cluster has loaded. There is no local source for it in this workspace, so nothing was session-defined and nothing in your editor affected what ran.";
+// ONE CALM LINE, ON PURPOSE (memql#4083). This banner used to explain, in the
+// buffer context's defensive register, that "nothing in your editor affected
+// what ran" -- which for a CATALOG click is the only possible semantics, not a
+// surprise. Rendered beside a legitimately empty result (a fresh cluster has
+// no plans, no actions, no spaces), the explanation read as the failure it was
+// adjacent to; the operator's words were "it looks like something failed.
+// There's no need for this." The four-way provenance distinction above is
+// still load-bearing -- each of the other three sentences is FALSE for a
+// catalog run -- but the register belongs to the surprise, and a catalog run
+// has none. Provenance in one line; the surprise-flagging prose stays on the
+// banners whose cases actually surprise.
+export const CATALOG_RESULT_BANNER = "Ran the definition deployed on this cluster.";
 
 export const REUSED_INJECTION_BANNER =
   "This ran the construct as previously session-defined from this buffer on the current connection. The buffer had not changed since, so it was not re-injected.";
