@@ -179,13 +179,17 @@ const CONNECT_SECRET_FIELDS: readonly ConnectField[] = ["token"];
  * `running` forever with Cancel as the only exit. That is exactly the "nothing
  * hangs indefinitely" requirement, and it is unmet by silence.
  *
- * Ten minutes PER STEP, not per run. It has to clear the genuinely slow ones --
- * `clusterUp` waits for ArgoCD to reconcile, `stackCheckout` clones, the tool
- * steps download -- on a slow connection, without being so generous that a
- * wedged step is indistinguishable from a working one. It matches the
- * `--timeout=600` the install-e2e lane drives the CLI with, so the editor and
- * the terminal kill a hung step at the same point rather than disagreeing
- * about what "stuck" means.
+ * Ten minutes PER STEP, not per run -- as the DEFAULT, which a step's own
+ * `timeoutSeconds` in the graph document replaces (memql#4076). One flat
+ * number was asked to both clear the genuinely slow step and kill a wedged
+ * one fast, and clusterUp outgrew the compromise: on a fresh install it pulls
+ * every image a new containerd has never seen and then waits out two inner
+ * budgets (ArgoCD 300s + workloads 900s), which is more than ten minutes by
+ * construction -- measured, this ceiling SIGKILLed it ~30s short of a cluster
+ * that came up healthy, on the very install after memql#4073 fixed the inner
+ * wait. So the slow step prices its slowness in the graph, beside the step it
+ * belongs to, and this default stays tight so a hang in any OTHER step still
+ * surfaces in minutes rather than inheriting the slowest step's patience.
  */
 const STEP_TIMEOUT_MS = 600_000;
 

@@ -176,6 +176,12 @@ type Step struct {
 	// Script is the capability-script id (the `script` arg of a shell.script
 	// action), which must be in the engine's capability allowlist.
 	Script string `json:"script"`
+
+	// TimeoutSeconds is the step's own executor ceiling, replacing the
+	// run-wide default for this step only (memql#4076). Carried here so the
+	// Go gates see the same document the executor runs; the TS loader owns
+	// validation (positive integer).
+	TimeoutSeconds int `json:"timeoutSeconds,omitempty"`
 	// Description is the operator-facing sentence for this step.
 	Description string `json:"description"`
 	// Params are the graph-PINNED flags for the script: the values that are
