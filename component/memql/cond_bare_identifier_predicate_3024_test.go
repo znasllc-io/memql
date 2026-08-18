@@ -205,7 +205,7 @@ func condAmbientProbeSource(name, pred string) string {
 //
 // Postgres-gated, like its #2962 sibling.
 func TestExecute_CondAmbientPredicate_RunsAndDiscriminates(t *testing.T) {
-	eng, _, baseCtx := readMergeTestEngine(t)
+	eng, _, baseCtx := sharedReadMergeEngine(t)
 
 	fn, err := tryParseNewFunctionSyntax(
 		"ambientRoleGate", "logic",
@@ -250,7 +250,7 @@ func TestExecute_CondAmbientPredicate_RunsAndDiscriminates(t *testing.T) {
 // empty map whose absent keys make a negated predicate evaluate true. A gate
 // that opens when authentication is missing is worse than one that never fires.
 func TestExecute_CondAmbientPredicate_AbsentActorDenies(t *testing.T) {
-	eng, _, baseCtx := readMergeTestEngine(t)
+	eng, _, baseCtx := sharedReadMergeEngine(t)
 
 	fn, err := tryParseNewFunctionSyntax(
 		"ambientDenyGate", "logic",

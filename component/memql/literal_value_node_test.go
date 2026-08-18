@@ -163,7 +163,7 @@ func TestEvaluateExpressionSet_LiteralIsDescriptiveError(t *testing.T) {
 // Postgres-gated: skips when no DB is reachable, like
 // executor_mutation_readmerge_db_test.go (whose engine helper this reuses).
 func TestExecute_LogicConsolidateMemoryShape_RunsToCompletion(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	const src = `@enabled
 @description("repro of the memql#1705 consolidateMemory return shape")
@@ -195,7 +195,7 @@ logic consolidateMemory {
 // rather than tripping the node-set evaluator. Postgres-gated only because
 // Execute requires a configured DB; the assertion is the literal-root branch.
 func TestExecute_BareLiteralReturnsScalar(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 	res, err := eng.Execute(ctx, `"node.created"`)
 	require.NoError(t, err, "a bare literal query must return a scalar, not error (memql#1705)")
 	require.NotNil(t, res)

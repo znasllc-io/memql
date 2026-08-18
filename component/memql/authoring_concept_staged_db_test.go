@@ -30,7 +30,16 @@ package memql
 // pinning the staged-data stamp on top of it would have made this test fail for
 // a reason that has nothing to do with what it is testing.
 //
-// Postgres-gated via readMergeTestEngine: skips when no DB is reachable, like
+// Postgres-gated via readMergeTestEngine -- the PRIVATE boot, deliberately,
+// while most of the package borrows sharedReadMergeEngine (memql#4075): this
+// test promotes a concept THROUGH the live engine (engineConceptDataStore)
+// and swaps the global concept registry back via memoryNodes.ReplaceAll. Both
+// halves assume the next test re-boots: on a shared engine the promoted
+// construct outlives the restore and the restore rewinds global state nothing
+// re-loads. Measured consequence of converting this file: every cond/literal
+// probe test downstream failed with `function "cond" was not expanded during
+// parsing` -- this file was the bisected, sole breaker.
+// Skips when no DB is reachable, like
 // every other _db_ test in this package. The fixture carries a per-process
 // unique namespace so concurrent runs never collide, and nothing here truncates
 // anything.

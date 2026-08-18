@@ -40,7 +40,7 @@ const bootstrapStamp3415 = "2026-08-09T07:38:20Z"
 // bootstrappedAt. `?? ""` puts an explicit empty string in the delta, which
 // before the fix won the read-merge and un-bootstrapped the cluster.
 func TestNoUnset3415_CreateClusterSettings_CannotBlankBootstrappedAt(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:clusterSettings"
 	settingsId := "cs3415-" + uniqueSuffix("create")
 
@@ -73,7 +73,7 @@ func TestNoUnset3415_CreateClusterSettings_CannotBlankBootstrappedAt(t *testing.
 // was already safe under read-merge; passing "" was not, and "un-bootstrap the
 // cluster" must not be an ordinary write on any path.
 func TestNoUnset3415_UpdateClusterSettings_CannotBlankBootstrappedAt(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:clusterSettings"
 	settingsId := "cs3415-" + uniqueSuffix("update")
 
@@ -101,7 +101,7 @@ func TestNoUnset3415_UpdateClusterSettings_CannotBlankBootstrappedAt(t *testing.
 // (StampClusterBootstrapped) writes a NON-empty stamp onto a row that has
 // none, and that must keep working, or a fresh cluster can never bootstrap.
 func TestNoUnset3415_StampingStillWorks(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:clusterSettings"
 	settingsId := "cs3415-" + uniqueSuffix("stamp")
 

@@ -8,7 +8,7 @@ import (
 // agentauthz_rowauthz_3177_db_test.go -- memql#3177, end to end against a real
 // store.
 //
-// Postgres-gated like its neighbours: readMergeTestEngine skips when no DB is
+// Postgres-gated like its neighbours: sharedReadMergeEngine skips when no DB is
 // reachable. CI's db-tests lane runs this package with MEMQL_REQUIRE_DB=1, so a
 // skip there is a failure rather than a green.
 //
@@ -39,7 +39,7 @@ var grantCtx = rowAuthzCallerCtx
 // concept declared a tier, knowing an authId was sufficient to switch off
 // somebody else's standing authorization.
 func TestRevokingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3177revoke")
 	userA := "user-a-" + suffix
@@ -94,7 +94,7 @@ func TestRevokingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
 // write could set `computerUseScope: "full"` and `skillTierAllowlist` on
 // somebody else's grant.
 func TestUpdatingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3177update")
 	userA := "user-a-" + suffix
@@ -147,7 +147,7 @@ func TestUpdatingAnotherCallersGrantIsRefusedEndToEnd(t *testing.T) {
 // always allow this tier" action, which writes the whole skillTierAllowlist
 // array back through this mutation.
 func TestAGrantCannotChangeHandsThroughItsPayloadEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3177reassign")
 	attacker := "user-attacker-" + suffix

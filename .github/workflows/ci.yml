@@ -1322,8 +1322,10 @@ jobs:
       #
       # Do NOT raise a budget in response to a warning. The warning means the
       # package is growing into its budget, and the answer is to split the
-      # package by concern -- it boots a full engine per db-gated test, which is
-      # the actual cost driver and the thing worth changing.
+      # package by concern -- the way memql#4075 split engine-MUTATING tests
+      # (private boot) from engine-BORROWING ones (one shared engine) when a
+      # full engine boot per db-gated test, the cost driver of both breaches
+      # recorded here, had eaten this budget twice.
       #
       # THE 600s BUDGET WAS BREACHED, NOT WARNED ABOUT (memql#4075). On
       # 2026-08-17 a green run on main printed `used 628s of its 600s budget`
@@ -1337,6 +1339,30 @@ jobs:
       # not a burial of the rule above: the warn machinery needs headroom to
       # exist before it can warn, and the split (memql#4075) remains the fix
       # for the cost itself.
+      #
+      # THE BRIDGE IS RETIRED: memql#4075 landed that split. 83 of the 103
+      # per-test engine boots (~2.1s each, ~216s of identical boots) now
+      # borrow ONE package-shared engine (sharedReadMergeEngine in
+      # component/memql/executor_mutation_readmerge_db_test.go); only
+      # engine-MUTATING tests still boot privately. Measured on the machine
+      # and database that measured 504.7s before the split, the same
+      # `go test -count=1 ./component/memql/...` runs in ~322s after it --
+      # so the 600s budget below is RESTORED with real headroom, not
+      # re-bridged.
+      #
+      # -run SHARDING WAS CONSIDERED FOR THIS STEP AND REJECTED. Partitioning
+      # one package's tests across several `go test -run <pattern>` blocks
+      # would hand each shard its own budget, but the partition is maintained
+      # by nothing: a test function matching NO shard's pattern does not fail
+      # -- it silently never runs, forever, while every shard stays green.
+      # That fail-open is a shape this repo keeps getting bitten by (the
+      # `./...` selector that never compiled the engine, memql#4032; the
+      # wrapper-script rule in the next paragraph, which exists because a
+      # refactor quietly disarmed this very lane's gate). The shared engine
+      # removes the boot-per-test growth driver without minting that
+      # landmine; if this budget tightens again, split by CONCERN again --
+      # never by -run partition.
+      #
       # Kept as two PLAIN `go test` blocks on purpose. scripts/cidb/dbgate_test.go
       # derives this lane's selector by parsing literal `./`-prefixed arguments
       # out of these `run:` blocks, and treats a block containing a shell control
@@ -1356,8 +1382,8 @@ jobs:
       - name: db-gated -- component/memql (own budget, the slow one)
         run: |
           start=$SECONDS
-          go test -count=1 -timeout=900s ./component/memql/...
-          echo "headroom: component/memql used $((SECONDS - start))s of its 900s budget"
+          go test -count=1 -timeout=600s ./component/memql/...
+          echo "headroom: component/memql used $((SECONDS - start))s of its 600s budget"
       # Named for the budget, not the count (memql#3985). It was "the fast
       # five", and then TWO packages joined within a day of each other --
       # integrations/embedding (memql#4037) and component/backup, when its

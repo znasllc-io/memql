@@ -24,7 +24,7 @@ import (
 //	  -run TestDeploymentNodeSpec ./component/memql/
 
 func TestDeploymentNodeSpec_CreatePersistsAndIsReadable(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-nodespec-2885")
 	depID := fmt.Sprintf("d-%s", uniqueSuffix("nodespec2885"))
 
@@ -71,7 +71,7 @@ func TestDeploymentNodeSpec_CreatePersistsAndIsReadable(t *testing.T) {
 //   - updateDeploymentNodeSpec, because it re-derives the id independently
 //     and a divergence there would fork the timeline silently.
 func TestDeploymentNodeSpec_RePinAppendsUnderTheSameId(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-nodespec-repin-2885")
 	depID := fmt.Sprintf("d-%s", uniqueSuffix("nodespecrepin2885"))
 
@@ -104,7 +104,7 @@ func TestDeploymentNodeSpec_RePinAppendsUnderTheSameId(t *testing.T) {
 // the collision guard: hashing must not collapse two node types onto one
 // timeline.
 func TestDeploymentNodeSpec_DistinctNodeTypesAreDistinctRows(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-nodespec-distinct-2885")
 	depID := fmt.Sprintf("d-%s", uniqueSuffix("nodespecdistinct2885"))
 

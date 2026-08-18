@@ -27,7 +27,7 @@ import (
 //
 // Postgres-gated, like its neighbours: skips when no DB is reachable.
 func TestAgentRolePredefinedLockIsWiredIntoExecuteWrite(t *testing.T) {
-	eng, _, sysCtx := readMergeTestEngine(t)
+	eng, _, sysCtx := sharedReadMergeEngine(t)
 
 	slug := "wiring-guard-" + uniqueSuffix("role")
 

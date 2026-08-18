@@ -48,7 +48,7 @@ import (
 // headroom. Three separate fixtures cost three DSL tree loads and ~80 network
 // round trips to prove the same three things.
 //
-// Postgres-gated via readMergeTestEngine: skips when no DB is reachable, and
+// Postgres-gated via sharedReadMergeEngine: skips when no DB is reachable, and
 // MEMQL_REQUIRE_DB=1 in the db-tests lane converts that skip into a failure.
 
 const seedSweepUserConcept = "v1:identity:user"
@@ -90,7 +90,7 @@ func seedSweepUser(t *testing.T, id string, createdAt time.Time, marker string, 
 // is why this change is not one line: activeUsers is a newest-first page of 50
 // and cannot answer this question.
 func TestSeedSweepListUserIds(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := context.Background()
 
 	sfx := uniqueSuffix("seed-sweep")

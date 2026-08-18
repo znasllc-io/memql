@@ -11,7 +11,7 @@ import (
 // Row-authz write enforcement, end to end against a real store
 // (memql#3174).
 //
-// Postgres-gated like its neighbours -- readMergeTestEngine skips when
+// Postgres-gated like its neighbours -- sharedReadMergeEngine skips when
 // no DB is reachable. CI's db-tests lane runs this package with
 // MEMQL_REQUIRE_DB=1, so a skip there is a failure rather than a green.
 //
@@ -45,7 +45,7 @@ func rowAuthzOwnerRoleCtx(userId string) context.Context {
 // memql#2991 parts 2 and 3 name for updateCalendarEvent /
 // deleteCalendarEvent.
 func TestWriteToAnotherCallersRowIsRefusedEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3174")
 	userA := "user-a-" + suffix
@@ -101,7 +101,7 @@ func TestWriteToAnotherCallersRowIsRefusedEndToEnd(t *testing.T) {
 // Without this the guard could be a blanket refusal on the write path
 // and the test above would still be green.
 func TestTheOwnersOwnWriteStillLandsEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3174owner")
 	userA := "user-a-" + suffix
@@ -128,7 +128,7 @@ func TestTheOwnersOwnWriteStillLandsEndToEnd(t *testing.T) {
 // CONSTRAINT 2 end to end: a cluster owner writes a row that is not
 // theirs, because that is the one role-based escape this guard declares.
 func TestClusterOwnerWritesAnotherCallersRowEndToEnd(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3174co")
 	userB := "user-b-" + suffix
@@ -154,7 +154,7 @@ func TestClusterOwnerWritesAnotherCallersRowEndToEnd(t *testing.T) {
 // CONSTRAINT 3 end to end: an update naming a row that does not exist is
 // refused, on a DECLARED concept, before anything is written.
 func TestUpdateOfAMissingRowIsRefusedEndToEnd(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3174missing")
 	ctxA := rowAuthzCallerCtx("user-a-" + suffix)

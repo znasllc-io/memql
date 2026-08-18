@@ -85,10 +85,10 @@ func TestZeroValueFor_Types(t *testing.T) {
 // phone / primaryRole / gender were retained -- this test FAILS against
 // that code and PASSES with the @scrubPii annotation-driven scrub.
 //
-// Postgres-gated (reuses readMergeTestEngine), like the sibling
+// Postgres-gated (reuses sharedReadMergeEngine), like the sibling
 // read-merge DB tests.
 func TestHardDelete_ScrubsAllPIIFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:user"
 	userId := "user-" + uniqueSuffix("piihard")
 

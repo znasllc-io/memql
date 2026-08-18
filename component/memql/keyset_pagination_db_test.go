@@ -28,7 +28,7 @@ import (
 // is proven in test/clustere2e/keyset_cursor_test.go — the cursor carries no
 // server session state, so it is replica-agnostic by construction.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 const keysetConcept = "v1:cognition:utterance"
 
@@ -82,7 +82,7 @@ func pageIDs(t *testing.T, res *ExecuteResult) []string {
 // 25 rows, pageSize 10 -> 3 pages (10, 10, 5) that exactly reconstruct the full
 // descending-createdAt set with no duplicate and no skipped id.
 func TestKeysetPagination_WalksFullSetNoOverlapNoGap(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-walk")
 	sfx := uniqueSuffix("keyset-walk")
 	owner := "kb:" + sfx
@@ -136,7 +136,7 @@ func walkAllPages(t *testing.T, ctx context.Context, eng *MemQLEngine, owner str
 // (createdAt, id) position of page-1's last row, so the remaining walk yields
 // exactly the original tail with no dup and no gap — and never the new head row.
 func TestKeysetPagination_StableUnderConcurrentHeadInsert(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-drift")
 	sfx := uniqueSuffix("keyset-drift")
 	owner := "kb:" + sfx
@@ -183,7 +183,7 @@ func TestKeysetPagination_StableUnderConcurrentHeadInsert(t *testing.T) {
 // rather than fetching N+offset rows and slicing in memory. We assert on the
 // generated SQL directly via executeCombinedFilterQuery with a keyset on ctx.
 func TestKeysetPagination_PushesSQLPredicate(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-sql")
 
 	pos := keysetPosition{createdAt: time.Now().UTC(), id: "v1:cognition:utterance:cursor-anchor"}
@@ -218,7 +218,7 @@ func TestKeysetPagination_PushesSQLPredicate(t *testing.T) {
 // desc, replayed against an ascending query, is rejected with the typed error
 // at the engine entrypoint (not a silently-wrong page).
 func TestKeysetPagination_SortMismatchRejected(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-mismatch")
 	sfx := uniqueSuffix("keyset-mismatch")
 	owner := "kb:" + sfx
@@ -254,7 +254,7 @@ func TestKeysetPagination_SortMismatchRejected(t *testing.T) {
 // exact (createdAt DESC, id ASC) order. The concurrent-insert test uses DISTINCT
 // timestamps, so it cannot catch a missing id tie-breaker — this one does.
 func TestKeysetPagination_EqualCreatedAtTieBreak(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-tie")
 	sfx := uniqueSuffix("keyset-tie")
 	owner := "kb:" + sfx
@@ -341,7 +341,7 @@ func TestKeysetPagination_FallbackOrderByEndsWithIdAsc(t *testing.T) {
 // `paginate 50` on main. Postgres-gated (skips without a reachable DB) like its
 // siblings in this file.
 func TestKeysetPagination_LoadBoundedFirstPageWalksFullSet(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-load")
 	sfx := uniqueSuffix("keyset-load")
 	owner := "kb:" + sfx

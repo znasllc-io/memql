@@ -166,7 +166,7 @@ func TestCond_UnsupportedPredicateShapesAreLoadErrors(t *testing.T) {
 // one and runs in CI. The DB-free tests above cover the same chain from the
 // parser down; this one covers the last hop.
 func TestExecute_CondComparisonPredicate_RunsAndDiscriminates(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	const src = `@enabled
 @description("memql#2962 end-to-end role gate")

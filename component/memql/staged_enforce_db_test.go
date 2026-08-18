@@ -16,9 +16,16 @@ package memql
 //   - that the conjunct rides INSIDE the DISTINCT ON collapse, which is what
 //     makes the scan yield a candidate at all for the swap fixture.
 //
-// Postgres-gated via readMergeTestEngine: skips when no DB is reachable, like
-// every other _db_ test in this package. Each test carries a per-process unique
-// createdBy scope so concurrent runs never collide, and nothing truncates.
+// Postgres-gated via readMergeTestEngine -- the PRIVATE boot, deliberately,
+// while most of the package borrows sharedReadMergeEngine (memql#4075): these
+// tests toggle concept-data staging on a CORE concept and assert both the
+// marked and the unmarked reading. The marker is in-memory engine state, and
+// the first test clears it in normal flow rather than in a t.Cleanup, so on a
+// shared engine one mid-test assertion failure would strand the mark and hide
+// v1:cognition:utterance rows from every borrower after it. Skips when no DB
+// is reachable, like every other _db_ test in this package. Each test carries
+// a per-process unique createdBy scope so concurrent runs never collide, and
+// nothing truncates.
 
 import (
 	"context"

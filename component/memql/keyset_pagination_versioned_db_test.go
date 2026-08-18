@@ -28,7 +28,7 @@ import (
 // id, so its raw window and its result set are the same thing and the collapse
 // is a no-op. That is the blind spot these tests fill.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 // CLUSTERED SEEDING, and why it matters: both tests below write every version
 // of an id in a contiguous createdAt run, so consecutive raw rows share an id.
@@ -119,7 +119,7 @@ func unpagedIDs(
 // separable from the continuation bug and would survive a fix aimed only at
 // the cursor.
 func TestKeysetPagination_ClusteredVersionsFirstPageIsFull(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-clustered-first")
 	sfx := uniqueSuffix("keyset-clustered-first")
 	owner := "kb:" + sfx
@@ -151,7 +151,7 @@ func TestKeysetPagination_ClusteredVersionsFirstPageIsFull(t *testing.T) {
 // TestKeysetPagination_ClusteredVersionsWalkFullSet is the headline memql#3388
 // regression: paging to exhaustion must reach every distinct id.
 func TestKeysetPagination_ClusteredVersionsWalkFullSet(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-clustered-walk")
 	sfx := uniqueSuffix("keyset-clustered-walk")
 	owner := "kb:" + sfx
@@ -199,7 +199,7 @@ func TestKeysetPagination_ClusteredVersionsWalkFullSet(t *testing.T) {
 // from that row resumes at `createdAt > 100`, which matches nothing -- so Y and
 // Z are silently lost even though the scan had only consumed the row at t=1.
 func TestKeysetPagination_CursorResumesFromScanPosition(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-scanpos")
 	sfx := uniqueSuffix("keyset-scanpos")
 	owner := "kb:" + sfx
@@ -233,7 +233,7 @@ func TestKeysetPagination_CursorResumesFromScanPosition(t *testing.T) {
 // time. Every page therefore keeps finding work and the walk does not
 // terminate -- reported on memql#3388 as 200 pages of 10 against a 30-id set.
 func TestKeysetPagination_MixedUpdateFrequencyDescendingNoDuplicate(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-scanpos-desc")
 	sfx := uniqueSuffix("keyset-scanpos-desc")
 	owner := "kb:" + sfx
@@ -263,7 +263,7 @@ func TestKeysetPagination_MixedUpdateFrequencyDescendingNoDuplicate(t *testing.T
 // cursor is still non-empty after maxWalkPages, so non-termination cannot be
 // mistaken for a slow pass.
 func TestKeysetPagination_DescendingVersionedWalkTerminates(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-desc-terminate")
 	sfx := uniqueSuffix("keyset-desc-terminate")
 	owner := "kb:" + sfx
@@ -304,7 +304,7 @@ func TestKeysetPagination_DescendingVersionedWalkTerminates(t *testing.T) {
 // puts a cursor between every pair of adjacent rows, so any enumeration that
 // does not agree with the result set shows up immediately.
 func TestKeysetPagination_PagedWalkEqualsUnpagedRead(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-keyset-parity")
 	sfx := uniqueSuffix("keyset-parity")
 	owner := "kb:" + sfx
@@ -361,7 +361,7 @@ func TestKeysetPagination_PagedWalkEqualsUnpagedRead(t *testing.T) {
 // documented chain and the DSL's compiled chain would start to disagree
 // silently, and this fails first.
 func TestKeysetPagination_SortPaginateNestingIsOrderIndependent(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	// The SDK's conceptBrowser chain, and the DSL struct form's chain.
 	sdkChain := fmt.Sprintf(`sort(paginate(concept==%s, 10), "createdAt", "asc")`, keysetConcept)

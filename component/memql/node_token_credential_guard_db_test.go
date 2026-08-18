@@ -9,7 +9,7 @@ package memql
 //
 // This drives the REAL createNodeTokenIdentity / stampNodeTokenBootstrap /
 // revokeNodeTokenIdentity mutations through Engine.Execute against a REAL
-// Postgres with the guard + read-merge active (the readMergeTestEngine
+// Postgres with the guard + read-merge active (the sharedReadMergeEngine
 // harness, Postgres-gated -- runs in CI's db-tests lane). It asserts the
 // contract every fix site depends on: the role="owner" session-actor
 // shape is rejected, the role="system" credential-actor shape is
@@ -75,7 +75,7 @@ func createNodeTokenCall(identityId, nodeId string) string {
 }
 
 func TestNodeTokenCredentialGuard_CreateActorScope(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	t.Run("owner_session_actor_rejected", func(t *testing.T) {
 		id := "v1:identity:identity:node_test_owner_" + uniqueSuffix("2549")
@@ -110,7 +110,7 @@ func TestNodeTokenCredentialGuard_CreateActorScope(t *testing.T) {
 // (admin) are gated the same as the insert. The system credential actor
 // passes both; a user actor is rejected on the revoke.
 func TestNodeTokenCredentialGuard_ReadMergeUpdateLegs(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	sys := systemCredentialActorCtx()
 
 	id := "v1:identity:identity:node_test_rm_" + uniqueSuffix("2549")

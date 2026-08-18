@@ -15,7 +15,7 @@ import (
 // isolation", and that the idempotent re-seed must be TESTED rather than
 // reasoned about. Both are here, driving the real engine.
 //
-// Postgres-gated like its neighbours (readMergeTestEngine skips when no DB is
+// Postgres-gated like its neighbours (sharedReadMergeEngine skips when no DB is
 // reachable). CI's db-tests lane runs this package with MEMQL_REQUIRE_DB=1, so
 // a skip there is a failure rather than a green.
 
@@ -33,7 +33,7 @@ func userCtxFor(subject string) context.Context {
 // `predefined` is false, so by that guard's own contract it is an ordinary
 // user-role write.
 func TestAgentRoleSlugUniquenessRefusesAShadowRowThroughTheMutationPath(t *testing.T) {
-	eng, _, sysCtx := readMergeTestEngine(t)
+	eng, _, sysCtx := sharedReadMergeEngine(t)
 
 	slug := "slug-unique-" + uniqueSuffix("role")
 
@@ -67,7 +67,7 @@ func TestAgentRoleSlugUniquenessRefusesAShadowRowThroughTheMutationPath(t *testi
 // re-runs createAgentRole for all ~97 predefined roles on EVERY startup, with
 // an explicit id. If self-exclusion is wrong, boot fails.
 func TestAgentRoleSlugUniquenessLeavesTheIdempotentReseedAlone(t *testing.T) {
-	eng, _, sysCtx := readMergeTestEngine(t)
+	eng, _, sysCtx := sharedReadMergeEngine(t)
 
 	slug := "slug-reseed-" + uniqueSuffix("role")
 	args := map[string]any{
@@ -88,7 +88,7 @@ func TestAgentRoleSlugUniquenessLeavesTheIdempotentReseedAlone(t *testing.T) {
 // template entirely. A validator in executeWrite still fires. The sibling
 // predefined-lock guard records the same asymmetry for itself.
 func TestAgentRoleSlugUniquenessCoversTheRawInsertPath(t *testing.T) {
-	eng, _, sysCtx := readMergeTestEngine(t)
+	eng, _, sysCtx := sharedReadMergeEngine(t)
 
 	slug := "slug-rawins-" + uniqueSuffix("role")
 	runMutation(t, sysCtx, eng, "createAgentRole", map[string]any{
@@ -113,7 +113,7 @@ func TestAgentRoleSlugUniquenessCoversTheRawInsertPath(t *testing.T) {
 // Driven as a USER, not the seeder: the guard carves out the system actor, so
 // a system-context version of this would pass without exercising the rule.
 func TestAgentRoleSlugUniquenessAllowsReclaimingADeactivatedSlug(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	userCtx := userCtxFor("user-slug-reclaim")
 
 	slug := "slug-reclaim-" + uniqueSuffix("role")
@@ -136,7 +136,7 @@ func TestAgentRoleSlugUniquenessAllowsReclaimingADeactivatedSlug(t *testing.T) {
 // The variant a create-only check misses: keep the id, RENAME the slug onto one
 // an active row already holds.
 func TestAgentRoleSlugUniquenessRefusesRenamingOntoATakenSlug(t *testing.T) {
-	eng, _, sysCtx := readMergeTestEngine(t)
+	eng, _, sysCtx := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("role")
 	taken := "slug-taken-" + suffix

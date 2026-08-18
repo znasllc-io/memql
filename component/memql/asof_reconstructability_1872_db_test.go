@@ -34,7 +34,7 @@ import (
 // Every existing asOf test in the tree is parse-level; nothing exercised
 // time-travel against a real engine before this file.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 // deploymentStatusAsOf runs the point-in-time read a caller actually has
 // available: the named query wrapped in an asOf directive. It returns the
@@ -102,7 +102,7 @@ func seedThreeVersions(t *testing.T, eng *MemQLEngine, ctx context.Context, sfx 
 // as an executable assertion: for any T, the read returns the state as it was
 // at T -- not the newest state overall.
 func TestDeploymentStateIsQueryableAsOfAnyTime(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-asof-1872")
 	depID := seedThreeVersions(t, eng, ctx, uniqueSuffix("pit1872"))
 
@@ -160,7 +160,7 @@ func TestDeploymentStateIsQueryableAsOfAnyTime(t *testing.T) {
 // timeline read mode ever lands, this test should fail and be replaced -- it
 // asserts a limitation, not a desirable property.
 func TestDeploymentAllVersionsInOneReadIsStillAbsent(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-asofall-1872")
 	depID := seedThreeVersions(t, eng, ctx, uniqueSuffix("all1872"))
 
@@ -192,7 +192,7 @@ func TestDeploymentAllVersionsInOneReadIsStillAbsent(t *testing.T) {
 // clarification -- it changes nothing about what the query returns -- while
 // silently removing the ability to read a deployment's history at all.
 func TestDeploymentByIdRemainsWrappableInAsOf(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-asofwrap-1872")
 	sfx := uniqueSuffix("wrap1872")
 	depID := fmt.Sprintf("wrap-%s", sfx)
