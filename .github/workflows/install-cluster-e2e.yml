@@ -293,8 +293,12 @@ jobs:
       # consent. On a runner whose image is a few days old that install 404s.
       # So the LANE refreshes the index, before the baseline, where it is a
       # property of the environment rather than of the installer.
+      # Bounded and retried (memql#4083's CI half): this exact line, unbounded,
+      # hung a repair leg for 38 minutes on 2026-08-17 -- a wedged apt mirror
+      # never exits, so a retry-on-failure alone cannot save it. `timeout`
+      # turns the hang into exit 124, which is the shape retry.sh retries.
       - name: Refresh the package index the install will use
-        run: sudo apt-get update -qq
+        run: scripts/ci/retry.sh -- timeout 120 sudo apt-get update -qq
 
       # Identical reasoning to install-e2e.yml, and it matters MORE here:
       # install.binary's pre-existence flag is PATH-WIDE, so the runner's

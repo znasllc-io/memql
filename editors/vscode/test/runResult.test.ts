@@ -128,7 +128,13 @@ test("resultBannerFor -- a catalog run says the cluster's definition ran, not a 
     kind: "query",
   });
   assert.equal(banner, CATALOG_RESULT_BANNER);
-  assert.match(banner, /no local source/i);
+  // `/no local source/` used to be asserted here as the distinguishing
+  // phrase. memql#4083 retired it FROM THE COPY: "no local source ... nothing
+  // in your editor affected what ran" was the buffer context's defensive
+  // register, and beside a legitimately empty result it read as a failure.
+  // The distinguishing fact is now the word "deployed" -- provenance without
+  // the disclaimer.
+  assert.match(banner, /deployed/i);
   // And it must NOT claim a buffer was involved, which is what every one of
   // the other three sentences would have done here.
   assert.doesNotMatch(banner, /buffer/i);
@@ -144,4 +150,23 @@ test("resultBannerFor -- a tool still gets the tool sentence, not the catalog on
     resultBannerFor({ ranDeployedDefinition: true, injected: false, kind: "tool" }),
     TOOL_RESULT_BANNER,
   );
+});
+
+
+test("the catalog banner speaks provenance, not anomaly (memql#4083)", () => {
+  // The original catalog caption borrowed the buffer context's defensive
+  // register -- "nothing was session-defined and nothing in your editor
+  // affected what ran" -- which, for a catalog click, explains an anomaly
+  // that is not one. Beside a legitimately empty result it read as the
+  // failure it sat next to. The register gate here is the two terms whose
+  // presence WAS the bug: a catalog run has no editor and no session-define
+  // story to disclaim, so the words have no business in its caption.
+  for (const term of ["editor", "session-defined"]) {
+    assert.ok(
+      !CATALOG_RESULT_BANNER.toLowerCase().includes(term),
+      `the catalog banner mentions "${term}" again -- that is the buffer context's ` +
+        "defensive register, and beside an empty result it reads as a failure " +
+        "(operator-reported, memql#4083)",
+    );
+  }
 });
