@@ -53,11 +53,34 @@ class StubEngine implements RunEngine {
 
   async validateBundle(sources: string): Promise<ValidateBundleResult> {
     this.calls.push({ op: "validate", sources });
+    // THE FAKE MIRRORS THE ENGINE'S EMPTY-BUNDLE REFUSAL (memql#4081).
+    // ValidateBundle has always failed-loud on a zero-construct bundle
+    // ("authoring: no recognizable constructs found in bundle source"), and
+    // this fake used to accept one -- which is exactly how the catalog run
+    // feature shipped green while every real catalog run died at validate:
+    // its empty `{sources: ""}` bundle satisfied the fake and enraged the
+    // engine. A fake that is more permissive than the thing it fakes is not a
+    // test double, it is a blindfold. If the orchestrator ever sends an empty
+    // bundle to validate again, this makes the suite fail the way the cluster
+    // does.
+    if (sources.length === 0) {
+      return {
+        ok: false,
+        diagnostics: [
+          { ok: false, error: "authoring: no recognizable constructs found in bundle source" } as never,
+        ],
+      } as ValidateBundleResult;
+    }
     return this.validateResult;
   }
 
   async sessionDefineBundle(sources: string): Promise<SessionDefineBundleResult> {
     this.calls.push({ op: "define", sources });
+    // Same refusal as validateBundle above, for the same reason: the real
+    // engine's AuthorSessionBundle errors on a zero-construct bundle.
+    if (sources.length === 0) {
+      return { ok: false, defined: [], diagnostics: [], error: "authoring: no recognizable constructs found in bundle source" };
+    }
     return this.defineResult;
   }
 
@@ -538,4 +561,55 @@ test("run -- a second run supersedes the first, which reports rather than landin
 
   assert.equal(second.status, "ok");
   assert.equal(firstOutcome.status, "superseded");
+});
+
+
+// ---------------------------------------------------------------------------
+// The catalog run: an empty bundle is a designed state (memql#4081)
+// ---------------------------------------------------------------------------
+
+test("an empty bundle skips validate and define and invokes the deployed definition", async () => {
+  // A catalog run assembles `{sources: ""}` on purpose -- the construct lives
+  // only in the cluster. The engine refuses a zero-construct bundle, so
+  // sending the empty bundle to validate failed EVERY catalog run at
+  // `validate` from the day the feature shipped, while the invoke path's own
+  // `ranDeployedDefinition: sources.length === 0` waited for a case that
+  // could never arrive. The orchestrator now treats the empty bundle as what
+  // it is: nothing to compile, invoke what the cluster already has.
+  const h = harness();
+  h.setActiveText("");
+
+  const outcome = await h.orchestrator.run(
+    { uri: "memql-catalog:/query/activePlansForUser", kind: "query", name: "activePlansForUser", args: [] },
+    {},
+  );
+
+  assert.equal(outcome.status, "ok", JSON.stringify(outcome));
+  if (outcome.status !== "ok") return;
+  assert.equal(
+    outcome.ranDeployedDefinition,
+    true,
+    "an empty bundle injects nothing, so the run must say it executed the deployed definition",
+  );
+  assert.deepEqual(
+    h.engine.ops(),
+    ["executeNamed"],
+    "validate and define must be SKIPPED for an empty bundle -- the engine refuses a " +
+      "zero-construct bundle (correctly, for the authoring surface), so sending it one " +
+      "is how every catalog run died at validate (memql#4081)",
+  );
+});
+
+test("a run that follows a failing buffer run clears its stale diagnostics even on the empty-bundle path", async () => {
+  // The skip must not also skip the Problems-panel clear: a catalog run after
+  // a failing buffer run would otherwise leave the buffer's stale problems on
+  // screen with nothing left running that produced them.
+  const h = harness();
+  h.setActiveText("");
+  await h.orchestrator.run(
+    { uri: "memql-catalog:/query/activePlansForUser", kind: "query", name: "activePlansForUser", args: [] },
+    {},
+  );
+  assert.ok(h.published.length > 0, "the empty-bundle path never published, so stale diagnostics survive");
+  assert.deepEqual(h.published[h.published.length - 1], [], "the last publish must be the clear");
 });

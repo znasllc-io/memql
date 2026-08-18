@@ -12,9 +12,13 @@
 //
 // THAT IS THE WHOLE MECHANISM, and it is small because the orchestrator never
 // reads `target.uri` itself. It reads the bundle its injected `assemble`
-// returns. An empty bundle validates trivially, injects nothing, and invokes
-// the definition the cluster already has -- which is exactly what running from
-// a catalog means.
+// returns. An empty bundle SKIPS validate and session-define entirely and
+// invokes the definition the cluster already has -- which is exactly what
+// running from a catalog means. ("Validates trivially", as this comment used
+// to claim, was never true: the engine fails-loud on a zero-construct bundle,
+// so every catalog run died at validate until memql#4081 taught the
+// orchestrator that an empty bundle is a designed state, not a degenerate
+// buffer.)
 //
 // WHAT IS DELIBERATELY REUSED UNCHANGED: `src/state/argForm.ts`,
 // `src/run/preflight.ts`, the write confirmation, the supersession token, the
