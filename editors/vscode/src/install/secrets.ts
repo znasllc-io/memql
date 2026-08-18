@@ -70,6 +70,17 @@ export function redactSecrets(params: Record<string, string>): Record<string, st
 // ---------------------------------------------------------------------------
 // step RESULTS, which are a different problem from step params
 // ---------------------------------------------------------------------------
+//
+// WITHHOLDING GOVERNS THE TWO FILES -- the run log and the receipt -- and
+// nothing else. The in-memory ExecutionReport keeps the raw envelope, and a
+// value that must reach the OPERATOR'S EYES exactly once does so through a
+// named display seam reading that report (install/recoveryKey.ts, the done
+// screen's one-time recovery-key reveal), never by weakening these gates.
+// That seam exists because of memql#4079: `recoveryKey` was withheld from
+// both files, correctly, and no display was ever built, so the step's "show
+// it once" was a promise no surface kept -- a redaction gate plus an untested
+// promise equals a credential shown to no one. The gates below are unchanged
+// by that fix and must stay so.
 
 /**
  * What a withheld result value reads as.

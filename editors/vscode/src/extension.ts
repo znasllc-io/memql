@@ -860,23 +860,35 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // step, fired once, at the end of an install the operator just watched.
       // The modal's built-in Cancel is the "later"; nothing else in the walk
       // may be modal, or the walk becomes a wizard that traps.
+      //
+      // AND DETACHED, never awaited (memql#4079). The dial's caller is
+      // sometimes the install panel's hand-off, whose next paint is the done
+      // screen carrying the ONE-TIME recovery key reveal. Awaiting the modal
+      // here -- and, behind "Set up now", the whole ownership walk -- would
+      // hold that paint hostage until the walk ended, burying the only chance
+      // there will ever be to show the key behind the popup that introduces
+      // the walk. The dial is complete at this point, and both calls below
+      // surface their own failures, so answering the caller first loses
+      // nothing.
       if (state?.status === 'error' && isFirstCredentialPending(state.reason, await ownershipRouteFor(dialing))) {
-        const choice = await window.showInformationMessage(
-          `memQL: "${displayLabel(dialing)}" is installed and running.`,
-          {
-            modal: true,
-            detail:
-              "One step left: create this cluster's owner passkey. Your browser " +
-              'will open -- approve the passkey prompt there, then come back to sign in.',
-          },
-          'Set up now'
-        );
-        if (choice === 'Set up now') {
-          await commands.executeCommand('memql.clusters.takeOwnership', {
-            cluster: dialing,
-            selected: true,
-          });
-        }
+        void (async () => {
+          const choice = await window.showInformationMessage(
+            `memQL: "${displayLabel(dialing)}" is installed and running.`,
+            {
+              modal: true,
+              detail:
+                "One step left: create this cluster's owner passkey. Your browser " +
+                'will open -- approve the passkey prompt there, then come back to sign in.',
+            },
+            'Set up now'
+          );
+          if (choice === 'Set up now') {
+            await commands.executeCommand('memql.clusters.takeOwnership', {
+              cluster: dialing,
+              selected: true,
+            });
+          }
+        })();
         return;
       }
       if (state?.status === 'error') {

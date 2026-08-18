@@ -981,3 +981,44 @@ test("the claim link is held on the host side, never rendered", () => {
   assert.equal(s.hasClaimLink, true);
   assert.equal(s.claimUrl, "https://identity.memql.localhost/auth/complete?ml=abc");
 });
+
+// -----------------------------------------------------------------------------
+// the recovery key's lifetime in panel state (memql#4079)
+// -----------------------------------------------------------------------------
+
+const STATE_TEST_KEY = `mql_rec_${"S".repeat(43)}`;
+
+test("the revealed recovery key does not outlive the screen that shows it", () => {
+  // DISPLAY, NOT STORAGE. The key lives in this in-memory state exactly as
+  // long as the done screen that renders it; it is never written to disk, and
+  // Back -- the only way off that screen short of closing the panel -- lets go
+  // of it. Closing the panel is goodbye by construction: the state object dies
+  // with it.
+  const s = new AddClusterState();
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+  assert.equal(s.revealedRecoveryKey, STATE_TEST_KEY);
+  assert.equal(s.recoveryKeyState, "claimed");
+
+  s.back();
+  assert.equal(s.revealedRecoveryKey, "", "leaving the done screen lets go of the key");
+  assert.equal(s.recoveryKeyState, "none");
+});
+
+test("a second run starts with no key from the first", () => {
+  // A repair over a claimed cluster reports alreadyClaimed and no key; the
+  // first run's key showing through that would be a stale reveal -- the same
+  // shape as the stale enrolment offer memql#4078 removed.
+  const s = new AddClusterState();
+  s.chooseAction("install");
+  s.setInput("domain", "memql.localhost");
+  s.setInput("ownerFirstName", "Ada");
+  s.setInput("ownerLastName", "Lovelace");
+  s.setInput("ownerEmail", "ada@example.com");
+  s.setInput("provider", "anthropic");
+  s.setInput("providerKeyFile", "/tmp/provider-key");
+  s.setRecoveryKey(STATE_TEST_KEY, "claimed");
+
+  assert.equal(s.beginRun(), true);
+  assert.equal(s.revealedRecoveryKey, "", "beginRun must clear the previous run's key");
+  assert.equal(s.recoveryKeyState, "none");
+});

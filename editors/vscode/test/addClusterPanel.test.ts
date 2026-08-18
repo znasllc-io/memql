@@ -1105,3 +1105,115 @@ test("the reconnect card registers the cluster and never shows a form", async ()
     h.close();
   }
 });
+
+// -----------------------------------------------------------------------------
+// The recovery key's one-time reveal (memql#4079)
+// -----------------------------------------------------------------------------
+
+const RECOVERY_KEY = `mql_rec_${"R".repeat(43)}`;
+
+/** Runs an install whose recoveryKey step reports the given state (and key). */
+async function runToDoneWithRecovery(state: string, key: string): Promise<Harness> {
+  const runner = await fakeRunner(
+    {},
+    { "install.recoveryKey": { recoveryKey: key, recoveryKeyState: state } },
+  );
+  const h = open({ runner });
+  beginInstall(h);
+  await until(() => /Your cluster is ready|Finished/.test(h.html()), "the run to settle");
+  return h;
+}
+
+test("the claimed recovery key is shown once, on the done screen", async () => {
+  // THE DEFECT (memql#4079). The step's description promised "show it once";
+  // memql#3908's withholding gate (tested) kept the value out of the run log
+  // and the receipt, correctly; and no display surface was ever built. A
+  // tested gate plus an untested promise equals a credential shown to no one
+  // -- the CLI's terminal made the design complete there, so CI stayed green
+  // while the plugin swallowed the envelope. This is the test the promise
+  // never had.
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
+  try {
+    const html = h.html();
+    assert.match(html, /Your cluster is ready/, "the run should have reached the done screen");
+    assert.ok(
+      html.includes(RECOVERY_KEY),
+      "the one-time reveal must reach the operator's eyes: the step claimed the key, " +
+        "which ROTATED it, so a run that shows it nowhere has destroyed the old key and " +
+        "revealed the new one to nobody",
+    );
+    assert.match(html, /shown once/i, "the block must say the value cannot be shown again");
+    assert.match(
+      html,
+      /data-act="copyRecoveryKey"/,
+      "a 47-character credential is copied, not retyped",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("the reveal is DISPLAY, not storage: the receipt and the run log still withhold", async () => {
+  const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
+  try {
+    // Asserted FIRST so the containment half cannot pass vacuously against a
+    // screen that revealed nothing at all.
+    assert.ok(h.html().includes(RECOVERY_KEY), "the reveal must be on screen");
+
+    // The receipt: written once, kept for the life of the install, read back by
+    // repair and uninstall. memql#3908's gate must hold byte-for-byte.
+    const receipt = fs.readFileSync(h.receiptFile, "utf8");
+    assert.ok(
+      !receipt.includes(RECOVERY_KEY),
+      "the plaintext key must never reach the install receipt",
+    );
+    assert.ok(
+      receipt.includes("[withheld: single-use credential]"),
+      "the receipt still records THAT the step produced a credential",
+    );
+
+    // The run log: every file the recorder wrote for this run.
+    const runsDir = path.join(path.dirname(h.receiptFile), "runs");
+    const runFiles = fs.readdirSync(runsDir, { recursive: true, encoding: "utf8" });
+    let sawWithheldKey = false;
+    for (const name of runFiles) {
+      const file = path.join(runsDir, name);
+      if (!fs.statSync(file).isFile()) continue;
+      const content = fs.readFileSync(file, "utf8");
+      assert.ok(!content.includes(RECOVERY_KEY), `the plaintext key must not reach ${name}`);
+      if (content.includes("recoveryKey=[withheld: single-use credential]")) sawWithheldKey = true;
+    }
+    assert.ok(sawWithheldKey, "the run log still says the step produced a credential it withheld");
+  } finally {
+    h.close();
+  }
+});
+
+test("a key claimed on an earlier run renders the fact, not an empty block", async () => {
+  // What repair and upgrade find here: the credential exists, its owner holds
+  // it, and it cannot be re-revealed -- only its hash was ever stored.
+  const h = await runToDoneWithRecovery("alreadyClaimed", "");
+  try {
+    const html = h.html();
+    assert.match(html, /Your cluster is ready/, "a re-run still hands off");
+    assert.match(html, /Recovery key: claimed earlier/);
+    assert.match(html, /rotate it from the portal/i);
+    assert.ok(
+      !html.includes('data-act="copyRecoveryKey"'),
+      "there is no key here to copy; a copy button would copy nothing",
+    );
+  } finally {
+    h.close();
+  }
+});
+
+test("a cluster with no owner yet says when the key will exist", async () => {
+  const h = await runToDoneWithRecovery("awaitingOwner", "");
+  try {
+    const html = h.html();
+    assert.match(html, /Recovery key: minted after the first sign-in/);
+    assert.ok(!html.includes('data-act="copyRecoveryKey"'));
+  } finally {
+    h.close();
+  }
+});
