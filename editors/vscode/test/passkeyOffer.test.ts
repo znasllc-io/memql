@@ -14,6 +14,8 @@ import { test } from "node:test";
 import {
   OfferMemory,
   decidePasskeyOffer,
+  enrolmentStillNeeded,
+  passkeyAlreadyEnrolledMessage,
   passkeyOfferMessage,
   type CallerIdentity,
   type PasskeyOfferDeps,
@@ -132,6 +134,61 @@ test("declining one cluster says nothing about another", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// the ownership walk owns its cluster's enrolment story (memql#4078)
+// ---------------------------------------------------------------------------
+
+test("a suppressed cluster is never offered, and the reason names the walk", async () => {
+  // The first fully-green install ended in THREE stacked notifications: the
+  // hand-off's, the walk's, and this offer's -- because the walk's own
+  // verification sign-in is still a sign-in, and the offer fires on the heels
+  // of every one. Suppression is the walk saying "this cluster's enrolment is
+  // mine": the sign-in that ends the walk must not mint a fourth toast.
+  const memory = new OfferMemory();
+  memory.suppress("local");
+
+  const decision = await decidePasskeyOffer("local", stub(), memory);
+
+  assert.deepEqual(decision, { offer: false, reason: "suppressedByWalk" });
+});
+
+test("suppression short-circuits before any network call", async () => {
+  // Mirrors the decline test above, for the same reason: the walk marks the
+  // cluster BEFORE it mints, so every later sign-in this session answers from
+  // memory rather than paying whoAmI plus a passkey query.
+  const memory = new OfferMemory();
+  memory.suppress("local");
+  const deps = stub();
+
+  await decidePasskeyOffer("local", deps, memory);
+
+  assert.deepEqual(deps.calls, [], "suppression must short-circuit before whoAmI");
+});
+
+test("suppressed is not declined -- the two markers answer different questions", async () => {
+  // Declined: the OPERATOR said no to the offer. Suppressed: the WALK claimed
+  // this cluster's enrolment story; the operator said nothing. Collapsing them
+  // would make "the walk ran" indistinguishable from "the operator refused" to
+  // anything reading the reason.
+  const suppressed = new OfferMemory();
+  suppressed.suppress("local");
+  const declined = new OfferMemory();
+  declined.decline("local");
+
+  const walkAnswer = await decidePasskeyOffer("local", stub(), suppressed);
+  const operatorAnswer = await decidePasskeyOffer("local", stub(), declined);
+
+  assert.deepEqual(walkAnswer, { offer: false, reason: "suppressedByWalk" });
+  assert.deepEqual(operatorAnswer, { offer: false, reason: "declinedThisSession" });
+});
+
+test("suppressing one cluster says nothing about another", async () => {
+  const memory = new OfferMemory();
+  memory.suppress("just-installed-local");
+  const decision = await decidePasskeyOffer("shared-staging", stub(), memory);
+  assert.equal(decision.offer, true);
+});
+
+// ---------------------------------------------------------------------------
 // silence wherever it cannot honestly say yes
 // ---------------------------------------------------------------------------
 
@@ -211,5 +268,45 @@ test("the offer says what a passkey buys, not what it is", async () => {
     message,
     /without waiting for an email/,
     "'Enrol a passkey' is a feature name; the reason somebody says yes is the alternative it replaces",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// a clicked offer re-checks before it mints (memql#4078)
+// ---------------------------------------------------------------------------
+
+test("a confirmed passkey cancels the mint a stale offer would run", () => {
+  // A toast with buttons persists in the notification bell, so the click can
+  // arrive long after the decision -- late enough for the operator to have
+  // enrolled through the ownership walk in between. Acting on the stale offer
+  // minted a fresh link and the BROWSER delivered the bad news ("a passkey
+  // already exists"). The count is therefore re-read at click time, and a
+  // confirmed enrolment turns that dead-end into a one-line answer.
+  assert.equal(enrolmentStillNeeded(0), true);
+  assert.equal(enrolmentStillNeeded(1), false);
+  assert.equal(enrolmentStillNeeded(3), false);
+});
+
+test("at click time, cannot-tell proceeds -- the inverse of the offer's default", () => {
+  // decidePasskeyOffer reads an unreadable count as "stay quiet", because
+  // nobody asked for the offer. Here somebody DID ask -- they clicked -- so
+  // refusing to mint over a transient query failure would be a new dead end.
+  // Only a CONFIRMED enrolment cancels the click.
+  for (const count of [Number.NaN, -1, Number.POSITIVE_INFINITY]) {
+    assert.equal(
+      enrolmentStillNeeded(count),
+      true,
+      `count ${String(count)} must not cancel a mint the operator asked for`,
+    );
+  }
+});
+
+test("the stale-offer answer is all-set, not an error", () => {
+  const message = passkeyAlreadyEnrolledMessage();
+  assert.match(message, /already has a passkey/);
+  assert.match(
+    message,
+    /all set/,
+    "clicking a stale offer after enrolling is a success to confirm, not a fault to report",
   );
 });

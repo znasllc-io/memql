@@ -54,6 +54,8 @@ import {
 import {
   OfferMemory,
   decidePasskeyOffer,
+  enrolmentStillNeeded,
+  passkeyAlreadyEnrolledMessage,
   passkeyOfferMessage,
 } from './auth/passkeyOffer.js';
 import {
@@ -178,9 +180,11 @@ import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
 
-// Which clusters the operator has declined passkey enrolment on (memql#3902).
-// Module-scoped so it lives exactly as long as the extension host does: a
-// decline is for this session, not a preference written to disk. See OfferMemory.
+// Which clusters will not get the passkey offer this session: those the
+// operator declined it on (memql#3902), and those the ownership walk has
+// claimed (memql#4078). Module-scoped so it lives exactly as long as the
+// extension host does: both markers are session answers, not preferences
+// written to disk. See OfferMemory.
 const passkeyOfferMemory = new OfferMemory();
 
 // activate wires the extension's TWO INDEPENDENT SURFACES: the language client
@@ -846,13 +850,28 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // information rather than an error, and wired to the action that
       // actually completes it -- which then chains on to sign-in and the
       // portal by itself.
+      //
+      // MODAL, uniquely among this file's information messages (memql#4078).
+      // As a toast this was the first of three stacked notifications after the
+      // first fully-green install, and it evaporated before the operator could
+      // read it -- decapitating the walk it introduces. VS Code gives no
+      // duration control on a toast, but a modal stays until answered, and
+      // this is the one popup that can justify one: the single required next
+      // step, fired once, at the end of an install the operator just watched.
+      // The modal's built-in Cancel is the "later"; nothing else in the walk
+      // may be modal, or the walk becomes a wizard that traps.
       if (state?.status === 'error' && isFirstCredentialPending(state.reason, await ownershipRouteFor(dialing))) {
         const choice = await window.showInformationMessage(
-          `memQL: "${displayLabel(dialing)}" is ready. Its owner account has no way to sign in yet -- set up a passkey to finish.`,
-          'Set up a passkey',
-          'Not now'
+          `memQL: "${displayLabel(dialing)}" is installed and running.`,
+          {
+            modal: true,
+            detail:
+              "One step left: create this cluster's owner passkey. Your browser " +
+              'will open -- approve the passkey prompt there, then come back to sign in.',
+          },
+          'Set up now'
         );
-        if (choice === 'Set up a passkey') {
+        if (choice === 'Set up now') {
           await commands.executeCommand('memql.clusters.takeOwnership', {
             cluster: dialing,
             selected: true,
@@ -942,15 +961,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // "the plugin will not let me in". Both routes are offered rather than
       // one chosen, because this side cannot know whether the operator already
       // registered a passkey on another machine -- they may have -- so it asks.
+      // The buttons speak the walk's vocabulary (memql#4078): the action is
+      // creating the cluster's owner passkey, not "taking ownership" -- that
+      // phrase survives only as the id of the command this button invokes.
       if (route === 'enrol') {
         const choice = await window.showInformationMessage(
           `memQL: "${displayLabel(target.cluster)}" has an owner but no credential is stored here. ` +
-            'Enrol a passkey if this is your first time on this machine; sign in if you already have one.',
-          'Take ownership',
+            'Create the owner passkey if this is your first time on this machine; sign in if you already have one.',
+          'Create the owner passkey',
           'Sign in'
         );
         if (choice === undefined) return;
-        if (choice === 'Take ownership') {
+        if (choice === 'Create the owner passkey') {
           await commands.executeCommand('memql.clusters.takeOwnership', target);
           return;
         }
@@ -980,6 +1002,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       if (target === undefined || target.cluster.name === '') {
         return;
       }
+      // FIRST THING, before anything can fail or be abandoned: this walk owns
+      // the cluster's enrolment story for the rest of the session (memql#4078).
+      // The walk ends in a sign-in, and every sign-in runs the independent
+      // passkey offer (offerPasskeyEnrolment) -- which used to stack a fresh
+      // "Enrol a passkey" toast on top of the walk's own notifications, and
+      // leave it in the bell to be clicked after the passkey already existed.
+      // Suppressed rather than declined, because the operator said nothing.
+      passkeyOfferMemory.suppress(target.cluster.name);
       const receipt = await readReceipt(defaultReceiptPath()).catch(() => null);
       const owner = recordedOwner(receipt);
       let url: string;
@@ -1026,9 +1056,18 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       // THE ORDER IS FORCED, not chosen. The portal authenticates like every
       // other surface, so it cannot be the page that grants the first
       // credential; sign-in cannot work until the passkey exists. Each step is
-      // therefore only offered once the one before it can succeed.
+      // therefore only offered once the one before it can succeed. The sign-in
+      // straight after enrolment is WANTED, not ceremony: it is how the
+      // operator verifies that the passkey they just approved actually works.
+      //
+      // ONE VOCABULARY (memql#4078). Three surfaces used to narrate this walk
+      // as three different tasks -- "take ownership", "enrol a passkey", "sign
+      // in" -- and, stacked, they read as three competing demands. Every step
+      // now speaks as one task, finishing setup of the cluster the operator
+      // owns; "take ownership" survives only as this command's id and palette
+      // title, which are contributions, not copy.
       const enrolled = await window.showInformationMessage(
-        `memQL: finish enrolling the passkey in your browser, then sign in to "${displayLabel(target.cluster)}".`,
+        `memQL: approved the passkey prompt in your browser? Sign in to "${displayLabel(target.cluster)}" to finish.`,
         'Sign in'
       );
       if (enrolled !== 'Sign in') return;
@@ -1039,7 +1078,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       });
       if (!signedIn) return;
       const next = await window.showInformationMessage(
-        `memQL: you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
+        `memQL: setup is complete -- you own "${displayLabel(target.cluster)}". Its portal is the operations console.`,
         'Open portal'
       );
       if (next === 'Open portal') {
@@ -2660,6 +2699,18 @@ async function signInToCluster(
  * decidePasskeyOffer): this fires on the heels of a sign-in the operator asked
  * for and got, so a diagnostic here reports a problem they do not have.
  *
+ * NEVER STACKED ON THE OWNERSHIP WALK (memql#4078). This runs after EVERY
+ * sign-in -- including the one that verifies the walk's own enrolment. That is
+ * how the first fully-green install ended in three notifications at once, and
+ * how this one, persisting in the notification bell because a toast with
+ * buttons does, came to be clicked AFTER the operator had enrolled through the
+ * walk -- minting a fresh link whose browser page could only say a passkey
+ * already exists. Two answers: `memql.clusters.takeOwnership` suppresses its
+ * cluster in passkeyOfferMemory before doing anything else, so the decision
+ * below answers `suppressedByWalk` from memory; and a clicked offer re-reads
+ * the passkey count before acting, so a stale click gets a one-line "all set"
+ * in the editor instead of a refusal in the browser.
+ *
  * The link is MINTED, never replayed. It is single-use and short-lived, so a
  * stored one would fail in a way that reads as the feature being broken -- the
  * same reasoning `memql.clusters.takeOwnership` records for the pre-sign-in
@@ -2673,6 +2724,15 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
   const dispatcher = conns?.dispatcher;
   if (query === undefined || dispatcher === undefined) return;
 
+  // No userId argument BY DESIGN: the row set comes from userId==actor.userId,
+  // so this cannot be pointed at a stranger's authenticators (memql#3178).
+  // Hoisted out of the deps object because the offer consults it TWICE: once
+  // for the decision, and once more the moment a click acts on it (below).
+  const countOwnPasskeys = async (): Promise<number> => {
+    const result = await query.executeNamed('passkeysForSelf', 'passkeysForSelf()');
+    return result.rows.length;
+  };
+
   const decision = await decidePasskeyOffer(
     cluster.name,
     {
@@ -2682,13 +2742,7 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
           ? null
           : { userId: access.userId, clusterRole: String(access.clusterRole ?? '') };
       },
-      // No userId argument BY DESIGN: the row set comes from
-      // userId==actor.userId, so this cannot be pointed at a stranger's
-      // authenticators (memql#3178).
-      countOwnPasskeys: async () => {
-        const result = await query.executeNamed('passkeysForSelf', 'passkeysForSelf()');
-        return result.rows.length;
-      },
+      countOwnPasskeys,
     },
     passkeyOfferMemory
   );
@@ -2704,6 +2758,26 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
     // closing the notification is an answer, and re-asking on the next connect
     // is how a prompt teaches people to dismiss it without reading.
     passkeyOfferMemory.decline(cluster.name);
+    return;
+  }
+
+  // THE COUNT IS RE-READ THE MOMENT THE CLICK ARRIVES (memql#4078). The offer
+  // persists in the notification bell, so the click can be minutes stale --
+  // late enough for the operator to have enrolled through the ownership walk
+  // in between, which is exactly what happened. Only a CONFIRMED enrolment
+  // cancels the mint; a count that cannot be read proceeds, because the
+  // operator just asked for this one (the inverted default
+  // enrolmentStillNeeded documents). Recorded as a decline so the rest of the
+  // session does not re-ask about a credential that now exists.
+  let passkeysNow: number;
+  try {
+    passkeysNow = await countOwnPasskeys();
+  } catch {
+    passkeysNow = Number.NaN;
+  }
+  if (!enrolmentStillNeeded(passkeysNow)) {
+    passkeyOfferMemory.decline(cluster.name);
+    void window.showInformationMessage(passkeyAlreadyEnrolledMessage());
     return;
   }
 
