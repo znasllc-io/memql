@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -42,6 +43,53 @@ import (
 // Postgres-gated: skips when no DB is reachable (CI without a DB), exactly
 // like skill_catalog_reconcile_db_test.go.
 
+// readMergeTestEngine boots a PRIVATE engine for the calling test: its own
+// bun.DB pool, its own LoadUnifiedConcepts + New + Init, closed with the
+// test. At ~2.1s per boot this is the expensive path, and since memql#4075 it
+// exists for exactly one class of caller -- a test that MUTATES engine-level
+// state, so that a stock shared engine would either not serve it or not
+// survive it:
+//
+//   - fixture DSL domains mounted into the GLOBAL tree via
+//     memqldsl.RegisterTree, which an engine only sees when it boots AFTER
+//     the registration -- a shared engine boots once, possibly before
+//     (relationship_traversal_matrix_db_test.go,
+//     relationship_label_traversal_3656_db_test.go,
+//     relationship_incoming_target_3432_db_test.go);
+//   - pokes at unexported engine internals (the eng.cache disable in
+//     relationship_label_traversal_3656_db_test.go), including engine-state
+//     toggles a file asserts from BOTH sides: staged_enforce_db_test.go and
+//     staged_write_test.go mark/clear concept-data staging on CORE concepts,
+//     and a mark that outlives its test on a shared engine hides that
+//     concept's rows -- or silences its write events -- for every test after
+//     it (converting staged_write_test.go was measured doing exactly that to
+//     its own positive controls);
+//   - promotes THROUGH the live engine paired with a global concept-registry
+//     snapshot/ReplaceAll around the test (authoring_concept_retire_db,
+//     authoring_concept_staged_db, staged_transition_db). Both halves assume
+//     the next test re-boots: shared, the promoted construct outlives the
+//     restore and the restore rewinds global state nothing re-loads.
+//     Converting authoring_concept_staged_db was the bisected, sole cause of
+//     every cond/literal probe test downstream failing with `function "cond"
+//     was not expanded during parsing`;
+//   - integration registration, or anything else that leaves the engine
+//     other than stock for whoever borrows it next.
+//
+// EVERY OTHER db-gated test -- one that reads/writes DB rows through a stock
+// engine -- borrows the package-wide engine via sharedReadMergeEngine below.
+// That split is memql#4075: 103 call sites each paying this boot was ~216s of
+// identical engine boots, the single cost driver that ate the db-tests lane's
+// 300s budget (memql#3257) and then its 600s one (memql#4074). 83 of those
+// sites now borrow; the 20 in the files above keep booting here. The concerns
+// are engine-MUTATING (private, this helper) vs engine-BORROWING (shared),
+// and the split is enforced here at the seam.
+//
+// A borrower that LAYERS per-test state through a public setter must restore
+// the boot state (nil) in a t.Cleanup so no later borrower inherits it --
+// TestExecute_CondAmbientConfigPredicate_Discriminates (SetConfigSnapshot)
+// is the worked example. Purely ADDITIVE registration under a test-unique
+// name (Functions().Upsert of a probe logic) needs no restore: nothing else
+// can name it, so nothing else can observe it.
 func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) {
 	t.Helper()
 	dsn := dbtest.DSN()
@@ -51,7 +99,7 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 		dbtest.Unreachable(t, "read-merge mutation DB test", dsn, err)
 	}
 
-	// Close the pool with the test. 92 tests call this helper and every one of
+	// Close the pool with the test. When every test booted here, every one of
 	// them used to leak its pool, each holding database/sql's default two idle
 	// connections open for the rest of the package run -- up to 184 against a
 	// stock max_connections of 100. The lane survived only because it sat just
@@ -59,6 +107,12 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	// incoming-array repro) tipped it into
 	// `FATAL: sorry, too many clients already`, in an unrelated test, chosen by
 	// run order rather than by anything the change touched.
+	//
+	// Since memql#4075 that pressure is gone STRUCTURALLY rather than by
+	// cleanup discipline: the borrowing majority share the ONE package-wide
+	// pool in sharedReadMergeEngine (never closed per test -- closing it was
+	// only ever the antidote to having a hundred of them), and this per-test
+	// close now covers just the handful of engine-mutating boots.
 	//
 	// Registered here, so it runs LAST (t.Cleanup is LIFO) -- after any cleanup
 	// the test body registers that still needs the connection.
@@ -85,6 +139,122 @@ func readMergeTestEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) 
 	ctx := auth.ContextWithToken(context.Background(),
 		&auth.TokenInfo{Subject: "system:readmerge-test"})
 	return eng, db, ctx
+}
+
+// sharedReadMergeEngineState backs sharedReadMergeEngine: ONE engine and ONE
+// bun.DB pool for the whole package, booted lazily by the first borrower.
+// The boot VERDICT is recorded alongside the engine, because the Once body
+// must not touch any *testing.T: see the helper's doc for why.
+var sharedReadMergeEngineState struct {
+	once sync.Once
+	// boots counts Once-body executions, so
+	// TestSharedReadMergeEngine_SharesOneBoot can assert "at most one" as a
+	// number instead of inferring it from wall time.
+	boots int
+	eng   *MemQLEngine
+	db    *bun.DB
+	dsn   string
+	// pingErr records "no database answered" -- the skip-or-fail case.
+	pingErr error
+	// bootErr records "the database answered but the engine did not come up"
+	// -- always a failure, never a skip.
+	bootErr error
+}
+
+// sharedReadMergeEngine returns the package-wide shared engine, booting it on
+// first use. Same return shape as readMergeTestEngine, and the DEFAULT choice
+// for a db-gated test that reads/writes rows through a stock engine
+// (memql#4075). Tests that mutate engine-level state must keep booting
+// privately -- readMergeTestEngine's doc comment is the authority on which is
+// which.
+//
+// Three properties are load-bearing:
+//
+//   - LAZY, with the verdict re-reported per caller. The boot runs inside a
+//     sync.Once whose body never touches a *testing.T: an unreachable
+//     database is RECORDED, and every caller re-reports the recorded verdict
+//     through dbtest.Unreachable -- the same skip-or-fail seam the private
+//     helper uses -- so a DB-less run still skips every borrower
+//     individually and MEMQL_REQUIRE_DB=1 still fails every one of them.
+//     Skipping or fataling inside the Once instead would let the FIRST
+//     caller's t answer for the whole package and hand everyone after it a
+//     nil engine.
+//
+//   - A FRESH context per call. The engine is process state; the context is
+//     a per-test value. Token-only, and DELIBERATELY NO AccessContext, for
+//     the reason recorded at the same line of readMergeTestEngine: the
+//     ambient-predicate tests (memql#2801) pin a context carrying no caller
+//     identity, and tests that write owned rows layer their own actor via
+//     insertViaMutation / runMutation.
+//
+//   - The pool is NEVER closed. The old per-test t.Cleanup(db.Close) was the
+//     antidote to a hundred coexisting pools crowding max_connections
+//     (memql#3670); with ONE pool for the package there is nothing to crowd,
+//     so the pressure is retired structurally and the pool lives until the
+//     test process exits.
+func sharedReadMergeEngine(t *testing.T) (*MemQLEngine, *bun.DB, context.Context) {
+	t.Helper()
+	s := &sharedReadMergeEngineState
+	s.once.Do(func() {
+		s.boots++
+		s.dsn = dbtest.DSN()
+		connector := pgdriver.NewConnector(pgdriver.WithDSN(s.dsn))
+		db := bun.NewDB(sql.OpenDB(connector), pgdialect.New())
+		if err := db.PingContext(context.Background()); err != nil {
+			s.pingErr = err
+			_ = db.Close()
+			return
+		}
+		if _, err := LoadUnifiedConcepts(nil); err != nil {
+			s.bootErr = fmt.Errorf("LoadUnifiedConcepts: %w", err)
+			_ = db.Close()
+			return
+		}
+		eng, err := New(db)
+		if err != nil {
+			s.bootErr = fmt.Errorf("New: %w", err)
+			_ = db.Close()
+			return
+		}
+		eng.Logger = slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
+		if err := eng.Init(concept.DefaultRegistry()); err != nil {
+			s.bootErr = fmt.Errorf("Init: %w", err)
+			_ = db.Close()
+			return
+		}
+		s.eng, s.db = eng, db
+	})
+	if s.pingErr != nil {
+		dbtest.Unreachable(t, "read-merge mutation DB test (shared engine)", s.dsn, s.pingErr)
+		return nil, nil, nil // Unreachable skipped or failed; only a non-stdlib TB reaches this
+	}
+	if s.bootErr != nil {
+		t.Fatalf("shared read-merge engine failed to boot (recorded on first use, reported per caller): %v", s.bootErr)
+	}
+	ctx := auth.ContextWithToken(context.Background(),
+		&auth.TokenInfo{Subject: "system:readmerge-test"})
+	return s.eng, s.db, ctx
+}
+
+// TestSharedReadMergeEngine_SharesOneBoot pins the mechanism memql#4075 buys
+// its time with. If sharing silently regressed to a boot per call -- the Once
+// moved somewhere per-test, a refactor returning a fresh engine -- every
+// borrower would still get a WORKING engine and nothing in the package would
+// notice; the only symptom would be the db-tests lane growing back toward its
+// budget, attributed to whoever commits next (the memql#3257 shape). So the
+// contract is asserted directly: two calls hand back the same engine and the
+// same pool, the process-lifetime boot counter reads exactly 1, and the
+// contexts still DIFFER, because contexts are per-test values that must not
+// leak one test's identity into another.
+func TestSharedReadMergeEngine_SharesOneBoot(t *testing.T) {
+	eng1, db1, ctx1 := sharedReadMergeEngine(t)
+	eng2, db2, ctx2 := sharedReadMergeEngine(t)
+	require.Same(t, eng1, eng2, "two sharedReadMergeEngine calls must return ONE engine")
+	require.Same(t, db1, db2, "two sharedReadMergeEngine calls must return ONE pool")
+	require.False(t, ctx1 == ctx2, "contexts are per-test values and must be built fresh per call")
+	require.Equal(t, 1, sharedReadMergeEngineState.boots,
+		"the shared engine booted %d times in this process; the whole point of the seam is one boot",
+		sharedReadMergeEngineState.boots)
 }
 
 // runMutation invokes a named mutation in the kind-prefixed, named-args call
@@ -155,7 +325,7 @@ func uniqueSuffix(name string) string {
 // active=false while every required field (label, recordType, partitionId,
 // importSource, importedBy, data) is inherited from the persisted row.
 func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:data:record"
 	recordId := "rec-" + uniqueSuffix("delete")
 
@@ -192,7 +362,7 @@ func TestReadMerge_DeleteRecord_PreservesOmittedFields(t *testing.T) {
 // must flip active=false while the discriminator (identityType=api_key),
 // nested credentials.keyHash, and label survive.
 func TestReadMerge_RevokePATIdentity_PreservesOmittedFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:identity"
 	identityId := "ident-" + uniqueSuffix("pat")
 
@@ -222,7 +392,7 @@ func TestReadMerge_RevokePATIdentity_PreservesOmittedFields(t *testing.T) {
 // capabilities/labels) when omitted. A minimal health transition (id + health
 // + lastSeen) must update those two fields and PRESERVE address + nodeType.
 func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:cluster:node"
 	nodeId := "node-" + uniqueSuffix("health")
 
@@ -271,7 +441,7 @@ func TestReadMerge_UpdateNodeHealth_PreservesAddress(t *testing.T) {
 // stored participant row: status flips to left while displayName /
 // participantType / partitionId / agentId / forUserId are inherited.
 func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:cognition:participant"
 
 	// Seed an AI participant under the elevated system actor. The id is
@@ -317,7 +487,7 @@ func TestReadMerge_LeaveSpace_PreservesParticipantFields(t *testing.T) {
 // read-merge (memql#1709) inherits every omitted discriminator field from the
 // stored delegation row while active flips to false.
 func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:delegation"
 
 	storedId := runMutation(t, ctx, eng, "createDelegation", map[string]any{
@@ -364,7 +534,7 @@ func TestReadMerge_RevokeDelegation_PreservesFields(t *testing.T) {
 // fields (nodeType + address); before memql#1709 it rejected as
 // "missing properties", after it inherits them and only flips health.
 func TestReadMerge_RawInsertOntoExistingId_ReadMerges(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:cluster:node"
 
 	storedId := runMutation(t, ctx, eng, "createNode", map[string]any{

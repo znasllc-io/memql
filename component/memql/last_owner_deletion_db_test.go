@@ -17,7 +17,7 @@ import (
 // last_owner_deletion_db_test.go -- memql#3967's acceptance criterion, against
 // a real database and through the real mutation path.
 //
-// POSTGRES-GATED (reuses readMergeTestEngine) because the guard's whole job is
+// POSTGRES-GATED (reuses sharedReadMergeEngine) because the guard's whole job is
 // a COUNT over versioned rows. A stubbed count would be asserting that the
 // stub returns what the stub was told to return; the interesting cases -- a
 // demoted owner, a previously-deactivated owner, an older version of a row
@@ -143,7 +143,7 @@ func newReader(t *testing.T, eng *MemQLEngine, ctx context.Context, suffix strin
 
 // TestDeletingTheLastOwnerIsRefused is the headline claim.
 func TestDeletingTheLastOwnerIsRefused(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 
 	owner := newOwner(t, eng, ctx, "lastowner")
 	isolateSingleOwner(t, ctx, eng, db, owner)
@@ -158,7 +158,7 @@ func TestDeletingTheLastOwnerIsRefused(t *testing.T) {
 // TestDeletingOneOfTwoOwnersIsAllowed is the other half, and the one that
 // stops the guard from being "owners are undeletable".
 func TestDeletingOneOfTwoOwnersIsAllowed(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	first := newOwner(t, eng, ctx, "twoowners-a")
 	_ = newOwner(t, eng, ctx, "twoowners-b")
@@ -171,7 +171,7 @@ func TestDeletingOneOfTwoOwnersIsAllowed(t *testing.T) {
 // TestDeletingANonOwnerIsUntouched: the guard must not become a tax on every
 // user deletion.
 func TestDeletingANonOwnerIsUntouched(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	reader := newReader(t, eng, ctx, "nonowner")
 	err := tryMutation(t, ctx, eng, "deleteUserHard", map[string]any{"userId": reader})
@@ -187,7 +187,7 @@ func TestDeletingANonOwnerIsUntouched(t *testing.T) {
 // payload->>'role' = 'owner'` still matches two ids, because the deactivated
 // owner's OLD versions are still in the table.
 func TestAnAlreadyDeactivatedOwnerDoesNotCount(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 
 	first := newOwner(t, eng, ctx, "stale-a")
 	isolateSingleOwner(t, ctx, eng, db, first)

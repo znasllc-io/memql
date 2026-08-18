@@ -28,7 +28,7 @@ import (
 // when no DB is reachable, exactly like executor_mutation_readmerge_db_test.go.
 
 func TestCreateOnly_ReStageDoesNotResetWorkerOwnedStatus(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 
 	const conceptName = "v1:platform:outboundRequest"
 	reqId := "co63-" + uniqueSuffix("restage")

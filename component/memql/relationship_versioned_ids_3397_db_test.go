@@ -50,7 +50,7 @@ import (
 // collapse to a full result by luck, and hides the defect completely -- which
 // is what made memql#3388 take three rounds to find.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 const (
 	participantConcept = "v1:cognition:participant"
@@ -103,7 +103,7 @@ func seedRawRow(
 // versions, all belonging to the two most-recently-written participants -- and
 // the other 8 were logged as missing references and dropped.
 func TestRelationshipParentOf_ClusteredVersionsReachesEveryParent(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3397-parent")
 	sfx := uniqueSuffix("rel-3397-parent")
 	owner := "kb:" + sfx
@@ -154,7 +154,7 @@ func TestRelationshipParentOf_ClusteredVersionsReachesEveryParent(t *testing.T) 
 // through the relationship resolvers to find it -- which is the hour memql#3388
 // records losing in the other direction.
 func TestExecuteFilterQuery_ClusteredVersionsFillsTheTarget(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3397-seam")
 	sfx := uniqueSuffix("rel-3397-seam")
 	owner := "kb:" + sfx
@@ -200,7 +200,7 @@ func TestExecuteFilterQuery_ClusteredVersionsFillsTheTarget(t *testing.T) {
 // versions so the fix's DISTINCT ON subquery is what is under test, not a
 // single-version happy path.
 func TestExecuteFilterQuery_LatestVersionWinsUnderAsOf(t *testing.T) {
-	eng, db, _ := readMergeTestEngine(t)
+	eng, db, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-rel-3397-asof")
 	sfx := uniqueSuffix("rel-3397-asof")
 	owner := "kb:" + sfx

@@ -92,6 +92,14 @@ query demoWidget demoWidgetsAll {
 // package default when it binds a bundle's constructs, so only an engine bound to
 // that same registry reproduces the production binding of a mutation to a
 // just-promoted concept.
+// retireDBEngine boots PRIVATELY, deliberately, while most of the package
+// borrows sharedReadMergeEngine (memql#4075): promoteBundleIntoEngine below
+// registers constructs into the live engine's registries and this snapshot /
+// ReplaceAll pair swaps the global concept registry around the test. Both
+// assume the next test re-boots its own engine; sharing one turns the restore
+// into a rewind nothing heals (the sibling authoring_concept_staged_db file
+// was the bisected breaker of the cond probe tests when converted, and this
+// file broke that sibling in the same combination).
 func retireDBEngine(t *testing.T) (*MemQLEngine, context.Context) {
 	t.Helper()
 	before := memoryNodes.All()

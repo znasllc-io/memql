@@ -105,6 +105,14 @@ func (r *eventRecorder) requireSilence(t *testing.T, why string) {
 // stagedWriteEngine is readMergeTestEngine plus a real event bus, since the
 // engine's publish helpers no-op on a nil bus and every event assertion below
 // would then pass for the wrong reason.
+//
+// The PRIVATE boot is deliberate while most of the package borrows
+// sharedReadMergeEngine (memql#4075): these tests mark v1:cluster:node -- a
+// CORE concept -- data-staged on the engine and never clear it, because the
+// mark used to die with the per-test engine. On a shared engine the stranded
+// mark makes the NEXT test's unstaged positive control silent: both
+// Publishes* tests failed exactly that way when this file was converted
+// ("an UNSTAGED write must publish graph.node.created -- no event arrived").
 func stagedWriteEngine(t *testing.T) (*MemQLEngine, context.Context) {
 	t.Helper()
 	eng, _, ctx := readMergeTestEngine(t)

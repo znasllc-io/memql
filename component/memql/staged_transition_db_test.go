@@ -52,6 +52,13 @@ import (
 // "it came back false" would also pass against a mutation that never wrote
 // anything and a stamp that never landed -- the staged read is what shows the
 // instrument can move.
+//
+// PRIVATE boot (readMergeTestEngine), deliberately, while most of the package
+// borrows sharedReadMergeEngine (memql#4075): the promote runs THROUGH the
+// live engine and the snapshot / ReplaceAll pair swaps the global concept
+// registry around the test -- the same shape as authoring_concept_staged_db,
+// whose conversion was the bisected breaker of the cond probe tests. Both
+// halves assume the next test boots its own engine.
 func TestTrainConstructConceptData_ClearsTheStampOnARealRow(t *testing.T) {
 	before := memoryNodes.All()
 	t.Cleanup(func() { memoryNodes.ReplaceAll(before) })

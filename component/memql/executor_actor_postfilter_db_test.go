@@ -43,7 +43,7 @@ func activeStatusNode(t *testing.T) memorynodes.MemoryNode {
 // post-filter cannot see. The actor gate stays enforced exactly once.
 //
 // Postgres-gated: skips when no DB is reachable, like
-// executor_mutation_readmerge_db_test.go (whose readMergeTestEngine helper
+// executor_mutation_readmerge_db_test.go (whose sharedReadMergeEngine helper
 // this reuses).
 
 func clusterOwnerCtx(userId string) context.Context {
@@ -85,7 +85,7 @@ func seedActiveAuthoringBundle(t *testing.T, ctx context.Context, eng *MemQLEngi
 // through systemActiveAuthoringBundles WITHOUT the post-filter blowing up
 // on the actor.isClusterOwner term.
 func TestActorClusterOwnerPostFilter_WithActiveRows(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	ownerCtx := clusterOwnerCtx("u-owner-1659")
 	bundleId := "v1:authoring:bundle:b-1659-owner"
@@ -114,7 +114,7 @@ func TestActorClusterOwnerPostFilter_WithActiveRows(t *testing.T) {
 // gate is enforced exactly once (in the SQL WHERE: the actor constant binds
 // false, so the DB returns no rows).
 func TestActorClusterOwnerPostFilter_GateStillEnforced(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	ownerCtx := clusterOwnerCtx("u-owner-1659b")
 	bundleId := "v1:authoring:bundle:b-1659-gate"

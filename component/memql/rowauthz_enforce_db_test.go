@@ -12,7 +12,7 @@ import (
 
 // Row-authz enforcement, end to end against a real store (memql#3172).
 //
-// Postgres-gated like its neighbours -- readMergeTestEngine skips when
+// Postgres-gated like its neighbours -- sharedReadMergeEngine skips when
 // no DB is reachable. CI's db-tests lane runs this package with
 // MEMQL_REQUIRE_DB=1, so a skip there is a failure rather than a green.
 //
@@ -50,7 +50,7 @@ func resultBlob(t *testing.T, res *ExecuteResult) string {
 // THE NARROWING, and the cache leak, in one fixture: two callers, one
 // declared concept, one row each.
 func TestEnforcedReadNarrowsAndTheCacheDoesNotLeakAcrossCallers(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3172")
 	userA := "user-a-" + suffix
@@ -120,7 +120,7 @@ func TestEnforcedReadNarrowsAndTheCacheDoesNotLeakAcrossCallers(t *testing.T) {
 // passes a client-supplied string straight to the engine -- so the
 // per-row gate is the only thing between the caller and the row.
 func TestRawQueryStringCannotReachAnotherCallersRow(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3172raw")
 	userA := "user-a-" + suffix
@@ -162,7 +162,7 @@ func TestRawQueryStringCannotReachAnotherCallersRow(t *testing.T) {
 // spellings -- enforcement narrows to the caller, it does not empty the
 // concept.
 func TestEnforcementDoesNotHideTheCallersOwnRows(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	suffix := uniqueSuffix("rowauthz3172own")
 	userA := "user-a-" + suffix
@@ -194,7 +194,7 @@ func TestEnforcementDoesNotHideTheCallersOwnRows(t *testing.T) {
 // context carrying no caller identity is REFUSED, not answered with
 // whatever an `ownerUserId = <empty string>` term happens to match.
 func TestActorlessReadOfADeclaredConceptIsRefused(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 
 	_, err := eng.Execute(context.Background(), "notes()")
 	if err == nil {

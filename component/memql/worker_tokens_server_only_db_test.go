@@ -27,12 +27,12 @@ import (
 //
 // Postgres-gated, like its neighbours in this package.
 func TestWorkerTokensForUserIsServerOnlyAndInternalOriginPasses(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	const q = `query workerTokensForUser(userId:"user-3063-probe")`
 
 	t.Run("a client-origin call is refused", func(t *testing.T) {
-		// readMergeTestEngine's context carries a token but NOT internal
+		// sharedReadMergeEngine's context carries a token but NOT internal
 		// origin, which is exactly the shape a wire call arrives in.
 		_, err := eng.Execute(ctx, q)
 		if err == nil {

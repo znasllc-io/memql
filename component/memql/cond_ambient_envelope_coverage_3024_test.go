@@ -192,13 +192,19 @@ func TestLogicCondBareIdentifier_MultiStepDeclaredArgIsNotRejected(t *testing.T)
 //
 // The first cut's only config assertion was a load-time check on a key that
 // does not exist, so it would have passed with config resolution entirely
-// removed. This one cannot: it runs the same predicate against two engines
-// whose snapshots differ and requires the answers to differ.
+// removed. This one cannot: it runs the same predicate twice under snapshots
+// that differ (swapped onto the shared engine per run, memql#4075) and
+// requires the answers to differ.
 func TestExecute_CondAmbientConfigPredicate_Discriminates(t *testing.T) {
 	run := func(t *testing.T, name, pred string, snapshot *busv1.ConfigSnapshot) any {
 		t.Helper()
-		eng, _, baseCtx := readMergeTestEngine(t)
+		eng, _, baseCtx := sharedReadMergeEngine(t)
+		// The snapshot is PER-TEST state layered onto the package-shared
+		// engine (memql#4075): restore the boot state -- nil, "no snapshot
+		// wired", the all-zero config surface -- so no later borrower reads
+		// this test's config through an ambient predicate.
 		eng.SetConfigSnapshot(snapshot)
+		t.Cleanup(func() { eng.SetConfigSnapshot(nil) })
 
 		fn, err := tryParseNewFunctionSyntax(
 			name, "logic", condAmbientProbeSource(name, pred),
@@ -282,7 +288,7 @@ func TestExecute_CondAmbientPredicate_NegatedAbsentActorDenies(t *testing.T) {
 		"role":           `actor.role != ""`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			eng, _, baseCtx := readMergeTestEngine(t)
+			eng, _, baseCtx := sharedReadMergeEngine(t)
 
 			fnName := "ambientNegatedDenyGate" + name
 			fn, err := tryParseNewFunctionSyntax(

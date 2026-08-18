@@ -33,7 +33,7 @@ import (
 //                                 consumedAt!="" so unspent-but-expired codes are
 //                                 excluded.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine
 // (component/memql/executor_mutation_readmerge_db_test.go).
 
 // --- #1708: queryDocumentsForDomain joins on attachedDomains membership ------
@@ -41,7 +41,7 @@ import (
 // --- #1708: avatarPersonas no longer hardcodes vendor==simli ------------
 
 func TestQueryAvatarPersonas_VendorOptionalNotHardcoded(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-persona-1708")
 	sfx := uniqueSuffix("persona")
 
@@ -85,7 +85,7 @@ func TestQueryAvatarPersonas_VendorOptionalNotHardcoded(t *testing.T) {
 // --- #1708: user-deletion queries gate on deletionScheduledAt ---------------
 
 func TestQueryUsersScheduledForDeletion_OnlyScheduled(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-deldel-1708")
 	sfx := uniqueSuffix("deldel")
 
@@ -131,7 +131,7 @@ func TestQueryUsersScheduledForDeletion_OnlyScheduled(t *testing.T) {
 // --- #1714: expiredConsumedAuthCodes gates on consumedAt ---------------
 
 func TestQueryExpiredConsumedAuthCodes_OnlyConsumed(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-authcode-1714")
 	sfx := uniqueSuffix("authcode")
 

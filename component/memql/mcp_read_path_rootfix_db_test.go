@@ -24,7 +24,7 @@ import (
 //          not-deleted trait, so soft-deleted invocations leaked through.
 //   #1682  searchUsers ignored its active/limit filter args (returned all users).
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 // queryIds runs a query and returns the ids of the returned rows.
 func queryIds(t *testing.T, ctx context.Context, eng *MemQLEngine, q string) []string {
@@ -53,7 +53,7 @@ func contains(ids []string, want string) bool {
 // --- #1674: `has` array-membership end-to-end -------------------------------
 
 func TestHasOperator_NotesByTag(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-has-1674")
 	sfx := uniqueSuffix("note")
 
@@ -91,7 +91,7 @@ func TestHasOperator_NotesByTag(t *testing.T) {
 // --- #1685: soft-deleted worker invocations excluded ------------------------
 
 func TestWorkerInvocations_SoftDeletedExcluded(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-wi-1685")
 	sfx := uniqueSuffix("wi")
 
@@ -123,7 +123,7 @@ func TestWorkerInvocations_SoftDeletedExcluded(t *testing.T) {
 // --- #1682: searchUsers honors active + limit -------------------------------
 
 func TestSearchUsers_ActiveAndLimitApplied(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-su-1682")
 	ctx = WithActingAgentRole(ctx, "owner")
 	ctx = WithActingAgentId(ctx, "v1:agents:agent:su-1682")

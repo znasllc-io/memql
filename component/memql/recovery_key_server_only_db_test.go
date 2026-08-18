@@ -37,7 +37,7 @@ import (
 //
 // Postgres-gated, like its neighbours in this package.
 func TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T) {
-	eng, _, ctx := readMergeTestEngine(t)
+	eng, _, ctx := sharedReadMergeEngine(t)
 
 	// A row id this test owns, so the write cases act on nothing real. The
 	// writes are what make the internal-origin half meaningful: asserting only
@@ -101,7 +101,7 @@ func TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T)
 
 	for _, tc := range cases {
 		t.Run(tc.construct, func(t *testing.T) {
-			// readMergeTestEngine's context carries a token but NOT internal
+			// sharedReadMergeEngine's context carries a token but NOT internal
 			// origin, which is exactly the shape a wire call arrives in.
 			t.Run("a client-origin call is refused", func(t *testing.T) {
 				_, err := eng.Execute(ctx, tc.call)

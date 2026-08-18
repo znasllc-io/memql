@@ -26,10 +26,10 @@ import (
 // assertion passes against a too-broad filter just as happily as a correct
 // one.
 //
-// Postgres-gated: skips when no DB is reachable, reusing readMergeTestEngine.
+// Postgres-gated: skips when no DB is reachable, reusing sharedReadMergeEngine.
 
 func TestQueryDeploymentById_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-depl-2784")
 	sfx := uniqueSuffix("depl2784")
 
@@ -81,7 +81,7 @@ func TestQueryDeploymentById_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
 // the criterion is met. What is absent is a one-query all-versions read.
 // See asof_reconstructability_1872_db_test.go (#2880).
 func TestQueryDeploymentById_ReturnsTheLatestVersionAfterAnAppend(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-depltl-2784")
 	sfx := uniqueSuffix("depltl2784")
 
@@ -115,7 +115,7 @@ func TestQueryDeploymentById_ReturnsTheLatestVersionAfterAnAppend(t *testing.T) 
 }
 
 func TestQueryOAuthClientByClientId_FiltersOnRowIdNotThePayloadMirror(t *testing.T) {
-	eng, _, _ := readMergeTestEngine(t)
+	eng, _, _ := sharedReadMergeEngine(t)
 	ctx := clusterOwnerCtx("u-oauth-2784")
 	sfx := uniqueSuffix("oauth2784")
 

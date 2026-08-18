@@ -48,7 +48,7 @@ func runMutationRaw(t *testing.T, ctx context.Context, eng *MemQLEngine, name st
 // create without declaring the engine-reserved createdBy / createdAt fields,
 // for both a timed event and an all-day event.
 func TestRun3_CalendarCreate_NoReservedFields(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:calendar:calendarEvent"
 
 	// Timed event, allDay omitted entirely (mutation coalesces to false).
@@ -83,7 +83,7 @@ func TestRun3_CalendarCreate_NoReservedFields(t *testing.T) {
 // without revokedAt must succeed (no literal 'nil' written into the date-time
 // field) and leave revokedAt absent.
 func TestRun3_CreateDelegation_NoLiteralNil(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:delegation"
 
 	delegationId := "deleg-" + uniqueSuffix("create")
@@ -108,7 +108,7 @@ func TestRun3_CreateDelegation_NoLiteralNil(t *testing.T) {
 // TestRun3_NotesCreate_OmittedTitle covers #1683: creating a note without a
 // title must succeed and must not stamp the literal string "null" into title.
 func TestRun3_NotesCreate_OmittedTitle(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:notes:note"
 
 	noteId := "note-" + uniqueSuffix("notitle")
@@ -127,7 +127,7 @@ func TestRun3_NotesCreate_OmittedTitle(t *testing.T) {
 // dueAt must succeed and must not stamp the literal string "null" into the
 // date-time dueAt field.
 func TestRun3_TodosCreate_OmittedDueAt(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:todos:todo"
 
 	todoId := "todo-" + uniqueSuffix("nodue")
@@ -146,7 +146,7 @@ func TestRun3_TodosCreate_OmittedDueAt(t *testing.T) {
 // the one changed field) must succeed and preserve the omitted required
 // discriminators (subject / tokenHash / source / expiresAt).
 func TestRun3_TouchSession_ReadMerge(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:authSession"
 
 	sessionId := "sess-" + uniqueSuffix("touch")
@@ -187,7 +187,7 @@ func TestRun3_TouchSession_ReadMerge(t *testing.T) {
 // read-merge needs the singleton; a row of the same concept proves the same
 // property with no blast radius.
 func TestRun3_UpdateClusterSettings_PreservesInternalDomains(t *testing.T) {
-	eng, db, ctx := readMergeTestEngine(t)
+	eng, db, ctx := sharedReadMergeEngine(t)
 	const conceptName = "v1:identity:clusterSettings"
 	settingsId := "cs1686-" + uniqueSuffix("internaldomains")
 
