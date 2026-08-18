@@ -218,39 +218,73 @@ export class RunOrchestrator {
     // here for the same reason every other await in this method is.
     if (!this.latest.isCurrent(token)) return { status: "superseded" };
 
-    // Validation runs for EVERY kind, including tool. It is free of engine
+    // Validation runs for every kind, including tool -- EXCEPT for an EMPTY
+    // bundle, which is not a degenerate buffer but a designed state
+    // (memql#4081). A catalog run assembles `{sources: ""}` on purpose
+    // (constructs/catalogTarget.ts): the construct lives only in the cluster,
+    // there is no file, and the run's whole meaning is "invoke the deployed
+    // definition". The engine's ValidateBundle, meanwhile, FAILS-LOUD on zero
+    // constructs -- correct for the authoring surface, where an empty buffer
+    // deserves "nothing here" -- so sending it the catalog's empty bundle
+    // failed EVERY catalog run of every construct at `validate`, from the day
+    // the feature shipped (its design prose claimed "an empty bundle
+    // validates trivially"; the engine had refused empty bundles since before
+    // that sentence was written). The invoke below was already waiting for
+    // this case -- `ranDeployedDefinition` for the empty bundle --
+    // and could never reach it.
+    //
+    // It shipped green because this file's tests faked validateBundle and the
+    // fake accepted an empty bundle. The fake now mirrors the engine's
+    // refusal, so the two contracts cannot drift apart silently again.
+    //
+    // For a NON-empty bundle nothing changes: validation is free of engine
     // mutation, and a buffer whose other constructs do not compile is
     // something the developer wants to know about before reading a result --
     // even when the thing being invoked is the deployed tool.
-    let validated: ValidateBundleResult;
-    try {
-      validated = await engine.validateBundle(bundle.sources, bundleOrigin(bundle));
-    } catch (err) {
-      if (!this.latest.isCurrent(token)) return { status: "superseded" };
-      return fail(target, "validate", err instanceof Error ? err.message : String(err));
-    }
-    if (!this.latest.isCurrent(token)) return { status: "superseded" };
-
-    const failures = failedDiagnostics(validated.diagnostics);
-    if (!validated.ok || failures.length > 0) {
-      const mapped = mapBundleDiagnostics(validated.diagnostics, bundle);
-      this.deps.publishDiagnostics(mapped);
-      // A bundle can be !ok with nothing mapped -- the engine refused it
-      // without attributing the refusal to a construct. Reporting "invalid"
-      // with an empty diagnostic list would leave the developer with a
-      // failed run and an empty Problems panel, so that case becomes an
-      // ordinary error carrying the reason we do have.
-      if (mapped.length === 0) {
-        return fail(target, "validate", "The engine rejected the bundle without a per-construct diagnostic.");
+    // "Empty" is SEMANTIC, not byte-length. The catalog's assemble returns
+    // `""` outright, but assembleBundle normalises every file to a trailing
+    // newline -- so a truly empty ACTIVE buffer arrives as "\n", one byte
+    // long and still nothing to compile. Both mean the same thing, and a
+    // whitespace-only scratch buffer means it too: sending any of them to
+    // validate buys the developer the engine's zero-construct refusal in
+    // place of the run they asked for.
+    const emptyBundle = bundle.sources.trim().length === 0;
+    if (!emptyBundle) {
+      let validated: ValidateBundleResult;
+      try {
+        validated = await engine.validateBundle(bundle.sources, bundleOrigin(bundle));
+      } catch (err) {
+        if (!this.latest.isCurrent(token)) return { status: "superseded" };
+        return fail(target, "validate", err instanceof Error ? err.message : String(err));
       }
-      return { status: "invalid", target, diagnostics: mapped, phase: "validate" };
+      if (!this.latest.isCurrent(token)) return { status: "superseded" };
+
+      const failures = failedDiagnostics(validated.diagnostics);
+      if (!validated.ok || failures.length > 0) {
+        const mapped = mapBundleDiagnostics(validated.diagnostics, bundle);
+        this.deps.publishDiagnostics(mapped);
+        // A bundle can be !ok with nothing mapped -- the engine refused it
+        // without attributing the refusal to a construct. Reporting "invalid"
+        // with an empty diagnostic list would leave the developer with a
+        // failed run and an empty Problems panel, so that case becomes an
+        // ordinary error carrying the reason we do have.
+        if (mapped.length === 0) {
+          return fail(target, "validate", "The engine rejected the bundle without a per-construct diagnostic.");
+        }
+        return { status: "invalid", target, diagnostics: mapped, phase: "validate" };
+      }
     }
     // Clear stale diagnostics from an earlier failing run. Without this a
-    // fixed error stays in the Problems panel until the next failure.
+    // fixed error stays in the Problems panel until the next failure. Cleared
+    // for the empty bundle too: a catalog run that follows a failing buffer
+    // run should not leave the buffer's stale problems on screen.
     this.deps.publishDiagnostics([]);
 
     let injected = false;
-    if (isSessionDefinable(target.kind)) {
+    // `bundle.sources.length > 0`: an empty bundle has nothing to define, and
+    // session-defining "" would ask the engine the same zero-construct
+    // question validate was skipped for.
+    if (!emptyBundle && isSessionDefinable(target.kind)) {
       if (this.session.needsInjection(cluster.name, bundle.sources)) {
         let defined: SessionDefineBundleResult;
         try {
@@ -333,7 +367,7 @@ export class RunOrchestrator {
         // defined. The flag is what the Result view's sentence is chosen from,
         // so a wrong value here is a confidently false claim about what just
         // executed.
-        ranDeployedDefinition: bundle.sources.length === 0,
+        ranDeployedDefinition: emptyBundle,
         injected,
       };
     } catch (err) {
