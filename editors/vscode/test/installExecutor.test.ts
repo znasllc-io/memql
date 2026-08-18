@@ -844,3 +844,51 @@ test("runCapabilityScript -- a script finds the installer's tools without the ca
   assert.equal(out.exitCode, 0, `the script could not find the tool: ${out.stdout}`);
   assert.equal(out.envelope?.result.found, true);
 });
+
+// ---------------------------------------------------------------------------
+// Per-step budgets (memql#4076)
+// ---------------------------------------------------------------------------
+
+test("a step's own timeoutSeconds outranks the run-wide default", async () => {
+  // One flat number was asked to both clear the genuinely slow step and kill
+  // a wedged one fast, and clusterUp outgrew the compromise: the run after
+  // memql#4073 widened the INNER workload budget to 900s, and the run-wide
+  // 600s ceiling SIGKILLed the whole step ~30s short of a cluster that came
+  // up healthy. The graph is where a step prices its slowness; the executor
+  // must hand the runner THAT price, not the default, or the field is a
+  // comment.
+  //
+  // Distinct scripts on purpose: the two steps share a wave, so call ORDER is
+  // scheduling, not identity -- the capability name is what keys the answer.
+  const g = graphOf([
+    { id: "fast", script: "install.dockerAccess" },
+    { id: "slow", script: "install.detect", timeoutSeconds: 1800 },
+  ]);
+  const runner = fakeRunner(() => ({}));
+
+  await executeGraph({
+    graph: g,
+    scriptPath: () => "/bin/true",
+    run: runner.run,
+    plan: okPlan,
+    onEvent: () => {},
+    timeoutMs: 600_000,
+  });
+
+  const byScript = new Map(runner.calls.map((r) => [r.capability, r.timeoutMs]));
+  assert.equal(runner.calls.length, 2, "both steps must run");
+  assert.equal(
+    byScript.get("install.detect"),
+    1_800_000,
+    "the declaring step's own budget (1800s) did not reach the runner -- the " +
+      "flat default would SIGKILL clusterUp mid-pull on every fresh install, " +
+      "exactly the memql#4076 failure",
+  );
+  assert.equal(
+    byScript.get("install.dockerAccess"),
+    600_000,
+    "the non-declaring step must keep the run-wide default -- the default is " +
+      "what makes a hang in a fast step surface in minutes, and inheriting a " +
+      "neighbour's patience would blunt it",
+  );
+});

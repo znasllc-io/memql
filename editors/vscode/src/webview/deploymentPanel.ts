@@ -78,7 +78,7 @@ import { DEFAULT_LOCAL_DOMAIN } from "../install/stackPin.js";
 import { renderChooseTag, renderInstanceOverview, renderRemoteInstance } from "./deploymentScreens.js";
 import { renderFailedScreen, renderRunningScreen } from "./installScreens.js";
 
-/** The same ceiling the wizard gives a step. */
+/** The same DEFAULT ceiling the wizard gives a step; a step's own `timeoutSeconds` in the graph outranks it (memql#4076) -- see addClusterPanel.ts for the full note. */
 const STEP_TIMEOUT_MS = 600_000;
 
 type Screen = "overview" | "chooseTag" | "running" | "failedStep";

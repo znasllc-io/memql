@@ -95,6 +95,19 @@ export interface Step {
   containedBy?: string;
   /** The install step this step undoes. Uninstall graphs only. */
   reverses?: string;
+  /**
+   * This step's OWN ceiling, in seconds, replacing the run-wide default for
+   * this step only (memql#4076). The default exists to kill a WEDGED step
+   * fast, and one number cannot both do that and clear the genuinely slow
+   * step: clusterUp on a fresh install pulls every image a new containerd
+   * has never seen and then waits out two inner budgets (ArgoCD 300s +
+   * workloads 900s), which is structurally more than ten minutes on a real
+   * connection -- measured, the run-wide default killed it ~30s short of a
+   * cluster that came up healthy. A slow step DECLARES its slowness here,
+   * where a reader of the graph can see it priced; every other step keeps
+   * the tight default, so a hang still surfaces in minutes.
+   */
+  timeoutSeconds?: number;
   verify: Verify;
 }
 
@@ -125,6 +138,7 @@ export class GraphError extends Error {
 const GRAPH_KEYS = new Set(["name", "kind", "description", "steps"]);
 const STEP_KEYS = new Set([
   "id",
+  "timeoutSeconds",
   "script",
   "description",
   "params",
@@ -265,6 +279,16 @@ function parseStep(value: unknown, i: number, source: string): Step {
       throw new GraphError(`${source}: step ${JSON.stringify(id)}: readOnly must be a boolean`);
     }
     step.readOnly = obj.readOnly;
+  }
+  if (obj.timeoutSeconds !== undefined) {
+    // A positive INTEGER of seconds, strictly. A step ceiling of 0 would mean
+    // "no timeout", which is the one value this field must not be able to
+    // spell -- the run-wide default exists so a wedged step dies, and a step
+    // may price its slowness but not opt out of dying.
+    if (typeof obj.timeoutSeconds !== "number" || !Number.isInteger(obj.timeoutSeconds) || obj.timeoutSeconds <= 0) {
+      throw new GraphError(`${source}: step ${JSON.stringify(id)}: timeoutSeconds must be a positive integer of seconds`);
+    }
+    step.timeoutSeconds = obj.timeoutSeconds;
   }
   for (const key of ["receipt", "preExistingPath", "containedBy", "reverses"] as const) {
     const v = obj[key];

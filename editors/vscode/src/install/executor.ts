@@ -254,7 +254,14 @@ async function runStep(
     capability: step.script,
     cwd: options.cwd,
     env: options.env,
-    timeoutMs: options.timeoutMs,
+    // The step's own declared ceiling outranks the run-wide default
+    // (memql#4076). The default is sized to kill a WEDGED step fast; a step
+    // that is legitimately slow -- clusterUp pulls every image a fresh
+    // containerd has never seen, then waits out two inner budgets -- prices
+    // that in the graph, where it is reviewed, instead of the run default
+    // quietly growing to cover the slowest step and blunting every other
+    // step's hang detection with it.
+    timeoutMs: step.timeoutSeconds !== undefined ? step.timeoutSeconds * 1000 : options.timeoutMs,
     onLog: (line) => void emit(options, { type: "stepLog", step, line }),
   });
 

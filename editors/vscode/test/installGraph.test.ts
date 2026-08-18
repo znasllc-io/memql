@@ -537,3 +537,88 @@ test("magicLink verifies on the state it found, not on having found a link", asy
   );
   assert.equal(ml.verify.field, "result.linkState");
 });
+
+// ---------------------------------------------------------------------------
+// Per-step budgets (memql#4076)
+// ---------------------------------------------------------------------------
+
+test("clusterUp declares a budget that contains the budgets inside it", async () => {
+  // clusterUp runs two inner waits -- ArgoCD (300s default, k3d.up) and the
+  // workloads (900s, passed by installPlan since memql#4073) -- plus cluster
+  // create, secret seeding and every image pull a fresh containerd has never
+  // seen. A step ceiling below the sum is a step that can be killed WHILE
+  // SUCCEEDING, which is exactly how the first install after #4073 died:
+  // the inner wait was willing, the outer ceiling was not, exit 124.
+  //
+  // 300 + 900 + 300 of create/seed/pull overhead. If an inner budget grows,
+  // this fails until the step's declared price grows with it -- the tie that
+  // was missing when #4073 raised one number and left the other.
+  const g = await loadGraphFile(graphDocumentPath("install", REPO_ROOT));
+  const up = g.steps.find((s) => s.id === "clusterUp");
+  assert.ok(up, "the install graph must still bring the cluster up");
+  assert.ok(
+    up.timeoutSeconds !== undefined && up.timeoutSeconds >= 300 + 900 + 300,
+    `clusterUp declares timeoutSeconds=${up.timeoutSeconds} but its inner waits alone ` +
+      "can legitimately take 1200s (ArgoCD 300 + workloads 900) before a single " +
+      "image pull is priced -- the executor would SIGKILL a SUCCEEDING install",
+  );
+});
+
+test("a step budget of zero is refused -- a step may not opt out of dying", async () => {
+  // timeoutSeconds=0 conventionally means "no timeout", which is the one
+  // value this field must not be able to spell: the run default exists so a
+  // wedged step dies, and a graph author may price slowness but not disable
+  // hang detection.
+  assert.throws(
+    () =>
+      loadGraph(
+        JSON.stringify({
+          name: "install",
+          kind: "install",
+          description: "d",
+          steps: [
+            {
+              id: "a",
+              script: "install.detect",
+              description: "d",
+              readOnly: true,
+              elevation: "none",
+              verify: { kind: "scriptOk" },
+              timeoutSeconds: 0,
+            },
+          ],
+        }),
+        "fixture.json",
+      ),
+    /timeoutSeconds must be a positive integer/,
+  );
+});
+
+test("a step budget must be a number, not a numeric string", async () => {
+  // "1800" would survive JSON.parse and multiply into NaN milliseconds at the
+  // executor, which setTimeout treats as 1ms -- a budget of a millisecond,
+  // reported as thirty minutes.
+  assert.throws(
+    () =>
+      loadGraph(
+        JSON.stringify({
+          name: "install",
+          kind: "install",
+          description: "d",
+          steps: [
+            {
+              id: "a",
+              script: "install.detect",
+              description: "d",
+              readOnly: true,
+              elevation: "none",
+              verify: { kind: "scriptOk" },
+              timeoutSeconds: "1800",
+            },
+          ],
+        }),
+        "fixture.json",
+      ),
+    /timeoutSeconds must be a positive integer/,
+  );
+});
