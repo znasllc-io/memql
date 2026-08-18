@@ -15,6 +15,7 @@
 // Refs: #3475 #3470 #3469 #3463
 
 import type { ExecEvent } from "../install/executor.js";
+import type { RecoveryKeyState } from "../install/recoveryKey.js";
 import type { AddClusterAction } from "../clusters/presence.js";
 import type { ClustersFile } from "../clusters/model.js";
 import { composeEndpointFromDomain, normalizeDomain, webSocketUrlFor } from "../connection/endpoint.js";
@@ -431,8 +432,10 @@ export class AddClusterState {
   // way in. The button now mints a FRESH link when clicked, which needs no
   // stored URL, and this boolean is all that is left to remember.
   //
-  // The pleasant side effect is that no credential is held in panel state at
-  // all any more.
+  // The pleasant side effect is that no ENROLMENT credential is held in panel
+  // state any more. (Two credentials still are, each with its lifetime argued
+  // where it lives: the claim link below, and the one-time recovery key
+  // reveal, memql#4079.)
   private ownerAccountExists = false;
   // The magic link the run RECOVERED, held under exactly the same rules and for
   // a more dangerous credential -- it authenticates as the cluster OWNER
@@ -440,6 +443,17 @@ export class AddClusterState {
   // enrolment link is empty, because a cluster is claimed by its first sign-in
   // and there is no account to enrol a passkey for until that has happened.
   private claimLink = "";
+  // The recovery key this run claimed, held for DISPLAY, never storage
+  // (memql#4079). The claim ROTATED the key and revealed the plaintext exactly
+  // once, into the run's in-memory report; the run log and the receipt
+  // withhold it (memql#3908), so this field and the done screen it feeds are
+  // the only place the operator can ever read it. It lives exactly as long as
+  // the screen that shows it: cleared by back(), cleared by beginRun(), gone
+  // with the panel -- closing the screen is goodbye, and the screen says so.
+  private revealedKey = "";
+  // What the claim reported, for the block's no-key renderings. `none` renders
+  // nothing at all -- an uninstall, a failed run, an old receipt.
+  private recoveryState: RecoveryKeyState = "none";
 
   get screen(): Screen {
     return this.currentScreen;
@@ -552,6 +566,20 @@ export class AddClusterState {
     this.claimLink = url;
   }
 
+  /** The one-time reveal, for the done screen and the copy button only. */
+  get revealedRecoveryKey(): string {
+    return this.revealedKey;
+  }
+
+  get recoveryKeyState(): RecoveryKeyState {
+    return this.recoveryState;
+  }
+
+  setRecoveryKey(key: string, state: RecoveryKeyState): void {
+    this.revealedKey = key;
+    this.recoveryState = state;
+  }
+
   /**
    * Which action the done screen leads with.
    *
@@ -603,6 +631,12 @@ export class AddClusterState {
     this.guidedRun = false;
     this.currentScreen = "landing";
     this.fieldErrors = [];
+    // The recovery key's display lifetime IS the done screen (memql#4079).
+    // Back is the only way off it short of closing the panel, so leaving lets
+    // go of the plaintext; what was typed into forms stays, a credential does
+    // not.
+    this.revealedKey = "";
+    this.recoveryState = "none";
     // The problems go, what was TYPED stays. Back is one click away from every
     // form on this page, and an operator who lands on the cards by accident
     // must not have to retype four fields to get where they were.
@@ -709,6 +743,11 @@ export class AddClusterState {
     // previous run's answer through would offer enrolment while the cluster is
     // mid-rebuild.
     this.ownerAccountExists = false;
+    // And the previous run's recovery key with it: a repair over a claimed
+    // cluster reports alreadyClaimed and no key, and the first run's plaintext
+    // showing through that would be a stale reveal (memql#4079).
+    this.revealedKey = "";
+    this.recoveryState = "none";
     return true;
   }
 

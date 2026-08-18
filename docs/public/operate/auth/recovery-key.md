@@ -120,6 +120,14 @@ RECOVERY_KEY="$(kubectl exec -n memql deploy/identity -- /app/memql recovery-key
 The local installer runs this as its last step
 (`scripts/install/recovery-key.sh`, capability `install.recoveryKey`).
 
+**Installing through the editor.** The VS Code extension runs the same step and
+shows the claimed key once, on the install's done screen, with a Copy button
+(memql#4079). The value lives only on that screen: the run log and the install
+receipt deliberately withhold it, and closing the screen is goodbye. On a
+repair or upgrade the screen reports the state instead -- claimed earlier, or
+awaiting the first sign-in -- since an already-claimed key cannot be re-shown.
+The CLI path above remains for headless installs.
+
 **Store it somewhere the cluster is not.** A password manager, a safe, a sealed
 envelope in a drawer. Storing it in the cluster it recovers is the one place
 that cannot work.

@@ -201,8 +201,8 @@ export function routeForClaimState(state: ClaimState): OwnershipRoute {
  *
  * NARROW ON PURPOSE, both halves. Only `missingCredential` -- an expired,
  * revoked, wrong-class or unreachable failure is a real problem and must keep
- * reading as one, because "set up a passkey" would be a confidently wrong
- * remedy for every one of them. And only `enrol`, which already carries the
+ * reading as one, because "create this cluster's owner passkey" would be a
+ * confidently wrong remedy for every one of them. And only `enrol`, which already carries the
  * checks that there is a pod here to mint in and an owner account to mint
  * against; without it this would offer an action whose only outcome is a
  * refusal.

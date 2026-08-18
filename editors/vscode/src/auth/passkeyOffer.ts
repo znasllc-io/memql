@@ -37,11 +37,23 @@
 // on every reconnect about an optional credential is how a good prompt becomes
 // one people learn to dismiss without reading.
 //
+// AND NEVER PART OF THE OWNERSHIP WALK (memql#4078). The walk that finishes an
+// install -- passkey, then a verification sign-in, then the portal -- ends in a
+// sign-in, and this offer fires on the heels of every sign-in. So the first
+// fully-green install landed THREE stacked notifications in three vocabularies,
+// and the offer's, being a toast with buttons, outlived the others in the
+// notification bell: the operator clicked it AFTER enrolling through the walk
+// and the browser answered that a passkey already exists. Two rules close that:
+// the walk marks its cluster suppressed (OfferMemory.suppress) before it mints,
+// so the sign-in that ends it cannot raise a fresh offer; and a clicked offer
+// re-reads the passkey count before acting, so a stale one answers "all set"
+// in the editor instead of dead-ending in the browser (enrolmentStillNeeded).
+//
 // Deliberately free of `vscode` imports (cmd/memql-lsp/vscodeimportrule_test.go):
 // the decision is the part worth testing, and `src/extension.ts` supplies the
 // notification.
 //
-// Refs: #3902 #3885 #3884 #3591 #3408 #3409
+// Refs: #4078 #3902 #3885 #3884 #3591 #3408 #3409
 
 /** The cluster roles that may mint an enrolment link. Mirrors adminops' gate. */
 const MINTING_ROLES = new Set(["owner", "admin"]);
@@ -67,12 +79,17 @@ export interface PasskeyOfferDeps {
 
 /**
  * Why no offer is being made. Carried rather than collapsed to a boolean
- * because the four reasons are genuinely different and a caller that wanted to
+ * because the five reasons are genuinely different and a caller that wanted to
  * log or test one of them should not have to infer it from prose.
+ *
+ * `suppressedByWalk` is not `declinedThisSession` under another name: declined
+ * means the OPERATOR said no, suppressed means the ownership walk claimed the
+ * cluster's enrolment story and the operator said nothing (memql#4078).
  */
 export type NoOfferReason =
   | "alreadyEnrolled"
   | "declinedThisSession"
+  | "suppressedByWalk"
   | "cannotMint"
   | "indeterminate";
 
@@ -81,20 +98,32 @@ export type PasskeyOfferDecision =
   | { offer: false; reason: NoOfferReason };
 
 /**
- * Which clusters the operator has already said no to, for this window's life.
+ * Which clusters this window will not offer enrolment on, and why. Two markers,
+ * kept apart because they answer different questions:
+ *
+ *   declined    the OPERATOR said no (or dismissed the toast, which is an
+ *               answer too).
+ *   suppressed  the OWNERSHIP WALK owns this cluster's enrolment story now
+ *               (memql#4078). The walk mints its own link, verifies with its
+ *               own sign-in, and that sign-in must not raise a fresh offer on
+ *               top of the walk's notifications -- nor leave a stale one in
+ *               the bell to be clicked after the passkey already exists.
  *
  * SESSION-SCOPED ON PURPOSE, and in memory rather than on disk. A decision to
  * skip enrolment today is not a decision to never be told again -- an operator
  * who declines because they are mid-task should meet the offer again next time
  * they open the editor, and one who declines because they enrolled on another
  * machine will not see it again anyway, because the passkey check answers
- * `alreadyEnrolled` from then on.
+ * `alreadyEnrolled` from then on. Suppression is the same shape: once the walk
+ * has run, the next window's check answers `alreadyEnrolled` on its own.
  *
  * Keyed by cluster NAME because the answer is per-cluster: declining on a
- * throwaway local install says nothing about a shared one.
+ * throwaway local install says nothing about a shared one, and a walk through
+ * one cluster says nothing about the others.
  */
 export class OfferMemory {
   private readonly declined = new Set<string>();
+  private readonly suppressed = new Set<string>();
 
   decline(clusterName: string): void {
     this.declined.add(clusterName);
@@ -103,15 +132,25 @@ export class OfferMemory {
   hasDeclined(clusterName: string): boolean {
     return this.declined.has(clusterName);
   }
+
+  suppress(clusterName: string): void {
+    this.suppressed.add(clusterName);
+  }
+
+  hasSuppressed(clusterName: string): boolean {
+    return this.suppressed.has(clusterName);
+  }
 }
 
 /**
  * Whether to offer enrolment, and for whom.
  *
  * THE ORDER OF THE CHECKS IS THE CHEAP-FIRST ORDER, and it matters for more
- * than speed: the session memory is consulted BEFORE any network call, so an
- * operator who declined does not silently cost a round trip on every reconnect
- * for the rest of the session.
+ * than speed: the session memory -- both markers -- is consulted BEFORE any
+ * network call, so a cluster the operator declined on, or one the ownership
+ * walk claimed, does not silently cost a round trip on every reconnect for the
+ * rest of the session. Suppression is asked first because it is the stronger
+ * claim: it holds whatever the operator later says about the offer.
  *
  * EVERY FAILURE IS `indeterminate` AND EVERY `indeterminate` IS SILENT. This
  * runs immediately after a sign-in the operator asked for and got; surfacing
@@ -124,6 +163,9 @@ export async function decidePasskeyOffer(
   deps: PasskeyOfferDeps,
   memory: OfferMemory,
 ): Promise<PasskeyOfferDecision> {
+  if (memory.hasSuppressed(clusterName)) {
+    return { offer: false, reason: "suppressedByWalk" };
+  }
   if (memory.hasDeclined(clusterName)) {
     return { offer: false, reason: "declinedThisSession" };
   }
@@ -177,4 +219,36 @@ export function passkeyOfferMessage(clusterLabel: string): string {
     `memQL: "${clusterLabel}" has no passkey registered for your account. ` +
     "Enrolling one lets you sign in without waiting for an email."
   );
+}
+
+/**
+ * Whether a clicked offer should still mint, given a just-re-read passkey count.
+ *
+ * THE CLICK CAN BE STALE (memql#4078). The offer is a toast with buttons, so it
+ * persists in the notification bell; the click can arrive minutes after the
+ * decision, late enough for the operator to have enrolled through the ownership
+ * walk in between. Acting on the stale offer minted a fresh link and left the
+ * BROWSER to deliver the bad news ("a passkey already exists"). So the caller
+ * re-reads the count at click time and asks this before minting.
+ *
+ * THE DEFAULT IS THE INVERSE OF decidePasskeyOffer's, on purpose. There, an
+ * unreadable count reads as "stay quiet", because nobody asked for the offer.
+ * Here somebody DID ask -- they clicked -- so cancelling the mint over a
+ * transient query failure would be a new dead end. Only a CONFIRMED enrolment
+ * cancels the click; NaN, a negative, or an infinity reads as "cannot tell,
+ * proceed".
+ */
+export function enrolmentStillNeeded(passkeyCount: number): boolean {
+  return !(Number.isFinite(passkeyCount) && passkeyCount > 0);
+}
+
+/**
+ * The one-line answer a stale offer gets instead of a browser dead-end.
+ *
+ * An INFO line, not an error: an operator who clicked after enrolling through
+ * the walk has done everything right, and the fact to confirm is that they are
+ * finished -- not that something went wrong.
+ */
+export function passkeyAlreadyEnrolledMessage(): string {
+  return "memQL: this account already has a passkey -- you are all set.";
 }

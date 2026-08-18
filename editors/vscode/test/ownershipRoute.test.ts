@@ -181,7 +181,7 @@ test("an installed cluster with no credential is an offer, not an error", () => 
 });
 
 test("a REAL auth failure keeps reading as one", () => {
-  // "Set up a passkey" would be a confidently wrong remedy for every one of
+  // "Create this cluster's owner passkey" would be a confidently wrong remedy for every one of
   // these: the credential exists and is expired, revoked, of a class the mesh
   // rejects, or the cluster is simply down.
   for (const reason of [
@@ -195,7 +195,7 @@ test("a REAL auth failure keeps reading as one", () => {
     assert.equal(
       isFirstCredentialPending(reason, "enrol"),
       false,
-      `${reason} must not be answered with "set up a passkey"`,
+      `${reason} must not be answered with "create the owner passkey"`,
     );
   }
 });

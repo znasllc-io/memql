@@ -49,6 +49,7 @@ import { completeLocalUninstall } from "../clusters/registry.js";
 import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
+import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -615,6 +616,9 @@ export class AddClusterPanel {
     if (type === "claimCluster") {
       void this.claimCluster();
     }
+    if (type === "copyRecoveryKey") {
+      void this.copyRecoveryKey();
+    }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
     // particular is reached only by comparison against a name written out in
@@ -1013,6 +1017,18 @@ export class AddClusterPanel {
     // not exist. The sign-in then times out and falls back to a device code
     // which cannot complete either, because there is still no account.
     if (report !== undefined) this.state.setClaimUrl(claimUrlFrom(report));
+
+    // THE RECOVERY KEY, the run's third and most perishable product
+    // (memql#4079). The claim ROTATED the key and revealed the plaintext into
+    // this in-memory report and nowhere else -- the run log and the receipt
+    // withhold it (memql#3908), correctly, which is exactly why a display had
+    // to be built: with no surface reading the report, default-deny had
+    // quietly become "revealed to no one", while the step's own description
+    // promised "show it once". DISPLAY, NOT STORAGE: the value goes to the
+    // done screen's state and dies with it.
+    if (report !== undefined) {
+      this.state.setRecoveryKey(revealedRecoveryKeyFrom(report), recoveryKeyStateFrom(report));
+    }
 
     // THE HAND-OFF, and the gate in front of it is the whole point (#3477).
     //
@@ -1467,6 +1483,18 @@ ${viewKitStyles}
   .form-error { margin: 14px 0 0; }
   .field[data-invalid="true"] input, .field[data-invalid="true"] select {
     border-color: var(--vscode-editorError-foreground); }
+  /* The one-time recovery key reveal (memql#4079). Monospace and boxed like
+     .remedy so the value reads as the credential it is; user-select: all so a
+     single click selects the whole 47 characters for the operator who prefers
+     the keyboard to the Copy button. Scoped classes, not a global h2 rule --
+     the uninstall screen's h2 keeps its own look. */
+  .recovery-heading { font-size: 1.05em; margin: 16px 0 4px; }
+  .recovery-key-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+  .recovery-key { font-family: var(--vscode-editor-font-family, monospace);
+                  background: var(--vscode-textCodeBlock-background, transparent);
+                  border: 1px solid var(--vscode-panel-border);
+                  border-radius: 4px; padding: 6px 8px; overflow-x: auto;
+                  user-select: all; }
   .actions { display: flex; gap: 8px; margin-top: 16px; }
   button.primary, button.secondary {
     font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
@@ -2173,6 +2201,33 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
   }
 
   /** Reaches the existing sign-in flow. No new credential path (#3401). */
+  /**
+   * Copies the revealed recovery key (memql#4079).
+   *
+   * THE KEY COMES FROM PANEL STATE, NEVER FROM THE MESSAGE -- the same rule the
+   * remedy terminal enforces, for the same reason: the webview channel is
+   * untrusted, and a value that came over it would let the page choose what
+   * lands in the clipboard. Loud on failure, because an operator who believes
+   * they copied a key they did not is worse off than one who was told to select
+   * it by hand.
+   */
+  private async copyRecoveryKey(): Promise<void> {
+    const key = this.state.revealedRecoveryKey;
+    if (key === "") return;
+    try {
+      await vscode.env.clipboard.writeText(key);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        "memQL: the recovery key could not be copied -- select it in the panel and copy it " +
+          `by hand (${err instanceof Error ? err.message : String(err)}).`,
+      );
+      return;
+    }
+    vscode.window.showInformationMessage(
+      "memQL: recovery key copied. Put it somewhere this machine is not -- it will not be shown again.",
+    );
+  }
+
   private async signInAsOwner(): Promise<void> {
     const handoff = this.state.handoff;
     if (handoff === undefined || !handoff.ok) return;
@@ -2262,10 +2317,21 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
           : `<p>${escapeHtml(
               "Nobody owns this cluster yet -- signing in once is what creates your account. This opens your browser with a single-use link that expires shortly, so do it now. Afterwards you can add a passkey from the identity service's devices page.",
             )}</p>`;
+      // THE RECOVERY KEY BLOCK, first after the lede (memql#4079). The reveal
+      // outranks every offer below it in ordering: the passkey and the claim
+      // link can be re-minted whenever the operator likes, while this value is
+      // being shown for the only time there will ever be. The key itself is
+      // interpolated ESCAPED and carries no control; the Copy button reads it
+      // back out of panel state on the host side, so the message channel never
+      // carries the credential. The two no-key states render one line each --
+      // they ask the operator for different things, which is why the script
+      // keeps them tellable apart.
+      const recovery = this.recoveryKeyBlock();
       return `<h1>Your cluster is ready</h1>
 <p class="lede">${escapeHtml(
         `"${handoff.cluster.name}" is registered and answers at ${handoff.cluster.endpoint}.`,
       )}</p>
+${recovery}
 ${enrolNote}
 ${claimNote}
 <div class="actions">
@@ -2287,6 +2353,50 @@ ${claimNote}
 <div class="actions">
   <button class="secondary" type="button" data-act="back">Back</button>
 </div>`;
+  }
+
+  /**
+   * The recovery-key block of the done screen (memql#4079).
+   *
+   * One of four renderings, decided by the step's own state:
+   *
+   *   claimed         the reveal -- heading, the key, Copy, and what to do
+   *                   with it. The only time the plaintext will ever be shown.
+   *   alreadyClaimed  one line: the value stored earlier is still the live
+   *                   one. What repair and upgrade find here.
+   *   awaitingOwner   one line: the key is minted after the first sign-in.
+   *                   What a fresh install finds, since a cluster is claimed
+   *                   by that sign-in.
+   *   none            nothing at all -- the step did not run or did not
+   *                   succeed, and a block about it would be a guess.
+   */
+  private recoveryKeyBlock(): string {
+    const state = this.state.recoveryKeyState;
+    const key = this.state.revealedRecoveryKey;
+    if (state === "claimed" && key !== "") {
+      return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- shown once")}</h2>
+<div class="recovery-key-row">
+  <code class="recovery-key">${escapeHtml(key)}</code>
+  <button class="secondary" type="button" data-act="copyRecoveryKey">Copy</button>
+</div>
+<p>${escapeHtml(
+        "Store it somewhere this machine is not -- a password manager or a safe. " +
+          "It is refused while you can still sign in normally, works exactly once, and can be " +
+          "rotated later from the portal. Only its hash is stored, so it cannot be shown again: " +
+          "closing this screen is goodbye.",
+      )}</p>`;
+    }
+    if (state === "alreadyClaimed") {
+      return `<p>${escapeHtml(
+        "Recovery key: claimed earlier. If you no longer have it, rotate it from the portal.",
+      )}</p>`;
+    }
+    if (state === "awaitingOwner") {
+      return `<p>${escapeHtml(
+        "Recovery key: minted after the first sign-in; claim it from the portal or CLI.",
+      )}</p>`;
+    }
+    return "";
   }
 
   private dispose(): void {
