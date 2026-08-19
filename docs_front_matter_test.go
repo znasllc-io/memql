@@ -81,8 +81,8 @@ func docsFrontMatterExempt(rel string) bool {
 
 // gitTrackedDocsFiles enumerates tracked docs/**.md paths via `git ls-files
 // -z`, per the house convention (lifecycle_docs_conformance_test.go): a
-// filepath.WalkDir sweep would see build artifacts and untracked scratch
-// files as if they were repo content.
+// directory-tree walk would see build artifacts and untracked scratch files
+// as if they were repo content.
 func gitTrackedDocsFiles(t *testing.T) []string {
 	t.Helper()
 	out, err := exec.Command("git", "ls-files", "-z", "docs").Output()
