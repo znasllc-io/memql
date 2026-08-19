@@ -145,22 +145,15 @@ Responsible for loading automation definitions from the unified DSL tree.
 | `parseJSON(data)` | Parses JSON data to `Automation` struct |
 | `validateSteps(steps)` | Validates step configuration |
 
-**Directory Structure Convention:**
-
-Each automation should have its own directory under `v1/`:
-
-```
-automations/v1/{automationName}/
-├── automation.memql          # RETIRED layout -- see memql#2858
-├── automation.md             # Flow diagrams and documentation (required)
-└── {automationName}.json     # Compiled JSON or legacy definition
-```
-
-| File | Purpose |
-|------|---------|
-| `automation.memql` | RETIRED per-directory layout (memql#2858); automations now live in `dsl/<domain>/automations.memql` |
-| `automation.md` | Human-readable documentation with flow diagrams, timestamp |
-| `{name}.json` | RETIRED. The on-disk `.json` automation loader was deleted in memql#2858 |
+**RETIRED: the per-automation directory convention.** Before memql#2858, each
+automation lived in its own directory (`automations/v1/{automationName}/`,
+carrying `automation.memql`, a required `automation.md` flow-diagram doc, and
+sometimes a compiled `{name}.json`). None of that exists any more -- no
+`automation.md` file exists anywhere in the tree today, and the on-disk
+`.json` loader was deleted in the same change. The live layout is the one
+"Package Overview" above and "Loader Flow" below describe: one bundled
+`dsl/<domain>/automations.memql` file per domain, with no per-automation
+directory and no separate doc file.
 
 ---
 
@@ -438,7 +431,12 @@ type AutomationExecution struct {
 
 ## CQS File Composition Rules
 
-MemQL enforces **Command-Query Separation (CQS)** principles at the file level.
+MemQL enforces **Command-Query Separation (CQS)** principles (`component/language/compiler/composition.go`,
+`ValidateFileComposition`). "File" here means the compiled unit these
+rules run against, which today is a SLICE the unified loader cuts out of
+the bundled `dsl/<domain>/automations.memql` (one `automation { ... }`
+block, isolated and compiled on its own -- see "Loader Flow" above), not
+the bundled file as a whole.
 
 ### Rules for Automation Files
 
@@ -446,45 +444,44 @@ MemQL enforces **Command-Query Separation (CQS)** principles at the file level.
 |------|-------------|
 | **Exactly 1 automation per file** | Workflows are complex; single source of truth |
 | **Can have helper queries** | Supporting queries for validation, checks |
-| **No mutations** | Standalone mutations belong in `mutations/` directory |
+| **No mutations** | A slice with an automation may not also carry a mutation; standalone mutations belong in the domain's own `dsl/<domain>/mutations.memql` |
 
 ### Valid Composition
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    VALID FILE COMPOSITION (automations/)                        │
+│                    VALID FILE COMPOSITION (one automation slice)                │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                 │
-│  automation.memql                                                               │
-│  ┌───────────────────────────────────────────────────────────────────────────┐  │
-│  │  @enabled                                                                 │  │
-│  │  @trigger(event="session.opened")                                         │  │
-│  │  automation bootstrapUser() {                                             │  │
-│  │    checkUser: query { ... }        ← Steps ARE inside automation          │  │
-│  │    createUser: mutation when ... { ... }                                  │  │
-│  │    return ...                                                             │  │
-│  │  }                                 ← ONE automation (workflow owner)      │  │
-│  │                                                                           │  │
-│  │  query helperValidation() { ... }  ← External helper query OK             │  │
-│  └───────────────────────────────────────────────────────────────────────────┘  │
+│  @enabled                                                                       │
+│  @trigger(event="session.opened")                                               │
+│  automation bootstrapUser() {                                                   │
+│    checkUser: query { ... }        ← Steps ARE inside automation                │
+│    createUser: mutation when ... { ... }                                        │
+│    return ...                                                                   │
+│  }                                 ← ONE automation (workflow owner)            │
+│                                                                                 │
+│  query helperValidation() { ... }  ← External helper query OK                   │
 │                                                                                 │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Invalid Compositions
 
+The real error messages, verified against `component/language/compiler/composition.go`:
+
 | Composition | Error |
 |-------------|-------|
-| 2+ automations in one file | `only one automation definition allowed per file` |
-| Standalone mutation | `mutation X should be in mutations/ directory, not automations/` |
-| Automation + mutation (outside automation) | `cannot mix automation and mutation` |
+| 2+ automations | `only one automation definition allowed per file` |
+| 2+ mutations | `only one mutation definition allowed per file` |
+| Automation + mutation | `cannot mix automation and mutation in the same file` |
 
 ### Why CQS for Automations?
 
-1. **Single Source of Truth**: One workflow per file for clear ownership
+1. **Single Source of Truth**: One workflow per compiled unit for clear ownership
 2. **Debugging**: Clear stack traces and execution logs
 3. **Auditability**: Each automation is an isolated, traceable unit
-4. **Separation**: Reusable mutations go in `mutations/`, automation-specific steps stay internal
+4. **Separation**: Reusable mutations go in the domain's `mutations.memql`, automation-specific steps stay internal
 
 ---
 
@@ -548,7 +545,7 @@ Automations also accept `@actor` (declares the body reads `actor.*`) and `@mcp`.
 
 **Note:** Automations are **enabled by default** (#2604, the uniform lifecycle ruling); `@enabled` is an accepted no-op and `@disabled` is the off-switch. The annotations the parser also folds on automations -- `@deprecated`, `@version`, `@timeout`, `@retry`, `@audit`, `@async`, `@rateLimit` -- are **not** valid: the automation runtime never honored them, and the load gate now rejects them (#2712). (Most are dead vocabulary on the function-style constructs generally, removed from the allow-lists in #989 -- see attribute-matrix.md; `@rateLimit` is valid only on tools, `@version` only on seeds/concepts.) Only `@schedule` among the once-tolerated extras is live on automations (it feeds the cron scheduler).
 
-See also: `/docs/attribute-matrix.md` for the full attribute reference across all function types.
+See also: [`docs/public/language/attribute-matrix.md`](../../docs/public/language/attribute-matrix.md) for the full attribute reference across all function types.
 
 **Examples:**
 
@@ -666,6 +663,6 @@ cd component/automations && go test ./... -run TestEvaluatorSeesArgs
 
 ---
 
-*For engine architecture, see `/engine/arch.md`*
-*For functions architecture, see `/queries/arch.md`*
-*For system-wide architecture, see `/docs/arch.md`*
+*For engine architecture, see [`component/memql/arch.md`](../memql/arch.md)*
+*For functions architecture, see [`docs/public/language/functions.md`](../../docs/public/language/functions.md)*
+*For system-wide architecture, see [`docs/public/concepts/architecture.md`](../../docs/public/concepts/architecture.md)*

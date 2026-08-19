@@ -463,7 +463,7 @@ func (c *Concept) deriveContentId(payload map[string]any) string {
 }
 ```
 
-The `contentid` package (`database/contentid/`) produces a 64-character hexadecimal SHA256 hash. The hash is deterministic: **same concept + payload + salt = same ID**.
+The `id` package (`core/id/`, imported here as `contentIdEngine = id.New()`) produces a 64-character hexadecimal SHA256 hash. The hash is deterministic: **same concept + payload + salt = same ID**.
 
 #### Implications for Insert Behavior
 
