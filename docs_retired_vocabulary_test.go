@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
@@ -60,12 +61,16 @@ import (
 //
 // # Scope + exemption
 //
-// vocabScope is scanned in full EXCEPT a file whose front-matter declares
-// `status: historical` (read literally: the block between the first two
-// `---` lines, checked for a `status:` key) -- a historical doc is
-// documenting what USED to be true by design, so the vocabulary it uses on
-// purpose must not be flagged as drift. README.md carries no front-matter
-// and is therefore never exempt.
+// vocabScope covers README.md plus every tracked docs/public/**.md file
+// (memql#4091 Task 4 widening the Task 3 gate), enumerated by
+// vocabScopeFiles() via `git ls-files` rather than a literal list -- see
+// snippetScopeFiles() in docs_memql_snippets_test.go for the identical
+// pattern and rationale. It is scanned in full EXCEPT a file whose
+// front-matter declares `status: historical` (read literally: the block
+// between the first two `---` lines, checked for a `status:` key) -- a
+// historical doc is documenting what USED to be true by design, so the
+// vocabulary it uses on purpose must not be flagged as drift. README.md
+// carries no front-matter and is therefore never exempt.
 //
 // FALSE-POSITIVE ESCAPE HATCH: a genuine false positive is fixed by
 // rewording the sentence (the normal path), or -- for a file whose entire
@@ -77,13 +82,45 @@ import (
 // gate would. Extend retiredVocabulary ONLY with a pattern whose full
 // current-tree hit list has been personally triaged the same way the five
 // patterns below were.
-var vocabScope = []string{"README.md"}
+var vocabScope = vocabScopeFiles()
+
+// vocabScopeFiles enumerates README.md plus every tracked
+// docs/public/**.md file via `git ls-files -z`. See snippetScopeFiles in
+// docs_memql_snippets_test.go for the shared rationale.
+func vocabScopeFiles() []string {
+	out, err := exec.Command("git", "ls-files", "-z", "--", "README.md", "docs/public/**.md").Output()
+	if err != nil {
+		panic("vocabScopeFiles: git ls-files: " + err.Error())
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
 
 var retiredVocabulary = []struct{ pattern, reason, ref string }{
 	{`(?i)partition-access|per-partition (isolation|scope)`, "partition tenancy retired", "memql#56"},
 	{`(?i)management at .?/admin/`, "/admin/ app retired; portal owns admin", "memql#3943-era"},
 	{`(?i)sealed (genesis )?envelope`, "superseded by component/envregistry", "memql#3963"},
-	{`MEMQL_MASTER_KEY`, "master key decrypts; operator key authenticates — docs must not present it as a credential", "memql#3519"},
+	// Task 3's original pattern was the bare substring `MEMQL_MASTER_KEY`,
+	// probed only against README/CONTRIBUTING/VERSIONING/COMPATIBILITY/
+	// SECURITY/CODE_OF_CONDUCT (zero hits there -- purely prophylactic). Task
+	// 4's widening probe found it fires ~20 times across docs/public/operate,
+	// every one a legitimate mention of the real env var by ops docs whose
+	// literal job is to document it (env-vars.md, operator-credential.md,
+	// recovery-key.md, minimum-requirements.md, ...) -- including
+	// operator-credential.md correctly QUOTING the old wrong justification
+	// in past tense as the contrast for why it changed. Bare substring
+	// matching cannot separate "documents this var" from "wrongly claims it
+	// authenticates" (RE2 has no lookaround to express the negation), so the
+	// pattern is narrowed to the actual dangerous claim SHAPE -- direct
+	// "MEMQL_MASTER_KEY is/serves as/acts as ... credential" phrasing --
+	// which has zero hits anywhere in the current tree (verified) and still
+	// catches a future regression shaped like the original bug.
+	{`(?i)MEMQL_MASTER_KEY (is|serves as|acts as) (the |a )?(operator )?(credential|bearer token)`, "master key decrypts; operator key authenticates — docs must not present it as a credential", "memql#3519"},
 	{`az acr build|make release\b`, "hand-built release images superseded by the build server", "CLAUDE.md image-build rule"},
 	// extend ONLY with patterns whose full current-tree hit list you have
 	// personally triaged (probe first; see the gate comment above).

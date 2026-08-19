@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -64,9 +65,11 @@ import (
 //
 // # Scope
 //
-// snippetScope is a package-level var so Task 4 (memql#4091's sibling task)
-// can widen it to docs/public/** in a one-line change; this task's scope is
-// README.md only, per the task-3 brief.
+// snippetScope covers README.md plus every tracked docs/public/**.md file
+// (memql#4091 Task 4 widening the Task 3 gate). It is populated by
+// snippetScopeFiles(), which enumerates via `git ls-files` rather than a
+// literal list, so a new file under docs/public/ is in scope the moment it
+// is tracked -- no gate maintenance required to keep pace with the tree.
 //
 // FALSE-POSITIVE ESCAPE HATCH: a snippet that is inherently a fragment (an
 // invocation example, a partial construct meant to be read in context) is
@@ -74,7 +77,26 @@ import (
 // deliberately showing a RETIRED form (a don't-do-this example) is not a bug
 // either -- mark it `retired`. Do not special-case a file or block index
 // here; the marker convention is the escape hatch.
-var snippetScope = []string{"README.md"}
+var snippetScope = snippetScopeFiles()
+
+// snippetScopeFiles enumerates README.md plus every tracked
+// docs/public/**.md file via `git ls-files -z` (the pattern in
+// lifecycle_docs_conformance_test.go), so scope tracks the repo instead of
+// a maintained list. Panics on failure (git ls-files) since this runs at
+// package-var init time, before any test can report a normal failure.
+func snippetScopeFiles() []string {
+	out, err := exec.Command("git", "ls-files", "-z", "--", "README.md", "docs/public/**.md").Output()
+	if err != nil {
+		panic("snippetScopeFiles: git ls-files: " + err.Error())
+	}
+	var files []string
+	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	return files
+}
 
 // memqlFenceOpen matches the opening fence line of a ```memql-tagged block.
 // The info string is everything after "```memql" on that line, trimmed;
@@ -90,10 +112,14 @@ func TestDocsMemqlSnippets(t *testing.T) {
 			t.Fatalf("read %s: %v", file, err)
 		}
 		blocks := extractMemqlBlocks(string(data))
+		// Unlike the README-only Task 3 scope (which always carries ```memql
+		// examples), most of docs/public/** carries none at all -- a file with
+		// 0 blocks is ordinary, not a gate-broke-itself signal, so it is
+		// skipped rather than fataled. The end-of-run checked==0 assertion
+		// below still catches the "the whole gate examined nothing" failure
+		// mode across the full scope.
 		if len(blocks) == 0 {
-			t.Fatalf("%s: found 0 ```memql fenced blocks -- either the file stopped carrying DSL "+
-				"examples, or extractMemqlBlocks stopped recognising the fence syntax. A gate that "+
-				"examines nothing passes forever.", file)
+			continue
 		}
 
 		for _, b := range blocks {
