@@ -127,7 +127,7 @@ restate it:
 | public | `@rowAuthz(public)` | none — explicit and greppable |
 | granted | `@rowAuthz(via="<spec>")` | the relationship spec, gated on `actor.userId` |
 
-```memql
+```memql fragment
 @rowAuthz(owner="ownerUserId")
 concept note { ... }        // dsl/notes/concepts.memql
 
@@ -244,9 +244,9 @@ For staged data it is the other way round, and the emphasis is not stylistic:
   so visibility is a pure function of the CONCEPT -- and every row carries its
   concept. A gate reading `node.Concept` therefore decides staging correctly with
   no injection whatsoever, and it inherits the property the row-authz gate beside
-  it already documents at `component/memql/executor.go:225-230`: it is "immune to
-  how the filter was spelled: naming a row by id, a top-level `||` and a negated
-  concept all reach it identically."
+  it already documents at `component/memql/executor.go` (around line 240): it is
+  "immune to how the filter was spelled: naming a row by id, a top-level `||` and
+  a negated concept all reach it identically."
 - **The injected conjunct is a pushdown optimization.** It exists so the engine
   does not FETCH rows the gate would then discard. A pushdown is allowed to be
   incomplete. It is not allowed to be wrong.
@@ -689,14 +689,21 @@ the Phase 2 shadow-mode measurement (#2921) has to cover, and a guessed
 tier would launder an absence of evidence into a declaration the
 measurement then treats as ground truth.
 
-Current distribution over `dsl/`: 12 `owned`, 1 `clusterOwner`, 87
-undeclared. The undeclared break down as 50 blocked by a query whose
-filter does not gate on the caller, 26 with no queries at all, 6
-blocked by a `@public` sibling, 4 blocked by an unfiltered query, and
-1 where two queries disagree (`authoring.bundle`:
-`authoringBundlesForOwner` is caller-scoped, `systemActiveAuthoringBundles`
-is admin-gated — the concrete instance of the per-concept-floor vs
-per-construct-override question).
+This document does not carry a snapshot of the current owned /
+clusterOwner / undeclared split, for the same reason the "Counts:
+regenerate, do not read" section below gives for deleting the
+per-domain tables: a hand-copied number begins drifting the day it is
+written. Regenerate it against the tree instead:
+
+```bash
+go test ./test/dslconformance/ -run TestPerRowAuthzClassification -v
+```
+
+The `authoring.bundle` concept is worth knowing about regardless of
+the current counts, as the concrete instance of the per-concept-floor
+vs per-construct-override question: `authoringBundlesForOwner` is
+caller-scoped while `systemActiveAuthoringBundles` is admin-gated, so
+its two queries disagree about who may read the concept's rows.
 
 ### The constraint carried forward, not solved
 

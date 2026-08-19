@@ -57,7 +57,7 @@ signing key, the subcommand must run as the identity binary itself
 make voice-agent-token INSTANCE=voice-agent-local
 
 # Equivalent direct invocation:
-docker exec memql-identity /app/memql voice-agent-token mint \
+kubectl exec -n memql deploy/identity -- /app/memql voice-agent-token mint \
   --instance-id=voice-agent-local
 
 # Optional flags:
@@ -111,13 +111,15 @@ identity service's `POST /node/bootstrap` endpoint with
 minted `class="voice_agent"` JWT and the agent uses it for the
 rest of the process's lifetime.
 
-The local overlay defaults all three knobs to dev sentinels:
+The local overlay wires all three knobs so bring-up needs no manual step
+(`deploy/k8s/base/voice-agent.yaml`, secrets seeded by
+`scripts/k3d/seed-secrets.sh`):
 
 | Env var | Local default | Production posture |
 | --- | --- | --- |
-| `MEMQL_NODE_BOOTSTRAP_TOKEN` | `dev-bootstrap-do-not-use-in-production-memql338` | Leave unset on identity side -- endpoint stays dark |
-| `MEMQL_IDENTITY_VERIFIER_BASE_URL` | `http://identity:8081` (cluster DNS) | Set to the deployed identity URL (HTTPS) |
-| `MEMQL_VOICE_AGENT_INSTANCE_ID` | `voice-agent-local` | Set to the deployed instance label (e.g. `voice-agent-prod-us-east-1`) |
+| `MEMQL_NODE_BOOTSTRAP_TOKEN` | Generated per cluster -- 64 hex characters (32 random bytes via `od -An -tx1 -N32 /dev/urandom`), seeded into `memql-secrets` by `seed-secrets.sh` and shared with node-class bootstrap | Leave unset on identity side -- endpoint stays dark |
+| `MEMQL_IDENTITY_VERIFIER_BASE_URL` | `https://identity:8085` (cluster DNS) | Set to the deployed identity URL (HTTPS) |
+| `MEMQL_VOICE_AGENT_INSTANCE_ID` | The pod's own name, via a Kubernetes `fieldRef: metadata.name` | Set to the deployed instance label (e.g. `voice-agent-prod-us-east-1`) |
 
 The endpoint reuses the same secret + same bootstrap surface as
 node-class JWTs (memql#338); operators have one secret to rotate
@@ -166,9 +168,12 @@ The deploy pipeline does the same dance:
 1. Identity service comes up first (or is already up).
 2. The pipeline runs `voice-agent-token mint --instance-id=<env-instance-id>`
    against the identity binary in the production cluster.
-3. The minted JWT lands in the deploy pipeline's secret store
-   (Cloud Run env vars, Secret Manager, etc.) and is injected as
-   `VOICE_AGENT_TOKEN` into the voice-agent container at startup.
+3. The minted JWT lands in the deploy pipeline's secret store --
+   Azure Key Vault, synced into the cluster via External Secrets
+   Operator (ESO) -- and is injected as `VOICE_AGENT_TOKEN` into the
+   voice-agent container at startup. memQL's cloud target is Azure
+   Kubernetes Service, not Cloud Run; see the "Deploy targets" table
+   in the repo's top-level CLAUDE.md.
 4. Rotation = re-mint + re-inject + restart on the same cadence
    (no in-place refresh path).
 
@@ -187,10 +192,21 @@ Rotate by minting fresh + restarting:
 2. Update `VOICE_AGENT_TOKEN` in the process's secret store.
 3. Restart the voice-agent process.
 
-For "compromised token, kill it NOW" flows, soft-delete the identity
-row (`active=false`). The verifier's per-stream revocation watcher
-(#106) catches the next periodic re-check within
-`IDENTITY_VERIFIER_REVOCATION_CHECK_SECONDS` (default 5 min).
+**"Compromised token, kill it NOW" has no targeted answer today.**
+Soft-deleting the identity row (`active=false`) records that the
+credential should be dead, but nothing on the verify path reads that
+row: `voice_agent`-class JWTs verify the same JWKS-only, no-DB way
+every service-account-class JWT does (see
+[service-account-jwt.md](service-account-jwt.md)), and
+`component/grpc/voice_agent_stream_interceptor.go` carries no
+revocation check. That is unlike the `node` class, which gained a
+row-backed revocation gate in memql#349 (see
+[node-jwt.md](node-jwt.md#rotation)) -- `voice_agent` has no
+equivalent. Until it does, the only working mitigation for a leaked
+voice-agent token is a full identity signing-key rotation, which
+invalidates every outstanding JWT of every class at once. This gap is
+tracked separately as a security issue; do not treat the soft-delete
+as a mitigation in the meantime.
 
 ## Out of scope
 
@@ -201,7 +217,10 @@ row (`active=false`). The verifier's per-stream revocation watcher
 - **Multi-tenant voice-agent topology.** The interceptor admits one
   class per call; multi-tenant routing (which tenant owns this
   voice-agent process?) would need extra claims.
-- **Per-instance revocation epoch.** Voice-agent tokens piggyback
-  on the identity-row revocation surface; a dedicated per-instance
-  epoch would let ops kill a single compromised instance without
-  affecting peers.
+- **Any per-instance revocation at all.** See "Rotation," above --
+  the identity row's `active` flag is soft-deleted on compromise but
+  nothing on the verify path reads it for this class, so there is
+  currently no way to kill one compromised voice-agent instance
+  without rotating the signing key for every class. A dedicated
+  revocation check (mirroring memql#349's `node`-class gate) would
+  close this.

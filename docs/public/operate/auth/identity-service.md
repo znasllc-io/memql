@@ -133,7 +133,10 @@ Identity-tagged binary:
 | `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `writer` / `reader`. Default `writer`.                             |
 | `MEMQL_IDENTITY_BRAND_NAME`              | recommended               | Subject prefix on outbound emails + admin UI title.                                    |
 
-Other nodes (bff / voice / cognition / agent / planner):
+Other nodes (bff / voice / cognition / agent / planner / workbench / mcp):
+The edge node is the one exception -- it is not an auth boundary
+(`verifierRequired=false`, `app/auth_mode_edge.go`) and installs no
+verifier at all.
 
 | Variable                                   | Required           | Purpose                                                                |
 |--------------------------------------------|--------------------|------------------------------------------------------------------------|
@@ -449,8 +452,9 @@ The identity service has two signing-key modes:
 > flapped between the two pods' keys. The fix is the shared seed plus
 > the startup guard below. The seed is now a DECLARED key on
 > `memql-secrets` in every environment (memql#3960) -- it used to reach
-> the cloud only by riding inside the sealed genesis envelope, which is
-> what made deleting that envelope a latent repeat of this outage.
+> the cloud only by riding inside the genesis secret-sealing mechanism
+> retired in memql#3963, which is what made deleting that mechanism a
+> latent repeat of this outage.
 
 **Fail-fast guard.** `Config.Validate()` REFUSES to start a deployment
 that has no `MEMQL_IDENTITY_SIGNING_KEY_B64` unless the operator explicitly
@@ -535,12 +539,12 @@ is the one with no automation in it.
 
 | | File-key mode (dev) | Env-seed mode (**staging + production**) |
 |---|---|---|
-| Key source | `MEMQL_IDENTITY_KEY_DIR` on disk | `MEMQL_IDENTITY_SIGNING_KEY_B64` in the sealed envelope |
+| Key source | `MEMQL_IDENTITY_KEY_DIR` on disk | `MEMQL_IDENTITY_SIGNING_KEY_B64` as a key on the `memql-secrets` Secret |
 | `KeyManager.RotationSupported()` | `true` | `false` |
 | 90-day scheduler (`MEMQL_IDENTITY_KEY_ROTATION_DAYS`) | rotates | **inert -- no effect whatsoever** |
 | "Rotate now" surface | n/a (the admin control was removed) | none; `Service.RotateNow` returns an error |
 | JWKS overlap window (`MEMQL_IDENTITY_JWKS_OVERLAP_HOURS`) | applied | **bypassed** |
-| How you rotate | it happens by itself | manual re-seal + roll, below |
+| How you rotate | it happens by itself | manually update the Secret + roll, below |
 
 The boot log says which one you are in: `jwt_signing_key_rotation_scheduler_active`
 or `jwt_signing_key_rotation_scheduler_inert`. So does
@@ -576,20 +580,20 @@ evidence rather than taste:
   memql#1523 / memql#3400 (roughly half of all auth failing, silently). So
   in-env-mode rotation needs shared durable state for the keyset -- a
   keystore -- not a rotation button. That is a different, larger design.
-- **Writing a new seed back into the envelope is not available to the
+- **Writing a new seed back into the Secret is not available to the
   service.** The seed reaches the pod through `envFrom` on the `memql-secrets`
   Secret, which an operator creates out of band; identity secrets are not
   ESO/Key-Vault-backed (only livekit and telephony are). For the service to
-  re-seal itself it would need `patch` on Secrets in its own namespace --
+  update it directly it would need `patch` on Secrets in its own namespace --
   handing the cluster's most security-sensitive pod the ability to rewrite
   every other secret next to it, including the database password. And it
   would not even work: `envFrom` is snapshotted at pod start, so a patched
   Secret changes nothing until a roll. The overlap the option promises is
-  unreachable through the envelope.
+  unreachable through the Secret.
 - **Rotation is genuinely rare.** A 90-day cadence on an Ed25519 signing key
-  is hygiene, not incident response. Compromise is handled by re-sealing
-  immediately and accepting the hard swap -- which is what you want in that
-  case anyway.
+  is hygiene, not incident response. Compromise is handled by rotating the
+  seed immediately and accepting the hard swap -- which is what you want in
+  that case anyway.
 
 **What option 2 owes you, and now delivers:** key age is observable
 (`memql_identity_signing_key_created_timestamp_seconds`), silence is earned
@@ -643,8 +647,8 @@ step 3.
 
 1. **Generate a new seed** (32 bytes, base64-std):
    `make identity-signing-key`
-2. **Re-seal it**, together with today's date, into the envelope / Secret the
-   identity Deployment reads:
+2. **Update it**, together with today's date, on the `memql-secrets` Secret
+   the identity Deployment reads:
    - `MEMQL_IDENTITY_SIGNING_KEY_B64` -- the new seed
    - `MEMQL_IDENTITY_SIGNING_KEY_CREATED_AT` -- today, RFC3339
      (e.g. `2026-08-09T00:00:00Z`). Re-stamp it every time; a stale stamp

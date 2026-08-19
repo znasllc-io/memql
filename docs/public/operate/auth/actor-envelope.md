@@ -38,12 +38,12 @@ shape actorEnvelope {
 ```
 
 Engine-side, dotted paths route through
-`component/memql/executor.go:resolveCallerReferences` →
-`resolveCallerPath`. (The internal Go types still carry the
-historical `CallerReference` / `resolveCaller*` names; that is
-implementation detail behind the `actor.` author surface.
-[#221](https://github.com/znasllc-io/memql/issues/221) renamed the
-DSL surface; renaming the internal types is a follow-up candidate.)
+`component/memql/executor.go:resolveActorReferences` (line 377) →
+`resolveActorPath` (line 427), matching each `*ActorReference` node
+(line 383) against the resolved envelope. [#221](https://github.com/znasllc-io/memql/issues/221)
+renamed both the DSL surface and these internal Go names, so `actor.`
+is the vocabulary top to bottom -- there is no leftover `caller.` /
+`CallerReference` naming behind it.
 
 ## Field reference
 

@@ -184,13 +184,38 @@ had it leaves, or on any suspicion of a leak. It costs nothing.
 
 ### When `claim` itself fails
 
-Two outcomes of `memql recovery-key claim` are not failures, and one is:
+**These two surfaces report the same underlying outcomes differently, and the
+difference matters if you are scripting against either one.**
+
+The raw CLI, `memql recovery-key claim` (`subcommand_recovery_key.go`), is a
+plain Unix command: every refusal -- no owner yet, no active key, several
+owners with no `--user-id` to disambiguate, an already-claimed key without
+`--reclaim` -- is reported as a plain-text message on stderr and an **exit 1**.
+Only success (a key printed to stdout) exits 0.
 
 | Output | What happened | Do this |
 |---|---|---|
-| `recoveryKeyState=awaitingOwner`, exit 0 | No owner exists yet, so there is nothing to bind a key to. Expected on a cluster nobody has signed into | Nothing. Claim it after the first sign-in |
 | A key on stdout, exit 0 | Worked | Store it somewhere the cluster is not |
+| `this cluster has no owner yet, so there is no recovery key to claim`, exit 1 | No owner exists yet, so there is nothing to bind a key to. Expected on a cluster nobody has signed into | Nothing yet. Claim it after the first sign-in |
+| `the key for <owner> was already claimed at <time>`, exit 1 | The key was already revealed on an earlier run. Only its SHA-256 hash is stored, so the original value cannot be shown again | If you still hold it, keep it. If you do not, rotate deliberately with `--reclaim` |
 | `function "activeRecoveryKeys" is server-only and cannot be called by a client`, exit 1 | The store reached the engine on a context that did not say the call was server-initiated | Not an operator problem — it is an engine defect. See below |
+
+`scripts/install/recovery-key.sh` -- the capability script the local installer
+runs, and the one the VS Code extension's install/repair flow drives -- wraps
+that same CLI and translates its exit-1 refusals into a structured JSON result
+on stdout with **exit 0**, because a second run of the install graph against
+an already-claimed cluster (repair, upgrade) is expected, not a failure. It
+matches the CLI's stderr text for exactly the two non-failure cases above
+(`CLAIM_NO_OWNER_MSG` / `CLAIM_ALREADY_CLAIMED_MSG` in the script) and reports:
+
+| `recoveryKeyState` | Meaning | `changed` |
+|---|---|---|
+| `awaitingOwner` | No owner yet -- mirrors the CLI's "no owner" refusal | `false` |
+| `alreadyClaimed` | The key was claimed on an earlier run; not re-revealed | `false` |
+| `claimed` | A key was revealed in this run | `true` |
+
+Any other CLI failure (the engine defect above, an unreachable pod, and so on)
+still fails the capability script with a non-zero exit and `cap_fail`.
 
 That last one is worth naming precisely, because it presented as a single
 failing install step and was not one. The whole break-glass surface is
