@@ -188,7 +188,13 @@ func forgeRequestTransitionAllowed(from, to, role string) bool {
 // set a forge request to `status`. Pure logic, unit-testable:
 //
 //   - approved / queued  -> owner only
-//   - needs_approval     -> owner, admin, or writer (developers)
+//   - needs_approval     -> owner, admin, developer, or writer (the developer
+//     tier), matching the forgeDeveloper spec in dsl/forge/specs.memql and the
+//     @allowedRoles on dsl/forge/tools.memql's validation tools. All three must
+//     agree: the tool gate decides whether the CALL is admitted, this decides
+//     whether the TRANSITION is, and the spec decides whether the queue rows
+//     are VISIBLE -- and a disagreement between the last two presents as an
+//     empty queue rather than an error (memql#4112).
 //   - all other statuses -> any role (fresh submit is reader-accessible;
 //     the DSL traits gate query-layer visibility separately)
 func forgeRequestRoleAllowed(status, role string) bool {
@@ -198,7 +204,7 @@ func forgeRequestRoleAllowed(status, role string) bool {
 		return r == string(auth.RoleOwner)
 	case forgeStatusNeedsApproval:
 		switch r {
-		case string(auth.RoleOwner), string(auth.RoleAdmin), string(auth.RoleWriter):
+		case string(auth.RoleOwner), string(auth.RoleAdmin), string(auth.RoleDeveloper), string(auth.RoleWriter):
 			return true
 		default:
 			return false

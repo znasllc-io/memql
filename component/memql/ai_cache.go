@@ -18,10 +18,24 @@ import (
 //
 // Phase-0 instrumentation: atomic counters + a Stats() snapshot + a
 // background log emitter so we can baseline hit rates over a week
-// of dev usage. See docs/internal/planning/cache-audit-phase-0.md.
+// of dev usage.
+//
+// BOUNDED since memql#4124. It was an unbounded map whose only eviction
+// was lazy: an expired entry was deleted when a read happened to land on
+// it, so an entry nobody ever read again was never reclaimed. That is the
+// common case here rather than the rare one -- the key is a hash of the
+// FULLY RENDERED prompt (buildAICacheKey), which folds in conversation
+// history, so most keys are written once and never looked up again. The
+// map therefore grew with total LLM call volume and shrank only by
+// coincidence. See evictLocked for the policy and why it is not LRU.
 type aiResponseCache struct {
 	mu      sync.RWMutex
 	entries map[string]aiCacheEntry
+
+	// maxEntries bounds the live entry count (memql#4124). <=0 is
+	// unbounded -- the pre-#4124 behaviour, reachable only as an explicit
+	// operator override via MEMQL_AI_CACHE_MAX_ENTRIES.
+	maxEntries int
 
 	// Telemetry counters. Atomic so the Stats() snapshot doesn't
 	// need to grab the entries mutex (it just reads counters + a
@@ -31,6 +45,8 @@ type aiResponseCache struct {
 	expiredOnRead   atomic.Int64 // entries deleted because the read found them past TTL
 	sets            atomic.Int64
 	skippedSetsZero atomic.Int64 // set() called with ttl<=0
+	sweptExpired    atomic.Int64 // entries reclaimed by the at-capacity sweep
+	evictedAtCap    atomic.Int64 // live entries dropped because the cap still bound after a sweep
 }
 
 type aiCacheEntry struct {
@@ -54,11 +70,21 @@ type AICacheStats struct {
 	SkippedSetsZero int64   `json:"skippedSetsZero"`
 	Size            int     `json:"size"`
 	HitRatio        float64 `json:"hitRatio"`
+	// SweptExpired and EvictedAtCap are the memql#4124 bound's telemetry.
+	// A non-zero EvictedAtCap means live entries are being shed -- the cap
+	// is binding, and either the workload or the cap wants a look.
+	SweptExpired int64 `json:"sweptExpired"`
+	EvictedAtCap int64 `json:"evictedAtCap"`
+	MaxEntries   int   `json:"maxEntries"`
 }
 
-func newAIResponseCache() *aiResponseCache {
+// newAIResponseCache builds the cache with an entry cap. maxEntries <=0
+// disables the cap (unbounded), which only the explicit operator override
+// selects.
+func newAIResponseCache(maxEntries int) *aiResponseCache {
 	return &aiResponseCache{
-		entries: make(map[string]aiCacheEntry),
+		entries:    make(map[string]aiCacheEntry),
+		maxEntries: maxEntries,
 	}
 }
 
@@ -95,12 +121,82 @@ func (c *aiResponseCache) set(key string, value any, ttl time.Duration) {
 		return
 	}
 	c.mu.Lock()
+	c.evictLocked(key)
 	c.entries[key] = aiCacheEntry{
 		value:     cloneInterface(value),
 		expiresAt: time.Now().Add(ttl),
 	}
 	c.mu.Unlock()
 	c.sets.Add(1)
+}
+
+// evictLocked makes room for one insertion. Caller holds c.mu for writing.
+//
+// Two stages, cheapest first:
+//
+//  1. Sweep every entry already past its TTL. These are dead by the
+//     cache's own contract -- get() would refuse them -- so reclaiming
+//     them costs nothing in hit rate. Under any steady workload this
+//     stage alone keeps the map bounded, because the TTL is short
+//     (60s by default) relative to how long it takes to write 5000 keys.
+//  2. If the map is STILL at capacity, drop the live entry closest to
+//     expiry. That entry has the least remaining value: it is the one
+//     that would have been reclaimed first anyway.
+//
+// NOT LRU, deliberately. LRU needs a per-read write to recency
+// bookkeeping, which would force get() from an RLock to a full Lock --
+// turning the hot path (a cache HIT) from a shared read into a serialised
+// write in order to improve an eviction decision that only matters on the
+// cold path. Nearest-expiry ordering is already carried by the entries.
+//
+// incomingKey is exempt from the count: overwriting an existing key does
+// not grow the map, so a repeated set on a full cache must not evict.
+func (c *aiResponseCache) evictLocked(incomingKey string) {
+	if c.maxEntries <= 0 {
+		return // explicitly unbounded
+	}
+	if _, replacing := c.entries[incomingKey]; replacing {
+		return
+	}
+	if len(c.entries) < c.maxEntries {
+		return
+	}
+
+	now := time.Now()
+	swept := 0
+	for k, entry := range c.entries {
+		if now.After(entry.expiresAt) {
+			delete(c.entries, k)
+			swept++
+		}
+	}
+	if swept > 0 {
+		c.sweptExpired.Add(int64(swept))
+	}
+
+	// Stage 2: still full, so shed live entries nearest to expiry until
+	// there is room for the incoming one.
+	evicted := 0
+	for len(c.entries) >= c.maxEntries {
+		var (
+			victim   string
+			earliest time.Time
+			found    bool
+		)
+		for k, entry := range c.entries {
+			if !found || entry.expiresAt.Before(earliest) {
+				victim, earliest, found = k, entry.expiresAt, true
+			}
+		}
+		if !found {
+			break
+		}
+		delete(c.entries, victim)
+		evicted++
+	}
+	if evicted > 0 {
+		c.evictedAtCap.Add(int64(evicted))
+	}
 }
 
 // Stats returns a point-in-time snapshot of the cache's counters
@@ -129,6 +225,9 @@ func (c *aiResponseCache) Stats() AICacheStats {
 		SkippedSetsZero: c.skippedSetsZero.Load(),
 		Size:            size,
 		HitRatio:        ratio,
+		SweptExpired:    c.sweptExpired.Load(),
+		EvictedAtCap:    c.evictedAtCap.Load(),
+		MaxEntries:      c.maxEntries,
 	}
 }
 
@@ -164,6 +263,9 @@ func (c *aiResponseCache) startStatsEmitter(ctx context.Context, logger *slog.Lo
 					"sets", stats.Sets,
 					"skippedSetsZero", stats.SkippedSetsZero,
 					"size", stats.Size,
+					"maxEntries", stats.MaxEntries,
+					"sweptExpired", stats.SweptExpired,
+					"evictedAtCap", stats.EvictedAtCap,
 				)
 			}
 		}

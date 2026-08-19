@@ -135,10 +135,12 @@ dials out through the Telnyx Outbound Voice Profile via LiveKit Cloud
 - An inbound call to the DID is answered and an outbound `place_call` connects,
   both from the local cluster (the live audio + ~$0-on-silence cost checks are
   [#2190](https://github.com/znasllc-io/memql/issues/2190)).
-- The cloud overlay is untouched — still self-hosted. The dedicated no-cloud-leak
-  guard that once kept `*.livekit.cloud` out of it
-  (`scripts/deploy/livekit_cloud_guard_test.go`) was deleted along with the
-  staging/production retirement (commit 992deb41) and has no replacement test
-  today; the property currently holds because the cloud overlay's LiveKit
-  manifests (`deploy/k8s/base/livekit*.yaml`) name only the self-hosted
-  Services.
+- The cloud overlay is untouched — still self-hosted, and a test enforces it.
+  `deploy/k8s/overlays/livekit_cloud_guard_test.go` fails CI when a
+  `*.livekit.cloud` reference appears in `deploy/k8s/overlays/cloud` or
+  `deploy/k8s/base`, which is what keeps the LiveKit Cloud project you just
+  wired up here from reaching a cloud install via a copy-pasted patch. (This
+  replaces `scripts/deploy/livekit_cloud_guard_test.go`, deleted in 992deb41;
+  both telephony pages went on citing it for its whole absence — memql#4113.)
+  This overlay is out of the guard's scope on purpose: LiveKit Cloud is the
+  supported local topology.

@@ -171,7 +171,7 @@ func TestSemanticCacheTokenSavingVsExactHash(t *testing.T) {
 	nearDupes := []string{"thank you", "thx", "thanks!", "ty", "thank you so much", "cheers"}
 
 	// --- Exact-hash baseline (the 5.8 cache) ---
-	exact := newAIResponseCache()
+	exact := newAIResponseCache(defaultAICacheMaxEntries)
 	exactProviderCalls := 0
 	exactTokens := 0
 	feedExact := func(prompt string) {

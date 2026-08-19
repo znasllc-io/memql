@@ -60,6 +60,24 @@ The version of a memQL build is the **git tag** it was cut from
   [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
   for the full deploy path (image build -> digest pin in the cloud overlay ->
   ArgoCD reconcile).
+- **`PUSH=1` is break-glass, and the script now says so** (memql#4116).
+  `make release VERSION=X.Y.Z ACR=acrmemql PUSH=1` runs a real `docker push`
+  to the shared registry -- precisely the path CLAUDE.md's image-build rule
+  forbids. It was reachable with no flag, check, or warning marking it, so the
+  rule held only for someone who had read the rule. It is now refused (exit 3)
+  unless the caller adds `CONFIRM=push-from-an-operator-machine`.
+
+  The capability was gated rather than deleted because a genuine break-glass
+  need exists -- the build server is unavailable and an image has to be cut --
+  and a removed capability gets worked around outside the script, where nothing
+  stamps the revision label or refuses to overwrite an existing tag. The phrase
+  spells out what the operator is asserting, and it lands in shell history.
+
+  What a break-glass push forfeits, and why it is not the default: the build
+  server's image is reproducible, natively `linux/amd64`, and carries
+  provenance. A locally-pushed image has none of those and is indistinguishable
+  from a build-server one once it is in the registry. Local builds without
+  `PUSH=1` are unaffected -- that is the normal use of this target.
 
 ## How a running binary states its release (memql#3998)
 

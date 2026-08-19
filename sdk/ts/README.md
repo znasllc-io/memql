@@ -132,16 +132,16 @@ One-shot AI ops on `MemqlService.Stream`. Each helper takes the
 connection's `Dispatcher` directly and returns a typed result.
 
 ```ts
-import { siChat, siChatStream, siSpeech, siTranscribe, siSuggest }
-  from "@znasllc-io/memql-sdk-core/si";
+import { aiChat, aiChatStream, aiSpeech, aiTranscribe, aiSuggest }
+  from "@znasllc-io/memql-sdk-core/ai";
 
 // Non-streaming chat
-const reply = await siChat(conn.dispatcher, [
+const reply = await aiChat(conn.dispatcher, [
   { role: "user", content: "Hi there" },
 ], { provider: "chat54Mini" });
 
 // Streaming chat
-const handle = siChatStream(conn.dispatcher, [
+const handle = aiChatStream(conn.dispatcher, [
   { role: "user", content: "Stream me a story" },
 ]);
 for await (const delta of handle.deltas) {
@@ -150,18 +150,18 @@ for await (const delta of handle.deltas) {
 const finalReply = await handle.result;
 
 // Text-to-speech
-const audio = await siSpeech(conn.dispatcher, "Hello there", {
+const audio = await aiSpeech(conn.dispatcher, "Hello there", {
   voice: "alto",
   format: "wav",
 });
 
 // One-shot transcription (streaming STT lives in /voice)
-const transcript = await siTranscribe(conn.dispatcher, audioBytes, {
+const transcript = await aiTranscribe(conn.dispatcher, audioBytes, {
   mimeType: "audio/wav",
 });
 
 // Suggest (spaces / spaceTitle / agents / groups / *CardSummary / knowledge)
-const suggestion = await siSuggest(conn.dispatcher, "spaceTitle", {
+const suggestion = await aiSuggest(conn.dispatcher, "spaceTitle", {
   description: "a brainstorm session",
 });
 ```
@@ -315,15 +315,15 @@ const unregister = registerClientToolHandler(conn.dispatcher, async (call, signa
   (`rowString`/`rowBool`/`rowNumber`/`rowObject`/`rowArray`),
   `newShortId`, `renderMemQLValue`, and the shared types (`Concept`,
   `Event`, `Role`, `SubscriptionKind`, `AccessSummary`, `Row`). Also
-  re-exports `identity`, `realtime`, `si`, `tools`, and `voice` as
+  re-exports `identity`, `realtime`, `ai`, `tools`, and `voice` as
   namespace objects.
 - `./client` -- the same client surface.
 - `./identity` -- the 10 identity & access methods listed above.
 - `./realtime` -- `polyphonRoomToken` (LiveKit token mint via the
   main stream) + `AudioClient` / `dialAudio` (separate WS for
   streaming STT + TTS on `/memql/audio`).
-- `./si` -- `siChat`, `siChatStream`, `siSpeech`, `siTranscribe`,
-  `siSuggest` and their types.
+- `./ai` -- `aiChat`, `aiChatStream`, `aiSpeech`, `aiTranscribe`,
+  `aiSuggest` and their types.
 - `./tools` -- `listTools` / `callTool` (MCP outbound) and
   `registerClientToolHandler` (inbound `ClientToolCall` ->
   `ClientToolResult` dispatch).

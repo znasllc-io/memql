@@ -88,7 +88,11 @@ func TestHelp(t *testing.T) {
 // `docker build`/`docker push` -- every line is a [plan] marker), and
 // stamps the source revision label.
 func TestDryRunPlanImmutableTag(t *testing.T) {
-	out, err := run(t, "--version=2.4.0", "--acr=acrmemql", "--push", "--dry-run")
+	// --push is break-glass since memql#4116 and needs the confirmation
+	// phrase; this test is about the PLAN's shape, so it clears the gate.
+	// The gate itself is covered in release_push_gate_test.go.
+	out, err := run(t, "--version=2.4.0", "--acr=acrmemql", "--push",
+		"--confirm=push-from-an-operator-machine", "--dry-run")
 	if err != nil {
 		t.Fatalf("dry-run exited non-zero: %v\n%s", err, out)
 	}
@@ -103,8 +107,8 @@ func TestDryRunPlanImmutableTag(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"acrmemql.azurecr.io/memql:2.4.0",        // pinnable immutable tag
-		"org.opencontainers.image.revision=",     // traceable to a commit
+		"acrmemql.azurecr.io/memql:2.4.0",    // pinnable immutable tag
+		"org.opencontainers.image.revision=", // traceable to a commit
 		"[plan] docker build",
 		"[plan] docker push",
 		"DRY RUN complete",
@@ -150,9 +154,14 @@ func TestInvalidVersionRejected(t *testing.T) {
 	}
 }
 
-// TestPushRequiresRegistry asserts --push without a registry fails.
+// TestPushRequiresRegistry asserts --push without a registry fails, and that
+// the registry check still reports FIRST -- the memql#4116 confirmation gate
+// is checked after it, so a missing registry keeps naming the missing
+// registry rather than sending the operator to find a confirmation phrase for
+// a push that could not have worked anyway.
 func TestPushRequiresRegistry(t *testing.T) {
-	out, err := run(t, "--version=2.4.0", "--push", "--dry-run")
+	out, err := run(t, "--version=2.4.0", "--push",
+		"--confirm=push-from-an-operator-machine", "--dry-run")
 	if err == nil {
 		t.Fatalf("expected non-zero exit for --push with no registry:\n%s", out)
 	}

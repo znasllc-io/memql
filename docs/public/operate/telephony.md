@@ -32,16 +32,18 @@ the env differs:
 | **Cloud** | **self-hosted** `livekit-server` + `livekit/sip` (`deploy/k8s/base/livekit*.yaml`). | the in-cluster `livekit/sip` edge (the carrier-reachable SIP URI). |
 
 The local-dev bring-up flow is its own runbook:
-[telephony-local-dev.md](telephony-local-dev.md). `scripts/deploy/livekit_cloud_guard_test.go`,
-the automated guard that failed CI if a `*.livekit.cloud` reference ever
-landed in the cloud overlay, was deleted along with the staging/production
-retirement (commit 992deb41); no replacement test currently covers this
-specifically. The two planes still cannot cross-contaminate in practice --
-the cloud overlay's LiveKit manifests (`deploy/k8s/base/livekit*.yaml`) name
-only the self-hosted `livekit-server` / `livekit/sip` Services, and nothing
-in this repo's cloud-facing config carries a `*.livekit.cloud` value -- but
-that is presently enforced by the manifests' content rather than a dedicated
-test. The rest of this page documents the **self-hosted** (cloud) plane.
+[telephony-local-dev.md](telephony-local-dev.md). An automated guard,
+`deploy/k8s/overlays/livekit_cloud_guard_test.go`, fails CI if a
+`*.livekit.cloud` reference ever lands in a manifest the cloud install
+renders from (`deploy/k8s/overlays/cloud` + `deploy/k8s/base`), so the two
+planes cannot cross-contaminate. It scans manifest text rather than rendered
+output, deliberately: rendering needs kustomize or kubectl on the runner and
+skips without them, and a guard that silently skips is how the previous one
+(`scripts/deploy/livekit_cloud_guard_test.go`, deleted in 992deb41 with the
+rest of the product deploy/release estate) stayed missing while these pages
+claimed it was running -- memql#4113. The local overlay is deliberately out
+of scope: pointing it at a LiveKit Cloud project is the supported local
+topology. The rest of this page documents the **self-hosted** (cloud) plane.
 
 > Epic 4 (memql#1906) builds this in dependency-ordered slices. This page
 > grows with each slice. **Live PSTN verification** (a real inbound and a real

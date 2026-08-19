@@ -159,8 +159,9 @@ patches:
   # livekit-secrets Secret that seed-secrets.sh fills from the operator's
   # environment (LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET) -- NEVER
   # hard-coded. The cloud stays self-hosted and pulls these from ESO/Key Vault;
-  # the no-cloud-leak guard (scripts/deploy/livekit_cloud_guard_test.go) fails
-  # CI if a *.livekit.cloud reference ever lands in the cloud overlay.
+  # the no-cloud-leak guard (deploy/k8s/overlays/livekit_cloud_guard_test.go)
+  # fails CI if a *.livekit.cloud reference ever lands in the cloud overlay or
+  # in deploy/k8s/base. This overlay is deliberately out of its scope.
   #
   # Remove the self-hosted media-plane workloads (livekit-server + SIP edge +
   # the LiveKit<->SIP coordination Redis).

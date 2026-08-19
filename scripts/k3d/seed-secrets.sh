@@ -1037,10 +1037,10 @@ function seed_livekit_secrets() {
     # media plane (no self-hosted livekit-server / livekit/sip locally; the
     # local overlay removes those workloads). So the API key/secret AND the
     # URL must point at the operator's LiveKit Cloud project, sourced from the
-    # environment -- NEVER hard-coded. Staging/prod stay self-hosted and pull
-    # these from ESO/Key Vault instead (the no-cloud-leak guard,
-    # scripts/deploy/livekit_cloud_guard_test.go, keeps cloud out of those
-    # overlays).
+    # environment -- NEVER hard-coded. A cloud install stays self-hosted and
+    # pulls these from ESO/Key Vault instead; the no-cloud-leak guard,
+    # deploy/k8s/overlays/livekit_cloud_guard_test.go, keeps *.livekit.cloud
+    # out of deploy/k8s/overlays/cloud and deploy/k8s/base.
     #
     # Both credential pairs must point at the SAME cloud project (verified on
     # main): the voice-agent reads the bare LIVEKIT_* names; telephony + the
