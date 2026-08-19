@@ -148,6 +148,7 @@ memQL/
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
 | `component/config/` | Centralized configuration loading | Go | -- |
+| `component/language/` | The MemQL front end: lexer, parser, struct-form rewriter, AST, compiler, and the annotation / spec / clause / pagination registries | Go | [→](component/language/CLAUDE.md) |
 | `component/node/` | Distributed node system (bootstrap, peers, mesh) | Go | [→](component/node/CLAUDE.md) |
 | `docs/` | Documentation | Markdown | [→](docs/CLAUDE.md) |
 
@@ -1129,18 +1130,50 @@ frontend wraps each `matchedPhrase` substring of the rendered text
 with a clickable chip linking to the named knowledge domain. When
 the agent used no trained sources, citations is an empty array.
 
-### Coding Agent (OpenClaw / NemoClaw)
-- **Currently:** OpenClaw (MIT license) - Open-source AI coding/automation agent, hardened
-  - Pinned to v2026.2.26+ (patches CVE-2026-25253: 1-click RCE)
-  - Gateway bound to internal network only, community skills disabled
-  - Shared instance for all agents, each with isolated workspace
-  - Per-agent workspaces at `/workspaces/{agentId}/`
-  - AI calls routed through memQL's centralized provider system
-- **Upgrade path:** NVIDIA NemoClaw (Apache 2.0) adds OpenShell sandboxing — swap image when container is published
-- **Development:** a coding-agent sidecar for the parity cluster is pending re-home (memql#1310)
-- **Cloud:** runs as a sidecar container alongside the agent node on AKS
-- **Agent capability:** `claw` flag on agent concept enables coding tools
-- **Tools:** `clawExecuteTask`, `clawReadFile`, `clawListFiles`, `clawSearchCode` (claw coding-agent tool surface; defined alongside the agent tool definitions)
+### Coding Agent (OpenClaw / NemoClaw) -- a SEAM, not a running deployment
+
+**Nothing in this repository runs a coding agent.** What exists is the
+extension point one would plug into, plus the graph fields and display
+strings that assume it. This section says which is which, because it
+previously read as a description of a shipped deployment and named an AKS
+sidecar no manifest implements (memql#4120).
+
+What is IN the tree:
+
+- **The seam.** `component/planner`'s `RegisterContainerExecutor(name,
+  exec)` is the registry a container-executor backend self-registers into
+  from `init()`; a Task routes to it by `executionSurface="containerExecutor"`
+  + `executorBackend` (`dsl/planner/concepts.memql`). `"nemoclaw"` is the
+  name the doc comments reserve for the first backend. **No package in this
+  repo calls `RegisterContainerExecutor`**, so the registry is empty at
+  runtime and a `containerExecutor` Task has nowhere to land.
+- **The agent flag.** `v1:agents:agent.claw` (bool) + `clawWorkspace`
+  (`dsl/agents/concepts.memql:46-47`), read by
+  `integrations/cognition/ai_responder.go`'s `ClawCapable()`. The
+  per-agent workspace convention `/workspaces/{agentId}/` is stated in
+  `component/planner/executor.go`, not implemented here.
+- **Display strings.** `integrations/cognition/tool_labels.go` formats
+  progress labels for `clawExecuteTask` / `clawReadFile` / `clawListFiles`
+  / `clawSearchCode`, and two cognition prompt templates name them as an
+  example of a capability gap. Formatting a label for a tool does not
+  define it.
+
+What is NOT in the tree, despite having been claimed here:
+
+- **No sidecar, cloud or local.** `deploy/k8s/base/agent.yaml` has exactly
+  one container (`agent`); `grep -ri 'nemoclaw\|openclaw' deploy/` is empty.
+  The parity-cluster sidecar is still pending re-home (memql#1310).
+- **No tool definitions.** No `tool claw*` exists anywhere under `dsl/`.
+  A product could ship them in its own bundle at `MEMQL_DSL_PATH`; the
+  engine does not. (`component/memql/tool_claw_test.go` asserted they load
+  and is `t.Skip`ped -- it covers the retired `dsl/v1` tree.)
+- **No image, pin, or gateway config.** There is no OpenClaw/NemoClaw image
+  reference, version pin, or gateway/network setting in this repo, so the
+  hardening posture that used to be described here (version pin, internal-
+  only gateway, disabled community skills) documents nothing that exists.
+  Whoever registers the first backend owns re-establishing it.
+- **No env vars.** No `NEMOCLAW_*` / `OPENCLAW_*` / `CLAW_*` name is read by
+  any Go code or registered in `component/envregistry/manifest.yaml`.
 
 ### Workers (computer_use_headless / computer_use_embodied)
 
@@ -2498,7 +2531,12 @@ because those backstops did not yet exist -- do not reintroduce one.
 
 ## Notes for Claude Code CLI
 
-- Each directory has a CLAUDE.md explaining its purpose
+- Several directories carry their own CLAUDE.md, and it is the first thing
+  to read before editing that tree: `component/`, `component/language/`,
+  `component/node/`, `component/architecture/`, `component/observe/`,
+  `integrations/`, `sdk/go/`, `docs/`. This is a list, not a rule -- a
+  directory without one is normal, and the root claim used to read as
+  though every directory had one (memql#4121).
 - Use GLOSSARY.md to find specific documentation
 - The local k3d cluster is self-contained (`make up`; no manual setup needed)
 - Migrations run automatically on startup

@@ -113,8 +113,12 @@ handler by FQN, executes it, and returns via `ReplyTo`.
   "actually no", "wait that's wrong", etc. so corrections land as
   actionable instead of conversational acks.
 
-Capabilities registered: `cognitionScore`, `cognitionTrackPresence`,
-`cognitionForwardToBridgeAgent`.
+Capabilities registered: `cognitionScore`, `cognitionTrackPresence`.
+Those are the two DSL builtin names; their executors are
+`integration.cognition.scoreUtterance` and
+`integration.cognition.trackPresence` (`capabilities.go`), and they are the
+whole registered surface -- the client-tool relay above rides the graph
+event bus rather than a capability (memql#4107).
 
 ## Agent (AI tool-loop + replier + suggest)
 
