@@ -7,7 +7,7 @@ go 1.26.1
 toolchain go1.26.6
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.62.0
+	github.com/anthropics/anthropic-sdk-go v1.63.1
 	github.com/dgraph-io/ristretto v0.2.0
 	github.com/lib/pq v1.12.3
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
