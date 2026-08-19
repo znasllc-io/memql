@@ -427,7 +427,7 @@ enum EventKind {
       "kind": 301,
       "ts": "2025-12-02T10:30:00Z",
       "payload": {
-        "topic": "graph.node.created.acme.v1:notes:note",
+        "topic": "graph.node.created.v1:notes:note",
         "eventKind": "node_created",
         "nodeId": "v1:notes:note:9c2f64f1-...",
         "concept": "v1:notes:note",

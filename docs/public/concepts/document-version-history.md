@@ -60,7 +60,7 @@ content equals v2's, so the history stays linear and complete.
 | `authorKind` / `authorId` | Who authored the version + their identity. |
 | `note` | Short human-readable description of the change. |
 | `parentVersionId` | Back-pointer to the version this one derived from. |
-| `producedByPlanId` / `spaceId` | Provenance parity with the artifact spine. |
+| `producedByPlanId` / `partitionId` | Provenance parity with the artifact spine. |
 | `ownerUserId` | Per-row authz key; threaded from the document's owner. |
 
 Per-row authz is **owned**: every read gates on
@@ -72,8 +72,10 @@ document history.
 Like every other concept, `documentVersion` rows live in the
 `MemoryNodes` TimescaleDB hypertable, which is already partitioned on
 `createdAt`. So version history is inherently time-partitioned -- there
-is no separate physical table, and the engine's per-row authz, partition,
-and mutation middleware apply uniformly. This mirrors the decision the
+is no separate physical table, and the engine's per-row authz and
+mutation middleware apply uniformly (there is no partition-scoping
+middleware; per-row authz is the only access gate -- see this repo's
+CLAUDE.md "Authorization model"). This mirrors the decision the
 observability `invocation` concept documents (the difference is that
 observability rows are written by the observe runtime directly, while
 `documentVersion` rows go through the engine like any other mutation).

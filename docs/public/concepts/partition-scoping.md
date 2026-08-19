@@ -17,9 +17,10 @@ This page is the reference for the partition-scoping API and the rule that
 keeps core product-agnostic. It pairs with the [Plugin SDK](../build/plugin-sdk.md),
 where `ResolvePartitionFromContext` is exposed to packs.
 
-> **Adopt, don't invent.** The partition primitive already exists
-> (`v1:platform:partition`, `v1:platform:partitionSecret` /
-> `partitionVariable`, the context resolvers below). This is the one to use;
+> **Adopt, don't invent.** The partition primitive already exists as the
+> per-tenant config/secret concepts (`v1:platform:partitionSecret` /
+> `partitionVariable`) plus the context resolvers below -- there is no
+> separate `v1:platform:partition` registry concept. This is the one to use;
 > there is no new partition concept.
 
 ---
@@ -104,12 +105,12 @@ The actual re-pointing of the existing core call sites is **Epic 3.2** (issue
 
 ## Guardrail: no new `spaceId` in core
 
-A test ratchet -- `TestNoNewPartitionIdInCore` in
+A test ratchet -- `TestNoNewSpaceIdInCore` in
 `component/memql/partition_scope_lint_test.go` -- fails when a core `.go` file
 outside the grandfathered baseline
 (`component/memql/testdata/spaceid_core_baseline.txt`) introduces `spaceId`.
 
-- The ~51 files that reference `spaceId` today are baselined and get cleaned up
+- The files that reference `spaceId` today are baselined and get cleaned up
   by Epic 3.2.
 - **New core code must scope by partition**, so a fresh `spaceId` reference
   trips the lint with a pointer back here.

@@ -109,7 +109,7 @@ Audit trail for state transitions:
 
 | Event | Trigger |
 |-------|---------|
-| `graph.node.created.{partition}.v1:data:record` | New record created (automatic) |
+| `graph.node.created.v1:data:record` | New record created (automatic) |
 | `data.conflicts.detected` | Conflict found with existing confirmed records (emitted by the conflict-detection automation; never auto-resolves) |
 
 ## Policy Examples
