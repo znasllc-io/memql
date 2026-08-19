@@ -72,12 +72,12 @@ The off-path is intentionally tiny: one map lookup + one comparison + a stack-al
 
 ## Levels
 
-| Level | Captures | Cost | Default env |
+| Level | Captures | Cost | Shipped default |
 |---|---|---|---|
-| `off` | nothing | 0 | prod |
-| `count` | count, duration, error | ~ns | always-safe baseline |
-| `meta` | + arg names, types, sizes (no values) | low | UAT default |
-| `verbose` | + full arg + return values (subject to redaction) | meaningful | dev default, on-demand in prod |
+| `off` | nothing | 0 | the shipped default everywhere -- memQL has one installation shape, so there is no environment-keyed default (`component/envregistry/manifest.yaml`) |
+| `count` | count, duration, error | ~ns | always-safe baseline; operator-set via `.env` (`MEMQL_OBSERVE_LEVEL`) |
+| `meta` | + arg names, types, sizes (no values) | low | operator-set via `.env`, or per-FQN via the `codeProfile` concept |
+| `verbose` | + full arg + return values (subject to redaction) | meaningful | operator-set via `.env`, or per-FQN via the `codeProfile` concept |
 
 ---
 

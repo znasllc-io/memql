@@ -108,7 +108,7 @@ memQL/
 ├── core/              Shared utilities (logger, env, id)
 │   └── dslfs/         MEMQL_DSL_PATH on-disk override / embedded FS picker
 ├── cmd/               Command-line tools (healthcheck, memqlfmt, memqlmigrate,
-│                      memqllint, frontdoorhosts, frontdoorpaths, admin-preview)
+│                      memqllint, frontdoorhosts, frontdoorpaths, admin-preview, etc.)
 ├── deploy/k8s/        GitOps manifests: base + components + per-env overlays
 ├── scripts/           Shell scripts (k3d bring-up, deploy, release, install,
 │                      migrations) + `lib/capability.sh`, the capability runtime
@@ -298,7 +298,7 @@ Where a container image is built depends ONLY on where it runs:
   machine. This spans the repos in the project:
   - `memql` -> `.github/workflows/build-engine-images.yml` builds **every**
     node type (identity / bff / cognition / agent / planner / voice /
-    workbench / mcp) as one set of **product-agnostic** engine images.
+    workbench / mcp / edge) as one set of **product-agnostic** engine images.
   - the product's DSL-bundle repo -> a tiny **data-only bundle image** the
     engine mounts at runtime via `MEMQL_DSL_PATH`.
   - the product client repo -> its `build-spa-image.yml`.
@@ -422,13 +422,15 @@ different axis and carries its own field (`provider`):
 | Target | Database | Service | Provider |
 |--------|----------|---------|----------|
 | **Local** | CloudNativePG in k3d | k3d + ArgoCD (`make up`) | `docker-local` |
-| **Cloud** | Tiger Cloud (Timescale Cloud) | Azure Kubernetes Service | `azure` |
+| **Cloud** | Self-hosted CloudNativePG on AKS | Azure Kubernetes Service | `azure` |
 
 **Key Principle:** the local cluster is completely isolated from any cloud
 install's database -- they are separate installations, not environments of one.
 
 ### Hardware Requirements
-Development is standardized on macOS / Apple Silicon.
+Development happens on macOS and Linux (amd64/arm64) -- CI runs on
+`ubuntu-latest`, and `scripts/dev/install-deps.sh`, `scripts/dev/proto-gen.sh`,
+and `scripts/identity/build-css.sh` all branch on `darwin`/`linux`.
 
 **Full tech stack details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
@@ -469,16 +471,23 @@ Development is standardized on macOS / Apple Silicon.
 
 memQL uses **Go build tags** to compile separate binaries for each node type.
 Each tagged binary includes only the integrations, transport layers, and Go
-packages relevant to its purpose, reducing binary size by up to 53%.
+packages relevant to its purpose. Measured with the Makefile's actual default
+flags (`CGO_ENABLED=0`, no strip), bff/cognition/agent/planner all land around
+~80-82MB with no meaningful per-tag size differentiation today (memql#4106
+tracks the regression investigation):
 
 ```bash
-go build .                       # bff        (25 MB, default)
-go build -tags voice .           # voice      (30 MB)
-go build -tags cognition .       # cognition  (35 MB, -34%)
-go build -tags agent .           # agent      (43 MB, -19%)
-go build -tags planner .         # planner    (25 MB, -53%)
+go build .                       # bff        (~80 MB, default)
+go build -tags voice .           # voice      (CGO_ENABLED=1 required; not measured here)
+go build -tags cognition .       # cognition  (~81 MB)
+go build -tags agent .           # agent      (~82 MB)
+go build -tags planner .         # planner    (~81 MB)
 go build -tags edge .            # edge       (serves hosted sites + the portal)
 ```
+
+This diagram shows only the mesh/product node types; the complete 9-type
+list (identity, bff, cognition, agent, planner, voice, workbench, mcp, edge)
+is in "The engine is the whole platform" below.
 
 ```
         ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
@@ -1187,7 +1196,7 @@ slice (shell / fs / http) and the embodied slice (mouse / keyboard /
 screenshot) can be granted independently. Authorization (scope grants,
 kill switch, knowledge domain) stays unified -- both modes act on the
 user's machine, so the consent is one decision. See
-`component/memql/operator_caps.go` for the slug expansion map. The
+`component/safety/descriptor.go` for the slug expansion map. The
 sandboxed first-choice surface for headless work is the Workbench,
 documented in the next section.
 
@@ -1386,8 +1395,8 @@ node-type binary (`make identity`) and owns:
 - Personal Access Token (PAT) issuance for CLI clients
   (`mql_pat_<...>`).
 
-Other binaries (bff / voice / cognition / agent / planner) verify
-identity-issued JWTs locally via the per-node verifier
+Other binaries (bff / voice / cognition / agent / planner / workbench /
+mcp) verify identity-issued JWTs locally via the per-node verifier
 (`component/identity/verifier`), which fetches the JWKS document
 on a 5-min background refresh and on demand for unknown `kid`
 headers. They never see the private key.
@@ -2223,11 +2232,14 @@ builtin cognitionScore {
 ```
 
 Available integrations (core, registered via the plug-in system):
-auth, database, email, embedding, files, gcs (as `storage`), identity,
-knowledge, liveavatar, router, similarity, training, plus node-type-
-scoped ones (cognition, agent, stt, openaiVoice) wired
-explicitly in `app/integrations_*.go` when their dependencies sit
-outside the stable `PluginContext` surface.
+actionSearch, agents, auth, avatardirect, chat, dailyspace, database,
+deployversion, email, embedding, files, azureblob (as `storage`),
+harnessRecall, harnessTrace, identity, knowledge, library, liveknowledge,
+openairealtime, rbac, router, similarity, telephony, timeutil, voice,
+workbench, plus node-type-scoped ones (cognition, agent, stt,
+openaiVoice) wired explicitly in `app/integrations_*.go` when their
+dependencies sit outside the stable `PluginContext` surface. `training`
+is a product-repo plugin, not part of engine-only core.
 
 ### Extension Points
 

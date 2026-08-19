@@ -8,10 +8,16 @@
 
 ## STRUCTURE Directory Structure
 
+`component/` currently has 37 subdirectories (`ls component/`), including
+several not detailed below (actions, architecture, automations, backup,
+campaigns, deploycontrol, edge, envregistry, frontdoor, harness, healing,
+inbound, mcp, metadata, metrics, observe, outbound, planner, provenance,
+router, safety, secret, worker -- see their own CLAUDE.md files or source
+where present). The core ones:
+
 ```
 component/
 ├── CLAUDE.md           # This file
-├── component.go       # Component wiring and lifecycle
 ├── memql/             # Core MemQL query engine
 │   └── sense/         # MemQL Sense language intelligence (tokenize, complete, diagnose, hover, signature)
 ├── database/          # Database providers
@@ -25,7 +31,6 @@ component/
 │   └── verifier/      # Per-node JWT verifier (used by bff/voice/cognition/agent/planner)
 ├── polyphon/          # Polyphon multi-agent voice pipeline
 ├── fileprocessor/     # File processing (PDF, DOCX, images, text)
-├── cache/             # Caching layer
 ├── bus/               # Channel-based inter-component communication
 │   └── gen/           # Generated protobuf code (bus.proto)
 ├── config/            # Centralized configuration loading
@@ -37,6 +42,9 @@ component/
 └── service/           # Service utilities
 ```
 
+Component wiring and lifecycle now lives in `core/component/component.go`
+(memql#3241), not here.
+
 ---
 
 ## TASKS Key Components
@@ -45,7 +53,7 @@ component/
 **Purpose:** Channel-based inter-component communication with protobuf messages
 
 **Key Files:**
-- `bus.proto` - Protobuf definitions for all internal messages (27 types)
+- `bus.proto` - Protobuf definitions for all internal messages (31 types)
 - `channel.go` - Generic `Channel[T]` wrapper with telemetry hooks
 - `replyto.go` - Request-response pattern over channels (ReplyTo)
 - `wiring.go` - `Wiring` registry holding all typed channels
@@ -167,14 +175,6 @@ core), pending engine-generic absorption or bundle delivery.
 - Async event processing
 - Event filtering
 
-### cache/ - **Caching Layer**
-**Purpose:** In-memory caching for performance
-
-**What It Does:**
-- TTL-based cache
-- LRU eviction
-- Cache invalidation
-
 ### language/ - **MemQL Language**
 **Purpose:** Parser and compiler for MemQL DSL
 
@@ -254,6 +254,9 @@ The heart of the system - executes all MemQL queries.
 ## Component Interfaces
 
 ### Dependency Interface (all components)
+
+Lives in `core/common/interfaces.go` as `common.Dependency`, not
+component/-local:
 ```go
 type Dependency interface {
     Start(ctx context.Context)
@@ -272,49 +275,25 @@ func (c *MyComponent) SetWiring(w *bus.Wiring) { c.wiring = w }
 ```
 Components with SetWiring: Engine, gRPC Server, HTTP Server, Automations Scheduler, Node EventBridge.
 
-### Engine Interface
-```go
-type MemQLEngine interface {
-    Execute(ctx context.Context, query string) (any, error)
-    InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
-    InvokeAIChatWithTools(ctx context.Context, templateId string, data map[string]any) (string, error)
-    RegisterIntegration(provider IntegrationProvider) error
-    SetWiring(w *bus.Wiring) // Channel-based communication
-}
-```
-
 ### IntegrationEngineAccess Interface
 
-Narrow interface for integrations -- excludes AI orchestration methods (InvokeAI,
-InvokeAIChatWithTools). Integrations receive this instead of the full engine.
+Narrow interface for integrations, defined in
+`component/memql/integration_engine.go`. Integrations receive this instead
+of the full `MemQLEngine` (a struct, not an interface).
 
 ```go
 type IntegrationEngineAccess interface {
     RegisterIntegration(provider IntegrationProvider) error
-    Execute(ctx context.Context, query string) (any, error)
+    Execute(ctx context.Context, query string) (*ExecuteResult, error)
+    InvokeAI(ctx context.Context, templateId string, data map[string]any) (any, error)
+    InvokeAIStructured(ctx context.Context, templateId string, data map[string]any, schemaName string, schema json.RawMessage, strict bool) (string, error)
     RenderPrompt(templateId string, data map[string]any) (string, error)
     ChatStreamProvider() common.ChatStreamProvider
     ChatStreamProviderByName(name string) common.ChatStreamProvider
     ChatStreamWithToolsProviderByName(name string) common.ChatStreamWithToolsProvider
     ToolDefinitionsForNames(names []string) []common.ToolDefinition
     ExecuteToolByName(ctx context.Context, name string, args map[string]any) (string, error)
-}
-```
-
-### Database Interface
-```go
-type Database interface {
-    Query(ctx context.Context, query string, args ...any) (Rows, error)
-    Exec(ctx context.Context, query string, args ...any) (Result, error)
-    Close() error
-}
-```
-
-### Event Bus Interface
-```go
-type EventBus interface {
-    Publish(ctx context.Context, event Event) error
-    Subscribe(pattern string, handler EventHandler) (Unsubscribe, error)
+    ResolveSkills(ctx context.Context, skillIds []string) (SkillBundle, error)
 }
 ```
 
@@ -422,10 +401,9 @@ kubectl logs -n memql deploy/bff | grep "query.*ms"
 | **server/** | HTTP/WS servers | `server.go`, `memqlws/`, `audiows/`, `polyphonws/` |
 | **auth/** | Auth context helpers + RBAC + delegation + identity resolver | `context.go`, `identity.go`, `rbac.go`, `security.go`, `identity_resolver.go` |
 | **identity/** | In-house identity service (magic-link, JWT issuance, JWKS, admin UI, PAT) | `identity.go`, `keys.go`, `jwt.go`, `jwks.go`, `verifier/` (per-node verifier) |
-| **polyphon/** | Voice pipeline | `cognition.go`, `session.go` |
+| **polyphon/** | Voice pipeline | `session.go`, `score_engine.go`, `state_machine.go` |
 | **fileprocessor/** | File processing | `processor.go` |
 | **events/** | Event bus | `bus.go` |
-| **cache/** | Caching | `cache.go` |
 | **grpc/** | gRPC server | `server.go`, `ai_handlers.go`, `polyphon_handlers.go`, `concepts_handlers.go`, `sense_handlers.go` |
 | **language/** | Parser/compiler | `parser/`, `compiler/` |
 | **memql/sense/** | MemQL Sense language intelligence | `sense.go` (types), `tokenize.go`, `complete.go`, `diagnose.go`, `hover.go`, `signature.go`, `builtins.go`, `context.go` |

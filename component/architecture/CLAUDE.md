@@ -129,8 +129,12 @@ stdlib interfaces, signatures rendered with stdlib type names -- so a minor or
 patch bump can move them. CI pins `go-version`, so this bites exactly on the PR
 that raises it: regenerate there.
 
-`make arch-model-check` (or plain `go test ./...`) verifies the committed model
-matches the code.
+`make arch-model-check` verifies the committed model matches the code.
+`component/architecture` is its own workspace module (its own `go.mod`,
+listed in `go.work`), so a bare `go test ./...` from the repo root does not
+run `TestArchitectureModelIsNotStale` -- the same module-boundary gap the
+root CLAUDE.md's Testing section documents for `component/memql`. Run the
+check from inside `component/architecture/`, or use `make arch-model-check`.
 
 **What "matches" means, precisely.** The gate is a SUBSET check, not a byte
 comparison -- every symbol the committed model *references* must still exist in a

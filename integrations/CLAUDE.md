@@ -69,7 +69,7 @@ type IntegrationProvider interface {
 }
 ```
 
-Capabilities are registered with the engine -- either through the plug-in path (`memql.RegisterPlugin` at `init()`; preferred and used by core integrations like database, auth, identity, email, embedding, files, gcs) or through explicit `app/` wiring for complex node-type-scoped ones (cognition, agent, stt). Either way they become callable as builtin functions from the DSL. Return `nil` from `Capabilities()` for integrations with no DSL-callable functions.
+Capabilities are registered with the engine -- either through the plug-in path (`memql.RegisterPlugin` at `init()`; preferred and used by core integrations like database, auth, identity, email, embedding, files, azureblob) or through explicit `app/` wiring for complex node-type-scoped ones (cognition, agent, stt). Either way they become callable as builtin functions from the DSL. Return `nil` from `Capabilities()` for integrations with no DSL-callable functions.
 
 ### Channel-Based Dispatch
 
@@ -248,8 +248,11 @@ Key files:
 - `space_context_engine.go`, `prompt_context_cache.go`,
   `participant_presence.go`
 
-### audio/ - Audio Processing
+### `core/audio/` - Audio Processing (moved out of `integrations/`)
 **Purpose:** Audio streaming format conversion and resampling
+
+Not a DSL-callable integration -- a shared Go utility package, so it lives
+under `core/audio/` rather than `integrations/`.
 
 **What It Does:**
 - PCM16 sample rate resampling (16kHz <-> 24kHz for Polyphon <-> OpenAI)
@@ -335,11 +338,11 @@ The database connection itself remains a core component. This integration expose
 
 Uses VisionAIProvider for image descriptions.
 
-### gcs/ - Google Cloud Storage
-**Purpose:** Cloud storage file operations
+### azureblob/ - Azure Blob Storage
+**Purpose:** Cloud storage file operations (registered as `storage`)
 
 **DSL Capabilities:**
-- `integration.storage.upload` -- Upload file data to GCS bucket
+- `integration.storage.upload` -- Upload file data to Azure Blob Storage, returns the blob URL
 
 ---
 
@@ -353,8 +356,8 @@ respondToUser-envelope schema + parser (`envelope.go`), and the prompt
 context builder (`prompt_data.go`). (AiSuggest is no longer handled here --
 it dispatches via the suggest-domain registry; see below.)
 
-The unified `MEMQL_TOOL_LOOP_MAX_ITERATIONS` cap (200) gates both
-streaming and non-streaming tool loops.
+The unified `MEMQL_TOOL_LOOP_MAX_ITERATIONS` cap (default 120, clamped
+to a max of 200) gates both streaming and non-streaming tool loops.
 
 **Reply envelope.** The chat path delivers every user-facing reply
 via a sentinel `respondToUser` tool call whose args are
@@ -520,8 +523,8 @@ kubectl logs -n memql deploy/cognition -f | grep "ai.*response"
 
 ### AI Providers (Cognition Integration)
 ```bash
-MEMQL_AI_OPENAI_API_KEY=sk-...         # OpenAI provider
-MEMQL_AI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
+MEMQL_SI_OPENAI_API_KEY=sk-...         # OpenAI provider
+MEMQL_SI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
 MEMQL_SI_CACHE_DEFAULT_ENABLED=true
 MEMQL_SI_CACHE_MAX_SECONDS=120
 ```

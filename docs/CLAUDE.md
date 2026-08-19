@@ -32,6 +32,7 @@ docs/
 └── internal/          Never published
     ├── design/        ADRs / historical design rationale (status: historical)
     ├── planning/      active multi-phase plans (deleted when shipped)
+    ├── program/       epic/planning documents (e.g. 00-master-plan.md)
     └── ops/           DR, CI, migrations, safety, provisioning runbooks
 ```
 
