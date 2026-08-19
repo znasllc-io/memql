@@ -518,7 +518,12 @@ test("a repair restores the answers the operator is never asked for again", () =
   });
   // And the domain reaches all four of its consumers, not just the two that
   // used to get it (memql#3593).
-  assert.match(paramsFor(opts, "hostsBlock", "install.hostsEntries").hostnames!, /api\.lab\.example\.com/);
+  // Anchored to the comma-joined list's separators: unanchored, `api.lab.example.com`
+  // would also match `api.lab.example.com.evil.test` (CodeQL missing-regexp-anchor).
+  assert.match(
+    paramsFor(opts, "hostsBlock", "install.hostsEntries").hostnames!,
+    /(^|,)api\.lab\.example\.com(,|$)/,
+  );
   assert.equal(paramsFor(opts, "clusterUp", "k3d.up").domain, "lab.example.com");
 });
 

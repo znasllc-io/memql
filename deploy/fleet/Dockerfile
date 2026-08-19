@@ -23,7 +23,7 @@
 # engine images: a release is {engine version, bundle digest, client digest}
 # pinned in one overlay. Do not hand-build and push a release bundle from an
 # operator machine.
-FROM busybox:1.37-uclibc
+FROM busybox:1.37-uclibc@sha256:8d7b1636e974e0adfd8d945955fca609304f0a56c18799dfd032d6e661382d84
 
 # Alpine or busybox rather than scratch: the init-container's command is `sh -c
 # "cp -a ..."`, so the image has to carry a shell. `scratch` would make an image
