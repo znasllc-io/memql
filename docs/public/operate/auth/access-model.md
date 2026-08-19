@@ -60,7 +60,7 @@ is `primaryEmail`.
 Key fields:
 
 - `displayName`, `primaryEmail`
-- `role` -- cluster-wide role: `owner` / `admin` / `writer` / `reader`
+- `role` -- cluster-wide role: `owner` / `admin` / `developer` / `writer` / `reader`
 - `internal` -- true when registration matched
   `MEMQL_IDENTITY_INTERNAL_DOMAINS`
 - `preferences` -- theme, language, notifications, archive

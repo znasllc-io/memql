@@ -245,7 +245,7 @@ query space activeSpaces {
 **Calling patterns:**
 ```memql fragment
 activeSpaces()                      -- No optional filter applied
-activeSpaces({"userId": "u-1"})     -- Creator filter applied
+activeSpaces(userId: "u-1")         -- Creator filter applied
 ```
 
 ### Sorting and Pagination
@@ -396,14 +396,14 @@ only fires when the condition holds:
 
 ```memql fragment
 body {
-  getUser := userById({ userId: args.event.payload.ownerUserId })
+  getUser := userById(userId: args.event.payload.ownerUserId)
   activeAssistantId := coalesce(getUser.first().payload.preferences.activeAssistantId, "")
 
   getActiveGA := if activeAssistantId != "" {
-    agentById({ agentId: activeAssistantId })
+    agentById(agentId: activeAssistantId)
   }
   getFallbackGA := if activeAssistantId == "" {
-    assistantAgentForUser({ ownerUserId: args.event.payload.ownerUserId })
+    assistantAgentForUser(ownerUserId: args.event.payload.ownerUserId)
   }
 
   return coalesce(getActiveGA, getFallbackGA)
@@ -728,7 +728,7 @@ builtins, declared in `dsl/<namespace>/tools.memql`. The body is the
 tool's input schema; `@handler` binds it to the operation it runs:
 
 ```memql
-@handler(type="query", query="findEvents({\"title\": \"$args.title\"})")
+@handler(type="query", query="query findEvents(title: \"$args.title\")")
 @executionTime("fast")
 @description("Find the caller's calendar events by exact title.")
 tool calendarFind {

@@ -102,7 +102,7 @@ in-house identity service:
   partition (memQL's per-tenant configuration/secret scope -- see
   [Partition scoping](partition-scoping.md) -- not a row-level access
   boundary).
-- Admins re-assign roles from the memQL portal at `/portal/admin/people`. The
+- Admins re-assign roles from the memQL portal at `/admin/people`. The
   write is gated server-side in `component/identity/adminops` (owner or admin)
   and appends a `user_role_changed` audit event; a refusal appends
   `admin_auth_forbidden`.

@@ -135,9 +135,12 @@ provisioning, never the shape of the system. See
 
 memQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
 the local cluster's prerequisites (`docker`, `k3d`, `kubectl`) have no
-platform-specific step on either. Linux/amd64 is a fully supported target
-in its own right (`scripts/install/detect.sh`'s `SUPPORTED_OS`/`SUPPORTED_ARCH`
-pair for the one-command installer), not a fallback from macOS.
+platform-specific step on either, and the `make up` dev flow is exercised
+on both. Linux/amd64 is a fully supported target in its own right, not a
+fallback from macOS. The one-command **installer** is a separate, narrower
+lane: `scripts/install/detect.sh`'s `SUPPORTED_OS`/`SUPPORTED_ARCH` pair
+targets Linux/amd64 only and refuses macOS by design -- on macOS, use the
+`make up` dev flow directly instead.
 
 **Software:**
 - Go 1.26.1+

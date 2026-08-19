@@ -19,7 +19,7 @@ There are two run modes:
 | Mode | What it is | How |
 |------|-----------|-----|
 | **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
-| **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against a **managed** TimescaleDB. | The rest of this page. |
+| **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
 
 Everything below is **environment-agnostic by design**: the architecture is
 identical local → staging → prod; only the *config values* (DSNs, replica

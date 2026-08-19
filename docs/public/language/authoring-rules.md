@@ -77,7 +77,7 @@ use platform.concepts.{ partition }
 use identity.mutations.{ grantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
-//    an args field -- apply defaults in the body via coalesce().)
+//    an args field -- apply defaults in the body via `??`.)
 mutate partition createPartition {
   args {
     name      string  @required
@@ -85,7 +85,7 @@ mutate partition createPartition {
   }
   insert {
     name: args.name
-    partitionType: coalesce(args.type, "standard")
+    partitionType: args.type ?? "standard"
     status: "active"
     createdAt: now
     createdBy: actor.userId
@@ -950,9 +950,9 @@ block) means insert.
 insert {
   accept { slug, name, rank, description }
   stamp {
-    id: coalesce(args.roleId, args.slug)
-    predefined: coalesce(args.predefined, false)
-    active: coalesce(args.active, true)
+    id: args.roleId ?? args.slug
+    predefined: args.predefined ?? false
+    active: args.active ?? true
   }
 }
 ```

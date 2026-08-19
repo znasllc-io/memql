@@ -91,7 +91,11 @@ func snippetScopeFiles() []string {
 	}
 	var files []string
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
-		if f != "" {
+		// docs/public/reference/_generated/** is machine-generated at release
+		// time; same exemption as docs_front_matter_test.go's
+		// docsFrontMatterExempt, for the same reason -- nothing there is
+		// hand-authored.
+		if f != "" && !strings.HasPrefix(f, "docs/public/reference/_generated/") {
 			files = append(files, f)
 		}
 	}

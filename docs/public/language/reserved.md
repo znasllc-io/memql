@@ -166,7 +166,7 @@ fixed envelope. Field paths under `actor.` are restricted to:
 | Path | What |
 |------|------|
 | `actor.userId` | The acting user's id. |
-| `actor.role` | Cluster role: `owner` / `admin` / `writer` / `reader`. |
+| `actor.role` | Cluster role: `owner` / `admin` / `developer` / `writer` / `reader`. |
 | `actor.identityId` | The credential row (token, magic-link, PAT). |
 | `actor.isClusterOwner` | Bool short-circuit; bypasses the per-partition ACL. |
 | `actor.primaryEmail` | The acting user's primary email address. |

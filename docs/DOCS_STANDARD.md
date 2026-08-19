@@ -36,7 +36,10 @@ docs/
 └── internal/                 # never published to the site
     ├── design/               # ADRs / issue-tied design rationale (historical)
     ├── planning/             # active multi-phase plans (delete when shipped)
-    └── ops/                  # runbooks, DR, CI, migrations
+    ├── ops/                  # runbooks, DR, CI, migrations
+    └── program/              # historical program-level epic/plan docs
+                               # (area: planning; kept for rationale rather
+                               # than deleted, unlike a live planning doc)
 ```
 
 - `docs/public/<area>/` subdirs **mirror the memql.io sidebar 1:1**, so the
@@ -52,7 +55,8 @@ docs/
 title: MemQL Language
 audience: public        # public | internal | ops
 status: stable          # stable | draft | historical
-area: language          # overview | concepts | language | ai | operate | build | cockpit
+area: language          # overview | concepts | language | ai | operate | build |
+                         # cockpit | design | planning | ops
 sinceVersion: 0.9.0     # first release the doc's subject shipped in
 owner: znas             # github handle responsible for keeping it current
 ---
@@ -73,6 +77,7 @@ owner: znas             # github handle responsible for keeping it current
 | Point-in-time design / ADR | `docs/internal/design/` | issue-tied design docs (`*-954.md`, `voice/4xx-*`) |
 | Active multi-phase plan | `docs/internal/planning/` | in-flight feature plans |
 | Ops runbook / DR / CI / migration | `docs/internal/ops/` | DR runbook, merge-queue, migrations |
+| Historical program-level epic/plan docs | `docs/internal/program/` | platformization program master plan + epics, kept for rationale (`area: planning`) |
 | Repo governance | repo root | CONTRIBUTING, SECURITY, VERSIONING |
 
 When unsure: if an outside developer building **against** memQL would

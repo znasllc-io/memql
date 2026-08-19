@@ -1204,18 +1204,18 @@ How names resolve inside a body:
 
 ### Calling Functions at Runtime
 
-Named queries and mutations are invoked from runtime query strings as function calls. They accept an optional JSON object argument; empty parentheses `()` are equivalent to `({})`:
+Named queries and mutations are invoked from runtime query strings as function calls, using named arguments; empty parentheses `()` mean no args:
 
 ```memql fragment
 -- No args (returns all matching records)
 queryActiveSpaces()
 
 -- With filters
-spaceParticipants({"spaceId": "space-456", "status": "active"})
+spaceParticipants(spaceId: "space-456", status: "active")
 
 -- Combine with directives
-sort(spaceUtterances({"spaceId": "s-1"}), "createdAt", "desc")
-paginate(queryActiveSpaces({"userId": "u-1"}), 10)
+sort(spaceUtterances(spaceId: "s-1"), "createdAt", "desc")
+paginate(queryActiveSpaces(userId: "u-1"), 10)
 ```
 
 The parentheses make functions immediately recognizable: `isActiveRecord` (no parens) is a spec/trait reference inside a DSL filter; `queryActiveSpaces()` (parens) is a function call.
@@ -2052,7 +2052,7 @@ concept==v1:user && active==true
 concept==v1:user && createdAt>"2025-01-01T00:00:00Z"
 
 // Call a DSL-defined query with args
-spaceParticipants({"spaceId": "space-123", "status": "active"})
+spaceParticipants(spaceId: "space-123", status: "active")
 
 // Sorted, paginated function call
 sort(paginate(queryActiveSpaces(), 10), "createdAt", "desc")
@@ -2062,7 +2062,7 @@ Use this reference when constructing MemQL queries. Always validate syntax and c
 
 ## Runtime Parser (epic #218: #248 → #249 → #250)
 
-The runtime grammar consumed by `engine.Execute(ctx, query string)` — function invocations (`funcName({k: v, ...})`), filter expressions (`concept==X && Y==Z`), `insert(...)` literals, and introspection meta-commands — is parsed exclusively through the language parser (`langparser.ParseExpression` + `ASTConverter`). The legacy in-package recursive-descent runtime parser was retired in #328 / #250 after the soak window; there is no fallback path.
+The runtime grammar consumed by `engine.Execute(ctx, query string)` — function invocations (`funcName(k: v, ...)`), filter expressions (`concept==X && Y==Z`), `insert(...)` literals, and introspection meta-commands — is parsed exclusively through the language parser (`langparser.ParseExpression` + `ASTConverter`). The legacy in-package recursive-descent runtime parser was retired in #328 / #250 after the soak window; there is no fallback path.
 
 A small set of legacy runtime shapes is rejected upfront with a typed `ErrUnsupportedQueryShape` carrying a shape-specific migration hint:
 

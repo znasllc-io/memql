@@ -12,7 +12,8 @@ import (
 // history has retired -- vocabulary that reads as a plausible, confident
 // sentence about memQL while describing a design the code no longer has
 // (memql#4091, the repo-cleanup-docs-update campaign's Task 3). Task 4
-// widens vocabScope; this task's scope is README.md only.
+// widens vocabScope -- see the "Scope + exemption" section below for the
+// current coverage.
 //
 // # Why a gate and not just a review pass
 //
@@ -94,7 +95,11 @@ func vocabScopeFiles() []string {
 	}
 	var files []string
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
-		if f != "" {
+		// docs/public/reference/_generated/** is machine-generated at release
+		// time; same exemption as docs_front_matter_test.go's
+		// docsFrontMatterExempt, for the same reason -- nothing there is
+		// hand-authored.
+		if f != "" && !strings.HasPrefix(f, "docs/public/reference/_generated/") {
 			files = append(files, f)
 		}
 	}

@@ -130,7 +130,7 @@ Identity-tagged binary:
 | `MEMQL_IDENTITY_REGISTERED_CLIENTS`      | yes for production        | JSON array of `{clientId, redirectURIs[]}` -- explicit, no wildcards.                  |
 | `MEMQL_IDENTITY_REGISTRATION_MODE`       | recommended               | `open` / `domain_restricted` / `invite_only` / `waitlist`. Default `open`.             |
 | `MEMQL_IDENTITY_INTERNAL_DOMAINS`        | recommended               | Comma-separated. Matches assign `internal=true` + `INTERNAL_DEFAULT_ROLE`.             |
-| `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `writer` / `reader`. Default `writer`.                             |
+| `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`   | recommended               | `owner` / `admin` / `developer` / `writer` / `reader`. Default `writer`.                |
 | `MEMQL_IDENTITY_BRAND_NAME`              | recommended               | Subject prefix on outbound emails + admin UI title.                                    |
 
 Other nodes (bff / voice / cognition / agent / planner / workbench / mcp):

@@ -97,7 +97,7 @@ them.
 
 | Component | Technology | Location |
 |-----------|-----------|----------|
-| **Database** | TimescaleDB Cloud (Tiger Cloud) or self-hosted CloudNativePG | Managed instance, or in-cluster |
+| **Database** | Self-hosted CloudNativePG (PostgreSQL + TimescaleDB Community + pgvector) | In-cluster, reconciled by the CloudNativePG operator |
 | **Service** | memQL node pods | Azure Kubernetes Service, reconciled by ArgoCD from `deploy/k8s/overlays/cloud` |
 | **URL** | HTTPS | `https://api.<domain>`, `https://identity.<domain>`, `https://mcp.<domain>`, `*.<domain>` |
 | **Data** | Persistent | Managed by the database platform |
@@ -133,7 +133,7 @@ All environments use the in-house identity service
   workbench/mcp); JWKS-published. The identity node is the JWKS
   authority and does not verify against itself; the edge node serves
   public bytes to anonymous visitors and is not an auth boundary
-- Role-based access control (owner / admin / writer / reader)
+- Role-based access control (owner / admin / developer / writer / reader)
 - Centralized user + invitation management via the memQL Portal's
   People surface (`IdentityAdminMsg`, gated by
   `component/identity/adminops`). The server-rendered admin web app is

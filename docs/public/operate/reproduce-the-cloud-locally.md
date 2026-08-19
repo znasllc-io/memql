@@ -47,8 +47,8 @@ only after a deploy.
 | Per-replica node id | `fieldRef: metadata.name` (downward API, same as the cloud) | `fieldRef: metadata.name` | **identical** |
 | `MEMQL_NODE_ID` uniqueness | enforced by fieldRef -- unique per pod | enforced by fieldRef | identical |
 | ArgoCD `ignoreDifferences` | `/spec/replicas` excluded | same | identical |
-| Database | CloudNativePG Cluster (`memql-db`), 1 instance, WAL + base backups to Azurite | Tiger Cloud | config only -- **same operator + manifests since memql#3846**; only instances/sizes/backup destination differ |
-| Connection pooler | not present locally (single db-pool pod, direct) | Tiger Cloud managed PgBouncer | config only |
+| Database | CloudNativePG Cluster (`memql-db`), 1 instance, WAL + base backups to Azurite | CloudNativePG Cluster (`memql-db`), 3 instances across 3 zones, WAL + base backups to Azure Blob | config only -- **same operator + manifests since memql#3846**; only instances/sizes/backup destination differ |
+| Connection pooler | not present locally (single db-pool pod, direct) | not present -- both DSNs point at `memql-db-rw` directly; a PgBouncer `Pooler` ships ready but not enabled (`cnpg-db/optional/pooler`) | config only |
 | Blob storage | Azurite emulator | Azure Blob | config only |
 | Secrets / keys | dev defaults (seeded by `make secrets`) | Key Vault via ESO | config only |
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
@@ -492,12 +492,12 @@ with its justification.
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
 | 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. `check_rendered` special-cases `ENV=local`: it skips the digest-pin assertion but still fails if the overlay does not render. As of this writing no Go test asserts this exemption specifically -- `scripts/deploy/drift_check_test.go` covers image-ref normalization, not the local-skip branch -- so the behaviour is enforced by the script alone. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
-| 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split the cloud uses can be reproduced by running PgBouncer as a separate pod if needed. |
+| 5 | **Connection pooler** | direct Postgres connection | direct Postgres connection (a PgBouncer `Pooler` ships ready but not enabled, `cnpg-db/optional/pooler`) | Single-node dev without a pool is safe; the cloud runs without one today too, and the optional pooler can be enabled on either side if a connection-count ceiling ever demands it. |
 | 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |
 
 ### Config-only -- EXPECTED to differ
 
-- `MEMQL_DATABASE_DSN` (local Postgres vs Tiger Cloud).
+- `MEMQL_DATABASE_DSN` (local `memql-db-rw` vs cloud `memql-db-rw`, self-hosted CloudNativePG on both sides).
 - Blob backend (Azurite connection string vs Azure Blob).
 - LiveKit plane (local → a **LiveKit Cloud** project, creds from your env via
   `livekit-secrets`; the cloud → self-hosted `livekit-server`, key/secret

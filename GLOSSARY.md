@@ -48,7 +48,7 @@ The complete map of memQL documentation. Layout + rules:
 - Generated reference (DSL constructs + concept catalog) lands in `docs/public/reference/_generated/` at release time (docs-gen).
 
 ### Operate (`operate/`)
-- **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run memQL outside the local dev cluster: Tiger Cloud (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
+- **[Minimum Requirements (running beyond local)](docs/public/operate/minimum-requirements.md)** — what you need to run memQL outside the local dev cluster: self-hosted CloudNativePG (the only supported DB provider), the pooler/connection model, k8s, secrets, images, GitOps. Start here.
 - [Before you install a local cluster](docs/public/operate/install-prerequisites.md) — the short list of things the install wizard deliberately does not place for you, and why.
 - [Reproduce the cloud locally (k3d + ArgoCD)](docs/public/operate/reproduce-the-cloud-locally.md) — the blessed local dev topology: same Kustomize base, same ArgoCD-reconciled manifests as the cloud cluster.
 - [Environment parity — one topology everywhere](docs/public/operate/environment-parity.md) — the non-negotiable standard: every installation runs the same topology, deploy process, and connection model; only configuration values and hardware resources vary.
