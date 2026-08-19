@@ -83,12 +83,20 @@
 //
 // The longhand the terse form lowers to. `event` is the bound trigger
 // payload; `args.X` reaches its fields inside step calls.
+//
+// ILLUSTRATIVE PSEUDOCODE, not a call into any real construct: `logic
+// exampleLogic` below names no logic that exists in this tree, and the real
+// `automation registerNode` (dsl/cluster/automations.memql) is NOT this
+// shape -- its former logic step was retired (#2235) in favor of writing
+// directly via `mutation createNode`, because both its inline writes
+// violated logic purity (ADR S2.1). This block exists only to show the
+// SHAPE the terse form (section 2) lowers to.
 
 @trigger(event="system.startup")
-@description("Register this node in the database on startup (longhand single-step form).")
-automation registerNodeLonghand {
+@description("Illustrative longhand single-step form -- names no real logic construct.")
+automation longhandSingleStepExample {
   step run {
-    logic registerNode(event: event)
+    logic exampleLogic(event: event)
   }
 }
 
@@ -136,12 +144,17 @@ automation registerNodeLonghand {
 @description("Full form with a typed args contract (G1).")
 automation deployWithArgs {
   args {
-    provider        enum("docker-local", "azure")!
-    engineNodeTypes []string!
-    workdir         string!
+    deploymentId string!
+    provider     enum("docker-local", "azure")!
   }
   step gate {
-    logic requireForwardDeploy(provider: args.provider, workdir: args.workdir)
+    // deploymentForwardAllowed (dsl/deployment/logic.memql) is @actor-bound
+    // and reads actor.role directly -- it takes no args of its own; the
+    // automation's OWN args are consumed below via punning (G3).
+    logic deploymentForwardAllowed()
+  }
+  step record {
+    mutation createDeployment(deploymentId, provider)
   }
 }
 

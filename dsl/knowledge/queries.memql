@@ -36,19 +36,8 @@ query documentChunk documentChunksForDomain {
   shape   documentChunkFull
 }
 
-// ---- queries/v1/knowledge/documentsForDomain.memql ----
-
-// queryDocumentsForDomain -- all validated Documents attached to a knowledge domain.
-// Backs the Knowledge page detail view ("what's in this domain").
-
-// ---- queries/v1/knowledge/documentsForSpace.memql ----
-
-// queryDocumentsForSpace -- list every Document in a space.
-// Backs the Knowledge page's "all uploads in this space" view.
-
-// ---- queries/v1/knowledge/entityIndexLookup.memql ----
-
-// queryEntityIndexLookup -- the dedup lookup. Given a (domainId,
-// entityKind, keyHash) triple, return any matching index entries.
-// Multiple matches happen when force-added overrides exist.
+// queryDocumentsForDomain, queryDocumentsForSpace, and queryEntityIndexLookup
+// used to have dead stub headers here (restructure-script artifacts): none
+// of the three is declared in this file, or anywhere in dsl/knowledge/.
+// Removed.
 

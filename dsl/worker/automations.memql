@@ -31,8 +31,9 @@ automation killSwitchSuspendsRunningPlans {
 //
 // Daily 02:30 UTC sweep. Soft-deletes worker-invocation rows older
 // than WORKER_INVOCATION_RETENTION_DAYS (default 90). Per-user
-// invocation queries already filter on @skipDeleted so the rows
-// disappear from UIs the moment the soft-delete lands.
+// invocation queries already filter on the isNotDeleted trait (see
+// dsl/worker/queries.memql) so the rows disappear from UIs the moment
+// the soft-delete lands.
 //
 // Different from auditEventRetentionSweep on the identity side
 // (default 365) because per-call telemetry is high-volume and

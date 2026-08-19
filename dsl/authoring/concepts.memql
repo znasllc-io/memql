@@ -9,7 +9,7 @@
 // ATOMIC unit of validation and activation -- you never half-activate
 // a closure. Lifecycle (draft -> validated -> dryRunPassed -> active
 // -> paused -> retired/failed) mirrors the staged gates in the design
-// doc (docs/design/authored-automations-954.md): Gate 1 isolated
+// doc (docs/internal/design/authored-automations-954.md): Gate 1 isolated
 // compile+bind, Gate 2 tiered behavioral dry-run, Gate 3 user approval.
 //
 // This issue (#955) defines the concepts + lifecycle mutations/queries/

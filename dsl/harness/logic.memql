@@ -68,7 +68,7 @@
 /// split the knowledge refresh-cron made), because the MemQL parser has neither arithmetic on
 /// number/datetime fields nor an in-DSL clustering primitive. This body is the scheduled trigger
 /// surface; the file header documents the full Go-handler contract it drives. Returns a sentinel
-/// until the handler is wired (mirrors logicRefreshDueKnowledgeDomains).
+/// until the handler is wired (mirrors the Go in-process poller pattern in integrations/planner/refresh_cron.go).
 logic consolidateMemory {
   args {
     event object!

@@ -461,9 +461,11 @@ query auditEvent auditEventsByTarget {
 // returns the row regardless of state so the handler can emit the
 // correct OAuth error (invalid_grant, etc.).
 //
-// Soft-deleted rows are excluded by @skipDeleted. No isActiveRecord
-// filter -- the authCode schema has no `active` field; liveness is
-// governed by consumedAt + expiresAt.
+// The authCode concept carries no `deleted` field, so there is no
+// soft-delete state to exclude here (unlike common.traits.isNotDeleted,
+// which requires one). No isActiveRecord filter either -- the authCode
+// schema has no `active` field; liveness is governed by consumedAt +
+// expiresAt.
 //
 // Arguments:
 //   codeHash (string) - SHA-256 hex digest (lowercase) of the plain auth code
@@ -643,9 +645,10 @@ query authSession authSessionByPreviousRefreshTokenHash {
 //   refreshTokenHash  -- refresh token hash, rotates on every
 //                        successful /auth/refresh call.
 //
-// Soft-deleted rows are excluded by @skipDeleted; revoked rows are
-// returned regardless of revokedAt so the rotator can refuse them
-// with the correct diagnostic.
+// The authSession concept carries no `deleted` field, so there is no
+// soft-delete filtering to apply here; revoked rows are returned
+// regardless of revokedAt so the rotator can refuse them with the
+// correct diagnostic.
 //
 // Arguments:
 //   refreshTokenHash (string) - SHA-256 hex digest (lowercase) of the refresh token
@@ -676,8 +679,8 @@ query authSession authSessionByRefreshTokenHash {
 //
 // Intentionally does NOT filter on isActiveRecord -- a revoked row
 // is still the row we need to find so the middleware can refuse the
-// token. Soft-deleted (tombstoned) rows are excluded by the concept's
-// @skipDeleted annotation.
+// token. The authSession concept carries no `deleted` field, so there
+// is no tombstone state to exclude.
 //
 // Arguments:
 //   tokenHash (string) - SHA-256 hex digest (lowercase) of the bearer token
@@ -710,8 +713,8 @@ query authSession authSessionByTokenHash {
 //
 // Intentionally does NOT filter on isActiveRecord -- callers want
 // to see revoked rows too (to skip them, not to revoke them again).
-// Soft-deleted (tombstoned) rows are excluded by @skipDeleted on the
-// concept.
+// The authSession concept carries no `deleted` field, so there is no
+// tombstone state to exclude.
 //
 // Arguments:
 //   subject (string) - JWT sub claim (canonical v1:identity:user.id)
@@ -1092,8 +1095,8 @@ query invitation invitationByPreviousTokenHash {
 // query returns the row regardless of state so the handler can emit
 // the right "expired" / "already_consumed" / "invalid" diagnostic.
 //
-// Soft-deleted (tombstoned) rows are excluded by the concept's
-// @skipDeleted annotation. Intentionally does NOT filter on
+// The magicLinkRequest concept carries no `deleted` field, so there is
+// no tombstone state to exclude. Intentionally does NOT filter on
 // isActiveRecord -- the magicLinkRequest schema has no `active`
 // field; row liveness is governed by consumedAt + expiresAt.
 //
@@ -1152,7 +1155,7 @@ query magicLinkRequest magicLinkRequestByTokenHash {
 //   - /me/tokens (component/identity/web/me_tokens.go) -- the owner, themselves.
 //   - `memql pat list --user-id X` (subcommand_pat.go) -- an OPERATOR listing
 //     somebody else's, which a bare `userId==actor.userId` would empty.
-//   - /admin/tokens (component/identity/admin/tokens.go, via pat.Store.ListAll)
+//   - /admin/tokens (component/identity/adminops/adminops.go, via pat.Store.ListAll)
 //     -- the same, cluster-wide.
 //
 // So the query is SPLIT rather than scoped: this admin-gated arm keeps the

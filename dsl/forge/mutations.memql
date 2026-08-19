@@ -10,8 +10,9 @@
 // "only an owner may set status=approved") is NOT enforced here -- the DSL
 // cannot gate a transition on actor.role. That guard belongs in an engine
 // pre-insert hook (mirroring component/memql/harness_step_validation.go) and
-// is tracked as a follow-up. The query-layer gating (traits.memql) keeps
-// non-developers from ever reaching the queues in the first place.
+// is tracked as a follow-up. The query-layer gating (dsl/forge/specs.memql:
+// forgeDeveloper / forgeApprover) keeps non-developers from ever reaching
+// the queues in the first place.
 
 // ---------------------------------------------------------------------------
 // createProject -- register a project forge develops against.

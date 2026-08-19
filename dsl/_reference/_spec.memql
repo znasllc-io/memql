@@ -58,13 +58,14 @@
 // (compiles to a SQL WHERE fragment, pushed down to the database).
 //
 // Every binding below resolves through a file-top `use` import. The parser
-// accepts `use` only in the preamble, before the first declaration, so all
-// four imports the examples bind (participant concept, actorEnvelope @actor
-// shape, participantRow @row shape, agent concept) live here together:
+// accepts `use` only in the preamble, before the first declaration, so the
+// three imports the examples bind (participant concept, actorEnvelope
+// @actor shape, agent concept) live here together. Section 4 below declares
+// its own `participantRow` @row shape locally rather than importing one --
+// see that section for why.
 
 use cognition.concepts.{ participant }
 use common.shapes.{ actorEnvelope }
-use cognition.shapes.{ participantRow }
 use agents.concepts.{ agent }
 
 @description("Matches participants with human participantType")
@@ -109,10 +110,17 @@ spec actorEnvelope isClusterOwner {
 // ONLY by binding a @row shape that projects it. The shape projects
 // `row.createdBy` to the flattened key `createdBy`; the spec reads it bare.
 //
-//     @row
-//     shape participant participantRow { participantType; row.createdBy }
-//
-// (the `participantRow` shape is imported in the file-top preamble above)
+// `participantRow` is declared HERE, illustratively, for this example only
+// -- it is not imported from `dsl/cognition/shapes.memql` (the real tree's
+// participant projection there is `participantFull`, which does not project
+// createdBy). `participant` itself is imported in the file-top preamble
+// above.
+
+@row
+shape participant participantRow {
+  participantType
+  row.createdBy
+}
 
 @description("Row authored by a specific seed identity.")
 spec participantRow isSeedParticipant {
@@ -187,10 +195,11 @@ trait statusIsActive {
 
 @description("Rich predicate showing the operator surface (concept-bound).")
 spec agent richPredicate {
-  return kind == "assistant"
-    && (status == "active" || status == "invited")
-    && tier != "banned"
-    && score >= 50
+  return role == "assistant"
+    && (roleSlug == "it-support" || roleSlug == "customer-service")
+    && kind != "system"
+    && colorIndex >= 3
+    && active == true
 }
 
 // =============================================================================

@@ -148,7 +148,7 @@ builtin databaseStats {
 //   - Future direct calls if we add a "regenerate bridges" admin
 //     surface.
 //
-// See docs/planning/knowledge-seeder.md (v2 bridge chunks) and
+// See docs/internal/planning/knowledge-seeder.md (v2 bridge chunks) and
 // integrations/knowledge/seed_bridge.go for the pipeline.
 
 @executor("integration.knowledge.ensureKnowledgeBridge")
@@ -408,7 +408,7 @@ builtin routerSetApiKey {
 //     this string (e.g. 'physics_')
 //
 // Cost: ~$300-500 for the full ~250-domain catalog at recipe v1;
-// partial runs proportional. See docs/planning/knowledge-seeder.md.
+// partial runs proportional. See docs/internal/planning/knowledge-seeder.md.
 
 @executor("integration.knowledge.seedAllDomainContent")
 @args(profile="object", additionalProperties="true")
@@ -436,7 +436,7 @@ builtin seedAllDomainContent {
 //       query: 'seedDomainContent({domainId: "physics_quantum_mechanics"})'
 //     })
 //
-// See docs/planning/knowledge-seeder.md and
+// See docs/internal/planning/knowledge-seeder.md and
 // integrations/knowledge/seed_domain_content.go for the pipeline.
 
 @executor("integration.knowledge.seedDomainContent")

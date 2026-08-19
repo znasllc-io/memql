@@ -4,7 +4,8 @@
 //
 // Gating: "my requests" + "request by id" are open to any authenticated team
 // member (submitters read their own work). The validation + approval QUEUES
-// are gated to developers/owners via the forge role traits, so a
+// are gated to developers/owners via the forge role context-specs
+// (dsl/forge/specs.memql: forgeDeveloper / forgeApprover), so a
 // non-developer can never list other people's requests to act on them.
 //
 // ---------------------------------------------------------------------------

@@ -17,7 +17,8 @@
 //     tenant, so a validator/approver can read a submitter's request. This is
 //     deliberately NOT the owned tier (which would hide other people's rows).
 //   - Read gating to developers/owners is enforced at the QUERY layer via the
-//     forge role traits (traits.memql). The transition guard ("only an owner
+//     forge role context-specs (dsl/forge/specs.memql: forgeDeveloper /
+//     forgeApprover). The transition guard ("only an owner
 //     may flip a request to approved") needs an engine-side pre-insert guard
 //     (mirroring component/memql/harness_step_validation.go) -- noted as a
 //     follow-up; the DSL alone cannot express a role-gated state machine.

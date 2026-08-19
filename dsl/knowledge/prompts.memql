@@ -6,7 +6,7 @@
 /// Generate ~10 cross-domain 'bridge' chunks for a (role, domain set) combination. Each chunk
 /// explicitly addresses how the domains overlap, conflict, or compose for an agent in that role --
 /// the kind of cross-cutting insight per-domain chunks miss because they're scoped to one domain.
-/// Per docs/planning/knowledge-seeder.md (v2 bridge chunks). Hash-keyed by (roleSlug,
+/// Per docs/internal/planning/knowledge-seeder.md (v2 bridge chunks). Hash-keyed by (roleSlug,
 /// sortedDomainIds) so this prompt fires once per unique combination across the tenant.
 @defaultProvider("chat54Mini")
 @templateFile("prompts/seedDomainBridge.tmpl")
@@ -22,7 +22,7 @@ prompt seedDomainBridge {
 /// to populate empty domain shells with LLM-generated baseline content. Each chunk should be
 /// self-contained, 100-300 words, dense, citation-worthy, declarative -- the kind of content an
 /// agent answering a question in this domain benefits from having retrieved into its prompt
-/// context. See docs/planning/knowledge-seeder.md for the full pipeline.
+/// context. See docs/internal/planning/knowledge-seeder.md for the full pipeline.
 @defaultProvider("chat54Mini")
 @templateFile("prompts/seedDomainContent.tmpl")
 prompt seedDomainContent {
