@@ -310,7 +310,7 @@ Voice messages create `v1:cognition:utterance` records with this structure:
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `MEMQL_STT_PROVIDER` | STT provider: `openai-realtime` (default) / `openai-whisper` | No |
-| `MEMQL_SI_OPENAI_API_KEY` | OpenAI API key (for Whisper / Realtime) | Yes |
+| `MEMQL_AI_OPENAI_API_KEY` | OpenAI API key (for Whisper / Realtime) | Yes |
 
 #### MemQL Variables (v1:platform:partitionVariable)
 
@@ -614,7 +614,7 @@ Same env vars as the legacy `/memql/audio` path:
 | Variable | Values | Default |
 |----------|--------|---------|
 | `MEMQL_STT_PROVIDER` | `openai-realtime`, `openai-whisper` | `openai-realtime` |
-| `MEMQL_SI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
+| `MEMQL_AI_OPENAI_API_KEY` | OpenAI key (Realtime / Whisper) | required for OpenAI |
 
 The local k3d cluster (`deploy/k8s/overlays/local`) brings up voice pods
 alongside the BFF so streaming transcription works locally; the BFF forwards

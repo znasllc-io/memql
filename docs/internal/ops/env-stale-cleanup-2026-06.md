@@ -9,6 +9,8 @@ owner: znas
 
 # Stale defined-but-unused env-var cleanup (Epic 7 / 7.4, memql#2107)
 
+> Historical: shipped in "0.9.6"; kept for rationale.
+
 Historical record of the workstream-7.4 sweep that removed env vars
 which were **defined/set** somewhere in the deploy/config surface but
 **read nowhere** in code and **absent from the registry**

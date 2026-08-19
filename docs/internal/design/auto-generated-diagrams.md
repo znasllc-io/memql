@@ -9,6 +9,8 @@ owner: znas
 
 # Auto-Generated Architecture Diagrams
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 **Status:** Shipped 2026-05-15 on `feature/auto-generated-diagrams`.
 
 **One-line:** Walk the workspace's Go source, build a typed graph of cluster / service / package / type / function nodes plus relationship edges, embed the graph in the binary, and let memQL Cockpit render it as an interactive drill-down topology with live observability data layered on top.

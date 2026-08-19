@@ -236,7 +236,6 @@ develop on.
 | Tool | Purpose | Installation |
 |------|---------|--------------|
 | **Database GUI** | Inspect the local DB | Point any client at the forwarded `localhost:5432` (`make db` for a psql shell) |
-| **Tiger CLI** | Database management | `./scripts/tiger-setup.sh` |
 | **Postman** | API testing | https://postman.com/downloads/ |
 
 ---

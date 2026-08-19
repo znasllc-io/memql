@@ -9,6 +9,8 @@ owner: znas
 
 # Skills v1 (memql#157 / #158 / #159)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: Phase 1 shipped 2026-05-21 in memql#157. Phase 2 (consumer
 migration) and Phase 3 (`mintSkill` planner authority) tracked separately.
 

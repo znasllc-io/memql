@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Event payload binding for automations
 
+> Historical: shipped in 0.12.0; kept for rationale.
+
 > **Status: ACCEPTED (owner sign-off 2026-07-03).** This ADR makes automation
 > inputs **typed and signature-bound**, the way every other construct's inputs
 > already are. It records the design locked under epic

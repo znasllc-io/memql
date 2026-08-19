@@ -36,9 +36,10 @@ never trigger `SQLSTATE 53300` ("remaining connection slots are reserved …" /
 **Environment-agnostic by design.** The connection *lifecycle* is identical in
 every environment — a bounded per-pod pool, graceful pool close on shutdown,
 leak-free reconnect, and a deploy that never exceeds the budget. Only the
-*numbers* differ per environment as config (per-pod pool size, the DB's
-`max_connections`, replica counts). Local (k3d Postgres pod) and Azure
-(AKS + Tiger Cloud) run the same code paths; they just plug in different limits.
+*numbers* differ per installation as config (per-pod pool size, the DB's
+`max_connections`, replica counts). Local (k3d + CloudNativePG) and Azure
+(AKS + CloudNativePG) run the same code paths; they just plug in different
+limits.
 
 ## The budget formula
 

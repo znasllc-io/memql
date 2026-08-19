@@ -9,6 +9,8 @@ owner: znas
 
 # memQL auth threat model
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 **Status:** v1, written 2026-05-20 as part of the Wave 3 security audit (see #86). Companion to [access-model.md](../../public/operate/auth/access-model.md), [actor-envelope.md](../../public/operate/auth/actor-envelope.md), [identity-service.md](../../public/operate/auth/identity-service.md), and [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
 
 This document inventories the auth surfaces, the threats considered, the defenses in place, the trust assumptions, and the known limitations. It is intended to be the single place a reviewer can read to understand what memQL's auth model *is* — both its enforcement and its boundaries.

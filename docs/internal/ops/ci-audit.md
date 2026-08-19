@@ -9,6 +9,8 @@ owner: znas
 
 # CI Bottleneck Audit
 
+> Historical: shipped in 0.15.0; kept for rationale.
+
 **Repo:** `znasllc-io/memql` (public, Team plan, 2 seats)
 **Audit date:** 2026-08-06
 **Scope:** read-only. Workflow inventory, ruleset/branch protection, last 50

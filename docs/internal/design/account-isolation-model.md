@@ -9,6 +9,8 @@ owner: znas
 
 # The `account` concept and its isolation model
 
+> Historical: shipped in 0.9.6; kept for rationale.
+
 > **Status: ACCEPTED (memql#3321).** This note records the isolation model for
 > `v1:identity:account` **and its limits**. The data layer it describes shipped
 > with it (`dsl/identity/{concepts,queries,mutations,shapes}.memql`); the

@@ -9,6 +9,8 @@ owner: znas
 
 # memQL DSL Engine — Architecture + Cleanup Audit
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 **Date:** 2026-05-14
 **Scope:** `component/memql/**`, `component/memql/baseparser/`, `component/memql/sense/`,
 `component/language/**`, `component/database/memory-nodes/concept_parser.go`.

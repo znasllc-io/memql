@@ -9,6 +9,8 @@ owner: znas
 
 # Conductor-driven response gate for multi-party Realtime turn-taking
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #432, part of the Hybrid Realtime Voice epic #440
 (Option B: memQL is the director, OpenAI `gpt-realtime` is the fast voice
 executor).

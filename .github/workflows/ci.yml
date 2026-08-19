@@ -769,6 +769,15 @@ jobs:
       # DSL-lint: runs `memqllint` over the embedded DSL tree, catching the
       # parse/import/reference failures the runtime loader's WARN+ skip paths
       # would surface at boot. See memql#278.
+      #
+      # THIS IS the "lint dsl/" CI gate the dsl-engine-mvp-foundation planning
+      # doc recorded as an unchecked, disabled placeholder waiting on the
+      # memql-cockpit binary becoming installable on the runner (memql#4109).
+      # It is enforced, and it never needed the cockpit: `cmd/memqllint` is an
+      # in-tree Go program, so `go run` builds it from the checkout with no
+      # cross-repo install step and no binary to distribute. Do not "restore"
+      # a cockpit-based gate on top of this one -- it would add a cross-repo
+      # dependency to buy nothing.
       - name: dsl lint
         if: ${{ env.RUN_DSL == 'true' }}
         run: go run ./cmd/memqllint dsl/

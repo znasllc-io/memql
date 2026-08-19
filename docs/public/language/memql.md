@@ -1959,10 +1959,12 @@ createdAt>"2025-01-01T00:00:00Z"
 
 - `&&` – AND
 - `||` – OR
-- `!` – NOT — **runtime condition strings only** (automation `Step.Condition`,
-  trigger `@filter`, a `cond` predicate, a logic `if`). A `!` in a query
-  filter, a spec, a logic `return` expression or a collection lambda is
-  refused at load (memql#3630)
+- `!` – NOT — **runtime condition strings only.** Those are the surfaces
+  `component/automations.Evaluator` serves: an automation cond-step
+  `Step.Condition`, and a trigger `@filter` (which `evaluateTriggerFilter`
+  evaluates with the same evaluator). A `!` in a query filter, a spec, a
+  logic `return` expression or a collection lambda is refused at load
+  (memql#3630)
 - `()` – Grouping
 - Go precedence: arithmetic > `??` > comparisons > `&&` > `||` (`!`, where it
   applies, binds tightest)

@@ -9,6 +9,8 @@ owner: znas
 
 # Epic 2 — Platform / plugin architecture
 
+> Historical: shipped in 0.9.88; kept for rationale.
+
 Formalize MemQL as a plug-and-play platform: a stable extension contract that
 third-party packs (Go plugin + `.memql` bundle) conform to, with `partition`
 as the canonical tenant scope. **Session: S2. Starts at G1. Produces G2.**

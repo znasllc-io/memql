@@ -9,6 +9,8 @@ owner: znas
 
 # DSL Import-Model Refactor — shipped
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 > **Status:** Shipped 2026-05-19 via memql PRs #47 / #48 / #49.
 
 The canonical post-migration shape is the only one the engine accepts:

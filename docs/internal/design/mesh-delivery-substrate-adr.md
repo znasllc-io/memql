@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Mesh delivery substrate -- subscription mechanism + delivery contract
 
+> Historical: shipped in 0.9.36; kept for rationale.
+
 > SPIKE deliverable for memql#1262, Phase 1 of epic memql#1259 (Resilient
 > multi-node mesh). This ADR is the contract the durable event delivery
 > backbone (memql#1263) implements against. It does NOT build the backbone --

@@ -9,6 +9,8 @@ owner: znas
 
 # Epic 4 — Telephony into core
 
+> Historical: shipped in 0.9.88; kept for rationale.
+
 Inbound + outbound PSTN calling for MemQL voice agents, via self-hosted
 `livekit/sip` + a carrier-agnostic `CarrierProvider` abstraction (Telnyx
 first), driven by the OpenAI Realtime voice path. **No Twilio.**

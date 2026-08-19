@@ -9,6 +9,8 @@ owner: znas
 
 # Deployment v2 — GitOps + progressive delivery (RFC)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 **Superseded by:** platform-consolidation (#2472), and — for everything below
 that names an environment — epic memql#3943, which removed "environment" as a
 product concept. memQL ships ONE installation shape: there is one cloud overlay

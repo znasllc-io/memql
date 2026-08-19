@@ -9,6 +9,8 @@ owner: znas
 
 # Session Handoff Prompts
 
+> Historical: shipped in 0.9.88; kept for rationale.
+
 Copy-paste prompts to run the four epics as separate sessions with explicit
 gates. **S1 starts now. S2/S3 start at G1. S4 starts at G3.** Gate definitions
 and the parallel plan: [`00-master-plan.md`](00-master-plan.md).

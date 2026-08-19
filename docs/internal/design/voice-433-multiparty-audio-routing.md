@@ -9,6 +9,8 @@ owner: znas
 
 # Multi-party audio routing + per-speaker attribution into the Realtime session (#433)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: design spike. No runtime code lands with this doc. Full
 validation requires live infrastructure (>=3-human LiveKit room +
 OpenAI gpt-realtime + Deepgram with real credentials) and is a flagged

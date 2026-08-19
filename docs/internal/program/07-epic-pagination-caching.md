@@ -9,6 +9,8 @@ owner: znas
 
 # Epic 5 — Pagination & caching (efficiency hardening)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Stop "pulling the universe." Make pagination the sane default for list queries
 and actually turn on the caching that's already built but dormant. **Session:
 S5. Starts at G1. Produces no gate other epics depend on.**

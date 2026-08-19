@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Behavioral DSL constructs -- the logic / action / automation contract
 
+> Historical: shipped in 0.9.6; kept for rationale.
+
 > **Status: ACCEPTED (owner sign-off 2026-06-27).** This ADR freezes the
 > behavioral half of the MemQL DSL (logic, action, automation) into a precise,
 > enforced contract *before* either humans or the planner author constructs

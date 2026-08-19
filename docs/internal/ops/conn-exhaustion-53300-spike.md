@@ -9,6 +9,8 @@ owner: platform
 
 # Spike: Postgres connection exhaustion (SQLSTATE 53300) on deploy/test
 
+> Historical: shipped in "0.9.78"; kept for rationale.
+
 **Issue:** memql#1817 · **Status:** root cause identified · **Date:** 2026-06-20
 
 > **HISTORICAL as of epic memql#3842 / #3848.** This is the record of a spike

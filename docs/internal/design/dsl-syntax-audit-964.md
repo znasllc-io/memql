@@ -9,6 +9,8 @@ owner: znas
 
 # memQL DSL syntax audit + standardization reference (#964)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: REVIEW ARTIFACT. Findings + a complete option reference for every
 construct, to drive an owner markup pass ("keep / remove / change"). Precursor
 to a standardization/cleanup epic and to the planner-authored-automations epic

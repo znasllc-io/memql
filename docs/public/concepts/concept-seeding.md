@@ -46,9 +46,9 @@ A seed's scope is stamped with `@scope`:
   `v1:identity:user`. The materializer computes the row id as
   `<seedName>-<userId>` and stamps `ownerUserId=<userId>` automatically.
   A perUser seed body must NOT declare its own id -- the loader rejects
-  that. Used for per-user baselines such as the Assistant
-  (`dsl/agents/assistant.memql`) and Trainer Agent
-  (`dsl/agents/trainerAgent.memql`).
+  that. Used for per-user baselines such as the Trainer Agent
+  (`dsl/agents/trainerAgent.memql`) and the Planner Agent
+  (`dsl/agents/plannerAgent.memql`).
 
 Long prose fields can be sourced from a template file next to the
 declaration via `@templateFile("templates/<name>.tmpl")`.

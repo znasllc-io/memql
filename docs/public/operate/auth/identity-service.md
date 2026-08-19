@@ -437,7 +437,7 @@ The identity service has two signing-key modes:
   replica derives the SAME Ed25519 key + `kid` from the same seed
   (#550). JWKS is coherent across all replicas, survives restarts and
   DB resets, and the deployment can run `replicas: >=2` on a rolling
-  update. This is the REQUIRED posture for staging and prod.
+  update. This is the REQUIRED posture for any multi-replica install.
 - **File-key mode (`MEMQL_IDENTITY_SIGNING_KEY_B64` unset)** -- each pod
   reads/generates an Ed25519 key on its OWN `MEMQL_IDENTITY_KEY_DIR` (which,
   in the cluster manifest, is the pod's ephemeral container
@@ -537,7 +537,7 @@ is the one with no automation in it.
 
 #### Which regime am I in?
 
-| | File-key mode (dev) | Env-seed mode (**staging + production**) |
+| | File-key mode (dev) | Env-seed mode (**any multi-replica install**) |
 |---|---|---|
 | Key source | `MEMQL_IDENTITY_KEY_DIR` on disk | `MEMQL_IDENTITY_SIGNING_KEY_B64` as a key on the `memql-secrets` Secret |
 | `KeyManager.RotationSupported()` | `true` | `false` |

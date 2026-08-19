@@ -9,6 +9,8 @@ owner: znas
 
 # Platform consolidation: a product-agnostic engine + DSL-bundle products
 
+> Historical: shipped in 0.12.0; kept for rationale.
+
 **Status:** accepted — validated by spike [#2473](https://github.com/znasllc-io/memql/issues/2473) (2026-07-08) · **Epic:** [#2472](https://github.com/znasllc-io/memql/issues/2472) · **Issue:** [#2474](https://github.com/znasllc-io/memql/issues/2474)
 
 This ADR records the target architecture the owner decided on 2026-07-08 to

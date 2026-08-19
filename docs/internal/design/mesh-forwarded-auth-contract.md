@@ -9,6 +9,8 @@ owner: znas
 
 # The mesh forwarded-auth contract
 
+> Historical: shipped in 0.15.0; kept for rationale.
+
 **Status:** shipped (memql#3205, carrying memql#2876 and absorbing memql#2814's
 "design it once for all forwards").
 

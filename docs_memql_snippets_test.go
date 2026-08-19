@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,17 +78,21 @@ import (
 // deliberately showing a RETIRED form (a don't-do-this example) is not a bug
 // either -- mark it `retired`. Do not special-case a file or block index
 // here; the marker convention is the escape hatch.
-var snippetScope = snippetScopeFiles()
 
 // snippetScopeFiles enumerates README.md plus every tracked
 // docs/public/**.md file via `git ls-files -z` (the pattern in
 // lifecycle_docs_conformance_test.go), so scope tracks the repo instead of
-// a maintained list. Panics on failure (git ls-files) since this runs at
-// package-var init time, before any test can report a normal failure.
-func snippetScopeFiles() []string {
+// a maintained list.
+//
+// It returns an error rather than panicking (memql#4125). This used to run
+// at package-var init time and panic on a `git ls-files` failure, which
+// takes down EVERY test in the root package -- so running the root suite
+// outside a git checkout reported the whole package as broken instead of
+// this one gate as unrunnable.
+func snippetScopeFiles() ([]string, error) {
 	out, err := exec.Command("git", "ls-files", "-z", "--", "README.md", "docs/public/**.md").Output()
 	if err != nil {
-		panic("snippetScopeFiles: git ls-files: " + err.Error())
+		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
 	var files []string
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
@@ -99,7 +104,7 @@ func snippetScopeFiles() []string {
 			files = append(files, f)
 		}
 	}
-	return files
+	return files, nil
 }
 
 // memqlFenceOpen matches the opening fence line of a ```memql-tagged block.
@@ -108,12 +113,17 @@ func snippetScopeFiles() []string {
 const memqlFenceTag = "```memql"
 
 func TestDocsMemqlSnippets(t *testing.T) {
+	snippetScope, err := snippetScopeFiles()
+	if err != nil {
+		t.Fatalf("enumerate snippet scope: %v", err)
+	}
+
 	var checked, skipped int
 
 	for _, file := range snippetScope {
-		data, err := os.ReadFile(file)
-		if err != nil {
-			t.Fatalf("read %s: %v", file, err)
+		data, readErr := os.ReadFile(file)
+		if readErr != nil {
+			t.Fatalf("read %s: %v", file, readErr)
 		}
 		blocks := extractMemqlBlocks(string(data))
 		// Unlike the README-only Task 3 scope (which always carries ```memql
@@ -183,17 +193,30 @@ func extractMemqlBlocks(content string) []memqlSnippet {
 	var marker string
 	var body []string
 
+	// indent is the leading whitespace of the OPEN fence of the block
+	// currently being read. A fence nested inside a list item is indented,
+	// and so is its body; the body is dedented by this prefix before it
+	// reaches the parser.
+	var indent string
+
 	for _, line := range lines {
 		trimmed := strings.TrimRight(line, "\r")
+		// Match the fence after stripping leading whitespace. Trimming only
+		// \r meant an INDENTED fence -- every ```memql block nested in a list
+		// item -- was invisible to this gate: neither validated nor reported
+		// as unmarked, so it silently escaped the whole convention
+		// (memql#4125).
+		stripped := strings.TrimLeft(trimmed, " \t")
 		if !inBlock {
-			if !strings.HasPrefix(trimmed, memqlFenceTag) {
+			if !strings.HasPrefix(stripped, memqlFenceTag) {
 				continue
 			}
+			indent = trimmed[:len(trimmed)-len(stripped)]
 			// Only a fence whose info string's first token is exactly
 			// "memql" counts -- "```memqlfoo" (no separating space) is a
 			// different (unrecognised) language tag, not a marked memql
 			// block, and must not be swept in here.
-			rest := trimmed[len(memqlFenceTag):]
+			rest := stripped[len(memqlFenceTag):]
 			if rest != "" && !strings.HasPrefix(rest, " ") && !strings.HasPrefix(rest, "\t") {
 				continue
 			}
@@ -205,7 +228,7 @@ func extractMemqlBlocks(content string) []memqlSnippet {
 		// Inside a block: a line that is a closing fence ends it. A closing
 		// fence is a line whose trimmed content is exactly a run of three or
 		// more backticks (no info string).
-		fenceLine := strings.TrimSpace(trimmed)
+		fenceLine := strings.TrimSpace(stripped)
 		if strings.HasPrefix(fenceLine, "```") && strings.Trim(fenceLine, "`") == "" {
 			blocks = append(blocks, memqlSnippet{
 				index:  len(blocks) + 1,
@@ -215,7 +238,7 @@ func extractMemqlBlocks(content string) []memqlSnippet {
 			inBlock = false
 			continue
 		}
-		body = append(body, trimmed)
+		body = append(body, strings.TrimPrefix(trimmed, indent))
 	}
 	return blocks
 }

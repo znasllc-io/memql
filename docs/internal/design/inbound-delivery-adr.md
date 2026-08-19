@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Inbound delivery -- signature-verified requests staged as graph rows
 
+> Historical: shipped in 0.12.2; kept for rationale.
+
 > Design deliverable for memql#2957, the counterpart to outbound delivery
 > (memql#2521, [outbound-delivery-adr.md](outbound-delivery-adr.md)). Outbound is
 > the outbox a product stages and the engine drains. Inbound is the inbox the

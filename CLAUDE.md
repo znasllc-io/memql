@@ -470,11 +470,19 @@ and `scripts/identity/build-css.sh` all branch on `darwin`/`linux`.
 ### Distributed Node Architecture (Cluster Mode)
 
 memQL uses **Go build tags** to compile separate binaries for each node type.
-Each tagged binary includes only the integrations, transport layers, and Go
-packages relevant to its purpose. Measured with the Makefile's actual default
-flags (`CGO_ENABLED=0`, no strip), bff/cognition/agent/planner all land around
-~80-82MB with no meaningful per-tag size differentiation today (memql#4106
-tracks the regression investigation):
+A tag selects which `app/build_*.go` runs, and therefore which integrations and
+transport layers a node WIRES UP.
+
+**Tags are a wiring mechanism, not a size mechanism.** Every node binary is
+within ~5.5% of every other one (80.4-84.8MB, `CGO_ENABLED=0`, no strip). Two
+structural reasons, both measured in memql#4106: ~32 MiB of every binary is a
+single Go 1.26 stdlib symbol (`crypto/internal/fips140/drbg.memory`), and the
+tag gating stops at `app/` -- `go list -deps` moves only 3-5 of ~116 first-party
+packages per tag, so untagged packages keep the heavy vendor set constant in
+every build (a `planner` binary still links 79 `pion/*` packages via
+`integrations/telephony`). Full numbers + the three offending imports:
+[docs/public/build/build-tags.md](docs/public/build/build-tags.md#binary-size).
+Never justify a build tag by expected binary size:
 
 ```bash
 go build .                       # bff        (~80 MB, default)
@@ -1869,8 +1877,11 @@ concept id.
   precedence. `!` (NOT) lexes and parses, but is refused by every
   ASTConverter surface -- filters and specs get the expression-led scope
   error, logic bodies and collection lambdas get "NOT/! does not convert"
-  (memql#3630). Its only working home is an automation cond-step condition;
-  write the `!=` comparison form everywhere else.
+  (memql#3630). Its working homes are the two surfaces served by the runtime
+  STRING evaluator (`component/automations.Evaluator`): an automation
+  cond-step condition, and a trigger `@filter` -- `evaluateTriggerFilter`
+  builds the same evaluator, so the two accept the same grammar. Everywhere
+  the AST converter runs, write the `!=` comparison form instead.
 - Membership is the single `in` operator: `args.x in list`
   or `kind in ["a", "b"]` (payload props bare).
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:

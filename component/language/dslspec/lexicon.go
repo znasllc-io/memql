@@ -77,7 +77,7 @@ func operators() []Operator {
 		// The Doc used to read "Logical NOT (highest precedence)", which
 		// advertised an operator the loader has never accepted
 		// (memql#3630).
-		{Symbol: "!", Doc: "Logical NOT -- NOT SUPPORTED in filters, specs, logic bodies or collection lambdas; rejected at load. Write the != comparison form. Works only in an automation cond-step condition."},
+		{Symbol: "!", Doc: "Logical NOT -- NOT SUPPORTED in filters, specs, logic bodies or collection lambdas; rejected at load. Write the != comparison form. Works in runtime condition strings only: an automation cond-step condition and a trigger @filter."},
 		{Symbol: "in", Doc: "Membership: lhs in rhsCollection."},
 		{Symbol: "??", Doc: "Null-coalescing: first non-nil/non-empty operand; a ?? b ?? c folds to coalesce(a, b, c) with the final operand as the ultimate fallback. Binds tighter than comparison, looser than arithmetic (#2611)."},
 	}

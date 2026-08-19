@@ -9,6 +9,8 @@ owner: znas
 
 # Archived issue backlog -> epic transfer map
 
+> Historical: shipped in 0.16.0; kept for rationale.
+
 `ISSUE-BACKLOG-TRANSFER.md` held the engineering substance of the 39 issues open in
 `memql` when the project moved off GitHub-issue tracking. Those issues were deleted from
 GitHub; that file was the surviving record, and it was deleted on 2026-08-06 once every
