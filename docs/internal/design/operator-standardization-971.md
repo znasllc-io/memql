@@ -9,6 +9,8 @@ owner: znas
 
 # DSL operator standardization — DESIGN (#971)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: APPROVED ARCHITECTURE; build not started. Decisions locked with the code
 owner. Phased child issues #972-#978 carry the build, low-risk first.
 

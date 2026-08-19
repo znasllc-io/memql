@@ -9,6 +9,8 @@ owner: znas
 
 # LiveKit room participation + media tracks in Go -- feasibility spike (#451)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #451, part of the Go-rewrite epic #449
 (Phase 0, "Long pole #1"). It answers the load-bearing question that
 gates the whole epic:

@@ -19,12 +19,18 @@ There are two run modes:
 | Mode | What it is | How |
 |------|-----------|-----|
 | **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
-| **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
+| **Real deployment** (any installation) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
 
-Everything below is **environment-agnostic by design**: the architecture is
-identical local → staging → prod; only the *config values* (DSNs, replica
-counts, sizes) differ. If a requirement is "do X differently in prod," that's a
-bug, not a feature.
+Everything below is **target-agnostic by design**: the architecture is
+identical from a local k3d cluster to a cloud one; only the *config values*
+(DSNs, replica counts, sizes) differ. If a requirement is "do X differently
+over there," that's a bug, not a feature.
+
+memQL ships **one installation shape** (epic memql#3943) — there is no
+staging-versus-production dimension inside the product. An operator who wants a
+second environment installs a second instance, with its own domain and its own
+database. What varies is the deploy TARGET (`provider`: `docker-local` |
+`azure`).
 
 ---
 
@@ -34,7 +40,7 @@ memQL stores everything (the time-series memory graph + the observability
 hypertables) in **PostgreSQL 16 + TimescaleDB Community + pgvector**, run
 **inside the cluster** by the CloudNativePG operator (epic memql#3842). The
 same operator, the same operand image and the same four resource kinds run in
-local k3d, staging and production; only the numbers and endpoints differ.
+local k3d and in a cloud cluster; only the numbers and endpoints differ.
 
 > **This replaced "Tiger Cloud is the only supported provider today."** It was
 > true, and it was the source of the constraint the rest of this page used to
@@ -72,8 +78,8 @@ Provisioning detail, alerts, and the failover/restore drills:
 
 The whole mesh (≈10 node-types × replicas) shares **one** database.
 
-`max_connections` is now **ours to set** — 200 local, 400 staging and
-production — so the ceiling is a sizing decision rather than a tier limit. It
+`max_connections` is now **ours to set** — 200 for a local cluster, 400 for a
+cloud one — so the ceiling is a sizing decision rather than a tier limit. It
 is still a ceiling: every Postgres backend is a process with its own memory, so
 raising it trades RAM for headroom, which is why the budget below is still
 enforced by a deploy gate.
@@ -91,9 +97,12 @@ breaking session state*, not about Tiger:
   would silently drop a held session lock.
 
 So when a pooler is eventually enabled (`cnpg-db/optional/pooler`, ready but
-not composed), only the first DSN moves. `MEMQL_DB_SEARCH_PATH` is a session
-GUC and **is** the staging/production boundary, so it must never ride a
-transaction-pooled connection.
+not composed), only the first DSN moves. (This paragraph used to add that
+`MEMQL_DB_SEARCH_PATH` "is the staging/production boundary" and must never ride
+a transaction-pooled connection. There is no such variable — it belonged to
+epic memql#3748's two-environments-in-one-cluster design, which epic memql#3943
+reversed in favour of one installation shape. Separate installations have
+separate databases, not separate schema search paths.)
 
 In code: `Database.DirectBunDB()` returns the direct pool when `DIRECT_DSN` is
 set, else falls back to the main pool — so a single-pool deployment is
@@ -121,9 +130,9 @@ Full detail, the budget formula, the pre-deploy gate, and the monitor:
 
 ## 2. Compute — Kubernetes
 
-- A **Kubernetes** cluster. We run and test on **Azure Kubernetes Service**
-  (`aks-memql-staging`); any conformant cluster should work, but AKS is the
-  exercised path. See [Infrastructure](infrastructure.md).
+- A **Kubernetes** cluster. We run and test on **Azure Kubernetes Service**;
+  any conformant cluster should work, but AKS is the exercised path. See
+  [Infrastructure](infrastructure.md).
 - **The database runs here too** — a CNPG `Cluster`, not an external service.
   It wants a dedicated node pool: Postgres is memory- and IO-sensitive, so a
   noisy neighbour costs latency on every query.
@@ -134,7 +143,7 @@ Full detail, the budget formula, the pre-deploy gate, and the monitor:
   fronts the product's DSL bundle -- plus the product client (SPA), both
   layered in from the product's own overlay -- see
   [Downstream product stacks](downstream-stacks.md).
-- Rough small-staging footprint: ~4 × 2-vCPU nodes. Right-size per workload.
+- Rough small-installation footprint: ~4 × 2-vCPU nodes. Right-size per workload.
 - **Argo CD** for GitOps (+ **Argo Rollouts** when a product stack runs a
   blue-green `bff`; the controller install lives in `deploy/rollouts/install`).
 

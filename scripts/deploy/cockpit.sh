@@ -25,7 +25,7 @@
 #   4. Otherwise: fail loud with bootstrap instructions.
 #
 # Usage:
-#   scripts/deploy/cockpit.sh deploy --env=<env> [--ref=<ver>] [--dry-run] ...
+#   scripts/deploy/cockpit.sh deploy [--ref=<ver>] [--role=<role>] [--dry-run] ...
 #
 # Exit codes: passes through the cockpit's exit code (0 ok/invoked, 1
 # error/denied/owner-gated-but-honest, 2 usage). 70 = cockpit binary could not
@@ -65,7 +65,7 @@ by ONE of:
        git -C "${COCKPIT_REPO}" pull   # if not present, clone it next to memql/
        make -C "${COCKPIT_REPO}" cockpit
   3. Point at an existing binary explicitly:
-       make deploy ENV=<env> COCKPIT_BIN=/path/to/memql-cockpit
+       make deploy COCKPIT_BIN=/path/to/memql-cockpit
 EOF
 }
 

@@ -1,5 +1,5 @@
 ---
-title: Self-hosted LiveKit (staging/prod) — provisioning runbook
+title: Self-hosted LiveKit (cloud) — provisioning runbook
 audience: public
 status: stable
 area: operate
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# Self-hosted LiveKit (staging/prod) — provisioning runbook
+# Self-hosted LiveKit (cloud) — provisioning runbook
 
 LiveKit powers the product's realtime voice/video. We **self-host** the
 open-source `livekit-server` (Apache-2.0) in the AKS cluster — there is **no
@@ -30,7 +30,7 @@ Tracking issue: znasllc-io/memql#1043.
 - `voice.yaml` (and the product pack's `bff` manifest) —
   `MEMQL_POLYPHON_LIVEKIT_URL` + `_PUBLIC_URL` (non-secret)
   and `_API_KEY` / `_API_SECRET` (from `livekit-secrets`).
-- The staging overlay digest-pins `livekit/livekit-server`.
+- The cloud overlay digest-pins `livekit/livekit-server`.
 
 ArgoCD (auto-sync from `main`) applies all of the above. The BFF is a
 blue/green Rollout, so a manifest change rolls a **preview** color that must be
@@ -41,10 +41,9 @@ blue/green Rollout, so a manifest change rolls a **preview** color that must be
 ### 1. Seed the Key Vault secrets (scripted, idempotent)
 
 ```
-make livekit-provision                 # staging (reuses an existing pair)
+make livekit-provision                 # reuses an existing pair
 make livekit-provision DRY_RUN=1       # plan only
 make livekit-provision ARGS=--rotate   # generate a fresh pair, then roll pods
-make livekit-provision ENV=production
 ```
 
 This seeds three secrets into `kv-memql-<env>` —

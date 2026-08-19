@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -83,15 +84,15 @@ import (
 // gate would. Extend retiredVocabulary ONLY with a pattern whose full
 // current-tree hit list has been personally triaged the same way the five
 // patterns below were.
-var vocabScope = vocabScopeFiles()
 
 // vocabScopeFiles enumerates README.md plus every tracked
 // docs/public/**.md file via `git ls-files -z`. See snippetScopeFiles in
-// docs_memql_snippets_test.go for the shared rationale.
-func vocabScopeFiles() []string {
+// docs_memql_snippets_test.go for the shared rationale, including why this
+// returns an error instead of panicking at package-var init (memql#4125).
+func vocabScopeFiles() ([]string, error) {
 	out, err := exec.Command("git", "ls-files", "-z", "--", "README.md", "docs/public/**.md").Output()
 	if err != nil {
-		panic("vocabScopeFiles: git ls-files: " + err.Error())
+		return nil, fmt.Errorf("git ls-files: %w", err)
 	}
 	var files []string
 	for _, f := range strings.Split(strings.TrimRight(string(out), "\x00"), "\x00") {
@@ -103,7 +104,35 @@ func vocabScopeFiles() []string {
 			files = append(files, f)
 		}
 	}
-	return files
+	return files, nil
+}
+
+// vocabOKMarker is the per-LINE escape hatch. A line carrying
+//
+//	<!-- retired-vocabulary-ok: why this mention is legitimate -->
+//
+// is skipped by the sweep. It exists because some retired vocabulary is
+// legitimately DISCUSSABLE: `make release` is banned as a deploy
+// instruction, but VERSIONING.md documents `make release VERSION=` as a
+// local-inspection command and memql#4116 confirmed the target still
+// exists -- so a docs/public page WARNING readers off it was blocked by
+// the very gate that wants the warning written (memql#4125).
+//
+// Mark the line, do not weaken the pattern and do not exempt the file: a
+// file-level exemption silently covers text nobody triaged, whereas a
+// marker is reviewable at the point of use and names its own reason.
+const vocabOKMarker = "<!-- retired-vocabulary-ok:"
+
+// lineIsVocabExempt reports whether a line carries the escape-hatch marker
+// WITH a reason. A bare marker earns nothing: the reason is the whole point
+// of preferring a marker to a file-level exemption.
+func lineIsVocabExempt(line string) bool {
+	_, after, found := strings.Cut(line, vocabOKMarker)
+	if !found {
+		return false
+	}
+	reason, closed := strings.CutSuffix(strings.TrimSpace(after), "-->")
+	return closed && strings.TrimSpace(reason) != ""
 }
 
 var retiredVocabulary = []struct{ pattern, reason, ref string }{
@@ -137,7 +166,12 @@ func TestRetiredVocabulary(t *testing.T) {
 		compiled[i] = regexp.MustCompile(rv.pattern)
 	}
 
-	var checked int
+	vocabScope, err := vocabScopeFiles()
+	if err != nil {
+		t.Fatalf("enumerate vocabulary scope: %v", err)
+	}
+
+	var checked, exempted int
 	for _, file := range vocabScope {
 		data, err := os.ReadFile(file)
 		if err != nil {
@@ -153,6 +187,10 @@ func TestRetiredVocabulary(t *testing.T) {
 		lines := strings.Split(content, "\n")
 		for i, line := range lines {
 			checked++
+			if lineIsVocabExempt(line) {
+				exempted++
+				continue
+			}
 			for j, re := range compiled {
 				if re.MatchString(line) {
 					rv := retiredVocabulary[j]
@@ -168,6 +206,7 @@ func TestRetiredVocabulary(t *testing.T) {
 			"(unlikely for README.md, which carries no front-matter at all), or vocabScope is empty. " +
 			"A gate that examines nothing passes forever.")
 	}
+	t.Logf("swept %d line(s); %d carried the %s escape-hatch marker", checked, exempted, vocabOKMarker)
 }
 
 // frontMatterStatus reports the `status:` value from a leading `---`

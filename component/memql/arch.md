@@ -136,8 +136,11 @@ Input String
 `!` lexes here like any other operator, but every ASTConverter surface
 refuses it after parsing -- filters/specs get the expression-led scope
 error, logic bodies and collection lambdas get "NOT/! does not convert".
-Its only working home is an automation cond-step condition (memql#3630);
-authors write the `!=` comparison form elsewhere.
+Its working homes are the two surfaces served by the runtime STRING
+evaluator (`component/automations.Evaluator`): an automation cond-step
+condition and a trigger `@filter`, which `evaluateTriggerFilter`
+(`component/automations/scheduler.go`) evaluates with the same evaluator
+(memql#3630). Authors write the `!=` comparison form elsewhere.
 
 ### Parser Grammar (Simplified)
 

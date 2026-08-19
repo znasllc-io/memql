@@ -35,7 +35,7 @@ Agent and voice deployments today are integration-heavy. Most of the engineering
 
 ## Example
 
-A concept (schema), a query over it, and an LLM-callable tool wired to that query — the same shape every real domain in `dsl/` uses (this one is trimmed from `dsl/todos/`):
+A concept (schema), a query over it, and an LLM-callable tool wired to that query — the same shape every real domain in `dsl/` uses (this one is trimmed from `dsl/todos/`). The one thing a real file would omit is `@namespace("todos")`: a concept's namespace DEFAULTS to its containing `dsl/<domain>/` directory, and you write it only for a colon-scoped sub-namespace or a pinned divergence. It is spelled out here because this block is validated standalone by the docs snippet gate, where there is no directory to default from:
 
 ```memql
 @namespace("todos")

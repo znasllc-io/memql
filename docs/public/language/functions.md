@@ -159,8 +159,10 @@ context:
 > in filters and specs, and with `NOT/! does not convert; write the !=
 > comparison form` in logic bodies and collection lambdas. Write the
 > `!=` form, or a trait that states the negative. (A bare `!` *does*
-> work in an automation cond-step **condition**, which a separate
-> string evaluator handles.)
+> work on the two surfaces a separate runtime STRING evaluator handles:
+> an automation cond-step **condition**, and a trigger **`@filter`** --
+> `evaluateTriggerFilter` builds the same
+> `component/automations.Evaluator`, so both accept `!`.)
 
 > **Retired operator forms.** These are retired **from authoring**, and
 > that is a convention a **text scan** enforces — not a parse error
@@ -217,7 +219,7 @@ Filter rules (enforced by `test/dslconformance/conformance_test.go`):
   it left a row intrinsic indistinguishable from a payload property even
   though the two compile to entirely different SQL:
 
-  ```memql
+  ```memql fragment
   filter  row.id == args.spaceId   // the row envelope (a table column)
   filter  status == args.status    // a payload property (a JSONB path)
   ```

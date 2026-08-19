@@ -9,6 +9,8 @@ owner: znas
 
 # Epic 1 — SI → AI rename
 
+> Historical: shipped in "0.9.87"; kept for rationale.
+
 Rename "SI / synthetic intelligence" to "AI" across DSL, Go, wire/proto, and
 frontend, in one coordinated sweep. **Runs first** (before decoupling).
 **Session: S1. Gate produced: G1.**

@@ -9,6 +9,8 @@ owner: znas
 
 # memQL MCP server — node role, capability tiers, and tool surface
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Phase 0 design for exposing memQL over the Model Context Protocol (MCP) to
 external clients (Claude Desktop / Claude Code and any other MCP host). This
 document records the architecture decision, the security model, the tool

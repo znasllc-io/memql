@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Core built-ins boundary -- ambient vs imported `core`, the collection/lambda library, and temporal visibility
 
+> Historical: shipped in 0.9.6; kept for rationale.
+
 > **Status: ACCEPTED (owner sign-off 2026-06-29).** This ADR freezes the
 > **built-in surface** of the MemQL DSL into the same opinionated-but-explicit
 > contract as the rest of the language: every source of nondeterminism or

@@ -9,6 +9,8 @@ owner: znas
 
 # Extension-point audit: cognition / voice / planner (memql#1922)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: completed 2026-06-22 for Epic 2 (platform / plugin), issue 2.3
 [G:2.1]. Spec: `docs/internal/program/02-epic-platform-plugin.md`.
 

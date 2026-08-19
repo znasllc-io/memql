@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Outbound delivery -- engine-drained outbound requests
 
+> Historical: shipped in 0.12.2; kept for rationale.
+
 > Design deliverable for memql#2521. A pure-DSL product pack can model
 > outbound communication as graph state, but nothing in the engine can then
 > PERFORM the delivery: the only route today is a product bff plugin via

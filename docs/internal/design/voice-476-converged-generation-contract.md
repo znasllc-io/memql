@@ -9,6 +9,8 @@ owner: znas
 
 # Converged generation contract (one brain) for voice + text
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #476, the **architectural keystone** of epic #475
 ("Realtime voice v2: model-owns-turn + converge to one generation brain").
 Phase 0 design, no dependencies; blocks the 1-on-1 native-generation work

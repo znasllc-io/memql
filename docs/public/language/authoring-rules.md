@@ -35,11 +35,12 @@ rule below is a gotcha; this one is the contract.
 exactly one `update` block. Two writes in one mutation is a
 parse-time error.
 
-```memql retired
+Right -- one bare insert. The target concept comes from the
+`mutate <Concept> <name>` signature; restating it is retired.
+
+```memql
 use cognition.concepts.{ space }
 
-// Right -- one bare insert. The target concept comes from the
-// `mutate <Concept> <name>` signature; restating it is retired.
 mutate space createSpace {
   args { name string @required }
   insert {
@@ -49,8 +50,11 @@ mutate space createSpace {
     createdBy: actor.userId
   }
 }
+```
 
-// Wrong -- two writes in one body. The parser rejects it.
+Wrong -- two writes in one body. The parser rejects it.
+
+```memql retired
 mutate space createSpaceAndGrantOwner {
   args { name string @required }
   insert { ... }                  // ERROR -- only one write allowed
@@ -376,7 +380,7 @@ than the generic "import it via a use declaration" that points at the spelling
 which does not work.
 
 (Unrelated: **seed** constructs have their own `@scope("perUser")`
-annotation -- see `dsl/agents/assistant.memql`. That is a seed
+annotation -- see `dsl/agents/trainerAgent.memql`. That is a seed
 materialization mode, not the retired concept-level scope.)
 
 ---
@@ -1360,7 +1364,7 @@ be met). Use it when `canonicalId()` will not resolve. Otherwise prefer
   arg with an **allowlist** — pin the prefix to that concept's own
   canonical form, and permit only characters a short id can contain:
 
-  ```memql
+  ```memql fragment
   deploymentId  string! @pattern("^(?:v[0-9]+:cluster:deployment:)?[A-Za-z0-9_.-]+$")
   ```
 
@@ -1791,7 +1795,7 @@ the change. The gates, with their test names:
   write (`args.X`, `actor.X`, `config.X`) and with shape bodies, which
   have always projected `row.id` / `row.createdAt`.
 
-  ```memql
+  ```memql fragment
   filter  row.id == args.clusterId      // correct -- the row envelope
   filter  id == args.clusterId          // rejected -- bare intrinsic
   filter  region == args.region         // correct -- payload property, bare
@@ -1813,7 +1817,7 @@ the change. The gates, with their test names:
   property called `id`, and the two compile to completely different
   `ORDER BY` expressions -- a table column vs `payload #>> '{id}'`.
 
-  ```memql
+  ```memql fragment
   sort  "row.createdAt", "desc"   // correct -- the row envelope
   sort  "createdAt", "desc"       // rejected -- bare intrinsic
   sort  "version", "desc"         // correct -- payload property, bare

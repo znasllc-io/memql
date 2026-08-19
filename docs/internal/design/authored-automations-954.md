@@ -9,6 +9,8 @@ owner: znas
 
 # Planner-authored automations -- DESIGN (#954)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Status: Substantial work has shipped. The three load-bearing decisions below
 were taken with the code owner (DSL architect); child issues #955-#961 carried
 the initial build, sequenced validation-first. Epic #1160/#1161 (everyday-task

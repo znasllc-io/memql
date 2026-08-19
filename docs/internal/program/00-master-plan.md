@@ -9,6 +9,8 @@ owner: znas
 
 # Platformization Program — Master Plan
 
+> Historical: shipped in 0.9.88; kept for rationale.
+
 Four-epic program to turn MemQL into a clean, plug-and-play platform and land
 telephony on top of it. Built from an analysis of the pre-platformization
 state (the working doc that captured that analysis, `05-current-state-map.md`,

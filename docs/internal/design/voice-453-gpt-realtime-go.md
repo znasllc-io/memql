@@ -9,6 +9,8 @@ owner: znas
 
 # gpt-realtime over WebSocket in Go -- feasibility spike
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #453, part of epic #449 ("Replace the Python
 voice-agent with a Go voice agent"). Phase 0, long pole #3. No code
 dependencies; blocks the Go realtime executor (#457).

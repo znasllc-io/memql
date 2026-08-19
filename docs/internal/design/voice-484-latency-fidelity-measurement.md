@@ -9,6 +9,8 @@ owner: znas
 
 # Latency, gate-cost & fidelity measurement (#484)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Phase 3 validation for epic #475. The v1 spikes (#432/#477) flagged that the
 cheap-gate / overlapping-latency assumptions were never measured live. This
 document is the **measurement harness**: the instrumentation that makes the

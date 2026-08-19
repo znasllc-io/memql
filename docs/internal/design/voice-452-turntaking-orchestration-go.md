@@ -9,6 +9,8 @@ owner: znas
 
 # Turn-taking / endpointing orchestration in Go (AgentSession replacement)
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #452, part of epic #449 ("Replace the Python
 voice-agent with a Go voice agent"). This is **Phase 0, long pole #2 -- the
 riskiest piece** of the rewrite: replacing the single biggest thing the Python

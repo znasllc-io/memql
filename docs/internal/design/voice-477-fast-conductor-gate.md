@@ -9,6 +9,8 @@ owner: znas
 
 # Fast conductor gate (WHEN not WHAT) + latency budget
 
+> Historical: shipped in 0.9.0; kept for rationale.
+
 Spike deliverable for issue #477, part of epic #475 ("Realtime voice v2:
 model-owns-turn + converge to one generation brain"). Phase 0 design. No
 production code changes in this PR.

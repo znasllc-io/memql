@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Spec/Shape binding -- the static-access contract
 
+> Historical: shipped in 0.9.6; kept for rationale.
+
 > **Status: ACCEPTED (owner sign-off 2026-06-27).** This ADR freezes the
 > static-data half's *binding model*: how a `spec` declares the single data
 > surface it predicates over, and how a `shape` is the only gateway to ambient

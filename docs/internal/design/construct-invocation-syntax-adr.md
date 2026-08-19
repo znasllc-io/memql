@@ -9,6 +9,8 @@ owner: znas
 
 # ADR: Construct invocation & action syntax
 
+> Historical: shipped in 0.9.7; kept for rationale.
+
 > **Status: ACCEPTED (owner sign-off 2026-06-29).** This ADR makes how
 > constructs are **invoked** and how **actions/bodies** are written uniform,
 > explicit, and machine-checkable -- the call-site analog of the explicit `use`
