@@ -3,6 +3,7 @@ package memql
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -174,24 +175,50 @@ func (c *aiResponseCache) evictLocked(incomingKey string) {
 		c.sweptExpired.Add(int64(swept))
 	}
 
-	// Stage 2: still full, so shed live entries nearest to expiry until
-	// there is room for the incoming one.
-	evicted := 0
-	for len(c.entries) >= c.maxEntries {
-		var (
-			victim   string
-			earliest time.Time
-			found    bool
-		)
-		for k, entry := range c.entries {
-			if !found || entry.expiresAt.Before(earliest) {
-				victim, earliest, found = k, entry.expiresAt, true
-			}
+	if len(c.entries) < c.maxEntries {
+		return // the sweep was enough, which is the steady-state case
+	}
+
+	// Stage 2: shed live entries nearest to expiry, in a BATCH down to a
+	// low-water mark rather than one per insertion.
+	//
+	// Batching is the difference between O(n) and O(log n) amortised per
+	// set. Evicting exactly one victim would mean the next set at capacity
+	// scans the whole map again -- an O(n) pass under the WRITE lock, on
+	// every insertion, for as long as the cap keeps binding. Shedding 10%
+	// at once amortises one O(n log n) sort over maxEntries/10 insertions,
+	// and the entries given up are the ones nearest to expiry, so the cost
+	// in hit rate is the lowest available.
+	target := c.maxEntries - c.maxEntries/10
+	if target < 1 {
+		target = 1
+	}
+
+	type victim struct {
+		key       string
+		expiresAt time.Time
+	}
+	victims := make([]victim, 0, len(c.entries))
+	for k, entry := range c.entries {
+		victims = append(victims, victim{key: k, expiresAt: entry.expiresAt})
+	}
+	sort.Slice(victims, func(i, j int) bool {
+		if victims[i].expiresAt.Equal(victims[j].expiresAt) {
+			// Map iteration order is random, so ties must break on
+			// something stable or the same workload evicts different
+			// entries run to run -- which makes a hit-rate regression
+			// impossible to reproduce.
+			return victims[i].key < victims[j].key
 		}
-		if !found {
+		return victims[i].expiresAt.Before(victims[j].expiresAt)
+	})
+
+	evicted := 0
+	for _, v := range victims {
+		if len(c.entries) <= target {
 			break
 		}
-		delete(c.entries, victim)
+		delete(c.entries, v.key)
 		evicted++
 	}
 	if evicted > 0 {

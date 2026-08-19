@@ -40,6 +40,92 @@ func TestAIResponseCacheIsBounded(t *testing.T) {
 		stats.Size, stats.MaxEntries, stats.Sets, stats.EvictedAtCap, stats.SweptExpired)
 }
 
+// TestAIResponseCacheEvictsInBatches pins the amortisation. Evicting one
+// victim per insertion would make every set at capacity an O(n) scan under
+// the WRITE lock; the batch drops to a low-water mark so that scan is paid
+// once per ~maxEntries/10 insertions instead. Measured by the eviction COUNT,
+// which is what distinguishes the two: one-at-a-time evicts exactly once per
+// over-cap set, batching evicts in bursts and then not at all for a while.
+func TestAIResponseCacheEvictsInBatches(t *testing.T) {
+	const cap = 100
+	c := newAIResponseCache(cap)
+
+	// Fill to capacity, nothing expiring.
+	for i := 0; i < cap; i++ {
+		c.set(fmt.Sprintf("key-%d", i), i, time.Hour)
+	}
+	if got := c.Stats().EvictedAtCap; got != 0 {
+		t.Fatalf("filling to exactly the cap should evict nothing, got %d", got)
+	}
+
+	// One more insertion must trigger a batch, not a single eviction.
+	c.set("overflow", "v", time.Hour)
+	stats := c.Stats()
+	if stats.EvictedAtCap < 2 {
+		t.Errorf("evictedAtCap=%d -- expected a batch, not one-at-a-time", stats.EvictedAtCap)
+	}
+	if stats.Size > cap {
+		t.Errorf("size=%d exceeds cap=%d", stats.Size, cap)
+	}
+	// And the batch must leave headroom, so the next several sets evict
+	// nothing at all -- that is the amortisation.
+	before := stats.EvictedAtCap
+	for i := 0; i < 5; i++ {
+		c.set(fmt.Sprintf("after-%d", i), i, time.Hour)
+	}
+	if after := c.Stats().EvictedAtCap; after != before {
+		t.Errorf("sets right after a batch evicted again (%d -> %d); no headroom was left", before, after)
+	}
+}
+
+// TestAIResponseCacheEvictionOrderIsDeterministic: map iteration is random,
+// so without a stable tie-break the same workload sheds different entries run
+// to run, and a hit-rate regression becomes unreproducible.
+func TestAIResponseCacheEvictionOrderIsDeterministic(t *testing.T) {
+	survivors := func() []string {
+		c := newAIResponseCache(10)
+		// Identical TTLs => every expiresAt ties => the tie-break decides.
+		for i := 0; i < 40; i++ {
+			c.set(fmt.Sprintf("key-%02d", i), i, time.Hour)
+		}
+		var keys []string
+		c.mu.RLock()
+		for k := range c.entries {
+			keys = append(keys, k)
+		}
+		c.mu.RUnlock()
+		sortStrings(keys)
+		return keys
+	}
+
+	first := survivors()
+	for i := 0; i < 5; i++ {
+		if got := survivors(); !equalStrings(got, first) {
+			t.Fatalf("eviction is not deterministic:\n run 1: %v\n run %d: %v", first, i+2, got)
+		}
+	}
+}
+
+func sortStrings(s []string) {
+	for i := 1; i < len(s); i++ {
+		for j := i; j > 0 && s[j] < s[j-1]; j-- {
+			s[j], s[j-1] = s[j-1], s[j]
+		}
+	}
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestAIResponseCacheSweepsExpiredBeforeEvictingLive pins the two-stage
 // order: an entry already past its TTL is dead by the cache's own contract,
 // so reclaiming it must be preferred over shedding a live one. If the order

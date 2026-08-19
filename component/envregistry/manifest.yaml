@@ -1292,6 +1292,13 @@ variables:
     optional: true
     description: "Ceiling in seconds on any AI-call result-cache TTL. CLAMPED to 0..300 in code: a larger value is silently reduced to 300, and 0 or negative disables AI result caching. Distinct from CACHE_MAX_TTL, which bounds the engine's query result cache."
 
+  - name: MEMQL_AI_CACHE_MAX_ENTRIES
+    component: ai
+    scope: node
+    default: "5000"
+    optional: true
+    description: "Maximum live entries in the exact-match AI response cache. At the cap the cache first reclaims entries already past their TTL, then sheds the live entries nearest to expiry in a batch. A non-positive value means UNBOUNDED -- the pre-memql#4124 behaviour, in which the map's only eviction was a read that happened to land on an expired key, so an entry never read again was never reclaimed. Distinct from MEMQL_SI_CACHE_MAX_SECONDS, which bounds the same cache's TTL, and from MEMQL_MEMORY_ENGINE_CACHE_MAX_ITEMS, which sizes the engine's query result cache."
+
   - name: MEMQL_SI_SEMANTIC_CACHE_NAMESPACES
     component: ai
     scope: node
