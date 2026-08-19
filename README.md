@@ -64,7 +64,7 @@ A concept (schema) and an LLM-callable tool in the same file, same language. Add
 make up
 
 # Run tests
-go test ./...
+make test
 
 # Break-glass deploy (the blessed path is a digest bump + merge -> ArgoCD)
 make deploy VERSION=X
@@ -160,7 +160,7 @@ make deploy VERSION=X
    make dev
 
    # Run tests
-   go test ./...
+   make test
 
    # View logs
    kubectl logs -n memql deploy/bff -f
@@ -226,7 +226,7 @@ memQL/
 | **Start local cluster** | `make up` |
 | **Tear down cluster** | `make down` |
 | **Inner-loop rebuild + reload** | `make dev [NODE=<type>]` |
-| **Run Go test suite** | `go test ./...` |
+| **Run Go test suite** | `make test` |
 | **Break-glass deploy** | `make deploy VERSION=X` |
 | **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
@@ -254,13 +254,13 @@ service** (`component/identity`):
 
 ```bash
 # Run all tests
-go test ./...
+make test
 
 # Run specific package tests
-go test -v ./component/memql/...
+make test
 
 # Run with coverage
-go test -cover ./...
+make test
 ```
 
 ---
@@ -332,7 +332,7 @@ for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration
 ## Contributing
 
 1. Read [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
-2. Make changes and test locally (`go test ./...`)
+2. Make changes and test locally (`make test`)
 3. Exercise the 2-replica parity cluster for anything cross-node
 4. Commit directly to `main` for focused changes, or open a PR when review is useful
 5. Stage files by explicit path (`git add <file>`)

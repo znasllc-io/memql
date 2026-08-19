@@ -17,7 +17,7 @@ See [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md) for
 ## Code style
 
 - Go code must be `gofmt`-clean and pass `go vet ./...`
-- Run `go test ./...` locally before opening a PR
+- Run `make test` locally before opening a PR
 - One logical change per commit; commit messages explain *why*, not just *what*
 - Match the surrounding code style and naming
 
