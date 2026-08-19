@@ -60,9 +60,16 @@ the executor reads at SQL push-down time.
 | `type` | string | concept declaration | Currently mirrors `concept`; reserved for future versioning differences. |
 | `createdAt` | datetime | mutation execution | RFC3339 timestamp at insert time. |
 | `createdBy` | string | mutation execution | Stamped from the request actor's identity. |
-| `partition` | string | mutation execution | Envelope partition for partition-scoped concepts; `_system` for global-scoped concepts. |
 | `schema` | string | concept declaration | Concept schema version hash (engine-derived). |
 | `provenance` | object | mutation execution | Origin metadata: `{kind, name, trigger, via}`. Supports nested paths. |
+
+`partition` is reserved on the payload schema too, but it is **not** a
+stamped row intrinsic: partitioning was retired in #56, `"MemoryNodes"`
+has no `partition` column, and the name stays reserved purely as a
+retired-name guard so a concept cannot reintroduce a field implying a
+tenancy dimension the engine no longer has (see [gotcha
+#12](authoring-rules.md#12-partition-is-still-a-reserved-payload-field----pick-another-name)
+and `component/database/memory-nodes/constants.go`).
 
 Defined in `component/memql/intrinsic_fields.go`. Cross-referenced
 in `docs/public/language/authoring-rules.md` (gotcha #19).
@@ -109,7 +116,7 @@ bare (memql#2779, `TestFilterIntrinsicsUseRowNamespace`). Payload
 properties in the same clause are bare, so the namespace is what keeps
 the two surfaces apart:
 
-```memql
+```memql fragment
 filter  row.id == args.spaceId && status == "active"
 //      ^^^^^^ row envelope      ^^^^^^ payload property
 ```
@@ -118,8 +125,11 @@ filter  row.id == args.spaceId && status == "active"
 `id`, `concept`, `type`, `createdAt`, `createdBy`, and
 `provenance.<leaf>`. `row.<anything else>` is an error rather than a
 silent fall-through to a payload lookup -- that fall-through is the
-defect the namespace closed. `partition` and `schema` are intrinsics on
-the row but are not filter-comparable, so they have no `row.` form.
+defect the namespace closed. `schema` is a real stamped column but is
+not filter-comparable, so it has no `row.` form either. `partition` is
+reserved on the payload schema (see section 1 above) but, post-#56, is
+not a row intrinsic at all -- there is no `partition` column to have a
+`row.` form.
 
 A **sort key** takes the same namespace -- `sort "row.createdAt", "desc"` --
 and rejects a non-sortable leaf rather than silently ordering on a JSONB path
@@ -194,7 +204,7 @@ and is unaffected.
 
 Cross-file dependencies are declared with file-top `use` imports:
 
-```memql
+```memql fragment
 use cognition.concepts.{ participant, space }
 use common.traits.{ isActiveRecord }
 ```

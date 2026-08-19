@@ -257,7 +257,7 @@ So `blocks []object @variant(discriminator="kind") { … }` validates every bloc
 
 The `@relationship` annotation inside a concept body declares a graph edge:
 
-```memql
+```memql fragment
 @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
 ```
 
@@ -548,13 +548,13 @@ The query above returns all leads in `new`/`contacted` state that already have a
 In DSL filter clauses, the `in` operator works with both scalar and string-array fields:
 
 **Scalar field:**
-```memql
+```memql fragment
 status in ["active", "pending"]
 ```
 Matches if `status` equals "active" OR "pending".
 
 **Array field (automatic detection):**
-```memql
+```memql fragment
 "filters" in topics
 ```
 Matches if the `topics` array contains "filters". For example, a module with `topics: ["filters", "limits", "sorting"]` matches.
@@ -830,7 +830,7 @@ Two legacy forms are retired (both rejected at parse time):
 
 `si("<promptName>", <dataObject>)` performs a blocking LLM call against a registered prompt. It is called from **logic bodies** (and from Go integrations); it is not part of the runtime query-string grammar:
 
-```memql
+```memql fragment
 // Inside a logic body
 siResponse := if existingResponse.empty() {
   si(args.event.payload.promptTemplateId, args.event.payload.promptData)
@@ -975,7 +975,7 @@ Specs are atomic boolean predicates, declared in struct form in `dsl/<namespace>
 
 A spec body never reads `actor.*` / `row.*` directly — bind a shape that projects it and read the projected key bare. The `@shape("name")` annotation is **removed**; the binding moved to the signature.
 
-```memql
+```memql fragment
 use cognition.concepts.{ participant }
 
 /// Matches guest participants
@@ -1008,7 +1008,7 @@ When a trait covers a predicate (e.g. `isActiveRecord` for `active==true`), **us
 
 Specs and traits are referenced by bare name inside DSL query filter clauses:
 
-```memql
+```memql fragment
 filter  spaceId==args.spaceId && isHumanParticipant && isActiveRecord
 ```
 
@@ -1032,13 +1032,17 @@ query participant spaceParticipants {
     status           string  @enum("active", "idle", "left")
     participantType  string  @enum("human", "si")
   }
-  filter  when(args.spaceId) { spaceId==args.spaceId } &&
-          when(args.status) { status==args.status } &&
-          when(args.participantType) { participantType==args.participantType } &&
-          isActiveRecord
+  filter  when(args.spaceId) { spaceId==args.spaceId } && when(args.status) { status==args.status } && when(args.participantType) { participantType==args.participantType } && isActiveRecord
   shape   participantFull
 }
 ```
+
+The `filter` clause must be a single physical line -- the struct-form
+rewriter scans a query body line by line, so a filter that wraps onto a
+second physical line has its continuation lines mistaken for new
+struct-query fields and fails to parse. Every `filter` in the shipped
+`dsl/` tree follows this convention already; wrap long filters at the
+editor level, not the source level.
 
 Body directives: `filter` (the predicate), `shape` (named projection), and optional `sort "field", "dir"` / `paginate N` lines:
 
@@ -1089,7 +1093,7 @@ query node nodesAt {        // asOf <ts> -> deterministic, no marker
 
 Every construct another file pulls into local scope is declared via a dotted-path import at file top:
 
-```memql
+```memql fragment
 use cognition.concepts.{ participant, space }
 use cognition.shapes.{ participantFull }
 use common.traits.{ isActiveRecord, isNotDeleted }
@@ -1101,7 +1105,7 @@ The dotted path maps to a file on disk (`cognition.concepts` → `dsl/cognition/
 
 An imported name can be bound to a different local name (memql#3802):
 
-```memql
+```memql fragment
 use harness.concepts.{ plan as harnessPlan }
 
 query harnessPlan tasksForHarnessPlan { ... }   // the imported one
@@ -1202,7 +1206,7 @@ How names resolve inside a body:
 
 Named queries and mutations are invoked from runtime query strings as function calls. They accept an optional JSON object argument; empty parentheses `()` are equivalent to `({})`:
 
-```memql
+```memql fragment
 -- No args (returns all matching records)
 queryActiveSpaces()
 
@@ -1262,7 +1266,7 @@ logic provisionDailySpaceOnUserCreate {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return ensureDailySpaceForUser(userId: args.event.payload.id)
   }
 }
 ```
@@ -1276,18 +1280,18 @@ logic purgeExpiredArchivedSpaces {
     event object @required
   }
   body {
-    expired := queryExpiredArchivedSpaces({ now: now })
+    expired := queryExpiredArchivedSpaces(asOf: now)
 
     for item := range expired.nodes() {
-      deleteStep := mutationDeleteSpaceNow({
+      deleteStep := mutationDeleteSpaceNow(
         spaceId: item.id,
         payload: {
-          item.payload.name,
+          name: item.payload.name,
           status: "archived",
           active: false,
           deleted: true
         }
-      })
+      )
     }
 
     return expired.count()
@@ -1303,7 +1307,7 @@ logic purgeExpiredArchivedSpaces {
 
 **Conditional steps** use `if <cond> { <call> }`:
 
-```memql
+```memql fragment
 siResponse := if existingResponse.empty() {
   si(args.event.payload.promptTemplateId, args.event.payload.promptData)
 }
@@ -1315,7 +1319,7 @@ Logic functions return via the trailing `return <expr>` — there is no `ctx.out
 
 A single LINQ-style, method-chained collection library with **arrow lambdas** is the in-memory, post-fetch way to filter, project, and aggregate a set inside a `logic` body (and an automation `forEach` source — see below). It operates on collections already in memory — a query-step result, an `args` list, a `select` projection — and never touches the database:
 
-```memql
+```memql fragment
 // active admins among the passed members
 args.members.where(m => m.role == "admin" && m.active).count()
 
@@ -1416,14 +1420,15 @@ The longhand single-step form is gate-enforced out of the shipped corpus, not me
 
 ### `@filter` Annotation
 
-`@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex:
+`@filter` attaches a filter predicate to an automation as an alternative to embedding it in the trigger — useful when the expression is complex. The predicate is over the triggering event's `payload.` fields; the automation only fires when it evaluates true:
 
 ```memql
-@trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-/// On participant creation, opens the session that participant needs.
-automation bootstrapSession {
+@trigger(event="node.created", concept="v1:data:record", partition="*")
+@filter(payload.naturalKeyValue!=null)
+/// Detects conflicts between new data records and existing confirmed records.
+automation conflictDetection {
   step decide {
-    logic bootstrapSession ( event )
+    logic conflictDetection ( event )
   }
 }
 ```
@@ -1529,7 +1534,7 @@ concepts()
 concepts("crm")
 
 // Combine with paginate() to page through long lists
-paginate(ids(concepts()), 5, 0)
+paginate(ids(concepts()), 5)
 ```
 
 Each child node includes:
@@ -1731,25 +1736,25 @@ Cache keys are computed from the normalized query expression (cache hints fold i
 
 ### Finding Unprocessed Items
 
-```memql
+```memql fragment
 concept==v1:task && processed==nil
 ```
 
 ### Filtering by Date Range
 
-```memql
+```memql fragment
 concept==v1:event && createdAt>"2025-01-01" && createdAt<"2025-02-01"
 ```
 
 ### Combining Multiple Concepts
 
-```memql
+```memql fragment
 concept==v1:user || concept==v1:admin
 ```
 
 ### Nested Field Queries
 
-```memql
+```memql fragment
 concept==v1:profile && settings.notifications.email==true
 ```
 
@@ -1767,12 +1772,16 @@ List all assistants that were active at the start of November 2025.
 
 ```
 sort(
-  paginate(concept==v1:examples:world && status=="active", 25, 25),
+  paginate(concept==v1:examples:world && status=="active", 25),
   "createdAt","desc"
 )
 ```
 
-Returns the second page of active worlds, sorted by recency.
+Returns up to 25 active worlds, sorted by recency. `paginate(<expr>, limit)`
+takes exactly two arguments -- there is no offset-style third argument.
+Continuation past the first page is via the response's keyset cursor, not an
+offset skip: pass the cursor the previous page returned to fetch the next
+one, rather than computing a page number.
 
 ### Graph Traversal
 
@@ -1907,88 +1916,16 @@ Queries can be executed via the gRPC `MemqlService.Stream` bidirectional RPC or 
 
 MemQL provides a real-time event system that delivers notifications for graph mutations, query execution, AI completions, and session lifecycle events. Clients subscribe over the existing bidirectional gRPC stream (or WebSocket bridge) and receive `EventNotification` messages as changes occur.
 
-### Subscribing to Events
-
-Send a `SubscribeMsg` over the stream to register for events:
-
-```json
-{
-  "messageId": "sub-1",
-  "subscribe": {
-    "subscriptionId": "my-graph-events",
-    "kind": 5,
-    "filter": ""
-  }
-}
-```
-
-**Subscription Kinds:**
-
-| Kind | Value | Default Pattern |
-|------|-------|-----------------|
-| `SUBSCRIPTION_KIND_TELEMETRY` | 1 | `telemetry.#` |
-| `SUBSCRIPTION_KIND_MESSAGE` | 2 | `message.#` |
-| `SUBSCRIPTION_KIND_QUERY_SPEC` | 3 | `query.#` |
-| `SUBSCRIPTION_KIND_SI_STREAM` | 4 | `si.#` |
-| `SUBSCRIPTION_KIND_GRAPH_EVENTS` | 5 | `graph.#` |
-| `SUBSCRIPTION_KIND_ALL` | 6 | `#` (everything) |
-
-The `filter` field accepts glob patterns for finer control:
-- `*` matches exactly one segment (e.g., `graph.node.*` matches `graph.node.created`)
-- `#` matches zero or more segments (e.g., `graph.#` matches all graph events)
-
-### Available Event Topics
-
-| Topic | Event Kind | Description |
-|-------|------------|-------------|
-| `graph.node.created.{partition}.{concept}` | `NODE_CREATED` | Graph node inserted |
-| `graph.node.deleted.{partition}.{concept}` | `NODE_DELETED` | Graph node deleted |
-| `graph.node.updated.{partition}.{concept}` | `NODE_UPDATED` | Graph node updated |
-| `query.executed` | `QUERY_EXECUTED` | Query completed |
-| `si.completion.started` | `SI_COMPLETION_STARTED` | AI request began |
-| `si.completion.finished` | `SI_COMPLETION_FINISHED` | AI request succeeded |
-| `si.completion.error` | `SI_COMPLETION_ERROR` | AI request failed |
-| `session.opened` | `SESSION_OPENED` | gRPC session started |
-| `session.closed` | `SESSION_CLOSED` | gRPC session ended |
-
-> **#56 phase 8 caveat:** node-event topics still embed a partition segment between the action and the concept, which is why subscription patterns (and automation trigger matching) use a `.*.` wildcard there. That segment goes away in phase 8.
-
-### Receiving Events
-
-Events arrive as `EventNotification` payloads:
-
-```json
-{
-  "messageId": "evt-abc123",
-  "event": {
-    "subscriptionId": "my-graph-events",
-    "kind": 10,
-    "ts": "2025-12-02T10:30:00Z",
-    "payload": {
-      "topic": "graph.node.created.default.v1:cognition:space",
-      "eventKind": "node_created",
-      "nodeId": "v1:cognition:space:space-abc",
-      "concept": "v1:cognition:space",
-      "actor": "user@example.com"
-    }
-  }
-}
-```
-
-### Unsubscribing
-
-```json
-{
-  "messageId": "unsub-1",
-  "unsubscribe": {
-    "subscriptionId": "my-graph-events"
-  }
-}
-```
-
-Subscriptions are automatically cleaned up when the session closes.
-
-> See [docs/public/concepts/events.md](../concepts/events.md) for the full architecture, payload schemas, and implementation details.
+The full subscription protocol -- `SubscribeMsg`, the `SubscriptionKind` enum
+and its values, the structured graph-events subscribe surface vs. the
+free-text filter surface for every other kind, event topic shapes,
+`EventNotification` payloads, and unsubscribing -- lives in
+[docs/public/concepts/events.md](../concepts/events.md), which is the
+single source of truth for this protocol. This guide does not duplicate it
+here: a second copy of an enum's numeric values drifts the moment either
+side changes, which is exactly what happened to an earlier version of this
+section (stale `SubscriptionKind` numbering, and event topics still showing
+the partition segment epic #56 removed).
 
 ## MemQL Language Reference for AI Agents
 
@@ -2038,7 +1975,7 @@ memql#3630.)
 
 ### Defaults / Fallbacks
 
-```memql
+```memql fragment
 coalesce(args.nickname, args.name, "Unknown")
 ```
 
@@ -2083,8 +2020,17 @@ query participant x {
 }
 
 mutate space createSpace {
-  args { spaceId string @required  name string @required }
-  insert { id: args.spaceId  name: args.name  status: "active"  createdAt: now  createdBy: actor.userId }
+  args {
+    spaceId string @required
+    name string @required
+  }
+  insert {
+    id: args.spaceId
+    name: args.name
+    status: "active"
+    createdAt: now
+    createdBy: actor.userId
+  }
 }
 
 spec participant isGuestParticipant { return isGuest == true }
@@ -2093,22 +2039,22 @@ spec participant isGuestParticipant { return isGuest == true }
 shape participant participantCard { row.id  displayName }
 
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
-automation bootstrapSession { step run { logic bootstrapSession { event: event } } }
+automation bootstrapSession { step run { logic bootstrapSession ( event ) } }
 ```
 
 ### Example Patterns
 
-```memql
-# Get active users
+```memql fragment
+// Get active users
 concept==v1:user && active==true
 
-# Get users created this year
+// Get users created this year
 concept==v1:user && createdAt>"2025-01-01T00:00:00Z"
 
-# Call a DSL-defined query with args
+// Call a DSL-defined query with args
 spaceParticipants({"spaceId": "space-123", "status": "active"})
 
-# Sorted, paginated function call
+// Sorted, paginated function call
 sort(paginate(queryActiveSpaces(), 10), "createdAt", "desc")
 ```
 

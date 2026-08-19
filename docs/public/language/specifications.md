@@ -17,7 +17,7 @@ Specs are atomic, named boolean predicates declared in struct form. A
 spec **binds exactly one shape XOR concept in its signature** and the
 body **`return`s a boolean** over **bare** field names (epic #2281):
 
-```memql
+```memql fragment
 spec <boundName> <name> {
   return <boolean-expression>
 }

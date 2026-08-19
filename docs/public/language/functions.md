@@ -73,7 +73,7 @@ The dotted path maps to a file on disk (`cognition.concepts` →
 `dsl/cognition/concepts.memql`); the brace list names the constructs
 pulled into local scope:
 
-```memql
+```memql fragment
 use cognition.concepts.{ participant, space }
 use cognition.shapes.{ participantFull }
 use common.traits.{ isActiveRecord }
@@ -121,7 +121,7 @@ calls (`authCheckPermission({ role: "admin" })`).
 Inputs are declared in an `args { ... }` block and read as `args.X`.
 Engine-provided values are bare top-level names:
 
-```memql
+```memql fragment
 args.fieldName       -- Caller-passed argument
 actor.userId         -- Resolved auth context (role, identityId, isClusterOwner, ...)
 now                  -- RFC3339 timestamp captured at evaluation start
@@ -243,7 +243,7 @@ query space activeSpaces {
 ```
 
 **Calling patterns:**
-```memql
+```memql fragment
 activeSpaces()                      -- No optional filter applied
 activeSpaces({"userId": "u-1"})     -- Creator filter applied
 ```
@@ -344,7 +344,7 @@ is rejected (`TestNoRetiredBindingForms`).
 > `@default` is NOT a substitute -- it is never applied on insert
 > either (memql#2960):
 
-```memql
+```memql fragment
 insert {
   id:      args.guideId
   kind:    args.kind ?? "walkthrough"
@@ -382,7 +382,7 @@ logic provisionDailySpaceOnUserCreate {
     event object @required
   }
   body {
-    return ensureDailySpaceForUser({ userId: args.event.payload.id })
+    return ensureDailySpaceForUser(userId: args.event.payload.id)
   }
 }
 ```
@@ -394,7 +394,7 @@ dependency order, and the trailing `return <expr>` is the function's
 return value. A step can be guarded with `if <cond> { ... }` so it
 only fires when the condition holds:
 
-```memql
+```memql fragment
 body {
   getUser := userById({ userId: args.event.payload.ownerUserId })
   activeAssistantId := coalesce(getUser.first().payload.preferences.activeAssistantId, "")
@@ -835,5 +835,4 @@ query participant spaceParticipants {
 > `func (Shape) name { ... }` receiver wrapping, the
 > `@concepts("v1:...")` binding annotation, the `@template({...})`
 > body annotation, and `node("path")` accessors. Shapes have no
-> inputs and no return; the body is a path list plus optional
-> `include` statements.
+> inputs and no return; the body is a path list.

@@ -37,18 +37,21 @@ The keyword already marks the kind at the declaration -- `query user
 userById { ... }` -- so a prefix restates in the name what the grammar
 states one token earlier. Call sites read better without it:
 
-```memql
+```memql fragment
 filter  spaceId == args.spaceId && isActiveRecord
 step decide { logic bootstrapSession ( event: event ) }
 ```
 
 This is also what the codebase has always done. Measured across the shipped
-tree (excluding the non-embedded `_reference/` skeletons), **0 of 1091
+tree (excluding the non-embedded `_reference/` skeletons), **0 of 1261
 construct DECLARATIONS carry a kind prefix**, across all 16 declaration
-keywords. The six kinds the retired rule actually named account for 666 of
-those: 0/199 queries, 0/213 mutations, 0/33 logic, 0/30 traits, 0/185 seeds,
-0/6 specs. The prefix rule this document used to state was never followed by
-anything.
+keywords. The six kinds the retired rule actually named account for 774 of
+those: 0/245 queries, 0/267 mutations, 0/33 logic, 0/33 traits, 0/186 seeds,
+0/10 specs. The prefix rule this document used to state was never followed by
+anything. (These counts drift as the tree grows; re-run `go test
+./test/dslconformance/ -run TestNoKindPrefixInConstructNames -v` for the
+current numbers -- the gate's own log line is the source of truth, not this
+paragraph.)
 
 Those counts come from the gate itself, which reads the lexer's token stream.
 Two earlier drafts undercounted, and both were caught by review rather than by

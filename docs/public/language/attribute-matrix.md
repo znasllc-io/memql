@@ -69,7 +69,7 @@ pins this table to the allow-lists so the two cannot drift.
 Accepted explicit no-op: definitions are enabled by default (functions since
 #360, automations since #2604). Use `@disabled` to deactivate.
 
-```memql
+```memql fragment
 @enabled
 query user activeUsers { ... }
 ```
@@ -124,7 +124,7 @@ source re-enables the name, and the demote retires it. A bundle authoring a `@di
 Gate-1 with `capability "name" is @disabled` (it would compile to
 nothing), not the misleading "no capability declaration found".
 
-```memql
+```memql fragment
 @disabled
 query user legacyUsers { ... }
 ```
@@ -138,7 +138,7 @@ a construct out of service.
 Version metadata tag. Accepted on **seeds and concept definitions only**;
 rejected at load on query / mutation / automation.
 
-```memql
+```memql fragment
 @version("v2")
 seed defaultSettings { ... }
 ```
@@ -161,14 +161,14 @@ a hard gate, #2703). The engine tree's conformance gate rejects the
 redundant long form where `///` suffices; downstream trees convert with
 `memqlmigrate --rewrite=doc-comment-descriptions` at their repin.
 
-```memql
+```memql fragment
 /// Returns all active user profiles with optional filters.
 query user activeUsers { ... }
 ```
 
 The fallback form stays valid wherever it parses today:
 
-```memql
+```memql fragment
 @description("Returns all active user profiles with optional filters")
 query user activeUsers { ... }
 ```
@@ -339,7 +339,7 @@ one that could never be a value of that type is **refused at load**:
 Before this, the lowering guessed from the literal's *shape* and had no
 datetime branch at all, so
 
-```memql
+```memql fragment
 whenField datetime @default("true")
 ```
 
@@ -388,7 +388,7 @@ not declared anywhere in `dsl/`), or public --
 a construct that references user-scope fields without one of those
 fails CI unless it carries `@public` with a comment explaining why.
 
-```memql
+```memql fragment
 // Concept catalog -- no per-user rows, safe to expose unscoped.
 @public
 query nodeType nodeTypes { ... }
@@ -432,7 +432,7 @@ the single ttl arg makes position unambiguous); the keyword form
 `@cache(ttl="300")` keeps parsing. Duration strings like "5m" were
 doc drift -- the engine reads whole seconds.
 
-```memql
+```memql fragment
 @cache(300)
 query nodeType nodeTypeCatalog { ... }
 ```
@@ -456,7 +456,7 @@ stored object instead of replacing it wholesale (the default contract
 is top-level replace). Added for single-key preference writes that
 would otherwise wipe sibling keys (memql#1339).
 
-```memql
+```memql fragment
 @mergeFields("preferences")
 mutate user toggleComputerUseEnabled { ... }
 ```
@@ -471,7 +471,7 @@ read-merge-append logic wrapper (memql#2240). Like `@mergeFields`, only
 valid on update-kind mutations; not deduped (re-appending an existing
 element yields a duplicate).
 
-```memql
+```memql fragment
 @appendFields("attachmentIds")
 mutate request attachToRequest { ... }
 ```
@@ -489,7 +489,7 @@ sending/sent/failed (fylo#63). The inverse of `@mergeFields`/`@appendFields`:
 only valid on insert-kind mutations (an update always targets an existing
 row, so a create-only field could never be written).
 
-```memql
+```memql fragment
 @createOnly("status", "attempts")
 mutate outboundRequest stageOutboundRequest { ... }
 ```
@@ -516,7 +516,7 @@ Valid on insert- and update-kind mutations alike; a create with no prior row
 is unaffected either way. "Empty" means nil, a blank string, or an empty
 array/object -- never a numeric or boolean zero, which are real values.
 
-```memql
+```memql fragment
 @noUnset("bootstrappedAt")
 mutate clusterSettings updateClusterSettings { ... }
 ```
@@ -540,7 +540,7 @@ the partition segment is a #56 phase-8 vestige -- always pass
 `partition="*"`. Domain events (`cognition.response.requested`,
 `system.startup`) use the bare `event=` form.
 
-```memql
+```memql fragment
 @trigger(event="node.created", concept="v1:cognition:participant", partition="*")
 automation bootstrapSession { ... }
 
@@ -553,7 +553,7 @@ Cron-based schedule. The cron expression is **6-field** (seconds
 first). `@schedule(cron="...")` is accepted as a synonym, but the
 live tree uses the `@trigger(schedule=...)` form exclusively.
 
-```memql
+```memql fragment
 @trigger(schedule="0 0 2 * * *")
 automation purgeExpiredArchivedSpaces { ... }
 
@@ -562,10 +562,10 @@ automation pruneStaleClusterNodes { ... }
 ```
 
 #### `@filter(...)`
-Predicate over the triggering event's  The automation only
+Predicate over the triggering event's payload. The automation only
 fires when the predicate holds.
 
-```memql
+```memql fragment
 @trigger(event="node.created", concept="v1:cognition:space", partition="*")
 @filter(active==true)
 automation autoJoinSI { ... }
