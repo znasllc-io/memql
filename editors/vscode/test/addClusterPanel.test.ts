@@ -1174,13 +1174,19 @@ test("the reveal is DISPLAY, not storage: the receipt and the run log still with
 
     // The run log: every file the recorder wrote for this run.
     const runsDir = path.join(path.dirname(h.receiptFile), "runs");
-    const runFiles = fs.readdirSync(runsDir, { recursive: true, encoding: "utf8" });
+    // Dirents rather than names + statSync: the type comes back from the one
+    // readdir call, so there is no second look-up on a path that could have
+    // changed underneath it (CodeQL js/file-system-race).
+    const runFiles = fs.readdirSync(runsDir, { recursive: true, withFileTypes: true });
     let sawWithheldKey = false;
-    for (const name of runFiles) {
-      const file = path.join(runsDir, name);
-      if (!fs.statSync(file).isFile()) continue;
+    for (const dirent of runFiles) {
+      if (!dirent.isFile()) continue;
+      const file = path.join(dirent.parentPath, dirent.name);
       const content = fs.readFileSync(file, "utf8");
-      assert.ok(!content.includes(RECOVERY_KEY), `the plaintext key must not reach ${name}`);
+      assert.ok(
+        !content.includes(RECOVERY_KEY),
+        `the plaintext key must not reach ${path.relative(runsDir, file)}`,
+      );
       if (content.includes("recoveryKey=[withheld: single-use credential]")) sawWithheldKey = true;
     }
     assert.ok(sawWithheldKey, "the run log still says the step produced a credential it withheld");
