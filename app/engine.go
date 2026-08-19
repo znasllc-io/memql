@@ -277,7 +277,7 @@ func (a *App) engineAndBus() {
 	// registry's DEFAULTED platform-scoped vars/secrets as cluster
 	// variable/secret rows, but ONLY IF ABSENT -- a re-deploy where an
 	// operator already set a value is a strict NO-OP. Loads the same
-	// manifest genesis seals + boot-validates against, so all three
+	// manifest envregistry loads and boot-validates against, so all three
 	// consumers read one source of truth. Runs in the background after
 	// the engine's Ready channel closes (same gate as the seed
 	// materializer: the DB getter is wired during startDependencies, not

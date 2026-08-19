@@ -8,7 +8,7 @@
 // TestNoEnvRegistryDrift Go test (which is what makes the check a CI
 // gate via the go-checks `go test ./...` lane).
 //
-// It detects two drift directions against the genesis manifest registry
+// It detects two drift directions against the envregistry manifest registry
 // (scripts/secrets/manifest.yaml, the locked source of truth):
 //
 //   - forward drift  -- a var read by code that is NOT registered.

@@ -1,6 +1,6 @@
 # Automations Package Architecture
 
-> **Last Updated:** 2025-12-07
+> **Last Updated:** 2026-07-26
 
 This document describes the architecture of the `automations/` package, which provides the multi-step workflow execution engine for MemQL.
 
@@ -622,18 +622,22 @@ Conditions are evaluated by the automation expression evaluator:
 
 ## Testing
 
+Run via `make test` (see CLAUDE.md's Testing section -- `go test ./...` from
+the repo root misses this package). To target just this package directly,
+name the full module path or `cd` into the directory first:
+
 ```bash
 # Run all automation tests
-go test ./automations/...
+go test github.com/znasllc-io/memql/component/automations/...
 
 # Run with verbose output
-go test ./automations/... -v
+go test github.com/znasllc-io/memql/component/automations/... -v
 
 # Run specific test
-go test ./automations -run TestLoadBootstrapUserAutomation
+go test github.com/znasllc-io/memql/component/automations/... -run TestEvaluatorSeesArgs
 
-# Run integration tests
-go test ./automations -run "Test.*Integration"
+# Or, from inside the package directory:
+cd component/automations && go test ./... -run TestEvaluatorSeesArgs
 ```
 
 ---

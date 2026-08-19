@@ -1,6 +1,6 @@
 # Engine Package Architecture
 
-> **Last Updated:** 2025-12-08
+> **Last Updated:** 2026-06-22
 
 This document describes the architecture of the `engine/` package, which contains the core MemQL processing engines.
 

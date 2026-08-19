@@ -4,7 +4,7 @@
 // CI drift gate (the TestNoEnvRegistryDrift Go test, 7.2 / #2105) so the
 // two can never diverge.
 //
-// It detects two drift directions against the genesis manifest registry
+// It detects two drift directions against the envregistry manifest registry
 // (scripts/secrets/manifest.yaml, the locked source of truth):
 //
 //   - forward drift  -- a var read by code that is NOT registered.

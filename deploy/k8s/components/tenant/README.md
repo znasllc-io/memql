@@ -9,8 +9,8 @@ Epic memql#3852, task memql#3853.
 ## The claim this component exists to make true
 
 A memQL Cloud tenant is **not a new kind of deployment**. It is the same base,
-the same engine images and the same ArgoCD reconciliation as staging and
-production — differing only in namespace, domain, replica counts and database
+the same engine images and the same ArgoCD reconciliation as our own cloud
+install — differing only in namespace, domain, replica counts and database
 preset. That is the environment-parity standard
 ([environment-parity.md](../../../../docs/public/operate/environment-parity.md))
 applied to a paying customer, and it is what makes a tenant something we already

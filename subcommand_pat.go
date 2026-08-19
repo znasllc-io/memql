@@ -218,8 +218,9 @@ func runPATRevoke(args []string) int {
 // (MEMQL_IDENTITY_KEY_ENCRYPTION_KEY required ...) and abort the mint on the identity
 // binary -- the only binary the `pat` subcommand is dispatched on.
 func bootstrapPATEngine(prefix string) ([]common.Dependency, *memql.MemQLEngine, *slog.Logger, int) {
-	// Mirror the server bootstrap: decrypt the genesis envelope (sealed DSN /
-	// signing key) then overlay /.env, so the mint sees the same config the
+	// Mirror the server bootstrap: applySubcommandEnv overlays the repo-root
+	// .env, bridges legacy env-var names via envregistry.ApplyLegacyEnvAliases,
+	// and applies domain derivations, so the mint sees the same config the
 	// running identity does (#751 -- subcommands run before main()'s autoload).
 	if err := applySubcommandEnv(prefix); err != nil {
 		fmt.Fprintln(os.Stderr, err)

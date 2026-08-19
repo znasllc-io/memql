@@ -89,7 +89,7 @@ func NewService(cfg Config, logger *slog.Logger, audit AuditLogger) (*Service, e
 		return nil, fmt.Errorf("identity: config validation failed: %w", err)
 	}
 
-	// #550: when a signing key is provided via the sealed envelope
+	// #550: when a signing key is provided via the `memql-secrets` Secret
 	// (MEMQL_IDENTITY_SIGNING_KEY_B64), every replica derives the same key from
 	// it -- no ReadWriteOnce key PVC, so identity can run >=2 replicas on
 	// RollingUpdate. Otherwise fall back to the on-disk KeyDir (dev).
@@ -261,8 +261,8 @@ func (s *Service) Start(ctx context.Context) {
 // this process just started will ever actually do anything.
 //
 // It exists because the scheduler is a false signal in every deployed
-// environment (memql#3381): staging and production get their signing key
-// from the sealed envelope, so RotationSupported() is false and
+// environment (memql#3381): the cloud install gets its signing key
+// from the `memql-secrets` Secret, so RotationSupported() is false and
 // maybeRotate returns immediately, silently, forever -- while the loop's
 // existence and its {"trigger":"scheduled","intervalDays":90} audit detail
 // make rotation look handled precisely where it never runs. A boot log

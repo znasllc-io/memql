@@ -60,8 +60,8 @@ const DefaultStartupReadyTimeout = 30 * time.Second
 // Carrier-binary callers (memql/main.go + the carrier repo's
 // main.go) populate Logger via
 // mustCreateServiceLogger (binary-side helper) + Version via the
-// binary's resolveServiceVersion. Subcommand dispatch + the genesis
-// .env override stay caller-side because they're binary-specific +
+// binary's resolveServiceVersion. Subcommand dispatch + the `.env` override
+// stay caller-side because they're binary-specific +
 // run BEFORE the logger / overrides exist.
 type RunConfig struct {
 	// Logger is the root slog.Logger every component derives from.

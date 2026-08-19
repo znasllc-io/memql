@@ -109,7 +109,7 @@ func TestMissingRequiredError(t *testing.T) {
 		t.Errorf("no missing -> %q, want empty", got)
 	}
 	got := MissingRequiredError("voice", []string{"LIVEKIT_URL", "LIVEKIT_KEY"})
-	want := `node type "voice" requires: LIVEKIT_URL, LIVEKIT_KEY (set them in the environment / genesis envelope)`
+	want := `node type "voice" requires: LIVEKIT_URL, LIVEKIT_KEY (set them in the environment / memql-secrets Secret)`
 	if got != want {
 		t.Errorf("MissingRequiredError = %q, want %q", got, want)
 	}

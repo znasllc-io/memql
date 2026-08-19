@@ -39,6 +39,6 @@ az storage container list \
   --connection-string "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;"
 ```
 
-## Cloud / staging deploys
+## Cloud deploys
 
-Cloud environments override the connection string via the genesis envelope (sealed in `~/.memql/genesis.znas`, seeded into k8s Secrets). The local Azurite constants only apply to the local overlay, so there is no risk of the dev constants leaking to staging or production.
+The cloud install overrides the connection string via ESO syncing `AZURE_BLOB_CONNECTION_STRING` from Key Vault into the `memql-secrets` Secret (see [`deploy/external-secrets/README.md`](../../deploy/external-secrets/README.md)). The local Azurite constants only apply to the local overlay, so there is no risk of the dev constants leaking to the cloud.

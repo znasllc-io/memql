@@ -2172,8 +2172,9 @@ func (c *CognitionIntegration) findParticipantsByType(ctx context.Context, parti
 		if !ok {
 			continue
 		}
-		// Defensive concept filter. The spaceParticipants shape is
-		// declared @concepts("v1:cognition:participant") so in principle
+		// Defensive concept filter. spaceParticipants is a query
+		// signature-bound to v1:cognition:participant
+		// (dsl/cognition/queries.memql), so in principle
 		// this is redundant, but in practice the shape runtime has been
 		// observed returning agent and human-participant nodes from a
 		// filtered AI query -- stripping them here prevents phantom

@@ -37,9 +37,10 @@ func runMigrateSubcommand(args []string) int {
 		}
 	}
 
-	// Mirror the server bootstrap: decrypt the genesis envelope (sealed DSN)
-	// then overlay /.env, so a migrate run sees the same DSN as the cluster
-	// (#751 -- subcommands run before main()'s autoload).
+	// Mirror the server bootstrap: applySubcommandEnv overlays the repo-root
+	// .env, bridges legacy env-var names via envregistry.ApplyLegacyEnvAliases,
+	// and applies domain derivations -- so a migrate run sees the same DSN as
+	// the cluster (#751 -- subcommands run before main()'s autoload).
 	if err := applySubcommandEnv("migrate"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

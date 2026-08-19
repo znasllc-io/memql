@@ -29,15 +29,19 @@ resolves the mesh values (`bff:50058`, `agent:50055`, ...), so
 `MEMQL_NODE_ADDRESS` / `MEMQL_WORKER_PEERS` are the same in the local k3d
 cluster and on AKS.
 
-**That bare-name addressing is what lets one base serve two environments**
-(memql#3766). Nothing here names a namespace in a string it owns, so kustomize's
-namespace transformer -- which rewrites `metadata.namespace` on every resource
-and `metadata.name` on `namespace.yaml` -- is the whole of the change between
-`overlays/cloud` (ns `memql-prod`) and `overlays/cloud` (ns `memql-staging`).
-Two independent meshes form, with no cross-talk and no per-environment
-manifest. Adding a fully-qualified `<svc>.memql.svc.cluster.local` anywhere in
-this base would break that silently, by pinning one environment's node to the
-other's Service.
+**That bare-name addressing is what lets one base serve any namespace**
+(memql#3766). Nothing here names a namespace in a string it owns, so
+kustomize's namespace transformer -- which rewrites `metadata.namespace` on
+every resource and `metadata.name` on `namespace.yaml` -- is the whole of the
+change needed to place the mesh in a different namespace (e.g. a per-tenant
+overlay, `deploy/k8s/components/tenant`). There is exactly one cloud
+installation today (`overlays/cloud`, ns `memql`, `deploy/argocd/apps/memql.yaml`;
+epic memql#3943 retired the staging/production split), but the bare-name
+addressing means a second, fully independent installation -- its own
+namespace, its own mesh, no cross-talk -- costs nothing more than a second
+overlay. Adding a fully-qualified `<svc>.memql.svc.cluster.local` anywhere in
+this base would break that, by pinning one installation's node to another's
+Service.
 
 **#1399 exception -- the parent dial target is `bff-active`, not `bff`.**
 Under the live Argo Rollouts blue/green cutover the unscoped `bff` Service
@@ -199,10 +203,8 @@ used to be forced by a ReadWriteOnce key PVC — only one pod could mount the
 signing key — so every deploy had an auth-down window.
 
 Now the Ed25519 signing key is env-provided as `MEMQL_IDENTITY_SIGNING_KEY_B64`
-(a base64 32-byte seed) through the `memql-secrets` Secret every node
-`envFrom`s — either as a key on that Secret, or inside the sealed genesis
-envelope it carries (autoload is set-if-absent, so an explicit Secret key
-wins). Every replica derives the **same** key + `kid` + JWKS from it, so
+(a base64 32-byte seed) as a key on the `memql-secrets` Secret every node
+`envFrom`s. Every replica derives the **same** key + `kid` + JWKS from it, so
 there's no single-writer volume. Generate one with `make identity-signing-key`.
 **Rotate** by writing a new seed and rolling the deployment (automatic rotation
 is disabled in this mode); rotation invalidates every live session and every
@@ -273,25 +275,17 @@ in-process rather than via a `preStop` sleep.)
 kubectl kustomize deploy/k8s/overlays/cloud | kubeconform -strict -summary -kubernetes-version 1.30.0
 ```
 
-## Smoke test (live front door)
+## Post-deploy gate (live front door)
 
 After a deploy, exercise the real product path through the public HTTPS
-entry (not just pod health) with the repeatable smoke test
+entry (not just pod health) with the post-deploy gate
 ([#535](https://github.com/znasllc-io/memql/issues/535)):
 
 ```bash
-make smoke-staging                                # baseline, read-only
-make smoke-staging SMOKE_EMAIL=me@example.com     # + issue a real magic link
-make smoke-staging MEMQL_SMOKE_TOKEN=mql_pat_xxx  # + run a live authenticated query
-make smoke-staging APP_HOST=<prod app host> IDENTITY_HOST=<prod identity host>  # smoke prod (target lives in the pack now)
+bash scripts/deploy/deploy-gate.sh --provider=azure --workdir=<checkout>
 ```
 
-It checks, in order: TLS + DNS for both public hosts (valid Let's Encrypt
-cert), identity `/healthz` + JWKS (directly **and** through the app's
-same-origin `/.well-known/jwks.json` proxy), the magic-link login page,
-the BFF `/memql/ws` upgrade, and the `/memql/audio` voice route. The
-baseline is read-only (sends no email, needs no auth); the **deep** checks
-(full magic-link round trip, authenticated query, cross-node AI forward)
-run only when `SMOKE_EMAIL` / `MEMQL_SMOKE_TOKEN` are supplied, and every
-skipped check is reported explicitly. Exit code is non-zero iff a check
-**failed**. Impl: `scripts/deploy/staging-smoke-test.sh`.
+The deploy is "good" only if this passes; see
+[`deploy/argocd/README.md`](../../argocd/README.md) for where it sits in the
+steady-state deploy flow, and `docs/internal/design/capability-script-contract.md`
+for the structured pass/fail envelope it reports. Impl: `scripts/deploy/deploy-gate.sh`.

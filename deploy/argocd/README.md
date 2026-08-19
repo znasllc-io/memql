@@ -147,7 +147,7 @@ bash scripts/deploy/drift-check.sh --live      # must report converged
 argocd app sync memql
 argocd app wait memql --health
 # 4. Validation authority — the existing post-deploy functional gate:
-bash scripts/deploy/post-deploy-gate.sh        # the deploy is "good" only if this passes
+bash scripts/deploy/deploy-gate.sh        # the deploy is "good" only if this passes
 ```
 
 Rollback = `git revert` the digest-bump commit + re-sync (`argocd app sync

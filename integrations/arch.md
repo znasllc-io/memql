@@ -17,23 +17,39 @@ integrations/
 ├── integration.go            # Base Integration struct (embeddable lifecycle)
 ├── env.go, errors.go         # Shared env reader + sentinel errors
 ├── embed.go, integrations.json
+├── actionsearch/                       # searchActions: pgvector cosine search over the action library's intent embeddings
+├── agent/                              # AI tool-loop + replier + suggest (agent build only)
+├── agentdef/                           # Modality-independent agent generation-definition projection
+├── agents/                             # agent(name, prompt, partitionId) builtin executor
 ├── auth/        capabilities.go        # resolveUser, checkPermission
-├── audio/       resample.go, wav.go    # PCM16 sample-rate conversion
+├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
+├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
+├── azureblob/                          # storage.upload (registered as `storage`)
+├── chat/                               # recentChat tool -- read-only window into a space's utterance stream
 ├── cognition/                          # routing + conductor + client-tool relay
-├── agent/                              # AI tool-loop + replier + suggest
+├── dailyspace/                         # platform-driven per-user daily-space lifecycle
 ├── database/    capabilities.go        # healthCheck, stats
+├── deployversion/                      # pure version-arithmetic DSL-callable capability
 ├── email/                              # Microsoft Graph / SMTP / Log senders
 ├── embedding/                          # vector embedding capabilities
 ├── fileprocessor/                      # extractText (PDF / DOCX / image)
-├── gcs/                                # storage.upload
+├── harnessrecall/                      # recall DSL operator -- recency x relevance hybrid memory query
+├── harnesstrace/                       # harnessTrace DSL/SDK builtin -- plan execution timeline over gRPC
 ├── identity/                           # identity-side helpers
 ├── knowledge/                          # corpus seed + lookup helpers
-├── avatarvendor/                       # CGO-free Anam/Simli vendor REST + dispatch core
-├── avatardirect/                       # Direct/Guide avatar: mint LiveKit room + bring Anam up
+├── library/                            # action-library capability
+├── liveknowledge/                      # Live Knowledge dispatch -- routes integration.liveknowledge.query
 ├── openai/      asr.go, tts.go         # Polyphon ASR/TTS via OpenAI Realtime + /v1/audio/speech
+├── openairealtime/                     # OpenAI Realtime ephemeral client-secret minting
+├── planner/                            # planner-node Task/Plan lifecycle orchestration + agent decompose loop
+├── rbac/                               # relational governance rank arithmetic behind dsl/rbac/logic.memql
 ├── router/                             # AI router ledger + integration
 ├── similarity/                         # pgvector similarTo() builtin
-└── stt/                                # Speech-to-text (transcribe + streaming)
+├── stt/                                # Speech-to-text (transcribe + streaming)
+├── telephony/                          # carrier/call/compliance/cost/provisioning capabilities
+├── timeutil/                           # IANA-timezone-aware date-key helpers
+├── voice/                              # canonical voice catalog + the Go voice-agent (integrations/voice/agent)
+└── workbench/                          # workbenchHost dispatch: exec/fs/http against the per-Plan workspace
 ```
 
 ## Plug-in vs explicit wiring
@@ -194,7 +210,7 @@ Self-registering plug-in. Capability:
 | `database` | `healthCheck`, `stats` |
 | `embedding` | text embedding (vendor-agnostic over `EmbeddingProviderByName`) |
 | `fileprocessor` | `extractText` (PDF, DOCX, images via VisionAIProvider, plain text) |
-| `gcs` | `storage.upload` |
+| `azureblob` (registered as `storage`) | `storage.upload` |
 | `identity` | identity-side helpers (resolve etc.) |
 | `knowledge` | corpus seed + lookup helpers |
 | `avatardirect` | `startSession` / `stopSession` (direct/Guide Anam avatar) |

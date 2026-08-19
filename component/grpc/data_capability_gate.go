@@ -73,9 +73,10 @@ var dataPlaneGateExemptions = []dataPlaneGateExemption{
 	{
 		Name:     "guest-stream",
 		Enforced: true,
-		Reason: "Guests carry their own authorization dimension -- invitation scope plus " +
-			"the partition grant -- and THAT, not the cluster role, is the real gate for " +
-			"them. The reader-vs-writer distinction this gate exists to enforce is about " +
+		Reason: "Guests carry their own authorization dimension -- the invitation's scope, " +
+			"including the space it names via its partitionId field (a product-scope hint, " +
+			"not the retired tenant-partition dimension) -- and THAT, not the cluster role, " +
+			"is the real gate for them. The reader-vs-writer distinction this gate exists to enforce is about " +
 			"ordinary authenticated users. Guests have dedicated message types only for " +
 			"the invite/join lifecycle (SendGuestInviteMsg, ResolveGuestInviteMsg, " +
 			"JoinSpaceAsGuestMsg, cancel/resend); there is no guest-specific message for " +

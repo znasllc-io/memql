@@ -12,10 +12,10 @@
 // a deploy would strand at in_progress with nothing to drive it -- so the pack
 // MUST be present on the identity binary.
 //
-// anchorDeployPack() is called from build_identity.go's Build() AFTER genesis
-// autoload (main.go applies the sealed envelope to the process env before
-// app.Build()) and BEFORE engineAndBus() loads the DSL tree -- so the pack's
-// tree + IntegrationProvider are registered in time to be loaded.
+// anchorDeployPack() is called from build_identity.go's Build() after
+// main.go's .env override + legacy-alias bridge + domain-derivation layering
+// has already run, and BEFORE engineAndBus() loads the DSL tree -- so the
+// pack's tree + IntegrationProvider are registered in time to be loaded.
 //
 // The deploypack package's own auto-register init lives behind the separate
 // `deploypack` build tag and does NOT fire here, so this Register is the

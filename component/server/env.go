@@ -58,7 +58,7 @@ const (
 	// prefix-composed read. Two blind spots covering for each other, which is the
 	// shape memql#3831 named and this is another instance of.
 	//
-	// The legacy spellings keep working: genesis.ApplyLegacyEnvAliases bridges
+	// The legacy spellings keep working: envregistry.ApplyLegacyEnvAliases bridges
 	// each SERVER_* name onto its MEMQL_SERVER_* counterpart at boot, before any
 	// config is read.
 	serverEnvPrefix              = "MEMQL_SERVER"

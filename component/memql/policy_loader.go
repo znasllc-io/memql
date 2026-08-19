@@ -81,16 +81,15 @@ func (r *PolicyRegistry) Count() int {
 	return len(r.byName)
 }
 
-// loadAIPolicies returns an empty registry. Pass 3 of the DSL
-// restructure migration retired the legacy walk over
-// dsl/v1/policies/. AI Router policies now live in
-// dsl/policies/routing.memql and load via a unified loader
-// (LoadUnifiedRoutingPolicies) called from engine.go. This stub
-// keeps the function signature so the bootstrap call site
-// compiles unchanged.
-//
-// TODO: wire LoadUnifiedRoutingPolicies as the actual loader and
-// delete this stub.
+// loadAIPolicies returns an empty registry (Pass 1). Pass 3 of the DSL
+// restructure migration retired the legacy walk over dsl/v1/policies/. AI
+// Router policies now live in dsl/policies/policies.memql and load via a
+// second pass -- the unified loader `LoadUnifiedPolicies`, called right
+// after this stub in engine_bootstrap.go's Init -- that overlays the real
+// registry on top of this stub's empty one. This stub stays in place
+// (rather than being deleted once the real loader was wired) so the
+// bootstrap call site compiles unchanged, mirroring the provider loader
+// immediately above it (loadAIProviders + LoadUnifiedProviders).
 func loadAIPolicies(logger *slog.Logger) (*PolicyRegistry, error) {
 	_ = logger
 	_ = strings.TrimSpace("") // keep import alive until decommissioned

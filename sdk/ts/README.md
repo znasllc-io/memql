@@ -243,7 +243,7 @@ const invite = await sendGuestInvite(conn.dispatcher, {
   spaceName: "Brainstorm",
   inviterName: "Alice",
   email: "guest@example.com",
-  joinUrlBase: "https://app.the product.ai",
+  joinUrlBase: "https://app.example.com",
   expiresInMinutes: 15,
 });
 

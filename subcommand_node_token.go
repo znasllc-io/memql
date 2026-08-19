@@ -106,8 +106,9 @@ func runNodeTokenMint(args []string) int {
 		return 2
 	}
 
-	// Decrypt the genesis envelope then overlay /.env, exactly as the server
-	// boot does, so the CLI sees the same signing key / DSN as the running
+	// applySubcommandEnv overlays the repo-root .env, bridges legacy env-var
+	// names via envregistry.ApplyLegacyEnvAliases, and applies domain
+	// derivations, so the CLI sees the same signing key / DSN as the running
 	// identity service when the operator execs into the container (#751 --
 	// subcommands run before main()'s autoload).
 	if err := applySubcommandEnv("node-token mint"); err != nil {

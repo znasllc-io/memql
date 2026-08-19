@@ -31,7 +31,7 @@ patches:
     patch: |
       - op: replace
         path: /spec/configuration/destinationPath
-        value: "azure://memql-staging-db-backups/"
+        value: "azure://memql-db-backups/"
 
 images:
   - name: memql-db
