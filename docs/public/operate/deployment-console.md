@@ -304,12 +304,14 @@ a surface you are admitted to.
 
 ## Reading the console
 
-Both surfaces show the same per-env state. Scope it with the env
-toggle (portal) or the per-env rows (cockpit).
+Both surfaces show the same installation's state. There is no env to
+scope by -- memQL ships one installation shape (epic memql#3943); an
+operator who wants a second environment installs a second instance
+with its own console.
 
 - **Version + digests** -- the deployed release version and the
-  per-component image `@sha256:` digests, read from the committed env
-  overlay (`deploy/k8s/overlays/<env>` under the deploy repo,
+  per-component image `@sha256:` digests, read from the committed cloud
+  overlay (`deploy/k8s/overlays/cloud` under the deploy repo,
   `MEMQL_DEPLOY_REPO_ROOT`). That one overlay pins the release directly
   as `{engine version, bundle digest, client digest}` -- there is no
   separate per-version lockfile.
@@ -346,7 +348,7 @@ Notes that hold on both surfaces:
   action is never invoked.
 - **Audit.** Every action (and every denied attempt) writes a
   `v1:identity:auditEvent` (category `admin`, action
-  `deployment_console_<verb>`, with the actor, env, target version /
+  `deployment_console_<verb>`, with the actor, target version /
   digest / rollout, and outcome). The console surfaces the audit-event
   id back to you on success (`SUCCESS: <action> (audit <id>)`); failures
   show `ERROR: <message>`, and a **refusal** shows the id of the blocked
@@ -360,7 +362,7 @@ Notes that hold on both surfaces:
 
 ### Portal
 
-`/views/deployments` -> select the env -> use the action controls
+`/views/deployments` -> use the action controls
 on the Overview panel (deploy / promote), next to the version
 (rollback), and in the Rollouts table (per-rollout promote / abort).
 Destructive actions render an inline type-to-confirm field.
@@ -377,7 +379,7 @@ a permissions one.
 
 In the cluster/Topology view, press **`D`** (capital D; lowercase `d`
 stays the pan key) to open the deploy-control menu. The menu walks you
-through the action, env, and any required inputs / confirmation; the
+through the action and any required inputs / confirmation; the
 result line shows `SUCCESS:` / `ERROR:` (and `ERROR: requires
 owner/admin` if your role is insufficient). On success the deployment
 overlay refreshes immediately so Argo / Rollouts state reflects the new
@@ -387,8 +389,8 @@ reality.
 
 All console writes and denials append to the identity audit log
 (`v1:identity:auditEvent`), visible in the memQL portal's Audit view
-view. Promotion-to-prod and rollback in particular are auditable after
-the fact: actor, env, target version / digest, and outcome.
+view. Deploy and rollback in particular are auditable after
+the fact: actor, target version / digest, and outcome.
 
 A denial appears there with `outcome = blocked` and the correlation id
 the refused caller was shown, so an id quoted in a support thread

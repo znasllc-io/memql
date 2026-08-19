@@ -54,7 +54,7 @@ only after a deploy.
 | ExternalSecrets | deleted by `$patch: delete` in local overlay | present | config only |
 | LiveKit | **LiveKit Cloud** (outbound; no self-hosted livekit/sip/redis locally) | self-hosted `livekit-server` + `livekit/sip` | divergent -- justified (Epic #2184) |
 | Ingress | k3s-bundled traefik front door (`identity.memql.localhost`, mkcert TLS) + port-forwards for the gRPC heads | ingress-nginx | divergent -- traefik vs nginx |
-| Digest-pinning gate | skipped for `ENV=local` in drift-check.sh | enforced | divergent -- justified |
+| Digest-pinning gate | skipped for the `local` overlay in `scripts/deploy/drift-check.sh` (`check_rendered`'s `ENV=local` branch, which still asserts the overlay renders) | enforced | divergent -- justified |
 
 ## Prerequisites
 
@@ -490,7 +490,7 @@ with its justification.
 |---|---|---|---|---|
 | 1 | **Replicas (default)** | 1 per Deployment | 2 per Deployment (0 when idle) | Resource-constrained laptops locally; cost in the cloud, which parks at zero between uses. Multi-node is opt-in in BOTH via `make scale N=2`. The fieldRef mechanism is identical everywhere, so the multi-node path fully reproduces wherever you scale it up. |
 | 2 | **Ingress** | k3s-bundled **traefik** front door for `identity.memql.localhost` (mkcert TLS); gRPC heads via port-forward | ingress-nginx on AKS | Same ingress *topology* as cloud (an HTTPS front door for identity); traefik ships with k3s so there's no extra install. gRPC heads (`mcp:50051`) stay on port-forward -- they're not fronted locally. |
-| 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. The gate exemption is tested by `TestDriftCheckRenderedLocalOverlaySkipsDigestGate`. |
+| 3 | **Digest-pinning gate** | skipped for `ENV=local` in `scripts/deploy/drift-check.sh` | enforced | Local images are built by `make dev` with a stable `:local` tag; they have no ACR digest. `check_rendered` special-cases `ENV=local`: it skips the digest-pin assertion but still fails if the overlay does not render. As of this writing no Go test asserts this exemption specifically -- `scripts/deploy/drift_check_test.go` covers image-ref normalization, not the local-skip branch -- so the behaviour is enforced by the script alone. |
 | 4 | **ExternalSecrets / Key Vault** | deleted by `$patch: delete` in local overlay | ESO syncs from Key Vault | Dev secrets are seeded directly by `make secrets`. |
 | 5 | **Connection pooler** | direct Postgres connection | Tiger Cloud managed PgBouncer | Single-node dev without a pool is safe; the hybrid-endpoint split the cloud uses can be reproduced by running PgBouncer as a separate pod if needed. |
 | 6 | **voice-agent** | opt-in (`deploy/k8s/overlays/local/` includes it) | in base | Needs live OpenAI + a **LiveKit Cloud** project. Export `LIVEKIT_URL` / `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` before `make up` (seed-secrets sources them); see [voice-bringup-verification.md](voice-bringup-verification.md) and, for telephony, [telephony-local-dev.md](telephony-local-dev.md). |

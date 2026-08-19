@@ -37,9 +37,22 @@ SPA) deploys from its own repo's release track -- see
 4. **`MEMQL_DEPLOY_REPO_ROOT`** pointing at a memql checkout (the
    capability-script runner resolves the allowlisted scripts/* backends
    from it when the cockpit runs outside the repo).
-5. For **staging/production**: an `az` session that can read the ACR
-   (`acrmemql` by default; override with `MEMQL_DEPLOY_ACR`). The
+5. For the **`azure` provider** (the cloud target): an `az` session that can
+   read the ACR (`acrmemql` by default; override with `MEMQL_DEPLOY_ACR`). The
    emitter resolves `payload.digests` from ACR by tag (memql#2381).
+
+## The deploy target: `provider`, not `env`
+
+memQL ships one installation shape (epic memql#3943); there is no
+staging-versus-production dimension for a command to select. What still
+varies is the deploy TARGET, which `deployEngineCluster`
+(`dsl/deployment/automations.memql`) switches on via its `provider` field --
+`docker-local` (a k3d cluster, images imported locally) or `azure` (AKS,
+digest-pinned overlay + ArgoCD sync). `MEMQL_DEPLOY_PROVIDER` sets the
+default provider server-side when a caller does not supply one explicitly.
+Pass it through the event payload (the `--input` JSON below) rather than an
+`--env` flag -- the automation's `args {}` block has no `env` field any
+more.
 
 ## The dry-run ladder (memql#2378)
 
@@ -69,29 +82,31 @@ git clone /path/to/memql /tmp/deploy-workdir
 
 MEMQL_DEPLOY_REPO_ROOT=/path/to/memql \
 MEMQL_DATABASE_DSN="postgres://memql:memql_dev@localhost:5432/memql?sslmode=disable" \
-memql-cockpit deploy --env development --ref main --role owner --actor "$USER" \
-  --apply --input '{"workdir":"/tmp/deploy-workdir","version":"local"}'
+memql-cockpit deploy --ref main --role owner --actor "$USER" \
+  --apply --input '{"workdir":"/tmp/deploy-workdir","version":"local","provider":"docker-local"}'
 ```
 
-Or through make (quoting of --input JSON does not survive make ARGS;
-pass simple inputs only, or invoke the binary directly as above):
+Or through make (quoting of --input JSON does not survive make ARGS, so the
+provider has to come from the environment instead -- `MEMQL_DEPLOY_PROVIDER`
+is read server-side as the default when the payload does not name one):
 
 ```bash
-make deploy ENV=development VERSION=main APPLY=1
+MEMQL_DEPLOY_PROVIDER=docker-local make deploy VERSION=main APPLY=1
 ```
 
-## Staging / production (dry-run today; live is owner-gated)
+## Azure (cloud) deploy target (dry-run today; live is owner-gated)
 
 ```bash
-memql-cockpit deploy --env staging --ref 0.11.2 --role owner --actor "$USER" \
-  --input '{"workdir":"/tmp/deploy-workdir"}'
+memql-cockpit deploy --ref 0.11.2 --role owner --actor "$USER" \
+  --input '{"workdir":"/tmp/deploy-workdir","provider":"azure"}'
 ```
 
 The emitter resolves real image digests from ACR (printed as INFO
 lines), defaults `overlayPath=deploy/k8s/overlays/cloud`, and the
 bundle's GitOps branch (pinOverlayDigests + argoSync + post-deploy
-gate) runs -- in dry-run reporting mode by default. The LIVE staging
-exercise is deferred to the staging-rebuild decision (memql#2381).
+gate) runs -- in dry-run reporting mode by default. A LIVE `azure`
+deploy through this path is owner-gated; see memql#2381 for the ACR
+digest-resolution decision it depends on.
 
 ## Reading the evidence
 

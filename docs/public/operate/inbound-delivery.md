@@ -117,7 +117,7 @@ spelled out per source -- an unset scheme is an error, never a silent downgrade
 
 ## What a product writes
 
-```memql
+```memql fragment
 @trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
 automation handleShopifyOrder { ... }
 ```

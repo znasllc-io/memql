@@ -29,14 +29,19 @@ the env differs:
 | | SIP + WebRTC media plane | `MEMQL_TELEPHONY_SIP_EDGE_URI` |
 |---|---|---|
 | **Local dev** | **LiveKit Cloud** (outbound; Cloud's TURN handles NAT). No self-hosted livekit-server / livekit/sip / coturn locally. | **unset/empty** — Cloud is the edge; the Telnyx Connection points at the Cloud SIP URI and the inbound trunk + dispatch rule are created via the LiveKit API. |
-| **Staging / prod** | **self-hosted** `livekit-server` + `livekit/sip` (`deploy/k8s/base/livekit*.yaml`). | the in-cluster `livekit/sip` edge (the carrier-reachable SIP URI). |
+| **Cloud** | **self-hosted** `livekit-server` + `livekit/sip` (`deploy/k8s/base/livekit*.yaml`). | the in-cluster `livekit/sip` edge (the carrier-reachable SIP URI). |
 
 The local-dev bring-up flow is its own runbook:
-[telephony-local-dev.md](telephony-local-dev.md). An automated guard
-(`scripts/deploy/livekit_cloud_guard_test.go`) fails CI if a `*.livekit.cloud`
-reference ever lands in a staging/prod overlay, so the two planes can never
-cross-contaminate. The rest of this page documents the **self-hosted**
-(staging/prod) plane.
+[telephony-local-dev.md](telephony-local-dev.md). `scripts/deploy/livekit_cloud_guard_test.go`,
+the automated guard that failed CI if a `*.livekit.cloud` reference ever
+landed in the cloud overlay, was deleted along with the staging/production
+retirement (commit 992deb41); no replacement test currently covers this
+specifically. The two planes still cannot cross-contaminate in practice --
+the cloud overlay's LiveKit manifests (`deploy/k8s/base/livekit*.yaml`) name
+only the self-hosted `livekit-server` / `livekit/sip` Services, and nothing
+in this repo's cloud-facing config carries a `*.livekit.cloud` value -- but
+that is presently enforced by the manifests' content rather than a dedicated
+test. The rest of this page documents the **self-hosted** (cloud) plane.
 
 > Epic 4 (memql#1906) builds this in dependency-ordered slices. This page
 > grows with each slice. **Live PSTN verification** (a real inbound and a real

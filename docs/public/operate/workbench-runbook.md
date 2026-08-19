@@ -205,7 +205,7 @@ at boot if the remote flag is set but the router could not be wired at all
 
 | Path                                                   | Purpose |
 |--------------------------------------------------------|---------|
-| `component/memql/operator_caps.go`                     | Slug expansion (`workbench_use` -> `workbenchHost` + `canvasPublish`) |
+| `component/memql/worker_caps.go`                     | Slug expansion (`workbench_use` -> `workbenchHost` + `canvasPublish`) |
 | `dsl/workbench/`                                       | Concept + mutations + queries + shapes + automation + logic + builtins |
 | the product pack's `tools.memql`                       | `tool workbenchHost { ... }` definition (pack-owned) |
 | `integrations/workbench/`                              | Go integration: Manager, dispatch handlers, forward router/handler |

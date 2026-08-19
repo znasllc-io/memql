@@ -145,14 +145,34 @@ VS Code extension and every worker dials that host. ingress-nginx ranks
 differently again — longest path, then oldest Ingress — so it would not even
 be the same wrong answer everywhere.
 
-**So precedence is declared, not inherited (memql#3714).** `api-front-door.yaml`,
-`front-door.yaml` (identity) and `mcp-front-door.yaml` each carry an explicit
+**So precedence is declared, not inherited -- but not the way it first shipped
+(memql#3714, revised memql#3810).** `api-front-door.yaml`, `front-door.yaml`
+(identity) and `mcp-front-door.yaml` originally each carried an explicit
 `traefik.ingress.kubernetes.io/router.priority: "100"` — comfortably above the
-wildcard's computed default (its longest rule is under 70 characters) and
-identical across the three, so they rank above the wildcard the same way rather
-than coincidentally. `edge-front-door.yaml` (the wildcard and apex rules) carries
-no priority annotation of its own; it does not need one; the declaration on the
-other three is what the ranking depends on. The ingress-nginx side is not yet
+wildcard's computed default. That broke the API: the annotation is
+**Ingress-level**, so the single value applied to every router that Ingress
+generates, and `api-front-door.yaml` alone declares 22 paths whose relative
+ordering had depended on traefik's default (the compiled rule length). A
+uniform `"100"` erased that variance, so `/` — the h2c gRPC catch-all pointed
+at `bff:50051` — outranked the 21 specific paths pointed at `bff-http:8085`,
+and every HTTP path on `api.<domain>` answered `415 Unsupported Media Type`
+with `Content-Type: application/grpc`.
+
+The fix moved the declaration to the other side of the relationship instead of
+removing it: **`api-front-door.yaml`, `front-door.yaml` and
+`mcp-front-door.yaml` carry NO `router.priority` annotation at all** (each
+file says so explicitly, in a comment naming memql#3810). Precedence over the
+wildcard is still declared — it has to be, or the wildcard genuinely does
+swallow the exact hosts — but it is declared **on the wildcard itself**, in
+`edge-front-door.yaml`, whose two rules (`*.<domain>` and the apex) carry
+`traefik.ingress.kubernetes.io/router.priority: "1"`. Priority `1` loses to
+every rule-length default, so all three exact hosts outrank the wildcard while
+keeping their own paths ordered by length exactly as before — the wildcard's
+two same-shaped `/` rules have no intra-host ordering for a uniform value to
+destroy, which is what makes it safe to put the annotation there and nowhere
+else. `deploy/k8s/overlays/local/render_priority_test.go` gates this shape:
+no Ingress declaring more than one distinct path may carry a uniform priority,
+and `edge-front-door.yaml` must carry one. The ingress-nginx side is not yet
 worked out here — this repository's overlays carry no cloud Ingress
 definitions at all (the product pack that runs on this engine owns those), so
 the equivalent declaration is that downstream repo's responsibility when it
