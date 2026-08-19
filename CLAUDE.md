@@ -1865,8 +1865,12 @@ concept id.
   for the same reason (`TestSortKeysUseRowNamespace`). Payload sort keys
   stay bare (`sort "version", "desc"`), `provenance` has no sort form,
   and the runtime/SDK sort surface accepts either spelling.
-- **One Go boolean grammar:** `&&` (AND), `||` (OR), `!` (NOT), parens
-  `( )` with Go precedence (`!` > comparisons > `&&` > `||`).
+- **One Go boolean grammar:** `&&` (AND), `||` (OR), parens `( )` with Go
+  precedence. `!` (NOT) lexes and parses, but is refused by every
+  ASTConverter surface -- filters and specs get the expression-led scope
+  error, logic bodies and collection lambdas get "NOT/! does not convert"
+  (memql#3630). Its only working home is an automation cond-step condition;
+  write the `!=` comparison form everywhere else.
 - Membership is the single `in` operator: `args.x in list`
   or `kind in ["a", "b"]` (payload props bare).
 - Arg-conditional predicates use the `when(args.x) { <expr> }` guard:
@@ -2303,7 +2307,7 @@ See [docs/internal/design/auto-generated-diagrams.md](docs/internal/design/auto-
 
 ### Identity Concepts
 Auth + access metadata (dsl/identity/concepts.memql; infrastructure metadata every node loads)
-- `v1:identity:user` -- the person; cluster-wide role (owner / admin / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
+- `v1:identity:user` -- the person; cluster-wide role (owner / admin / developer / writer / reader); preferences (theme, archive retention, daily-space toggle, voice mode, UI-takeover settings)
 - `v1:identity:identity` -- a credential set owned by a user (magic-link verified email, oauth token, api key/PAT, service account, worker token, badge, account token, passkey). A discriminated union keyed on `identityType`; the `passkey` variant (memql#3406) is the only one whose stored material is PUBLIC (a COSE key), because possession is proved by a signature rather than by a digest match
 - `v1:identity:authSession` -- per-token session record (used for revocation)
 - `v1:identity:magiclink` -- single-use magic-link credential (token-hashed)

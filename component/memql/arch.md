@@ -133,6 +133,12 @@ Input String
 └──────────────────────────────────────────────────────────┘
 ```
 
+`!` lexes here like any other operator, but every ASTConverter surface
+refuses it after parsing -- filters/specs get the expression-led scope
+error, logic bodies and collection lambdas get "NOT/! does not convert".
+Its only working home is an automation cond-step condition (memql#3630);
+authors write the `!=` comparison form elsewhere.
+
 ### Parser Grammar (Simplified)
 
 ```
@@ -149,7 +155,8 @@ step         = id ":" stepType ["when" cond] "{" body "}"
 expression   = logicalOr
 logicalOr    = logicalAnd { "||" logicalAnd }
 logicalAnd   = unary { "&&" unary }
-unary        = "!" unary | primary
+unary        = "!" unary | primary   // parses; refused post-parse except in
+                                      // an automation cond-step (memql#3630)
 primary      = comparison | functionCall | whenGuard | grouped
 ```
 
@@ -159,6 +166,9 @@ primary      = comparison | functionCall | whenGuard | grouped
 Node
 ├── ExpressionNode
 │   ├── LogicalExpr           // a && b (AND) or a || b (OR); ! for NOT
+│   │                         // (parses into this node, but every
+│   │                         // ASTConverter surface except an automation
+│   │                         // cond-step refuses it -- memql#3630)
 │   ├── ComparisonExpr        // field==value
 │   ├── FunctionCallExpr      // func(args)
 │   ├── RelationshipExpr      // parentOf(...), childOf(...)
