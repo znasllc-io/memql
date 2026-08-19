@@ -230,7 +230,7 @@ const matrixKeyOrder = "\x00order\x00"
 
 // effectiveCheckRunNames computes the check-run name(s) a job publishes.
 //
-// The rules, as observed on this repo's own runs (docs/ci-audit.md records the
+// The rules, as observed on this repo's own runs (docs/internal/ops/ci-audit.md records the
 // live `statusCheckRollup` names):
 //
 //   - No matrix: the name is `name:` verbatim, or the job key when `name:` is

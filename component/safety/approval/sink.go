@@ -306,7 +306,7 @@ var envLookup = func(k string) string {
 // The one correct definition of "a MemQL string literal" is
 // langparser.QuoteString, which lives beside the lexer whose escape set it
 // targets. This package cannot reach it: `component/safety` is a base-tier
-// module whose only internal dependency is `core` (docs/ci-design.md D3), and
+// module whose only internal dependency is `core` (docs/internal/ops/ci-design.md D3), and
 // requiring `component/language` would give the base tier an upward edge into
 // the engine tier -- the one thing that tier cannot have.
 //

@@ -296,7 +296,7 @@ def main():
         return 2
 
     header = ("// Part of the memql module split (memql#3228). Tier assignment and\n"
-              "// rationale: docs/ci-design.md, section D3.\n")
+              "// rationale: docs/internal/ops/ci-design.md, section D3.\n")
 
     # Read BEFORE any go.mod is written, so the seed is the tree's current
     # pins rather than something this run produced.

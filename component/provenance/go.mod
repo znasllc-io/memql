@@ -1,5 +1,5 @@
 // Part of the memql module split (memql#3228). Tier assignment and
-// rationale: docs/ci-design.md, section D3.
+// rationale: docs/internal/ops/ci-design.md, section D3.
 module github.com/znasllc-io/memql/component/provenance
 
 go 1.26.1
