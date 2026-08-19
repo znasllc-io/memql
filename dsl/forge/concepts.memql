@@ -17,16 +17,23 @@
 //     tenant, so a validator/approver can read a submitter's request. This is
 //     deliberately NOT the owned tier (which would hide other people's rows).
 //   - Read gating to developers/owners is enforced at the QUERY layer via the
-//     forge role traits (traits.memql). The transition guard ("only an owner
+//     forge role context-specs (dsl/forge/specs.memql: forgeDeveloper /
+//     forgeApprover). The transition guard ("only an owner
 //     may flip a request to approved") needs an engine-side pre-insert guard
 //     (mirroring component/memql/harness_step_validation.go) -- noted as a
 //     follow-up; the DSL alone cannot express a role-gated state machine.
 //
-// Cross-client isolation (partition model):
-//   - The partition is the hard tenant boundary in memQL. Every row's composite
-//     PK is (partition, id, createdAt); the engine stamps partition from the
-//     caller's auth envelope and appends WHERE partition = $envelope to every
-//     query automatically. No DSL filter is needed -- isolation is structural.
+// Cross-client isolation (partition model) -- SUPERSEDED, do not design
+// against this block (memql#56, memql#3305-style retirement). The paragraph
+// below described the partition as the hard tenant boundary with a composite
+// (partition, id, createdAt) PK and an engine-stamped WHERE clause; that
+// mechanism was retired in #56. The actual PK is (id, createdAt), there is no
+// `partition` column, and cross-client isolation today is enforced by
+// per-row authorization -- the forge role context-specs
+// (dsl/forge/specs.memql: forgeDeveloper / forgeApprover) plus the
+// projectId-scoped queries below. Kept as historical context; see
+// [access-model.md](../../public/operate/auth/access-model.md) and
+// [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
 //   - One partition per client/company. ClientA and ClientB each operate in
 //     separate partitions; their forge project and request rows are physically
 //     segregated. A session authed into ClientA's partition cannot read or write
@@ -40,8 +47,12 @@
 //         └── project row (v1:forge:project, one per codebase/client)
 //               └── request rows (filtered by request.projectId)
 //
-// Role mapping (cluster roles are owner/admin/writer/reader -- there is no
-// literal "developer" role, so personas map on):
+// Role mapping. The cluster role enum is owner/admin/developer/writer/reader
+// (dsl/identity/concepts.memql:511). The forge personas below predate that
+// fifth role and map onto the other four; the forge role specs
+// (dsl/forge/specs.memql) currently exclude the literal "developer" role from
+// forgeDeveloper as a scoping gap tracked in memql#4112, not because the role
+// doesn't exist:
 //   owner   -> Jose: final approval + fast-track (self-approve), execute/deploy
 //   admin   -> senior developer: may validate AND approve to staging
 //   writer  -> junior developer: first-line validation

@@ -164,10 +164,12 @@ Constructed via `model.ServiceID(...)`, `model.PackageID(...)`, etc. **Never inl
 
 ## Local override: `.env` over the process environment
 
-Genesis seals secrets + variables into an encrypted envelope. For local development, retyping a value into `memql-cockpit genesis init` for every tweak was friction. The framework adds a `.env` override layered on top:
+The envregistry package resolves env vars from a manifest + boot validation +
+domain derivations. For local development, retyping a value for every tweak
+was friction. The framework adds a `.env` override layered on top:
 
 - Each repo's root may contain a `.env` (gitignored). Each repo also has a checked-in `.env.example` documenting the schema.
-- At process start, every binary (memql, memql-cockpit) calls `genesis.ApplyLocalOverride(".")` which applies each line via `os.Setenv` BEFORE the config component reads its values.
+- At process start, every binary (memql, memql-cockpit) calls `envregistry.ApplyLocalOverride(".")` which applies each line via `os.Setenv` BEFORE the config component reads its values.
 - `MEMQL_MASTER_KEY` is the one exception: it's the trust anchor for the envelope itself; letting `.env` override it would mean a stray file silently switches which envelope is decrypted. Everything else is fair game.
 
 The implementation lives in `component/envregistry/localenv.go`; `ReservedFromOverride` is the allow-list of names the override skips.
@@ -230,4 +232,4 @@ func (h *Handler) Login(ctx context.Context, user, password string) (err error) 
 - Cockpit side: `memql-cockpit/cli/CLAUDE.md` (a sibling repo, not this one; X:Architecture key binding)
 - Concept surfaces: `dsl/observability/concepts.memql`, `dsl/cluster/concepts.memql` (`v1:cluster:nodeType.codeReference`)
 - Hypertable: `component/database/memory-nodes/migrations/20260515000000_observability_hypertable.up.sql`
-- Genesis local override: `component/envregistry/localenv.go`
+- Local override: `component/envregistry/localenv.go`

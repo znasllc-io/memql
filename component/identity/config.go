@@ -340,9 +340,9 @@ type Config struct {
 	// environment instead of generated onto a ReadWriteOnce PVC. Every
 	// identity replica handed the same seed derives the same keypair +
 	// kid + JWKS, so identity can run >=2 replicas on RollingUpdate (no
-	// single-writer key volume -> no strategy:Recreate downtime). Rides
-	// the sealed genesis envelope like the other secrets. Automatic
-	// rotation is disabled in this mode (re-seal + roll to rotate).
+	// single-writer key volume -> no strategy:Recreate downtime). Delivered
+	// via the `memql-secrets` Secret like the other secrets. Automatic
+	// rotation is disabled in this mode (roll to rotate).
 	// Empty = legacy on-disk KeyDir behaviour (dev).
 	// Env: MEMQL_IDENTITY_SIGNING_KEY_B64 (#550)
 	SigningKeyB64 string
@@ -814,8 +814,8 @@ func (c Config) Validate() error {
 		return fmt.Errorf("MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE %q must be one of: owner, admin, developer, writer, reader", c.InternalDefaultRole)
 	}
 
-	// An env-provided signing key (#550) lives in the sealed genesis
-	// envelope, not on disk, so the at-rest MEMQL_IDENTITY_KEY_ENCRYPTION_KEY
+	// An env-provided signing key (#550) is delivered via the `memql-secrets`
+	// Secret, not on disk, so the at-rest MEMQL_IDENTITY_KEY_ENCRYPTION_KEY
 	// requirement does not apply -- but it MUST be a valid 32-byte seed.
 	if c.SigningKeyB64 != "" {
 		seed, err := base64.StdEncoding.DecodeString(c.SigningKeyB64)

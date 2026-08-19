@@ -44,7 +44,7 @@ concept auditEvent {
 
   actorUserId     string  @description("v1:identity:user.id of the actor when authenticated. Empty for anonymous events (login attempts where no session yet exists).")
   actorEmail      string  @description("Email of the actor at the time of the event. Captured here for audit even after the user record is deleted — auditEvent rows are tombstoned, not removed, on user deletion.")
-  actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / writer / reader). Captured for point-in-time accuracy.")
+  actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / developer / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
   targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "")  @default("")  @description("Concept type of the target row, if any.")
@@ -508,8 +508,8 @@ concept user {
   primaryRole     string  @pii  @description("Free-form job title / role at the org (e.g. 'CEO', 'Engineer'). Distinct from the cluster-wide auth `role` field above; admin-curated, not auth-related.")
   gender          string  @pii  @description("Optional self-identified gender. Free-form string -- the frontend offers a curated list but the backend doesn't enforce one.")
   birthdate       string  @pii  @description("ISO-8601 date (YYYY-MM-DD), optional. Stored as a string rather than datetime because we never compute against it -- it's reference data the admin sets and the profile UI surfaces.")
-  role            enum("owner", "admin", "developer", "writer", "reader")  @default("reader")  @description("Cluster-wide role. owner bypasses the partition ACL; admin sees all partitions but still needs a per-partition grant to mutate data; developer is engineering power (authoring + inline DSL + deploy/cut-version, but no user management); writer and reader need an explicit grant for every partition they operate in.")
-  groupIds        []string  @description("Group memberships. Reserved for future cluster-side group-based partition-access derivation.")
+  role            enum("owner", "admin", "developer", "writer", "reader")  @default("reader")  @description("Cluster-wide role. owner is the sole cluster-owner tier (actor.isClusterOwner==true is what an admin-tier row's @rowAuthz gates on -- e.g. the audit log); admin/developer/writer/reader are RBAC roles for the identity admin console + engineering surfaces (component/auth/rbac.go) but carry no automatic per-row data access of their own -- reaching an owned/granted row still requires being its owner or holding a relationship grant, not just this role. developer additionally gets authoring + inline DSL + deploy/cut-version; admin/writer/reader do not.")
+  groupIds        []string  @description("Group memberships. Reserved for future cluster-side group-based access derivation.")
   // Every nested block rejects undeclared keys (memql#3641), and this is the
   // block that made the case for it: `computerUseEnbaled` used to store
   // happily beside `computerUseEnabled`, leaving the computer-use kill switch

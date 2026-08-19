@@ -177,12 +177,16 @@ poll-query for completion.
 
 The PlannerAgentLoop in `integrations/planner/agent_loop.go` skips
 `kind=agentInvocation` Plans -- those are owned by the agents
-integration. **The end-to-end async-dispatch wiring is the last
-remaining piece**: the agents integration needs to subscribe to
-plan-created events for this kind, which requires widening
-`memql.PluginContext` to expose the `EventBus` (or a small
+integration. **The end-to-end async-dispatch wiring is still open**
+(confirmed live: both `integrations/agents/integration.go`'s header
+comment and `agent_loop.go`'s `agentInvocation` branch document the
+same gap and point back at this file): the agents integration needs
+to subscribe to plan-created events for this kind, which requires
+widening `memql.PluginContext` to expose the `EventBus` (or a small
 dependency-injection adjustment in `app/`). Today an `agentInvocation`
 Plan is correctly minted but sits in `queued` until that wiring lands.
+(It is not necessarily the *last* open Phase 2 item -- see §3-5 below,
+which were not independently reverified.)
 
 For blocking AI calls from DSL, use `si("promptName", args)` -- the
 synchronous structured-output path. `agent()` is for agent-orchestrated
@@ -294,6 +298,9 @@ in role_seed.go).
   expanded domain block).
 - Concept surfaces: `dsl/agents/concepts.memql`,
   `dsl/knowledge/concepts.memql` (lockedForRoles).
-- Agents-as-DSL-primitive context: `docs/internal/planning/agents-dsl-primitive.md`.
+- Agents-as-DSL-primitive context: the `agent` DSL primitive parser this
+  catalog originally designed against was reverted (commit `f168e2cb`) in
+  favor of the `seed`-based approach below; its planning doc was removed
+  per the DOCS_STANDARD lifecycle.
 - Seed primitive context: `component/memql/seed_parser.go`,
   `component/memql/seed_materializer.go`.

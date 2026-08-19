@@ -13,7 +13,7 @@ import (
 // PluginContext.
 //
 // When LiveKit is configured (POLYPHON_LIVEKIT_* -- shared cluster-wide
-// via the genesis envelope, so every replica sees the same value), the
+// via the `memql-secrets` Secret, so every replica sees the same value), the
 // rollover sweep additionally gets the room-provider's RoomService
 // client so it can delete a rolled-over daily's polyphon room
 // (memql#1384). Without LiveKit there is no room to delete and the

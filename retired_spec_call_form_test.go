@@ -68,8 +68,7 @@ var retiredSpecFormExempt = map[string]string{
 		"and then corrects it; the quote is evidence, not prescription",
 	"docs/internal/design/construct-invocation-syntax-adr.md": "the ADR that RETIRED the form -- it has " +
 		"to show what it replaced",
-	"docs/internal/design/dsl-syntax-audit-964.md":        "a dated audit record of the tree as it was",
-	"docs/internal/planning/dsl-engine-mvp-foundation.md": "a historical planning document",
+	"docs/internal/design/dsl-syntax-audit-964.md": "a dated audit record of the tree as it was",
 
 	// Go files, added with the *.go glob in the memql#3071 review.
 	//

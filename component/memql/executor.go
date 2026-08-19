@@ -371,7 +371,7 @@ type ownerWildcardSentinel struct{}
 //
 //	caller.userId       -> string
 //	caller.identityId   -> string
-//	caller.role         -> string (owner/admin/writer/reader)
+//	caller.role         -> string (owner/admin/developer/writer/reader)
 //	caller.primaryEmail -> string
 //	caller.isOwner      -> bool
 func resolveActorReferences(ctx context.Context, expr ExpressionNode) (ExpressionNode, error) {

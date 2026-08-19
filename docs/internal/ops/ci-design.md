@@ -9,9 +9,35 @@ owner: znas
 
 # CI redesign — decision record
 
-**Status:** proposed, except Phase 0 and O5 which are **applied** (ruleset
-16630577, 2026-08-06T21:32Z and 21:47Z — see Sequencing and Open Items).
-No workflow or Go file is modified by this document.
+**Status:** decision record; landing state now diverges from "proposed,
+except Phase 0 and O5" per-decision, as of 2026-08-19:
+
+- **Decision A ("merge queue stays off") is REVERSED in production.** The
+  live branch ruleset carries a `merge_queue` rule (confirmed via
+  `gh api repos/znasllc-io/memql/rules/branches/main --jq '[.[].type]'`);
+  see [merge-queue.md](merge-queue.md) (CI Tier 3, shipped #858 —
+  `merge_group:` wired into `ci.yml` / `codeql.yml` / `gitleaks.yml`; gone
+  8 days after an unrelated ruleset edit dropped it, restored 2026-08-14).
+- **Phase 0** (restore the gate) and **O5** (break-glass bypass actor)
+  are applied (ruleset 16630577, 2026-08-06T21:32Z and 21:47Z — see
+  Sequencing and Open Items).
+- **Phase 1** hardening (`timeout-minutes` on every job) has landed, beyond
+  what "Phase 0 and O5 only" implies.
+- **Phase 2** test economics (disjoint `go-checks` / `go-tests` / `db-tests`
+  package sets, D5.3(b)) has landed — `ci.yml` now runs the bulk suite in a
+  dedicated `go-tests` job excluding the db-gated trees.
+- **D5.1** (retire `codeql.yml`) is **NOT applied** — `codeql.yml` still
+  exists, and now carries its own `merge_group:` trigger.
+- **O1** (`-count=1`) landed in the shape its own recommendation asked
+  for, not as a blanket removal: the bulk test invocation (now in the
+  `go-tests` lane) drops `-count=1`, while the root package, `db-tests`,
+  `conformance`, and the filesystem-sweeping gate tests deliberately keep
+  it — so counting the 13 remaining occurrences in `ci.yml` alone
+  overstates non-adoption.
+
+Everything else in Decisions / D1–D5 / Sequencing / Open Items below is
+unchanged from when it was proposed — read it as a decision record, not as
+current CI state. No workflow or Go file is modified by this document.
 **Input:** [ci-audit.md](ci-audit.md) — the measured audit this responds to.
 **Related:** [internal/ops/tier4-build-graph.md](tier4-build-graph.md)
 (CI-acceleration epic #854, Tiers 0–3 shipped, Tier 4 = Bazel north star).
@@ -28,7 +54,7 @@ Settled in discussion; recorded here so the rationale survives.
 
 | # | Decision | Rationale |
 |---|---|---|
-| A | **Merge queue stays off.** Gate + up-to-date branch instead. | Restoring it doubles per-merge cost (40 → 82 job-min measured on PR #3136) and adds a full CI cycle of latency. Revisit only if real semantic conflicts appear on `main`. |
+| A | **Merge queue stays off.** Gate + up-to-date branch instead. **Reversed in production 2026-08-14 — see Status above and [merge-queue.md](merge-queue.md).** | Restoring it doubles per-merge cost (40 → 82 job-min measured on PR #3136) and adds a full CI cycle of latency. Revisit only if real semantic conflicts appear on `main`. |
 | B | **Keep GitHub Code Quality; retire `codeql.yml`.** | Code Quality already covers go + python + javascript-typescript and reports on every PR. Saves 5.3 job-min/PR. Cost accepted: query suite is not pinned in-repo. |
 | C | **Real Go modules, compiler-enforced boundaries.** | Independent versioning is the goal, and it is the one goal that genuinely requires modules rather than path filters or an arch test. |
 | D | **Only `wire` and `engine` get independent versions.** Everything else lockstep. | They are the only modules with external consumers (`sdk/go` imports `wire`; the engine is the embedded product). Kubernetes model, not google-cloud-go: a deep dependency chain makes independent versioning of interior modules pure bookkeeping. |

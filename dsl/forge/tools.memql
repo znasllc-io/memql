@@ -8,9 +8,13 @@
 //
 // Gating: submit + "my requests" are open to every authenticated team member.
 // The validation/approval QUEUE tools run developer/owner-gated queries
-// (traits.memql), so a non-developer calling them gets an empty list. The
-// hard transition guard (only an owner may approve) is the engine pre-insert
-// follow-up noted in mutations.memql.
+// (dsl/forge/specs.memql: forgeDeveloper / forgeApprover), so a non-developer
+// calling them gets an empty list. The hard transition guard (only an owner
+// may approve) is the engine pre-insert follow-up noted in mutations.memql.
+//
+// @allowedRoles below is NOT touched by this pass -- see memql#4112 for the
+// real (narrower) defect in that surface; a prior claim that it made every
+// forge tool unreachable was adjudicated wrong.
 //
 // Mentoring: forgeSubmitRequest's description instructs Claude to teach a
 // non-owner submitter about what they're looking at while filing -- the

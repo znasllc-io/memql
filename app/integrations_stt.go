@@ -51,7 +51,7 @@ func (a *App) selectSTTProvider() {
 // trying MEMQL_AI_OPENAI_API_KEY first and falling back to the bare
 // MEMQL_OPENAI_API_KEY -- the same prefix-elision chain the provider auth
 // resolver (component/memql/ai_providers.go, authConceptLookupNames)
-// and integrations/openairealtime use. The genesis envelope seeds the
+// and integrations/openairealtime use. The `memql-secrets` Secret seeds the
 // bare form, so without the fallback the voice node boots with the
 // audio websocket silently disabled (#1371).
 func openAIKeyFromEnv() string {

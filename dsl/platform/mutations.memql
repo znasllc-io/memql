@@ -8,11 +8,13 @@
 // insertPolicyTrace
 // =================
 //
-// Engine-internal mutation. Called from component/memql/policy_evaluator.go
-// when a policy evaluation needs to land on the v1:platform:policyTrace
-// timeline -- either because the policy carries @traces_persisted, or
-// because the caller passed PersistTrace=true on the EvaluatePolicy
-// options.
+// Engine-internal mutation for landing a policy evaluation on the
+// v1:platform:policyTrace timeline. The caller this comment used to name --
+// component/memql/policy_evaluator.go, and its EvaluatePolicy options --
+// does not exist; that mechanism was retired (#984). Nothing calls this
+// mutation today (see memql#4114). Kept in place pending an owner decision
+// on the policyTrace subsystem; if it is re-introduced, this comment should
+// name the real caller at that time rather than describe retired behavior.
 //
 // args:
 //   policyName       string  required

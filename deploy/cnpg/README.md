@@ -1,7 +1,7 @@
 # CloudNativePG operator stack
 
-The operator every environment's database runs on. Local k3d, staging, and
-production reconcile **this one directory** through ArgoCD; what differs per
+The operator every environment's database runs on. Local k3d and the cloud
+install reconcile **this one directory** through ArgoCD; what differs per
 environment is the `Cluster` CR in that environment's overlay — instances,
 resources, storage, backup destination — which is values, not shape.
 
@@ -18,7 +18,7 @@ Epic memql#3842, task memql#3845.
 ```
 deploy/argocd/apps/cert-manager.yaml    (sync-wave -2)  -> deploy/cert-manager/install
 deploy/argocd/apps/cnpg-operator.yaml   (sync-wave -1)  -> deploy/cnpg/install
-deploy/argocd/apps/memql-{staging,prod}.yaml            -> the overlays' Cluster CRs
+deploy/argocd/apps/memql.yaml                           -> the overlay's Cluster CR
 ```
 
 Both Applications are registered in `deploy/argocd/apps/root.yaml`'s
@@ -77,11 +77,11 @@ every database pod for the first time in months.
 3. **Local first.** `make up-refresh` on a clean k3d cluster, then confirm
    `kubectl -n cnpg-system get deploy` is available and an existing local
    `Cluster` reaches `Cluster in healthy state`.
-4. **Staging, then soak.** Watch for the rolling restart to complete on every
-   instance, and confirm the three alerts from memql#3847 stay quiet.
-5. **Production**, in a window. Run the failover litmus afterwards
-   (memql#3850) — an operator upgrade is exactly when you want promotion proven
-   rather than assumed.
+4. **The cloud install, in a maintenance window.** Watch for the rolling
+   restart to complete on every instance, confirm the three alerts from
+   memql#3847 stay quiet, and run the failover litmus afterwards
+   (memql#3850) — an operator upgrade is exactly when you want promotion
+   proven rather than assumed.
 
 Upgrading the **Barman Cloud plugin** is the same shape but cheaper: it is a
 sidecar, so the blast radius is backups rather than availability. Verify a backup
@@ -97,7 +97,7 @@ only replica at once.
 the default PDB permits zero disruptions, so a node drain — `kubectl drain`, a
 k3d node restart, an AKS node-pool upgrade — **blocks forever** on a pod nothing
 can safely evict. The local overlay runs one instance and therefore disables it;
-staging and production run two or three and leave it on.
+the cloud overlay runs two or three and leaves it on.
 
 This is the single most common way a CNPG install becomes mysteriously
 un-drainable, and the symptom (a drain that hangs with no error) points nowhere

@@ -1,7 +1,7 @@
 ---
 title: Self-healing two-tier base/overlay store (Epic 4)
 audience: internal
-status: draft
+status: historical
 area: design
 sinceVersion: 0.11.0
 owner: znas
@@ -9,7 +9,11 @@ owner: znas
 
 # Self-healing two-tier base/overlay store (Epic 4)
 
-Status: E4.1 + E4.2 landed. E4.3–E4.6 in progress.
+> Historical: shipped; kept for rationale.
+
+Status: E4.1–E4.6 all landed. `component/healing/end_to_end_test.go`
+(`TestSelfHealing_EndToEnd`) walks the full flow -- precondition miss ->
+repair-loop proposal -> typed-patch apply -> human validation -- in one test.
 
 The self-healing layer lets a precondition miss (E4.1) trigger an LLM
 repair loop (E4.4) that proposes a TYPED patch (E4.3), which a human

@@ -46,7 +46,7 @@ type ActorField struct {
 // documentation order.
 var ActorEnvelopeFields = []ActorField{
 	{Name: "userId", Doc: "The acting user's id."},
-	{Name: "role", Doc: "Cluster role: owner / admin / writer / reader."},
+	{Name: "role", Doc: "Cluster role: owner / admin / developer / writer / reader."},
 	{Name: "identityId", Doc: "The credential row (token, magic-link, PAT)."},
 	{Name: "isClusterOwner", Doc: "Bool short-circuit; bypasses the per-partition ACL."},
 	{Name: "primaryEmail", Doc: "The acting user's primary email address."},

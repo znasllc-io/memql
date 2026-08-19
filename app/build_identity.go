@@ -21,9 +21,10 @@ func Build(serviceLogger *slog.Logger, version string, overrides Overrides) *App
 	a.configAndAuth()
 	a.databaseAndConcepts()
 	// Anchor the deploy pack (flag-gated, #2115) BEFORE engineAndBus loads
-	// the DSL tree, and after genesis autoload (run in main before Build) so
-	// a genesis-supplied flag is visible -- keeps the mount in lockstep with
-	// the thinned Deploy path wired in setupDeployControlService.
+	// the DSL tree, and after the boot-time env layering (.env override +
+	// legacy-alias bridge + domain derivations, run in main before Build) so
+	// any such flag is visible -- keeps the mount in lockstep with the
+	// thinned Deploy path wired in setupDeployControlService.
 	a.anchorDeployPack()
 	a.engineAndBus()
 	a.integrationsIdentity()

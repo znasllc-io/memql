@@ -220,7 +220,7 @@ func (i *Integration) apiKey(ctx context.Context) (string, error) {
 	}
 
 	// 2) OS env fallback (dev): the OpenAI key is commonly provided as an env
-	// var (MEMQL_OPENAI_API_KEY / MEMQL_AI_OPENAI_API_KEY) via the genesis envelope
+	// var (MEMQL_OPENAI_API_KEY / MEMQL_AI_OPENAI_API_KEY) via the `memql-secrets` Secret
 	// rather than seeded into globalSecret. This mirrors the AI-provider /
 	// bridge-agent resolution chain (see component/memql/ai_providers.go
 	// authConceptLookupNames) so the builtin works wherever those do, without

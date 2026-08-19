@@ -34,7 +34,7 @@ const (
 	// struct field, so the composed name appears nowhere in the source and
 	// neither grep nor envscan can attribute the read (memql#3892, memql#3834).
 	//
-	// genesis.ApplyLegacyEnvAliases bridges the SERVICE_* spellings at boot.
+	// envregistry.ApplyLegacyEnvAliases bridges the SERVICE_* spellings at boot.
 	serviceEnvPrefix            = "MEMQL_SERVICE"
 	capabilitiesLoggingLevelKey = "CAPABILITIES_LOGGING_LOG_LEVEL"
 	legacyLoggerLevelKey        = "LOGGER_LEVEL"

@@ -1,14 +1,14 @@
 // Package secret provides authenticated symmetric encryption helpers
-// for memql. Two surfaces:
+// for memql. The live surface is per-value Encrypt / Decrypt: seals one
+// secret string at a time for storage in memQL concept rows
+// (v1:platform:partitionSecret, v1:platform:globalSecret, historical
+// v1:router:apikey).
 //
-//   - Per-value Encrypt / Decrypt: seals one secret string at a time
-//     for storage in memQL concept rows (v1:platform:partitionSecret,
-//     v1:platform:globalSecret, historical v1:router:apikey).
-//   - Whole-blob SealBlob / OpenBlob: seals a full byte slice with a
-//     versioned, self-describing header for on-disk artifacts like
-//     ~/.memql/genesis.znas.
+// (A whole-blob SealBlob / OpenBlob pair used to live here too, for the
+// sealed genesis envelope's on-disk artifact. It is gone -- see "THE
+// WHOLE-BLOB SEAL/OPEN PAIR IS GONE" further down this file, epic memql#3958.)
 //
-// Both share NaCl secretbox (XSalsa20-Poly1305) -- the Go port of
+// Encrypt/Decrypt use NaCl secretbox (XSalsa20-Poly1305) -- the Go port of
 // libsodium's secretbox primitive -- and a single 32-byte master key
 // from the MEMQL_MASTER_KEY env var (64 hex characters). NaCl secretbox
 // was chosen per the Phase 1 decision: simplest authenticated symmetric
@@ -17,15 +17,6 @@
 // Per-value ciphertext format (concept rows):
 //
 //	base64( nonce(24B) || secretbox_seal(plaintext) )
-//
-// Whole-blob ciphertext format (genesis.znas and similar):
-//
-//	"ZNAS"  4B magic
-//	0x01    1B format version
-//	0x01    1B algorithm tag (1 = secretbox)
-//	0x0000  2B reserved (must be zero)
-//	nonce(24B)
-//	secretbox_seal(plaintext)
 //
 // Helpers are pure -- they don't mutate shared state and are safe to
 // call concurrently.

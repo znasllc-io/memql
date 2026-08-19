@@ -28,6 +28,8 @@ In the default build (no tags), BFF code is included.
 | **cognition** | `cognition` | Cognition pipeline | Engine + PeerManager + EventBridge + Polyphon + NodeServer |
 | **agent** | `agent` | Task execution, AI | Engine + PeerManager + EventBridge + AI + Tools + NodeServer |
 | **planner** | `planner` | Task planning | Engine + PeerManager + EventBridge + NodeServer |
+| **workbench** | `workbench` | Sandboxed per-Plan workspace host | Engine + PeerManager + EventBridge + NodeServer (`bootstrap_workbench.go`, `compiled_workbench.go`) |
+| **mcp** | `mcp` | MCP protocol surface | Engine + PeerManager + EventBridge + NodeServer (`bootstrap_mcp.go`, `compiled_mcp.go`) |
 
 ---
 
@@ -38,7 +40,7 @@ component/node/
 ├── CLAUDE.md              # This file
 ├── identity.go            # NodeType enum, Identity struct, env var parsing
 ├── lifecycle.go           # NodeLifecycle state machine (Starting/Ready/Draining/Stopped, #1268)
-├── node.proto             # NodeService proto (20 message types)
+├── node.proto             # NodeService proto (23 message types)
 ├── generate.go            # protoc go:generate directive
 ├── gen/                   # Generated gRPC code
 │   ├── node.pb.go
@@ -48,7 +50,10 @@ component/node/
 ├── server.go              # NodeServer -- gRPC server for NodeService
 ├── stream_handler.go      # nodeService -- stream message dispatch
 ├── eventbridge.go         # EventBridge -- bridges local events.Bus across nodes
+├── eventbridge_bus.go     # EventBridge channel-based publish path
+├── eventbridge_fastpath.go # Mesh push fast-path over the delivery substrate
 ├── routing.go             # Event routing rules (block/forward/broadcast)
+├── routing_automation_run.go # Routing rules for automation-run events
 ├── dedup.go               # Ring buffer dedup for distributed events
 ├── bootstrap.go           # NodeBootstrap interface, BootstrapFor() factory, DiscoverPeerAddress()
 ├── bootstrap_bff.go
@@ -56,11 +61,36 @@ component/node/
 ├── bootstrap_cognition.go
 ├── bootstrap_agent.go
 ├── bootstrap_planner.go
+├── bootstrap_mcp.go
+├── bootstrap_token.go
+├── bootstrap_workbench.go
 ├── capability_router.go   # Route capability lookups across the mesh
 ├── parent_connector.go    # ParentConnector -- child dials its MEMQL_PARENT_ADDRESS
-└── worker_dialer.go       # WorkerDialer -- BFF opens outbound streams to workers
-                            # (seeded by MEMQL_WORKER_PEERS, reconciled via v1:cluster:node
-                            # events + 30s ticker)
+├── worker_dialer.go       # WorkerDialer -- BFF opens outbound streams to workers
+│                           # (seeded by MEMQL_WORKER_PEERS, reconciled via v1:cluster:node
+│                           # events + 30s ticker)
+├── auth.go                # Node-to-node auth helpers
+├── chat_reply_delivery.go # Chat-reply concept delivery over the substrate
+├── chat_reply_registry.go # RegisterChatReplyConcept registry
+├── client_tool_rpc.go     # Client-tool relay RPC plumbing
+├── compiled_agent.go      # Build-tag-selected compiled node type (agent)
+├── compiled_bff.go        # Build-tag-selected compiled node type (bff, default)
+├── compiled_cognition.go  # Build-tag-selected compiled node type (cognition)
+├── compiled_default.go    # Build-tag-selected compiled node type (fallback)
+├── compiled_mcp.go        # Build-tag-selected compiled node type (mcp)
+├── compiled_planner.go    # Build-tag-selected compiled node type (planner)
+├── compiled_voice.go      # Build-tag-selected compiled node type (voice)
+├── compiled_workbench.go  # Build-tag-selected compiled node type (workbench)
+├── delivery_retention.go  # Substrate delivery retention/backlog bounds
+├── delivery_store_pg.go   # Postgres-backed outbox+cursor store
+├── delivery_substrate.go  # DeliverySubstrate: Publish/Subscribe/Ack contract
+├── forwarded_authority.go # Mandatory ForwardedAuthority carried on AiForwardRequest
+├── plan_delivery.go       # Plan-scoped delivery helpers
+├── reconciler.go          # Peer/worker reconciliation loop
+├── status_writer.go       # Node status/heartbeat writer
+├── stream_channel.go      # Streaming-over-substrate primitive (RoutingKey, Deliverable)
+├── stream_lifecycle.go    # Typed Start/Delta/Complete lifecycle over stream_channel.go
+└── substrate_rpc.go       # RPC-over-substrate primitive
 ```
 
 ---
@@ -254,7 +284,8 @@ The CLI's pool entry runs a per-connection heartbeat ticker plus a bounded
 3-attempt dial cycle with linear backoff (15s → 30s → 45s). On stream loss the
 entry transitions Connected → Backoff and re-enters the cycle automatically; the
 user can short-circuit via Esc (cancel) or R (manual retry from stateFailed).
-See `cli/pool.go` for the entryState machine.
+This CLI lives in the separate `memql-cockpit` repo (this repo has no `cli/`
+directory) -- see that repo's `entryState` machine for the implementation.
 
 ### Bootstrap Strategy (`bootstrap.go`)
 `BootstrapFor(nodeType)` returns a `NodeBootstrap` that creates the right dependencies

@@ -64,6 +64,9 @@ concept without the sibling `use` import: `calendar/shapes.memql`,
   `spec requiresOwnerOrAdmin` (`dsl/deployment/specs.memql:18`), plus
   `_reference/_spec.memql:70,185`. Hidden behind a debug-level skip log
   (`unified_spec_loader.go:29`). LIVE BUG.
+  **Since fixed** — the lexer now tokenizes `||` (`component/language/parser/lexer.go:405-411`);
+  see `operator-standardization-971.md`'s "What actually shipped" section
+  (issue #972) for the unified Go expression grammar that closed this gap.
 - Logic `if`-conditions mix Go `&&` with the English words `and`/`or`
   (`dsl/worker/logic.memql:35`, `dsl/identity/logic.memql:90,152`,
   `dsl/workbench/logic.memql:19`). The runtime normalizer rewrites only

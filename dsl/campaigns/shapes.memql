@@ -53,8 +53,8 @@ shape template templateFull {
 }
 
 /// Full campaign projection: the authoring fields plus the send-state fields. The send-state half is
-/// written by nothing today (the sending engine is out of scope, memql#3323) and reads as zeros --
-/// projected anyway so the surface that eventually writes it needs no shape change.
+/// written by updateCampaignProgress (dsl/campaigns/mutations.memql), the sending engine's progress
+/// writer (memql#3348).
 @row
 shape campaign campaignFull {
   row.id

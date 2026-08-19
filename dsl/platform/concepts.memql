@@ -46,14 +46,23 @@ concept globalVariable {
 // dropped by the unified loader as a recorded skip. Found while annotating
 // that concept's encryptedValue for issue #3181.)
 
-// No default secret seeds. Operators populate v1:platform:globalSecret via:
-//   * `make secrets-seed` (reads ~/.memql/dev-secrets.yaml locally)
-//   * `make prod-seed-secrets ENV=...` (reads from GCP Secret Manager
-//     in staging/prod)
-//   * `make secret-set NAME=... VALUE=... SCOPE=global` (one-offs)
-// Seeding a secret at the concept-file level would require committing
-// ciphertext, which requires a static MEMQL_MASTER_KEY -- antithetical
-// to per-install keys. Keep this file empty.
+// No default secret seeds. v1:platform:globalSecret rows are populated at
+// runtime, not from this concept file:
+//   * component/memql.DefaultInjector -- one-time, only-if-absent seed of
+//     manifest-listed (scripts/secrets/manifest.yaml) DEFAULTED
+//     concept-stored entries, run on every node boot (Epic 7 / memql#2109).
+//   * scripts/secrets (Go CLI, `seed --env-file <path>`) -- an operator
+//     tool, invoked internally by memQL's dev-refresh flow, that reads a
+//     .env file and upserts manifest-listed entries as v1:platform:global*
+//     rows against a running memql.
+//   * The setGlobalSecret / setPartitionSecret mutations directly, e.g.
+//     from an admin surface.
+// `make secrets` (scripts/k3d/seed-secrets.sh) is a DIFFERENT layer: it
+// seeds the k8s Secret objects nodes envFrom at boot (MEMQL_MASTER_KEY,
+// DATABASE_DSN, TLS certs, ...), not graph rows. Seeding a secret at the
+// concept-file level would require committing ciphertext, which requires a
+// static MEMQL_MASTER_KEY -- antithetical to per-install keys. Keep this
+// file empty.
 
 // ---- concepts/v1/platform/partitionSecret/concept.memql ----
 
@@ -91,13 +100,15 @@ concept partitionVariable {
   active       bool    @default("true")  @description("When false the resolver skips this row and falls back to the global v1:platform:globalVariable.")
 }
 
-/// Persisted trace tree for a single policy evaluation. The engine writes one row per evaluation
-/// when the resolved policy carries @traces_persisted or when the caller requests PersistTrace=true
-/// on the EvaluatePolicy options. The row carries the policy name, the tier, the caller (actor /
+/// Persisted trace tree for a single policy evaluation. Nothing calls insertPolicyTrace today --
+/// the EvaluatePolicy mechanism this schema was designed around (component/memql/policy_evaluator.go,
+/// @traces_persisted, PersistTrace) does not exist; that mechanism was retired (#984). This concept
+/// is kept in place pending an owner decision on the policyTrace subsystem (memql#4114). If it is
+/// re-introduced, the row is designed to carry the policy name, the tier, the caller (actor /
 /// partition), the args hash (for cache lookup and audit correlation), the JSON-serialized
 /// PolicyTrace tree, the computed result, the wall-clock duration in milliseconds, and any error
-/// message that arose during evaluation. Retention is governed by the
-/// MEMQL_POLICYTRACE_RETENTION_DAYS env var (default 90); the daily purge automation hard-deletes
+/// message that arose during evaluation, with retention governed by the
+/// MEMQL_POLICYTRACE_RETENTION_DAYS env var (default 90) via a daily purge automation hard-deleting
 /// rows whose `createdAt + retentionDays < now`. Distinct from v1:identity:auditEvent, which is the
 /// lightweight @audited per-eval row -- policyTrace is the heavyweight 'I'm debugging WHY this
 /// returned X' artifact.
@@ -106,7 +117,7 @@ concept policyTrace {
   policyName   string! @description("Name of the policy that produced this trace.")
   tier         string! @description("Tier of the policy at evaluation time -- 'core' or 'bff'.")
   actorUserId  string    @description("Caller's v1:identity:user id. May be empty for server-internal calls.")
-  actorRole    string    @description("Caller's cluster-wide role (owner / admin / writer / reader). Empty when unauthenticated.")
+  actorRole    string    @description("Caller's cluster-wide role (owner / admin / developer / writer / reader). Empty when unauthenticated.")
   callerPartition string @description("Active partition envelope at evaluation time.")
   argsHash     string! @description("SHA-256 hex of canonicalized args JSON. Used for cache lookup and audit correlation.")
   resultJson   string! @description("JSON-encoded return value of the policy.")

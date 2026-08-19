@@ -17,7 +17,14 @@ clarified or work moves into a planning doc under `docs/planning/`.
 
 ## Partition model (current state, for context)
 
-Two concept scopes exist today:
+> **Superseded -- do not design against this section (memql#3305).** The
+> `WHERE partition = $envelope` tenant-isolation model described below was
+> retired by #56; per-row authorization (`ownerUserId` / grant-based) is the
+> only gate today. See [access-model.md](../../public/operate/auth/access-model.md)
+> and [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
+> Kept as historical context for the sections that build on it below.
+
+Two concept scopes existed at the time this was written:
 
 - **Partition-scoped (default)**: concepts without a scope annotation.
   Rows carry the envelope's partition; reads/writes/events are all
@@ -150,12 +157,14 @@ default; the cluster-mode path runs the dedicated `workbench`
 node-type binary (`make workbench`) and routes via
 `NodeService.Stream` to a Cloud Run service backed by GCS-FUSE.
 
-The cluster-mode code is committed and tested -- builds, proto,
-routers, handlers, service yaml, k8s manifest entries all in
-place -- but is not yet active anywhere. Cross this bridge when
-the production cutover lands. Step-by-step plan in
-[docs/internal/ops/workbench-production.md](../ops/workbench-production.md): bucket
-provisioning, image build, deploy, agent env flip, rollback.
+Cluster mode is now the deployed default -- `deploy/k8s/base/agent.yaml`
+sets `MEMQL_WORKBENCH_REMOTE=1` unconditionally, and
+`deploy/k8s/base/workbench.yaml` runs 2 replicas by default in the base
+manifest. Remaining production-hardening items (per-instance workspace
+isolation, resource quotas, network egress policy, image hardening, audit
+telemetry, frontend visibility) are tracked in
+[docs/internal/ops/workbench-production.md](../ops/workbench-production.md)
+§7.
 
 Items inside this work that may need decisions when picked up
 again:

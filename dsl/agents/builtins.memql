@@ -1,8 +1,9 @@
 // Builtins in the agents namespace. Today: one builtin (`agent`)
 // that asynchronously invokes a DSL-registered agent. See
-// dsl/_reference/_agent.memql for the agent primitive itself and
-// docs/planning/agents-dsl-primitive.md for the phased implementation
-// plan.
+// dsl/_reference/_agent.memql for the agent primitive itself and its
+// migration breadcrumb -- the `agent X { ... }` DSL primitive this
+// planned was retired, not shipped; the runtime invocation surface
+// (this builtin) stays as-is.
 
 // ---- builtin agent --------------------------------------------------
 //

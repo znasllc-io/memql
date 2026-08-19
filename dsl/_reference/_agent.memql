@@ -10,15 +10,19 @@
 // startup + on user-create events.
 //
 // See:
-//   - dsl/agents/assistant.memql     -- canonical seed example
-//   - dsl/agents/plannerAgent.memql         -- another seed example
-//   - dsl/agents/trainerAgent.memql         -- another seed example
+//   - dsl/agents/plannerAgent.memql         -- seed example (global scope)
+//   - dsl/agents/trainerAgent.memql         -- seed example (global scope)
 //   - dsl/agents/builtins.memql             -- the agent(name, args) builtin
 //                                              (KEPT; the runtime invocation
 //                                              surface stays as-is)
 //   - component/memql/seed_parser.go        -- the seed parser
 //   - component/memql/seed_materializer.go  -- row materialization
 //   - component/memql/agents.go             -- AgentRegistry (row-backed)
+//
+// The per-user assistant seed (once dsl/agents/assistant.memql) was deleted
+// from this repo -- it now ships in the product DSL bundle
+// (MEMQL_DSL_PATH), not the engine tree. The two seeds above are the only
+// seed examples that remain in-repo.
 //
 // This file is kept (under the underscore-prefix skip rule the loader
 // honors) so a search for "agent reference" lands on the migration breadcrumb

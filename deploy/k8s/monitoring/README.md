@@ -92,10 +92,11 @@ kubectl apply -f deploy/k8s/monitoring/servicemonitor-argo-rollouts.yaml
   feed) so an in-cluster scrape -- which cannot present a bearer token --
   can read it. The exposed data is non-sensitive: aggregate reject counts
   and a non-reversible fingerprint of the (already-public) JWKS kid set.
-  Note the `staging-identity` Ingress routes `/` to identity:8085, so
-  `/metrics` is reachable on the identity host; block it at the ingress if
-  you want it strictly in-cluster (out of scope here -- no deploy-flow
-  changes per memql#1523).
+  `/metrics` is one of the paths the front-door path generator classifies
+  `servedButNotExternallyRouted` (`component/frontdoor`, memql#3703), so the
+  generated `identity.<domain>` Ingress does not route it externally; it stays
+  reachable only in-cluster, which is what keeps it unauthenticated safely
+  (out of scope here -- no deploy-flow changes per memql#1523).
 - **Scheme.** The PodMonitor scrapes `http` exactly as the k8s readiness
   probe hits `/healthz` over plain HTTP on 8085. If you enable internal
   TLS on 8085, set `scheme: https` + `tlsConfig` on the PodMonitor.

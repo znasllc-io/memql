@@ -2039,8 +2039,8 @@ replacement are gated by name rather than left to review.
 (`engine.go` `cacheKey`), so distinct continuation pages of a `@cache`'d
 query key independently — page 2 never collides with the cached page 1.
 
-See `docs/internal/planning/cache-audit-phase-0.md` for the cache's shape
-and instrumentation.
+See `component/memql/result_cache.go` and `result_cache_policy.go` for the
+cache's shape and instrumentation.
 
 ---
 

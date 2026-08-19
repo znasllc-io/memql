@@ -91,8 +91,9 @@ action importImageToK3d {
 }
 
 // pinOverlayDigests -- pin a kustomize overlay to the exact image digests for a
-// release (the GitOps placement step for staging/production). Backend:
-// scripts/deploy/pin-overlay-digests.sh.
+// release (the GitOps placement step for a deploy target -- local k3d or the
+// one cloud overlay, per the `provider` field; there is no staging/production
+// pair, epic memql#3943). Backend: scripts/deploy/pin-overlay-digests.sh.
 /// Pin a kustomize overlay to the resolved per-node image digests for a release (GitOps placement)
 /// so ArgoCD deploys exactly those images.
 action pinOverlayDigests {

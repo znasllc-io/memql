@@ -337,7 +337,7 @@ func (*ArgRefExpression) isExpressionNode() {}
 //
 //	caller.userId        -- v1:identity:user.id
 //	caller.primaryEmail  -- primary email
-//	caller.role          -- cluster-wide role (owner/admin/writer/reader)
+//	caller.role          -- cluster-wide role (owner/admin/developer/writer/reader)
 //	caller.identityId    -- v1:identity:identity.id used for the request
 //	caller.isOwner       -- bool short-circuit for owner-bypass paths
 //

@@ -107,7 +107,7 @@ func CertificateSANs(domain string) []string {
 // DomainDerivationSuffix is the hostname suffix every front-door host carries:
 // `.<domain>`.
 //
-// Exists so a caller composing many host names at once (genesis's env
+// Exists so a caller composing many host names at once (envregistry's env
 // derivation) can do it with one string concatenation per name and still be
 // using this package's rule rather than its own copy of it.
 //

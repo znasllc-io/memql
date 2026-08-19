@@ -26,7 +26,7 @@ func loadMemoryNodesEnvDatabaseOptions() (database.DatabaseEnvOptions, error) {
 	// MEMORY_NODES_DATABASE_DSN -> MEMQL_DATABASE_DSN. The prefix-composed
 	// reader above still resolves the legacy MEMORY_NODES_DATABASE_DSN key
 	// (back-compat); prefer the canonical new name when it is set. The
-	// boot-time alias shim (genesis.ApplyLegacyEnvAliases) bridges the
+	// boot-time alias shim (envregistry.ApplyLegacyEnvAliases) bridges the
 	// other direction for an operator who only set the legacy name.
 	if dsn := strings.TrimSpace(os.Getenv("MEMQL_DATABASE_DSN")); dsn != "" {
 		opts.DSN = dsn

@@ -24,7 +24,7 @@ seed skill go-backend-engineering {
   predefined:    true
 }
 
-@description("Authoring memQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/core/memql-authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")
+@description("Authoring memQL DSL constructs (concepts, queries, mutations, seeds, shapes, specs, policies, tools, prompts, builtins). Knows the struct-form authoring shape, the load-time validation chain, and the trait-based filter conventions documented in docs/public/language/authoring-rules.md. Phase 2 ships a dedicated memql-dsl-authoring knowledge domain; this skill currently bundles the generic engineering domains and is upgraded when the dedicated domain lands.")
 seed skill memql-dsl-author {
   slug:          "memql-dsl-author"
   name:          "MemQL DSL Authoring"

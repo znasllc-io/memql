@@ -7,7 +7,7 @@ secret material. **External Secrets Operator** reconciles `memql-secrets` from
 
 ```
    kv-memql-staging (Azure Key Vault)
-      memql-master-key / memql-genesis-b64 / memory-nodes-database-dsn
+      memql-master-key / memql-operator-key / memory-nodes-database-dsn
               │   (WorkloadIdentity: federated managed identity -> ESO SA)
               ▼
    ExternalSecret (external-secrets controller, refresh 1h)
@@ -96,7 +96,7 @@ az role assignment create --assignee "$CLIENT_ID" --role "Key Vault Secrets User
 ## Install + migrate (SUPERVISED — touches the live Secret)
 
 ```bash
-# 0. Ensure the 3 Key Vault entries exist (memql-genesis-b64 already does, §4):
+# 0. Ensure the 3 Key Vault entries exist:
 az keyvault secret set --vault-name kv-memql-staging --name memql-master-key --value "$MEMQL_MASTER_KEY"
 az keyvault secret set --vault-name kv-memql-staging --name memql-operator-key --value "$(openssl rand -hex 32)"  # memql#3519: NOT the master key
 az keyvault secret set --vault-name kv-memql-staging --name memory-nodes-database-dsn --value "$DSN"
@@ -115,10 +115,12 @@ kubectl -n memql get externalsecret memql-secrets -w   # -> SecretSynced
 
 # 3. Verify the synced values match (sha256 before/after; KV == live, so a no-op).
 #    Pods pick up changes on their next restart (envFrom is injected at pod start);
-#    do NOT roll if the values were unchanged. Going forward, shared-secret
-#    rotation runs through scripts/secrets/reseal-genesis.sh (DEPLOYMENT_STRATEGY
-#    §4), which writes Key Vault, drives the ESO refresh, verifies convergence, and
-#    rolls — so Key Vault and the cluster Secret can never silently diverge (#734).
+#    do NOT roll if the values were unchanged. Going forward, rotating a shared
+#    secret is a Key Vault write (as in step 0) followed by an ESO refresh
+#    (reconciles within the hour, or force it with `kubectl annotate
+#    externalsecret memql-secrets force-sync=$(date +%s) --overwrite`), then a
+#    manual rollout restart of every pod that envFroms memql-secrets so the new
+#    value actually lands in a running process (#734).
 ```
 
 Manage these manifests via the Argo CD app-of-apps (Phase 2) so the secret

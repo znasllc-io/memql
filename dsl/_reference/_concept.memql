@@ -27,7 +27,7 @@
 // concept name resolved through one of these (memql#1067); the quoted
 // canonical-ID form is retired. A target in this file's own namespace needs no
 // import -- see section 6's collectionExample.
-use cognition.concepts.{ space }
+use cognition.concepts.{ participant }
 use identity.concepts.{ user }
 
 // =============================================================================
@@ -796,10 +796,10 @@ concept nestedExample {
 @namespace("reference")
 @description("A concept with two relationship decorators.")
 concept relationshipExample {
-  // Parent: this row hangs off a space. `space` resolves through the
-  // file-top `use cognition.concepts.{ space }`.
-  @relationship(type="parent", field="spaceId", target=space, direction="outgoing")
-  spaceId    string!
+  // Parent: this row hangs off a participant. `participant` resolves through
+  // the file-top `use cognition.concepts.{ participant }`.
+  @relationship(type="parent", field="participantId", target=participant, direction="outgoing")
+  participantId    string!
 
   // Two plain foreign keys, both pointing at the same concept. There is no
   // structural relationship between a post and either person beyond "points

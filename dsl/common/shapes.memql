@@ -43,7 +43,7 @@ shape documentChunk documentChunkFull {
 // `payload.refreshCadenceDays`, `payload.lastSeededAt`,
 // `payload.seederRecipeVersion`) are required by:
 //   - integrations/agent/replier.go citation registry (reads source)
-//   - integrations/training/training.go domainNeedsRefresh (reads
+//   - integrations/planner/refresh_cron.go domainIsDue (reads
 //     lastSeededAt, seederRecipeVersion, refreshCadenceDays)
 //   - the frontend's useKnowledgeDomains hook (surfaces source,
 //     refreshCadenceDays, lastSeededAt to the Knowledge panel)
@@ -59,10 +59,13 @@ shape documentChunk documentChunkFull {
 //
 // These shapes carry @row WITHOUT a concept binding in the signature
 // (i.e. `shape <name>`, not `shape <Concept> <name>`), which is what
-// makes them concept-agnostic. Specs bind to a trait shape via
-// `@shape("<name>")` when they want to filter rows by a predicate
-// that applies across many different concepts (e.g. "active row",
-// "cancelled row").
+// makes them concept-agnostic. Specs bind to a trait shape via the
+// two-identifier signature form -- `spec <traitShapeName> <name> {
+// return <bool> }` (e.g. `spec activeRowTrait isActive { ... }`) --
+// when they want to filter rows by a predicate that applies across
+// many different concepts (e.g. "active row", "cancelled row"). The
+// `@shape("<name>")` annotation pin is retired (epic #2281); the
+// binding moved to the signature.
 //
 // Trait shapes project ONLY the payload fields their predicates check,
 // so the engine knows the predicate's field-reference universe without

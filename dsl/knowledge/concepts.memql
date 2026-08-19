@@ -16,7 +16,7 @@ concept documentChunk {
   sourceRef   string  @description("Where the chunk came from, e.g. 'opid:agents.new', 'doc:README.md#L42', 'url:https://docs.example.com/agents'. Used for citation in the UI and for idempotent re-ingestion.")
   seq         int     @default("0") @description("Order within the source (0-based). A document of N chunks has seq 0..N-1.")
   tokenCount  int     @default("0") @description("Approximate token count, rough character-length / 4 heuristic. Used for budgeting context windows when assembling the system_knowledge block.")
-  documentId  string  @description("Per Q8: optional back-reference to v1:knowledge:document when this chunk came from a user-uploaded file rather than a seeded corpus. Null for seeded UI-corpus chunks; populated for chunks produced by the analyzer.")
+  documentId  string  @description("Per Q8: optional back-reference to a v1:knowledge:document row when this chunk came from a user-uploaded file rather than a seeded corpus. Null for seeded UI-corpus chunks; populated for chunks produced by the analyzer. NOTE: no `document` concept is declared anywhere in this engine tree today -- see the dead-stub headers below this concept.")
   validationStatus  enum("unvalidated", "validated", "rejected") @default("unvalidated") @description("Per Q15: validation gating mirror of v1:knowledge:document. validated = ingestible into knowledge domains; rejected = soft-deleted from retrieval. Seeded chunks default to 'validated' since they ship as canonical.")
   source  enum("llmSeeded", "augment", "crossDomainBridge", "appStructure", "fileUpload", "trainerAgent")! @description("Provenance discriminator for audit, UI grouping, and the dev-refresh cache filter. Aligned with the citation-registry source taxonomy on the agent-reply side -- one word, one meaning across the whole stack. 'llmSeeded' = baseline LLM-generated content from seedDomainContent (catalog Tier-A/B bodies, Tier-B disclaimers, Tier-C Wikipedia chunks). 'augment' = topic-focused chunks added via the chat 'Analyze for training' action; carries sourceUtteranceId + sourceAgentId + sourceTopic back-pointers. 'crossDomainBridge' = bridge content generated when an agent has 2+ domains. 'appStructure' = the product UI corpus that drives operator UI moves (cited silently). 'fileUpload' = user-uploaded document content (when wired). 'trainerAgent' = chunks distilled by the Trainer Agent's web-search + reasoning pipeline (Q3, Q9); cited with provenance back to the original web sources via sourceRef. Required: every writer must declare which class of provenance it represents.")
   sourceUtteranceId  string  @description("When source='augment': bare id of the v1:cognition:utterance that triggered the augment action. Lets the Knowledge panel show 'Added from chat with <agent> on <date>' provenance and lets a future cleanup audit reach back to the conversation.")
@@ -28,15 +28,10 @@ concept documentChunk {
 
 }
 
-// ---- concepts/v1/common/knowledgeDomain/concept.memql ----
-
-// ---- concepts/v1/knowledge/spreadsheetRow/concept.memql ----
-
-// ---- concepts/v1/knowledge/validationEvent/concept.memql ----
-
-// ---- concepts/v1/knowledge/liveSource/concept.memql ----
-
-// ---- concepts/v1/knowledge/liveConnector/concept.memql ----
-
-// ---- concepts/v1/knowledge/liveSnapshot/concept.memql ----
-
+// The restructure-script section headers that used to sit here
+// (knowledgeDomain, spreadsheetRow, validationEvent, liveSource,
+// liveConnector, liveSnapshot) named no concept declared in this file, or
+// anywhere in dsl/ -- dead stubs left behind by scripts/restructure-by-construct
+// with no body to accompany them. Removed rather than kept as headers to
+// nothing; see documentChunk.documentId above for the related dangling
+// v1:knowledge:document reference.

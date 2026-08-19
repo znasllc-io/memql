@@ -1489,7 +1489,7 @@ mutate identity revokeNodeTokenIdentity {
 // process, not a delegated agent principal.
 //
 // Provisioned by the `voice-agent-token mint` subcommand on the
-// identity binary; see docs/auth/voice-agent-jwt.md.
+// identity binary; see docs/public/operate/auth/voice-agent-jwt.md.
 
 /// Create a voice_agent_token identity (credential row for the Go voice-agent process). Plain JWT
 /// is returned by JWTIssuer.IssueVoiceAgentAccessToken; this row stores only the SHA-256 of an

@@ -1,4 +1,4 @@
-// Package contentid provides deterministic, content-addressable ID generation.
+// Package id provides deterministic, content-addressable ID generation.
 //
 // IDs are derived from content using SHA256, making them reproducible and verifiable.
 // The core operations satisfy three axioms:
@@ -9,7 +9,7 @@
 //
 // # Basic Usage
 //
-//	engine := contentid.New()
+//	engine := id.New()
 //	id := engine.FromString("hello world")
 //	combined := engine.Combine(id1, id2)
 //
@@ -17,7 +17,7 @@
 //
 // For ordered sequences where each state depends on the previous:
 //
-//	chain := contentid.NewChain()
+//	chain := id.NewChain()
 //	id, _ := chain.Next(engine.FromString("first action"), engine)
 //	chain.Advance(id)
 package id

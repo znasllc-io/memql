@@ -9,7 +9,13 @@ owner: znas
 
 # LLM-driven decisions, cached intelligently
 
-**Status:** Proposed. Not shipped.
+**Status:** Phases 0-2 shipped -- the vector-classification cache primitive
+(S1.3, Epic 5 #1973) and the cognition affirmation-guard migration (Phase 2:
+`looksLikeCorrection`/`previousAgentAskedQuestion`/`userFollowUpCarriesAction`/
+`agentTextInvitesReply` are gone from `integrations/cognition/cognition_handler.go`,
+replaced by `integrations/cognition/message_classifier.go`'s
+`MessageClassification`). Phase 3 (codebase-wide sweep) and Phase 4 (tune)
+remain open.
 **Priority:** High — current state is a slow-growing bandaid pile that misfires in user-visible ways.
 **Owner:** TBD.
 **Related:** cognition (affirmation guard, intent classification, dispatch routing); knowledge (domain inference); planner (kind discrimination); any future decision logic.

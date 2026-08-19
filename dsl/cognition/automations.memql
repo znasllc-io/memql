@@ -120,7 +120,7 @@ automation generateResponse {
   }
 }
 
-// ---- automations/v1/cognition/purgeExpiredArchivedSpaces/automation.memql ----
+// ---- automations/v1/cognition/voiceMigrationOnSecondHuman/automation.memql ----
 
 // voiceMigrationOnSecondHuman
 // ===========================

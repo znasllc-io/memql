@@ -9,11 +9,10 @@ import "testing"
 // The regression this guards: resolveWorkerDialEndpoint used to reach the
 // pairing row's origin through identity.DeriveGRPCEndpoint, which consults
 // MEMQL_DISCOVERY_GRPC_ENDPOINT FIRST. That variable is set in every
-// deployed environment (deploy/k8s/base/identity.yaml declares it, the
-// local overlay patches it, and the sealed genesis envelope carries one
-// too), so tier 2 never actually read the stored URL -- every worker was
-// handed the one cluster-wide advertised endpoint no matter which origin
-// it paired against.
+// deployed environment (deploy/k8s/base/identity.yaml declares it, and the
+// local overlay patches it), so tier 2 never actually read the stored URL --
+// every worker was handed the one cluster-wide advertised endpoint no matter
+// which origin it paired against.
 //
 // The expected values below carry a scheme since memql#3437, which made the
 // reply STATE its transport instead of leaving a bare `:443` to be read as

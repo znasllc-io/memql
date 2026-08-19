@@ -25,7 +25,7 @@ import (
 //	             doesn't carry it yet.
 //	family_name  last name (OIDC-style claim) — same lifecycle as
 //	             given_name.
-//	role         cluster-wide role: owner / admin / writer / reader.
+//	role         cluster-wide role: owner / admin / developer / writer / reader.
 //	             external users have empty role here; their scoping
 //	             lives in `partitions`.
 //	internal     true if the user's email matched an internal-domain

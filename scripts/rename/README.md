@@ -65,7 +65,8 @@ found families `SESSION*`, `SIZE*`, `SIMILAR*`, `TRANSITION*`, `SIGNAL*`,
 Two SI tokens are runtime/stored contracts, not code identifiers, so they are
 denylisted here and tracked as follow-ups (renaming them needs a coordinated
 reseed/migration, not a code sweep):
-- **Env var names** `MEMQL_SI_*`, `VITE_SIMLI_*`, `MEMQL_SIMLI_API_KEY` — secret-store
-  + genesis-envelope contract.
+- **Env var names** `MEMQL_SI_*`, `VITE_SIMLI_*`, `MEMQL_SIMLI_API_KEY` — the
+  secret-store contract (the registered manifest name, `memql-secrets` Secret
+  key, and any operator tooling that already reference the literal name).
 - **Stored data value** `participantType: "si"` — DB row data. Identifiers that
   *read* the value are renamed; the value string stays `"si"`.

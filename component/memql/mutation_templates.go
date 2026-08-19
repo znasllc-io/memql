@@ -1143,25 +1143,28 @@ func (e *mutationTemplateEvaluator) evalShortId(ctx context.Context, expr string
 }
 
 // evalCanonicalId resolves canonicalId(value, "<conceptType>") into
-// the canonical id form for the named concept. The engine reads the
-// concept's @scope to pick the partition prefix (`_system` for global
-// concepts, otherwise the request envelope's partition).
+// the canonical `<conceptType>:<bareSlug>` id form for the named
+// concept, delegating to the shared canonicalizeIdValue
+// (component/memql/partition_context.go) -- the same helper
+// canonicalizeRelationshipFields uses for insert-time auto-canon on
+// @relationship-tagged payload fields. There is no partition prefix:
+// the tenant-partition dimension is retired (#56).
 //
 // Behavior matrix:
 //
 //	value=""                                   -> "" (missing/optional id)
-//	value="user-abc",            concept=user  -> "_system:v1:identity:user:user-abc" (global)
-//	value="abc-123",             concept=space -> "<envelope>:v1:cognition:space:abc-123"
-//	value="default:v1:cognition:space:abc",
+//	value="abc-123",             concept=space -> "v1:cognition:space:abc-123" (bare slug, concept prepended)
+//	value="v1:cognition:space:abc-123",
 //	      concept=space                        -> as-is (already canonical for this concept)
-//	value="weird:v1:cognition:space:abc",
-//	      concept=space                        -> "<envelope>:v1:cognition:space:abc"
-//	      (re-partitioned: tolerates legacy callers that hand in a
-//	      canonical id under a stale partition)
+//	value="v1:identity:user:abc-123",
+//	      concept=space                        -> error (wrong concept tag)
 //
 // Errors when the concept isn't registered (catches typos at runtime;
 // the assert layer catches them at parse-time, this is the safety
-// net for dynamic callers).
+// net for dynamic callers), and when the value is already a canonical
+// id tagged with a DIFFERENT concept -- silently rewriting it could
+// mask real authoring bugs (passing a userId to
+// canonicalId(..., "v1:cognition:space")).
 func (e *mutationTemplateEvaluator) evalCanonicalId(ctx context.Context, expr string) (string, error) {
 	args, err := parseArgList(expr, "canonicalId")
 	if err != nil {
@@ -1192,8 +1195,8 @@ func (e *mutationTemplateEvaluator) evalCanonicalId(ctx context.Context, expr st
 	}
 
 	// Second arg: the concept type, must be a literal quoted string
-	// (we need it at parse time to resolve the concept's scope; passing
-	// it as a dynamic expression would be a footgun).
+	// (we need it at parse time to validate against the concept registry;
+	// passing it as a dynamic expression would be a footgun).
 	rawConcept := strings.TrimSpace(args[1])
 	if !isQuotedString(rawConcept) {
 		return "", fmt.Errorf("canonicalId(): second argument must be a literal quoted concept name (e.g. \"v1:identity:user\")")

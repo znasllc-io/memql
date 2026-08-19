@@ -16,8 +16,9 @@ S5. Starts at G1. Produces no gate other epics depend on.**
 **Repos:** `memql` (engine + DSL), the product carrier repo, the product SPA repo
 (frontend), the identity portal, `memql-cockpit`.
 **Prior art (build on, do NOT restart):**
-`docs/internal/planning/cache-audit-phase-0.md`,
-`docs/internal/planning/llm-driven-decisions.md`.
+`docs/internal/planning/llm-driven-decisions.md` (the Phase-0 cache-audit
+groundwork it built on has since shipped and its planning doc was removed
+per the DOCS_STANDARD lifecycle).
 **Tracking:** epic memql#1964 (children #1965–#1997).
 
 ## Approach (as shipped)

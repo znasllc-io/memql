@@ -147,8 +147,8 @@ func NewKeyManagerFromSeedMintedAt(seedB64 string, createdAt time.Time) (*KeyMan
 }
 
 // RotationSupported reports whether this process can rotate its own
-// signing key. False in envMode -- and envMode is what STAGING AND
-// PRODUCTION run (the seed rides the sealed envelope so every replica
+// signing key. False in envMode -- and envMode is what the cloud install
+// runs (the seed rides the `memql-secrets` Secret so every replica
 // derives the same key, memql#550). So in every deployed environment
 // this returns false, which means:
 //

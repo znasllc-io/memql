@@ -1,4 +1,4 @@
-# contentid
+# id
 
 Deterministic, content-addressable ID generation for MemQL.
 
@@ -19,7 +19,7 @@ The ID generation satisfies three mathematical properties:
 ### Basic ID Generation
 
 ```go
-engine := contentid.New()
+engine := id.New()
 
 // From a string
 id := engine.FromString("hello world")
@@ -64,7 +64,7 @@ This is critical for content-addressing - without deterministic serialization, t
 For ordered sequences where each state depends on the previous:
 
 ```go
-chain := contentid.NewChain()
+chain := id.NewChain()
 id, _ := chain.Next(engine.FromString("action 1"), engine)
 chain.Advance(id)
 id, _ = chain.Next(engine.FromString("action 2"), engine)
@@ -82,4 +82,4 @@ Different salts produce different IDs for the same payload, enabling environment
 
 ## See Also
 
-- [`docs/memql.md`](../docs/memql.md) - MemQL query language reference, including content-addressed insert syntax
+- [`docs/public/language/memql.md`](../../docs/public/language/memql.md) - MemQL query language reference, including content-addressed insert syntax

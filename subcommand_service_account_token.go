@@ -70,8 +70,9 @@ func runServiceAccountTokenMint(args []string) int {
 		return 2
 	}
 
-	// Layer the genesis envelope (sealed signing key etc.) then /.env, exactly
-	// as the server boot does -- subcommands run before main()'s autoload (#751).
+	// applySubcommandEnv overlays the repo-root .env, bridges legacy env-var
+	// names via envregistry.ApplyLegacyEnvAliases, and applies domain
+	// derivations -- subcommands run before main()'s autoload (#751).
 	if err := applySubcommandEnv("service-account-token mint"); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

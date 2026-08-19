@@ -69,7 +69,7 @@ func MissingRequiredError(nodeType string, missing []string) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"node type %q requires: %s (set them in the environment / genesis envelope)",
+		"node type %q requires: %s (set them in the environment / memql-secrets Secret)",
 		nodeType, strings.Join(missing, ", "),
 	)
 }

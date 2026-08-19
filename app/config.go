@@ -40,8 +40,8 @@ func (a *App) configAndAuth() {
 	// a voice pod must fail if the LiveKit vars are missing; a bff pod
 	// must not). This runs FIRST so a misconfigured node exits with one
 	// clear, actionable error instead of panicking deep in init. The
-	// genesis envelope + local-env override have already been applied to
-	// the process environment by main.go, so os.LookupEnv is the source
+	// .env override, legacy-alias bridge, and domain derivations have
+	// already been applied to the process environment by main.go, so os.LookupEnv is the source
 	// of truth here. The verifier's MEMQL_IDENTITY_VERIFIER_BASE_URL check
 	// below is a separate, node-shape-specific gate and complements this.
 	a.validateRequiredEnv()

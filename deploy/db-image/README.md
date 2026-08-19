@@ -1,8 +1,8 @@
 # memQL database operand image
 
 PostgreSQL 16 + TimescaleDB Community + pgvector — the container CloudNativePG
-runs as a Postgres instance in **every** environment (local k3d, staging,
-production), digest-pinned per overlay exactly like the engine images.
+runs as a Postgres instance in **every** environment (local k3d, cloud),
+digest-pinned per overlay exactly like the engine images.
 
 Epic memql#3842, task memql#3844.
 
