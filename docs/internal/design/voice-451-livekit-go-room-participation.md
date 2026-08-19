@@ -2,7 +2,7 @@
 title: LiveKit room participation + media tracks in Go -- feasibility spike (#451)
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

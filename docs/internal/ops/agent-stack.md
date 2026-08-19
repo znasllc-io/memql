@@ -1,3 +1,12 @@
+---
+title: Agent Stack
+audience: internal
+status: stable
+area: ops
+sinceVersion: 0.15.0
+owner: znas
+---
+
 # Agent Stack
 
 **Status:** stable · **Applies to:** local developer machines (macOS, Linux)

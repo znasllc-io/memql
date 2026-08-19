@@ -2,7 +2,7 @@
 title: Latency, gate-cost & fidelity measurement (#484)
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

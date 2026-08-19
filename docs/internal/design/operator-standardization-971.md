@@ -2,7 +2,7 @@
 title: DSL operator standardization — DESIGN (#971)
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

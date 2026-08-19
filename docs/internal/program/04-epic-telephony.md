@@ -2,7 +2,8 @@
 title: Epic 4 — Telephony into core
 audience: internal
 status: historical
-area: internal
+area: planning
+sinceVersion: 0.9.88
 owner: znas
 ---
 

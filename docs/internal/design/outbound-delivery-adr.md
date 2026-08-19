@@ -1,8 +1,8 @@
 ---
 title: Outbound delivery -- engine-drained outbound requests (email / webhook)
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.12.2
 owner: znas
 ---

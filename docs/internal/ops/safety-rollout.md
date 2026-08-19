@@ -2,7 +2,7 @@
 title: Safety Classifier — Rollout Runbook
 audience: ops
 status: stable
-area: internal
+area: ops
 sinceVersion: 0.9.0
 owner: znas
 ---

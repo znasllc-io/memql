@@ -1,6 +1,7 @@
 ---
+title: Before you install a local cluster
 audience: public
-status: current
+status: stable
 area: operate
 sinceVersion: 0.16.0
 owner: platform

@@ -2,7 +2,8 @@
 title: Epic 2 — Platform / plugin architecture
 audience: internal
 status: historical
-area: internal
+area: planning
+sinceVersion: 0.9.88
 owner: znas
 ---
 

@@ -2,7 +2,7 @@
 title: memQL DSL syntax audit + standardization reference (#964)
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

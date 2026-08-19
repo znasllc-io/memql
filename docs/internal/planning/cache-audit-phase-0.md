@@ -2,7 +2,7 @@
 title: Cache audit — Phase 0 of the LLM-driven decisions plan
 audience: internal
 status: draft
-area: internal
+area: planning
 sinceVersion: 0.9.0
 owner: znas
 ---

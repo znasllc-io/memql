@@ -1,8 +1,8 @@
 ---
 title: CI redesign — decision record
 audience: ops
-status: proposed
-area: internal
+status: draft
+area: ops
 sinceVersion: 0.14.0
 owner: znas
 ---

@@ -1,3 +1,12 @@
+---
+title: The operator credential (MEMQL_OPERATOR_KEY)
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.16.0
+owner: platform
+---
+
 # The operator credential (`MEMQL_OPERATOR_KEY`)
 
 `Authorization: Operator <key>` admits a gRPC stream as a **synthetic cluster

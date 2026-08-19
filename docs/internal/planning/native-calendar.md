@@ -2,7 +2,7 @@
 title: Native Calendar
 audience: internal
 status: draft
-area: internal
+area: planning
 sinceVersion: 0.9.0
 owner: znas
 ---

@@ -1,3 +1,12 @@
+---
+title: Doc-comments as the description source
+audience: internal
+status: draft
+area: design
+sinceVersion: 0.15.0
+owner: znas
+---
+
 # Doc-comments as the description source
 
 **Status:** accepted · **Epic:** [#2601](https://github.com/znasllc-io/memql/issues/2601) · **Issue:** [#2632](https://github.com/znasllc-io/memql/issues/2632)

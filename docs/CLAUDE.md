@@ -1,3 +1,12 @@
+---
+title: Documentation Directory
+audience: internal
+status: stable
+area: ops
+sinceVersion: 0.1.0
+owner: znas
+---
+
 # Documentation Directory
 
 **Purpose:** memQL documentation, split public (drives memql.io) vs internal.

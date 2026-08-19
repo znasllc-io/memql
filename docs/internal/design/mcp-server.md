@@ -1,8 +1,8 @@
 ---
 title: memQL MCP server — node role, capability tiers, and tool surface
 audience: internal
-status: design
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

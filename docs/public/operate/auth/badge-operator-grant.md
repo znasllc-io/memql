@@ -1,6 +1,7 @@
 ---
+title: Badge operator grants (shared-terminal attribution)
 audience: public
-status: current
+status: stable
 area: operate
 sinceVersion: 0.13.0
 owner: platform

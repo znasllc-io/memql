@@ -180,7 +180,7 @@ next section.
 
 memQL is **48 Go modules**, one per tier directory, so its dependency
 direction is enforced by the compiler rather than by convention (see
-[docs/ci-design.md](docs/ci-design.md) §D3). Each of those modules has
+[docs/internal/ops/ci-design.md](docs/internal/ops/ci-design.md) §D3). Each of those modules has
 its own tag namespace.
 
 ### Tag form

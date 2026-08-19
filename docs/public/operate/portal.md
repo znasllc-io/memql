@@ -1,3 +1,12 @@
+---
+title: memQL Portal -- operator guide
+audience: public
+status: stable
+area: operate
+sinceVersion: 0.16.0
+owner: platform
+---
+
 # memQL Portal -- operator guide
 
 The memQL Portal is the platform's own graphical operations console: a static

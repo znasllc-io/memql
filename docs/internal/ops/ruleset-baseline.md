@@ -2,7 +2,7 @@
 title: Ruleset baseline — what `main`'s protection should be, and why
 audience: ops
 status: stable
-area: internal
+area: ops
 sinceVersion: 0.18.0
 owner: znas
 ---
@@ -55,7 +55,7 @@ to be present; there are no recorded gaps.
 
 The full narrative of the 2026-08-06 double drop and the 2026-08-14 restore is
 in [merge-queue.md](merge-queue.md); the point-in-time evidence is in
-[`docs/ci-audit.md`](../../ci-audit.md) §2.2–§2.3. Note that `ci-audit.md` is a
+[`docs/ci-audit.md`](ci-audit.md) §2.2–§2.3. Note that `ci-audit.md` is a
 **dated audit**, not a live status page — it correctly records 2026-08-06 and
 should not be edited to match today.
 

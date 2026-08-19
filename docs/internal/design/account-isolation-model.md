@@ -1,8 +1,8 @@
 ---
 title: The account concept, and whether per-row authz is sufficient for account isolation
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.6
 owner: znas
 ---

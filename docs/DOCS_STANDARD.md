@@ -1,3 +1,12 @@
+---
+title: Documentation Standard
+audience: internal
+status: stable
+area: ops
+sinceVersion: 0.9.36
+owner: znas
+---
+
 # Documentation Standard
 
 **Status:** stable · **Applies to:** `memql` (canonical), and — lighter — `memql-cockpit` and the product repos (the frontend SPA and the product pack).

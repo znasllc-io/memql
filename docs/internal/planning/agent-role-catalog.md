@@ -2,7 +2,7 @@
 title: Agent Role Catalog -- Phase 2 plan
 audience: internal
 status: draft
-area: internal
+area: planning
 sinceVersion: 0.9.0
 owner: znas
 ---

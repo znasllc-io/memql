@@ -1,3 +1,12 @@
+---
+title: Capability-script contract
+audience: internal
+status: historical
+area: design
+sinceVersion: 0.12.0
+owner: znas
+---
+
 # Capability-script contract
 
 **Status:** accepted · **Epic:** [#2212](https://github.com/znasllc-io/memql/issues/2212) · **Issue:** [#2221](https://github.com/znasllc-io/memql/issues/2221) (I14)

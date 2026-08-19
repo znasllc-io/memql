@@ -2,7 +2,7 @@
 title: TimescaleDB license compliance (TSL) -- posture, client notice, confirmation request
 audience: ops
 status: stable
-area: internal
+area: ops
 sinceVersion: 0.9.0
 owner: znas
 ---

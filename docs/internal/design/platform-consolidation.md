@@ -1,3 +1,12 @@
+---
+title: Platform consolidation: a product-agnostic engine + DSL-bundle products
+audience: internal
+status: historical
+area: design
+sinceVersion: 0.12.0
+owner: znas
+---
+
 # Platform consolidation: a product-agnostic engine + DSL-bundle products
 
 **Status:** accepted — validated by spike [#2473](https://github.com/znasllc-io/memql/issues/2473) (2026-07-08) · **Epic:** [#2472](https://github.com/znasllc-io/memql/issues/2472) · **Issue:** [#2474](https://github.com/znasllc-io/memql/issues/2474)
