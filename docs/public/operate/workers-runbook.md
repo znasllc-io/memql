@@ -31,7 +31,12 @@ see workers owned by the user whose session they're acting in.
 
 ## 2. Install
 
-Pick the installer for your OS. Both ship under `scripts/install/`.
+Pick the installer for your OS. `install-mac.sh` and `install-linux.sh` ship
+from the `memql-cockpit` repo (the worker is a run mode of the Cockpit
+binary), not from this engine repo's `scripts/install/` -- that directory
+carries the cluster-bring-up installers (`mkcert-setup.sh`,
+`hosts-entries.sh`, `install-binary.sh`, ...) and has no `install-mac.sh` /
+`install-linux.sh` of its own.
 
 ### macOS
 
@@ -224,13 +229,13 @@ UI: Workers panel (`?panel=workers`) → Revoke per row.
 
 CLI: `memql-cockpit` → connect → run mutation:
 
-```memql
-revokeWorker({
+```memql fragment
+revokeWorker(
   registrationId: "wkr-abc...",
   revokedAt: "2026-05-05T12:00:00Z",
   revokedBy: "user-jose-...",
   revokeReason: "decommissioned"
-})
+)
 ```
 
 The agent node's registry checks `revokedAt` on every dispatch and
@@ -243,10 +248,8 @@ UI: Floating shield widget in any space's chrome.
 
 CLI:
 
-```memql
-toggleComputerUseEnabled({
-  enabled: false
-})
+```memql fragment
+toggleComputerUseEnabled(enabled: false)
 ```
 
 The switch always targets the **caller's own** user row -- the id is
@@ -260,8 +263,8 @@ a separately-named mutation.
 
 ### Inspect invocations for a plan
 
-```memql
-invocationsForPlan({ planId: "plan-..." })
+```memql fragment
+invocationsForPlan(planId: "plan-...")
 ```
 
 ### Force a token rotation

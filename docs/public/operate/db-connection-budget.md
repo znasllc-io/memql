@@ -63,9 +63,9 @@ Source of truth is the code; defaults are conservative and overridable per env:
 | Env var | Default | Purpose |
 |---|---|---|
 | `MAX_OPEN_CONNS` | 10 | hard cap on concurrent connections per pod (the primary budget lever) |
-| `MAX_IDLE_CONNS` | 3 | warm idle connections kept per pod |
+| `MAX_IDLE_CONNS` | 1 | warm idle connections kept per pod |
 | `CONN_MAX_LIFETIME_MS` | 3600000 (1h) | rotate connections hourly (bounds long-lived leaks) |
-| `CONN_MAX_IDLE_TIME_MS` | 600000 (10m) | close idle connections after 10 min (reclaims slack) |
+| `CONN_MAX_IDLE_TIME_MS` | 120000 (2m) | close idle connections after 2 min (reclaims slack) |
 
 `MAX_OPEN_CONNS` is a **hard** per-pod cap (database/sql never exceeds it), so a
 single pod cannot leak past it. Right-size it so `peak_connections` (above) fits

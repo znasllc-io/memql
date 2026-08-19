@@ -317,7 +317,7 @@ Voice messages create `v1:cognition:utterance` records with this structure:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MEMQL_STT_PROVIDER` | STT provider name | `openai-realtime` |
-| `MEMQL_STT_DEFAULT_LANGUAGE` | Default language hint | `en` |
+| `MEMQL_STT_LANGUAGE` | Default language hint | `en` |
 
 #### Provider Comparison
 
@@ -339,7 +339,7 @@ stops speaking. Best for accuracy but no interim results.
 ### STT Component Structure
 
 ```
-server/audiows/
+component/server/audiows/
 ├── handler.go      # WebSocket handler, session management
 └── messages.go     # Message type definitions
 
@@ -560,7 +560,7 @@ for await (const chunk of ttsStream) {
 |----------|-------------|---------|
 | `MEMQL_DEFAULT_TTS_PROVIDER` | TTS provider name from registry | `tts1` |
 
-TTS providers are configured in `providers/v1/openai/` as `.memql` files with `@type("OpenAITTS")`. The default voice, format, and speed are set per-provider in the MemQL configuration.
+TTS providers are configured in `dsl/providers/providers.memql` with `@type("OpenAITTS")`. The default voice, format, and speed are set per-provider in the MemQL configuration.
 
 ### Chunk Sizing
 
@@ -635,10 +635,11 @@ Multi-agent real-time voice conversations route through the Polyphon
 pipeline -- LiveKit for audio transport, a Bridge Agent for ASR/TTS,
 and the cognition node for turn-taking.
 
-The full architecture (audio flow, provider flavors, configuration,
-component structure, costs) lives in
-[/docs/polyphon-architecture.md](/docs/polyphon-architecture.md). Don't
-duplicate it here.
+The audio flow, provider flavors, configuration, and component structure
+are covered in the Voice + Video Pipeline section of the root `CLAUDE.md`
+and in [docs/public/operate/](../operate/) (the standalone Polyphon
+architecture doc that used to live here was superseded by the Go
+voice-agent + those docs). Don't duplicate it here.
 
 ### Endpoints
 
@@ -653,12 +654,11 @@ env vars are configured.
 
 ### Provider selection
 
-`POLYPHON_VOICE_PROVIDER`:
+`MEMQL_POLYPHON_VOICE_PROVIDER`:
 
 - `openai` (fallback) -- OpenAI Realtime transcription + `/v1/audio/speech` TTS.
 
 ---
 
-*For the Polyphon architecture and deployment details, see [/docs/polyphon-architecture.md](/docs/polyphon-architecture.md)*
-*For the overall memQL architecture, see [/docs/public/concepts/architecture.md](/docs/public/concepts/architecture.md)*
-*For integration patterns, see [/integrations/CLAUDE.md](/integrations/CLAUDE.md)*
+*For the overall memQL architecture, see [docs/public/concepts/architecture.md](../concepts/architecture.md)*
+*For integration patterns, see [integrations/CLAUDE.md](../../../integrations/CLAUDE.md)*

@@ -1,3 +1,12 @@
+---
+title: Self-healing two-tier base/overlay store (Epic 4)
+audience: internal
+status: draft
+area: design
+sinceVersion: 0.11.0
+owner: znas
+---
+
 # Self-healing two-tier base/overlay store (Epic 4)
 
 Status: E4.1 + E4.2 landed. E4.3–E4.6 in progress.

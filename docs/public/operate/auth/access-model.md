@@ -60,7 +60,7 @@ is `primaryEmail`.
 Key fields:
 
 - `displayName`, `primaryEmail`
-- `role` -- cluster-wide role: `owner` / `admin` / `writer` / `reader`
+- `role` -- cluster-wide role: `owner` / `admin` / `developer` / `writer` / `reader`
 - `internal` -- true when registration matched
   `MEMQL_IDENTITY_INTERNAL_DOMAINS`
 - `preferences` -- theme, language, notifications, archive
@@ -179,9 +179,10 @@ middleware (`component/identity/verifier`). On each gRPC stream open:
    `iss`, and `aud`. Unknown `kid` triggers a one-shot JWKS refresh
    to handle rotation overlap.
 4. The verified claims (`sub`, `email`, `name`, `role`, `internal`,
-   `partitions`, `sid`) are stamped onto the request context using
+   `sid`) are stamped onto the request context using
    `auth.ContextWithClaims` + `auth.BuildTokenInfo`, exactly as the
-   legacy auth path did.
+   legacy auth path did. The identity-issued JWT no longer carries a
+   `partitions` claim.
 
 ### The unauthenticated HTTP surface is declared, not inherited
 
@@ -361,21 +362,17 @@ See `component/server/unauthenticated_surface.go` and
    documents and three code comments (memql#2984); a reader who follows the citation to an
    owner-or-admin-gated query concludes the circularity constraint is
    imaginary.
-3. Per message: `CheckPartition(ctx, accessCtx, envelope.partition,
-   messageId)`:
-   - Reject `_system` unconditionally.
-   - Cluster owners bypass.
-   - Otherwise the partition must appear in the caller's ACL.
-4. `listPartitions` post-filter: the gRPC server trims the response
-   to only partitions in the caller's ACL (owners see everything).
 
-### Subscription scoping
-
-Stream subscriptions that send a `*` partition wildcard get
-server-side rewritten via `scopeGraphPatternToPartition` so a
-subscriber cannot observe other tenants' events. Cluster owners
-ride the same path -- they bypass the per-partition ACL but the
-events still scope by envelope.
+There is no further per-message envelope check after that. #56 removed the
+per-partition ACL this step used to run (`CheckPartition` against the
+caller's ACL, and a `listPartitions` post-filter trimming the response) --
+the `partition` wire field is `reserved` in `component/grpc/memql.proto` and
+nothing derives scope from it any more. What decides whether a given
+message may read or write a given row from here is the per-row check
+described in [per-row-authz-audit.md](per-row-authz-audit.md): the query or
+mutation the message executes carries its own `owned` / `granted` / `admin`
+/ `public` gate, evaluated against the `AccessContext` this step resolved.
+There is no separate envelope-level gate above that to describe.
 
 ### Session revocation
 
@@ -387,31 +384,33 @@ check runs at stream-open time only -- already-established streams
 keep their socket open until the JWT expires or the client
 disconnects.
 
-### Audit
-
-Every rejection logs at `Info` level with subject / user id /
-partition / reason. Reasons today:
-
-- `system_addressed`  -- caller set partition=`_system`
-- `no_access`         -- caller has no grant for that partition
-- `no_access_context` -- internal: middleware ran before access
-  context loaded
-
 ## Cockpit Settings: My Access
 
-The Cockpit's Settings tab includes a **MY ACCESS** panel showing
-account + per-partition grants. The data comes from a dedicated
-gRPC message (`MyAccessMsg` / `MyAccessResult`).
+The Cockpit's Settings tab includes a **MY ACCESS** panel showing the
+caller's own identity: user id, primary email, and cluster-wide role. The
+data comes from a dedicated gRPC message (`MyAccessMsg` / `MyAccessResult`,
+`component/grpc/my_access_handler.go`). There is no per-partition grant
+list to show any more -- the proto's `partitions` field is `reserved`
+(`component/grpc/memql.proto`), and a role is the only access-relevant
+fact a `v1:identity:user` row carries (see "Role spectrum," above).
 
 ## Granting access
 
-Today granting access goes through `mutationGrantPartitionAccess`.
-The admin web app under `/admin/*` (mounted by the identity
-binary) provides a UI for it.
+A cluster-wide role is set by an owner or admin over `IdentityAdminMsg`
+(`Service.SetUserRole`, `component/identity/adminops/adminops.go`), audited
+as `user_role_changed`. The admin screens that call it live in the memQL
+portal, not the identity binary's own web app -- `/admin/*` on the identity
+binary itself is now just its sign-in pages plus an `/admin/` root that
+answers `410 Gone`. There is no separate partition-grant mutation to run:
+setting the role is the whole of it.
 
 ## Out of scope (deferred)
 
-- **Per-concept ACL.** Today access is at partition granularity.
+- **Per-concept ACL beyond `@rowAuthz`.** Today access is at the granularity
+  of a construct's declared tier (`owned` / `granted` / `admin` / `public`)
+  or, for an undeclared concept, whatever its own filters happen to gate on
+  -- see [per-row-authz-audit.md](per-row-authz-audit.md) for what's
+  declared today and what remains undeclared.
 - **Writer-vs-reader enforcement beyond the ExecuteQuery handler.**
   A `reader` issuing a mutation over `ExecuteQueryMsg` is now refused
   with `PermissionDenied` by the coarse data-plane capability gate
@@ -423,9 +422,14 @@ binary) provides a UI for it.
   its complete residual-bypass set is enumerated with reasons in
   `dataPlaneGateExemptions` (same file):
   - **Guest streams are explicitly exempt.** A guest's real
-    authorization dimension is the invitation scope plus the partition
-    grant, not the cluster role -- the `reader` on a guest stream is a
-    placeholder. Guest participation necessarily rides
+    authorization dimension is the invitation itself, not the cluster
+    role -- the `reader` on a guest stream is a placeholder. (The
+    gate's own source comment in `data_capability_gate.go` still
+    describes this as "invitation scope plus the partition grant";
+    there is no partition grant any more -- #56 retired it, and the
+    `partitionId` field the comment is echoing is now just a product
+    routing hint on the invitation row, not an access grant.) Guest
+    participation necessarily rides
     `ExecuteQueryMsg` (the dedicated guest message types cover only the
     invite/join lifecycle), so gating it would break guest chat. The
     exemption keys off the guest claim, never off the role.
@@ -438,13 +442,9 @@ binary) provides a UI for it.
   planner loop, node bootstrap -- are likewise not covered, by design.
   It is also the COARSE half only: it answers "may this actor write at
   all", never "which rows".
-- **Time-bounded grants UI.** `expiresAt` exists on the concept but
-  Cockpit doesn't expose it as a form field yet.
 - **Identity-merge UI.** If the same human ends up with two users
   (different emails), there's no merge tool. Avoid by using
   `primaryEmail` as the dedup key at registration.
-- **Partition rename.** Access rows reference partitions by name;
-  renaming would orphan grants.
 
 ## Related
 

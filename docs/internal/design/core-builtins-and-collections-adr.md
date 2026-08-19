@@ -1,8 +1,8 @@
 ---
 title: Core built-ins boundary -- ambient primitives vs imported core, the collection/lambda library, and temporal visibility
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.6
 owner: znas
 ---

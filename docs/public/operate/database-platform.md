@@ -1,6 +1,6 @@
 ---
 title: Database platform (CloudNativePG) -- operator guide
-audience: ops
+audience: public
 status: stable
 area: operate
 sinceVersion: 0.9.0

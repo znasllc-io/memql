@@ -2,7 +2,8 @@
 title: Session Handoff Prompts
 audience: internal
 status: historical
-area: internal
+area: planning
+sinceVersion: 0.9.88
 owner: znas
 ---
 

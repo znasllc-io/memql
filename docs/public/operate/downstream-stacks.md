@@ -1,6 +1,7 @@
 ---
+title: Downstream product stacks (the DSL-bundle contract)
 audience: public
-status: current
+status: stable
 area: operate
 sinceVersion: 0.12.0
 owner: platform

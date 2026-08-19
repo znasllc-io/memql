@@ -376,7 +376,7 @@ function main() {
         printf 'Verify any time with: make verify-agents\n'
     else
         printf '\nSome steps failed. See the FAIL lines above, fix, and re-run.\n' >&2
-        printf 'Details and remediation: docs/AGENTS.md\n' >&2
+        printf 'Details and remediation: docs/internal/ops/agent-stack.md\n' >&2
     fi
     exit "$rc"
 }

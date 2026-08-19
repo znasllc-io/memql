@@ -1,8 +1,8 @@
 ---
 title: Spec/Shape binding contract -- signature binding, return bodies, ambient gateways
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.6
 owner: znas
 ---

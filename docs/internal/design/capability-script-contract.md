@@ -1,7 +1,16 @@
+---
+title: Capability-script contract
+audience: internal
+status: historical
+area: design
+sinceVersion: 0.12.0
+owner: znas
+---
+
 # Capability-script contract
 
 **Status:** accepted · **Epic:** [#2212](https://github.com/znasllc-io/memql/issues/2212) · **Issue:** [#2221](https://github.com/znasllc-io/memql/issues/2221) (I14)
-**Companion:** [`dsl-behavioral-constructs-adr.md`](./dsl-behavioral-constructs-adr.md) · the [Execution model](../../../DEVOPS_DSL_BUNDLE_HANDOFF.md)
+**Companion:** [`dsl-behavioral-constructs-adr.md`](./dsl-behavioral-constructs-adr.md) · the execution model in the DSL-bundle repo's `DEVOPS_DSL_BUNDLE_HANDOFF.md` (a sibling repo, not this one)
 
 A **capability script** is the deterministic shell backend behind a DSL
 `action`. The same script must run **identically** when invoked by the action

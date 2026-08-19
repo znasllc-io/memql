@@ -2,7 +2,7 @@
 title: Turn-taking / endpointing orchestration in Go (AgentSession replacement)
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

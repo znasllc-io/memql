@@ -135,21 +135,28 @@ The trigger is `node.created`; `advanceRequest` is an `update`
 
 ## Role mapping
 
-Cluster roles are `owner` / `admin` / `writer` / `reader`. Forge maps these to
-pipeline personas:
+Cluster roles are `owner` / `admin` / `developer` / `writer` / `reader`
+(`dsl/identity/concepts.memql`). Forge maps these to pipeline personas. The
+forge MCP tool surface's `@allowedRoles` annotations already grant
+`developer` the same tool access as `admin` throughout `dsl/forge/tools.memql`:
 
 | Cluster role | Forge persona | Permissions |
 |---|---|---|
 | `owner` | Approver / fast-track | Final approval. Self-approves on submit (fast-track to `queued`). Can validate and approve other requests. Execute/deploy authority. |
 | `admin` | Senior developer | May validate requests (advance to `needs_approval`) and approve them (advance to `queued`). |
+| `developer` | Senior developer | Tool-permitted the same as `admin`, but see the query-layer caveat below. |
 | `writer` | Junior developer | May validate requests (first-line review). Cannot approve; moves requests to `needs_approval` for the owner. |
 | `reader` | Non-developer employee | Submit-only. Requests enter the pipeline at `needs_validation`. Receives the mentoring layer while filing (see below). |
 
 The validation and approval queues are gated at the query layer via the forge
 role specs (`forgeDeveloper` for `owner` / `admin` / `writer`;
-`forgeApprover` for `owner` only). A `reader` calling
-`forgeValidationQueue` or `forgeApprovalQueue` receives an empty list, not an
-error. Submission (`forgeSubmitRequest`) and reading own requests
+`forgeApprover` for `owner` only). **`forgeDeveloper` does not currently
+include `developer`** (`dsl/forge/specs.memql`), even though the tool-level
+`@allowedRoles` on `forgeValidationQueue` / `forgeApprovalQueue` /
+`forgeValidateRequest` / `forgeApproveRequest` does admit that role -- so a
+caller whose cluster role is `developer` can invoke those tools but currently
+gets the same empty-list result a `reader` gets, rather than the populated
+queue an `admin` sees. Submission (`forgeSubmitRequest`) and reading own requests
 (`forgeMyRequests`) are open to every authenticated team member.
 
 ### Mentoring layer
@@ -157,9 +164,11 @@ error. Submission (`forgeSubmitRequest`) and reading own requests
 When a `reader` submits a request, the `forgeSubmitRequest` tool description
 instructs Claude to teach the submitter about the part of the system or company
 their request touches — a short, friendly explanation so they learn while they
-file. This is client-side behaviour driven by the tool description; a
-server-side `mentored` requestEvent is recorded when it happens. A dedicated
-mentoring prompt template lands in a follow-on slice.
+file. This is client-side behaviour driven by the tool description, backed by
+a dedicated mentoring prompt: `forgeMentoringExplanation`
+(`dsl/forge/prompts.memql`) generates the teaching explanation, and
+`forgeRecordMentoring` (see below) records it server-side as a `mentored`
+requestEvent.
 
 ---
 
@@ -174,6 +183,7 @@ connected to a memQL cluster with the forge bundle loaded.
 |---|---|
 | `forgeRegisterProject` | Register a new project forge develops against (call once per app or codebase). |
 | `forgeActiveProjects` | List active projects (use to resolve a `projectId` before submitting). |
+| `forgeResolveProject` | Resolve a project by its human-readable slug (e.g. `memql`) to the full project row, including its id. |
 
 ### Submit and browse (open to all team members)
 
@@ -193,6 +203,13 @@ connected to a memQL cluster with the forge bundle loaded.
 | `forgeApprovalQueue` | List validated requests awaiting owner approval. Owner only; returns empty for others. |
 | `forgeApproveRequest` | Approve a request (owner action): advances to `queued`, stamps the approver. |
 | `forgeRequestChanges` | Send a request back for changes with a reason: sets status `changes_requested`. |
+
+### Mentoring and attachments
+
+| Tool | Summary |
+|---|---|
+| `forgeRecordMentoring` | Record a `mentored` requestEvent after Claude has delivered a teaching explanation to a non-owner submitter (`recordMentoredEvent` mutation). |
+| `forgeAttachToRequest` | Attach one screenshot or file (a `v1:common:attachment` id) to an existing forge request; callable repeatedly to accumulate multiple attachments. |
 
 Identity is always stamped server-side from the authenticated actor
 (`submitterUserId`, `validatedByUserId`, `approvedByUserId`, `actorUserId` on
@@ -298,8 +315,8 @@ All forge constructs live under `dsl/forge/`:
 |---|---|
 | `concepts.memql` | `project`, `request`, `requestEvent` concept schemas |
 | `shapes.memql` | `projectFull`, `requestFull`, `requestEventFull` projections |
-| `mutations.memql` | `createProject`, `createRequest`, `advanceRequest`, `validateRequest`, `approveRequest`, `requestChanges`, `recordRequestEvent` |
-| `queries.memql` | `activeProjects`, `myRequests`, `requestById`, `projectRequests`, `validationQueue`, `approvalQueue`, `requestEvents` |
+| `mutations.memql` | `createProject`, `createRequest`, `advanceRequest`, `validateRequest`, `approveRequest`, `requestChanges`, `attachToRequest`, `recordRequestEvent`, `recordMentoredEvent` |
+| `queries.memql` | `projectById`, `activeProjects`, `projectBySlug`, `myRequests`, `requestById`, `projectRequests`, `validationQueue`, `approvalQueue`, `requestEvents` |
 | `logic.memql` | `requestRouteStatus` — role-based pipeline router; `transitionEventKind` — status → `requestEvent` kind |
 | `automations.memql` | `routeRequest` — fires on `node.created` for `v1:forge:request`; `recordTransition` — fires on `node.updated` |
 | `tools.memql` | All `@mcp`-annotated tools (the team's Claude-facing surface) |

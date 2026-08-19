@@ -2,7 +2,7 @@
 title: Disaster recovery runbook (deployment-v2 Phase 5, #703)
 audience: ops
 status: stable
-area: internal
+area: ops
 sinceVersion: 0.9.0
 owner: znas
 ---

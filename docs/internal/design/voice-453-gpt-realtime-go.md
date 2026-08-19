@@ -2,7 +2,7 @@
 title: gpt-realtime over WebSocket in Go -- feasibility spike
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

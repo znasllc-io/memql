@@ -15,7 +15,7 @@ The telephony media plane is **environment-selectable** (Epic #2184):
   **outbound** to a LiveKit Cloud project. There is **no** local
   `livekit-server` / `livekit/sip` / coturn for the dev loop — LiveKit Cloud is
   the SIP + WebRTC media plane and its TURN handles NAT.
-- **Staging / production → self-hosted LiveKit** (unchanged). See
+- **Cloud → self-hosted LiveKit** (unchanged). See
   [telephony.md](telephony.md) for the self-hosted plane.
 
 This page is the documented bring-up flow for telephony on the **local** plane:
@@ -135,6 +135,10 @@ dials out through the Telnyx Outbound Voice Profile via LiveKit Cloud
 - An inbound call to the DID is answered and an outbound `place_call` connects,
   both from the local cluster (the live audio + ~$0-on-silence cost checks are
   [#2190](https://github.com/znasllc-io/memql/issues/2190)).
-- Staging/prod are untouched — still self-hosted, with the no-cloud-leak guard
-  (`scripts/deploy/livekit_cloud_guard_test.go`) keeping cloud out of those
-  overlays.
+- The cloud overlay is untouched — still self-hosted. The dedicated no-cloud-leak
+  guard that once kept `*.livekit.cloud` out of it
+  (`scripts/deploy/livekit_cloud_guard_test.go`) was deleted along with the
+  staging/production retirement (commit 992deb41) and has no replacement test
+  today; the property currently holds because the cloud overlay's LiveKit
+  manifests (`deploy/k8s/base/livekit*.yaml`) name only the self-hosted
+  Services.

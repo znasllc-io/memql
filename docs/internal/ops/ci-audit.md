@@ -1,3 +1,12 @@
+---
+title: CI Bottleneck Audit
+audience: internal
+status: historical
+area: ops
+sinceVersion: 0.15.0
+owner: znas
+---
+
 # CI Bottleneck Audit
 
 **Repo:** `znasllc-io/memql` (public, Team plan, 2 seats)

@@ -68,8 +68,8 @@ memQL splits configuration into two tiers:
    Secrets reconciles them from Key Vault. There is no encrypted-at-rest
    path for these -- they live in plain env inside the pod.
 
-   > There used to be a second path: a sealed **genesis envelope**
-   > (`MEMQL_GENESIS_B64`) that each pod decrypted in-process at boot,
+   > There used to be a second path: a genesis **envelope**, sealed under
+   > `MEMQL_GENESIS_B64`, that each pod decrypted in-process at boot,
    > applying ~150 vars set-if-absent. It is gone, along with its sealing
    > CLI and its `.znas` format. If a runbook tells you to seal one, it is
    > describing a mechanism that no longer exists.
@@ -276,7 +276,7 @@ them.
 | Variable                       | Required when                            | Notes                                                                                                                                              |
 |--------------------------------|------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
 | `MEMQL_IDENTITY_BASE_URL`            | identity binary, when `MEMQL_IDENTITY_ENABLED=true` | Public origin (e.g. `https://auth.example.com`). Used as JWT `iss` and in outbound email links.                                                       |
-| `MEMQL_IDENTITY_SIGNING_KEY_B64`     | identity binary running **>=2 replicas** | Shared base64-std 32-byte Ed25519 seed (#550) -- every replica derives the SAME key + JWKS. **REQUIRED for any multi-replica deployment**; without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail with `unknown kid` (the 2026-06-16 staging outage, #1515). `Config.Validate()` fail-fast refuses to boot without it unless the issuer is a LOOPBACK host (`localhost` / `127.0.0.1` / `::1` / `0.0.0.0` / `*.localhost` -- one process, no possible second replica) or `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. A `*.local.<domain>` issuer is NOT exempt: it is a local cluster's front door, and exempting it is memql#3400. Generate: `make identity-signing-key`. Delivered as a **key on the `memql-secrets` Secret** and by no other route (memql#3960) -- the cloud declares it in Key Vault through `deploy/external-secrets/externalsecret-memql.yaml`, and `make secrets` generates and preserves it locally. It could previously also ride inside the sealed genesis envelope, and that arm was in fact the only *declared* cloud path, so the redundancy read the opposite way round from how it actually stood. |
+| `MEMQL_IDENTITY_SIGNING_KEY_B64`     | identity binary running **>=2 replicas** | Shared base64-std 32-byte Ed25519 seed (#550) -- every replica derives the SAME key + JWKS. **REQUIRED for any multi-replica deployment**; without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail with `unknown kid` (the 2026-06-16 staging outage, #1515). `Config.Validate()` fail-fast refuses to boot without it unless the issuer is a LOOPBACK host (`localhost` / `127.0.0.1` / `::1` / `0.0.0.0` / `*.localhost` -- one process, no possible second replica) or `MEMQL_IDENTITY_ALLOW_EPHEMERAL_KEY=true`. A `*.local.<domain>` issuer is NOT exempt: it is a local cluster's front door, and exempting it is memql#3400. Generate: `make identity-signing-key`. Delivered as a **key on the `memql-secrets` Secret** and by no other route (memql#3960) -- the cloud declares it in Key Vault through `deploy/external-secrets/externalsecret-memql.yaml`, and `make secrets` generates and preserves it locally. It could previously also ride inside the genesis envelope (sealed and decrypted in-process at boot), and that arm was in fact the only *declared* cloud path, so the redundancy read the opposite way round from how it actually stood. |
 | `MEMQL_IDENTITY_KEY_ENCRYPTION_KEY`  | identity binary in non-localhost prod (file-key mode) | Master secret (>=16 bytes) wrapping the on-disk Ed25519 signing keypair. Only the file-key (no-seed) path. Sourced from `v1:platform:globalSecret` of the same name in production.        |
 | `MEMQL_IDENTITY_VERIFIER_BASE_URL`   | non-identity binaries, prod auth          | URL the per-node verifier fetches JWKS from. Empty -> dev no-auth identity (`local-dev@memql.local`).                                                  |
 | `MEMQL_WORKER_PEERS`           | cluster mode, first boot of any dialing node | Comma-separated `type=host:port` seed list (e.g. `agent=agent:50055,cognition=cognition:50054,planner=planner:50056`). Dialable types: `agent`, `cognition`, `identity`, `planner`, `voice`, `workbench`; anything else is ignored with a boot-time WARN naming the entry (memql#3450). DB-based discovery via `v1:cluster:node` takes over once peers register. Without it the BFF can't find workers on first boot. |
@@ -330,10 +330,10 @@ All optional. Defaults baked into `component/database/database.go`:
 | `MEMORY_NODES_DATABASE_MAX_CONN_RETRIES_INTERVAL_MS`  | `1000`      |
 | `MEMORY_NODES_DATABASE_TICKER_INTERVAL_MS`            | `30000`     |
 | `MEMORY_NODES_DATABASE_MIGRATION_TIMEOUT_MS`          | `30000`     |
-| `MEMORY_NODES_DATABASE_MAX_OPEN_CONNS`                | `25`        |
-| `MEMORY_NODES_DATABASE_MAX_IDLE_CONNS`                | `5`         |
+| `MEMORY_NODES_DATABASE_MAX_OPEN_CONNS`                | `10`        |
+| `MEMORY_NODES_DATABASE_MAX_IDLE_CONNS`                | `1`         |
 | `MEMORY_NODES_DATABASE_CONN_MAX_LIFETIME_MS`          | `3600000`   |
-| `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `600000`    |
+| `MEMORY_NODES_DATABASE_CONN_MAX_IDLE_TIME_MS`         | `120000`    |
 
 #### Connection pooling: hybrid endpoint split (`DIRECT_DSN`)
 
@@ -373,7 +373,10 @@ For the identity binary (`-tags identity`):
 | `MEMQL_DISCOVERY_CLIENT_ID`                     | the first registered client | The OAuth `client_id` published as `clientId` in the same document.                                              |
 | `MEMQL_DISCOVERY_CLUSTER_NAME`                  | the identity host        | The human-readable default name published as `clusterName` in the same document.                                     |
 
-For every other binary (bff/voice/cognition/agent/planner):
+For every other binary (bff/voice/cognition/agent/planner/workbench/mcp) --
+every node type except identity itself (the JWKS authority, which does not
+verify against itself) and edge (not an auth boundary; it serves public
+bytes to anonymous site visitors):
 
 | Variable                                       | Default | Purpose                                                                                                                              |
 |------------------------------------------------|---------|--------------------------------------------------------------------------------------------------------------------------------------|
@@ -396,11 +399,11 @@ delivery).
 | `MEMQL_DEMO_MODE`                               | `false` | Affects webhook step behavior; used by demo deployments.                                 |
 | `MEMQL_COGNITION_FIT_THRESHOLD`                 | `0.4`   | Float in `[0,1]`; cognition turn-fit cutoff. Higher = stricter "should I respond?" gate. |
 | `MEMQL_CLASSIFICATION_SHORTCIRCUIT`             | `true`  | Deterministic messageClassification short-circuit (#1329): in a 1-human/1-agent space, a TEXT turn with no ambiguous @-addressing skips the classification LLM call and dispatches to the single agent. Set `false`/`0`/`off` to force every turn through the LLM classifier (A/B latency measurement, or to restore text-ack suppression in 1:1 spaces). Voice turns always use the LLM classifier regardless. |
-| `MEMQL_QUERY_MAX_RESULTS`                       | `10000` | Per-query row cap.                                                                       |
-| `MEMQL_QUERY_MAX_WINDOW`                        | `100`   | Query optimizer lookahead window.                                                        |
-| `MEMORY_ENGINE_CACHE_SIZE`                      | `1000`  | Concept-schema cache size.                                                               |
-| `MEMORY_ENGINE_CACHE_MAX_TTL`                   | `300`   | Cache entry TTL (seconds).                                                               |
-| `MEMORY_ENGINE_SI_TOOL_LOOP_MAX_ITERATIONS`     | `10`    | Max AI tool-calling iterations per turn.                                                 |
+| `MEMQL_MEMORY_ENGINE_MAX_RESULTS`               | `500`   | Per-query row cap.                                                                       |
+| `MEMQL_MEMORY_ENGINE_MAX_WINDOW`                | `5000`  | Query optimizer lookahead window.                                                        |
+| `MEMQL_MEMORY_ENGINE_CACHE_MAX_ITEMS`           | `1024`  | Concept-schema cache size.                                                               |
+| `MEMQL_CACHE_MAX_TTL`                           | `0`     | Cache entry TTL (seconds). `0` = no expiry.                                              |
+| `MEMQL_TOOL_LOOP_MAX_ITERATIONS`                | `120`   | Max AI tool-calling iterations per turn. Shared by the engine-level tool loop and the agent-node streaming loop. |
 | `MEMQL_DSL_PATH`                                | unset   | Optional on-disk root for the .memql tree. When set and `<root>/<typeName>` exists, that DSL type reads from disk instead of the embedded copy. Per-type partial overrides supported. |
 | `MEMQL_POLICYTRACE_RETENTION_DAYS`             | `90`    | Retention window (days) for v1:platform:policyTrace rows. Surfaced by `purgeExpiredPolicyTraces` cron. |
 | `MEMQL_MESH_OUTBOX_RETENTION`                  | `24h`   | Max-age watermark (Go duration string) for the mesh delivery substrate's `mesh_outbox` rows and stale `mesh_cursor` rows; an hourly per-node sweep deletes rows older than this. `0` or negative disables the sweep; an unparsable value falls back to the default. `mesh_key_seq` is never swept (seq-restart hazard). |
@@ -446,10 +449,10 @@ All in `component/server/memqlws/env.go`:
 
 | Variable                              | Default            |
 |---------------------------------------|--------------------|
-| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `10000`            |
-| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `30000`            |
-| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `100`              |
-| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `67108864` (64 MB) |
+| `MEMQL_WS_DIAL_TIMEOUT_MS`            | `5000`             |
+| `MEMQL_WS_WRITE_TIMEOUT_MS`           | `10000`            |
+| `MEMQL_WS_MAX_CONCURRENT_REQUESTS`    | `4`                |
+| `MEMQL_WS_MAX_MESSAGE_BYTES`          | `5242880` (5 MB)   |
 | `MEMQL_WS_PING_INTERVAL_MS`           | `30000`            |
 
 ---

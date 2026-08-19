@@ -19,7 +19,7 @@ There are two run modes:
 | Mode | What it is | How |
 |------|-----------|-----|
 | **Local dev** | k3d + ArgoCD cluster on one machine — Postgres, the mesh, LiveKit. Throwaway. | `make up` (primary local path, memql#2061). See [Reproduce the cloud locally](reproduce-the-cloud-locally.md). |
-| **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against a **managed** TimescaleDB. | The rest of this page. |
+| **Real deployment** (staging / prod / self-host) | A Kubernetes mesh against **self-hosted CloudNativePG** (PostgreSQL + TimescaleDB Community + pgvector), in-cluster. | The rest of this page. |
 
 Everything below is **environment-agnostic by design**: the architecture is
 identical local → staging → prod; only the *config values* (DSNs, replica
@@ -150,7 +150,7 @@ Every DB-connecting pod mounts the `memql-secrets` Secret via `envFrom`. The
 | `MEMQL_MASTER_KEY` | 32-byte key that decrypts stored secrets at rest (`v1:platform:globalSecret`). It DECRYPTS and never authenticates -- the operator bearer is `MEMQL_OPERATOR_KEY` (memql#3519). |
 | `MEMQL_OPERATOR_KEY` | 32-byte credential that AUTHENTICATES `Authorization: Operator <key>` as a synthetic cluster owner. A **different** value from the master key (memql#3519). |
 | `MEMQL_IDENTITY_SIGNING_KEY_B64` | base64-std 32-byte Ed25519 seed. Required for any multi-replica identity: without it each pod mints its own key, JWKS diverges, and ~50% of token verifications fail (memql#3400). |
-| `MEMQL_DATABASE_DSN` | DB — the **transaction pooler** endpoint. |
+| `MEMQL_DATABASE_DSN` | DB — the bulk-traffic endpoint (bun pool; resolves to `memql-db-rw` today, will move to a pooler if `cnpg-db/optional/pooler` is ever composed). |
 | `MEMORY_NODES_DATABASE_DIRECT_DSN` | DB — the **direct** endpoint. |
 
 - **Identity** is the in-house auth service; for multi-replica HA it needs a

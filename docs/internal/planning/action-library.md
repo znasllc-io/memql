@@ -2,7 +2,7 @@
 title: Action library — reusable, replayable actions composed without an LLM
 audience: internal
 status: draft
-area: internal
+area: planning
 sinceVersion: 0.9.6
 owner: znas
 ---

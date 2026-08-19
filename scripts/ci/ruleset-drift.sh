@@ -7,7 +7,7 @@
 # repository expects, and say so out loud when it does not (memql#3836).
 #
 # WHY THIS EXISTS. On 2026-08-06T19:29:07Z one edit to ruleset 16630577 dropped
-# TWO rules at once. `docs/ci-audit.md` §2.3 caught the moment and recorded the
+# TWO rules at once. `docs/internal/ops/ci-audit.md` §2.3 caught the moment and recorded the
 # rule list. Exactly one of the two came back:
 #
 #   dropped                  symptom                                outcome

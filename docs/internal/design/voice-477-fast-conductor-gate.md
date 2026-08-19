@@ -2,7 +2,7 @@
 title: Fast conductor gate (WHEN not WHAT) + latency budget
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

@@ -52,9 +52,12 @@ them).
    - **New user**: provisions `v1:identity:user` and
      `v1:identity:identity` (`identityType="magic_link"`), then
      issues tokens. Internal-domain users get
-     `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`; external users start with
-     no cluster role and an owner grant on a fresh personal
-     partition.
+     `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`; external users get the
+     default cluster-wide role, `reader`. There is no per-partition
+     grant of any kind -- partitioning was retired in #56, and what
+     bounds every user, internal or external, is the per-row check on
+     each concept they read (see
+     [access-model.md](access-model.md#what-the-role-actually-decides)).
 6. Browser receives the access JWT and starts using it as
    `Authorization: Bearer ...` against bff/voice/etc.
 
@@ -76,8 +79,9 @@ flows:
 - **User invitations** (admin / waitlist mode): an admin issues a
   user-targeted invitation. The recipient lands in the registration
   flow with the invitation token pre-bound; on completion the
-  identity service stamps the issuing admin's specified role + any
-  partition grants.
+  identity service stamps the issuing admin's specified cluster-wide
+  role. There is no separate partition grant to stamp -- the role is
+  the whole of it.
 
 Tokens are stored as SHA-256 hashes (column: `tokenHash`); the
 plaintext is shown only once at issuance.
@@ -130,8 +134,10 @@ to.
 
 ## Account deletion
 
-Users request deletion via `/me/delete` in the identity web app.
-The mutation stamps `deletionScheduledAt` on the user row but
+Users request deletion from `/me/settings` in the identity web app,
+which reaches the `scheduleAccountDeletion` mutation
+(`dsl/identity/mutations.memql`) -- there is no separate `/me/delete`
+route. The mutation stamps `deletionScheduledAt` on the user row but
 does not hard-delete; an `accountDeletionSweep` cron runs after
 `MEMQL_IDENTITY_DELETION_COOLDOWN_DAYS` and performs the cascade:
 

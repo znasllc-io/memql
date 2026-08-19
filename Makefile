@@ -832,7 +832,7 @@ install-deps:
 ## Install the agent stack: the GitHub MCP server, the Superpowers plugin,
 ## and the CCPM skill. Idempotent -- every step probes current state first, so
 ## a repeat run changes nothing. Needs GITHUB_PAT in the environment or in a
-## gitignored .env at the repo root. See docs/AGENTS.md.
+## gitignored .env at the repo root. See docs/internal/ops/agent-stack.md.
 ##   make setup-agents            install what is missing
 ##   make setup-agents ARGS=--update   also refresh what is already installed
 setup-agents:

@@ -78,9 +78,17 @@ Node tokens have a 30-day default TTL
    drains harmlessly.
 
 For "compromised token, kill it NOW" flows, soft-delete the identity
-row (`active=false`). The verifier's per-stream revocation watcher
-(#106) catches subsequent calls within
-`IDENTITY_VERIFIER_REVOCATION_CHECK_SECONDS` (default 5 min).
+row (`active=false`). The revocation gate that catches this is
+`node.NodeClassStreamInterceptorWithRevocation` (memql#349), wired
+onto `NodeService.Stream` in `app/cluster.go`. On every stream open it
+looks up the `(nodeType, nodeId)` row behind the verified JWT's
+binding and rejects when that row's `active` flag is `false`, layered
+on top of the base JWKS-only `NodeClassStreamInterceptor` (memql#343).
+The lookup is fronted by a short-TTL in-process cache --
+`node.DefaultNodeRevocationCacheTTL`, a hardcoded 5 seconds
+(`component/node/node_token_revocation.go:94`) -- so a revoke reaches
+every peer within one cache window. There is **no env-var override**
+for that window; it is a compiled-in constant, not a config knob.
 
 ## Out of scope
 
@@ -88,7 +96,8 @@ row (`active=false`). The verifier's per-stream revocation watcher
 - **TLS on `NodeService.Stream`.** The interceptor + token pin
   defends against forged peers; mTLS at the transport layer is a
   separate hardening item.
-- **Per-token revocation epoch.** Node tokens piggyback on the
-  existing user-row epoch (#106). A dedicated node-row epoch would
-  let ops kill a specific compromised node token without touching
-  every user's tokens.
+- **Per-token revocation epoch.** Shipped as memql#349 (see
+  Rotation, above): the revocation gate checks the individual
+  `(nodeType, nodeId)` identity row's `active` flag, so soft-deleting
+  one node token's row kills that node without touching any other
+  node's or any user's tokens.

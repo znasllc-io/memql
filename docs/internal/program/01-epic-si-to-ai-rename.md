@@ -2,7 +2,7 @@
 title: Epic 1 — SI → AI rename
 audience: internal
 status: historical
-area: internal
+area: planning
 sinceVersion: "0.9.87"
 owner: znas
 ---

@@ -1,3 +1,12 @@
+---
+title: The mesh forwarded-auth contract
+audience: internal
+status: historical
+area: design
+sinceVersion: 0.15.0
+owner: znas
+---
+
 # The mesh forwarded-auth contract
 
 **Status:** shipped (memql#3205, carrying memql#2876 and absorbing memql#2814's

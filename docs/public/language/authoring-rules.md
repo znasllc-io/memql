@@ -35,7 +35,7 @@ rule below is a gotcha; this one is the contract.
 exactly one `update` block. Two writes in one mutation is a
 parse-time error.
 
-```memql
+```memql retired
 use cognition.concepts.{ space }
 
 // Right -- one bare insert. The target concept comes from the
@@ -77,7 +77,7 @@ use platform.concepts.{ partition }
 use identity.mutations.{ grantPartitionAccess }
 
 // 1. The product calls this mutation. (`@default` is not valid on
-//    an args field -- apply defaults in the body via coalesce().)
+//    an args field -- apply defaults in the body via `??`.)
 mutate partition createPartition {
   args {
     name      string  @required
@@ -85,7 +85,7 @@ mutate partition createPartition {
   }
   insert {
     name: args.name
-    partitionType: coalesce(args.type, "standard")
+    partitionType: args.type ?? "standard"
     status: "active"
     createdAt: now
     createdBy: actor.userId
@@ -99,18 +99,14 @@ mutate partition createPartition {
 /// Grant the partition creator owner access on first landing.
 automation autoBootstrapWorkspaceOwnerAccess {
   step grant {
-    logic grantOwnerOnPartitionCreate { event: event }
+    logic grantOwnerOnPartitionCreate ( event )
   }
 }
 
 logic grantOwnerOnPartitionCreate {
   args { event object @required }
   body {
-    return grantPartitionAccess({
-      userId:      args.event.payload.createdBy,
-      partitionId: args.event.payload.id,
-      role:        "owner"
-    })
+    return grantPartitionAccess(userId: args.event.payload.createdBy, partitionId: args.event.payload.id, role: "owner")
   }
 }
 ```
@@ -159,7 +155,7 @@ can't attach. Whole cluster bricked.
 
 **Wrong:**
 
-```memql
+```memql retired
 use cognition.queries.{ activeSpaceIds }
 
 // `sort` is not a registered function -- engine init fails.
@@ -257,32 +253,42 @@ through the top-level parser, which knows about directives.
 
 ---
 
-## 2. Function-call argument keys are bare identifiers
+## 2. Function-call arguments are named, not an object literal
 
-**Rule.** Function call argument object keys are **bare identifiers**,
-not quoted strings. Values follow the standard MemQL grammar (quoted
-strings, numbers, booleans, null, nested objects, arrays).
+**Rule (obsolete example rewritten -- object-literal call args were
+retired entirely).** This section used to document a bare-vs-quoted
+distinction between two accepted spellings of an object-literal call
+(`createPartition({name: "test", ...})` vs
+`createPartition({"name": "test", ...})`). That premise is gone: a
+call's argument list is no longer an object literal at all. The only
+accepted call form is **named arguments** --
+`fn(key: value, key2: value2, ...)`, with an empty call as `fn()`:
 
-**Canonical:**
-```memql
-createPartition({name: "test", partitionType: "standard"})
-spaceParticipants({spaceId: "space-123", participantType: "si"})
+```memql fragment
+createPartition(name: "test", partitionType: "standard")
+spaceParticipants(spaceId: "space-123", participantType: "si")
 ```
 
-Quoted string keys are also accepted so JSON-serialized tool calls
-that arrive through the same parser path keep working:
+There is nothing left to have a bare-vs-quoted split, because a named-arg
+call has no object literal for a key to live inside -- `key` is a bare
+identifier by construction, matched positionally against the callee's
+declared arg names. A quoted key (`"name": "test"`) is a **parse error**
+in this position, not an accepted alternate spelling:
 
-```memql
+```memql retired
+// REJECTED -- object-literal call args are retired; this parses as
+// neither a named-arg call nor a valid expression.
 createPartition({"name": "test", "partitionType": "standard"})
 ```
 
-Both forms parse identically. Mixed is fine too. The public RPC
-(`ExecuteQuery`), the CLI/SDK call builders, the function-definition
-parser, and the automation-DSL parser all use the same rule now --
-there is no strict vs. relaxed split anymore.
-
-If you build a call string from a Go template, either form works;
-the bare-identifier form is easier to read.
+The public RPC (`ExecuteQuery`), the CLI/SDK call builders, the
+function-definition parser, and the automation-DSL parser all use the
+named-arg form now -- there is no strict vs. relaxed split, and no
+object-literal call form to fall back to. There is no `memqlmigrate
+--rewrite=...` mode for this specific conversion (see the `rewriters`
+map in `cmd/memqlmigrate/main.go`); a stray `fn({...})` call anywhere in
+`.memql` source is a load-time parse error naming the fix
+(`fn(k: v, ...)`, empty = `fn()`).
 
 ---
 
@@ -299,7 +305,7 @@ rejects the annotation at load time:
 
 **Retired form (rejected at load):**
 
-```memql
+```memql retired
 // REJECTED -- concept-level @scope is gone.
 @scope("global")
 concept node { ... }
@@ -453,7 +459,7 @@ dedicated retirement error (see
 `@` and `//` lines directly above it. A block comment ends that run, so
 annotations sitting above a parked declaration belong to **nothing**:
 
-```memql
+```memql retired
 @executor("integration.workbench.dispatchHost")
 @description("does real work")
 /*
@@ -477,7 +483,7 @@ its authorization is read from, and there the loader raises **nothing at all**.
 
 The same rule catches a **file header** that a banner comment detaches:
 
-```memql
+```memql retired
 @version("1.0.0")
 @namespace("knowledge")
 /* ------------------------- concepts ------------------------- */
@@ -545,7 +551,7 @@ Where:
 are now a plain `{concept}:{shortId}`. See
 [identifiers.md](../concepts/identifiers.md).)
 
-If you omit `id:`, the engine derives a content hash from the 
+If you omit `id:`, the engine derives a content hash from the payload.
 Same payload twice ⇒ same id ⇒ a new time-series row under that id.
 Different payload ⇒ different id ⇒ a different row.
 
@@ -556,27 +562,35 @@ create new ids instead of new versions of the same id.
 
 ## 10. Subscriptions and event topic shape
 
-**Rule.** Event topics are **5 segments**:
+**Rule.** Graph CDC event topics are **4 segments**, with no partition
+segment:
 
 ```
-graph.node.{created|updated|deleted}.{partition}.{concept}
+graph.node.{created|updated|deleted}.{concept}
 ```
 
-Subscriptions can use `*` to match any single segment:
+e.g. `graph.node.created.v1:notes:note`. The old `{partition}` segment
+between the action and the concept was retired in #56 -- topics are
+concept-keyed, not partition-keyed.
 
-```
-node.*.*.v1:cluster:node       # any partition, this concept
-node.created.*.v1:cluster:node # only creates, any partition
-```
+**Composing that topic string is the SERVER's job, not the client's**
+(memql#2460). A graph subscription (`SUBSCRIPTION_KIND_GRAPH_EVENTS`)
+carries a structured `concept` + a set of `actions`; the engine composes
+the bus topic from those, and the legacy free-text `filter` field is
+**rejected** for graph subscriptions -- it survives only for the
+non-graph subscription kinds (`TELEMETRY`, `MESSAGE`, `QUERY_SPEC`,
+`AI_STREAM`, `DOMAIN_EVENTS`, `AUTOMATION_EVENTS`). Empty `concept` means
+all concepts; empty `actions` means all actions. The SDKs wrap this as
+`SubscriptionManager.subscribeGraph(handler, { concept, actions })`
+(TS) / `SubscribeGraph(ctx, GraphSubscribeOptions{...})` (Go).
 
-The CLI prepends `graph.` automatically when subscription kind is
-`SUBSCRIPTION_KIND_GRAPH_EVENTS` -- so the filter you pass is
-`node.*.*.<concept>`, NOT `graph.node.*.*.<concept>`.
+`@trigger(event=..., concept=..., partition="*")` in
+`dsl/*/automations.memql` still carries the `partition="*"` kwarg as a
+separate #56 phase-8 vestige on the DSL trigger surface -- unrelated to
+the client subscription wire, and tracked by its own caveat where this
+doc discusses `@trigger`.
 
-The partition segment is a #56 phase-8 vestige -- always use a `*`
-wildcard for it (the same reason `@trigger(...)` patterns in
-`dsl/*/automations.memql` carry `partition="*"`). A literal
-partition match is a bug waiting for phase 8 to land.
+Full detail: [events.md](../concepts/events.md#subscribing-to-events).
 
 ---
 
@@ -629,7 +643,7 @@ thenValue, elseValue)`. The `if` keyword is reserved for the
 control-flow statement (`if condition { step }` in automations) and
 does NOT work as a value-returning expression.
 
-```memql
+```memql retired
 # Wrong -- parse error
 role: if existingOwners.empty { "owner" }
 
@@ -832,7 +846,7 @@ clear compile-time error.
 
 Example of a typo that surfaces at compile time:
 
-```memql
+```memql fragment
 checkUser := userById({ userId: args.event.payload.userId })
 
 result := if cehckUser.empty() {   // typo: cehckUser -> checkUser
@@ -848,7 +862,7 @@ automation "bootstrapUser": step "result" references unknown step "cehckUser" --
 
 Example of a cycle (would deadlock at runtime):
 
-```memql
+```memql fragment
 a := if b.empty() { queryFoo({}) }
 b := if a.empty() { queryBar({}) }
 ```
@@ -931,14 +945,14 @@ inside `insert { ... }` / `update { ... }` the enclosing block spells
 the write kind; the top-level bare form (accept/stamp with no write
 block) means insert.
 
-```memql
+```memql fragment
 // Preferred -- the corpus form after the #2616 migration.
 insert {
   accept { slug, name, rank, description }
   stamp {
-    id: coalesce(args.roleId, args.slug)
-    predefined: coalesce(args.predefined, false)
-    active: coalesce(args.active, true)
+    id: args.roleId ?? args.slug
+    predefined: args.predefined ?? false
+    active: args.active ?? true
   }
 }
 ```
@@ -959,7 +973,7 @@ runs into accept/stamp via `memqlmigrate --rewrite=accept-stamp`;
 blocks it cannot prove safe (comments worth keeping, nested object
 values, single mirrors) stay longhand deliberately.
 
-```memql
+```memql fragment
 // Longhand with bare mirrors -- still valid where the gate allows it.
 // This block stays longhand deliberately: the multi-line computed id
 // is exactly the shape the codemod refuses to reflow.
@@ -1049,7 +1063,7 @@ key, and the declared kind must match the body (`actor.*` needs
 **Retired forms (rejected at parse time):** the receiver form and
 its template wrapper are gone --
 
-```memql
+```memql retired
 // REJECTED -- func (Shape), @template, and node("...") are retired.
 func (Shape) agentFull {
   @template({
@@ -1121,20 +1135,34 @@ identifiers (`name:`, `spaceId:`, `createdAt:`). Quoted-string keys
 for JSON interop but are not idiomatic MemQL and must not appear in
 new code.
 
-```memql
+```memql fragment
 // Correct -- mutation write block
 insert {
   name: args.name
   spaceId: args.spaceId
   active: true
+  metadata: { source: "import" }   // unquoted key in a nested object VALUE
 }
 
-// Correct -- step-call args in an automation / logic body
-createUser({ userId: args.event.payload.subject, email: args.event.payload.email })
-
 // Wrong -- unnecessary quotes on simple-identifier keys
-createUser({ "userId": args.event.payload.subject, "email": args.event.payload.email })
+insert {
+  "name": args.name
+  metadata: { "source": "import" }
+}
 ```
+
+> **Where this still applies (and where it no longer does).** This rule
+> is about `{...}` object literals: a mutation write block
+> (`insert { ... }` / `update { ... }`) and a nested object-typed field
+> VALUE (`metadata: { ... }`) both remain genuine object literals, and
+> both still accept a quoted key -- so the bare-vs-quoted style choice
+> still applies there. **Function-call arguments are a different
+> surface and no longer apply here at all**: a call's argument list is
+> named args (`fn(key: value, ...)`), not an object literal, so there is
+> no `{...}` for a key to be quoted or unquoted inside -- see
+> [#2](#2-function-call-arguments-are-named-not-an-object-literal). The
+> `createUser({ userId: ... })` call-style example this section used to
+> show here was retired along with object-literal call args generally.
 
 **Why it bites you.** Mixed quoting styles in the same codebase make
 every review a guessing game. All .memql files before this rule had
@@ -1168,7 +1196,7 @@ this as a PR-review checklist item.
 
 **Rule.** The engine auto-stamps a small set of intrinsic fields on
 every inserted node version. They live on the row itself, not in the
- Declaring any of them as a payload property in a concept
+payload. Declaring any of them as a payload property in a concept
 schema is rejected at concept-load time by
 `ensureReservedFieldsNotDeclared`:
 
@@ -1243,7 +1271,7 @@ reference under different shapes (`"user-abc"` vs
 `"_system:v1:identity:user:user-abc"`) hash to different strings and
 produce DUPLICATE rows with distinct ids.
 
-```memql
+```memql retired
 // Wrong -- bare-vs-canonical input shape changes the participant id
 insert {
   id: hash(concat(args.spaceId, ":", args.userId))
@@ -1281,9 +1309,10 @@ outright. The shortId is the bare hash / uuid / slug.)
 `canonicalId(value, concept)` -- `concept` is an imported concept
 short-name (the stringly-typed `"v1:ns:name"` literal is retired):
 
-- bare slug → prepends `<partition>:<concept>:` (engine reads the
-  concept's `@scope` to pick `_system` for global concepts, otherwise
-  the request envelope's partition)
+- bare slug → prepends `<concept>:` (no partition prefix -- partitioning
+  and `@scope` were both retired in #56; the composed form is the plain
+  `{concept}:{shortId}` shape, see `component/memql/partition_context.go`'s
+  `canonicalizeIdValue`)
 - already-canonical, matching concept → returns as-is
 - canonical for a different concept → errors loudly (catches type-tag
   typos like passing `userId` to `canonicalId(..., space)`)
@@ -1419,7 +1448,7 @@ the **raw** arg — before `shortId()` runs — so a colon ban there would
 reject the exact shape the normalisation exists to support. Constraining
 the trailing part alone is both sufficient and compatible:
 
-```memql
+```memql fragment
 args {
   deploymentId  string!                        // canonical or bare, normalised below
   nodeType      string! @pattern("^[^:]+$")    // trailing part: no separator
@@ -1451,7 +1480,7 @@ part is drawn from a **known set** — a `nodeType`, an enum — where
 forbidding a character costs the caller nothing. Reach for construction
 when it is not:
 
-```memql
+```memql fragment
 id: concat("utt-", hash(concat(
   hash(args.partitionId),
   hash(canonicalId(args.participantId, participant)),
@@ -1567,7 +1596,7 @@ accepted and then silently thrown away. The identical annotation on a
 schema and do retain it. Same de-overload as `@default` on an args
 field, which is likewise rejected (#991).
 
-```memql
+```memql retired
 query space activeSpaces {
   args {
     /// The owner whose spaces to list.
@@ -1587,7 +1616,7 @@ which strips the annotation; re-add the prose as a `///` comment.
 **Right (struct form — the canonical author surface):**
 
 ```memql
-use cognition.concepts.{ utterance, space }
+use cognition.concepts.{ utterance, space, participant }
 use common.traits.{ isActiveRecord }
 
 /// Insert a chat utterance
@@ -1615,8 +1644,6 @@ query space activeSpaces {
 
 // Spec — struct form. Binds one shape XOR concept in the signature;
 // the body returns a boolean over bare field names. No args.
-use cognition.concepts.{ participant }
-
 spec participant isGuestParticipant {
   return isGuest == true
 }
@@ -1637,7 +1664,7 @@ policy balancedChat { }
 
 **Wrong (rejected at registration):**
 
-```memql
+```memql retired
 // Legacy func (Spec) form — specs are struct-form now.
 func (Spec) example(ctx any) bool {
   return true
@@ -1666,7 +1693,7 @@ For Logic bodies the author surface is ctx-free: write
 write `ctx.output = ...`.
 
 **Why `args.X` is required (not bare).** In a mutation's `insert`
-block, the keys ARE bare field names of the row's  Saying
+block, the keys ARE bare field names of the row's payload. Saying
 `spaceId: args.spaceId` keeps the LHS (concept payload key) and RHS
 (caller arg) visually distinct. The same precedent applies to query
 filters: `spaceId == args.spaceId` reads correctly without
@@ -1709,7 +1736,7 @@ rather than schema. It takes the typed spelling, because a block-bodied
 property accepts no annotation in either other position (memql#3623,
 memql#3692):
 
-```memql
+```memql fragment
 metadata  object  @open {
   knownKey  string
 }
@@ -1987,17 +2014,26 @@ concept evicts the dependent cached results, so a cached read never
 outlives a row it depends on. You do not annotate the eviction; it is
 keyed off the concept the query reads.
 
-**Correctness — cross-node (REQUIRED).** Each node runs its OWN result
-cache. The invalidation subscriber only fires on a node when the graph
-write reaches it, and the default routing rules forward only a fixed set
-of namespaces (`v1:cluster:*`, `v1:cognition:*`, `v1:planner:*`). For
-**every** concept you `@cache`, its `graph.node.created/updated/deleted`
-writes MUST be forwarded to peers by a `node.RegisterRoutingRule`
-(`component/node/routing.go`) — otherwise the write evicts the cache on
-the writing node but the cached read goes **stale on its siblings**, a
-silent cross-node stale read. A single-node green test will not catch
-this. The cached-concept forward rules are pinned by
-`TestEvaluateRouting_CachedConceptForwarding` in `component/node`.
+**Correctness — cross-node.** Each node runs its OWN result cache, so a
+write on one replica has to evict the cached read on every sibling or a
+stale answer survives there. Epic 5 issue 5.5 handled this with a
+routing rule PER cached concept -- an author adding `@cache` had to also
+register a `node.RegisterRoutingRule` forwarding that concept's
+`graph.node.created/updated/deleted` writes, or the eviction silently
+stayed local. **That per-concept rule is retired (issue 5.6,
+memql#1970)** and pinned as gone by
+`TestEvaluateRouting_PerConceptCacheRulesRetired`
+(`component/node/routing_test.go:183`). Every graph write now also
+publishes a dedicated `cache.invalidate.<concept>` event
+(`MemQLEngine.publishCacheInvalidate`), and ONE broadcast routing rule
+(`{Pattern: "cache.invalidate.*", TargetType: ""}` in
+`component/node/routing.go`) forwards that channel to every node type --
+pinned by `TestEvaluateRouting_CacheInvalidateBroadcast`. So `@cache` now
+Just Works cross-node for any concept, with **no routing rule to add**:
+the broadcast channel is what evicts the cached read on every sibling
+replica. A single-node green test still would not have caught the old
+per-concept gap, which is why both the retirement and the broadcast
+replacement are gated by name rather than left to review.
 
 **Keyset cursors.** The cache key includes the paginated query's cursor
 (`engine.go` `cacheKey`), so distinct continuation pages of a `@cache`'d
@@ -2037,8 +2073,11 @@ suite, epic #2351 / memql#2383):
   construct nested at the wrong depth, and duplicate names (caught as a
   WARN-level runtime-loader skip).
 
-Both files need no database and run as part of the standard
-`go test ./...` CI job. If a change reveals a NEW silent-acceptance hole
+Both files need no database, but both live in workspace modules
+(`component/language`, `component/memql`) that a bare `go test ./...`
+from the repo root does not compile into its test binary (memql#4032) --
+run `make test` instead, which is what CI actually runs. If a change
+reveals a NEW silent-acceptance hole
 the change itself does not close, pin it as an explicit `t.Skip` case
 marked `HOLE` (with an issue pointer) so the gap is tracked and visible
 rather than forgotten.
@@ -2142,7 +2181,7 @@ rather than flagged: a product bundle mounts extra domains at boot via
 time. The rule is "if the tree can see it in another domain, name it" --
 never "every reference must resolve here".
 
-```memql
+```memql fragment
 // dsl/planner/queries.memql -- `plan` is ambient (v1:planner:plan),
 // even though v1:harness:plan shares the trailing segment.
 query plan plansForSpace {
@@ -2190,7 +2229,7 @@ a closed set, and both layers read the same canonical table.
 field **matches**. A `==` predicate does not. The one exception is
 `!= ""`, which excludes absent fields.
 
-```memql
+```memql fragment
 filter deleted != true      // matches rows with NO `deleted` key
 filter status == "active"   // does NOT match rows with no `status` key
 filter consumedAt != ""     // does NOT match rows with no `consumedAt` key
@@ -2217,7 +2256,7 @@ all of it, including that agreement.
 **The trap this creates.** A misspelled property in a `!=` predicate is
 ABSENT, so it matches **every row**:
 
-```memql
+```memql fragment
 filter delted != true       // typo -- matches everything, including deleted rows
 ```
 
@@ -2251,8 +2290,11 @@ miss -- see below:
 **Where these run matters.** The field lanes (rows 1 and 2) live in
 `memqllint` and in the real-tree test that drives them
 (`TestVerifyReferentialIntegrity_RealDSLTree`, in
-`component/memql/dslimports`), so `go test ./...` catches them but
-`go test ./dsl/...` alone stays green -- and the `dsl` package is the
+`component/memql/dslimports`). `component/memql/dslimports` sits in a
+workspace module that `go test ./...` from the repo root does not
+compile into its test binary (memql#4032, see the CLAUDE.md Testing
+section) -- so `make test` catches these two lanes but
+`go test ./dsl/...` alone stays green, and the `dsl` package is the
 natural place to look. Row 3 is caught by both, since the cross-domain
 import gate (rule 25) also runs in `./dsl/...`.
 
@@ -2260,7 +2302,7 @@ import gate (rule 25) also runs in `./dsl/...`.
 SITE.** Row 3 catches a name misspelled in the `use` line. It does not
 check that call sites match what was imported -- so this is silent:
 
-```memql
+```memql fragment
 use common.traits.{ isNotDeleted }        // correct
 
 filter  planId==args.planId && isNotDeletd    // typo -- nothing reports it
@@ -2298,7 +2340,7 @@ Two lexical traps in the same neighbourhood, one fixed and one still live.
 lex as an identifier, so it reached the comparison as the *string* `".5"`
 while `0.5` reached it as the float:
 
-```memql
+```memql retired
 filter score > .5       // REJECTED at load since memql#3624
 filter score > 0.5      // correct -- and always was
 ```
@@ -2314,7 +2356,7 @@ construct, matching the rest of this document.
 in `dsl/install/actions.memql`), so a hyphen with no surrounding space
 becomes part of the identifier instead of an operator:
 
-```memql
+```memql fragment
 filter remaining == total-used     // compares against the STRING "total-used"
 filter remaining == total - used   // subtraction -- what was probably meant
 ```
@@ -2378,7 +2420,7 @@ default provider -- so the prompt quietly runs on a model its author did
 not choose, leaving one INFO line on the structured path and nothing at
 all on the plain chat path.
 
-```memql
+```memql retired
 @defaultProvider("strongReasoning")     // WRONG -- that is a `policy`
 @defaultProvider("streamClaudeSonnet")  // right -- a `provider`
 ```
@@ -2403,7 +2445,7 @@ and `test/dslconformance/prompt_caller_payload_test.go`.
 only whitespace**. It does *not* fall through for `false`, `0`, `[]` or
 `{}` — those are values.
 
-```memql
+```memql fragment
 // with the caller passing v:
 //   false   -> false        kept
 //   0       -> 0            kept

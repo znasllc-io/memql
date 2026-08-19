@@ -363,9 +363,16 @@ defect:
    are gone. The authenticator still holds its half and the browser may still
    offer it, but the server has nothing to resolve the credential id against and
    the assertion is refused as unknown. The stale entry is harmless -- it is a
-   public key nobody can use -- and is deleted from the operating system's or
-   password manager's own passkey list, not from memQL, which ships no passkey
-   management surface (see [Not implemented](#not-implemented)).
+   public key nobody can use. Clean it up from `/me/devices` (memql#3409):
+   the page lists enrolled passkeys -- label, added, last used, an
+   AAGUID-derived model name, and the backup posture that says whether
+   losing the device loses the credential -- with rename and revoke
+   actions, and a route to enrol another via the memql#3406 ceremony.
+   Revoke is a soft delete (`revokePasskeyIdentity`,
+   `dsl/identity/mutations.memql`): the row stays for audit and its
+   credential id stays taken so the same authenticator cannot be
+   re-enrolled onto a fresh row. A revoke that would leave the account
+   with no working sign-in route is warned about before it happens.
 
 **The mitigation is structural: the install wizard mints a fresh enrolment link
 on every install.** A reinstall therefore ends the way a first install does --
@@ -416,19 +423,18 @@ platform authenticator only.
 
 Stated here so nobody plans against it:
 
-- **There is no passkey management surface.** `/me/devices` lists active
-  *sessions*, not passkeys, and its "Sign out everywhere" revokes sessions. The
-  DSL ships `createPasskeyIdentity` and `recordPasskeyAssertion` and **no
-  passkey revoke mutation** -- unlike PATs, worker tokens, badges, node tokens
-  and account tokens, which each have one. The login ceremony does refuse an
-  inactive row, so the generic `updateIdentity` mutation could be used to flip
-  one by hand, but nothing user-facing does. Listing, renaming and revoking
-  passkeys is tracked separately (memql#3409).
 - **There is no passkey-only account model.** A user row still carries a primary
   email; the enrolment link removes email from the sign-in path, not from the
   data model.
-- **The editor's "+" Install / Repair actions do not run an installer.** They
-  print the CLI command with a Copy Command button and say so.
+- ~~**The editor's "+" Install / Repair actions do not run an
+  installer.**~~ Superseded. The extension now runs the install /
+  repair graph in-process: the "+" Add Cluster panel and the cluster
+  panel's Repair action both call `runInstall`
+  (`editors/vscode/src/install/session.ts`), the same entry point the
+  CLI's own install command uses. Repair is not a separate mode --
+  every step verifies first and skips when already satisfied, so
+  re-running the graph against a cluster that stopped answering IS
+  the repair.
 
 ---
 

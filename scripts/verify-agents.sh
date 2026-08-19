@@ -181,7 +181,7 @@ function main() {
         printf '\nAgent stack is complete.\n'
     else
         printf '\nAgent stack is incomplete. Run: make setup-agents\n' >&2
-        printf 'Details and remediation: docs/AGENTS.md\n' >&2
+        printf 'Details and remediation: docs/internal/ops/agent-stack.md\n' >&2
     fi
     exit "$rc"
 }

@@ -2,7 +2,7 @@
 title: CI Tier 3 — GitHub merge queue
 audience: ops
 status: stable
-area: internal
+area: ops
 sinceVersion: 0.9.0
 owner: znas
 ---
@@ -118,7 +118,7 @@ something real that quietly stopped being real.
 
 ### When it went, and why only half of it came back
 
-[`docs/ci-audit.md` §2.3](../../ci-audit.md) caught the moment without
+[`ci-audit.md` §2.3](ci-audit.md) caught the moment without
 recognising it:
 
 > ### 2.3 REQUIRED STATUS CHECKS — removed 2026-08-06T19:29:07Z
@@ -218,7 +218,7 @@ stalls.
 
 ### The repository already knew, in a document nobody reads for this
 
-[`docs/ci-audit.md`](../../ci-audit.md)'s finding **W6** says it plainly:
+[`ci-audit.md`](ci-audit.md)'s finding **W6** says it plainly:
 
 > **W6. Dead `merge_group` triggers in four workflows.**
 > No merge queue is configured; four workflows still declare `merge_group:`.
@@ -264,7 +264,7 @@ measured property together with the measurement, or do not state it.**
 This paragraph previously read "Required status checks are
 `ci-required`, `scan`, and `Analyze (go)`", which was stale twice over
 (corrected in memql#3210). The required set was reduced to
-`ci-required` alone — see [../../ci-design.md](../../ci-design.md) for
+`ci-required` alone — see [ci-design.md](ci-design.md) for
 why one aggregator beats three independent names. And the secret-scan
 check is no longer called `scan`: `gitleaks.yml` and `govulncheck.yml`
 both published a check-run under that one name, so they were renamed to

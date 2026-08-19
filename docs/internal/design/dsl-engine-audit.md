@@ -2,7 +2,7 @@
 title: memQL DSL Engine — Architecture + Cleanup Audit
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---
@@ -207,10 +207,10 @@ small blast radius, can be done in one focused commit each.
 
 #### 1.1 Generic `Registry[T]` to collapse 5 hand-rolled registries
 
-**Files:** [function_types.go:238-375](component/memql/function_types.go),
-[tool_types.go:290-430](component/memql/tool_types.go),
-[spec_types.go:91-190](component/memql/spec_types.go),
-[shape_loader.go:43-120](component/memql/shape_loader.go),
+**Files:** [function_types.go:238-375](../../../component/memql/function_types.go),
+[tool_types.go:290-430](../../../component/memql/tool_types.go),
+[spec_types.go:91-190](../../../component/memql/spec_types.go),
+[shape_loader.go:43-120](../../../component/memql/shape_loader.go),
 plus PromptRegistry + ProviderRegistry (partial fit).
 
 Each registry hand-rolls the same `sync.RWMutex + map[string]*T`
@@ -237,10 +237,10 @@ PromptRegistry deviate today** (different method names: `Lookup`,
 
 #### 1.2 Generic unified-loader factory
 
-**Files:** [unified_kinds_loader.go](component/memql/unified_kinds_loader.go) (298 LOC),
-[unified_spec_loader.go](component/memql/unified_spec_loader.go) (90 LOC),
-[unified_policy_loader.go](component/memql/unified_policy_loader.go) (95 LOC),
-[unified_functions_loader.go](component/memql/unified_functions_loader.go) (160 LOC).
+**Files:** [unified_kinds_loader.go](../../../component/memql/unified_kinds_loader.go) (298 LOC),
+[unified_spec_loader.go](../../../component/memql/unified_spec_loader.go) (90 LOC),
+[unified_policy_loader.go](../../../component/memql/unified_policy_loader.go) (95 LOC),
+[unified_functions_loader.go](../../../component/memql/unified_functions_loader.go) (160 LOC).
 
 Every loader has the exact same skeleton:
 
@@ -274,8 +274,8 @@ delta: -400 to -500 LOC.**
 
 #### 1.3 Canonical identifier validator
 
-**Files:** [mutation_templates.go:1168-1180](component/memql/mutation_templates.go),
-[language/parser/parser.go:5269-5275](component/language/parser/parser.go).
+**Files:** [mutation_templates.go:1168-1180](../../../component/memql/mutation_templates.go),
+[language/parser/parser.go:5269-5275](../../../component/language/parser/parser.go).
 
 Two near-identical implementations of `[A-Za-z_][A-Za-z0-9_]*`:
 - `isSimpleIdentifier` in mutation_templates.go
@@ -296,7 +296,7 @@ people grep often). Worth doing but plan the cuts before swinging.
 
 #### 2.1 Split `executor.go` (5063 LOC, 170 case statements, 41 switches)
 
-[executor.go](component/memql/executor.go) is the single biggest
+[executor.go](../../../component/memql/executor.go) is the single biggest
 file in the engine. The top-level functions break cleanly along
 construct concerns -- they were just never separated:
 
@@ -330,7 +330,7 @@ review surface tractable. **Estimated post-split: 6 files of
 
 #### 2.2 Split `engine.go` (1923 LOC)
 
-[engine.go](component/memql/engine.go) mixes:
+[engine.go](../../../component/memql/engine.go) mixes:
 - Constructor + Phase 2/3 bootstrap
 - Registry accessors (Shapes, Specs, Providers, etc. -- thin
   getters)
@@ -350,7 +350,7 @@ engine.go               -- Execute + plan cache + lifecycle
 
 #### 2.3 `ProviderRegistry` by-modality accessor consolidation
 
-**File:** [ai_providers.go:319-700](component/memql/ai_providers.go).
+**File:** [ai_providers.go:319-700](../../../component/memql/ai_providers.go).
 
 The registry has 8 modality-specific accessors:
 `TTSProvider`, `TTSProviderByName`, `ChatProvider`,
@@ -371,11 +371,17 @@ where the consolidation lives. **Estimated delta: -150 to -200 LOC.**
 
 #### 3.1 The five rewriter files (1264 LOC)
 
-**Files:** [language/parser/query_rewrite.go](component/language/parser/query_rewrite.go) (322 LOC),
-[mutation_rewrite.go](component/language/parser/mutation_rewrite.go) (327),
-[logic_rewrite.go](component/language/parser/logic_rewrite.go) (161),
-[automation_rewrite.go](component/language/parser/automation_rewrite.go) (292),
-[args_rewrite.go](component/language/parser/args_rewrite.go) (162).
+As of this audit's date, before later consolidation into the single
+`component/language/parser/rewriter.go` (see
+[struct-form-rewriter-retirement.md](../planning/struct-form-rewriter-retirement.md)),
+these were still five separate files, none of which survive under these
+names today.
+
+**Files:** `language/parser/query_rewrite.go` (322 LOC),
+`mutation_rewrite.go` (327),
+`logic_rewrite.go` (161),
+`automation_rewrite.go` (292),
+`args_rewrite.go` (162).
 
 These translate the canonical struct form (`query NAME { args, filter,
 shape }`) into the procedural form (`func (Query) NAME(ctx) { return
@@ -394,7 +400,7 @@ struct-form-native parsing instead of adding a sixth rewriter).
 
 #### 3.2 `concepts_only_extractor.go`
 
-**File:** [concepts_only_extractor.go](component/memql/concepts_only_extractor.go) (72 LOC).
+**File:** [concepts_only_extractor.go](../../../component/memql/concepts_only_extractor.go) (72 LOC).
 
 Regex-based concept extractor that bypasses the language parser
 "to avoid rewriter limitations." Active today but explicitly a
@@ -420,7 +426,7 @@ opportunistically.
 
 #### 4.2 `ShapeDefinition.Includes` -- likely dead like Concepts was
 
-**File:** [shape_loader.go:36-40](component/memql/shape_loader.go).
+**File:** [shape_loader.go:36-40](../../../component/memql/shape_loader.go).
 
 The cleanup commit's comment on this field: "lists shapes whose
 fields are merged into this shape at load time." But after the
@@ -431,7 +437,7 @@ audit before the next pass.
 
 #### 4.3 Sense layer's authoring_rules.go (276 LOC)
 
-**File:** [sense/authoring_rules.go](component/memql/sense/authoring_rules.go).
+**File:** [sense/authoring_rules.go](../../../component/memql/sense/authoring_rules.go).
 
 Hardcodes grammar/nesting rules for IDE completion. Risk: drifts
 from the actual grammar in language/parser/parser.go silently. Not

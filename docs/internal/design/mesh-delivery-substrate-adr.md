@@ -1,8 +1,8 @@
 ---
 title: Mesh delivery substrate -- subscription mechanism + delivery contract
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.36
 owner: znas
 ---

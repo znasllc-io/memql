@@ -10,9 +10,12 @@ owner: znas
 # Infrastructure Management Guide
 
 memQL and its downstream product stack run on **Azure Kubernetes Service**
-(cluster `aks-memql-staging`, namespace `memql`), with a managed **Tiger Cloud**
-database, images in **ACR** (`acrmemql.azurecr.io`), secrets in the **memql-secrets
-A2** sealed envelope, and per-env config in **Key Vault** (`kv-memql-<env>`).
+(cluster `aks-memql-staging`, namespace `memql`), with a self-hosted
+**CloudNativePG** database in-cluster, images in **ACR** (`acrmemql.azurecr.io`), bootstrap secrets arriving
+as keys on the **memql-secrets** Secret (a plain Kubernetes Secret every node
+`envFrom`s -- the earlier genesis envelope, sealed and decrypted in-process
+at boot, is retired, memql#3963), and per-env config in **Key Vault**
+(`kv-memql-<env>`).
 
 The former Google Cloud Run / Cloud Build / Artifact Registry / Secret Manager
 infrastructure is retired. To avoid the doc drift that retirement caused, this

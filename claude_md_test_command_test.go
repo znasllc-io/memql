@@ -9,6 +9,74 @@ import (
 	"testing"
 )
 
+// TestFrontDoorDocsDoNotTeachSingleModuleTestSweep is
+// TestDocumentedTestCommandCoversTheEngine's sibling for the repo's FRONT
+// DOOR docs -- README.md and CONTRIBUTING.md -- which is where a newcomer
+// or a cloning agent looks first, before ever opening CLAUDE.md
+// (memql#4087, the repo-cleanup-docs-update campaign's Task 1; memql#4089).
+//
+// The defect is the same one memql#4032 fixed in CLAUDE.md: `go test ./...`
+// (and its `-v`/`-cover`/subtree variants like `./component/...`) reads as
+// universal and resolves inside the root module only, in this 49-module
+// workspace -- so it silently never compiles component/memql,
+// component/database, or component/language, and the contributor who ran it
+// sees `ok` and reports the change verified. The probe that motivated this
+// test found the identical pattern independently re-introduced in both
+// front-door docs: `go test ./...` (a bare recommendation, a table row, and
+// inside a "make changes and test locally" parenthetical) and
+// `go test -v ./component/memql/...` / `go test -cover ./...` in README.md,
+// plus `go test ./...` in CONTRIBUTING.md's pre-PR checklist -- none of them
+// routed a reader to `make test` at all.
+//
+// # Why README/CONTRIBUTING get the simpler literal ban, not the full re-derive
+//
+// TestDocumentedTestCommandCoversTheEngine re-derives coverage by running
+// `go list` on whatever CLAUDE.md documents, because CLAUDE.md's Testing
+// section is prose that legitimately NAMES the wrong command in order to
+// explain why it is wrong (the measured-packages table, the "do NOT verify
+// with" sentence) -- a same-shape gate there would have to parse counter-
+// examples out of structured prose. README.md and CONTRIBUTING.md carry no
+// such structure: they are supposed to hand a reader ONE short, correct
+// command, never a comparison table. So the front-door gate is the
+// simpler, honest tool for that job -- a literal ban on the single-module
+// sweep SHAPES, full stop. There is no legitimate reason for either file to
+// contain `go test ./...`, `go test -v ./component/...`, or
+// `go test ./cmd/...`: every one of them should read `make test` instead
+// (docs-only mechanical substitution, no counter-example exemption needed).
+//
+// FALSE-POSITIVE ESCAPE HATCH: if README or CONTRIBUTING ever legitimately
+// needs to WARN against this shape in prose (mirroring CLAUDE.md's "do NOT
+// verify with" sentence), reach for the same counter-example detection
+// TestDocumentedTestCommandCoversTheEngine uses (isCounterExample) rather
+// than special-casing a phrase here -- do not let this test grow a phrase
+// denylist.
+func TestFrontDoorDocsDoNotTeachSingleModuleTestSweep(t *testing.T) {
+	// `./...`, `./component`, `./cmd` (with or without a trailing `/...`) are
+	// the shapes that read as "the whole tree" while actually resolving
+	// inside one module -- the same three memql#4032 measured. Flags typical
+	// flag forms (`-v`, `-cover`, `-run X`) between `go test` and the
+	// pattern, matching the forms actually found in the front-door docs.
+	singleModuleSweep := regexp.MustCompile(`go test\s+(-[^\s]+\s+)*\./(\.\.\.|component|cmd)`)
+
+	for _, doc := range []string{"README.md", "CONTRIBUTING.md"} {
+		data, err := os.ReadFile(doc)
+		if err != nil {
+			t.Fatalf("read %s: %v", doc, err)
+		}
+		for i, line := range strings.Split(string(data), "\n") {
+			if m := singleModuleSweep.FindString(line); m != "" {
+				t.Errorf(""+
+					"%s:%d teaches the single-module test sweep (`%s`), which silently misses "+
+					"component/memql, component/database and component/language in this multi-module "+
+					"workspace (memql#4032) -- the exact defect this repo's own CLAUDE.md Testing "+
+					"section documents and TestDocumentedTestCommandCoversTheEngine gates. Replace it "+
+					"with `make test`, which names the module path Makefile's ALL_PKGS expands to.",
+					doc, i+1, m)
+			}
+		}
+	}
+}
+
 // TestDocumentedTestCommandCoversTheEngine fails the build when CLAUDE.md tells
 // a contributor to verify with a command that does not compile the engine
 // (memql#4032).

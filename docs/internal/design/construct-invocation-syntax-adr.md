@@ -1,8 +1,8 @@
 ---
 title: Construct invocation & action syntax -- kind-prefixed calls, named args, the simplified action, and the body rule
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.7
 owner: znas
 ---

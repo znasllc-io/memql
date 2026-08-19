@@ -38,19 +38,19 @@ shape actorEnvelope {
 ```
 
 Engine-side, dotted paths route through
-`component/memql/executor.go:resolveCallerReferences` →
-`resolveCallerPath`. (The internal Go types still carry the
-historical `CallerReference` / `resolveCaller*` names; that is
-implementation detail behind the `actor.` author surface.
-[#221](https://github.com/znasllc-io/memql/issues/221) renamed the
-DSL surface; renaming the internal types is a follow-up candidate.)
+`component/memql/executor.go:resolveActorReferences` (line 377) →
+`resolveActorPath` (line 427), matching each `*ActorReference` node
+(line 383) against the resolved envelope. [#221](https://github.com/znasllc-io/memql/issues/221)
+renamed both the DSL surface and these internal Go names, so `actor.`
+is the vocabulary top to bottom -- there is no leftover `caller.` /
+`CallerReference` naming behind it.
 
 ## Field reference
 
 | Field | Type | Meaning | Per-identity-shape behavior |
 |---|---|---|---|
 | `actor.userId` | string | Canonical `v1:identity:user.id` for the user behind the request | **user (magic-link / OAuth)**: the user's id. **PAT**: the user who owns the PAT. **worker token**: the user who issued the worker token. **guest invite**: empty -- guests have no `userId`. **system**: empty -- system actor; `actor.role == "system"`. |
-| `actor.role` | string | Cluster-wide role: `owner` / `admin` / `writer` / `reader` (plus `system` for the seed-materializer / automation actor and `guest` for guest invites) | Re-fetched from `v1:identity:user.role` at each request -- a role demotion takes effect at the next call, not on the next token refresh. |
+| `actor.role` | string | Cluster-wide role: `owner` / `admin` / `developer` / `writer` / `reader` (plus `system` for the seed-materializer / automation actor and `guest` for guest invites) | Re-fetched from `v1:identity:user.role` at each request -- a role demotion takes effect at the next call, not on the next token refresh. |
 | `actor.identityId` | string | `v1:identity:identity.id` of the credential the request was authenticated with (distinct from `userId`: one user can own many credentials) | **user (magic-link)**: the `magic_link` identity row's id. **PAT**: the `api_key` identity row's id. **worker token**: the `worker_token` identity row's id. |
 | `actor.isClusterOwner` | bool | True iff `actor.userId` is the registered cluster owner | Re-resolved per request via the cluster-settings lookup. |
 | `actor.primaryEmail` | string | The user's primary email | Empty for guest / system / worker shapes. |

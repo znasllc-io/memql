@@ -30,7 +30,7 @@ Examples of unacceptable behavior include:
 
 Project maintainers are responsible for clarifying and enforcing the standards above and will take appropriate and fair corrective action in response to any behavior they deem inappropriate.
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team at the email listed in `SECURITY.md`. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project maintainer directly (GitHub: [@znas-io](https://github.com/znas-io), the owner listed in [.github/CODEOWNERS](.github/CODEOWNERS)). [SECURITY.md](SECURITY.md) documents a private security-advisory channel for vulnerability reports, but that channel is not currently enabled on this repository (memql#4108); until it is, the maintainer contact above is the working path for a report you do not want to be public. All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution
 

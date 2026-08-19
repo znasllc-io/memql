@@ -87,7 +87,7 @@ deliberate.
 
 Those concepts declare the decision instead:
 
-```memql
+```memql fragment
 /// Persisted working state of a parked Task.
 // @no-displayCard: A per-Task working-memory blob: nested objects, arrays, and a
 //   multi-kilobyte reasoning transcript. The one scalar (`taskId`) is a

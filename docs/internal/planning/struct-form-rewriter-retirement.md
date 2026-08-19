@@ -2,7 +2,7 @@
 title: Struct-form rewriter retirement -- planning doc
 audience: internal
 status: draft
-area: internal
+area: planning
 sinceVersion: 0.9.0
 owner: znas
 ---
@@ -18,7 +18,7 @@ consolidated the five rewriter files
 (`query_rewrite.go` / `mutation_rewrite.go` / `logic_rewrite.go` /
 `automation_rewrite.go` / `args_rewrite.go` plus `normalise_all.go`,
 1306 LOC) into a single
-[`component/language/parser/rewriter.go`](../../component/language/parser/rewriter.go)
+[`component/language/parser/rewriter.go`](../../../component/language/parser/rewriter.go)
 at 936 LOC. The "five rewriters" stop existing as separate concerns
 but the rewriter as a concept stays -- it still pre-processes
 struct-form source into procedural source before tokenization.
@@ -59,7 +59,7 @@ them in isolation breaks tests.
 
 ### 1. Native struct-form productions in `parser.go`
 
-[`component/language/parser/parser.go:299-356`](../../component/language/parser/parser.go)
+[`component/language/parser/parser.go:299-356`](../../../component/language/parser/parser.go)
 (`parseDefinition`) currently dispatches on `TokenKeywordFunc` and
 the contextual `concept` identifier. Add three more contextual
 dispatches:
@@ -75,7 +75,7 @@ dispatches:
 
 The lexer already treats lowercase `query`, `mutation`, `logic`,
 `automation` as identifiers (capitalized variants are keywords --
-see [`component/language/parser/lexer.go:572-577`](../../component/language/parser/lexer.go)).
+see [`component/language/parser/lexer.go:572-577`](../../../component/language/parser/lexer.go)).
 No lexer change needed.
 
 The hard part: each `parseStructX` needs to BUILD the Body
@@ -92,7 +92,7 @@ Estimated: ~500 LOC of new parser code in
 
 ### 2. AST-level concept-name resolution
 
-[`component/memql/function_loader.go:118-141`](../../component/memql/function_loader.go)
+[`component/memql/function_loader.go:118-141`](../../../component/memql/function_loader.go)
 (`tryParseNewFunctionSyntax`) runs
 `translateConceptPathsToPayload(content, name)` on the SOURCE
 string. This naive `\b<name>\.` regex replacement converts
@@ -122,7 +122,7 @@ post-parse work).
 ### 3. Reconcile `args.X` handling
 
 The parser has native `args.X -> ArgRefExpr` conversion at
-[`component/language/parser/parser.go:3720-3732`](../../component/language/parser/parser.go).
+[`component/language/parser/parser.go:3720-3732`](../../../component/language/parser/parser.go).
 The rewriter translates `args.X -> ctx.X` BEFORE lexing, which
 means most struct-form-emitted source never hits the parser's
 ArgRefExpr path. Procedural-form-authored sources that include an
@@ -134,7 +134,7 @@ To eliminate the rewriter, pick ONE canonical form:
 **Option A: parser-native ArgRefExpr everywhere.** Remove the
 `args.X -> ctx.X` translation from the rewriter. The engine
 evaluator already has an ArgRefExpr handler at
-[`component/memql/executor_filter.go`](../../component/memql/executor_filter.go)
+[`component/memql/executor_filter.go`](../../../component/memql/executor_filter.go)
 and a few other sites (search for `*ArgRefExpr`); audit them and
 add coverage for the contexts that today rely on ctx.X form.
 
@@ -152,13 +152,13 @@ silent semantic shifts.
 
 Once #1-#3 land, these explicit rewriter calls go away:
 
-- [`component/memql/function_loader.go`](../../component/memql/function_loader.go) --
+- [`component/memql/function_loader.go`](../../../component/memql/function_loader.go) --
   `languageParser.NormaliseAll` invocation in
   `tryParseNewFunctionSyntax`.
-- [`component/language/compiler/api.go`](../../component/language/compiler/api.go) --
+- [`component/language/compiler/api.go`](../../../component/language/compiler/api.go) --
   `parser.NormaliseAll` in `CompileSource`, `ParseMemQL`,
   `ValidateMemQL`, `applyFullRewriteChain`.
-- [`component/automations/loader.go`](../../component/automations/loader.go) --
+- [`component/automations/loader.go`](../../../component/automations/loader.go) --
   the `LooksLikeStructLogic`/`NormaliseLogicSource` +
   `LooksLikeStructAutomation`/`NormaliseAutomationSource` pair in
   `parseResolveCompile`. The `LooksLikeLegacyAutomation` rejection

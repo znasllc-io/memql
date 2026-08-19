@@ -54,7 +54,7 @@ const (
 // AttachmentStore, ...) takes interfaces instead of concrete dependencies.
 //
 // The own-types choice is NOT just style here: component/server is a tiered
-// module (the memql module split, memql#3228, docs/ci-design.md section D3)
+// module (the memql module split, memql#3228, docs/internal/ops/ci-design.md section D3)
 // with its own go.mod, and component/edge has no go.mod of its own -- it
 // lives directly in the unsplit root module, which none of this tier's
 // existing relative-path replace directives reach (unlike

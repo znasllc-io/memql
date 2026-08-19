@@ -1,8 +1,8 @@
 ---
 title: Event payload binding -- payload-as-args, bare-field reads, punning, and the automation envelope
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.12.0
 owner: znas
 ---

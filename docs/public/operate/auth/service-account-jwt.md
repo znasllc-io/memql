@@ -157,8 +157,7 @@ The service-account interceptor
         │ isServiceAccountPayload(payload)?                         │
         │   ALLOW: ClientHello, Ack, Unsubscribe, CancelRequest,    │
         │          ExecuteQuery, Subscribe, ConceptsList,           │
-        │          ConceptsSubscribe, MyAccess, EvaluatePolicy,     │
-        │          AgentGenerateTurn                                │
+        │          ConceptsSubscribe, MyAccess, AgentGenerateTurn   │
         │   DENY (PermissionDenied): IdentityCreate/Update,         │
         │          CreateWorkerToken, DelegationCreate, RotateAuth, │
         │          SendGuestInvite, Revoke*, … every credential/    │

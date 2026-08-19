@@ -1,8 +1,8 @@
 ---
 title: Behavioral DSL constructs -- logic / action / automation contract
 audience: internal
-status: accepted
-area: internal
+status: historical
+area: design
 sinceVersion: 0.9.6
 owner: znas
 ---

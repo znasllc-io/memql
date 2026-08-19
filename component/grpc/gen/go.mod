@@ -1,4 +1,4 @@
-// The `wire` tier (memql#3240, design D3 in docs/ci-design.md).
+// The `wire` tier (memql#3240, design D3 in docs/internal/ops/ci-design.md).
 //
 // L0: zero dependencies on anything else in this repository. That is what lets
 // it be the first module to exist -- every other tier requires something, and

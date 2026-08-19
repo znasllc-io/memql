@@ -2,7 +2,7 @@
 title: Conductor-driven response gate for multi-party Realtime turn-taking
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---

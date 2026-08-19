@@ -223,5 +223,5 @@ long as it is wrong.
   side of the comparison comes from, and why it is recorded rather than observed
 - [Database platform (CloudNativePG)](database-platform.md) — the platform the
   v0.18.0 barrier moves onto
-- [Reproduce staging locally](reproduce-staging-locally.md) — the local k3d
+- [Reproduce the cloud locally](reproduce-the-cloud-locally.md) — the local k3d
   runbook, including backup and restore drills on the CNPG side

@@ -82,7 +82,7 @@ Components communicate via typed Go channels carrying protobuf-defined messages
 - **ReplyTo pattern** -- Request-response over channels via embedded reply channel (buffered, size 1)
 - **Backpressure** -- Buffered channels (default 64) with non-blocking send and drop counting
 - **Telemetry** -- Channel fill-level sampling, message send/drop counters
-- **Proto messages** -- 27 message types in the `InternalMessage` envelope (database, engine, integration, event, config, telemetry, lifecycle)
+- **Proto messages** -- dozens of typed messages in the `InternalMessage` envelope (database, engine, integration, event, config, telemetry, lifecycle); see `component/bus/bus.proto` for the current set
 - **Correlation IDs** -- Every message carries a `correlation_id` for distributed tracing across channel hops
 
 All components implement `Ready() <-chan struct{}` for parallel startup coordination,
@@ -537,9 +537,8 @@ The Executor Engine (in `component/memql/`) executes parsed queries against the 
 │                                                                                      │
 │  Client                                                                              │
 │  ┌──────────┐                                                                       │
-│  │ WebSocket│                                                                       │
-│  │ gRPC     │                                                                       │
-│  │ REST     │                                                                       │
+│  │ gRPC     │  (MemqlService.Stream -- the primary surface)                        │
+│  │ WebSocket│  (browser bridge -> the same gRPC stream, /memql/ws)                 │
 │  └────┬─────┘                                                                       │
 │       │                                                                              │
 │       │  { "query": "concept==v1:user" }                                             │
@@ -822,7 +821,7 @@ memQL supports running as a distributed cluster where each node type specializes
 a subset of functionality. See [component/node/CLAUDE.md](../../../component/node/CLAUDE.md)
 for full details.
 
-**Node types:** bff (default), voice, cognition, agent, planner
+**Node types:** identity, bff (default), voice, cognition, agent, planner, workbench, mcp, edge
 
 Each node type compiles to a separate binary via Go build tags. See [build-tags.md](../build/build-tags.md).
 

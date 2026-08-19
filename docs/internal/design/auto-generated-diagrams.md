@@ -2,7 +2,7 @@
 title: Auto-Generated Architecture Diagrams
 audience: internal
 status: historical
-area: internal
+area: design
 sinceVersion: 0.9.0
 owner: znas
 ---
@@ -227,7 +227,7 @@ func (h *Handler) Login(ctx context.Context, user, password string) (err error) 
 
 - Static side: [`component/architecture/CLAUDE.md`](../../../component/architecture/CLAUDE.md)
 - Runtime side: [`component/observe/CLAUDE.md`](../../../component/observe/CLAUDE.md)
-- Cockpit side: [`memql-cockpit/cli/CLAUDE.md`](../../../memql-cockpit/cli/CLAUDE.md) (X:Architecture key binding)
+- Cockpit side: `memql-cockpit/cli/CLAUDE.md` (a sibling repo, not this one; X:Architecture key binding)
 - Concept surfaces: `dsl/observability/concepts.memql`, `dsl/cluster/concepts.memql` (`v1:cluster:nodeType.codeReference`)
 - Hypertable: `component/database/memory-nodes/migrations/20260515000000_observability_hypertable.up.sql`
 - Genesis local override: `component/envregistry/localenv.go`

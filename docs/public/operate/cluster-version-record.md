@@ -22,8 +22,10 @@ at risk on the other's next write.
 - `ServerHello.version` is the literal string `"v1"`. It names the wire
   protocol, not the release, and always has.
 - The `VERSION` file has read `0.15.0` at every tag since v0.16.1, and
-  the Dockerfile overwrites even that with a build stamp of the form
-  `0.15.0-<epoch>` before the binary ships.
+  until memql#3998 the Dockerfile overwrote even that with a build stamp
+  of the form `0.15.0-<epoch>` before the binary shipped. That stamping
+  step is gone: the release now goes into the binary via the linker and
+  nowhere else, and neither runtime stage copies a `VERSION` file.
 
 memQL engine releases now stamp a real version into the binary and
 introduce it on an additive `ServerHello.engine_version` field. That
@@ -92,7 +94,8 @@ judgement. A release tag is the common case, but the value may equally be:
 - a release tag, with or without the `v` prefix (`v0.18.0`, `0.18.0`)
 - a branch name
 - a commit sha
-- the `0.15.0-<epoch>` build stamp the Dockerfile produces
+- the `0.15.0-<epoch>` build stamp older images (built before memql#3998)
+  may still carry
 
 Anything unparseable is reported as `notComparable` by the comparison
 module -- and never as "up to date", which is the failure direction that
