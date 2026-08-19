@@ -35,25 +35,36 @@ Agent and voice deployments today are integration-heavy. Most of the engineering
 
 ## Example
 
-```
-@version("1.0.0")
-@namespace("acme")
-concept ticket {
-  subject     string   @required
-  priority    string   @default("normal")
-  status      enum("open", "closed") @default("open")
+A concept (schema), a query over it, and an LLM-callable tool wired to that query — the same shape every real domain in `dsl/` uses (this one is trimmed from `dsl/todos/`):
+
+```memql
+@namespace("todos")
+@description("A user-owned to-do item.")
+@rowAuthz(owner="ownerUserId")
+concept todo {
+  ownerUserId  string!
+  title        string!
+  done         bool  @default("false")
 }
 
-@enabled
-@handler(type="query", query="concept==v1:acme:ticket && payload.priority==\"$args.priority\"")
+@actor
+@description("List the caller's to-dos, optionally filtered by completion.")
+query todo todos {
+  args {
+    done  bool
+  }
+  filter  ownerUserId==actor.userId && when(args.done) { done==args.done }
+}
+
+@handler(type="query", query="query todos(done: $args.done)")
 @executionTime("fast")
-@description("List tickets by priority")
-tool listByPriority {
-  priority string @required
+@description("List the caller's to-dos.")
+tool todosList {
+  done  boolean  @description("Filter by completion: true for done, false for open. Omit for everything.")
 }
 ```
 
-A concept (schema) and an LLM-callable tool in the same file, same language. Add queries, mutations, or event-driven automations right next to them.
+`@rowAuthz(owner="ownerUserId")` makes the query's `ownerUserId==actor.userId` filter a load-time-enforced authorization tier, not just a convention — a caller can never read another user's rows through this query. Add mutations or event-driven automations right next to them, in the same file family.
 
 ---
 
@@ -65,9 +76,6 @@ make up
 
 # Run tests
 make test
-
-# Break-glass deploy (the blessed path is a digest bump + merge -> ArgoCD)
-make deploy VERSION=X
 ```
 
 **Full setup guide:** [docs/public/overview/quickstart.md](docs/public/overview/quickstart.md)
@@ -101,22 +109,21 @@ make deploy VERSION=X
 
 ## Environments
 
-### Development (k3d + ArgoCD)
-- **Database:** PostgreSQL + TimescaleDB pod in the local k3d cluster
-- **Service:** memQL node pods reconciled by ArgoCD from `deploy/k8s/overlays/local`
-- **Access:** All developers
-- **Command:** `make up`
+memQL ships **one installation shape**: an operator who wants a second
+environment installs a second instance, with its own domain and its own
+ArgoCD — there is no staging-versus-production dimension inside the product.
+What varies between a local dev cluster and a cloud install is the deploy
+**target**, not the architecture:
 
-### Cloud
-- **Database:** TimescaleDB Cloud (Tiger Cloud), or self-hosted CloudNativePG
-- **Service:** Azure Kubernetes Service (AKS), reconciled by ArgoCD from `deploy/k8s/overlays/cloud`
-- **Access:** per the cluster's own role model (owner / admin / developer / …)
-- **Deploy:** bump the digests in the overlay and merge — ArgoCD reconciles
-  (see docs/public/operate/deploy-bundle-runbook.md)
+| Target | Database | Service | Access |
+|---|---|---|---|
+| **Local** (`make up`) | self-hosted CloudNativePG in k3d | k3d + ArgoCD, reconciled from `deploy/k8s/overlays/local` | all developers |
+| **Cloud** | self-hosted CloudNativePG (same operator + manifests as local) | Azure Kubernetes Service (AKS), reconciled from `deploy/k8s/overlays/cloud` | per the cluster's own role model |
 
-> memQL ships **one installation shape**. An operator who wants a second
-> environment installs a second instance, with its own domain and its own
-> ArgoCD — there is no staging-versus-production dimension inside the product.
+Both targets run the **same self-hosted CloudNativePG database on the same
+manifests** — the local/cloud split is DNS, TLS source, and secrets
+provisioning, never the shape of the system. See
+[docs/public/operate/database-platform.md](docs/public/operate/database-platform.md).
 
 **Full details:** [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 
@@ -126,16 +133,18 @@ make deploy VERSION=X
 
 ### Prerequisites
 
-**Hardware:**
-- macOS with Apple Silicon (M1/M2/M3)
-- MacBook Pro or MacBook Air
-- 16GB RAM minimum (32GB recommended)
+memQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
+the local cluster's prerequisites (`docker`, `k3d`, `kubectl`) have no
+platform-specific step on either. Linux/amd64 is a fully supported target
+in its own right (`scripts/install/detect.sh`'s `SUPPORTED_OS`/`SUPPORTED_ARCH`
+pair for the one-command installer), not a fallback from macOS.
 
 **Software:**
-- Go 1.26.1+ (ARM64 build)
-- Docker Desktop for Mac (Apple Silicon)
-- k3d + kubectl (`brew install k3d kubectl`)
-- Azure CLI (`az`) — for cloud deploys
+- Go 1.26.1+
+- Docker (Docker Desktop on macOS; the Docker Engine on Linux)
+- k3d + kubectl (`brew install k3d kubectl` on macOS; your distro's package
+  manager or the upstream install scripts on Linux)
+- Azure CLI (`az`) — for cloud deploys only
 - git
 
 ### Local Development Workflow
@@ -171,12 +180,15 @@ make deploy VERSION=X
    make up SERVERS=2 && make scale N=2 && make status
    ```
 
-5. **Commit to `main`** (focused commits) or open a feature branch + PR
-   when review is genuinely useful. Stage by explicit path:
+5. **Branch, PR, merge queue.** `main` refuses direct pushes — a
+   repository ruleset enforces `pull_request` + `required_status_checks` +
+   `merge_queue`, so `git push origin main` fails no matter how small the
+   change. Stage by explicit path, then branch, push, and open a PR as
+   usual; once CI is green, enqueue it:
    ```bash
    git add path/to/changed.file
    git commit -m "domain: imperative subject"
-   git push origin main
+   gh pr merge <n> --repo znasllc-io/memql   # bare: enqueues into the merge queue
    ```
 
 ---
@@ -185,36 +197,41 @@ make deploy VERSION=X
 
 ```
 memQL/
-├── main.go                 # Entry point (thin orchestrator)
-├── app/                    # Phased service bootstrap
-│   ├── app.go             # Build() orchestrator
-│   ├── config.go          # Config + auth
-│   ├── database.go        # Database + concepts
-│   ├── engine.go          # Engine + bus + automations
-│   ├── integrations.go    # Integration providers
-│   ├── transport.go       # gRPC + HTTP + WebSocket
-│   ├── cluster.go         # Distributed node bootstrap
-│   └── adapters.go        # Engine adapter types
-├── component/              # Go service components
-│   ├── memql/             # Core query engine
-│   ├── database/          # Database providers
-│   ├── server/            # HTTP/WebSocket servers
-│   └── auth/              # Authentication
-├── integrations/          # External service integrations
-│   ├── cognition/         # AI collaboration
-│   └── audio/             # Audio streaming
-├── dsl/                   # The MemQL DSL tree (one directory per namespace)
-│   ├── cognition/         # e.g. concepts.memql, queries.memql, mutations.memql,
-│   │                      #      tools.memql, automations.memql, ... per namespace
+├── main.go              # Entry point (thin orchestrator)
+├── app/                  # Phased service bootstrap
+│   ├── app.go            # Build() orchestrator
+│   ├── config.go         # Config + auth
+│   ├── database.go       # Database + concepts
+│   ├── engine.go         # Engine + bus + automations
+│   ├── integrations.go   # Integration providers
+│   ├── transport.go      # gRPC + HTTP + WebSocket
+│   └── cluster.go        # Distributed node bootstrap
+├── component/            # Core Go service components
+│   ├── memql/            # Core query engine
+│   ├── database/         # Database providers
+│   ├── server/           # HTTP/WebSocket servers
+│   └── auth/             # Authentication
+├── integrations/         # External service integrations
+│   ├── cognition/        # AI collaboration
+│   └── voice/            # Voice + video pipeline (LiveKit room, avatar)
+├── clients/              # Surfaces built ON the platform (SPAs, portal)
+│   └── portal/           # memQL Portal -- the platform's ops console
+├── dsl/                  # The MemQL DSL tree (one directory per namespace)
+│   ├── cognition/        # e.g. concepts.memql, queries.memql, mutations.memql,
+│   │                     #      tools.memql, automations.memql, ... per namespace
 │   ├── identity/
-│   ├── _reference/        # Authoring reference skeletons (not loaded)
+│   ├── _reference/       # Authoring reference skeletons (not loaded)
 │   └── ...
-├── docs/                  # Documentation
-│   ├── public/            # Published docs (overview, concepts, language, ai,
-│   │                      #      build, operate) -- rendered on memql.io
-│   └── internal/          # Design records, plans, internal runbooks
-├── deploy/k8s/            # Kustomize manifests (base + overlays/local|cloud)
-└── .claude/               # Configuration
+├── core/                 # Shared utilities (logger, env, id, dslfs)
+├── cmd/                  # Command-line tools (memqllint, memqlfmt, memqlmigrate, ...)
+├── scripts/              # k3d bring-up, deploy, release, install, migrations
+├── sdk/                  # Generated client SDKs (Go, TS)
+├── docs/                 # Documentation
+│   ├── public/           # Published docs (overview, concepts, language, ai,
+│   │                     #      build, operate) -- rendered on memql.io
+│   └── internal/         # Design records, plans, internal runbooks
+├── deploy/k8s/           # Kustomize manifests (base + overlays/local|cloud)
+└── .claude/              # Configuration
 ```
 
 ---
@@ -227,6 +244,8 @@ memQL/
 | **Tear down cluster** | `make down` |
 | **Inner-loop rebuild + reload** | `make dev [NODE=<type>]` |
 | **Run Go test suite** | `make test` |
+| **Run tests with coverage** | `make test-cover` |
+| **DSL lint** | `make dsl-lint` |
 | **Break-glass deploy** | `make deploy VERSION=X` |
 | **View pod logs** | `kubectl logs -n memql deploy/<node> -f` |
 | **Database shell** | `psql postgres://memql:memql_dev@localhost:5432/memql` |
@@ -241,7 +260,7 @@ service** (`component/identity`):
 - OAuth-style code exchange for SPAs (`/oauth/token`)
 - JWKS-published EdDSA signing keys (`/.well-known/jwks.json`)
 - Role-based access control (RBAC) per `v1:identity:user.role`
-- Centralized user / partition-access management at `/admin/`
+- Admin surfaces (people, tokens, keys, settings) live in the memQL portal
 
 **Developer access:**
 - **Local:** All developers (own machine)
@@ -256,19 +275,22 @@ service** (`component/identity`):
 # Run all tests
 make test
 
-# Run specific package tests
-make test
-
 # Run with coverage
-make test
+make test-cover
 ```
+
+Always verify with `make test`. This is a multi-module workspace, and a
+reflex `go test` invocation resolves inside one module only -- silently
+skipping the engine's own modules and reporting a false "ok". See
+[CLAUDE.md's Testing section](CLAUDE.md#testing) for the full explanation
+and the `MEMQL_REQUIRE_DB=1` / db-gated-lane details.
 
 ---
 
 ## Local Cluster (k3d + ArgoCD)
 
-Full stack with PostgreSQL + TimescaleDB + memQL node pods, reconciled
-by ArgoCD from `deploy/k8s/overlays/local`:
+Full stack with PostgreSQL + TimescaleDB (via CloudNativePG) + memQL node
+pods, reconciled by ArgoCD from `deploy/k8s/overlays/local`:
 
 ```bash
 # Bootstrap (cluster + ArgoCD + seeded secrets)
@@ -276,9 +298,6 @@ make up
 
 # View pod logs
 kubectl logs -n memql deploy/bff -f
-
-# Access database (via the k3d postgres port-forward)
-psql postgres://memql:memql_dev@localhost:5432/memql
 
 # Tear down
 make down
@@ -293,11 +312,13 @@ make down
 MemQL DSL is a domain-specific query language for time-series memory graphs.
 
 ### Example Query
-```memql
-// Find active human participants in a space
-activeHumanParticipants({
-  "spaceId": "space_123"
-})
+
+The named-args form is how a declared query is invoked from a logic body or
+a tool handler (not a standalone top-level `.memql` declaration in its own
+right):
+
+```memql fragment
+query activeHumanParticipants(partitionId: "space_123")
 ```
 
 ### Example Automation
@@ -307,7 +328,7 @@ activeHumanParticipants({
 @description("On space creation, auto-join the creator's assistant")
 automation autoJoinSI {
   step run {
-    logic autoJoinSI { event: event }
+    logic autoJoinSI ( event )
   }
 }
 ```
@@ -321,7 +342,10 @@ automation autoJoinSI {
 memQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
 `deploy/k8s/overlays/cloud`. The blessed deploy is a GIT MERGE: bump the
 `{engine version, bundle digest, client digest}` in that overlay and merge.
-`make deploy VERSION=X` is break-glass, for when ArgoCD is unavailable.
+
+`make deploy VERSION=X` is the break-glass path for when ArgoCD is
+unavailable — it delegates to the memQL Cockpit's pinned, role-gated,
+audited `deployEngineCluster` automation. It is not the normal path.
 
 See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
 for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration
@@ -331,10 +355,13 @@ for deploy/topology (ACR `acrmemql.azurecr.io`, the database, and the migration
 
 ## Contributing
 
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 1. Read [docs/public/overview/tech-stack.md](docs/public/overview/tech-stack.md)
 2. Make changes and test locally (`make test`)
 3. Exercise the 2-replica parity cluster for anything cross-node
-4. Commit directly to `main` for focused changes, or open a PR when review is useful
+4. Branch, PR, CI green, then `gh pr merge <n>` (bare) — every change,
+   including a one-line docs fix, goes through the merge queue
 5. Stage files by explicit path (`git add <file>`)
 
 **Git workflow:** Single long-lived `main` branch. Pre-release: no

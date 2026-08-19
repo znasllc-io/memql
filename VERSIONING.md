@@ -48,10 +48,18 @@ The version of a memQL build is the **git tag** it was cut from
   `org.opencontainers.image.revision=<short-sha>` on every image, and
   flags a dirty tree). There is nothing to strip and nothing to
   reconcile.
-- A release is cut by tagging `main` (`git tag vX.Y.Z`), then
-  `make release VERSION=X.Y.Z ...` builds the immutable
-  `memql:X.Y.Z` image from that commit. See
-  docs/public/operate/deployment-strategy.md (see the product pack repo's docs/operate/deployment-strategy.md).
+- A release is cut by tagging `main` (`git tag vX.Y.Z`). `make release
+  VERSION=X.Y.Z` builds an immutable `memql:X.Y.Z` image **locally** from
+  that commit -- useful for inspecting what a release image contains, but
+  it is not the cloud-release path: per CLAUDE.md's image-build rule, a
+  deployable release image is built on the GitHub build server, not an
+  operator machine. The cloud-release mechanism is the git tag plus a
+  manual `workflow_dispatch` of
+  [`.github/workflows/build-engine-images.yml`](.github/workflows/build-engine-images.yml)
+  with the version as input; see
+  [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
+  for the full deploy path (image build -> digest pin in the cloud overlay ->
+  ArgoCD reconcile).
 
 ## How a running binary states its release (memql#3998)
 
@@ -260,6 +268,19 @@ be published first.
 
 ### `wire` is published, and resolvable — demonstrated
 
+**Point-in-time demonstration, not current-state narrative.** The walkthrough
+below is exactly what was run and observed on 2026-08-07, at root tag
+`v0.15.0`, to prove the mechanism works once. It has not been re-run since.
+As of this writing the root line has advanced to `v0.19.1` (six releases past
+`v0.15.0`); `wire`'s three tags are still only cut at `v0.15.0` (versioning
+independently means no later cut was required, not that one is owed), and
+the `engine` line remains unopened -- zero `component/{language,database,
+harness,actions,memql}/vX.Y.Z` or `dsl/vX.Y.Z` tags exist -- despite its
+stated precondition (memql#3228 landing) having been met in the interim.
+Read the proxy responses and git-tag counts below as "true on 2026-08-07,"
+not as "true today" -- re-run the same `curl`/`git tag` commands against the
+current tags for the live state.
+
 The three wire tags were cut at `v0.15.0` on 2026-08-07:
 
 ```
@@ -294,11 +315,16 @@ $ curl -s https://proxy.golang.org/github.com/znasllc-io/memql/component/grpc/ge
 the same commit the `v0.15.0` release was cut from. The module line and
 the release line agree.
 
-`engine` cannot be published at `v0.15.0` — its modules did not exist at
-that commit. Its line opens at the first release cut after
+`engine` could not be published at `v0.15.0` — its modules did not exist at
+that commit. Its line was designed to open at the first release cut after
 [memql#3228](https://github.com/znasllc-io/memql/issues/3228) lands, with
 `make tag-submodules VERSION=X.Y.Z LINE=engine`, and only once the
-release commit has rewritten the placeholders described above.
+release commit has rewritten the placeholders described above. As of this
+writing memql#3228 has landed and the root line has advanced six releases
+past `v0.15.0`, but the `engine` line has still not been opened -- `git tag`
+carries no `component/{language,database,harness,actions,memql}/vX.Y.Z` or
+`dsl/vX.Y.Z` tag. Cutting one is a `make tag-submodules ... LINE=engine`
+away at the next release; nothing besides operator action is blocking it.
 
 ### Consumers: what this means for the per-module `replace` set
 

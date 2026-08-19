@@ -30,7 +30,7 @@ Examples of unacceptable behavior include:
 
 Project maintainers are responsible for clarifying and enforcing the standards above and will take appropriate and fair corrective action in response to any behavior they deem inappropriate.
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by contacting the project team at the email listed in `SECURITY.md`. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported by opening a private security advisory via the **Security** tab on this repository (the same channel [SECURITY.md](SECURITY.md) uses for vulnerability reports: [Report a vulnerability](https://github.com/znasllc-io/memql/security/advisories/new)), which reaches the project team privately. All complaints will be reviewed and investigated promptly and fairly.
 
 ## Attribution
 
