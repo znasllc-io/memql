@@ -10,13 +10,14 @@ owner: znas
 # Platformization Program — Master Plan
 
 Four-epic program to turn MemQL into a clean, plug-and-play platform and land
-telephony on top of it. Built from the analysis in
-[`05-current-state-map.md`](05-current-state-map.md).
+telephony on top of it. Built from an analysis of the pre-platformization
+state (the working doc that captured that analysis, `05-current-state-map.md`,
+was deleted once its substance was folded in here and elsewhere).
 
 **Epics**
 1. [SI → AI rename](01-epic-si-to-ai-rename.md)
 2. [Platform / plugin architecture](02-epic-platform-plugin.md)
-3. [Decouple the product from core](03-epic-decouple-the product.md)
+3. Decouple the product from core (no surviving epic doc)
 4. [Telephony into core](04-epic-telephony.md)
 
 ---

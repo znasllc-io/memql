@@ -108,7 +108,7 @@ dsl/agents/v1/<namespace>/templates/<name>.tmpl
 
 The full syntax reference (every annotation, every field, every reference
 type, scope semantics, invocation contract) lives at
-[`dsl/_reference/_agent.memql`](../../dsl/_reference/_agent.memql).
+[`dsl/_reference/_agent.memql`](../../../dsl/_reference/_agent.memql).
 
 ## Implementation phases
 

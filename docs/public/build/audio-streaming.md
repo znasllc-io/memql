@@ -635,10 +635,11 @@ Multi-agent real-time voice conversations route through the Polyphon
 pipeline -- LiveKit for audio transport, a Bridge Agent for ASR/TTS,
 and the cognition node for turn-taking.
 
-The full architecture (audio flow, provider flavors, configuration,
-component structure, costs) lives in
-[/docs/polyphon-architecture.md](/docs/polyphon-architecture.md). Don't
-duplicate it here.
+The audio flow, provider flavors, configuration, and component structure
+are covered in the Voice + Video Pipeline section of the root `CLAUDE.md`
+and in [docs/public/operate/](../operate/) (the standalone Polyphon
+architecture doc that used to live here was superseded by the Go
+voice-agent + those docs). Don't duplicate it here.
 
 ### Endpoints
 
@@ -659,6 +660,5 @@ env vars are configured.
 
 ---
 
-*For the Polyphon architecture and deployment details, see [/docs/polyphon-architecture.md](/docs/polyphon-architecture.md)*
-*For the overall memQL architecture, see [/docs/public/concepts/architecture.md](/docs/public/concepts/architecture.md)*
-*For integration patterns, see [/integrations/CLAUDE.md](/integrations/CLAUDE.md)*
+*For the overall memQL architecture, see [docs/public/concepts/architecture.md](../concepts/architecture.md)*
+*For integration patterns, see [integrations/CLAUDE.md](../../../integrations/CLAUDE.md)*

@@ -230,7 +230,7 @@ To change what the stack contains, edit the definitions block at the top of
 `scripts/lib/agents.sh`; both scripts pick the change up.
 
 These are not
-[capability scripts](internal/design/capability-script-contract.md) and
+[capability scripts](../design/capability-script-contract.md) and
 deliberately do not source `scripts/lib/capability.sh`: that contract requires a
 single JSON envelope on stdout for a DSL action executor, whereas these are
 human-facing and emit colored status lines.

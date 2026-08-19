@@ -146,7 +146,7 @@ ids for the real ones once the knowledge seeder ships them.
 
 ## References
 
-- Concept binding pattern: [agentRole](../../dsl/agents/concepts.memql)
-- Seed materializer + tier-validation hook: [seed_materializer.go](../../component/memql/seed_materializer.go), [skill_tier_validation.go](../../component/memql/skill_tier_validation.go)
-- Knowledge domain tier source: [knowledgeDomain concept](../../dsl/knowledge/concepts.memql), [seed.go](../../integrations/knowledge/seed.go)
+- Concept binding pattern: [agentRole](../../../dsl/agents/concepts.memql)
+- Seed materializer + tier-validation hook: [seed_materializer.go](../../../component/memql/seed_materializer.go), [skill_tier_validation.go](../../../component/memql/skill_tier_validation.go)
+- Knowledge domain tier source: [knowledgeDomain concept](../../../dsl/knowledge/concepts.memql), [seed.go](../../../integrations/knowledge/seed.go)
 - Tool ↔ Knowledge Domain pattern: [architecture/tool-knowledge-domain-pattern.md](../../public/concepts/tool-knowledge-domain-pattern.md)

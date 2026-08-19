@@ -13,7 +13,7 @@ owner: znas
 16630577, 2026-08-06T21:32Z and 21:47Z — see Sequencing and Open Items).
 No workflow or Go file is modified by this document.
 **Input:** [ci-audit.md](ci-audit.md) — the measured audit this responds to.
-**Related:** [internal/ops/tier4-build-graph.md](internal/ops/tier4-build-graph.md)
+**Related:** [internal/ops/tier4-build-graph.md](tier4-build-graph.md)
 (CI-acceleration epic #854, Tiers 0–3 shipped, Tier 4 = Bazel north star).
 This design sits between Tier 3 and Tier 4 and does not conflict with either.
 
