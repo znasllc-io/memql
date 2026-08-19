@@ -3,58 +3,6 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-// ---- mutations/v1/platform/insertPolicyTrace.memql ----
-
-// insertPolicyTrace
-// =================
-//
-// Engine-internal mutation for landing a policy evaluation on the
-// v1:platform:policyTrace timeline. The caller this comment used to name --
-// component/memql/policy_evaluator.go, and its EvaluatePolicy options --
-// does not exist; that mechanism was retired (#984). Nothing calls this
-// mutation today (see memql#4114). Kept in place pending an owner decision
-// on the policyTrace subsystem; if it is re-introduced, this comment should
-// name the real caller at that time rather than describe retired behavior.
-//
-// args:
-//   policyName       string  required
-//   tier             string  required
-//   actorUserId      string  optional
-//   actorRole        string  optional
-//   callerPartition  string  optional
-//   argsHash         string  required
-//   resultJson       string  required
-//   traceJson        string  required
-//   durationMs       float   required
-//   error            string  optional
-//
-// Retention is enforced by purgeExpiredPolicyTraces (daily cron).
-
-@description("Persist a single policy evaluation trace to v1:platform:policyTrace.")
-mutate policyTrace insertPolicyTrace {
-  args {
-    policyName       string!
-    tier             string!
-    actorUserId      string
-    actorRole        string
-    callerPartition  string
-    argsHash         string!
-    resultJson       string!
-    traceJson        string!
-    durationMs       number!
-    error            string
-  }
-  insert {
-    accept { policyName, tier, argsHash, resultJson, traceJson, durationMs }
-    stamp {
-      actorUserId: args.actorUserId ?? ""
-      actorRole: args.actorRole ?? ""
-      callerPartition: args.callerPartition ?? ""
-      error: args.error ?? ""
-    }
-  }
-}
-
 // ---- concepts/v1/platform/partitionSecret/seed.memql ----
 
 @actor("system")

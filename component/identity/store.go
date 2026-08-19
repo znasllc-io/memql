@@ -757,6 +757,60 @@ func (s *Store) LookupNodeTokenIdentityByBinding(
 	return out, nil
 }
 
+// VoiceAgentTokenLookup is what LookupVoiceAgentTokenIdentityById
+// returns when a row exists for the given identity id. Active is the
+// whole answer the verify path needs (memql#4111).
+type VoiceAgentTokenLookup struct {
+	IdentityId string
+	Active     bool
+}
+
+// LookupVoiceAgentTokenIdentityById returns the
+// v1:identity:identity[voice_agent_token] row whose id is the
+// class="voice_agent" JWT's subject, or (nil, nil) when no such row
+// exists.
+//
+// A nil result means "unknown", NOT "revoked" -- the caller
+// (component/grpc.VoiceAgentRevocationCheck) treats it as
+// not-revoked, matching the node-class convention in
+// component/node/node_token_revocation.go. Rows are returned even
+// when active=false; that is the state the caller is asking about.
+func (s *Store) LookupVoiceAgentTokenIdentityById(
+	ctx context.Context,
+	identityId string,
+) (*VoiceAgentTokenLookup, error) {
+	identityId = strings.TrimSpace(identityId)
+	if identityId == "" {
+		return nil, nil
+	}
+	var sb strings.Builder
+	sb.WriteString(`query voiceAgentTokenIdentityById(`)
+	writeKVString(&sb, "identityId", identityId, true)
+	sb.WriteString(`)`)
+	// Internal origin: the query is @serverOnly, and this runs inside an
+	// auth interceptor -- BEFORE any actor exists to scope to. Same
+	// reasoning as LookupNodeTokenIdentityByBinding above.
+	result, err := s.Engine.Execute(auth.ContextWithInternalOrigin(ctx), sb.String())
+	if err != nil {
+		return nil, fmt.Errorf("identity.store: lookup voice_agent_token identity: %w", err)
+	}
+	if result == nil || result.Bundle == nil || len(result.Bundle.Nodes) == 0 {
+		return nil, nil
+	}
+	node := result.Bundle.Nodes[0]
+	if node == nil {
+		return nil, nil
+	}
+	out := &VoiceAgentTokenLookup{IdentityId: strings.TrimSpace(node.GetId())}
+	if node.Payload != nil {
+		out.Active = node.Payload.GetFields()["active"].GetBoolValue()
+	}
+	if out.IdentityId == "" {
+		return nil, nil
+	}
+	return out, nil
+}
+
 // CreateNodeTokenIdentity inserts a fresh v1:identity:identity row
 // for the node_token credential type. Used by both the operator
 // CLI (`memql node-token mint`) and the /node/bootstrap handler's

@@ -100,34 +100,6 @@ concept partitionVariable {
   active       bool    @default("true")  @description("When false the resolver skips this row and falls back to the global v1:platform:globalVariable.")
 }
 
-/// Persisted trace tree for a single policy evaluation. Nothing calls insertPolicyTrace today --
-/// the EvaluatePolicy mechanism this schema was designed around (component/memql/policy_evaluator.go,
-/// @traces_persisted, PersistTrace) does not exist; that mechanism was retired (#984). This concept
-/// is kept in place pending an owner decision on the policyTrace subsystem (memql#4114). If it is
-/// re-introduced, the row is designed to carry the policy name, the tier, the caller (actor /
-/// partition), the args hash (for cache lookup and audit correlation), the JSON-serialized
-/// PolicyTrace tree, the computed result, the wall-clock duration in milliseconds, and any error
-/// message that arose during evaluation, with retention governed by the
-/// MEMQL_POLICYTRACE_RETENTION_DAYS env var (default 90) via a daily purge automation hard-deleting
-/// rows whose `createdAt + retentionDays < now`. Distinct from v1:identity:auditEvent, which is the
-/// lightweight @audited per-eval row -- policyTrace is the heavyweight 'I'm debugging WHY this
-/// returned X' artifact.
-@displayCard(primary="policyName", secondary="actorUserId", tertiary="durationMs", status="tier")
-concept policyTrace {
-  policyName   string! @description("Name of the policy that produced this trace.")
-  tier         string! @description("Tier of the policy at evaluation time -- 'core' or 'bff'.")
-  actorUserId  string    @description("Caller's v1:identity:user id. May be empty for server-internal calls.")
-  actorRole    string    @description("Caller's cluster-wide role (owner / admin / developer / writer / reader). Empty when unauthenticated.")
-  callerPartition string @description("Active partition envelope at evaluation time.")
-  argsHash     string! @description("SHA-256 hex of canonicalized args JSON. Used for cache lookup and audit correlation.")
-  resultJson   string! @description("JSON-encoded return value of the policy.")
-  traceJson    string! @description("Full PolicyTrace tree serialized as JSON (name / tier / args / result / durationMs / subcalls / breadcrumbs / error).")
-  durationMs   float! @description("Wall-clock duration of the top-level evaluation in milliseconds.")
-  error        string    @description("Error message captured when the evaluation aborted; empty on success.")
-
-  @relationship(type="parent", field="actorUserId", target=user, direction="outgoing")
-}
-
 // ---- concepts/v1/platform/missingCapability/concept.memql ----
 
 /// A capability the platform itself cannot yet provide -- a missing tool, missing integration,

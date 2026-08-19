@@ -32,11 +32,25 @@ import (
 // auth chain). A nil `v` parameter disables the voice-agent admit
 // path entirely; intended for tests and binaries that don't run
 // the voice-agent surface.
+//
+// `revocation` adds the row-state kill switch (memql#4111): after the
+// JWT verifies and the class is confirmed, the credential's
+// v1:identity:identity row is checked and a soft-deleted row
+// (active=false) is refused. A nil `revocation`, or one with a nil
+// Resolver, skips that check -- which is the pre-#4111 behaviour, and
+// means a leaked token stays valid for its full 90-day TTL. Wire it
+// anywhere a real store is available. See voice_agent_revocation.go
+// for why service accounts are deliberately not covered.
 func NewVoiceAgentStreamInterceptor(
 	base grpc.StreamServerInterceptor,
 	v *verifier.Verifier,
+	revocation *VoiceAgentRevocationCheck,
 	logger *slog.Logger,
 ) grpc.StreamServerInterceptor {
+	var revCache *voiceAgentRevocationCache
+	if revocation != nil && revocation.Resolver != nil {
+		revCache = newVoiceAgentRevocationCache(revocation.CacheTTL)
+	}
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 		ctx := ss.Context()
 		scheme, token := schemeAndTokenFromMetadata(ctx)
@@ -62,6 +76,39 @@ func NewVoiceAgentStreamInterceptor(
 				return status.Error(codes.Internal, "auth not configured")
 			}
 			return base(srv, ss, info, handler)
+		}
+
+		// Row-state revocation gate (memql#4111). Runs AFTER the class
+		// is confirmed, so a non-voice-agent bearer never reaches it,
+		// and BEFORE the actor is stamped, so a revoked credential
+		// never becomes an actor. Fails closed on a lookup error: a
+		// half-answered revocation check must not admit traffic.
+		//
+		// vc.UserId carries the JWT `sub` (verifier.go maps "sub" ->
+		// UserId for every class), and for this class the subject IS the
+		// v1:identity:identity row id -- see
+		// identity.VoiceAgentIssueInput.IdentityId. It is not a person.
+		if revCache != nil {
+			revoked, rerr := revCache.lookup(ctx, vc.UserId, revocation.Resolver)
+			if rerr != nil {
+				if logger != nil {
+					logger.Warn("voice-agent revocation: lookup failed (rejecting open)",
+						"subject", vc.UserId,
+						"instance_id", vc.NodeId,
+						"method", info.FullMethod,
+						"error", rerr)
+				}
+				return status.Error(codes.Unauthenticated, "voice-agent revocation check failed")
+			}
+			if revoked {
+				if logger != nil {
+					logger.Info("voice-agent revocation: rejected revoked credential",
+						"subject", vc.UserId,
+						"instance_id", vc.NodeId,
+						"method", info.FullMethod)
+				}
+				return status.Error(codes.PermissionDenied, "voice-agent credential has been revoked")
+			}
 		}
 
 		if logger != nil {

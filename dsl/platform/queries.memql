@@ -5,45 +5,6 @@
 
 use common.traits.{ isActiveRecord, isNotDeleted }
 
-/// Recent persisted policy traces for the named policy, most-recent first.
-query policyTrace policyTracesForPolicy {
-  args {
-    policyName  string!
-  }
-  filter  policyName==args.policyName
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "row.createdAt", "desc"
-  paginate 50
-  shape   policyTraceFull
-}
-
-// ---- queries/v1/platform/allPolicyTraces.memql ----
-
-// allPolicyTraces
-// ===============
-//
-// Returns every persisted PolicyTrace row. The
-// purgeExpiredPolicyTraces cron iterates the result and per-row
-// tests whether createdAt + MEMQL_POLICYTRACE_RETENTION_DAYS is
-// past `now` -- same shape as expiredAuditEvents
-// in the identity tree (MemQL filter expressions can't inline
-// addDuration today).
-//
-
-/// All persisted policy traces; the retention sweep iterates and per-row checks createdAt +
-/// retention-days < now.
-query policyTrace allPolicyTraces {
-  filter  policyName!=""
-  // Pagination (5.3 / epic #1964): bounded first page + keyset cursor over
-  // (createdAt, id) instead of a full-table pull. Literal page size -- the
-  // struct-query paginate directive only accepts an integer literal.
-  sort     "row.createdAt", "desc"
-  paginate 50
-  shape   policyTraceFull
-}
-
 // ---- queries/v1/platform/globalVariable.memql ----
 
 // globalVariable -- Get Single Instance-Wide Configuration Variable

@@ -810,24 +810,7 @@ func AllPlansBuild(args AllPlansArgs) string {
 	return "query allPlans()"
 }
 
-// AllPolicyTraces -- All persisted policy traces; the retention sweep iterates and per-row checks createdAt + retention-days < now.
-//
-// Bound concept: v1:platform:policyTrace (machine-readable: BoundConcepts["allPolicyTraces"] in generated_concepts.go).
-type AllPolicyTracesArgs struct {
-}
-
-// AllPolicyTraces calls the engine query allPolicyTraces.
-func (qc *QueryClient) AllPolicyTraces(ctx context.Context, args AllPolicyTracesArgs) (*Result, error) {
-	call := AllPolicyTracesBuild(args)
-	return qc.executeNamed(ctx, "allPolicyTraces", call)
-}
-
-func AllPolicyTracesBuild(args AllPolicyTracesArgs) string {
-	_ = args
-	return "query allPolicyTraces()"
-}
-
-// AllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep (mirrors allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
+// AllSafetyClassifications -- Returns every v1:safety:classification row. Used by the retention sweep; a future cockpit Command Safety view will layer more targeted queries on top.
 //
 // Bound concept: v1:safety:classification (machine-readable: BoundConcepts["allSafetyClassifications"] in generated_concepts.go).
 type AllSafetyClassificationsArgs struct {
@@ -3607,28 +3590,6 @@ func PolicyBuild(args PolicyArgs) string {
 		b.WriteString("partitionId: ")
 		b.WriteString(quoteMemQL(args.PartitionId))
 	}
-	b.WriteString(")")
-	return b.String()
-}
-
-// PolicyTracesForPolicy -- Recent persisted policy traces for the named policy, most-recent first.
-//
-// Bound concept: v1:platform:policyTrace (machine-readable: BoundConcepts["policyTracesForPolicy"] in generated_concepts.go).
-type PolicyTracesForPolicyArgs struct {
-	PolicyName string
-}
-
-// PolicyTracesForPolicy calls the engine query policyTracesForPolicy.
-func (qc *QueryClient) PolicyTracesForPolicy(ctx context.Context, args PolicyTracesForPolicyArgs) (*Result, error) {
-	call := PolicyTracesForPolicyBuild(args)
-	return qc.executeNamed(ctx, "policyTracesForPolicy", call)
-}
-
-func PolicyTracesForPolicyBuild(args PolicyTracesForPolicyArgs) string {
-	var b strings.Builder
-	b.WriteString("query policyTracesForPolicy(")
-	b.WriteString("policyName: ")
-	b.WriteString(quoteMemQL(args.PolicyName))
 	b.WriteString(")")
 	return b.String()
 }

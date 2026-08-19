@@ -108,7 +108,7 @@ func TestVoiceAgentInterceptor_JWTAdmits(t *testing.T) {
 
 	v := vaNewVerifier(t, srv.URL)
 	base := &stubBase{}
-	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, slog.Default())
+	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, nil, slog.Default())
 
 	md := metadata.Pairs("authorization", "Bearer "+tok)
 	admitted := false
@@ -142,7 +142,7 @@ func TestVoiceAgentInterceptor_UserClassJWTFallsThrough(t *testing.T) {
 
 	v := vaNewVerifier(t, srv.URL)
 	base := &stubBase{}
-	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, slog.Default())
+	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, nil, slog.Default())
 
 	md := metadata.Pairs("authorization", "Bearer "+tok)
 	err = interceptor(nil, vaServerStream(md), &grpc.StreamServerInfo{FullMethod: "/x"}, func(_ interface{}, _ grpc.ServerStream) error {
@@ -164,7 +164,7 @@ func TestVoiceAgentInterceptor_PATFallsThrough(t *testing.T) {
 
 	v := vaNewVerifier(t, srv.URL)
 	base := &stubBase{}
-	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, slog.Default())
+	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), v, nil, slog.Default())
 	md := metadata.Pairs("authorization", "Bearer mql_pat_anything")
 	err := interceptor(nil, vaServerStream(md), &grpc.StreamServerInfo{FullMethod: "/x"}, func(_ interface{}, _ grpc.ServerStream) error {
 		return nil
@@ -179,7 +179,7 @@ func TestVoiceAgentInterceptor_PATFallsThrough(t *testing.T) {
 // surface.
 func TestVoiceAgentInterceptor_NilVerifierFallsThrough(t *testing.T) {
 	base := &stubBase{}
-	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), nil, slog.Default())
+	interceptor := NewVoiceAgentStreamInterceptor(base.Interceptor(), nil, nil, slog.Default())
 	md := metadata.Pairs("authorization", "Bearer some-token")
 	err := interceptor(nil, vaServerStream(md), &grpc.StreamServerInfo{FullMethod: "/x"}, func(_ interface{}, _ grpc.ServerStream) error {
 		return nil
