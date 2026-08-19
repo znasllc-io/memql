@@ -759,16 +759,21 @@ proto-gen-check:
 ## write-once: pushing over an existing tag is refused without --allow-overwrite.
 ## Implementation lives in scripts/release/release.sh per the function-based
 ## shell-script convention (CLAUDE.md).
+## PUSH=1 is BREAK-GLASS, not the release path (memql#4116). Deployable
+## images are built by the GitHub build server (OIDC -> ACR), so a push from
+## an operator machine needs CONFIRM=push-from-an-operator-machine and is
+## refused (exit 3) without it. Building locally is unaffected.
 ##   make release                                   # local image, VERSION semver prefix
 ##   make release VERSION=2.4.0                      # explicit version, local only
-##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1  # build + push to shared ACR
 ##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1   # plan only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 CONFIRM=push-from-an-operator-machine
 release:
 	@bash scripts/release/release.sh \
 		$${VERSION:+--version=$$VERSION} \
 		$${REGISTRY:+--registry=$$REGISTRY} \
 		$${ACR:+--acr=$$ACR} \
 		$${PUSH:+--push} \
+		$${CONFIRM:+--confirm=$$CONFIRM} \
 		$${ALLOW_OVERWRITE:+--allow-overwrite} \
 		$${DRY_RUN:+--dry-run} \
 		$(ARGS)

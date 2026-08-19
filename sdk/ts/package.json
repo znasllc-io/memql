@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js"
+    },
     "./authoring": {
       "types": "./dist/authoring/index.d.ts",
       "import": "./dist/authoring/index.js"
@@ -41,10 +45,6 @@
     "./realtime": {
       "types": "./dist/realtime/index.d.ts",
       "import": "./dist/realtime/index.js"
-    },
-    "./si": {
-      "types": "./dist/si/index.d.ts",
-      "import": "./dist/si/index.js"
     },
     "./tools": {
       "types": "./dist/tools/index.d.ts",

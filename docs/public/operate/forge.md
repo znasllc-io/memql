@@ -144,20 +144,28 @@ forge MCP tool surface's `@allowedRoles` annotations already grant
 |---|---|---|
 | `owner` | Approver / fast-track | Final approval. Self-approves on submit (fast-track to `queued`). Can validate and approve other requests. Execute/deploy authority. |
 | `admin` | Senior developer | May validate requests (advance to `needs_approval`) and approve them (advance to `queued`). |
-| `developer` | Senior developer | Tool-permitted the same as `admin`, but see the query-layer caveat below. |
+| `developer` | Senior developer | Engineering power: may validate requests (advance to `needs_approval`). Cannot approve -- approval is owner-only. |
 | `writer` | Junior developer | May validate requests (first-line review). Cannot approve; moves requests to `needs_approval` for the owner. |
 | `reader` | Non-developer employee | Submit-only. Requests enter the pipeline at `needs_validation`. Receives the mentoring layer while filing (see below). |
 
 The validation and approval queues are gated at the query layer via the forge
-role specs (`forgeDeveloper` for `owner` / `admin` / `writer`;
-`forgeApprover` for `owner` only). **`forgeDeveloper` does not currently
-include `developer`** (`dsl/forge/specs.memql`), even though the tool-level
-`@allowedRoles` on `forgeValidationQueue` / `forgeApprovalQueue` /
-`forgeValidateRequest` / `forgeApproveRequest` does admit that role -- so a
-caller whose cluster role is `developer` can invoke those tools but currently
-gets the same empty-list result a `reader` gets, rather than the populated
-queue an `admin` sees. Submission (`forgeSubmitRequest`) and reading own requests
-(`forgeMyRequests`) are open to every authenticated team member.
+role specs (`forgeDeveloper` for `owner` / `admin` / `developer` / `writer`;
+`forgeApprover` for `owner` only). Submission (`forgeSubmitRequest`) and
+reading own requests (`forgeMyRequests`) are open to every authenticated team
+member.
+
+**Three gates must agree on the developer tier, and a disagreement is
+silent.** The `@allowedRoles` annotation on a forge tool decides whether the
+CALL is admitted; `forgeRequestRoleAllowed`
+(`component/memql/forge_request_validation.go`) decides whether the status
+TRANSITION is; and the `forgeDeveloper` spec decides whether the queue's rows
+are VISIBLE. When the tool gate admits a role the spec excludes, the caller
+gets an empty list rather than a permission error -- which reads as "there is
+nothing to validate", not as "you lack access". That is exactly what happened
+to the `developer` role until memql#4112: `@allowedRoles` admitted it,
+`forgeDeveloper` and `forgeRequestRoleAllowed` both omitted it, so a
+legitimately-permissioned engineer saw the same empty queue a `reader` sees.
+Both now include it; `TestForgeQueueGatingTiers` pins the tier.
 
 ### Mentoring layer
 

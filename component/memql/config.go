@@ -26,6 +26,13 @@ const (
 
 	defaultAICacheEnabled    = true
 	defaultAICacheMaxSeconds = 60
+	// Entry cap for the exact-match AI response cache (memql#4124). Sized
+	// against the TTL rather than against memory: the default TTL is 60s
+	// (defaultAICacheMaxSeconds), so 5000 live entries is far more than a
+	// single node accumulates in one TTL window under any realistic rate,
+	// and the cap only ever binds when eviction has genuinely stopped
+	// keeping up -- i.e. exactly the runaway this bounds.
+	defaultAICacheMaxEntries = 5000
 	maxAICacheSeconds        = 300
 
 	// Agent tool loop: one iteration = one LLM round, during which the
@@ -68,6 +75,13 @@ const (
 	envCacheMaxTTL          = "MEMQL_CACHE_MAX_TTL"
 	envAICacheDefaultEnable = "MEMQL_SI_CACHE_DEFAULT_ENABLED"
 	envAICacheMaxSeconds    = "MEMQL_SI_CACHE_MAX_SECONDS"
+	// Entry cap for the exact-match AI response cache (memql#4124). The
+	// cache was unbounded, with eviction only on a read that happened to
+	// land on an expired key -- so a workload with high key churn (every
+	// key is a hash of the FULLY RENDERED prompt, which includes
+	// conversation history, so near-every call is a fresh key) grew the
+	// map without limit and never read most of those keys again.
+	envAICacheMaxEntries = "MEMQL_AI_CACHE_MAX_ENTRIES"
 	// Canonical names for the unified tool-loop knobs. The agent
 	// streaming loop in integrations/agent/streaming.go reads the same
 	// two env vars so there's exactly one place to tune walkthrough
@@ -93,6 +107,10 @@ type engineConfig struct {
 type aiCacheConfig struct {
 	DefaultEnabled bool
 	MaxTTLSeconds  int
+	// MaxEntries bounds the live entry count. <=0 means unbounded, which
+	// is what shipped before memql#4124 and is retained only as an
+	// explicit operator override.
+	MaxEntries int
 }
 
 func loadEngineConfigFromEnv() engineConfig {
@@ -182,6 +200,7 @@ func loadAICacheConfigFromEnv() aiCacheConfig {
 	cfg := aiCacheConfig{
 		DefaultEnabled: defaultAICacheEnabled,
 		MaxTTLSeconds:  defaultAICacheMaxSeconds,
+		MaxEntries:     defaultAICacheMaxEntries,
 	}
 
 	if value, ok := os.LookupEnv(envAICacheDefaultEnable); ok {
@@ -196,6 +215,16 @@ func loadAICacheConfigFromEnv() aiCacheConfig {
 	if value, ok := os.LookupEnv(envAICacheMaxSeconds); ok {
 		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
 			cfg.MaxTTLSeconds = parsed
+		}
+	}
+
+	// A negative or zero value here is an explicit "unbounded" -- the
+	// pre-memql#4124 behaviour, kept reachable so an operator who has
+	// measured their workload can turn the cap off deliberately rather
+	// than having to patch a constant.
+	if value, ok := os.LookupEnv(envAICacheMaxEntries); ok {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			cfg.MaxEntries = parsed
 		}
 	}
 

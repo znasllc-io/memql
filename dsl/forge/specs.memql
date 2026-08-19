@@ -9,19 +9,28 @@
 // on them. Submission and "my own requests" stay open to every
 // authenticated team member.
 //
-// Cluster roles are owner/admin/writer/reader (there is no literal
-// "developer" role), so the forge personas map on:
-//   owner   -> approver / fast-track
-//   admin   -> senior developer (validate + approve)
-//   writer  -> junior developer (validate)
-//   reader  -> non-developer employee (submit-only, mentored)
+// Cluster roles are owner/admin/developer/writer/reader
+// (dsl/identity/concepts.memql) -- there IS a literal "developer" role, and
+// this comment used to deny it while the spec below silently excluded it
+// (memql#4112). The forge personas map on:
+//   owner     -> approver / fast-track
+//   admin     -> senior developer (validate + approve)
+//   developer -> senior developer (engineering power; validate)
+//   writer    -> junior developer (validate)
+//   reader    -> non-developer employee (submit-only, mentored)
+//
+// Keep forgeDeveloper in step with dsl/forge/tools.memql's @allowedRoles and
+// with forgeRequestRoleAllowed (component/memql/forge_request_validation.go).
+// When they disagree, the caller does NOT get an error: the MCP tool gate
+// admits the call and the query's forgeDeveloper conjunct filters every row,
+// so a legitimately-permissioned role reads it as "the queue is empty".
 
 use common.shapes.{ actorEnvelope }
 
-/// Caller is a forge developer (owner/admin/writer) -- may see the validation queue and validate
-/// requests.
+/// Caller is a forge developer (owner/admin/developer/writer) -- may see the validation queue and
+/// validate requests.
 spec actorEnvelope forgeDeveloper {
-  return role == "owner" || role == "admin" || role == "writer"
+  return role == "owner" || role == "admin" || role == "developer" || role == "writer"
 }
 
 /// Caller is a forge approver (owner) -- holds final approval + fast-track authority.

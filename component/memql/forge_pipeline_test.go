@@ -208,14 +208,19 @@ func TestForgeOwnerFastTrack(t *testing.T) {
 //
 //   - approver tier (forgeApprover) == owner only: only the owner may
 //     reach the terminal approve/queue statuses.
-//   - developer tier (forgeDeveloper) == owner/admin/writer: developers
-//     may reach needs_approval (the validation act); a reader may not.
+//   - developer tier (forgeDeveloper) == owner/admin/developer/writer:
+//     developers may reach needs_approval (the validation act); a reader may
+//     not. `developer` is a literal cluster role (dsl/identity/concepts.memql)
+//     and was missing from BOTH this authority and the spec until memql#4112 --
+//     a gap that presented as an empty queue, not as a refusal, because the MCP
+//     tool gate admitted the call and the row filter then matched nothing.
 func TestForgeQueueGatingTiers(t *testing.T) {
 	developerTier := map[string]bool{
-		string(auth.RoleOwner):  true,
-		string(auth.RoleAdmin):  true,
-		string(auth.RoleWriter): true,
-		string(auth.RoleReader): false,
+		string(auth.RoleOwner):     true,
+		string(auth.RoleAdmin):     true,
+		string(auth.RoleDeveloper): true,
+		string(auth.RoleWriter):    true,
+		string(auth.RoleReader):    false,
 	}
 	for role, isDev := range developerTier {
 		// needs_approval is the developer-gated validation act.
@@ -224,11 +229,14 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 		}
 	}
 
+	// Approval stays owner-only by design (forge.md): `developer` is engineering
+	// power, not release authority, so it is deliberately absent here.
 	approverTier := map[string]bool{
-		string(auth.RoleOwner):  true,
-		string(auth.RoleAdmin):  false,
-		string(auth.RoleWriter): false,
-		string(auth.RoleReader): false,
+		string(auth.RoleOwner):     true,
+		string(auth.RoleAdmin):     false,
+		string(auth.RoleDeveloper): false,
+		string(auth.RoleWriter):    false,
+		string(auth.RoleReader):    false,
 	}
 	for role, isApprover := range approverTier {
 		if got := forgeRequestRoleAllowed(forgeStatusApproved, role); got != isApprover {
@@ -250,7 +258,7 @@ func TestForgeQueueGatingTiers(t *testing.T) {
 	ss := string(specs)
 	for _, must := range []string{
 		"forgeDeveloper", "forgeApprover",
-		`role == "owner"`, `role == "admin"`, `role == "writer"`,
+		`role == "owner"`, `role == "admin"`, `role == "developer"`, `role == "writer"`,
 	} {
 		if !strings.Contains(ss, must) {
 			t.Errorf("specs.memql missing expected fragment %q", must)

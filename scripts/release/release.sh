@@ -36,6 +36,21 @@
 # --allow-overwrite is given, which is what makes the tag a
 # trustworthy engine-version pin for a release.
 #
+# PUSHING IS BREAK-GLASS (memql#4116). CLAUDE.md's "Image builds" section
+# is a HARD RULE: local Docker for dev, the GitHub build server for
+# anything deployed to a cloud cluster. This script used to implement the
+# forbidden path with nothing marking it as such -- `--push --acr=acrmemql`
+# ran a real `docker push` to the shared registry, and neither the help
+# text nor VERSIONING.md said that was the path the rule forbids. So the
+# rule lived only in prose while the tool contradicted it silently.
+#
+# --push now requires --confirm=push-from-an-operator-machine, per the
+# capability-script contract's convention that a destructive or
+# policy-breaking action is an explicit phrase rather than a blocking
+# prompt (docs/internal/design/capability-script-contract.md). Building
+# locally is untouched: the default, and the normal use of this script,
+# is still a local-only image.
+#
 # Per the repo + global Skills+Scripts convention (CLAUDE.md): pure
 # function-based structure -- one function per responsibility, with
 # main() at the bottom calling them in order. Supports --help and a
@@ -53,6 +68,9 @@ set -uo pipefail
 # (memql:X.Y.Z with no registry prefix), which is the default so the
 # target works before a subscription exists.
 readonly DEFAULT_ACR_NAME="acrmemql"
+# The exact phrase --push requires. Deliberately says what the operator is
+# actually asserting, so it cannot be typed absent-mindedly (memql#4116).
+readonly PUSH_CONFIRM_PHRASE="push-from-an-operator-machine"
 readonly IMAGE_NAME="memql"
 readonly DOCKERFILE="docker/memql.Dockerfile"
 
@@ -77,23 +95,38 @@ Options:
     --acr=NAME          Shorthand: derive --registry from an ACR name
                         (NAME.azurecr.io). Default ACR: $DEFAULT_ACR_NAME
                         (only used if --registry/--acr is given).
-    --push              Push the built tag to the registry. Requires
-                        a registry. Refused if the tag already exists
-                        unless --allow-overwrite.
+    --push              BREAK-GLASS. Push the built tag to the registry.
+                        Requires a registry AND
+                        --confirm=push-from-an-operator-machine.
+                        Deployable images are built by the GitHub build
+                        server (OIDC -> ACR), not here -- see below.
+    --confirm=PHRASE    The confirmation --push requires. The only
+                        accepted phrase is
+                        push-from-an-operator-machine.
     --allow-overwrite   Permit pushing over an existing X.Y.Z tag.
                         Off by default: release tags are immutable.
     --dry-run           Print the full plan; build/push nothing.
     --help              Show this help.
 
+Push is break-glass, not the release path:
+    Deployable images are built by the GitHub build server
+    (.github/workflows/build-engine-images.yml, workflow_dispatch on main,
+    OIDC -> ACR). That is what makes an image reproducible, natively
+    linux/amd64, and provenanced. A push from an operator machine bypasses
+    all three and is indistinguishable from one that did not -- which is
+    why it needs the phrase rather than a flag.
+
 Examples:
-    # Local immutable image from the VERSION file's semver prefix:
+    # Local immutable image from the VERSION file's semver prefix
+    # (the normal use: inspect what a release WOULD contain):
     scripts/release/release.sh
 
-    # Explicit version, build + push to the shared ACR:
-    scripts/release/release.sh --version=2.4.0 --acr=$DEFAULT_ACR_NAME --push
-
-    # Plan only:
+    # Plan a push without doing it:
     scripts/release/release.sh --version=2.4.0 --acr=$DEFAULT_ACR_NAME --push --dry-run
+
+    # Break-glass push, when the build server cannot be used:
+    scripts/release/release.sh --version=2.4.0 --acr=$DEFAULT_ACR_NAME \
+        --push --confirm=push-from-an-operator-machine
 EOF
 }
 
@@ -102,6 +135,7 @@ function parse_arguments() {
     REGISTRY=""
     ACR_NAME=""
     PUSH=false
+    CONFIRM=""
     ALLOW_OVERWRITE=false
     DRY_RUN=false
 
@@ -111,6 +145,7 @@ function parse_arguments() {
             --registry=*)        REGISTRY="${1#*=}" ;;
             --acr=*)             ACR_NAME="${1#*=}" ;;
             --push)              PUSH=true ;;
+            --confirm=*)         CONFIRM="${1#*=}" ;;
             --allow-overwrite)   ALLOW_OVERWRITE=true ;;
             --dry-run)           DRY_RUN=true ;;
             --help)              show_help; exit 0 ;;
@@ -178,9 +213,38 @@ function resolve_registry() {
 }
 
 function validate_push() {
-    if [[ "$PUSH" == true && -z "$REGISTRY" ]]; then
+    if [[ "$PUSH" != true ]]; then
+        return 0
+    fi
+
+    if [[ -z "$REGISTRY" ]]; then
         echo "ERROR: --push requires a registry (--registry=HOST or --acr=NAME)" >&2
         exit 1
+    fi
+
+    # The gate is checked even under --dry-run: a plan that prints a push
+    # this script would refuse is a plan for something that cannot happen,
+    # and the point of --dry-run is to show what WOULD run.
+    if [[ "$CONFIRM" != "$PUSH_CONFIRM_PHRASE" ]]; then
+        cat >&2 <<ERR
+ERROR: --push is a break-glass path and needs an explicit confirmation.
+
+  Deployable images are built by the GitHub build server, not on an
+  operator machine (CLAUDE.md, "Image builds: LOCAL Docker for dev,
+  BUILD SERVER for deploys"):
+
+      .github/workflows/build-engine-images.yml
+      workflow_dispatch on main, OIDC -> ACR ${DEFAULT_ACR_NAME}
+
+  A locally-pushed image is not reproducible, carries no provenance, and
+  is indistinguishable in the registry from one that does. If the build
+  server genuinely cannot be used, say so deliberately:
+
+      --confirm=${PUSH_CONFIRM_PHRASE}
+
+  To build without pushing (the normal use), drop --push.
+ERR
+        exit 3
     fi
 }
 
