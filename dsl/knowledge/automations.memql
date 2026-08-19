@@ -1,8 +1,24 @@
 // automations.memql
 //
-// Knowledge-domain lifecycle automations. Currently houses the daily
-// refresh-cadence cron from Q9 of the planner-redesign work; future
-// automations (auto-archive of zero-citation domains, supersession
-// rollup) land here too.
-
-
+// Knowledge-domain lifecycle automations. EMPTY on purpose, and the
+// emptiness is the finished state of a migration rather than a gap.
+//
+// This file used to hold the refresh-cadence cron from Q9 of the
+// planner-redesign work: a nightly 02:30 automation firing
+// logicRefreshDueKnowledgeDomains, which returned a candidate COUNT and
+// did nothing else. memql#644 replaced it with an in-process Go poller,
+// integrations/planner/refresh_cron.go, and removed the automation --
+// this header kept claiming to house it (memql#4115).
+//
+// Why Go and not DSL: the elapsed-time check is arithmetic on datetime
+// fields, which the MemQL grammar has no form for, and an in-process
+// poller cannot depend on the engine's automation scheduler reaching the
+// planner node-type binary. The poller runs hourly rather than nightly
+// for that reason, with a per-domain "spawned recently" guard so a due
+// domain gets exactly one refresh Plan. refresh_cron.go's own header
+// carries the full contract.
+//
+// The other lifecycle duties the earlier header promised -- auto-archive
+// of zero-citation domains, supersession rollup -- are unbuilt. They land
+// here if they land as automations at all; the split above is the thing to
+// weigh first, since anything needing date arithmetic belongs in Go.

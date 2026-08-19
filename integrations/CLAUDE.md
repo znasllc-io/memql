@@ -107,27 +107,48 @@ External Service <-- [protocol response]
 ```
 integrations/
 ├── CLAUDE.md          # This file
-├── arch.md           # Architecture documentation
-├── agent/            # AI tool-loop + chat replier + AiSuggest dispatcher (agent build only)
-├── audio/            # PCM16 resampling for the Polyphon pipeline
-├── avatarvendor/     # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
-├── auth/             # resolveUser, checkPermission
-├── cognition/        # Routing+conductor, Polyphon scoring, client-tool relay
-├── database/         # healthCheck, stats
-├── email/            # Microsoft Graph / SMTP / Log senders -- sendEmail
-├── embedding/        # Vendor-neutral text-embedding capability
-├── fileprocessor/    # extractText (PDF / DOCX / images via VisionAIProvider)
-├── gcs/              # storage.upload
-├── identity/         # Identity-side helpers
-├── knowledge/        # Corpus seed + lookup helpers (concept:* surfaces for agents)
-├── avatardirect/     # Direct/Guide avatar: mint LiveKit room + bring Anam up (avatarDirectStartSession)
-├── openai/           # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech)
-├── router/           # AI router ledger
-├── similarity/       # pgvector similarTo() builtin
-└── stt/              # Speech-to-text (batch transcribe capability + streaming session)
+├── arch.md            # Architecture documentation
+├── integration.go     # Base Integration struct + the IntegrationProvider contract
+├── integrations.json  # Integration inventory metadata
+├── actionsearch/      # searchActions -- pgvector cosine search over the action library's intent embeddings
+├── agent/             # AI tool-loop + chat replier + AiSuggest dispatcher (agent build only)
+├── agentdef/          # One modality-independent projection of an agent's generation definition (text + voice read the same fields)
+├── agents/            # Specialist dispatch -- askSpecialist, invoke, produceArtifact, requestUserFeedback
+├── auth/              # resolveUser, checkPermission
+├── avatardirect/      # Direct/Guide avatar -- startSession, stopSession, engageVendor
+├── avatarvendor/      # CGO-free Anam/Simli avatar-vendor REST + dispatch core (shared by voice-agent + direct/Guide avatar)
+├── azureblob/         # storage.upload (Azure Blob) -- registers as plug-in "storage"
+├── chat/              # recentChat -- the row-gated recent-utterance repack
+├── cognition/         # Routing+conductor, Polyphon scoring, client-tool relay -- scoreUtterance, trackPresence
+├── dailyspace/        # Per-user daily-space lifecycle -- ensureForCaller, ensureForUser, rolloverAllUsers
+├── database/          # healthCheck, stats
+├── deployversion/     # suggestNextVersion -- read-only version arithmetic the DSL grammar cannot express
+├── email/             # Microsoft Graph / SMTP / Log senders -- sendEmail, status
+├── embedding/         # Vendor-neutral text embedding -- embed, store, findSimilar (pgvector)
+├── fileprocessor/     # extractText (PDF / DOCX / images via VisionAIProvider)
+├── harnessrecall/     # recall -- the harness memory-recall operator
+├── harnesstrace/      # trace -- harness trace writes
+├── identity/          # Delegation lifecycle -- createDelegation, resolveDelegation, revokeDelegation, validateScope
+├── knowledge/         # Corpus seed + augment-domain pipeline -- ingest, seedStandardDomains, augmentDomainAnalyze/Generate, ensureKnowledgeBridge
+├── library/           # Library document version history: the user / assistant / restore appends (memql#1228-1231)
+├── liveknowledge/     # query -- Live Knowledge dispatch to a registered connector
+├── openai/            # Polyphon ASR/TTS via OpenAI (Realtime transcription + /v1/audio/speech) -- synthesize
+├── openairealtime/    # Mints OpenAI Realtime ephemeral client secrets for the direct browser<->OpenAI WebRTC path
+├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)
+├── rbac/              # Relational governance rank arithmetic -- canCreatePrincipal, governPrincipal
+├── router/            # BYOK credential + budget admin -- setApiKey, listModels, listPolicies
+├── similarity/        # pgvector similarTo() builtin
+├── stt/               # Speech-to-text -- transcribe (batch capability + streaming session)
+├── telephony/         # PSTN edge -- number provisioning, call control, E911, consent, DTMF
+├── timeutil/          # Stateless time helpers; always-on core plug-in, every node type
+├── voice/             # Canonical voice catalog builtins -- pickForGender, resolve
+└── workbench/         # Per-Plan sandboxed workspace -- dispatchHost, teardownDirectory
 
-# NemoClaw is invoked via webhook tools (claw coding-agent tool surface,
-# defined alongside the agent tool definitions), not a Go integration here.
+# The coding agent is a SEAM, not an integration here: component/planner's
+# RegisterContainerExecutor takes a backend (the reserved name is
+# "nemoclaw"), and nothing in this repo registers one. The claw tool
+# definitions the prompt templates name are not in this repo's dsl/ tree
+# either -- see the root CLAUDE.md Coding Agent section (memql#4120).
 #
 # training/ (the per-agent "Train" pipeline: identity embedding + distilled
 # system prompt + just-in-time knowledge seeding) is a product
@@ -147,8 +168,12 @@ integrations/
 ### cognition/ -- routing + conductor + relay
 
 Owns the cognition pipeline on the cognition node. Capabilities
-registered: `cognitionScore`, `cognitionTrackPresence`,
-`cognitionForwardToBridgeAgent`.
+registered: `cognitionScore` and `cognitionTrackPresence` -- the DSL
+builtin names in `dsl/common/builtins.memql`, backed by
+`integration.cognition.scoreUtterance` and
+`integration.cognition.trackPresence` (`capabilities.go`). Those two are
+the whole surface; the cross-node `ClientToolCall` round trip below rides
+the graph event bus, not a capability.
 
 **Single LLM brain on the text path** (shipped 2026-04-26 in
 4249c0b). The conductor (`conductor_consult.go` +
@@ -502,10 +527,12 @@ MEMQL_SI_CACHE_MAX_SECONDS=120
 ```
 
 ### Feature Flags
-```bash
-COGNITION_INTEGRATION_CAPABILITIES_LOGGING=true
-COGNITION_INTEGRATION_CAPABILITIES_LOGGING_LOG_LEVEL=debug
-```
+
+None. The `<COMPONENT>_CAPABILITIES_LOGGING_LOG_LEVEL` spelling belongs to
+`core/component`'s logger convention (see `core/component/component.go`),
+and an integration is an `IntegrationProvider`, not a
+`core/component.Component` -- so no integration reads one. An integration
+logs through the logger its plug-in factory is handed.
 
 ---
 
