@@ -12,9 +12,11 @@
 /// One row per safety-classifier decision. Captures what the Gate decided, the verdict source (rule
 /// / model / cache), the surface + action it was deciding about, and the (redacted) payload.
 /// Retention is governed by the MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS env var (default 90);
-/// the daily purge automation hard-deletes rows whose `createdAt + retentionDays < now`. Distinct
-/// from v1:platform:policyTrace -- policyTrace covers the decision-policy evaluation tree; this
-/// concept covers the safety-classifier verdict + final gate decision per command.
+/// the daily purge automation hard-deletes rows whose `createdAt + retentionDays < now`. This
+/// concept covers the safety-classifier verdict + final gate decision per command. (It used to be
+/// contrasted here with v1:platform:policyTrace, which covered the decision-policy evaluation
+/// tree; that whole subsystem was removed in memql#4114 -- the decision-policy tier it belonged
+/// to was retired in #984 and nothing ever wrote a row.)
 @displayCard(primary="action", secondary="surface", tertiary="reason", status="decision")
 concept classification {
   surface       string! @description("Execution surface: `computer_use_headless`/`_embodied`, `workbench`, `tool_webhook`, `tool_integration`.")
@@ -27,7 +29,7 @@ concept classification {
   ruleId        string @description("Stable rule identifier (`shell.destructive`, `model.classify_v1`, ...). Empty for noop/disabled sources.")
   confidence    float  @description("Classifier self-reported confidence [0, 1]. Rule verdicts are 1.0 by convention; model verdicts carry the model's own estimate.")
   reason        string @description("Short human-readable explanation -- which specific pattern fired. <= 200 chars.")
-  latencyMs     float  @description("Total classification latency in ms (chain time including rules + model + cache lookup). float (matches policyTrace.durationMs) since `number` isn't a DSL primitive.")
+  latencyMs     float  @description("Total classification latency in ms (chain time including rules + model + cache lookup). float rather than `number`, which isn't a DSL primitive.")
   agentId       string @description("Calling agent id.")
   ownerUserId   string @description("Owning user id.")
   planId        string @description("Plan id, when the action is plan-scoped.")

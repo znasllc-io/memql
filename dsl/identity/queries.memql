@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsRecoveryKey, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
+use common.traits.{ identityIsApiKey, identityIsBadge, identityIsMagicLink, identityIsNodeToken, identityIsPasskey, identityIsRecoveryKey, identityIsVoiceAgentToken, identityIsWorkerToken, isActiveRecord, isDeletionScheduled, statusIsPending }
 use common.specs.{ requiresOwnerOrAdmin }
 
 // account -- the operator's customer records
@@ -2286,6 +2286,41 @@ query identity nodeTokenIdentityById {
     identityId  string!
   }
   filter  identityIsNodeToken && row.id==args.identityId
+  shape   identityFull
+}
+
+// ---- queries/v1/identity/voiceAgentTokenIdentityById.memql ----
+
+// voiceAgentTokenIdentityById
+// ===========================
+//
+// Backs the voice-agent revocation check on the VERIFY path
+// (memql#4111). A class="voice_agent" JWT carries the identity row's
+// id as its `sub`, so the interceptor can ask "is that row still
+// active?" on every stream open.
+//
+// Returns the row even when active=false -- that IS the answer the
+// caller needs. A missing row reads as not-revoked, matching the
+// node-class convention in component/node/node_token_revocation.go:
+// an operator-CLI mint that pre-dates row persistence must not be
+// locked out by a lookup that finds nothing.
+
+/// Lookup a voice_agent_token identity by row id, for the verify-path revocation check
+/// (memql#4111). Returns the row regardless of `active`, because `active=false` is the answer
+/// the caller is asking for -- filtering it out would make a revoked credential indistinguishable
+/// from an unknown one, and those two states must produce OPPOSITE decisions.
+///
+/// Why actor.userId scoping is not the fix: same as its node_token sibling -- a voice_agent_token
+/// row's `userId` is the synthetic minting user rather than any reader, and the caller here is an
+/// auth interceptor running BEFORE any actor is resolved. There is no caller to scope to, which is
+/// what makes origin the only boundary available.
+@serverOnly
+@unbounded("voice-agent identity by row id -- bounded to a single row")
+query identity voiceAgentTokenIdentityById {
+  args {
+    identityId  string!
+  }
+  filter  identityIsVoiceAgentToken && row.id==args.identityId
   shape   identityFull
 }
 

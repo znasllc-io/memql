@@ -364,7 +364,7 @@ logic logicSweep {
 // `function "stepName.method" not found`).
 //
 // This is the path that lets revokeExpiredDelegations,
-// purgeExpired{ArchivedSpaces,PolicyTraces}, and the rest of the
+// purgeExpiredArchivedSpaces, and the rest of the
 // `return X.count()` family run end-to-end.
 func TestLogicRunner_TryEvaluateReturnLocally_PureStepMethod(t *testing.T) {
 	evaluator := NewEvaluator()

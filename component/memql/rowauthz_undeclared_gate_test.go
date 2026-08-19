@@ -541,26 +541,27 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 	"expiredActiveDelegations":           {"v1:identity:delegation", undeclaredGrandfatherReason},
 
 	// v1:identity:identity
-	"accountTokenById":           {"v1:identity:identity", undeclared3322AccountTokenReason},
-	"accountTokensForAccount":    {"v1:identity:identity", undeclared3322AccountTokenReason},
-	"badgeByKeyHash":             {"v1:identity:identity", undeclaredGrandfatherReason},
-	"badgesForSelf":              {"v1:identity:identity", undeclared3178SelfScopedReason},
-	"nodeTokenIdentities":        {"v1:identity:identity", undeclaredGrandfatherReason},
-	"nodeTokenIdentitiesAdmin":   {"v1:identity:identity", undeclared3324NodeTokenAdminReason},
-	"nodeTokenIdentityByBinding": {"v1:identity:identity", undeclaredGrandfatherReason},
-	"nodeTokenIdentityById":      {"v1:identity:identity", undeclaredGrandfatherReason},
-	"patIdentitiesForSelf":       {"v1:identity:identity", undeclared3178SelfScopedReason},
-	"patIdentitiesForUser":       {"v1:identity:identity", undeclaredGrandfatherReason},
-	"patIdentityById":            {"v1:identity:identity", undeclaredGrandfatherReason},
-	"passkeyByCredentialId":      {"v1:identity:identity", undeclared3406PasskeyReason},
-	"passkeysForSelf":            {"v1:identity:identity", undeclared3406PasskeyReason},
-	"recoveryKeyByHash":          {"v1:identity:identity", undeclared3964RecoveryKeyReason},
-	"activeRecoveryKeys":         {"v1:identity:identity", undeclared3964RecoveryKeyReason},
-	"signInIdentitiesForSelf":    {"v1:identity:identity", undeclared3409SignInRoutesReason},
-	"signInIdentitiesForUser":    {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
-	"patIdentityByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
-	"workerTokenByKeyHash":       {"v1:identity:identity", undeclaredGrandfatherReason},
-	"workerTokensForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"accountTokenById":            {"v1:identity:identity", undeclared3322AccountTokenReason},
+	"accountTokensForAccount":     {"v1:identity:identity", undeclared3322AccountTokenReason},
+	"badgeByKeyHash":              {"v1:identity:identity", undeclaredGrandfatherReason},
+	"badgesForSelf":               {"v1:identity:identity", undeclared3178SelfScopedReason},
+	"nodeTokenIdentities":         {"v1:identity:identity", undeclaredGrandfatherReason},
+	"nodeTokenIdentitiesAdmin":    {"v1:identity:identity", undeclared3324NodeTokenAdminReason},
+	"nodeTokenIdentityByBinding":  {"v1:identity:identity", undeclaredGrandfatherReason},
+	"nodeTokenIdentityById":       {"v1:identity:identity", undeclaredGrandfatherReason},
+	"voiceAgentTokenIdentityById": {"v1:identity:identity", "memql#4111: read by the voice-agent revocation gate on the auth path, before any actor exists. v1:identity:identity cannot carry an owner tier (see identity_credential_rowauthz_inventory_3349_test.go); classified machine-credential there."},
+	"patIdentitiesForSelf":        {"v1:identity:identity", undeclared3178SelfScopedReason},
+	"patIdentitiesForUser":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"patIdentityById":             {"v1:identity:identity", undeclaredGrandfatherReason},
+	"passkeyByCredentialId":       {"v1:identity:identity", undeclared3406PasskeyReason},
+	"passkeysForSelf":             {"v1:identity:identity", undeclared3406PasskeyReason},
+	"recoveryKeyByHash":           {"v1:identity:identity", undeclared3964RecoveryKeyReason},
+	"activeRecoveryKeys":          {"v1:identity:identity", undeclared3964RecoveryKeyReason},
+	"signInIdentitiesForSelf":     {"v1:identity:identity", undeclared3409SignInRoutesReason},
+	"signInIdentitiesForUser":     {"v1:identity:identity", undeclared3591ClaimedOwnerReason},
+	"patIdentityByKeyHash":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"workerTokenByKeyHash":        {"v1:identity:identity", undeclaredGrandfatherReason},
+	"workerTokensForUser":         {"v1:identity:identity", undeclaredGrandfatherReason},
 
 	// v1:identity:enrolmentToken
 	"enrolmentTokenByHash": {"v1:identity:enrolmentToken", undeclared3408EnrolmentReason},
@@ -648,10 +649,6 @@ var undeclaredRowAuthzConstructs = map[string]struct {
 
 	// v1:platform:outboundRequest
 	"outboundRequestsByStatus": {"v1:platform:outboundRequest", undeclaredGrandfatherReason},
-
-	// v1:platform:policyTrace
-	"allPolicyTraces":       {"v1:platform:policyTrace", undeclaredGrandfatherReason},
-	"policyTracesForPolicy": {"v1:platform:policyTrace", undeclaredGrandfatherReason},
 
 	// v1:rbac:capability
 	"activeCapabilities":          {"v1:rbac:capability", undeclaredGrandfatherReason},

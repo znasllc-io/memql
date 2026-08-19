@@ -216,6 +216,19 @@ func TestServerOnlyParsedSetMatchesTheTree(t *testing.T) {
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentityByBinding"}: true,
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentities"}:        true,
 		{Path: "identity/queries.memql", Name: "nodeTokenIdentityById"}:      true,
+		// memql#4111, same argument as the node-token trio above and for the
+		// same structural reason: this is read by an AUTH INTERCEPTOR, before
+		// any actor exists. The caller is the voice-agent revocation gate
+		// (component/grpc/voice_agent_revocation.go, via
+		// component/identity/store.go's LookupVoiceAgentTokenIdentityById),
+		// deciding whether a class="voice_agent" credential's identity row has
+		// been soft-deleted. Caller-scoping is not merely inconvenient here --
+		// there is provably no caller to scope to, since the question being
+		// asked IS "may this bearer become a caller at all". `userId` on a
+		// voice_agent_token row is the synthetic minting user, so
+		// userId==actor.userId would match zero rows for every real request and
+		// fail the credential open.
+		{Path: "identity/queries.memql", Name: "voiceAgentTokenIdentityById"}: true,
 		// memql#3063. The item memql#2987 deferred and then closed: same shape
 		// as the trio above -- caller-supplied id, no actor check, identityFull
 		// projecting `credentials` (keyHash, registeredBy, lastSeenAt,

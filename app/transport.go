@@ -17,6 +17,36 @@ import (
 
 // transportBase creates the gRPC server, WebSocket bridge, and gateway middleware.
 // Called by all tag-specific transport methods before wiring their endpoints.
+// voiceAgentTokenRevocationResolver bridges component/grpc's narrow
+// VoiceAgentRevocationResolver port to the identity store, mirroring
+// nodeTokenRevocationResolver in app/cluster.go.
+//
+// identityId is the verified class="voice_agent" JWT's subject, which for
+// this class IS the v1:identity:identity row id.
+//
+// Returns true only when the row EXISTS and is inactive. A missing row is
+// not-revoked: the operator-CLI mint path does not persist a row, and
+// locking those out would break minting rather than close the leak this
+// gate exists for. A lookup error propagates so the interceptor fails
+// closed instead of admitting on a half-answered check.
+type voiceAgentTokenRevocationResolver struct {
+	Store *identity.Store
+}
+
+func (r *voiceAgentTokenRevocationResolver) IsVoiceAgentTokenRevoked(ctx context.Context, identityId string) (bool, error) {
+	if r == nil || r.Store == nil {
+		return false, nil
+	}
+	row, err := r.Store.LookupVoiceAgentTokenIdentityById(ctx, identityId)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return false, nil
+	}
+	return !row.Active, nil
+}
+
 func (a *App) transportBase() {
 	// Safety gate (memql#230 + #234). Configures the process-wide
 	// safety.DefaultGate BEFORE any handler is registered, so every
@@ -126,7 +156,24 @@ func (a *App) transportBase() {
 		// Voice-agent: class="voice_agent" identity-issued JWT pinned
 		// to VoiceAgent* payload types (#109). See
 		// docs/public/operate/auth/voice-agent-jwt.md.
-		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, a.identityVerifier, a.Logger)
+		//
+		// The revocation check (memql#4111) is what makes soft-deleting
+		// the credential's identity row actually kill it. Without it the
+		// verify path is JWKS-only, so `active=false` recorded the
+		// operator's intent and changed nothing for the token's full
+		// 90-day TTL -- the only working mitigation was rotating the
+		// signing key, which invalidates every JWT of every class. Nil
+		// engine (tests, dev builds with no store) leaves the check off,
+		// which is the pre-#4111 behaviour.
+		var voiceAgentRevocation *memqlgrpc.VoiceAgentRevocationCheck
+		if a.engine != nil {
+			voiceAgentRevocation = &memqlgrpc.VoiceAgentRevocationCheck{
+				Resolver: &voiceAgentTokenRevocationResolver{
+					Store: &identity.Store{Engine: a.engine, Logger: a.Logger},
+				},
+			}
+		}
+		voiceAgentChecked := memqlgrpc.NewVoiceAgentStreamInterceptor(operatorChecked, a.identityVerifier, voiceAgentRevocation, a.Logger)
 		// Service-account: class="service_account" identity-issued JWT pinned
 		// to the read/query surface (#691, deployment-v2 Phase 3). Verified via
 		// the same JWKS verifier (no DB lookup), so it works on the BFF/mesh

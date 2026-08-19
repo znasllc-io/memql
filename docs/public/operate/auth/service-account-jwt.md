@@ -239,6 +239,18 @@ run. The token never lives in git and never leaves the cluster.
 - There is **no per-token revoke list** (no DB row by design). If you need
   individual revoke semantics, prefer a PAT on the identity surface instead.
 
+> **Why this class did NOT get the row-state kill switch memql#4111 added
+> to `voice_agent`.** That gate works by reading the credential's
+> `v1:identity:identity` row, and a service-account subject is explicitly
+> not required to name one — the verify path is JWKS-only by design. There
+> is no row whose state could be read, so the same gate would fail open on
+> every call. What stands in for it is the TTL: **1 hour**
+> (`DefaultServiceAccountTokenTTLSeconds`) against the voice-agent class's
+> **90 days**. That three-order-of-magnitude difference is the whole reason
+> one class needed a kill switch and this one does not — a leaked
+> service-account token is dead by lunchtime; a leaked voice-agent token was
+> live for a quarter.
+
 ## Class comparison
 
 | | `user` | `node` (#105) | `voice_agent` (#109) | `service_account` (#691) | PAT |
@@ -248,7 +260,7 @@ run. The token never lives in git and never leaves the cluster.
 | Surface | full app | NodeService only | VoiceAgent* msgs | read/query + 1 agent turn | identity APIs |
 | Persisted row | session | identity row | identity row | **none** | identity row |
 | Default TTL | 15 min | 30 d | 90 d | **1 h** | long-lived |
-| Revoke | session revoke | row + key | row + key | **expiry / key** | row |
+| Revoke | session revoke | row + key (#349) | row + key (#4111) | **expiry / key** | row |
 | Use | humans | mesh nodes | voice-agent proc | **automation / deploy gate** | human CLI |
 
 ## Code map

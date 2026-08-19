@@ -525,27 +525,7 @@ func PurgeExpiredOutputScreeningsBuild(args PurgeExpiredOutputScreeningsArgs) st
 	return b.String()
 }
 
-// PurgeExpiredPolicyTraces -- Daily 02:30 UTC sweep over v1:platform:policyTrace rows older than MEMQL_POLICYTRACE_RETENTION_DAYS (default 90). Currently observation-only: emits a 'platform.policyTrace.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation.
-type PurgeExpiredPolicyTracesArgs struct {
-	Event map[string]any
-}
-
-// PurgeExpiredPolicyTraces calls the engine logic purgeExpiredPolicyTraces.
-func (qc *QueryClient) PurgeExpiredPolicyTraces(ctx context.Context, args PurgeExpiredPolicyTracesArgs) (*Result, error) {
-	call := PurgeExpiredPolicyTracesBuild(args)
-	return qc.executeNamed(ctx, "purgeExpiredPolicyTraces", call)
-}
-
-func PurgeExpiredPolicyTracesBuild(args PurgeExpiredPolicyTracesArgs) string {
-	var b strings.Builder
-	b.WriteString("logic purgeExpiredPolicyTraces(")
-	b.WriteString("event: ")
-	b.WriteString(renderMemQLValue(args.Event))
-	b.WriteString(")")
-	return b.String()
-}
-
-// PurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- mirrors the same gap purgeExpiredPolicyTraces + auditEventRetentionSweep document.
+// PurgeExpiredSafetyClassifications -- Daily sweep over v1:safety:classification rows past MEMQL_SAFETY_CLASSIFICATION_RETENTION_DAYS (default 90). Currently observation-only: emits a 'safety.classification.retention.observed' event with the candidate count. Per-row delete lands when the engine grows a delete() mutation -- the same gap auditEventRetentionSweep documents.
 type PurgeExpiredSafetyClassificationsArgs struct {
 	Event map[string]any
 }

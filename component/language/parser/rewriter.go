@@ -782,6 +782,122 @@ func unboundedReason(preamble string) (string, bool, error) {
 	return "", false, nil
 }
 
+// joinStructQueryContinuations folds a struct-query body's physical lines
+// into logical ones, so a field value may span lines.
+//
+// The scan below is line-based: it reads the first token of each line as a
+// field keyword. That made a multi-line boolean impossible -- this
+//
+//	filter  when(args.ownerId) { ownerId==args.ownerId } &&
+//	        when(args.status) { status==args.status }
+//
+// failed with `unknown struct-query field on line "when(args.status) { ...`
+// while the byte-identical expression on ONE line loaded fine (memql#4123).
+// The failure named a "field", so it read as a typo in the author's field
+// name rather than as "multi-line values are not supported", which is the
+// part that cost time.
+//
+// A line continues its predecessor when any of three things is true:
+//
+//   - the accumulated value has an unclosed `(` or `{` -- a `when(...) {`
+//     guard or a parenthesised group split across lines;
+//   - the accumulated value ends on a dangling binary operator or opener,
+//     so it cannot be a complete expression (`... &&`);
+//   - the next line OPENS with a binary operator (`&& when(...) { ... }`),
+//     which is the other conventional way to break a long boolean.
+//
+// Anything else starts a new field. A field keyword can therefore never be
+// swallowed: `shape spaceFull` neither leaves a delimiter open nor ends on
+// an operator, so the `sort` line after it starts fresh.
+func joinStructQueryContinuations(raw []string) []string {
+	var out []string
+	var acc string
+
+	flush := func() {
+		if acc != "" {
+			out = append(out, acc)
+			acc = ""
+		}
+	}
+
+	for _, r := range raw {
+		line := strings.TrimSpace(r)
+		if line == "" {
+			continue
+		}
+		if acc != "" && (unclosedDelimiters(acc) || endsOnDanglingOperator(acc) || opensWithBinaryOperator(line)) {
+			acc += " " + line
+			continue
+		}
+		flush()
+		acc = line
+	}
+	flush()
+	return out
+}
+
+// structQueryTrailingOperators are the tokens that cannot END a complete
+// expression, longest first so `<=` is tested before `<`.
+var structQueryTrailingOperators = []string{
+	"??", "&&", "||", "==", "!=", "<=", ">=",
+	"+", "-", "*", "/", "%", ",", "(", "{", "<", ">", "=", ".", ":",
+}
+
+// structQueryLeadingOperators are the tokens a continuation line may OPEN
+// with. `-` is excluded deliberately: it is a legal identifier character in
+// this language, so a line starting `-foo` is not reliably an operator.
+var structQueryLeadingOperators = []string{"??", "&&", "||", "==", "!=", "<=", ">=", ")", "}", ",", ".", "+", "*", "/"}
+
+func endsOnDanglingOperator(s string) bool {
+	s = strings.TrimSpace(s)
+	for _, op := range structQueryTrailingOperators {
+		if strings.HasSuffix(s, op) {
+			return true
+		}
+	}
+	return false
+}
+
+func opensWithBinaryOperator(s string) bool {
+	s = strings.TrimSpace(s)
+	for _, op := range structQueryLeadingOperators {
+		if strings.HasPrefix(s, op) {
+			return true
+		}
+	}
+	return false
+}
+
+// unclosedDelimiters reports whether s leaves a `(` or `{` open, ignoring
+// anything inside a string literal so a `{` in `@pattern("^a{2}$")` does not
+// read as an opener.
+func unclosedDelimiters(s string) bool {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if quote != 0 {
+			if c == '\\' {
+				i++
+				continue
+			}
+			if c == quote {
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '(', '{':
+			depth++
+		case ')', '}':
+			depth--
+		}
+	}
+	return depth > 0
+}
+
 func parseStructQueryBody(body string) (*structQueryBody, error) {
 	out := &structQueryBody{}
 
@@ -822,11 +938,7 @@ func parseStructQueryBody(body string) (*structQueryBody, error) {
 	// `//` inside a string literal survives untouched, while a trailing comment
 	// on a real field (`filter id==args.id // note`) becomes trailing
 	// whitespace that TrimSpace removes -- which is what the author meant.
-	for _, raw := range strings.Split(restScan, "\n") {
-		line := strings.TrimSpace(raw)
-		if line == "" {
-			continue
-		}
+	for _, line := range joinStructQueryContinuations(strings.Split(restScan, "\n")) {
 		switch {
 		case strings.HasPrefix(line, "concept"):
 			return nil, fmt.Errorf("inline `concept` line is no longer supported; declare the concept via a file-top `use <ns>.<concept>` directive instead")

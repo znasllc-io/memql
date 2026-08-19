@@ -192,21 +192,45 @@ Rotate by minting fresh + restarting:
 2. Update `VOICE_AGENT_TOKEN` in the process's secret store.
 3. Restart the voice-agent process.
 
-**"Compromised token, kill it NOW" has no targeted answer today.**
-Soft-deleting the identity row (`active=false`) records that the
-credential should be dead, but nothing on the verify path reads that
-row: `voice_agent`-class JWTs verify the same JWKS-only, no-DB way
-every service-account-class JWT does (see
-[service-account-jwt.md](service-account-jwt.md)), and
-`component/grpc/voice_agent_stream_interceptor.go` carries no
-revocation check. That is unlike the `node` class, which gained a
-row-backed revocation gate in memql#349 (see
-[node-jwt.md](node-jwt.md#rotation)) -- `voice_agent` has no
-equivalent. Until it does, the only working mitigation for a leaked
-voice-agent token is a full identity signing-key rotation, which
-invalidates every outstanding JWT of every class at once. This gap is
-tracked separately as a security issue; do not treat the soft-delete
-as a mitigation in the meantime.
+### Killing a compromised token
+
+**Soft-delete the credential's identity row.** Set `active=false` on the
+`v1:identity:identity[voice_agent_token]` row whose id is the token's
+`sub`. Every voice-agent stream open re-checks that row, so the
+credential stops being admitted within the revocation cache TTL --
+**5 seconds** (`DefaultVoiceAgentRevocationCacheTTL`), not the token's
+90-day expiry.
+
+Mechanics, for anyone auditing this:
+
+- The gate is `component/grpc/voice_agent_revocation.go`, wired in
+  `app/transport.go`. It runs AFTER the JWT verifies and the class is
+  confirmed, and BEFORE the actor is stamped -- so a revoked credential
+  never becomes an actor.
+- It **fails closed.** A lookup error rejects the open with
+  `Unauthenticated` rather than admitting on a half-answered check.
+- A credential whose row does not exist is **not** treated as revoked.
+  The operator-CLI mint path persists no row, so locking those out would
+  break minting rather than close a leak. This matches the `node` class
+  (memql#349).
+- It reads row state, not a claim. `verifier.EpochCheck` (memql#106) is
+  the user-class mechanism and does not apply here: it keys on
+  `v1:identity:user.revocationEpoch`, and a voice-agent credential is a
+  machine identity with no user row to bump.
+
+> **This did not work before memql#4111.** The verify path was
+> JWKS-only, this class creates no `v1:identity:authSession` row, so the
+> session-revocation middleware never saw it, and no epoch check was
+> wired. Soft-deleting the row recorded the operator's intent and
+> changed nothing: the token stayed valid for its full 90-day TTL, and
+> the only real mitigation was rotating the identity signing key --
+> which invalidates every JWT of every class at once. If you are reading
+> a copy of this page that promises a
+> `IDENTITY_VERIFIER_REVOCATION_CHECK_SECONDS` window, that variable has
+> never existed in this repo.
+
+Signing-key rotation remains the answer when the SIGNING KEY itself is
+compromised, rather than one credential.
 
 ## Out of scope
 
@@ -217,10 +241,9 @@ as a mitigation in the meantime.
 - **Multi-tenant voice-agent topology.** The interceptor admits one
   class per call; multi-tenant routing (which tenant owns this
   voice-agent process?) would need extra claims.
-- **Any per-instance revocation at all.** See "Rotation," above --
-  the identity row's `active` flag is soft-deleted on compromise but
-  nothing on the verify path reads it for this class, so there is
-  currently no way to kill one compromised voice-agent instance
-  without rotating the signing key for every class. A dedicated
-  revocation check (mirroring memql#349's `node`-class gate) would
-  close this.
+- **Revoking a `service_account`-class token the same way.** That class
+  is deliberately different and is not a gap to close here: its subject
+  is not required to name a persisted row, so there is no row state to
+  read. Its answer is the TTL -- 1 hour by default
+  (`DefaultServiceAccountTokenTTLSeconds`) against this class's 90 days.
+  See [service-account-jwt.md](service-account-jwt.md).

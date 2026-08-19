@@ -1,7 +1,7 @@
 // queries.memql -- safety namespace.
 
-/// Returns every v1:safety:classification row. Used by the retention sweep (mirrors
-/// allPolicyTraces); future cockpit Command Safety view will layer more targeted queries on top.
+/// Returns every v1:safety:classification row. Used by the retention sweep; a future cockpit
+/// Command Safety view will layer more targeted queries on top.
 @unbounded("safety classification catalog -- a bounded config set consumed whole")
 query classification allSafetyClassifications {
   filter  surface!=""

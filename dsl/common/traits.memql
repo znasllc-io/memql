@@ -324,6 +324,19 @@ trait identityIsNodeToken {
   return identityType=="node_token"
 }
 
+// ---- identityIsVoiceAgentToken ----
+//
+// Concept-targeted trait for v1:identity:identity rows whose
+// identityType field is "voice_agent_token". Voice-agent tokens
+// authenticate the Go voice-agent process on MemqlService.Stream
+// (#109); this trait scopes the row-state revocation lookup the
+// verify path consults (memql#4111).
+
+/// Matches v1:identity:identity rows with identityType=='voice_agent_token'.
+trait identityIsVoiceAgentToken {
+  return identityType=="voice_agent_token"
+}
+
 // ---- identityIsBadge ----
 //
 // Concept-targeted trait for v1:identity:identity rows whose
