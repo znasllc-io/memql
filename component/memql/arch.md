@@ -2,17 +2,30 @@
 
 > **Last Updated:** 2026-06-22
 
-This document describes the architecture of the `engine/` package, which contains the core MemQL processing engines.
+This document describes the architecture of the MemQL processing engine,
+which is split across two Go modules: `component/language/` (parsing +
+compilation) and `component/memql/` (the query engine itself). There is
+no single `engine/` directory -- the diagrams below use `engine/parser/`
+etc. as a conceptual label for `component/language/parser/`, and so on
+for the other pipeline stages.
 
 ## Package Overview
 
 ```
-engine/
-├── parser/          # Lexical analysis and parsing
-├── compiler/        # AST to target format transformation
-├── memql/           # Query execution engine
-│   └── sense/       # MemQL Sense language intelligence
-└── engine.go        # Base engine interface
+component/language/
+├── parser/       # Lexical analysis and parsing
+├── compiler/     # AST to target format transformation
+├── ast/          # Shared AST node type definitions
+├── annotations/  # Annotation (@foo(...)) parsing + validation
+├── dslclause/    # Single source of truth for which keywords terminate a filter clause (memql#2815)
+├── dslspec/      # Single source of truth for the DSL authoring surface: constructs / keywords / operators / field types
+└── pagination/   # sort()/paginate() expression support
+
+component/memql/
+├── engine.go   # Base engine interface + MemQLEngine
+├── executor.go # Query execution logic
+├── ...         # 573 top-level files -- loaders, AI tool loop, dslgate callers, etc.
+└── sense/      # MemQL Sense language intelligence (tokenize, complete, diagnose, hover, signature)
 ```
 
 ---
@@ -108,7 +121,7 @@ Input String
 │  ┌────────────────────────────────────────────────────┐  │
 │  │ Scan Token                                         │  │
 │  │  ├── Keywords (automation, query, mutation, when)  │  │
-│  │  ├── Operators (==, !=, >, >=, <, <=, in, not in, has, &&, ??, ?.)│  │
+│  │  ├── Operators (==, !=, >, >=, <, <=, in, not in, &&, ||, !, ??)│  │
 │  │  ├── Literals (strings, numbers)                   │  │
 │  │  ├── Identifiers (names, concept refs)             │  │
 │  │  └── Structural (, ; : { } [ ] ( ))                │  │
@@ -134,9 +147,10 @@ statement    = schedule | enabled | step | return
 step         = id ":" stepType ["when" cond] "{" body "}"
 
 expression   = logicalOr
-logicalOr    = logicalAnd { "," logicalAnd }
-logicalAnd   = primary { ";" primary }
-primary      = comparison | functionCall | conditionalFilter | grouped
+logicalOr    = logicalAnd { "||" logicalAnd }
+logicalAnd   = unary { "&&" unary }
+unary        = "!" unary | primary
+primary      = comparison | functionCall | whenGuard | grouped
 ```
 
 ### AST Node Types
@@ -144,11 +158,14 @@ primary      = comparison | functionCall | conditionalFilter | grouped
 ```
 Node
 ├── ExpressionNode
-│   ├── LogicalExpr           // a; b (AND) or a, b (OR)
+│   ├── LogicalExpr           // a && b (AND) or a || b (OR); ! for NOT
 │   ├── ComparisonExpr        // field==value
 │   ├── FunctionCallExpr      // func(args)
 │   ├── RelationshipExpr      // parentOf(...), childOf(...)
-│   ├── ConditionalFilterExpr // ?.field==value
+│   ├── ConditionalFilterExpr // when(args.x) { <expr> } arg-conditional guard
+│   │                         // (the node's name + internal `?.` parsing survive
+│   │                         // from the retired `?.` prefix syntax it replaced;
+│   │                         // authors write `when(...)`, never `?.`)
 │   ├── SortExpr              // sort(fields)(...)
 │   ├── PaginateExpr          // paginate(limit,offset)(...)
 │   ├── DepthExpr             // depth(n)(...)
@@ -689,23 +706,28 @@ func (e *RuntimeEvaluator) EvaluateMyAccessor(target any) any {
 
 ## Testing Strategy
 
+Run via `make test` (see root CLAUDE.md's Testing section -- a bare
+`go test ./...` from the repo root misses this package, memql#4032). To
+target one tree directly, use the module-path form, not a relative
+`./engine/...` pattern (that directory does not exist):
+
 | Package | Test Focus | Command |
 |---------|------------|---------|
-| `parser` | Lexer tokenization, parser grammar | `go test ./engine/parser/...` |
-| `compiler` | AST to JSON, transpilation | `go test ./engine/compiler/...` |
-| `memql` | Query execution, integration | `go test ./engine/memql/...` |
+| `parser` | Lexer tokenization, parser grammar | `go test -count=1 github.com/znasllc-io/memql/component/language/parser/...` |
+| `compiler` | AST to JSON, transpilation | `go test -count=1 github.com/znasllc-io/memql/component/language/compiler/...` |
+| `memql` | Query execution, integration | `go test -count=1 github.com/znasllc-io/memql/component/memql/...` |
 
 ```bash
-# Run all engine tests
-go test ./engine/...
+# Run all parser/compiler/memql tests
+go test -count=1 github.com/znasllc-io/memql/component/language/... github.com/znasllc-io/memql/component/memql/...
 
 # Run with verbose output
-go test ./engine/... -v
+go test -count=1 github.com/znasllc-io/memql/component/memql/... -v
 
-# Run specific test
-go test ./engine/parser -run TestLexer
+# Run a specific test
+go test -count=1 github.com/znasllc-io/memql/component/language/parser/... -run TestLexer_LineCounterAdvancesThroughMultiLineString
 ```
 
 ---
 
-*For system-wide architecture, see `/docs/arch.md`*
+*For system-wide architecture, see [`docs/public/concepts/architecture.md`](../../docs/public/concepts/architecture.md)*

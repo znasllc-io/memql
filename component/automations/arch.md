@@ -6,18 +6,31 @@ This document describes the architecture of the `automations/` package, which pr
 
 ## Package Overview
 
-The automations subsystem is split across two trees: the Go runtime
-lives under `component/automations/`; the .memql definitions plus the
-`go:embed` declaration live under `dsl/v1/automations/`.
+The automations subsystem is split across two trees. The Go runtime lives
+under `component/automations/` (107 top-level files plus 58 more under
+`steps/` -- mostly test coverage for the sandboxed expression/logic
+runtime; see "Key entry points" below for the files worth reading first).
+The `.memql` definitions live inline in each domain's own
+`dsl/<domain>/automations.memql` file -- one bundled file per domain
+(cognition, common, data, ...), each declaring many `automation { ... }`
+blocks -- not a per-automation directory tree. (An earlier layout gave
+each automation its own directory under `dsl/v1/automations/v1/<domain>/
+<name>/`; that directory does not exist any more -- see "Loader Flow"
+below, memql#2858.)
+
+Key entry points in `component/automations/`:
 
 ```
 component/automations/
 ├── arch.md              # This architecture document
 ├── types.go             # Type definitions (Automation, Step, StepResult, etc.)
-├── loader.go            # Loads automations from the embedded FS
+├── loader.go            # Loads automations from the unified DSL tree
+├── unified_loader.go    # Slices + compiles automation { ... } blocks out of dsl/<domain>/automations.memql
 ├── scheduler.go         # Cron and event-based triggering
 ├── executor.go          # Orchestrates automation execution
-├── evaluator.go         # Resolves $ expressions at runtime
+├── evaluator.go         # Resolves $var.NAME expressions at runtime
+├── cluster_guard.go     # Cross-replica exactly-once claim for event-triggered automations
+├── cron_leader.go       # Cluster-singleton cron firing (Postgres advisory lock)
 ├── integration_test.go  # Integration tests
 └── steps/               # Step type executors
     ├── steps.go         # Step registry
@@ -30,15 +43,6 @@ component/automations/
     ├── parallel.go      # Concurrent execution
     ├── switch.go        # Conditional branching
     └── automation.go    # Sub-automation invocation
-
-dsl/v1/automations/
-├── CLAUDE.md            # DSL-side guidance for authoring automations
-├── embed.go             # go:embed + Source() helper -- imported by the loader
-└── v1/                  # Automation definitions (.memql + .md only)
-    └── <domain>/        # Domain grouping (cognition, common, data, ...)
-        └── <name>/      # Individual automation
-            ├── automation.memql  # MemQL source
-            └── automation.md     # Flow diagrams & docs
 ```
 
 ---
