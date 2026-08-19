@@ -126,8 +126,21 @@ LiveKit Service to forward.
 ## Run tests
 
 ```bash
-go test ./...
+make test
 ```
+
+`make test` is the correct verification command -- a bare `go test ./...`
+misses this repo's own engine modules (`component/memql`,
+`component/database`, `component/language`), since `go.work` lists 49
+workspace modules and the relative pattern only covers the root module. See
+this repo's [CLAUDE.md](../../../CLAUDE.md#testing) for the full explanation.
+
+```bash
+MEMQL_REQUIRE_DB=1 make test
+```
+
+turns a missing-database skip into a hard failure -- point
+`MEMQL_DATABASE_DSN` at a real Postgres+TimescaleDB+pgvector first.
 
 ---
 

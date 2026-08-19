@@ -100,7 +100,7 @@ redeploying. The same declarations drive validation, authorization
 (per-row, classified and test-enforced in `test/dslconformance/conformance_test.go`),
 and the generated reference. Capability grants (what an agent is even
 allowed to do — `computer_use_*`, `workbench_use`) are declared and
-expanded centrally in `component/memql/operator_caps.go`.
+expanded centrally in `component/memql/worker_caps.go`.
 
 ### 5. It is multi-node, authenticated, and observable out of the box
 

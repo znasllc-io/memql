@@ -128,11 +128,16 @@ All environments use the in-house identity service
 (`component/identity`, `make identity`) for authentication:
 - Magic-link login as the primary path
 - Personal Access Tokens (PATs) for CLI clients
-- Per-node JWT verifier (`component/identity/verifier`) on
-  bff/voice/cognition/agent/planner; JWKS-published
+- Per-node JWT verifier (`component/identity/verifier`) on every
+  verifier-consuming node type (bff/voice/cognition/agent/planner/
+  workbench/mcp); JWKS-published. The identity node is the JWKS
+  authority and does not verify against itself; the edge node serves
+  public bytes to anonymous visitors and is not an auth boundary
 - Role-based access control (owner / admin / writer / reader)
-- Centralized user + invitation management via the admin web app
-  at `/admin/*`
+- Centralized user + invitation management via the memQL Portal's
+  People surface (`IdentityAdminMsg`, gated by
+  `component/identity/adminops`). The server-rendered admin web app is
+  retired -- `/admin/` now answers `410 Gone` except its sign-in pages
 
 See [docs/public/operate/auth/identity-service.md](../operate/auth/identity-service.md)
 for the operator-side narrative.
@@ -162,9 +167,13 @@ for the operator-side narrative.
 2. Start the local cluster: `make up`
 3. Make code changes
 4. Rebuild + reload the changed node: `make dev [NODE=<type>]`
-5. Test locally: `go test ./...`
+5. Test locally: `make test`
 6. View logs: `kubectl logs -n memql deploy/mcp -f`
-7. Commit (directly to `main` for focused changes; feature branch + PR when review is useful)
+7. Branch, push, open a PR, wait for CI to go green, then enqueue it:
+   `gh pr merge <n> --repo znasllc-io/memql` (bare -- no strategy, no
+   `--delete-branch`). `main` refuses direct pushes; every change,
+   including a one-line docs fix, goes through a branch + PR + merge
+   queue
 
 **Best Practices:**
 - Always use the local k3d cluster database (never a deployed cluster's)
@@ -199,32 +208,28 @@ for the operator-side narrative.
 
 ### Hardware Requirements
 
-**Standardized Platform:** macOS with Apple Silicon
+**Supported platforms:** macOS / Apple Silicon and Linux/amd64 both run the
+full local k3d + ArgoCD stack. `make up`, `make dev`, and the rest of the
+local run path are platform-agnostic; pick whichever host you already
+develop on.
 
 | Component | Requirement | Notes |
 |-----------|------------|-------|
-| **Operating System** | macOS | Monterey (12.0) or later |
-| **Processor** | Apple Silicon (M1/M2/M3) | ARM64 architecture |
-| **Devices** | MacBook Pro or MacBook Air | With M-series chips |
+| **Operating System** | macOS (Monterey 12.0+) or Linux (amd64) | |
+| **Processor** | Apple Silicon (M1/M2/M3) on macOS, or x86-64 on Linux | |
 | **RAM** | 16GB minimum, 32GB recommended | For Docker + IDE + services |
 | **Storage** | 50GB free minimum | For Docker images, dependencies |
-
-**Why Apple Silicon?**
-- Standardized development environment across team
-- Native ARM64 Docker performance
-- Consistent tooling and behavior
-- Superior battery life for remote work
 
 ### Required Software
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **Go 1.26.1+** | Backend development | https://go.dev/dl/ (ARM64 build) |
-| **Docker Desktop** | Image builds + k3d runtime | https://docker.com/products/docker-desktop (Apple Silicon) |
-| **k3d** | Local Kubernetes cluster | `brew install k3d` |
-| **kubectl** | Local + AKS cluster management | `brew install kubectl` |
+| **Go 1.26.1+** | Backend development | https://go.dev/dl/ |
+| **Docker** | Image builds + k3d runtime | Docker Desktop on macOS; Docker Engine on Linux |
+| **k3d** | Local Kubernetes cluster | `brew install k3d` (macOS) or your Linux package manager |
+| **kubectl** | Local + AKS cluster management | `brew install kubectl` (macOS) or your Linux package manager |
 | **Azure CLI (`az`)** | Cloud deployments (AKS, ACR) | https://learn.microsoft.com/cli/azure/install-azure-cli |
-| **git** | Version control | Pre-installed on macOS |
+| **git** | Version control | Pre-installed on macOS; package manager on Linux |
 
 ### Optional Tools
 
@@ -279,16 +284,17 @@ kubectl logs -n memql deploy/mcp -f                             # View logs
 psql postgres://memql:memql_dev@localhost:5432/memql            # PostgreSQL shell (via make db)
 
 # Testing
-go test ./...                    # Run Go test suite
+make test                        # Run the Go test suite -- NOT `go test ./...`,
+                                  # which misses the engine's own modules (memql#4032)
 
 # Deployment (Azure AKS) -- see docs/public/operate/deploy-bundle-runbook.md
 make deploy VERSION=X            # Break-glass deploy (cockpit, scripts/deploy/cockpit.sh)
 
 # Dev secrets workflow
-make bootstrap                                   # Generate .env.local with master key + bootstrap envelope
-make secrets-init                                # Interactively populate ~/.memql/dev-secrets.yaml from manifest
-make secrets-seed                                # Push the yaml into running memQL (encrypts secrets first)
-make secrets-list                                # Diff manifest vs yaml vs running memQL
+make secrets                                     # Seed/re-seed the k8s Secrets the local
+                                                  # overlay needs (scripts/k3d/seed-secrets.sh);
+                                                  # idempotent, reads MEMQL_MASTER_KEY from
+                                                  # the environment
 
 # AKS
 kubectl get pods -n memql                                   # List pods
@@ -299,30 +305,28 @@ kubectl get deployments -n memql                            # Deployment status
 ### Environment Variables
 
 **Managed via memQL concept storage** (`v1:platform:globalVariable` and
-`v1:platform:globalSecret`). Operators populate via Make targets backed by
-the dev-secrets workflow; see [docs/public/operate/env-vars.md](../operate/env-vars.md)
-for the full design.
+`v1:platform:globalSecret`). The bootstrap envelope (master key, identity
+signing seed, node bootstrap token, DB DSN, ...) is seeded into the
+`memql-secrets` k8s Secret by `make secrets`; see
+[docs/public/operate/env-vars.md](../operate/env-vars.md) for the full
+bootstrap-envelope-vs-concept-storage design.
 
-**Development (Docker):**
-- Generate `.env.local` with `make bootstrap` (writes master key + bootstrap envelope; idempotent)
-- Populate `~/.memql/dev-secrets.yaml` interactively with `make secrets-init`
-- Push to memQL with `make secrets-seed`
-- Override with `.env.local` file (git-ignored) for the bootstrap envelope only
+**Development (k3d):**
+- `make up` seeds the k8s Secrets on first boot via `make secrets`
+  (`scripts/k3d/seed-secrets.sh`), which reads `MEMQL_MASTER_KEY` from the
+  environment -- when unset, an existing valid key in `memql-secrets` is
+  reused, and only a cluster with no usable key falls back to the dev
+  default
+- Re-seed after changing a secret with `make secrets`
 - Debug logging enabled by default
-
-**Partition Configuration:**
-- No env var. Partition defaults to `"default"` and is set per-request via
-  the gRPC envelope (`MemqlClientMessage.partition`).
-- Auto-injected into every query / mutation / event topic by the engine.
-- The CLI manages partitions interactively in the Clusters tab and persists
-  the per-cluster selection in `~/.memql/clusters.yaml`.
 
 **Cloud (AKS):**
 - Shared secrets (DSN, master key, operator key, identity signing seed)
   are KEYS on the `memql-secrets` Secret, reconciled from Azure Key Vault
   by External Secrets (`deploy/external-secrets/`). One delivery path
-  (epic memql#3958); the sealed genesis envelope that used to be a second
-  one is gone. Per-node, non-secret config lives in the k8s manifest env. See
+  (epic memql#3958); the two-bearer design this replaced (a second,
+  irreplaceable credential that also decrypted config) is gone. Per-node,
+  non-secret config lives in the k8s manifest env. See
   [docs/public/operate/deploy-bundle-runbook.md](../operate/deploy-bundle-runbook.md)
   for the canonical add/rotate flow.
 - Everything else lives in memQL's `v1:platform:globalSecret` /
@@ -343,8 +347,10 @@ for the full design.
 
 ### Git Workflow
 
-1. **Single long-lived branch:** `main`. Commit directly when PR review
-   isn't useful; use a short-lived feature branch only when it is.
+1. **Single long-lived branch:** `main`. `main` refuses direct pushes
+   (a repository ruleset, not a convention) -- every change, including a
+   one-line docs fix, goes through a short-lived feature branch + PR +
+   merge queue.
 2. **Stage by explicit path** (`git add <file>`) -- never `git add -A` /
    `.`. Multiple Claude sessions may share a worktree.
 3. **Pre-release; no backwards-compat shims.** When a contract changes,
@@ -362,7 +368,7 @@ for the full design.
 3. **Health checks:** All containers must have health checks
 4. **Multi-stage builds:** Optimize image sizes
 5. **Non-root users:** Security best practice
-6. **Environment variables:** Generate `.env.local` with `make bootstrap`, then populate memQL config via `make secrets-init` + `make secrets-seed`
+6. **Environment variables:** Seed the k8s Secrets with `make secrets` (`scripts/k3d/seed-secrets.sh`); re-run after changing a secret
 
 ### Database Practices
 

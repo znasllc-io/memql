@@ -317,7 +317,7 @@ Voice messages create `v1:cognition:utterance` records with this structure:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MEMQL_STT_PROVIDER` | STT provider name | `openai-realtime` |
-| `MEMQL_STT_DEFAULT_LANGUAGE` | Default language hint | `en` |
+| `MEMQL_STT_LANGUAGE` | Default language hint | `en` |
 
 #### Provider Comparison
 
@@ -339,7 +339,7 @@ stops speaking. Best for accuracy but no interim results.
 ### STT Component Structure
 
 ```
-server/audiows/
+component/server/audiows/
 ├── handler.go      # WebSocket handler, session management
 └── messages.go     # Message type definitions
 
@@ -560,7 +560,7 @@ for await (const chunk of ttsStream) {
 |----------|-------------|---------|
 | `MEMQL_DEFAULT_TTS_PROVIDER` | TTS provider name from registry | `tts1` |
 
-TTS providers are configured in `providers/v1/openai/` as `.memql` files with `@type("OpenAITTS")`. The default voice, format, and speed are set per-provider in the MemQL configuration.
+TTS providers are configured in `dsl/providers/providers.memql` with `@type("OpenAITTS")`. The default voice, format, and speed are set per-provider in the MemQL configuration.
 
 ### Chunk Sizing
 
@@ -654,7 +654,7 @@ env vars are configured.
 
 ### Provider selection
 
-`POLYPHON_VOICE_PROVIDER`:
+`MEMQL_POLYPHON_VOICE_PROVIDER`:
 
 - `openai` (fallback) -- OpenAI Realtime transcription + `/v1/audio/speech` TTS.
 

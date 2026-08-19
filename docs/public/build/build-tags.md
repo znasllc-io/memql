@@ -89,7 +89,7 @@ go build -tags planner .                           # planner
 
 ### How It Works
 
-The `app/` package contains build-tagged files that control which bootstrap phases run:
+The `app/` package contains build-tagged files that control which bootstrap phases run. This list is illustrative, not exhaustive -- run `ls app/build_*.go` for the full current set of node-type `Build()` files:
 
 ```
 app/
@@ -99,6 +99,11 @@ app/
   build_cognition.go            # Build() for cognition
   build_agent.go                # Build() for agent
   build_planner.go              # Build() for planner
+  build_voice.go                # Build() for voice
+  build_workbench.go            # Build() for workbench
+  build_edge.go                 # Build() for edge
+  build_identity.go             # Build() for identity
+  build_mcp.go                  # Build() for mcp
   config.go                     # Phase 1: config + auth (all nodes)
   database.go                   # Phase 2: database + concepts (all nodes)
   engine.go                     # Phase 3: engine + bus + automations (all nodes)
@@ -154,12 +159,18 @@ compiled := node.CompiledNodeType()
 ## Testing
 
 ```bash
-# All tests must pass for each tag
-go test ./...
-go test -tags voice ./...
-go test -tags cognition ./...
-go test -tags agent ./...
-go test -tags planner ./...
+# Use `make test`, NOT `go test ./...` -- the bare command misses this
+# repo's own engine modules (component/memql, component/database,
+# component/language), since go.work lists 49 workspace modules and a
+# relative pattern only covers the root module (memql#4032).
+make test
+
+# A genuinely tag-scoped run needs the full module path too, for the
+# same reason -- `go test -tags voice ./...` would miss the engine:
+go test -tags voice github.com/znasllc-io/memql/...
+go test -tags cognition github.com/znasllc-io/memql/...
+go test -tags agent github.com/znasllc-io/memql/...
+go test -tags planner github.com/znasllc-io/memql/...
 ```
 
 ## Adding Code to a Node Type
@@ -178,4 +189,4 @@ Common tag patterns:
 //go:build voice || cognition                             // voice + cognition
 ```
 
-The key principle: move **import statements** to tag-specific files. Excluding a Go package import is what actually reduces binary size. The `.memql` DSL files are small (~212KB total) and are always embedded.
+The key principle: move **import statements** to tag-specific files. Excluding a Go package import is what actually reduces binary size. The `.memql` DSL files are small (a few MB total -- `du -sh dsl/` to check the current size) and are always embedded.
