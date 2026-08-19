@@ -1171,7 +1171,7 @@ What is NOT in the tree, despite having been claimed here:
 
 - **No sidecar, cloud or local.** `deploy/k8s/base/agent.yaml` has exactly
   one container (`agent`); `grep -ri 'nemoclaw\|openclaw' deploy/` is empty.
-  The parity-cluster sidecar is still pending re-home (memql#1310).
+  The parity-cluster sidecar was tracked in memql#1310 (now closed); the absence of any manifest here is tracked in memql#4120.
 - **No tool definitions.** No `tool claw*` exists anywhere under `dsl/`.
   A product could ship them in its own bundle at `MEMQL_DSL_PATH`; the
   engine does not. (`component/memql/tool_claw_test.go` asserted they load
@@ -1196,7 +1196,7 @@ slice (shell / fs / http) and the embodied slice (mouse / keyboard /
 screenshot) can be granted independently. Authorization (scope grants,
 kill switch, knowledge domain) stays unified -- both modes act on the
 user's machine, so the consent is one decision. See
-`component/safety/descriptor.go` for the slug expansion map. The
+`component/memql/worker_caps.go` for the slug expansion map. The
 sandboxed first-choice surface for headless work is the Workbench,
 documented in the next section.
 

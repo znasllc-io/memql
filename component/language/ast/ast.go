@@ -441,7 +441,7 @@ type EventRefExpr struct{}
 //
 //	caller.userId        -- v1:identity:user.id
 //	caller.primaryEmail  -- the caller's primary email
-//	caller.role          -- cluster-wide role (owner / admin / writer / reader)
+//	caller.role          -- cluster-wide role (owner / admin / developer / writer / reader)
 //	caller.identityId    -- v1:identity:identity.id used for this request
 //	caller.isOwner       -- bool short-circuit for owner-bypass paths
 //

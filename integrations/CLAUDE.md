@@ -523,11 +523,15 @@ kubectl logs -n memql deploy/cognition -f | grep "ai.*response"
 
 ### AI Providers (Cognition Integration)
 ```bash
-MEMQL_SI_OPENAI_API_KEY=sk-...         # OpenAI provider
-MEMQL_SI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
+MEMQL_AI_OPENAI_API_KEY=sk-...         # OpenAI provider
+MEMQL_AI_ANTHROPIC_API_KEY=sk-ant-...  # Anthropic provider
 MEMQL_SI_CACHE_DEFAULT_ENABLED=true
 MEMQL_SI_CACHE_MAX_SECONDS=120
 ```
+
+`MEMQL_SI_OPENAI_API_KEY` / `MEMQL_SI_ANTHROPIC_API_KEY` are legacy aliases
+only (`component/envregistry/legacyalias.go`, entries at :88-89, the map is
+NEW -> LEGACY); use the `MEMQL_AI_*` forms above.
 
 ### Feature Flags
 

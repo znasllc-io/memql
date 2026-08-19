@@ -186,7 +186,7 @@ trait statusIsActive {
 // =============================================================================
 //
 // Comparison operators: == != > >= < <=
-// Logical operators:    && || !
+// Logical operators:    && || (specs refuse `!` -- write `!=` instead)
 // Set operators:        in (X, Y, Z)
 // Null check:           field == null  /  field != null
 // Parentheses:          (expr1) || (expr2 && expr3)

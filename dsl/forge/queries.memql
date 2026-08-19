@@ -27,13 +27,17 @@
 //   human-readable; the id is the row-stable FK. The two-step resolution
 //   means Claude never guesses UUIDs and never conflates projects.
 //
-// CROSS-CLIENT ISOLATION (partition boundary)
-//
-//   The partition is the hard tenant-isolation boundary in memQL. Every row
-//   carries a `partition` column; the engine stamps it from the caller's
-//   auth envelope and appends `WHERE partition = $envelope` to every query
-//   automatically. There is NO DSL filter needed on the client side -- the
-//   engine enforces it unconditionally.
+// CROSS-CLIENT ISOLATION (partition boundary) -- SUPERSEDED, do not design
+// against this block (memql#56, memql#3305-style retirement). It described
+// the partition as the hard tenant-isolation boundary with an engine-stamped
+// `WHERE partition = $envelope` on every query; that mechanism was retired
+// in #56 and there is no `partition` column on the row store today.
+// Cross-client isolation is now enforced by per-row authorization -- the
+// forge role context-specs (dsl/forge/specs.memql: forgeDeveloper /
+// forgeApprover) plus projectId-scoped queries below. Kept as historical
+// context; see
+// [access-model.md](../../public/operate/auth/access-model.md) and
+// [per-row-authz-audit.md](../../public/operate/auth/per-row-authz-audit.md).
 //
 //   Forge maps onto this model as follows:
 //

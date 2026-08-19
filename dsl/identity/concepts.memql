@@ -44,7 +44,7 @@ concept auditEvent {
 
   actorUserId     string  @description("v1:identity:user.id of the actor when authenticated. Empty for anonymous events (login attempts where no session yet exists).")
   actorEmail      string  @description("Email of the actor at the time of the event. Captured here for audit even after the user record is deleted — auditEvent rows are tombstoned, not removed, on user deletion.")
-  actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / writer / reader). Captured for point-in-time accuracy.")
+  actorRole       string  @description("Cluster role of the actor at the time of the event (owner / admin / developer / writer / reader). Captured for point-in-time accuracy.")
   actorIdentityId string  @description("v1:identity:identity.id of the credential the actor used (magic_link, api_key, etc.). Distinguishes 'logged in via web' from 'PAT in CI'.")
 
   targetType      enum("user", "session", "identity", "invitation", "accessRequest", "config", "magicLinkRequest", "authCode", "clusterSettings", "")  @default("")  @description("Concept type of the target row, if any.")

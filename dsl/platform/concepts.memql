@@ -117,7 +117,7 @@ concept policyTrace {
   policyName   string! @description("Name of the policy that produced this trace.")
   tier         string! @description("Tier of the policy at evaluation time -- 'core' or 'bff'.")
   actorUserId  string    @description("Caller's v1:identity:user id. May be empty for server-internal calls.")
-  actorRole    string    @description("Caller's cluster-wide role (owner / admin / writer / reader). Empty when unauthenticated.")
+  actorRole    string    @description("Caller's cluster-wide role (owner / admin / developer / writer / reader). Empty when unauthenticated.")
   callerPartition string @description("Active partition envelope at evaluation time.")
   argsHash     string! @description("SHA-256 hex of canonicalized args JSON. Used for cache lookup and audit correlation.")
   resultJson   string! @description("JSON-encoded return value of the policy.")

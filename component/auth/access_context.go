@@ -12,7 +12,7 @@ import (
 //
 //	UserId         v1:identity:user.id
 //	PrimaryEmail   denormalized from the user record
-//	Role           cluster-wide role (owner / admin / writer / reader)
+//	Role           cluster-wide role (owner / admin / developer / writer / reader)
 //	IdentityId     which v1:identity:identity the caller authenticated with
 //
 // Per-row authorization (see docs/public/operate/auth/per-row-authz-audit.md) is the
