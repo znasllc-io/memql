@@ -9,7 +9,14 @@ owner: znas
 
 # Shape-drift hardening
 
-**Status:** Proposed. Not shipped.
+**Status:** Proposal B (patch-style mutations) is effectively shipped via the
+`update { id: ..., ... }` mutation form (`component/language/ast/ast.go:729`
+`MutationKindUpdate`; documented in root CLAUDE.md's "Functions" section) --
+a read-merge-validate-write partial update sits alongside full-replace
+`insert`. Proposal A (a shape-completeness lint, e.g.
+`TestShapesCoverAllConceptFields`) is **not** implemented -- no such test
+exists anywhere in `component`/`test` -- so this doc stays open for Proposal
+A only.
 **Priority:** Medium — passive bug with loud failure mode.
 **Owner:** TBD (memQL core).
 **Related:** Any product that persists concept fields and updates records

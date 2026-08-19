@@ -82,7 +82,7 @@ func TestAIRuntimeCacheDefaultEnabled(t *testing.T) {
 // identical AI call must hit; a different rendered prompt must miss.
 // If this regresses, the cache is silently not caching (or the
 // telemetry is broken) and any hit-ratio we report from BFF logs is a
-// lie. See docs/internal/planning/cache-audit-phase-0.md.
+// lie.
 func TestAIRuntimeCacheStatsBaseline(t *testing.T) {
 	prompts := newPromptRegistry()
 	tmpl := template.Must(template.New("baseline").Parse("greeting {{.name}}"))

@@ -62,7 +62,6 @@ func newResultCache(size int64) (*resultCache, error) {
 		MaxCost:     size,
 		BufferItems: 64,
 		// Phase-0 plan: enable so hit/miss/eviction is observable.
-		// See docs/internal/planning/cache-audit-phase-0.md.
 		Metrics: true,
 	}
 

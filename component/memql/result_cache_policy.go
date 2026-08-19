@@ -60,8 +60,7 @@ const (
 // do it for them. (No identity query currently carries @cache.)
 //
 // Keep this list short and well-justified; over-denylisting silently
-// erodes the cache hit ratio. Documented in
-// docs/internal/planning/cache-audit-phase-0.md.
+// erodes the cache hit ratio.
 var cacheDenylistedConceptPrefixes = []string{
 	"v1:identity:",
 }

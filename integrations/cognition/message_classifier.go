@@ -20,8 +20,7 @@ import (
 // re-pay the LLM cost.
 //
 // See docs/internal/planning/llm-driven-decisions.md for the full
-// architecture; docs/internal/planning/cache-audit-phase-0.md for the
-// cache-instrumentation prerequisite (shipped in 006822a).
+// architecture; the cache-instrumentation prerequisite shipped in 006822a.
 //
 // First-iteration cache is hash-keyed (exact-string match);
 // vector-keyed near-duplicate hits are a Phase 4 enhancement

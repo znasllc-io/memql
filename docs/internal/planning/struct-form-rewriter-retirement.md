@@ -13,14 +13,20 @@ owner: znas
 work needs coordinated grammar + AST + evaluator changes that don't
 fit in a single coherent commit.
 
-**Last landed:** [`daaec10`](https://github.com/znasllc-io/memql/commit/daaec10)
-consolidated the five rewriter files
+**Last landed:** the commit hash previously cited here (`daaec10`) does not
+resolve in this repo's history -- the five-file consolidation
 (`query_rewrite.go` / `mutation_rewrite.go` / `logic_rewrite.go` /
-`automation_rewrite.go` / `args_rewrite.go` plus `normalise_all.go`,
-1306 LOC) into a single
+`automation_rewrite.go` / `args_rewrite.go` plus `normalise_all.go`) predates
+this repo's tracked history: `component/language/parser/rewriter.go` already
+existed as a single consolidated file at the repo's first commit
+(`ad7acaa6`, "Initial commit: memQL core (post-split residual)", 2026-05-14),
+so the actual consolidation commit is not recoverable from this tree. The
+consolidated
 [`component/language/parser/rewriter.go`](../../../component/language/parser/rewriter.go)
-at 936 LOC. The "five rewriters" stop existing as separate concerns
-but the rewriter as a concept stays -- it still pre-processes
+is currently 2750 LOC (grown well past the 936 LOC figure previously cited
+here, from ongoing struct-form grammar work -- see "Retired author-side
+forms" in root CLAUDE.md). The "five rewriters" stop existing as separate
+concerns but the rewriter as a concept stays -- it still pre-processes
 struct-form source into procedural source before tokenization.
 
 This doc captures the actual retirement path: deleting `rewriter.go`

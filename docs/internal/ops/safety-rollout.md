@@ -39,7 +39,7 @@ drives the enforce-flip decision.
 
 ## Pre-flight checklist (before flipping ANY enforce knob)
 
-1. **Run the red-team corpus tests locally:** `go test ./component/safety/ -run TestCommandCorpus -run TestScreenCorpus`. Both must pass — they're the FP/FN budget gate and ride CI on every commit.
+1. **Run the red-team corpus tests locally:** `go test ./component/safety/ -run 'TestCommandCorpus|TestScreenCorpus'`. Both must pass — they're the FP/FN budget gate and ride CI on every commit. (A second `-run` flag silently overrides the first in Go's flag parser, so `-run TestCommandCorpus -run TestScreenCorpus` only ever runs the screen-corpus tests — use the single `-run` with a `|` alternation instead.)
 2. **Measure 7-day block-rate per surface from shadow:**
    ```sql
    SELECT payload->>'surface', payload->>'decision', COUNT(*)

@@ -9,9 +9,15 @@ owner: znas
 
 # Planner-authored automations -- DESIGN (#954)
 
-Status: APPROVED ARCHITECTURE; build not started. The three load-bearing
-decisions below were taken with the code owner (DSL architect). Child issues
-#955-#961 carry the build, sequenced validation-first.
+Status: Substantial work has shipped. The three load-bearing decisions below
+were taken with the code owner (DSL architect); child issues #955-#961 carried
+the initial build, sequenced validation-first. Epic #1160/#1161 (everyday-task
+capture -- post-hoc bundle authoring wired to a live trigger), #1163
+(multi-phase composition), #1164 (concurrent phases), and #1394 (generated
+parallel plan-automations for sectionable deliverables) are all documented as
+landed later in this file. The "Open threads" section below still tracks
+genuinely deferred work (bundle authoring syntax/ergonomics, multi-node
+ownership, catalog GC).
 
 Successor to the shipped reactive-harness epic #629. The reactive harness gave
 users **Responsibilities** (standing NL directives). This epic compiles a

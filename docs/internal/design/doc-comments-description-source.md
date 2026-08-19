@@ -1,7 +1,7 @@
 ---
 title: Doc-comments as the description source
 audience: internal
-status: draft
+status: historical
 area: design
 sinceVersion: 0.15.0
 owner: znas
@@ -9,7 +9,9 @@ owner: znas
 
 # Doc-comments as the description source
 
-**Status:** accepted · **Epic:** [#2601](https://github.com/znasllc-io/memql/issues/2601) · **Issue:** [#2632](https://github.com/znasllc-io/memql/issues/2632)
+> Historical: shipped; kept for rationale.
+
+**Status:** accepted, shipped · **Epic:** [#2601](https://github.com/znasllc-io/memql/issues/2601) · **Issue:** [#2632](https://github.com/znasllc-io/memql/issues/2632)
 **Rulings 5 and 6 adopt the recommendations flagged in the #2632 proposal**
 under the owner's end-to-end mandate for the open-issue sweep; both are
 single-constant / single-story decisions and stay adjustable until the

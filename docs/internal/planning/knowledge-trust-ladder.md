@@ -27,11 +27,17 @@ chunks + live knowledge dispatcher) with:
    "integration broker" -- external data flows through Live Knowledge
    into native concept rows; agents read native rows uniformly.
 
-Most of the schema scaffolding already exists in the tree
-(`documentChunk.validationStatus`, `validationEvent` audit log,
-`source` enum on `documentChunk`, `liveSource` + `liveConnector`
-registry, `v1:knowledge:document` container). This initiative
-connects the pieces and adds the missing fields.
+Some of the schema scaffolding exists in the engine core
+(`documentChunk.validationStatus`, `source` enum on `documentChunk`).
+The rest -- `validationEvent` audit log, `liveSource` + `liveConnector`
+registry, `v1:knowledge:document` container -- is **not** in this
+engine tree: those PRODUCT knowledge concepts were moved out of engine
+core and into the product pack by commit `2d49ec6c` ("B3 (#2039): move
+PRODUCT knowledge concepts out of engine core into the pack"); only
+orphaned generator banner comments remain in
+`dsl/knowledge/concepts.memql`. This initiative must re-add that
+scaffolding in the product pack, not assume it already exists in the
+engine core.
 
 ---
 
@@ -40,7 +46,7 @@ connects the pieces and adds the missing fields.
 | Tier | What it is | Maps to |
 |------|------------|---------|
 | T0 | LLM pretraining; no graph rows | nothing in the graph |
-| T1 | Seeded chunks, unreviewed | `documentChunk` with `source ∈ {llmSeeded, crossDomainBridge, augment}` and `validationStatus = unreviewed` |
+| T1 | Seeded chunks, unreviewed | `documentChunk` with `source ∈ {llmSeeded, crossDomainBridge, augment}` and `validationStatus = unvalidated` |
 | T2 | User-validated chunks | `validationStatus = validated`; recorded on the existing `validationEvent` audit row |
 | T3 | Live data, fetched at query time | `liveSource` query results; trust comes from the confirmed binding contract, not per-row review |
 

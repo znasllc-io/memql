@@ -27,12 +27,17 @@ commit; Argo CD reconciles the previous digests back.
 # Pick the previous good overlay commit:
 git log --oneline -- deploy/k8s/overlays/cloud
 # Revert the bad change and push; Argo reconciles (or apply manually pre-Argo):
-scripts/deploy/aks-rollback.sh --to=<bad-commit>      # prints the exact steps
 git revert --no-edit <bad-commit> && git push
 # Verify convergence:
 scripts/deploy/drift-check.sh --live     # -> converged
 ```
 Recovery time = one reconcile cycle. No image rebuild, no `rollout undo`.
+
+`scripts/deploy/revert-overlay.sh` (`--overlayPath=`, `--toDeploymentId=`,
+`--dryRun=`; refs #2222/#2221) is the owner-gated, automation-driven
+alternative for the same rollback placement step -- it restores an overlay's
+pinned digests to a prior deployment id under the capability-script contract,
+without a human running the `git revert` by hand.
 
 Under a progressive Rollout (Phase 3), a failed `AnalysisRun` **auto-aborts** to
 the stable ReplicaSet — recovery is automatic and needs no human step.

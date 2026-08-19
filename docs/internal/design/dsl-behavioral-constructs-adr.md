@@ -13,7 +13,7 @@ owner: znas
 > behavioral half of the MemQL DSL (logic, action, automation) into a precise,
 > enforced contract *before* either humans or the planner author constructs
 > against it. It is a decision record, not an implementation. It is the contract
-> the action library (`docs/internal/planning/action-library.md`), the
+> the action library (epic #1734, shipped -- see §2.2 below), the
 > deployment bundle, and the retrieval-augmented planner (#587) all build to.
 > All §2 rulings and the former open questions (§7) are decided; implementation
 > is tracked by the issues enumerated in the root handoff file.
@@ -47,9 +47,9 @@ shipped `action` -- was never given the same treatment, and it shows:
   becomes invocable -- a patch over a missing model, with its own live/dry-run
   divergence to babysit.
 - The `action` construct is **parsed** as an automation step type (#1758:
-  `action { ref: "act_x@3", args, surface }`) but the library, executor, and any
-  real authored actions are unshipped (`docs/internal/planning/action-library.md`,
-  status "Proposed. Not shipped").
+  `action { ref: "act_x@3", args, surface }`) but at ADR time the library,
+  executor, and any real authored actions were unshipped (see §2.2 below for
+  the shipped status recorded after epic #1734 landed).
 
 Two forces make fixing this urgent now. First, the **deployment bundle**: we
 want `make`-style operations (clone a version, build, deploy, promote, rollback)

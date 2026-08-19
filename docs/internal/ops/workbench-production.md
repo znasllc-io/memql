@@ -9,22 +9,23 @@ owner: znas
 
 # Workbench Production Deployment
 
-**Status:** Cluster-mode deployment is deferred — gated on the broader
-production rollout. The code is committed and tested. This document
-covers the storage model and environment topology that apply when the
-workbench node is promoted to production.
+**Status:** Cluster mode is the deployed default -- `deploy/k8s/base/agent.yaml`
+sets `MEMQL_WORKBENCH_REMOTE=1` unconditionally, and `deploy/k8s/base/workbench.yaml`
+runs 2 replicas by default in the base manifest (not merely an overlay). This
+document covers the storage model and environment topology for that
+deployment, and the remaining production-hardening items in section 7.
 
-This doc catalogs what needs to happen to move the workbench from the
-in-process MVP (documented in [runbook.md](../../public/operate/workbench-runbook.md)) to a dedicated
-cluster node with durable storage. None of it changes the agent-facing
-tool surface or the workspace semantics — `workbenchHost` and per-Plan
-workspaces behave identically in both modes; only where the work
+This doc catalogs the workbench's distributed split from the in-process MVP
+(documented in [runbook.md](../../public/operate/workbench-runbook.md)) to a
+dedicated cluster node with durable storage. None of it changes the
+agent-facing tool surface or the workspace semantics — `workbenchHost` and
+per-Plan workspaces behave identically in both modes; only where the work
 executes and where bytes land at rest changes.
 
-## 1. What's already in the repo
+## 1. What's in the repo
 
-The distributed split landed alongside the MVP so the architecture is
-committed and exercised by tests, just not yet in active use:
+The distributed split landed alongside the MVP and is now the default
+runtime path, exercised by tests:
 
 | Layer | What | Files |
 |-------|------|-------|

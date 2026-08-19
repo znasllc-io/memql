@@ -80,7 +80,7 @@ resolve them.
 
 | old | now | note |
 |---|---|---|
-| #2876 | #3205 | PR #2891 is a draft and must not merge -- it is a net security regression |
+| #2876 | #3205 | The forwarded-auth contract was designed and shipped (memql#3205, closed via PR #3220; see docs/internal/design/mesh-forwarded-auth-contract.md). PR #2891 merged 2026-07-26 as a safe, additive revision -- the regression it originally proposed never landed. |
 | #3128 | #3206 | |
 | #3114 | #3207 | |
 | #3131 | #3209 | |
