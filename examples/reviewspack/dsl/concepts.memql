@@ -1,0 +1,48 @@
+// reviews pack -- client-agnostic storefront reviews (memql#4139).
+//
+// Net-new PACK, not core. dsl/todos, dsl/calendar, dsl/campaigns stay
+// untouched and this domain cannot shadow them.
+//
+// Config (criteria copy, public display toggle) is DATA on
+// reviewSettings, not .memql source -- a client hides/shows without a
+// rebuild. On-storefront only; no GBP / marketplace ingest.
+
+@version("1.0.0")
+@namespace("reviews")
+@description("A storefront product review. Merchandising stays on the store; this row is the review body plus optional image attachment ids. Images export as files (bytes), not URLs.")
+@displayCard(primary="title", secondary="body", tertiary="productHandle")
+@rowAuthz(owner="ownerUserId")
+concept review {
+  ownerUserId         string!   @description("v1:identity:user.id of the Client principal that authored the review. Stamped from actor.userId. Provider operators cannot author reviews.")
+  productHandle       string!   @description("Storefront product handle this review is about.")
+  productId           string    @description("Optional Shopify product GID when the thin index is present.")
+  title               string    @description("Optional short title.")
+  body                string!   @description("Review text.")
+  rating              int       @description("Optional 1-5 star rating. Sentiment analysis is not a field and must not be added.")
+  imageAttachmentIds  []string  @description("v1:common:attachment ids for review images. Export resolves these to bytes, never to a remote URL as the payload.")
+  createdAtClient     datetime  @description("Client-supplied authored-at watermark. The row intrinsic createdAt remains the version clock.")
+}
+
+@version("1.0.0")
+@namespace("reviews")
+@description("Append-only moderation decision for a review. A new row is a new decision; there is no in-place update and no undo-by-overwrite. decidedBy is a Client principal -- a Provider operator cannot author one. Criterion is a closed enum: no other, no sentiment.")
+@displayCard(primary="criterion", secondary="reviewId", tertiary="decidedBy")
+@rowAuthz(owner="decidedBy")
+concept moderationAction {
+  reviewId    string!  @description("v1:reviews:review.id this decision applies to.")
+  criterion   enum("spam", "profanity", "harassment", "off_topic", "illegal", "copyright")!  @description("Closed moderation criterion. There is no other and no free-text reason. Sentiment is not a criterion.")
+  decidedBy   string!  @description("v1:identity:user.id of the Client principal that authored this action. Provider operators are refused on the write path.")
+  principalKind enum("client")!  @description("The only expressible principal kind is client. provider is inexpressible -- the enum does not contain it.")
+  note        string   @description("Optional client-visible note. Not a criterion and not a sentiment score.")
+}
+
+@version("1.0.0")
+@namespace("reviews")
+@description("Runtime reviews settings. The public display toggle lives here as data so a client can hide or show reviews without a deploy or .memql edit.")
+@displayCard(primary="publicDisplay", secondary="ownerUserId")
+@rowAuthz(owner="ownerUserId")
+concept reviewSettings {
+  ownerUserId    string!  @description("v1:identity:user.id of the Client that owns this storefront's review settings.")
+  publicDisplay  bool!    @description("When true, approved reviews render on the storefront. Flipped at runtime; not compiled into .memql.")
+  criteriaText   string   @description("Optional client-authored copy describing the closed criteria. Data, not source.")
+}

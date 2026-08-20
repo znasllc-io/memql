@@ -1,0 +1,66 @@
+// reviews pack -- caller-scoped writes (memql#4139).
+//
+// Authz tier: owned. ownerUserId / decidedBy are stamped from
+// actor.userId. The Go capability recordModerationAction additionally
+// refuses a Provider operator so a cluster operator cannot author a
+// moderation row even if they call the mutation.
+
+/// Create a storefront review. Owned: ownerUserId is stamped from actor.userId.
+@actor
+mutate review createReview {
+  args {
+    reviewId            string!
+    productHandle       string!
+    productId           string
+    title               string
+    body                string!
+    rating              int
+    imageAttachmentIds  []string
+  }
+  insert {
+    accept { productHandle, productId, title, body, rating, imageAttachmentIds }
+    stamp {
+      id: args.reviewId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Append a moderation decision. There is no update mutation on
+/// moderationAction -- append-only. decidedBy is stamped from actor.userId.
+/// principalKind is accepted only as the literal "client" by the closed
+/// concept enum; a Provider operator is refused by the Go write path.
+@actor
+mutate moderationAction recordModerationAction {
+  args {
+    actionId       string!
+    reviewId       string!
+    criterion      string!
+    note           string
+  }
+  insert {
+    accept { reviewId, criterion, note }
+    stamp {
+      id: args.actionId
+      decidedBy: actor.userId
+      principalKind: "client"
+    }
+  }
+}
+
+/// Create or flip the public display toggle. Data, not source -- no rebuild.
+@actor
+mutate reviewSettings setReviewDisplay {
+  args {
+    settingsId     string!
+    publicDisplay  bool!
+    criteriaText   string
+  }
+  insert {
+    accept { publicDisplay, criteriaText }
+    stamp {
+      id: args.settingsId
+      ownerUserId: actor.userId
+    }
+  }
+}
