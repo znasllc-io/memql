@@ -13,7 +13,6 @@
 // Webhooks are at-least-once / occasionally not-at-all, so a 6-hour
 // reconcile re-fetches known index rows.
 
-use shopify.builtins.{ shopifyApplyInboundProduct, shopifyReconcileIndex }
 
 /// On a staged inbound webhook, offer it to the thin Shopify index.
 @trigger(event="node.created", concept="v1:platform:inboundRequest", partition="*")
