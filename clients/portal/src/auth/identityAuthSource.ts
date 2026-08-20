@@ -116,13 +116,17 @@ export function createIdentityAuthSource(
     // rather than "this cluster has auth turned off". Dial with no credential
     // instead, which is exactly what that mode expects.
     if (!opts.config().authEnabled) return null;
+    const heldAtStart = accessToken;
     try {
       const tokens = await refreshAccessToken(opts.fetchImpl, opts.config());
       return store(tokens.accessToken);
     } catch (err) {
       if (err instanceof IdentityHttpError && err.unauthenticated) {
-        // The session is genuinely over: revoked, expired, or never existed
-        // (the cold-load-while-signed-out case, which is not an error).
+        // adopt() can win a race with this in-flight refresh (callback
+        // exchange vs bootstrap probe). Keep a token that arrived while
+        // we were waiting; a 401 against the same held token is a real
+        // sign-out (memql#4160).
+        if (accessToken && accessToken !== heldAtStart) return accessToken;
         accessToken = null;
         opts.onSessionEnded?.();
         return null;
