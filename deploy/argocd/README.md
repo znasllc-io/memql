@@ -14,7 +14,7 @@ anymore — Argo's `selfHeal` reverts any out-of-band change. Rollback =
               │  Argo CD (argocd ns)            │  project `memql`
               │  watches main                   │
               │   app memql  -> ns memql        │  (manual sync)
-              └──────────┬──────────────────────┘
+              └────────────────────────┤
                          ▼
           ONE NAMESPACE, ONE CLUSTER, ONE BASE
 ```
@@ -236,5 +236,5 @@ kubectl delete -f deploy/argocd/apps/root.yaml     # removes the apps (finalizer
 kubectl delete -k deploy/argocd/bootstrap          # removes Argo CD
 ```
 Removing Argo does NOT touch the running mesh (the Deployments stay); it only
-stops reconciliation. The overlay + `aks-deploy.sh`/`aks-apply.sh` remain a
-working manual path.
+stops reconciliation. Re-apply the overlay with `kubectl apply -k` only as
+break-glass; GitOps is the sanctioned path. `aks-deploy.sh` is gone.
