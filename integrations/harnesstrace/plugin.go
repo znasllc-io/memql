@@ -16,6 +16,9 @@ import (
 // handle (the trace builtin then resolves to "no handler" rather than
 // failing startup), mirroring harnessrecall.
 func init() {
+	// The harness is a PACK since memql#4190; see harnessrecall's init for
+	// what the binding buys.
+	memql.BindPluginToPack("harnessTrace", "harness")
 	memql.RegisterPlugin("harnessTrace", func(pctx memql.PluginContext) (memql.IntegrationProvider, error) {
 		if pctx.BunDB == nil {
 			// No database getter on this node-type binary; the trace

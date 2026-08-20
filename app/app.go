@@ -106,7 +106,16 @@ type App struct {
 	registry memoryNodesDatabase.Registry
 
 	// Phase 3: engine
-	engine              *memql.MemQLEngine
+	engine *memql.MemQLEngine
+	// disabledPackDomains is the boot-time projection of
+	// v1:platform:packState (module-registry design section 4.2): the pack
+	// domains whose newest row says enabled=false, read in engineAndBus
+	// after the database starts and before engine.Init runs the loaders.
+	// Phase 4 consults it to skip disabled packs' Go factories
+	// (materializePlugins) and pack-conditional wiring (the harness
+	// reconciler). The same set is handed to the DSL layer, which owns the
+	// loaders' mounted-inert view of it.
+	disabledPackDomains map[string]struct{}
 	eventBus            *events.Bus
 	wiring              *bus.Wiring
 	automationScheduler *automations.Scheduler

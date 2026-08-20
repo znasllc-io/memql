@@ -65,7 +65,11 @@ func TestDeployControlReachesTheIdentityNodeFromABff(t *testing.T) {
 			DeployControl: &memqlv1.DeployControlMsg{
 				RequestId: requestId,
 				Request: &memqlv1.DeployControlMsg_GetDeploymentStatus{
-					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{Env: "staging"},
+					// The env field died with the environment dimension (epic
+					// memql#3943); this lane is not compiled by CI, so the
+					// removal rotted here unseen until memql#4188's tests
+					// joined the package.
+					GetDeploymentStatus: &memqlv1.GetDeploymentStatusRequest{},
 				},
 			},
 		},
@@ -94,11 +98,9 @@ func TestDeployControlReachesTheIdentityNodeFromABff(t *testing.T) {
 	// argument error -- was decided by the service on the identity node, which
 	// is what "the hop works" means.
 	t.Logf("deploy status answered by the identity node: ok=%v code=%v", res.GetOk(), code)
-	if res.GetOk() {
-		if got := res.GetDeploymentStatus().GetEnv(); got != "staging" {
-			t.Errorf("status env = %q, want staging", got)
-		}
-	}
+	// (The status used to echo an env label; the environment dimension is
+	// gone -- epic memql#3943 -- and "the hop answered" above is the whole
+	// property this gate holds.)
 }
 
 // TestForwardedRollbackRefusesANonOwnerInTheCluster is the live-cluster mirror

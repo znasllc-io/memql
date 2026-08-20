@@ -15,13 +15,14 @@ The complete map of MemQL documentation. Layout + rules:
 ## Public docs (`docs/public/`)
 
 ### Overview (`overview/`)
-- [Why MemQL Is a Harness, Not a Library](docs/public/overview/why-memql-harness.md) — the proof-driven thesis: MemQL is a running harness + memory substrate.
-- [MemQL vs. Other Harnesses](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
+- [What Is MemQL](docs/public/overview/what-is-memql.md) — the platform: modules it runs, clients you build on it, the memory graph underneath.
+- [The Harness Module](docs/public/overview/why-memql-harness.md) — the proof-driven tour of the module that runs agents: loop, budgets, memory consolidation.
+- [MemQL vs. Agent Libraries and Frameworks](docs/public/overview/vs-other-harnesses.md) — honest comparison with the Go + Python field.
 - [Quickstart](docs/public/overview/quickstart.md) — get running fast.
 - [Tech Stack & Practices](docs/public/overview/tech-stack.md) — the stack + engineering practices.
 
 ### Concepts (`concepts/`)
-- [Architecture](docs/public/concepts/architecture.md) · [Events](docs/public/concepts/events.md) · [Identifiers](docs/public/concepts/identifiers.md) · [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md)
+- [Architecture](docs/public/concepts/architecture.md) · [Events](docs/public/concepts/events.md) · [Identifiers](docs/public/concepts/identifiers.md) · [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md) · [Modules](docs/public/concepts/modules.md) · [Clients](docs/public/concepts/clients.md)
 - [Data Validation](docs/public/concepts/data-validation.md) · [Concept Versioning](docs/public/concepts/concept-versioning.md) · [Concept Seeding](docs/public/concepts/concept-seeding.md)
 - [Permissions & Access Control](docs/public/concepts/permissions-and-access-control.md) · [Tool ↔ Knowledge-Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md)
 - [Partition Scoping](docs/public/concepts/partition-scoping.md) -- the canonical tenant scope; core scopes by partition, not spaceId
