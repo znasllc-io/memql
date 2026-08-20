@@ -1,0 +1,18 @@
+// shopifypack reads (memql#4138). Owned: a caller sees only shops they attached.
+
+@actor
+query shop shopById {
+  args {
+    shopId  string!
+  }
+  filter  row.id==args.shopId && ownerUserId==actor.userId
+  shape   shopFull
+}
+
+@actor
+query shop shops {
+  filter    ownerUserId==actor.userId
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     shopFull
+}

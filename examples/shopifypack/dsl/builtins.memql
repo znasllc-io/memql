@@ -1,0 +1,40 @@
+// shopifypack builtins (memql#4138).
+//
+// Go validates secret NAMES before a write. These are the portal
+// buttons: attach, store secrets, toggle sync.
+
+@enabled
+@executor("integration.shopifypack.attachShop")
+@args(profile="object")
+@description("Attach a Shopify shop. Token fields must be secret names (MEMQL_SHOPIFY_*), never token values.")
+builtin shopifyPackAttachShop {
+  shopId                 string  @required  @description("Row id for the attached shop.")
+  storeDomain            string  @required  @description("Shop hostname.")
+  storefrontTokenSecret  string  @required  @description("Secret name, not the token.")
+  adminTokenSecret       string  @required  @description("Secret name, not the token.")
+  storeDomainSecret      string  @description("Optional secret name for the shop domain.")
+  apiVersionSecret       string  @description("Optional secret name for the API version.")
+  apiVersion             string  @description("Optional API version as data.")
+  syncEnabled            bool    @description("Initial sync toggle. Defaults true.")
+}
+
+@enabled
+@executor("integration.shopifypack.setShopSecrets")
+@args(profile="object")
+@description("Replace secret references on an attached shop. Names only; token values are refused.")
+builtin shopifyPackSetShopSecrets {
+  shopId                 string  @required  @description("Attached shop id.")
+  storefrontTokenSecret  string  @required  @description("Secret name, not the token.")
+  adminTokenSecret       string  @required  @description("Secret name, not the token.")
+  storeDomainSecret      string  @description("Optional secret name for the shop domain.")
+  apiVersionSecret       string  @description("Optional secret name for the API version.")
+}
+
+@enabled
+@executor("integration.shopifypack.setShopSync")
+@args(profile="object")
+@description("Flip Shopify index sync on or off. Data, not a rebuild.")
+builtin shopifyPackSetShopSync {
+  shopId       string  @required  @description("Attached shop id.")
+  syncEnabled  bool    @required  @description("Whether inbound apply + reconcile may write the thin index.")
+}
