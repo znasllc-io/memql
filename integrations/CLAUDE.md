@@ -137,7 +137,7 @@ integrations/
 ├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)
 ├── rbac/              # Relational governance rank arithmetic -- canCreatePrincipal, governPrincipal
 ├── router/            # BYOK credential + budget admin -- setApiKey, listModels, listPolicies
-├── shopify/           # Storefront/Admin product read -- fetchProduct (GID, handle, availableForSale)
+├── shopify/           # Storefront/Admin product read + thin index inbound/reconcile (GID, handle, availableForSale)
 ├── similarity/        # pgvector similarTo() builtin
 ├── stt/               # Speech-to-text -- transcribe (batch capability + streaming session)
 ├── telephony/         # PSTN edge -- number provisioning, call control, E911, consent, DTMF
@@ -340,14 +340,16 @@ The database connection itself remains a core component. This integration expose
 Uses VisionAIProvider for image descriptions.
 
 ### shopify/ - Shopify Storefront + Admin
-**Purpose:** Server-side product read for the thin catalog index (memql#4136).
+**Purpose:** Server-side product read and thin catalog index (memql#4136, #4137).
 First slice: GID, handle, `availableForSale`. Tokens stay off any
 browser-reachable surface. Checkout stays `cart.checkoutUrl`.
 
 **DSL Capabilities:**
 - `integration.shopify.fetchProduct` -- read GID / handle / availableForSale by Storefront GID or handle (Admin GraphQL if only an Admin token is set; GID required)
+- `integration.shopify.applyInboundProduct` -- webhook apply: fetch, then upsert the three fields or retire on a miss. Never invents.
+- `integration.shopify.reconcileProduct` / `reconcileIndex` -- re-fetch known GIDs. A miss retires; nothing new is invented.
 
-Opt-out when `MEMQL_SHOPIFY_STORE_DOMAIN` plus a Storefront or Admin token is missing.
+The plug-in always registers so inbound builtins exist. Fetch/persist no-op when `MEMQL_SHOPIFY_STORE_DOMAIN` plus a Storefront or Admin token is missing.
 
 ### azureblob/ - Azure Blob Storage
 **Purpose:** Cloud storage file operations (registered as `storage`)

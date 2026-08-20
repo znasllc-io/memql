@@ -1,0 +1,20 @@
+@executor("integration.shopify.applyInboundProduct")
+@description("Apply a staged inbound Shopify product webhook: parse the GID, fetch GID/handle/availableForSale from Storefront, upsert only if Shopify returns the product. A miss is not invented (retire a row we already had). Non-shopify or non-product deliveries are a no-op. Unconfigured Shopify is a no-op, not a failure.")
+builtin shopifyApplyInboundProduct {
+  inboundRequestId  string
+  body              string
+  source            string
+  topic             string
+}
+
+@executor("integration.shopify.reconcileProduct")
+@description("Re-fetch one thin-index product from Storefront. Upserts the three fields on a hit; retires the row on a miss. Never invents a GID we did not already ask Shopify for.")
+builtin shopifyReconcileProduct {
+  id      string
+  handle  string
+}
+
+@executor("integration.shopify.reconcileIndex")
+@description("Scheduled reconcile of present thin-index rows. Each known GID is re-fetched; a miss retires, a hit upserts. Nothing new is invented. No-op when Shopify is unconfigured.")
+builtin shopifyReconcileIndex {
+}

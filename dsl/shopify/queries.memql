@@ -1,0 +1,28 @@
+// shopify domain -- thin index reads (memql#4137).
+//
+// clusterOwner reads: the catalog is deployment-wide. The portal and
+// campaigns/reviews/agents ask through these queries, not the browser
+// Storefront token.
+
+/// One thin product by GID.
+@actor
+query shopifyProduct shopifyProductById {
+  args {
+    productId  string!
+  }
+  filter  row.id==args.productId && actor.isClusterOwner==true
+  shape   shopifyProductFull
+}
+
+/// Index rows, newest first. Optional handle / present filters.
+@actor
+query shopifyProduct shopifyProducts {
+  args {
+    handle   string
+    present  bool
+  }
+  filter    actor.isClusterOwner==true && when(args.handle) { handle==args.handle } && when(args.present) { present==args.present }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     shopifyProductFull
+}
