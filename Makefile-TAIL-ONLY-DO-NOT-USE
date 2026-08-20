@@ -1,0 +1,371 @@
+## Install runtime-core (@znasllc-io/memql-sdk-core) dev dependencies
+## (typescript). Idempotent.
+##
+## `npm ci`, not `npm install`: sdk/ts commits its package-lock.json as of
+## memql#3344, so the install is reproducible and integrity-pinned. It used
+## `npm install` only because that lockfile had never been committed.
+sdk-ts-install:
+	cd sdk/ts && npm ci --no-audit --no-fund
+
+## Typecheck the runtime core. Runs `tsc --noEmit` against sdk/ts. CI
+## gates the core SDK through this target. Requires node + npm.
+sdk-ts-typecheck:
+	cd sdk/ts && npm run typecheck
+
+## Run the runtime-core test suite. Compiles src + test via the
+## tsconfig.test.json overlay and drives node:test against the
+## emitted JS. Zero new runtime deps -- uses Node's built-in
+## test runner. Requires node + npm.
+sdk-ts-test:
+	cd sdk/ts && npm test
+
+## Install view-kit (@znasllc-io/memql-view-kit) dev dependencies. Idempotent.
+viewkit-install:
+	cd sdk/ts-viewkit && npm install --no-audit --no-fund
+
+## Typecheck view-kit. Runs `tsc --noEmit` against sdk/ts-viewkit.
+viewkit-typecheck:
+	cd sdk/ts-viewkit && npm run typecheck
+
+## Run the view-kit test suite via node:test. Zero runtime deps.
+viewkit-test:
+	cd sdk/ts-viewkit && npm test
+
+## Build the workspace packages the extension depends on via `file:`. Their
+## dist/ must exist before `npm ci` in editors/vscode can resolve them, so a
+## clean checkout needs this first.
+##
+## The recipe itself lives in scripts/vscode/deps.sh rather than here, because
+## EVERY lane that compiles the extension needs it. While it existed as three
+## hand-maintained copies the fourth consumer -- package.sh, behind
+## `make vscode-install` -- was written without one and shipped broken from a
+## clean checkout (memql#3340).
+vscode-deps:
+	bash scripts/vscode/deps.sh
+
+## Run the VS Code extension's unit tests. Covers only modules that do not
+## import `vscode`; the API layer is exercised by the host lane below.
+vscode-test: vscode-deps
+	cd editors/vscode && npm ci --no-audit --no-fund && npm test
+
+## Install the MemQL Portal's dependencies (clients/portal), building the
+## sdk/ts + sdk/ts-viewkit `file:` dependencies first -- their dist/ must
+## exist before anything in the portal can resolve against them. Idempotent.
+portal-install:
+	bash scripts/portal/build.sh install
+
+## Typecheck the portal. `tsc -b` over both projects: the browser sources and
+## vite.config.ts are deliberately separate type environments.
+portal-typecheck:
+	bash scripts/portal/build.sh typecheck
+
+## Run the portal test suite (vitest + @testing-library/react on jsdom).
+portal-test:
+	bash scripts/portal/build.sh test
+
+## Build the portal bundle into clients/portal/dist. This is what the
+## Dockerfile's portal stage runs. To serve a locally-built bundle, point a
+## site row's bundleRef at it (file:///abs/path/clients/portal/dist via
+## updateSiteBundle) -- the portal is site #1 (memql#3711), so there is no
+## longer an env var that repoints it.
+portal-build:
+	bash scripts/portal/build.sh build
+
+## Remove the portal's build output (dist + the vite/tsc caches). Leaves
+## node_modules alone -- `npm ci` already fixes anything stale in there.
+portal-clean:
+	bash scripts/portal/build.sh clean
+
+## Run the VS Code extension's Extension Development Host smoke lane
+## (memql#3302): downloads a real VS Code and asserts the host-only surface --
+## activation, command registration, the activity-bar views, the host runtime's
+## WebSocket story, a watcher on a path OUTSIDE the workspace, and webview
+## creation. Needs a display (falls back to xvfb-run when DISPLAY is unset).
+## Deliberately not folded into `vscode-test`, which stays fast and
+## Electron-free.
+vscode-test-host:
+	bash scripts/vscode/host-test.sh
+
+## Run all tests
+test:
+	$(GO) test $(ALL_PKGS)
+
+## Run all tests with verbose output
+test-v:
+	$(GO) test -v $(ALL_PKGS)
+
+## Run tests with coverage report
+test-cover:
+	$(GO) test -coverprofile=coverage.out $(ALL_PKGS)
+	$(GO) tool cover -func=coverage.out
+	@rm -f coverage.out
+
+## Run Polyphon/cognition tests only
+test-polyphon:
+	$(GO) test ./component/polyphon/... ./integrations/cognition/...
+
+# ---------------------------------------------------------------------------
+# Code quality
+# ---------------------------------------------------------------------------
+
+##@ Quality & codegen
+.PHONY: vet fmt lint tidy generate proto-gen proto-gen-check prs-stalled claims-stale arch-model arch-model-check frontdoor frontdoor-hosts frontdoor-hosts-check frontdoor-paths frontdoor-paths-check
+
+## Run go vet on all packages
+vet:
+	$(GO) vet $(ALL_PKGS)
+
+## Format all Go files
+fmt:
+	$(GO) fmt $(ALL_PKGS)
+
+## Run vet + fmt (quick lint)
+lint: fmt vet
+
+## Report PRs nobody is advancing: green + mergeable + un-enqueued (memql#2833),
+## and closed-without-merging whose branch and issue are both still live
+## (memql#2887). READ-ONLY: it never enqueues, because green is not reviewed.
+## IDLE_MINUTES=15 tightens the idle threshold -- head-commit age, not last
+## activity. CLOSED_MAX_AGE_MINUTES=43200 widens the closed-PR lookback from its
+## 14-day default. REPO=owner/name retargets.
+prs-stalled:
+	bash scripts/dev/stalled-prs.sh
+
+## Report claimed:* labels no live session is holding (memql#2834). READ-ONLY by
+## default. Pass APPLY=1 to remove the label from CLOSED issues whose claim has
+## also gone cold; claims on OPEN issues are always reported, never swept.
+##
+## $(filter ...), not a bare $(if $(APPLY),...): make's $(if) tests emptiness,
+## not truth, so APPLY=0 / APPLY=no / APPLY=false would all have passed --apply
+## and written to GitHub. On a target whose whole safety story is "mutation is
+## opt-in", APPLY=0 meaning yes inverts the operator's obvious intent. Anything
+## outside {1,true,yes,on} -- including APPLY=Y and APPLY=2 -- is read as false,
+## which is the fail-safe direction.
+claims-stale:
+	bash scripts/dev/stale-claims.sh $(if $(filter 1 true yes on,$(APPLY)),--apply,)
+
+## Tidy go.mod dependencies
+tidy:
+	$(GO) mod tidy
+
+## Run code generation (protobuf, etc.)
+generate:
+	$(GO) generate $(ALL_PKGS)
+
+## Regenerate the pinned-toolchain proto bindings (component/grpc,
+## component/node, component/bus). The fix command for `proto-gen-check`, and
+## since memql#3251 the ONLY generation path: the //go:generate directives in
+## those three packages delegate here rather than invoking a bare `protoc`,
+## which is what let `make generate` disagree with this target about the protoc
+## version and rewrite the stamp in all nine generated files.
+##
+## PROTO_GEN_ONLY=<proto dir> narrows the run to one directory. It exists for
+## those directives, which are necessarily per-package: each one delegates here
+## scoped to itself, so `go generate` over the tree regenerates each dir once
+## instead of regenerating all three, three times. Unset means every target,
+## which is what a human running `make proto-gen` and the drift gate both want.
+##
+## Emptiness is the right test for $(if) here (unlike claims-stale, where it
+## would read APPLY=0 as yes): an empty PROTO_GEN_ONLY genuinely means "no
+## narrowing", and an unrecognised value is rejected by the script.
+proto-gen:
+	@bash scripts/dev/proto-gen.sh $(if $(PROTO_GEN_ONLY),--only=$(PROTO_GEN_ONLY),)
+
+## CI gate: regenerate the pinned proto bindings, then diff against the
+## checked-in tree (ignoring the cosmetic protoc version stamp). Fails if a
+## .proto evolved without the generator running. Mirrors `sdk-gen-check`.
+proto-gen-check:
+	@bash scripts/dev/proto-gen.sh --check
+
+# ---------------------------------------------------------------------------
+# Docker image targets
+# ---------------------------------------------------------------------------
+
+##@ Release (engine image)
+##> The cloud deploy is GitOps: bump the digest in deploy/k8s/overlays/cloud + merge -> ArgoCD reconciles.
+.PHONY: release tag-submodules
+
+## Cut an immutable engine release image memql:<VERSION> from VERSION + the
+## short git SHA (znasllc-io/memql#493, epic #491). The engine ships every node
+## type product-agnostic; this image tag is the engine-version leg of a
+## release's {engine version, bundle digest, client digest} triple, pinned in
+## one deploy overlay (not a standalone backend-version file). The X.Y.Z tag is
+## write-once: pushing over an existing tag is refused without --allow-overwrite.
+## Implementation lives in scripts/release/release.sh per the function-based
+## shell-script convention (CLAUDE.md).
+## PUSH=1 is BREAK-GLASS, not the release path (memql#4116). Deployable
+## images are built by the GitHub build server (OIDC -> ACR), so a push from
+## an operator machine needs CONFIRM=push-from-an-operator-machine and is
+## refused (exit 3) without it. Building locally is unaffected.
+##   make release                                   # local image, VERSION semver prefix
+##   make release VERSION=2.4.0                      # explicit version, local only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1   # plan only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 CONFIRM=push-from-an-operator-machine
+release:
+	@bash scripts/release/release.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${REGISTRY:+--registry=$$REGISTRY} \
+		$${ACR:+--acr=$$ACR} \
+		$${PUSH:+--push} \
+		$${CONFIRM:+--confirm=$$CONFIRM} \
+		$${ALLOW_OVERWRITE:+--allow-overwrite} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Cut the Go module tags for the nested modules (memql#3245).
+## A nested module is only fetchable at <module-dir>/vX.Y.Z -- the root tag
+## does NOT publish it. `wire` and `engine` carry independent version lines;
+## every other module is lockstep with the root release. Tags are write-once
+## and name the commit the root vX.Y.Z tag names. See VERSIONING.md.
+##   make tag-submodules VERSION=0.16.0                # all three lines
+##   make tag-submodules VERSION=0.16.0 LINE=wire      # one line
+##   make tag-submodules VERSION=0.16.0 DRY_RUN=1      # plan only
+tag-submodules:
+	@bash scripts/release/tag-submodules.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${LINE:+--line=$$LINE} \
+		$${COMMIT:+--commit=$$COMMIT} \
+		$${NO_PUSH:+--no-push} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+# The per-node `docker-*` targets (docker / docker-bff / docker-voice /
+# docker-cognition / docker-agent / docker-planner) were removed in #2205:
+# immutable release images come from `make release` (and the GitHub build
+# server for the cloud), while the local inner loop is `make dev` (build +
+# k3d import). A hand-built `docker build` image fed neither path.
+
+# ---------------------------------------------------------------------------
+# Dev tooling
+# ---------------------------------------------------------------------------
+# Config has ONE delivery path (epic memql#3958): the memql-secrets Secret.
+# `make secrets` seeds it locally via scripts/k3d/seed-secrets.sh; ESO
+# reconciles it from Key Vault in the cloud. The sealed genesis envelope, its
+# `genesis-seal` target and its .znas format are gone.
+
+##@ Dev tooling
+.PHONY: install-deps env-registry-sync env-registry-check
+.PHONY: setup-agents verify-agents
+
+## Regenerate the embedded env-registry manifest snapshot
+## (component/envregistry/manifest.yaml) from the authored registry
+## (scripts/secrets/manifest.yaml). Run after editing the authored file;
+## TestEmbeddedManifestInSync fails CI otherwise. (Epic 7 / memql#2104)
+env-registry-sync:
+	@bash scripts/secrets/sync-embedded-manifest.sh
+
+## Drift-check the env-var registry both ways: a var read in code but not
+## registered, or a registry entry that appears nowhere in the repo, fails.
+## The shared classifier behind the CI gate (memql#2105).
+env-registry-check:
+	$(GO) run ./cmd/envscan -check
+
+## Install + verify every build-time tool the dev workflow needs:
+## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
+## missing) plus go / docker / k3d / kubectl (verified only -- printed
+## install hint if missing). Idempotent. Run before 'make generate'
+## or after a fresh clone so 'make up' isn't surprised by a missing tool.
+install-deps:
+	@bash scripts/dev/install-deps.sh
+
+## Install the agent stack: the GitHub MCP server, the Superpowers plugin,
+## and the CCPM skill. Idempotent -- every step probes current state first, so
+## a repeat run changes nothing. Needs GITHUB_PAT in the environment or in a
+## gitignored .env at the repo root. See docs/internal/ops/agent-stack.md.
+##   make setup-agents            install what is missing
+##   make setup-agents ARGS=--update   also refresh what is already installed
+setup-agents:
+	@bash scripts/setup-agents.sh $(ARGS)
+
+## Read-only status check for the agent stack; exits non-zero if anything is
+## missing. Installs nothing, so it is safe to run as a gate. Fix with
+## 'make setup-agents'.
+verify-agents:
+	@bash scripts/verify-agents.sh
+
+# ---------------------------------------------------------------------------
+# Deploy gates (engine ops)
+# ---------------------------------------------------------------------------
+
+##@ Deploy gates (engine ops)
+.PHONY: conn-headroom-check
+
+## Connection-headroom deploy gate (memql#1820, from the #1817 53300 spike):
+## check whether the fleet's projected DB connections fit the instance budget.
+## Override the budget via env: MAX_CONNECTIONS, RESERVED_CONNECTIONS,
+## MAX_OPEN_CONNS. Exits non-zero when the peak would exceed budget.
+##   make conn-headroom-check
+##   MAX_CONNECTIONS=300 make conn-headroom-check
+conn-headroom-check:
+	@bash scripts/deploy/conn-headroom-check.sh
+
+# ===========================================================================
+# BREAK-GLASS -- imperative deploy. ArgoCD OWNS the cluster (deploys = merges;
+# selfHeal reverts out-of-band kubectl applies), so this target is the escape
+# hatch for when Argo is unavailable (#2207).
+#
+# THE BLESSED DEPLOY IS A GIT MERGE, NOT `make deploy`:
+#   bump the image digest in deploy/k8s/overlays/cloud + merge to main
+#   -> ArgoCD reconciles. Rollback = `git revert` the overlay. See
+#   docs/public/operate/deployment-strategy.md.
+# ===========================================================================
+
+##@ Deploy (break-glass -- ArgoCD owns the cluster; use only when Argo is unavailable)
+.PHONY: deploy
+
+## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
+## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
+## `memql-cockpit deploy`, which embeds the engine automation runtime, loads the
+## deployment bundle, and runs the PINNED `deployEngineCluster` automation
+## (role-gated + audited + version-pinned) from OUTSIDE the target cluster.
+## See DEVOPS_DSL_BUNDLE_HANDOFF.md "Execution model".
+##
+## NOT the normal path -- the normal path is GitOps (digest bump in
+## overlays/cloud + merge -> ArgoCD syncs). Use this break-glass path only when
+## ArgoCD is unavailable (#2207).
+##
+## OWNER-GATED (honest, not a silent failure): the cockpit's in-process engine
+## carries no database yet, so DB-backed deployment steps cannot complete until
+## the I13 runner surface + a live engine DB are wired (memql#2220/#2228). A real
+## deploy reports `BLOCKED (owner-gated): ...` cleanly; a DRY_RUN is a clean
+## no-op resolve. The cockpit binary is resolved by scripts/deploy/cockpit.sh
+## (COCKPIT_BIN > PATH > built from the sibling ../memql-cockpit via `make
+## cockpit`). There is NO fallback to the old script path.
+##
+## Forwarded knobs: VERSION->--ref, DRY_RUN->--dry-run, plus the role gate
+## (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->--actor for
+## the audit trail. ARGS passes extra cockpit flags through.
+##   make deploy VERSION=0.9.6 ROLE=developer            # imperative roll-out
+##   make deploy VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
+##   make deploy COCKPIT_BIN=/path/to/memql-cockpit      # pin the binary
+deploy:
+	@COCKPIT_BIN="$${COCKPIT_BIN:-}" bash scripts/deploy/cockpit.sh deploy \
+		$${VERSION:+--ref=$$VERSION} \
+		$${ROLE:+--role=$$ROLE} \
+		$${ACTOR:+--actor=$$ACTOR} \
+		$${DRY_RUN:+--dry-run} \
+		$${APPLY:+--apply} \
+		$(ARGS)
+
+# ---------------------------------------------------------------------------
+# Utility targets
+# ---------------------------------------------------------------------------
+
+##@ Utility
+.PHONY: clean version help help-check
+
+## Remove build artifacts
+clean:
+	rm -rf $(BIN_DIR)/ coverage.out
+
+## Print the current version
+version:
+	@echo $(VERSION)
+
+## Show all available targets (auto-generated from the '##' doc comments -- never drifts)
+help:
+	@bash scripts/make/help.sh
+
+## Drift guard: fail if any target lacks a '## ' doc comment (also run by `make test`)
+help-check:
+	@bash scripts/make/help.sh --check && echo "OK: every Makefile target is documented"
