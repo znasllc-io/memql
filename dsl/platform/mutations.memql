@@ -441,3 +441,29 @@ mutate site deleteSite {
     deleted: true
   }
 }
+
+// ---- setPackEnabled (module registry, memql#4189) ----
+
+/// Flip a pack's per-instance enablement in v1:platform:packState. clusterOwner tier via the
+/// concept's @rowAuthz -- these rows are the deployment's, not any operator's, and the tier injects
+/// the actor gate. The caller (component/grpc's SetPackEnabledMsg handler) verifies the owner role
+/// and writes the audit event BEFORE invoking this; the tier here is the independent second layer.
+/// The id is the bare pack domain -- the engine canonicalizes it to
+/// v1:platform:packState:<packDomain>, so one row per pack with the version history as the flip
+/// audit trail. RESTART-REQUIRED lifecycle: the write changes what each node reads at its next
+/// boot, never what a running node has loaded.
+@description("Persist a pack's per-instance enablement state in v1:platform:packState. Absence of a row means enabled; the flip takes effect as each node restarts.")
+mutate packState setPackEnabled {
+  args {
+    id          string!
+    packDomain  string!
+    enabled     bool!
+    reason      string
+  }
+  insert {
+    args.id
+    args.packDomain
+    args.enabled
+    args.reason
+  }
+}

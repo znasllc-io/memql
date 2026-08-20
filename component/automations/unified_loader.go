@@ -96,6 +96,15 @@ func (l *Loader) LoadFromUnifiedTree() ([]*Automation, error) {
 		if !strings.HasSuffix(path, "/automations.memql") {
 			return nil
 		}
+		// A disabled pack is mounted-inert (module-registry design section
+		// 4.2): its automations must not fire, and -- since a load problem
+		// refuses boot -- must not be able to brick a node that has switched
+		// the pack off either. Same predicate baseloader.ReadAll applies for
+		// every other behavioral construct kind; this walker does not read
+		// through baseloader, so it consults the predicate itself.
+		if memqldsl.SkipsBehavioralLoad(path) {
+			return nil
+		}
 		data, readErr := fs.ReadFile(tree, path)
 		if readErr != nil {
 			if l.logger != nil {

@@ -56,6 +56,15 @@ func (a *App) engineAndBus() {
 	}
 	a.engine.SetDatabaseGetter(a.db.BunDB)
 
+	// Per-instance pack enablement (module-registry design section 4.2):
+	// read v1:platform:packState in the window where the database is live
+	// and no DSL loader has run, so Init below loads a disabled pack
+	// mounted-inert (concepts only) and phase 4 skips its Go factories.
+	// This ordering is the whole mechanism -- moving Init above this call
+	// would load every pack's behavioral constructs before the node knows
+	// which packs the instance has switched off.
+	a.loadPackEnablement()
+
 	if err := a.engine.Init(a.registry); err != nil {
 		a.fatal("failed to initialize memory engine", "error", err, "component", memql.ComponentName)
 	}

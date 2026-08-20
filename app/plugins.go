@@ -32,6 +32,16 @@ func (a *App) materializePlugins() {
 
 	pctx := a.pluginContext()
 	for _, p := range plugins {
+		// A plugin bound to a DISABLED pack is not materialized (module-
+		// registry design section 4.2): the pack's DSL half loaded
+		// mounted-inert in phase 3, and this is the Go half of the same
+		// switch. One honest line per skip; the module inventory reports
+		// the state, so the log is a breadcrumb rather than the record.
+		if domain, bound := memql.PackDomainForPlugin(p.Name); bound && a.packDisabled(domain) {
+			a.Logger.Info("pack disabled by v1:platform:packState; factory not materialized",
+				"pack", p.Name, "packDomain", domain)
+			continue
+		}
 		// Reject a pack built against an incompatible Plugin SDK contract
 		// version before materializing it -- a stale pack fails loudly here
 		// instead of mis-binding against a contract it was not built for.

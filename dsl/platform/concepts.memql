@@ -202,3 +202,23 @@ concept site {
   notes        string   @description("Operator-facing notes.")
   deleted      bool     @default("false") @description("Soft-delete flag (memql#3717). isNotDeleted filters it out of siteByHostname/sitesAll/siteById so the edge stops resolving a deleted site's hostname; the row survives for history. deleteSite stamps this true. A systemOwned row is refused at the write path regardless of this field -- see the Go guard wired beside executeWrite.")
 }
+
+/// Per-instance pack enablement state (module-registry design,
+/// docs/superpowers/specs/2026-08-20-module-registry-design.md section 4). One row per pack at the
+/// deterministic id v1:platform:packState:<packDomain>; the append-only version history IS the audit
+/// trail of flips. ABSENCE OF A ROW MEANS ENABLED, so a pack ships with zero behavior change and a
+/// fresh database needs no seeding. Read once per node at boot (app phase 3, after the database
+/// starts and before the DSL loaders run); a flip takes effect as each node restarts, and the module
+/// inventory reports enabled-vs-loaded honestly in between. A row naming no registered pack domain
+/// is reported by the inventory and otherwise ignored.
+///
+/// clusterOwner tier for the same reason v1:platform:site and v1:campaigns:sendJob carry it: what a
+/// cluster RUNS is one deployment's fact, not any individual operator's rows, and "list every
+/// pack's state" must be expressible.
+@rowAuthz(clusterOwner)
+@displayCard(primary="packDomain", secondary="reason", status="enabled")
+concept packState {
+  packDomain  string!  @description("The registered pack domain this row governs (the RegisterTree name, e.g. 'harness', 'referencepack'). Also the row id's short form.")
+  enabled     bool!    @description("Desired per-instance state. false = the pack is mounted-inert on every node's next boot: its namespace stays owned and its concepts (and rows) stay readable, but its queries, mutations, builtins, tools, prompts, automations and Go factories are not loaded.")
+  reason      string   @description("Operator note recorded with the flip; shown in the portal's module detail.")
+}
