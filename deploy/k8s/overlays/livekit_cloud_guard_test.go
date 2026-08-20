@@ -43,7 +43,8 @@ var livekitCloudHost = regexp.MustCompile(`[A-Za-z0-9_-]+\.livekit\.cloud`)
 // LOCAL overlay is deliberately absent: pointing it at LiveKit Cloud is the
 // supported local topology, not a leak.
 var cloudPlaneTrees = []string{
-	"cloud", // deploy/k8s/overlays/cloud -- the one cloud overlay (epic memql#3943)
+	"cloud",       // deploy/k8s/overlays/cloud -- top (epic memql#3943)
+	"cloud-entry", // deploy/k8s/overlays/cloud-entry -- keep-it / client (memql#4203)
 	"../base",
 }
 
