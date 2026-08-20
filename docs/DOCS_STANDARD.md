@@ -25,7 +25,7 @@ versioned per memQL release.** (Epic: znasllc-io/memql#1167.)
 docs/
 ├── DOCS_STANDARD.md          # this file
 ├── public/                   # the ONLY tree memql.io consumes
-│   ├── overview/             # what it is, quickstart, install
+│   ├── overview/             # what it is, quickstart, install, roadmap, proving
 │   ├── concepts/             # data model, events, identifiers, mental models
 │   ├── language/             # MemQL DSL: constructs, authoring, reference
 │   ├── ai/                   # AI providers, policies, integrations & tools

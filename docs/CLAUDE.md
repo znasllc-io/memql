@@ -22,7 +22,7 @@ docs/
 ├── DOCS_STANDARD.md   The standard (read this first)
 ├── CLAUDE.md          This file
 ├── public/            Published to memql.io; areas mirror the site sidebar
-│   ├── overview/      what it is, harness thesis, quickstart, tech stack
+│   ├── overview/      what it is, harness thesis, quickstart, tech stack, roadmap, proving
 │   ├── concepts/      data model, events, identifiers, mental models
 │   ├── language/      the MemQL DSL (reference, authoring, naming, specs)
 │   ├── ai/            LLM cost control, operator capabilities
