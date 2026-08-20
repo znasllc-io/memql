@@ -37,11 +37,17 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    // `npm run dev` talks to a cluster over the same relative `/memql/ws`
-    // path the built bundle uses, so the dev server proxies it rather than
-    // the app carrying a dev-only absolute endpoint. MEMQL_PORTAL_DEV_TARGET
+    // `npm run dev` talks to a cluster over the same relative `/_memql/ws`
+    // path the built bundle uses (memql#4157). The rewrite matches the
+    // edge serveAPI hop (`/_memql/*` -> bff `/memql/*`). MEMQL_PORTAL_DEV_TARGET
     // points at whatever front door the developer is running against.
     proxy: {
+      "/_memql/ws": {
+        target: process.env.MEMQL_PORTAL_DEV_TARGET ?? "http://localhost:8085",
+        ws: true,
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/_memql/, "/memql"),
+      },
       "/memql/ws": {
         target: process.env.MEMQL_PORTAL_DEV_TARGET ?? "http://localhost:8085",
         ws: true,

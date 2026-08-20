@@ -224,10 +224,11 @@ export function AuthProvider({
       // ONE unconditional request, and a 401 is a NORMAL outcome. identity
       // sets a JS-readable `memql_session` marker cookie next to the HttpOnly
       // refresh cookie precisely so a SPA can skip this probe -- but that
-      // cookie is set on the IDENTITY origin and the portal is served from the
-      // bff's, so document.cookie here cannot see it. Probing unconditionally
-      // is the honest cost of the cross-origin topology; it is one request per
-      // cold load.
+      // cookie used to be set on the IDENTITY origin when exchange was
+      // cross-origin. Exchange is now same-origin through serveIdentityXHR,
+      // so the marker would be visible -- but the HttpOnly refresh cookie is
+      // not, and a missing marker must never skip a live session. One unconditional
+      // request per cold load (memql#4158).
       const token = await authSource.refresh();
       if (cancelled || generation.current !== mine) return;
       // Cold landing: no session on first probe. SignInPage auto-starts

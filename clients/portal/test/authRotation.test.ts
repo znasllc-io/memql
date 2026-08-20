@@ -90,7 +90,7 @@ describe("bearer auto-rotation across an expiry", () => {
       let conn: Connection | undefined;
       try {
         const dialing = Connection.dial({
-          endpoint: "/memql/ws",
+          endpoint: "/_memql/ws",
           ...(auth ? { auth } : {}),
           clientId: "memql-portal",
           webSocketFactory: (url, protocols) => {

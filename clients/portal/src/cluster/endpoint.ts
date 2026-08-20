@@ -7,9 +7,12 @@
 // from. That is a deliberate property, not a convenience: it means
 // there is no endpoint to configure, no CORS to arrange, and no way for the
 // bundle to end up pointed at a different cluster than the one that served
-// it. `/memql/ws` stays RELATIVE so the SDK resolves it against
+// it. `/_memql/ws` stays RELATIVE so the SDK resolves it against
 // document.location -- the same URL works behind the local traefik front
 // door, behind the cloud nginx ingress, and behind a `vite dev` proxy.
+// The `/_memql` prefix is the edge's same-origin API marker (memql#3712):
+// component/edge rewrites `/_memql/*` to bff `/memql/*`. A browser WS to
+// `/memql/ws` on portal.* is the SPA fallback (index.html), not an upgrade.
 //
 // ===========================================================================
 // THE CLUSTER-REGISTRY DECISION (memql#3315). Read this before adding a
@@ -58,7 +61,7 @@
 // outward in anticipation: the single choke point is what makes that change
 // cheap.
 
-const BRIDGE_PATH = "/memql/ws";
+const BRIDGE_PATH = "/_memql/ws";
 
 // Derived from Vite's `base` rather than hardcoded, the same reasoning as
 // portalRedirectPathFor below.
@@ -68,8 +71,8 @@ const BRIDGE_PATH = "/memql/ws";
 // (the trailing-slash trim after it already reduces "/" to ""). It is left
 // general rather than hardcoded to "" because the SAME function still has
 // to handle a MEMQL_SERVER_PUBLIC_PATH-prefixed deployment or a `vite dev` base
-// override, and because how /memql/ws itself is reached through the edge's
-// same-origin API surface is Task 7's concern (memql#3712), not this one's.
+// override. The API marker itself is `/_memql/ws` (memql#3712 / #4157):
+// Task 7's same-origin surface is no longer deferred.
 export function bridgePathFor(baseUrl: string): string {
   const prefix = baseUrl.replace(/\/portal\/?$/, "").replace(/\/+$/, "");
   return prefix + BRIDGE_PATH;

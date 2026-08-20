@@ -585,3 +585,84 @@ describe("the header", () => {
     expect(navigated).toHaveLength(0);
   });
 });
+
+describe("reload after exchange (memql#4158)", () => {
+  it("cold-remounts signed-in via /auth/refresh with credentials include", async () => {
+    // Access token is in-memory only. After a successful exchange the
+    // host-only memql_refresh cookie is what a reload of / has; the next
+    // AuthProvider (no in-memory token) must probe same-origin
+    // POST /auth/refresh with credentials:"include" and land signed-in
+    // with autoStartAuthorize false. One fetchImpl / one storage -- one
+    // document, one cookie jar. A second mock that never saw the exchange
+    // is the QA confounder (cookie flush across processes).
+    const storage = memoryStorage();
+    storage.setItem(
+      "memql-portal-pending-auth",
+      JSON.stringify({
+        state: "STATE-1",
+        verifier: "VERIFIER-1",
+        returnTo: DEEP_LINK,
+        createdAt: Date.now(),
+      }),
+    );
+
+    let exchanged = false;
+    const refreshInits: Array<RequestInit | undefined> = [];
+    const navigated: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("runtime-config")) {
+        return jsonResponse({
+          identityUrl: "https://identity.memql.localhost",
+          identityApiBaseUrl: "",
+          oauthClientId: "portal",
+          authEnabled: true,
+        });
+      }
+      if (path.includes("/oauth/token")) {
+        expect(init?.credentials).toBe("include");
+        exchanged = true;
+        return jsonResponse({ access_token: "AT-EXCHANGE", expires_in: 900 });
+      }
+      if (path.includes("/auth/refresh")) {
+        refreshInits.push(init);
+        if (!exchanged) return unauthenticated();
+        return jsonResponse({ access_token: "AT-REFRESH", expires_in: 900 });
+      }
+      if (path.includes("/auth/logout")) {
+        return jsonResponse({}, 204);
+      }
+      throw new Error(`unexpected fetch ${path}`);
+    });
+
+    const first = renderPortal({
+      path: "/auth/callback?code=AUTH-CODE&state=STATE-1",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      storage,
+      navigate: (url) => navigated.push(url),
+    });
+    await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());
+    first.unmount();
+
+    // Cold remount: new provider, empty in-memory token, same jar.
+    renderPortal({
+      path: "/",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      storage,
+      navigate: (url) => navigated.push(url),
+    });
+    await waitFor(() => expect(screen.getByText("Concepts")).toBeTruthy());
+
+    expect(refreshInits.length).toBeGreaterThanOrEqual(2);
+    expect(exchanged).toBe(true);
+    for (const init of refreshInits) {
+      expect(init?.credentials).toBe("include");
+    }
+    // autoStartAuthorize stays false when the probe gets a token -- no
+    // authorize email form, no PKCE navigation (memql#4153 / #4152).
+    expect(navigated).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /Continue with/ })).toBeNull();
+  });
+});
