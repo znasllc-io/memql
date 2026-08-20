@@ -334,11 +334,11 @@ func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 			UnsubscribeSecret:  "test-signing-secret-not-a-credential",
 			UnsubscribeBaseURL: "https://example.test",
 		},
-		now:                time.Now,
-		readyCh:            make(chan struct{}),
-		doneCh:             make(chan struct{}),
-		reputation:         newReputationCollector("sender@example.test", "n1"),
-		catalogPurchasable: func(context.Context) (bool, error) { return true, nil },
+		now:               time.Now,
+		readyCh:           make(chan struct{}),
+		doneCh:            make(chan struct{}),
+		reputation:        newReputationCollector("sender@example.test", "n1"),
+		shopifyConfigured: func() bool { return false },
 	}
 	w.limiter = newRateLimiter(w.cfg.SendRatePerMinute, w.now)
 	return w

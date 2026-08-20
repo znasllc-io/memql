@@ -110,9 +110,9 @@ type Worker struct {
 	now      func() time.Time
 	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
 
-	// catalogPurchasable is the #4140 send-time guard. Tests inject it;
-	// production leaves it nil and the worker reads the thin Shopify index.
-	catalogPurchasable func(context.Context) (bool, error)
+	// shopifyConfigured is the #4140 "index in play" half. Tests inject
+	// it; production leaves it nil and reads shopify.ConfigFromEnv.
+	shopifyConfigured func() bool
 
 	// reputation accumulates the per-domain counters this replica observes
 	// (memql#3462), flushed once per drain pass.

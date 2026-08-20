@@ -7,12 +7,39 @@ import (
 	"time"
 )
 
-func TestProductPurchasableEmptyCatalogRefuses(t *testing.T) {
-	if ProductPurchasable(nil) {
-		t.Fatal("empty catalog must not be purchasable")
+func TestCatalogRefusalUnconfiguredEmptyPasses(t *testing.T) {
+	if got := CatalogRefusal(false, nil); got != "" {
+		t.Fatalf("zero rows + unconfigured must pass; got %q", got)
 	}
-	if ProductPurchasable([]IndexProduct{}) {
-		t.Fatal("empty catalog must not be purchasable")
+	if got := CatalogRefusal(false, []IndexProduct{}); got != "" {
+		t.Fatalf("zero rows + unconfigured must pass; got %q", got)
+	}
+}
+
+func TestCatalogRefusalFailsClosedWhenIndexInPlay(t *testing.T) {
+	if got := CatalogRefusal(true, nil); got != ErrNoPurchasableProduct {
+		t.Fatalf("configured + zero rows must refuse; got %q", got)
+	}
+	if got := CatalogRefusal(false, []IndexProduct{{Present: false, AvailableForSale: false}}); got != ErrNoPurchasableProduct {
+		t.Fatalf("retired row means the index is in play; got %q", got)
+	}
+	if got := CatalogRefusal(true, []IndexProduct{{Present: true, AvailableForSale: false}}); got != ErrNoPurchasableProduct {
+		t.Fatalf("unavailable catalog must refuse; got %q", got)
+	}
+}
+
+func TestCatalogRefusalOneAvailablePasses(t *testing.T) {
+	if got := CatalogRefusal(true, []IndexProduct{
+		{Present: true, AvailableForSale: false},
+		{Present: true, AvailableForSale: true},
+	}); got != "" {
+		t.Fatalf("one present + availableForSale must pass; got %q", got)
+	}
+}
+
+func TestProductPurchasableEmptyCatalogIsNotPurchasable(t *testing.T) {
+	if ProductPurchasable(nil) || ProductPurchasable([]IndexProduct{}) {
+		t.Fatal("empty catalog is not purchasable (in-play check is CatalogRefusal)")
 	}
 }
 
@@ -25,50 +52,44 @@ func TestProductPurchasableUnavailableOrRetiredRefuses(t *testing.T) {
 	}
 }
 
-func TestProductPurchasableOneAvailablePasses(t *testing.T) {
-	if !ProductPurchasable([]IndexProduct{
-		{Present: true, AvailableForSale: false},
-		{Present: true, AvailableForSale: true},
-	}) {
-		t.Fatal("one present + availableForSale product must pass")
-	}
-}
-
-func TestAnyPurchasableProductReadsTheIndex(t *testing.T) {
+func TestShopifyIndexReadsPresentAndRetired(t *testing.T) {
 	engine := &fakeEngine{
 		shopifyProducts: []map[string]any{
 			{"id": "gid://shopify/Product/1", "handle": "retired", "present": false, "availableForSale": false},
 			{"id": "gid://shopify/Product/2", "handle": "hat", "present": true, "availableForSale": true},
 		},
 	}
-	ok, err := NewStore(engine).AnyPurchasableProduct(context.Background())
+	products, err := NewStore(engine).ShopifyIndex(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok {
-		t.Fatal("want purchasable when one present product is for sale")
+	if len(products) != 2 {
+		t.Fatalf("want both present and retired rows, got %d", len(products))
 	}
-
-	engine.shopifyProducts = []map[string]any{
-		{"id": "gid://shopify/Product/1", "handle": "gone", "present": true, "availableForSale": false},
-	}
-	ok, err = NewStore(engine).AnyPurchasableProduct(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ok {
-		t.Fatal("unavailable catalog must refuse")
+	if CatalogRefusal(false, products) != "" {
+		t.Fatal("one available product must pass even when env is unconfigured")
 	}
 }
 
-func TestStartSendRefusesEmptyCatalog(t *testing.T) {
+func TestStartSendPassesWhenIndexNotInPlay(t *testing.T) {
 	engine := schedulingEngine()
 	w := newTestWorker(t, engine, &recordingSender{})
-	w.catalogPurchasable = func(context.Context) (bool, error) { return false, nil }
+	if _, err := w.handleStartSend(schedulingCtx(), map[string]any{"campaignId": testCampaign}, 0); err != nil {
+		t.Fatalf("unconfigured + empty index must not block campaigns: %v", err)
+	}
+	if n := len(engine.mutations("enqueueCampaignSend")); n != 1 {
+		t.Fatalf("want the send enqueued, got %d", n)
+	}
+}
+
+func TestStartSendRefusesWhenConfiguredAndEmpty(t *testing.T) {
+	engine := schedulingEngine()
+	w := newTestWorker(t, engine, &recordingSender{})
+	w.shopifyConfigured = func() bool { return true }
 
 	_, err := w.handleStartSend(schedulingCtx(), map[string]any{"campaignId": testCampaign}, 0)
 	if err == nil {
-		t.Fatal("startSend accepted an empty catalog")
+		t.Fatal("startSend accepted a configured empty catalog")
 	}
 	if !strings.Contains(err.Error(), "product_purchasable") {
 		t.Fatalf("refusal must be operator-visible; got %q", err)
@@ -78,18 +99,18 @@ func TestStartSendRefusesEmptyCatalog(t *testing.T) {
 	}
 }
 
-func TestScheduleSendRefusesEmptyCatalog(t *testing.T) {
+func TestScheduleSendRefusesWhenConfiguredAndEmpty(t *testing.T) {
 	engine := schedulingEngine()
 	w := newTestWorker(t, engine, &recordingSender{})
 	atClock(w, time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC))
-	w.catalogPurchasable = func(context.Context) (bool, error) { return false, nil }
+	w.shopifyConfigured = func() bool { return true }
 
 	_, err := w.handleScheduleSend(schedulingCtx(), map[string]any{
 		"campaignId":  testCampaign,
 		"scheduledAt": "2026-08-14T09:00:00Z",
 	}, 0)
 	if err == nil {
-		t.Fatal("scheduleSend accepted an empty catalog")
+		t.Fatal("scheduleSend accepted a configured empty catalog")
 	}
 	if !strings.Contains(err.Error(), "product_purchasable") {
 		t.Fatalf("refusal must be operator-visible; got %q", err)
@@ -98,7 +119,11 @@ func TestScheduleSendRefusesEmptyCatalog(t *testing.T) {
 
 func TestStartSendPassesWhenOneProductAvailable(t *testing.T) {
 	engine := schedulingEngine()
+	engine.shopifyProducts = []map[string]any{
+		{"id": "gid://shopify/Product/1", "handle": "hat", "present": true, "availableForSale": true},
+	}
 	w := newTestWorker(t, engine, &recordingSender{})
+	w.shopifyConfigured = func() bool { return true }
 	if _, err := w.handleStartSend(schedulingCtx(), map[string]any{"campaignId": testCampaign}, 0); err != nil {
 		t.Fatalf("startSend with a purchasable catalog: %v", err)
 	}
@@ -107,7 +132,7 @@ func TestStartSendPassesWhenOneProductAvailable(t *testing.T) {
 	}
 }
 
-func TestFireTimeRefusesEmptyCatalog(t *testing.T) {
+func TestFireTimeRefusesWhenConfiguredAndEmpty(t *testing.T) {
 	engine := &fakeEngine{
 		jobs:     []map[string]any{jobRow()},
 		campaign: campaignRow(),
@@ -116,12 +141,12 @@ func TestFireTimeRefusesEmptyCatalog(t *testing.T) {
 	}
 	sender := &recordingSender{}
 	w := newTestWorker(t, engine, sender)
-	w.catalogPurchasable = func(context.Context) (bool, error) { return false, nil }
+	w.shopifyConfigured = func() bool { return true }
 
 	w.DrainOnce(context.Background())
 
 	if got := sender.recipients(); len(got) != 0 {
-		t.Fatalf("fire-time must not mail against an empty catalog: mailed %v", got)
+		t.Fatalf("fire-time must not mail against an empty in-play catalog: mailed %v", got)
 	}
 	failed := engine.mutations("updateSendJob")
 	found := false

@@ -2,18 +2,20 @@ package campaigns
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/znasllc-io/memql/integrations/shopify"
 )
 
 // purchasable.go -- memql#4140.
 //
-// Marketing send is refused unless the thin Shopify index has at least
-// one present product that is availableForSale. Transactional mail stays
-// on Shopify; this guard is campaigns only.
+// Marketing send is refused when the thin Shopify index is IN PLAY and
+// has no present product availableForSale. dsl/shopify is core, so an
+// empty index is the default on every install -- including products
+// that never attached a shop. Fail closed only when Shopify is
+// configured or at least one shopifyProduct row exists (present or
+// retired). Zero rows + unconfigured passes.
 //
-// The same check runs at start, at schedule, and at fire time. Hours
-// pass between a schedule and the send, so a catalog that emptied
-// overnight still refuses rather than mailing against nothing.
+// The same check runs at start, at schedule, and at fire time.
 
 // ErrNoPurchasableProduct is the operator-visible refusal. The portal
 // surfaces this string as the send-button reason.
@@ -37,14 +39,26 @@ func ProductPurchasable(products []IndexProduct) bool {
 	return false
 }
 
-// AnyPurchasableProduct reads shopifyProducts under the caller's
-// context. Callers that need clusterOwner (the campaigns worker) must
-// pass the engine's system actor. A query error is returned, not
-// swallowed -- a broken index is not "purchasable".
-func (s *Store) AnyPurchasableProduct(ctx context.Context) (bool, error) {
-	rows, err := s.rows(ctx, call("query", "shopifyProducts", arg{"present", true}))
+// CatalogRefusal is the #4140 scope rule. Empty string means pass.
+//
+//	unconfigured + zero rows → pass (index is not in play)
+//	configured, or any row   → fail closed unless one present product is for sale
+func CatalogRefusal(configured bool, products []IndexProduct) string {
+	if !configured && len(products) == 0 {
+		return ""
+	}
+	if ProductPurchasable(products) {
+		return ""
+	}
+	return ErrNoPurchasableProduct
+}
+
+// ShopifyIndex reads every thin-index row (present and retired).
+// Callers that need clusterOwner must pass the engine's system actor.
+func (s *Store) ShopifyIndex(ctx context.Context) ([]IndexProduct, error) {
+	rows, err := s.rows(ctx, call("query", "shopifyProducts"))
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	products := make([]IndexProduct, 0, len(rows))
 	for _, r := range rows {
@@ -53,28 +67,24 @@ func (s *Store) AnyPurchasableProduct(ctx context.Context) (bool, error) {
 			AvailableForSale: boolean(r, "availableForSale"),
 		})
 	}
-	return ProductPurchasable(products), nil
+	return products, nil
 }
 
 // catalogRefusal is the shared start / schedule / fire-time check.
-// Empty string means the guard passes.
 func (w *Worker) catalogRefusal(ctx context.Context) string {
-	ok, err := w.productPurchasable(ctx)
+	if w.store == nil {
+		return "product_purchasable: no store"
+	}
+	products, err := w.store.ShopifyIndex(w.systemActorContext(ctx))
 	if err != nil {
 		return "product_purchasable: " + err.Error()
 	}
-	if !ok {
-		return ErrNoPurchasableProduct
-	}
-	return ""
+	return CatalogRefusal(w.shopifyIsConfigured(), products)
 }
 
-func (w *Worker) productPurchasable(ctx context.Context) (bool, error) {
-	if w.catalogPurchasable != nil {
-		return w.catalogPurchasable(ctx)
+func (w *Worker) shopifyIsConfigured() bool {
+	if w.shopifyConfigured != nil {
+		return w.shopifyConfigured()
 	}
-	if w.store == nil {
-		return false, fmt.Errorf("no store")
-	}
-	return w.store.AnyPurchasableProduct(w.systemActorContext(ctx))
+	return shopify.ConfigFromEnv().Configured()
 }
