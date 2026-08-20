@@ -37,9 +37,11 @@ was deleted once its substance was folded in here and elsewhere).
   partition.
 - **Services stay core; packs are product.** cognition, voice, voice-agent,
   planner, agent are core services (the `mcp` node already builds engine-only
-  with no the product DSL — proof the split works). A "client" is a plugin repo:
-  build-tag-gated Go (`RegisterPlugin`) + embedded `.memql` tree
-  (`RegisterTree`) + routing rules.
+  with no the product DSL — proof the split works). A client repo (stamped
+  from the `memql-project` template) carries the product's `dsl/<product>/`
+  bundle plus its `clients/` SPA surfaces; **packs** are the reusable,
+  client-agnostic product features — build-tag-gated Go (`RegisterPlugin`) +
+  a `.memql` tree (`RegisterTree`) + routing rules.
 - **Telephony attaches to a generic partition/room, never to a the product
   `space`.**
 

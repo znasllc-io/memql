@@ -626,7 +626,7 @@ client; a release = `{engine version, bundle digest, client digest}`):
    DSL bundle (product)     +     client (SPA)      ← the only per-product artifacts
 ```
 
-Genuinely-bespoke product Go (rare) becomes a thin optional `bff/` plugin
+Genuinely-bespoke product Go (rare) becomes a thin optional `bff/` pack
 module in the product repo. Full rationale:
 [docs/internal/design/platform-consolidation.md](docs/internal/design/platform-consolidation.md).
 
@@ -2266,7 +2266,7 @@ openairealtime, rbac, router, similarity, telephony, timeutil, voice,
 workbench, plus node-type-scoped ones (cognition, agent, stt,
 openaiVoice) wired explicitly in `app/integrations_*.go` when their
 dependencies sit outside the stable `PluginContext` surface. `training`
-is a product-repo plugin, not part of engine-only core.
+is a product-repo pack, not part of engine-only core.
 
 ### Extension Points
 

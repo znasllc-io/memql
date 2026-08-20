@@ -7,8 +7,8 @@ External-service adapters and DSL-callable capabilities. The
 (LiveKit, OpenAI WebSocket, Microsoft Graph, GCS)
 into the MemQL DSL via typed capability functions.
 
-For the broader pattern (when to write Go vs MemQL DSL, plug-in
-registration), see [CLAUDE.md](CLAUDE.md).
+For the broader pattern (when to write Go vs MemQL DSL,
+self-registration), see [CLAUDE.md](CLAUDE.md).
 
 ## Package layout
 
@@ -52,15 +52,15 @@ integrations/
 └── workbench/                          # workbenchHost dispatch: exec/fs/http against the per-Plan workspace
 ```
 
-## Plug-in vs explicit wiring
+## Self-registration (`RegisterPlugin`) vs explicit `app/` wiring
 
 memQL has two registration paths for integration providers:
 
-1. **Self-registering plug-in** (`memql.RegisterPlugin(name, factory)`
+1. **Self-registration** (`memql.RegisterPlugin(name, factory)`
    from `init()`). Factory receives a narrow `PluginContext`
    (Logger, Engine, BunDB getter, VisionProvider,
    EmbeddingProviderByName, partition / variable resolvers). This is
-   the preferred path. Anchor the plug-in by adding a blank import to
+   the preferred path. Anchor the package by adding a blank import to
    `app/plugins_core.go` (core integrations); product-specific
    integrations anchor from their pack repo.
    Build-tag-gate the anchor file if the integration only runs on
@@ -71,7 +71,7 @@ memQL has two registration paths for integration providers:
    stt). Lives in `app/integrations_<nodeType>.go` with build tags;
    `engine.RegisterIntegration(provider)` is called directly.
 
-Event routing rules are also plug-in-registerable:
+Event routing rules are also self-registerable:
 `node.RegisterRoutingRule(...)` from `init()`, with build tags on the
 caller deciding which binaries register them. See the product pack's
 routing registration file for an example.
@@ -189,7 +189,7 @@ Providers (selected by `MEMQL_STT_PROVIDER`; default `openai-realtime`):
 
 ## Email (`integrations/email/`)
 
-Self-registering plug-in. Capability:
+Self-registers via `memql.RegisterPlugin`. Capability:
 `integration.email.sendEmail`. Three sender flavors selected by env:
 
 - **GraphSender** (preferred) -- Microsoft Graph `sendMail` via OAuth
@@ -220,7 +220,7 @@ Self-registering plug-in. Capability:
 ## Adding a new integration
 
 See [CLAUDE.md > START Adding New Integrations](CLAUDE.md#start-adding-new-integrations).
-The plug-in path is the right answer in almost every case; touch
+The self-registration path is the right answer in almost every case; touch
 `app/integrations_*.go` only when the dependencies don't fit
 `PluginContext`.
 

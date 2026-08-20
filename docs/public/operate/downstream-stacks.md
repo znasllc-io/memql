@@ -49,7 +49,7 @@ product domain via `RegisterTree(os.DirFS(…))` before the first tree walk.
 So a plain engine image runs any product's DSL with zero product code. A
 "bff" is just an engine `bff` node fronting a product's bundle -- a deploy
 concern, not a repo. Genuinely-bespoke product Go (rare) becomes a thin
-optional `bff/` plugin module in the product repo.
+optional `bff/` pack module in the product repo.
 
 A **release** is `{engine version, bundle digest, client digest}` pinned in
 that one overlay in that one repo -- no cross-repo assembly, no per-node
@@ -182,7 +182,7 @@ data-only DSL bundle image and client image.
 1. The engine never names a product. Product identifiers (concept ids,
    skill slugs, knowledge domains) live in the product's DSL and reach the
    engine at **runtime** through the DSL bundle (`MEMQL_DSL_PATH`), never
-   compiled in. The rare bespoke-Go plugin still registers through the
+   compiled in. The rare bespoke-Go pack still registers through the
    narrow seams (`memql.RegisterPlugin`, `node.RegisterRoutingRule`,
    suggest-domain registration); image names and hostnames come through
    the override flags above.
