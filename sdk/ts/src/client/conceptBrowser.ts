@@ -30,6 +30,15 @@ export interface ConceptPage {
 }
 
 export interface ConceptBrowseOptions extends QueryCallOptions {
+  /**
+   * Walk direction. The default "asc" is the canonical browse ordering the
+   * concept workspace depends on (oldest first, live arrivals banded apart).
+   * "desc" exists for surfaces whose question is "what happened RECENTLY" --
+   * the observability drill-in reads codeMetric windows newest-first
+   * (memql#4192) -- and mints the same keyset cursor bound to its own
+   * ordering. Additive: nothing changes for callers that do not pass it.
+   */
+  order?: "asc" | "desc";
   pageSize?: number;
 }
 
@@ -45,7 +54,7 @@ export async function browseConceptPage(
   // Hand-copying `cursor` + `signal` was correct for today's
   // QueryCallOptions and silently wrong the moment a field is added to it --
   // the new option would compile fine here and never reach the query.
-  const { pageSize: requestedPageSize, ...callOpts } = opts;
+  const { pageSize: requestedPageSize, order, ...callOpts } = opts;
   const pageSize =
     requestedPageSize !== undefined && requestedPageSize > 0
       ? requestedPageSize
@@ -55,7 +64,8 @@ export async function browseConceptPage(
   // keyset-eligible directive chain (leading createdAt sort plus a paginate
   // window). The engine appends `id ASC` as the tie-breaker under equal
   // createdAt.
-  const call = `sort(paginate(concept==${conceptId}, ${pageSize}), "createdAt", "asc")`;
+  const direction = order === "desc" ? "desc" : "asc";
+  const call = `sort(paginate(concept==${conceptId}, ${pageSize}), "createdAt", "${direction}")`;
 
   const result = await query.executeNamed("conceptBrowse", call, callOpts);
 

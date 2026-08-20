@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { ErrorMessage } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Band, Button, DataText } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { NODE_TOKEN_CONCEPT, TOKEN_CONCEPT } from "./rows";
@@ -57,14 +57,15 @@ export function TokensPage(): ReactNode {
       role={role}
       resolved={resolved}
       actions={
-        <MetaButton
+        <Button
+          size="xs"
           onClick={() => {
             console_.reload();
             nodes.reload();
           }}
         >
           Refresh
-        </MetaButton>
+        </Button>
       }
     >
       <Band>
@@ -249,14 +250,14 @@ function RevokeList({
         >
           <span className="min-w-0 text-sm">
             {item.label}
-            <span className="ml-2 font-mono text-xs break-all text-subtle">{item.id}</span>
+            <span className="ml-2 text-xs break-all"><DataText kind="id">{item.id}</DataText></span>
           </span>
           {item.revoked ? (
             <span className="text-xs text-subtle">already revoked</span>
           ) : (
-            <MetaButton tone="danger" disabled={busy} onClick={() => onRevoke(item.id)}>
+            <Button size="xs" tone="danger" disabled={busy} onClick={() => onRevoke(item.id)}>
               Revoke
-            </MetaButton>
+            </Button>
           )}
         </li>
       ))}

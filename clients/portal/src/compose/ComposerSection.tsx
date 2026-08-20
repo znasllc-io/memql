@@ -7,7 +7,8 @@ import {
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { ArrangementBands } from "./ArrangementBands";
 import { ComposeButton, PopulationMeta, SectionHeader } from "./ComposeLayout";
 import type { ComposerAction, ComposerDraft } from "./composerState";
@@ -88,7 +89,7 @@ export function ComposerSection({
     if (status !== "connected") {
       return <Empty>Not connected to a cluster. See the connection state in the header.</Empty>;
     }
-    if (data.registryLoading) return <Loading what="the concept registry" />;
+    if (data.registryLoading) return <Skeleton variant="rows" rows={4} />;
     return (
       <Empty>
         This cluster publishes no concept called{" "}
@@ -178,7 +179,7 @@ export function ComposerSection({
       ) : null}
 
       {arrangement === undefined ? (
-        <Loading what="the rows" />
+        <Skeleton variant="rows" rows={4} />
       ) : (
         <ArrangementBands
           arrangement={arrangement}

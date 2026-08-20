@@ -4,7 +4,8 @@ import { sanitizeArrangement, profileConcept, type Arrangement } from "@znasllc-
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
 import { ArrangementBands } from "./ArrangementBands";
 import { PopulationMeta, SectionHeader } from "./ComposeLayout";
@@ -35,7 +36,7 @@ export function ComposedViewPage(): ReactNode {
   const { view, loading, error, missing } = useSavedView(viewId);
 
   if (error) return <ErrorMessage>Failed to read the view: {error}</ErrorMessage>;
-  if (loading) return <Loading what="the view" />;
+  if (loading) return <Skeleton variant="rows" rows={4} />;
   if (missing || view === null) {
     return (
       <section className="mx-auto max-w-2xl">
@@ -111,7 +112,7 @@ function SavedSection({
     if (status !== "connected") {
       return <Empty>Not connected to a cluster. See the connection state in the header.</Empty>;
     }
-    if (data.registryLoading) return <Loading what="the concept registry" />;
+    if (data.registryLoading) return <Skeleton variant="rows" rows={4} />;
     return (
       <Empty>
         This cluster no longer publishes{" "}

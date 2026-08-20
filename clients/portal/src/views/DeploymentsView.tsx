@@ -17,6 +17,7 @@ import {
 } from "../deploy/rows";
 import { useDeployConsole } from "../deploy/useDeployConsole";
 import { ErrorMessage } from "../components/StatusMessage";
+import { DataText } from "../ui";
 import { ViewElement } from "./ViewElement";
 import { Band, MetaButton, type ViewProps } from "./ViewLayout";
 
@@ -275,7 +276,7 @@ function ReleaseReading({
   }
   return (
     <p className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
-      <span className="text-lg font-semibold tracking-tight">{version}</span>
+      <span className="text-lg font-semibold tracking-tight"><DataText kind="id">{version}</DataText></span>
       {engineVersion && engineVersion !== version ? (
         <span className="text-muted">engine {engineVersion}</span>
       ) : null}

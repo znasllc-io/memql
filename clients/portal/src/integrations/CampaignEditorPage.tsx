@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import { Link, useParams } from "react-router-dom";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Band, Breadcrumbs, Button, ConfirmDialog, Field, PageHeader, Select, Skeleton, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
-import { Field, SubmitButton, TextInput } from "./CampaignsPage";
 import { useCampaignDetail, useCampaigns } from "./useCampaigns";
 import {
   DELIVERY_CONCEPT_ID,
@@ -66,6 +65,10 @@ export function CampaignEditorPage(): ReactNode {
     [campaigns, creating, routeId],
   );
 
+  // Which irreversible action is awaiting confirmation. Starting a send
+  // and cancelling a campaign are the two commitments on this page; both
+  // go through ConfirmDialog so the consequence is stated before it lands.
+  const [confirming, setConfirming] = useState<"start" | "cancel" | null>(null);
   const [name, setName] = useState("");
   const [audienceId, setAudienceId] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -114,7 +117,7 @@ export function CampaignEditorPage(): ReactNode {
     return <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>;
   }
   if (!creating && !existing && loading) {
-    return <Loading what="the campaign" />;
+    return <Skeleton variant="kv" rows={6} />;
   }
   if (!creating && !existing) {
     return (
@@ -130,17 +133,22 @@ export function CampaignEditorPage(): ReactNode {
 
   return (
     <section className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 pb-8">
-      <header className="border-b border-line pb-4">
-        <Link to={campaignsPath()} className="text-xs text-muted hover:text-fg hover:underline">
-          ← Campaigns
-        </Link>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight">
-          {creating ? "New campaign" : name || routeId}
-        </h1>
-        <p className="mt-1 text-sm text-muted">
-          Status <span className="font-medium text-fg">{status}</span>.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow={
+          <Breadcrumbs
+            items={[
+              { label: "Campaigns", to: campaignsPath() },
+              { label: creating ? "New campaign" : name || routeId },
+            ]}
+          />
+        }
+        title={creating ? "New campaign" : name || routeId}
+        blurb={
+          <>
+            Status <span className="font-medium text-fg">{status}</span>.
+          </>
+        }
+      />
 
       {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
       {actionMessage ? (
@@ -196,17 +204,17 @@ export function CampaignEditorPage(): ReactNode {
         </Field>
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <SubmitButton busy={busy} disabled={incomplete}>
+          <Button type="submit" size="xs" busyLabel="Working…" busy={busy} disabled={incomplete}>
             {creating ? "Create draft" : "Save"}
-          </SubmitButton>
+          </Button>
           {creating ? null : (
             <>
-              <MetaButton
+              <Button size="xs"
                 onClick={() => scheduleCampaign({ campaignId: routeId, scheduledAt })}
                 disabled={busy || scheduledAt.trim() === ""}
               >
                 Schedule send
-              </MetaButton>
+              </Button>
               {/* One control, three states. A single button whose label and
                   action follow the campaign's status, rather than three
                   buttons of which two are always wrong: the operator's
@@ -217,21 +225,21 @@ export function CampaignEditorPage(): ReactNode {
                   the delivery ledger is per (campaign, recipient) and a second
                   run would find every recipient terminal and mail nobody. */}
               {status === "sending" ? (
-                <MetaButton onClick={() => pauseSend(routeId)} disabled={busy}>
+                <Button size="xs" onClick={() => pauseSend(routeId)} disabled={busy}>
                   Pause sending
-                </MetaButton>
+                </Button>
               ) : status === "paused" ? (
-                <MetaButton onClick={() => resumeSend(routeId)} disabled={busy}>
+                <Button size="xs" onClick={() => resumeSend(routeId)} disabled={busy}>
                   Resume sending
-                </MetaButton>
+                </Button>
               ) : status === "sent" || status === "cancelled" ? null : (
-                <MetaButton onClick={() => startSend(routeId)} disabled={busy}>
+                <Button size="xs" onClick={() => setConfirming("start")} disabled={busy}>
                   Start sending
-                </MetaButton>
+                </Button>
               )}
-              <MetaButton onClick={() => cancelCampaign(routeId)} disabled={busy} tone="danger">
+              <Button size="xs" onClick={() => setConfirming("cancel")} disabled={busy} tone="danger">
                 Cancel campaign
-              </MetaButton>
+              </Button>
             </>
           )}
         </div>
@@ -259,6 +267,38 @@ export function CampaignEditorPage(): ReactNode {
           )}
         </Band>
       )}
+
+      <ConfirmDialog
+        open={confirming === "start"}
+        title="Start sending this campaign?"
+        confirmLabel="Start sending"
+        busy={busy}
+        onConfirm={() => {
+          setConfirming(null);
+          startSend(routeId);
+        }}
+        onCancel={() => setConfirming(null)}
+      >
+        Sending mails every subscribed member of the audience, minus the cluster-wide
+        suppression list, and cannot be re-run: the delivery ledger records one attempt per
+        recipient. Pausing stops new sends; it does not recall anything already delivered.
+      </ConfirmDialog>
+      <ConfirmDialog
+        open={confirming === "cancel"}
+        title="Cancel this campaign?"
+        confirmLabel="Cancel campaign"
+        tone="danger"
+        busy={busy}
+        onConfirm={() => {
+          setConfirming(null);
+          cancelCampaign(routeId);
+        }}
+        onCancel={() => setConfirming(null)}
+      >
+        A cancelled campaign is terminal: it stops sending and cannot be resumed or re-sent.
+        Deliveries already made stay delivered; re-sending means authoring a new campaign.
+      </ConfirmDialog>
+
     </section>
   );
 }
@@ -273,18 +313,14 @@ function Picker({
   options: readonly { value: string; label: string }[];
 }): ReactNode {
   return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg"
-    >
+    <Select value={value} onChange={onChange}>
       <option value="">Choose…</option>
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }
 

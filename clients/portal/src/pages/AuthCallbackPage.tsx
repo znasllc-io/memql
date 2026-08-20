@@ -4,7 +4,8 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { isRuntimeConfigReady } from "../cluster/config";
-import { ErrorMessage, Loading } from "../components/StatusMessage";
+import { ErrorMessage } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { DEFAULT_RETURN_TO } from "../auth/pending";
 
 // Where the identity service sends the browser back to, carrying either
@@ -117,7 +118,7 @@ export function AuthCallbackPage(): ReactNode {
           </div>
         ) : (
           <div className="mt-3">
-            <Loading what="your session" />
+            <Skeleton variant="text" width="w-40" />
           </div>
         )}
       </div>

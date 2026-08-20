@@ -4,7 +4,7 @@ import { PROPORTION_BAR_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-ki
 
 import { useConcepts } from "../cluster/useConcepts";
 import { ErrorMessage } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Band, Button, Select } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Elsewhere, Reading, Refused } from "./AdminLayout";
 import { adminPath, surfaceById } from "./urls";
@@ -72,7 +72,8 @@ export function OverviewPage(): ReactNode {
       role={role}
       resolved={resolved}
       actions={
-        <MetaButton
+        <Button
+          size="xs"
           onClick={() => {
             people.reload();
             activity.reload();
@@ -82,7 +83,7 @@ export function OverviewPage(): ReactNode {
           }}
         >
           Refresh
-        </MetaButton>
+        </Button>
       }
     >
       <Band>
@@ -146,19 +147,14 @@ export function OverviewPage(): ReactNode {
             <label htmlFor="audit-category" className="sr-only">
               Category
             </label>
-            <select
-              id="audit-category"
-              value={category}
-              onChange={(event) => setCategory(event.target.value)}
-              className="rounded border border-line bg-surface px-2 py-1 text-xs text-fg"
-            >
+            <Select ariaLabel="Audit category" value={category} onChange={setCategory}>
               <option value="">every category</option>
               {AUDIT_CATEGORIES.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>
               ))}
-            </select>
+            </Select>
             <Link to="/views/audit" className="text-xs text-muted hover:text-fg hover:underline">
               Open the audit view
             </Link>

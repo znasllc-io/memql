@@ -2,7 +2,8 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { useConcepts } from "../cluster/useConcepts";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton, TextInput } from "../ui";
 import { filterConcepts } from "../concepts/registry";
 import { VIEWS } from "../views/registry";
 import { ComposeButton } from "./ComposeLayout";
@@ -64,7 +65,7 @@ export function ComposeHomePage(): ReactNode {
         {saved.error ? (
           <ErrorMessage>Failed to read your views: {saved.error}</ErrorMessage>
         ) : saved.loading ? (
-          <Loading what="your saved views" />
+          <Skeleton variant="rows" rows={4} />
         ) : saved.views.length === 0 ? (
           <Empty>You have not composed a view yet.</Empty>
         ) : (
@@ -99,14 +100,10 @@ export function ComposeHomePage(): ReactNode {
             Start from a concept
           </h2>
           <div className="flex items-center gap-2">
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search concepts"
-              aria-label="Search concepts"
-              className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-            />
+            <label className="block">
+              <span className="sr-only">Search concepts</span>
+              <TextInput type="search" value={query} onChange={setQuery} placeholder="Search concepts" />
+            </label>
             <ComposeButton
               tone="accent"
               disabled={selected.length === 0}
@@ -125,7 +122,7 @@ export function ComposeHomePage(): ReactNode {
         {error ? (
           <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
         ) : loading ? (
-          <Loading what="the concept registry" />
+          <Skeleton variant="rows" rows={4} />
         ) : matches.length === 0 ? (
           <Empty>No concept matches that search.</Empty>
         ) : (

@@ -4,6 +4,17 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MemQL Portal</title>
+    <meta
+      name="description"
+      content="MemQL Portal - the browser operations console for a MemQL cluster."
+    />
+    <!-- Brand assets are served from public/ at the site origin; the edge CSP
+         allows no external host, so everything the page references is bundled. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#07090a" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f4ef" />
     <!--
       The theme attribute is written by src/app/theme.ts BEFORE React mounts
       (the module runs at import time, ahead of createRoot) so the first paint

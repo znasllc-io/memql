@@ -35,6 +35,13 @@ const CONCEPTS: Concept[] = [
 function fakeConnection(overrides: Partial<Connection> = {}): Connection {
   const query = {
     listConcepts: vi.fn(async () => CONCEPTS),
+    // The shell reads the caller's access to decide what the rail offers
+    // (the Modules item is owner/admin-only, memql#4191).
+    getMyAccess: vi.fn(async () => ({
+      userId: "user-test",
+      primaryEmail: "op@example.test",
+      clusterRole: "admin",
+    })),
   } as unknown as QueryClient;
   return {
     nodeId: "bff-test",

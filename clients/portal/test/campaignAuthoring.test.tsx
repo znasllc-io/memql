@@ -24,7 +24,7 @@
 // re-parses the rest of the campaign name as MemQL.
 
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
   Result,
@@ -381,6 +381,11 @@ describe("the campaign editor", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Start sending/ }));
+    // Starting a send is irreversible and confirms in a dialog (memql#4181).
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: /Start sending/ }),
+    );
 
     await waitFor(() => expect(callsNamed(calls, "campaignStartSend").length).toBe(1));
     // The keyword matters: `builtin` is what the engine's parser dispatches on,

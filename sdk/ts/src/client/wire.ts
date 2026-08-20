@@ -511,6 +511,9 @@ type ClientPayload =
   | { rotateAuth: RotateAuthPayload }
   | { conceptsList: ConceptsListPayload }
   | { myAccess: MyAccessPayload }
+  | { modulesList: ModulesListPayload }
+  | { moduleDetail: ModuleDetailPayload }
+  | { setPackEnabled: SetPackEnabledPayload }
   | { aiChat: AiChatPayload }
   | { aiSpeech: AiSpeechPayload }
   | { aiTranscribe: AiTranscribePayload }
@@ -1244,6 +1247,84 @@ export type UserRoleWire =
   | "USER_ROLE_READER"
   | "USER_ROLE_DEVELOPER";
 
+// ---------------------------------------------------------------------------
+// Module registry (epic memql#4183). Reads are owner/admin-gated;
+// setPackEnabled is owner-only. Every result carries errorCode/errorMessage
+// INSIDE the payload (a handler error would tear down the multiplexed
+// stream) plus the reporting-node facts, because per-node vs cluster-wide
+// honesty is part of the contract. A secret env var carries set/unset and
+// NOTHING else -- no value, no mask; there is no reveal call.
+// ---------------------------------------------------------------------------
+
+export interface ModulesListPayload {
+  requestId?: string;
+}
+
+export interface ModuleInfoWire {
+  kind?: string;
+  name?: string;
+  description?: string;
+  state?: string;
+  stateDetail?: string;
+  scope?: string;
+  envComponents?: string[];
+  fqnPrefixes?: string[];
+  codeReference?: string;
+}
+
+export interface ModulesListResultPayload {
+  requestId?: string;
+  modules?: ModuleInfoWire[];
+  reportingNodeId?: string;
+  reportingNodeType?: string;
+  errorCode?: number;
+  errorMessage?: string;
+}
+
+export interface ModuleDetailPayload {
+  requestId?: string;
+  kind?: string;
+  name?: string;
+}
+
+export interface ModuleEnvVarWire {
+  name?: string;
+  description?: string;
+  secret?: boolean;
+  scope?: string;
+  requiredFor?: string[];
+  set?: boolean;
+  value?: string;
+  defaultValue?: string;
+}
+
+export interface ModuleDetailResultPayload {
+  requestId?: string;
+  module?: ModuleInfoWire | null;
+  envVars?: ModuleEnvVarWire[];
+  reportingNodeId?: string;
+  reportingNodeType?: string;
+  errorCode?: number;
+  errorMessage?: string;
+}
+
+export interface SetPackEnabledPayload {
+  requestId?: string;
+  packDomain?: string;
+  enabled?: boolean;
+  reason?: string;
+}
+
+export interface SetPackEnabledResultPayload {
+  requestId?: string;
+  packDomain?: string;
+  priorEnabled?: boolean;
+  enabled?: boolean;
+  restartRequired?: boolean;
+  errorCode?: number;
+  errorMessage?: string;
+}
+
 export type ServerMessage = MessageBase & ServerPayload;
 
 type ServerPayload =
@@ -1254,6 +1335,9 @@ type ServerPayload =
   | { heartbeat: HeartbeatPayload }
   | { conceptsListResult: ConceptsListResultPayload }
   | { myAccessResult: MyAccessResultPayload }
+  | { modulesListResult: ModulesListResultPayload }
+  | { moduleDetailResult: ModuleDetailResultPayload }
+  | { setPackEnabledResult: SetPackEnabledResultPayload }
   | { rotateAuthResult: RotateAuthResultPayload }
   | { aiChatResult: AiChatResultPayload }
   | { aiSpeechResult: AiSpeechResultPayload }
@@ -1298,6 +1382,9 @@ export function readServerPayload(msg: ServerMessage):
   | { kind: "heartbeat"; value: HeartbeatPayload }
   | { kind: "conceptsListResult"; value: ConceptsListResultPayload }
   | { kind: "myAccessResult"; value: MyAccessResultPayload }
+  | { kind: "modulesListResult"; value: ModulesListResultPayload }
+  | { kind: "moduleDetailResult"; value: ModuleDetailResultPayload }
+  | { kind: "setPackEnabledResult"; value: SetPackEnabledResultPayload }
   | { kind: "rotateAuthResult"; value: RotateAuthResultPayload }
   | { kind: "aiChatResult"; value: AiChatResultPayload }
   | { kind: "aiSpeechResult"; value: AiSpeechResultPayload }
@@ -1341,6 +1428,12 @@ export function readServerPayload(msg: ServerMessage):
     return { kind: "conceptsListResult", value: m.conceptsListResult as ConceptsListResultPayload };
   if (m.myAccessResult)
     return { kind: "myAccessResult", value: m.myAccessResult as MyAccessResultPayload };
+  if (m.modulesListResult)
+    return { kind: "modulesListResult", value: m.modulesListResult as ModulesListResultPayload };
+  if (m.moduleDetailResult)
+    return { kind: "moduleDetailResult", value: m.moduleDetailResult as ModuleDetailResultPayload };
+  if (m.setPackEnabledResult)
+    return { kind: "setPackEnabledResult", value: m.setPackEnabledResult as SetPackEnabledResultPayload };
   if (m.rotateAuthResult)
     return { kind: "rotateAuthResult", value: m.rotateAuthResult as RotateAuthResultPayload };
   if (m.aiChatResult)

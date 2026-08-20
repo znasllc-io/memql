@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { Button } from "../ui";
 
 // The header's connection state. Deliberately always visible rather than
 // appearing only on failure: "no error shown" and "not looking" are
@@ -13,14 +14,6 @@ const LABELS: Record<string, string> = {
   connected: "Connected",
   closed: "Disconnected",
   error: "Connection failed",
-};
-
-const DOT_CLASSES: Record<string, string> = {
-  idle: "bg-subtle",
-  connecting: "bg-warn animate-pulse",
-  connected: "bg-ok",
-  closed: "bg-subtle",
-  error: "bg-danger",
 };
 
 export function ConnectionIndicator(): ReactNode {
@@ -36,10 +29,8 @@ export function ConnectionIndicator(): ReactNode {
 
   return (
     <div className="flex items-center gap-2 text-sm">
-      <span
-        aria-hidden="true"
-        className={`inline-block h-2 w-2 rounded-full ${DOT_CLASSES[status] ?? "bg-subtle"}`}
-      />
+      {/* The coloured state lives on the rail mark (memql#4180); this row is
+          the words -- the replica id, the version, and the retry. */}
       <span role="status" className="text-fg">
         {LABELS[status] ?? status}
       </span>
@@ -49,13 +40,9 @@ export function ConnectionIndicator(): ReactNode {
         </span>
       ) : null}
       {status === "error" || status === "closed" ? (
-        <button
-          type="button"
-          onClick={reconnect}
-          className="rounded border border-line px-2 py-0.5 text-xs text-fg hover:bg-raised"
-        >
+        <Button size="xs" onClick={reconnect}>
           Retry
-        </button>
+        </Button>
       ) : null}
     </div>
   );

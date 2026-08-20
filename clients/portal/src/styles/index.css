@@ -12,6 +12,17 @@
  */
 
 @import "tailwindcss";
+
+/* Self-hosted brand faces (memql#4177). The edge CSP declares no font-src,
+ * so font requests fall back to default-src 'self' -- a bundled font works
+ * and an external host never can. fontsource packages ship the files into
+ * the bundle; nothing here reaches the network. */
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
+@import "@fontsource/squada-one";
+
 @import "./tokens.css";
 @import "./status.css";
 
@@ -38,14 +49,19 @@
   --color-danger: var(--portal-danger);
   --color-danger-subtle: var(--portal-danger-subtle);
 
+  --color-data-number: var(--portal-data-number);
+  --color-data-string: var(--portal-data-string);
+
   --font-sans: var(--portal-font-sans);
   --font-mono: var(--portal-font-mono);
+  --font-display: var(--portal-font-display);
 
   --text-xs: var(--portal-text-xs);
   --text-sm: var(--portal-text-sm);
   --text-base: var(--portal-text-base);
   --text-lg: var(--portal-text-lg);
   --text-xl: var(--portal-text-xl);
+  --text-display: var(--portal-text-display);
 
   --radius-DEFAULT: var(--portal-radius);
   --radius-lg: var(--portal-radius-lg);
@@ -78,5 +94,97 @@
   :focus-visible {
     outline: 2px solid var(--portal-accent);
     outline-offset: 2px;
+  }
+}
+
+/*
+ * The reactive grammar (memql#4180): the rail mark's connection states and
+ * the accent wash a freshly arrived row gets. CSS rather than JS animation
+ * so one reduced-motion media query flattens all of it to static states.
+ */
+@layer components {
+  @keyframes mm-node-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes mark-breathe {
+    0%,
+    100% {
+      opacity: 0.95;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  @keyframes row-wash {
+    from {
+      background-color: var(--portal-accent-subtle);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+
+  /* A just-arrived row region: a brief accent wash that fades to rest. */
+  .row-wash {
+    animation: row-wash 600ms ease-out;
+  }
+
+  /* Streaming: the nodes pulse in a stagger, the graph visibly alive. */
+  .mark-connection[data-conn="streaming"] .mm-node {
+    animation: mm-node-pulse 2.4s ease-in-out infinite;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n2 {
+    animation-delay: 0.25s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n3 {
+    animation-delay: 0.5s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n4 {
+    animation-delay: 0.75s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n5 {
+    animation-delay: 1s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n6 {
+    animation-delay: 1.25s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n7 {
+    animation-delay: 1.5s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n8 {
+    animation-delay: 1.75s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n9 {
+    animation-delay: 2s;
+  }
+
+  /* Connecting: the whole mark breathes while the dial is in flight. */
+  .mark-connection[data-conn="connecting"] svg {
+    animation: mark-breathe 1.6s ease-in-out infinite;
+  }
+
+  /* Offline (idle / closed / error): dimmed and desaturated, unmistakably
+     not the live mark. A static state -- nothing to animate. */
+  .mark-connection[data-conn="offline"] {
+    opacity: 0.35;
+    filter: grayscale(0.6);
+  }
+
+  /* Reduced motion: static colour/opacity states only. The offline dimming
+     stays (it is not motion); everything that moves stops. */
+  @media (prefers-reduced-motion: reduce) {
+    .mark-connection .mm-node,
+    .mark-connection svg,
+    .row-wash {
+      animation: none !important;
+    }
   }
 }

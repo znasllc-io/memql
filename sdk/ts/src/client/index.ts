@@ -15,6 +15,16 @@ export {
 export { Dispatcher, type DispatcherOptions } from "./dispatcher.js";
 export { QueryClient, type QueryCallOptions } from "./query.js";
 export {
+  ModulesClient,
+  type Module,
+  type ModuleDetail,
+  type ModuleEnvVar,
+  type ModuleKind,
+  type ModulesCallOptions,
+  type ModulesInventory,
+  type SetPackEnabledOutcome,
+} from "./modules.js";
+export {
   browseConceptPage,
   getRowByConceptAndId,
   DEFAULT_CONCEPT_BROWSE_PAGE_SIZE,

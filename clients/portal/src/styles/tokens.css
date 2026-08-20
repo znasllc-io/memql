@@ -1,12 +1,11 @@
 /*
- * The portal's design tokens -- the layer everything else in the epic builds
- * on (#3317's element library, #3319's predefined views).
+ * The portal's design tokens -- the layer everything else builds on.
  *
  * THREE THINGS LIVE HERE AND NOTHING ELSE:
  *
- *   1. --portal-*  the palette, type scale and spacing rhythm. Semantic names
+ *   1. --portal-*  the palette, type scale and radius rhythm. Semantic names
  *      (surface / fg / muted / border / accent / danger), never colour names:
- *      "slate-700" is a value that cannot survive a theme flip, "--portal-fg"
+ *      "mint-300" is a value that cannot survive a theme flip, "--portal-fg"
  *      is a role that can.
  *   2. --vk-*      view-kit's theming contract (sdk/ts-viewkit/src/styles.ts,
  *      VIEW_KIT_CSS_VARIABLES), mapped ONTO the roles above. view-kit ships
@@ -15,80 +14,113 @@
  *      integration -- the renderer inherits a theme flip for free.
  *   3. the light/dark resolution.
  *
- * THEME RESOLUTION, in the order the cascade applies it:
+ * THE PALETTE IS memql.io's, exactly (memql#4177). The neutrals are
+ * green-tinted -- the dark ground is a near-black with a moss cast, the light
+ * ground a warm paper -- and the one accent is the brand green the site's
+ * graph mark wears. Warn and danger are re-derived warm hues muted toward the
+ * same olive cast so the three status families read as one system.
  *
- *   :root                                     -> the complete LIGHT palette.
- *   @media (prefers-color-scheme: dark)
- *     :root:not([data-theme="light"])         -> dark, unless overridden light.
- *   :root[data-theme="dark"]                  -> dark, overriding a light OS.
+ * THEME RESOLUTION -- one definition per token via light-dark():
  *
- * Every token gets its definition on bare `:root`; the dark blocks only
- * REDEFINE. A token defined solely inside a media query is undefined for the
- * other theme, which is how a half-legible dark mode happens. The explicit
- * `data-theme` attribute exists so a later settings toggle (this epic ships
- * one) has something to set -- src/app/theme.ts owns writing it.
+ *   :root { color-scheme: light dark }        -> no data-theme attribute means
+ *                                                "follow the OS", which is the
+ *                                                correct default for a viewer
+ *                                                who has never chosen.
+ *   :root[data-theme="light"] { color-scheme: light }
+ *   :root[data-theme="dark"]  { color-scheme: dark }
+ *
+ * Every colour token is written ONCE as light-dark(<light>, <dark>) and the
+ * three color-scheme declarations above are the entire switch. This replaces
+ * the older pattern of a light :root block plus two byte-identical dark
+ * blocks (one media-queried, one attribute-keyed) that had to be edited in
+ * lockstep -- the duplication this file used to carry a warning about.
+ * light-dark() needs a 2024-era browser, which an operations console can
+ * assume; src/app/theme.ts still owns writing the attribute.
+ *
+ * CONTRAST (measured, WCAG relative luminance -- keep this table honest when
+ * a value moves):
+ *   dark  fg/bg 15.96 · muted/bg 7.68 · subtle/bg 4.04 · accent/bg 10.21
+ *         accent-fg on accent 10.21 · warn/bg 8.95 · danger/bg 6.32
+ *         data-number/surface 16.08 · data-string/surface 9.15
+ *   light fg/bg 15.15 · muted/white 6.42 · subtle/white 3.86 · accent/white 5.14
+ *         accent-fg on accent 5.14 · warn/bg 4.94 · danger/white 6.04
+ *         data-number/white 5.47 · data-string/white 5.02
+ * The binding floors: warn is a border and a dot (non-text UI, >= 3:1 against
+ * the ground it sits on -- both themes clear it with room); accent and the
+ * data tints carry small text (>= 4.5:1 -- both themes clear it).
  */
 
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
 
   /* --- surfaces, back to front ------------------------------------- */
-  --portal-bg: oklch(98.5% 0.003 264);        /* the page itself */
-  --portal-surface: oklch(100% 0 0);          /* cards, panels, the nav rail */
-  --portal-surface-raised: oklch(96.5% 0.004 264); /* hover, selected rows */
+  --portal-bg: light-dark(#f2f4ef, #07090a);          /* the page itself */
+  --portal-surface: light-dark(#ffffff, #0b1110);     /* cards, panels, the rail */
+  --portal-surface-raised: light-dark(#e9ede6, #0e1311); /* hover, selected rows */
 
   /* --- foreground ---------------------------------------------------- */
-  --portal-fg: oklch(23% 0.015 264);          /* body text */
-  --portal-fg-muted: oklch(52% 0.014 264);    /* labels, secondary slots */
-  --portal-fg-subtle: oklch(66% 0.012 264);   /* placeholders, "null" */
+  --portal-fg: light-dark(#14201a, #e8e6dd);          /* body text */
+  --portal-fg-muted: light-dark(#586159, #9ca395);    /* labels, secondary slots */
+  --portal-fg-subtle: light-dark(#7c847b, #6c726a);   /* placeholders, "null" */
 
   /* --- lines --------------------------------------------------------- */
-  --portal-border: oklch(90% 0.006 264);
-  --portal-border-strong: oklch(80% 0.008 264);
+  --portal-border: light-dark(#d6ddd4, #18231e);
+  --portal-border-strong: light-dark(#c2cabf, #213029);
 
-  /* --- accents ------------------------------------------------------- */
-  --portal-accent: oklch(52% 0.19 264);
-  --portal-accent-fg: oklch(99% 0 0);
-  --portal-accent-subtle: oklch(94% 0.04 264);
+  /* --- accents -------------------------------------------------------- */
+  --portal-accent: light-dark(#047d5a, #5ccda7);
+  --portal-accent-fg: light-dark(#ffffff, #07090a);
+  --portal-accent-subtle: light-dark(#dcefe6, #0f2a20);
+  /* The deep brand green, for the rare filled moment that wants the site's
+     darker pole (memql.io's accent-deep #026842 family). Not a status. */
+  --portal-accent-deep: light-dark(#026842, #026842);
 
-  /* --- status -------------------------------------------------------- */
-  --portal-ok: oklch(58% 0.15 155);
-  --portal-ok-subtle: oklch(95% 0.04 155);
-  /* Darker than the amber it started as (70% 0.16 75), which measured 2.76:1
-     on white -- under the 3:1 floor for a non-text UI indicator, and this hue
-     is a border on the live-degraded banner and the fill of the "connecting"
-     dot. 62% takes it to 3.76:1 and it is still unmistakably amber. The dark
-     theme's warn was already clear (9.29:1) and is unchanged. */
-  --portal-warn: oklch(62% 0.16 68);
-  --portal-warn-subtle: oklch(95% 0.04 75);
-  --portal-danger: oklch(56% 0.20 25);
-  --portal-danger-subtle: oklch(95% 0.03 25);
+  /* --- status ---------------------------------------------------------
+   * ok IS the brand green: on a console whose brand is green, "healthy"
+   * wearing the accent is the point, not a collision. warn/danger are warm
+   * hues pulled toward the olive-tinted neutrals so the three families sit
+   * in one palette; ratios in the header table.
+   */
+  --portal-ok: light-dark(#047d5a, #5ccda7);
+  --portal-ok-subtle: light-dark(#dcefe6, #0f2a20);
+  --portal-warn: light-dark(#8a6210, #d2a75a);
+  --portal-warn-subtle: light-dark(#f5ead2, #2a2113);
+  --portal-danger: light-dark(#b3362a, #e0705f);
+  --portal-danger-subtle: light-dark(#f8e3df, #2b1512);
+
+  /* --- the two-voice data tints ---------------------------------------
+   * Graph data (ids, counts, timestamps, field values) renders in the mono
+   * voice with these tints -- numbers mint, strings amber -- mirroring the
+   * site's code samples. Chrome never wears them.
+   */
+  --portal-data-number: light-dark(#0f766e, #98ffe0);
+  --portal-data-string: light-dark(#b45309, #cbb083);
 
   /* --- type scale ----------------------------------------------------
    * A fifth-based ramp, deliberately short. Five sizes is enough for an
    * operations console and a short ramp is what keeps two screens built by
-   * two different issues looking like one product.
+   * two different issues looking like one product. `display` is the one
+   * exception -- the Squada One big-number/wordmark size -- and it is a
+   * moment, not a step pages may reach for casually.
    */
   --portal-text-xs: 0.75rem;
   --portal-text-sm: 0.8125rem;
   --portal-text-base: 0.9375rem;
   --portal-text-lg: 1.125rem;
   --portal-text-xl: 1.5rem;
+  --portal-text-display: 2.25rem;
 
-  --portal-font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    Roboto, "Helvetica Neue", Arial, sans-serif;
-  /* Row ids, concept ids and raw payload values are all monospace: they are
-     read character by character, not word by word. */
-  --portal-font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo,
-    Consolas, "Liberation Mono", monospace;
-
-  /* --- spacing rhythm (4px base) -------------------------------------- */
-  --portal-space-1: 0.25rem;
-  --portal-space-2: 0.5rem;
-  --portal-space-3: 0.75rem;
-  --portal-space-4: 1rem;
-  --portal-space-6: 1.5rem;
-  --portal-space-8: 2rem;
+  /* Inter carries the chrome; JetBrains Mono carries the data voice -- rows,
+     ids and payload values are read character by character, not word by
+     word. Squada One is the display face: the wordmark and big-number
+     moments only. All three are self-hosted (fontsource) because the edge
+     CSP allows no external font host; the stacks keep real fallbacks. */
+  --portal-font-sans: "InterVariable", "Inter", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --portal-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono",
+    Menlo, Consolas, "Liberation Mono", monospace;
+  --portal-font-display: "Squada One", "InterVariable", "Inter", ui-sans-serif,
+    sans-serif;
 
   --portal-radius: 0.375rem;
   --portal-radius-lg: 0.625rem;
@@ -128,70 +160,12 @@
   --vk-chart-surface: var(--portal-surface);
 }
 
-/*
- * Dark, for a viewer who has expressed no preference (no data-theme
- * attribute) and whose OS is dark. Guarded with :not([data-theme="light"]) so
- * an explicit light choice still wins on a dark OS.
- *
- * Only the tokens whose ROLE resolves differently are redefined. The type
- * scale, spacing and radii are theme-invariant and stay above.
- */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
-
-    --portal-bg: oklch(17% 0.012 264);
-    --portal-surface: oklch(21% 0.014 264);
-    --portal-surface-raised: oklch(26% 0.016 264);
-
-    --portal-fg: oklch(94% 0.005 264);
-    --portal-fg-muted: oklch(72% 0.012 264);
-    --portal-fg-subtle: oklch(58% 0.012 264);
-
-    --portal-border: oklch(30% 0.014 264);
-    --portal-border-strong: oklch(42% 0.016 264);
-
-    --portal-accent: oklch(72% 0.15 264);
-    --portal-accent-fg: oklch(17% 0.012 264);
-    --portal-accent-subtle: oklch(30% 0.06 264);
-
-    --portal-ok: oklch(72% 0.15 155);
-    --portal-ok-subtle: oklch(30% 0.06 155);
-    --portal-warn: oklch(80% 0.15 75);
-    --portal-warn-subtle: oklch(30% 0.07 75);
-    --portal-danger: oklch(70% 0.17 25);
-    --portal-danger-subtle: oklch(30% 0.07 25);
-  }
+/* The explicit choice, written by src/app/theme.ts. Pinning color-scheme is
+ * the entire override: every light-dark() token above re-resolves. */
+:root[data-theme="light"] {
+  color-scheme: light;
 }
 
-/*
- * Dark, chosen explicitly. Byte-identical to the block above by necessity:
- * one is "the OS said so", the other is "the operator said so", and CSS has
- * no way to share a declaration block between two different selectors without
- * a preprocessor. Keeping them adjacent is the mitigation -- edit both.
- */
 :root[data-theme="dark"] {
   color-scheme: dark;
-
-  --portal-bg: oklch(17% 0.012 264);
-  --portal-surface: oklch(21% 0.014 264);
-  --portal-surface-raised: oklch(26% 0.016 264);
-
-  --portal-fg: oklch(94% 0.005 264);
-  --portal-fg-muted: oklch(72% 0.012 264);
-  --portal-fg-subtle: oklch(58% 0.012 264);
-
-  --portal-border: oklch(30% 0.014 264);
-  --portal-border-strong: oklch(42% 0.016 264);
-
-  --portal-accent: oklch(72% 0.15 264);
-  --portal-accent-fg: oklch(17% 0.012 264);
-  --portal-accent-subtle: oklch(30% 0.06 264);
-
-  --portal-ok: oklch(72% 0.15 155);
-  --portal-ok-subtle: oklch(30% 0.06 155);
-  --portal-warn: oklch(80% 0.15 75);
-  --portal-warn-subtle: oklch(30% 0.07 75);
-  --portal-danger: oklch(70% 0.17 25);
-  --portal-danger-subtle: oklch(30% 0.07 25);
 }

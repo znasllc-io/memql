@@ -5,7 +5,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { useConcepts } from "../cluster/useConcepts";
 import { ErrorMessage } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Band, Button, ConfirmDialog, DataText, Field as UiField, Select, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { surfaceById } from "./urls";
@@ -86,7 +86,7 @@ export function PeoplePage(): ReactNode {
       surface={surface}
       role={role}
       resolved={resolved}
-      actions={<MetaButton onClick={people.reload}>Refresh</MetaButton>}
+      actions={<Button size="xs" onClick={people.reload}>Refresh</Button>}
     >
       <Band>
         <div className="flex flex-wrap gap-2">
@@ -206,7 +206,7 @@ function PersonDetail({
     <div className="flex flex-col gap-6">
       <Band
         title={field(person, "displayName") || email || id}
-        meta={<span className="font-mono break-all">{id}</span>}
+        meta={<DataText kind="id">{id}</DataText>}
       >
         <div className="grid gap-4 lg:grid-cols-2">
           <ProfileForm person={person} writes={writes} onChanged={onChanged} />
@@ -268,7 +268,7 @@ function ProfileForm({
         <Field label="Birthdate" value={draft.birthdate} onChange={(v) => setDraft({ ...draft, birthdate: v })} />
       </div>
       <div className="mt-4">
-        <SubmitButton busy={writes.busy}>Save the profile</SubmitButton>
+        <FormSubmit busy={writes.busy}>Save the profile</FormSubmit>
       </div>
     </form>
   );
@@ -327,22 +327,16 @@ function RoleForm({
         console; owner alone can roll a deployment back.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Role
-          <select
-            aria-label="Cluster role"
-            value={role}
-            onChange={(event) => setRole(event.target.value)}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-          >
+        <UiField label="Role">
+          <Select ariaLabel="Cluster role" value={role} onChange={setRole}>
             {ROLES.map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
             ))}
-          </select>
-        </label>
-        <SubmitButton busy={writes.busy || role === current}>Apply the role</SubmitButton>
+          </Select>
+        </UiField>
+        <FormSubmit busy={writes.busy || role === current}>Apply the role</FormSubmit>
       </div>
     </form>
   );
@@ -361,12 +355,19 @@ function SuspensionForm({
 }): ReactNode {
   const id = rowId(person);
   const [reason, setReason] = useState("");
+  // Suspending is the dangerous branch, so it confirms in a dialog that
+  // states what stops working; reinstating is the undo and submits directly.
+  const [confirmingSuspend, setConfirmingSuspend] = useState(false);
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
-        writes.run((client) => client.setUserSuspended(id, !suspended, reason), onChanged);
+        if (suspended) {
+          writes.run((client) => client.setUserSuspended(id, false, reason), onChanged);
+        } else {
+          setConfirmingSuspend(true);
+        }
       }}
       className="rounded-lg border border-line bg-surface p-4"
     >
@@ -377,7 +378,7 @@ function SuspensionForm({
             This account is suspended{reasonSuffix(person)}. It cannot sign in.
           </p>
           <div className="mt-3">
-            <SubmitButton busy={writes.busy}>Reinstate the account</SubmitButton>
+            <FormSubmit busy={writes.busy}>Reinstate the account</FormSubmit>
           </div>
         </>
       ) : (
@@ -388,12 +389,28 @@ function SuspensionForm({
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <Field label="Reason" value={reason} onChange={setReason} />
-            <SubmitButton busy={writes.busy} tone="danger">
+            <FormSubmit busy={writes.busy} tone="danger">
               Suspend the account
-            </SubmitButton>
+            </FormSubmit>
           </div>
         </>
       )}
+      <ConfirmDialog
+        open={confirmingSuspend}
+        title="Suspend this account?"
+        confirmLabel="Suspend the account"
+        tone="danger"
+        busy={writes.busy}
+        onConfirm={() => {
+          setConfirmingSuspend(false);
+          writes.run((client) => client.setUserSuspended(id, true, reason), onChanged);
+        }}
+        onCancel={() => setConfirmingSuspend(false)}
+      >
+        {field(person, "displayName") || field(person, "primaryEmail") || id} will not be able to
+        sign in until reinstated. Tokens they already hold are a separate matter — revoke those
+        under Tokens.
+      </ConfirmDialog>
     </form>
   );
 }
@@ -454,22 +471,20 @@ function EnrolmentForm({ person, writes }: { person: Row; writes: WriteState }):
         the moment the passkey is created.
       </p>
       <div className="mt-3 flex flex-wrap items-end gap-2">
-        <label className="flex flex-col gap-1 text-xs text-muted">
-          Valid for
-          <select
-            aria-label="Enrolment link lifetime"
+        <UiField label="Valid for">
+          <Select
+            ariaLabel="Enrolment link lifetime"
             value={String(seconds)}
-            onChange={(event) => setSeconds(Number(event.target.value))}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
+            onChange={(next) => setSeconds(Number(next))}
           >
             {ENROLMENT_TTLS.map((option) => (
               <option key={option.seconds} value={String(option.seconds)}>
                 {option.label}
               </option>
             ))}
-          </select>
-        </label>
-        <SubmitButton busy={writes.busy}>Issue a link</SubmitButton>
+          </Select>
+        </UiField>
+        <FormSubmit busy={writes.busy}>Issue a link</FormSubmit>
       </div>
       {minted === "" ? null : <MintedEnrolmentLink url={minted} onDismiss={() => setMinted("")} />}
     </form>
@@ -492,13 +507,7 @@ function MintedEnrolmentLink({ url, onDismiss }: { url: string; onDismiss: () =>
         {url}
       </code>
       <div>
-        <button
-          type="button"
-          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
-          onClick={onDismiss}
-        >
-          I have copied it
-        </button>
+        <Button onClick={onDismiss}>I have copied it</Button>
       </div>
     </div>
   );
@@ -554,7 +563,7 @@ function RecoveryKeyForm({ person, writes }: { person: Row; writes: WriteState }
         you a new one.
       </p>
       <div className="mt-3">
-        <SubmitButton busy={writes.busy}>Rotate the key</SubmitButton>
+        <FormSubmit busy={writes.busy}>Rotate the key</FormSubmit>
       </div>
       {minted === "" ? null : <MintedRecoveryKey value={minted} onDismiss={() => setMinted("")} />}
     </form>
@@ -575,13 +584,7 @@ function MintedRecoveryKey({ value, onDismiss }: { value: string; onDismiss: () 
         {value}
       </code>
       <div>
-        <button
-          type="button"
-          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
-          onClick={onDismiss}
-        >
-          I have stored it
-        </button>
+        <Button onClick={onDismiss}>I have stored it</Button>
       </div>
     </div>
   );
@@ -602,22 +605,16 @@ function Field({
   onChange: (next: string) => void;
 }): ReactNode {
   return (
-    <label className="flex flex-col gap-1 text-xs text-muted">
-      {label}
-      <input
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-      />
-    </label>
+    <UiField label={label}>
+      <TextInput value={value} onChange={onChange} />
+    </UiField>
   );
 }
 
-// A submit button in the MetaButton idiom. Not MetaButton itself, because that
-// one is `type="button"` with an onClick and these live inside forms, where
-// submitting on Enter is the behaviour an operator expects.
-export function SubmitButton({
+// A submit button in the toolbar idiom, local to these forms: type="submit"
+// so Enter works, busy label spelled once. The exported naming is retired --
+// SettingsPage composes ui/Button directly now (memql#4181).
+function FormSubmit({
   busy,
   tone = "quiet",
   children,
@@ -627,17 +624,8 @@ export function SubmitButton({
   children: ReactNode;
 }): ReactNode {
   return (
-    <button
-      type="submit"
-      disabled={busy}
-      className={
-        "rounded border px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 " +
-        (tone === "danger"
-          ? "border-danger bg-danger-subtle text-fg hover:bg-danger hover:text-accent-fg"
-          : "border-line bg-surface text-fg hover:bg-raised")
-      }
-    >
+    <Button type="submit" size="xs" tone={tone} busy={busy} busyLabel="Working…">
       {children}
-    </button>
+    </Button>
   );
 }

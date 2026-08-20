@@ -3,7 +3,8 @@ import { inferDisplayCard } from "@znasllc-io/memql-view-kit";
 
 import { flattenForList } from "../viewkit/rows";
 import { describeConceptSchema, type ConceptSchemaView } from "../concepts/schema";
-import { Empty, Loading } from "../components/StatusMessage";
+import { Empty } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { useConceptPane } from "./conceptContext";
 
 // The schema view: a concept's fields, their types, and their annotations.
@@ -105,7 +106,7 @@ function FieldTable({
   loading: boolean;
 }): ReactNode {
   if (view.fields.length === 0) {
-    if (loading) return <Loading what="the schema" />;
+    if (loading) return <Skeleton variant="kv" rows={5} />;
     return (
       <Empty>
         No schema is available for this concept. The declared document rides on a

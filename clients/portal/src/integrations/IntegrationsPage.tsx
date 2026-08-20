@@ -6,8 +6,8 @@ import {
   TABLE_ELEMENT,
 } from "@znasllc-io/memql-view-kit";
 
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Band, Button, PageHeader, Skeleton } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useIntegrationStatus } from "./useIntegrationStatus";
 import {
@@ -63,27 +63,26 @@ export function IntegrationsPage(): ReactNode {
 
   return (
     <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-6 pb-8">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-tight">Integrations</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            What this node has wired to the outside world. Registration, configuration and
-            health are three separate facts and this page keeps them separate.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Link
-            to={campaignsPath()}
-            className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
-          >
-            Email campaigns
-          </Link>
-          <MetaButton onClick={refresh}>Refresh</MetaButton>
-          <MetaButton onClick={probe} disabled={probing || !canView}>
-            {probing ? "Checking…" : "Check now"}
-          </MetaButton>
-        </div>
-      </header>
+      <PageHeader
+        title="Integrations"
+        blurb="What this node has wired to the outside world. Registration, configuration and health are three separate facts and this page keeps them separate."
+        actions={
+          <>
+            <Link
+              to={campaignsPath()}
+              className="rounded border border-line bg-surface px-2.5 py-1 text-xs font-medium text-fg hover:bg-raised"
+            >
+              Email campaigns
+            </Link>
+            <Button size="xs" onClick={refresh}>
+              Refresh
+            </Button>
+            <Button size="xs" onClick={probe} disabled={probing || !canView} busy={probing} busyLabel="Checking…">
+              Check now
+            </Button>
+          </>
+        }
+      />
 
       {!canView ? (
         <Empty>
@@ -94,7 +93,7 @@ export function IntegrationsPage(): ReactNode {
       ) : error ? (
         <ErrorMessage>Could not read the integration registry: {error}</ErrorMessage>
       ) : loading && status === null ? (
-        <Loading what="the integration registry" />
+        <Skeleton variant="rows" rows={4} />
       ) : reports.length === 0 ? (
         <Empty>This node registered no integration plug-ins.</Empty>
       ) : (

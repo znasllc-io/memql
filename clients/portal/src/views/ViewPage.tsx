@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useViewRows } from "../cluster/useViewRows";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { conceptPath } from "../concepts/urls";
 import { AgentsView } from "./AgentsView";
 import { AuditView } from "./AuditView";
@@ -72,7 +73,7 @@ export function ViewPage(): ReactNode {
     return <ErrorMessage>Failed to list concepts: {data.registryError}</ErrorMessage>;
   }
   if (data.concept === undefined) {
-    if (data.registryLoading) return <Loading what="the concept registry" />;
+    if (data.registryLoading) return <Skeleton variant="rows" rows={4} />;
     return <MissingConcept view={view} />;
   }
 

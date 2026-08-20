@@ -38,6 +38,7 @@ import {
   walkReducer,
   type WalkState,
 } from "../concepts/rowWalk";
+import { bumpActivity } from "./activity";
 import { useCluster } from "./ClusterProvider";
 
 // 100 rather than the SDK's 200 default. This is an interactive pane, not a
@@ -160,6 +161,7 @@ export function useConceptRows(conceptId: string): ConceptRowsState {
     try {
       unsubscribe = subscriptions.subscribeGraph(
         (event) => {
+          bumpActivity();
           setLive((current) =>
             applyGraphEvent(current, event, {
               conceptId,

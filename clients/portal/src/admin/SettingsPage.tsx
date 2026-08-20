@@ -4,11 +4,11 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import type { ClusterSettingsEdit } from "@znasllc-io/memql-sdk-core/identityadmin";
 
 import { ErrorMessage } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Band, Button, Select, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { brandAssetSummary, settingRows, SETTING_CONCEPT } from "./rows";
-import { SubmitButton } from "./PeoplePage";
+
 import { surfaceById } from "./urls";
 import { useAdminAccess, useAdminWrites, useClusterSettings, type WriteState } from "./useAdminConsole";
 import { WriteOutcome } from "./WriteOutcome";
@@ -62,7 +62,7 @@ export function SettingsPage(): ReactNode {
       surface={surface}
       role={role}
       resolved={resolved}
-      actions={<MetaButton onClick={settings.reload}>Refresh</MetaButton>}
+      actions={<Button size="xs" onClick={settings.reload}>Refresh</Button>}
     >
       <Band>
         <div className="flex flex-wrap gap-2">
@@ -164,35 +164,25 @@ function SettingsForm({
         </legend>
         <label className="flex flex-col gap-1 text-xs text-muted">
           Registration mode
-          <select
-            aria-label="Registration mode"
-            value={draft.registrationMode}
-            onChange={(e) => set({ registrationMode: e.target.value })}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-          >
+          <Select ariaLabel="Registration mode" value={draft.registrationMode} onChange={(next) => set({ registrationMode: next })}>
             {["open", "domain_restricted", "invite_only", "waitlist"].map((mode) => (
               <option key={mode} value={mode}>
                 {mode}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <Text label="Allowed email domains" value={draft.registrationDomains} onChange={(v) => set({ registrationDomains: v })} />
         <Text label="Internal email domains" value={draft.internalDomains} onChange={(v) => set({ internalDomains: v })} />
         <label className="flex flex-col gap-1 text-xs text-muted">
           Role granted to internal users
-          <select
-            aria-label="Role granted to internal users"
-            value={draft.internalDefaultRole}
-            onChange={(e) => set({ internalDefaultRole: e.target.value })}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-          >
+          <Select ariaLabel="Role granted to internal users" value={draft.internalDefaultRole} onChange={(next) => set({ internalDefaultRole: next })}>
             {["owner", "admin", "developer", "writer", "reader"].map((r) => (
               <option key={r} value={r}>
                 {r}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <Text
           label="Waitlist notifications go to"
@@ -216,16 +206,11 @@ function SettingsForm({
         <Text label="Invitation (days)" value={draft.invitationDays} onChange={(v) => set({ invitationDays: v })} />
         <label className="flex flex-col gap-1 text-xs text-muted">
           Refresh cookie SameSite
-          <select
-            aria-label="Refresh cookie SameSite"
-            value={draft.refreshCookieSameSite}
-            onChange={(e) => set({ refreshCookieSameSite: e.target.value })}
-            className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-          >
+          <Select ariaLabel="Refresh cookie SameSite" value={draft.refreshCookieSameSite} onChange={(next) => set({ refreshCookieSameSite: next })}>
             <option value="">the node default</option>
             <option value="lax">lax</option>
             <option value="none">none</option>
-          </select>
+          </Select>
         </label>
       </fieldset>
 
@@ -245,7 +230,7 @@ function SettingsForm({
       </fieldset>
 
       <div className="lg:col-span-2">
-        <SubmitButton busy={writes.busy}>Save the settings</SubmitButton>
+        <Button type="submit" size="xs" busyLabel="Working…" busy={writes.busy}>Save the settings</Button>
       </div>
     </form>
   );
@@ -335,12 +320,7 @@ function Text({
   return (
     <label className="flex flex-col gap-1 text-xs text-muted">
       {label}
-      <input
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-      />
+      <TextInput value={value} onChange={onChange} />
     </label>
   );
 }

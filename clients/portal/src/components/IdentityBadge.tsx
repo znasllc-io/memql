@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
+import { Button } from "../ui";
 import { useMyAccess } from "../cluster/useMyAccess";
 
 // Who is signed in, and the ability to stop being.
@@ -49,13 +50,9 @@ export function IdentityBadge(): ReactNode {
           {access.clusterRole}
         </span>
       ) : null}
-      <button
-        type="button"
-        onClick={signOut}
-        className="rounded border border-line px-2 py-0.5 text-xs text-fg hover:bg-raised"
-      >
+      <Button size="xs" onClick={signOut}>
         Sign out
-      </button>
+      </Button>
     </div>
   );
 }

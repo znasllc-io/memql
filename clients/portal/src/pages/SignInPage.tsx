@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { clusterLabelFor } from "../cluster/endpoint";
+import { MemqlMark } from "../components/MemqlMark";
 import { ErrorMessage } from "../components/StatusMessage";
 
 // The sign-in view.
@@ -40,7 +41,14 @@ export function SignInPage(): ReactNode {
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">
       <div className="w-full max-w-md rounded-lg border border-line bg-surface p-6">
-        <h1 className="text-lg font-semibold tracking-tight">MemQL Portal</h1>
+        <div className="flex items-center gap-2.5">
+          <span className="text-accent">
+            <MemqlMark size={22} />
+          </span>
+          <h1 className="font-display text-xl leading-none tracking-wide">
+            MemQL Portal
+          </h1>
+        </div>
         <p className="mt-1 text-sm text-muted">
           Sign in to{" "}
           <span className="font-mono text-fg">{cluster || "this cluster"}</span>.

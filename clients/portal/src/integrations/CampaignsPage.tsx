@@ -2,8 +2,8 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { STAT_TILE_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Band, Button, Field, PageHeader, Skeleton, Textarea, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useCampaigns } from "./useCampaigns";
 import {
@@ -56,20 +56,21 @@ export function CampaignsPage(): ReactNode {
 
   return (
     <section className="mx-auto flex min-h-full max-w-5xl flex-col gap-6 pb-8">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-        <div className="min-w-0">
-          <p className="font-mono text-xs break-all text-subtle">{CAMPAIGN_CONCEPT_ID}</p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">Email campaigns</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            Audiences, templates and the campaigns that pair them. Open a campaign to send it —
-            scheduling records an intended time and does not start a send on its own.
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <MetaButton onClick={refresh}>Refresh</MetaButton>
-          <MetaButton onClick={() => navigate(newCampaignPath())}>New campaign</MetaButton>
-        </div>
-      </header>
+      <PageHeader
+        eyebrow={CAMPAIGN_CONCEPT_ID}
+        title="Email campaigns"
+        blurb="Audiences, templates and the campaigns that pair them. Open a campaign to send it — scheduling records an intended time and does not start a send on its own."
+        actions={
+          <>
+            <Button size="xs" onClick={refresh}>
+              Refresh
+            </Button>
+            <Button size="xs" onClick={() => navigate(newCampaignPath())}>
+              New campaign
+            </Button>
+          </>
+        }
+      />
 
       {actionError ? <ErrorMessage>{actionError}</ErrorMessage> : null}
       {actionMessage ? (
@@ -81,7 +82,7 @@ export function CampaignsPage(): ReactNode {
       {error ? (
         <ErrorMessage>Could not read campaigns: {error}</ErrorMessage>
       ) : loading && campaigns.length === 0 && audiences.length === 0 ? (
-        <Loading what="your campaigns" />
+        <Skeleton variant="rows" rows={6} />
       ) : (
         <>
           <Band>
@@ -177,9 +178,9 @@ function NewAudienceForm({
           placeholder="How someone lands in this audience"
         />
       </Field>
-      <SubmitButton busy={busy} disabled={name.trim() === ""}>
+      <Button type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={name.trim() === ""}>
         Add audience
-      </SubmitButton>
+      </Button>
     </form>
   );
 }
@@ -231,85 +232,18 @@ function NewTemplateForm({
         </Field>
       </div>
       <Field label="Plain-text body" grow>
-        <textarea
+        <Textarea
           value={textBody}
-          onChange={(event) => setTextBody(event.target.value)}
+          onChange={setTextBody}
           rows={4}
           placeholder="The message. Plain text is required; the HTML alternative is added when editing."
-          className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-subtle"
         />
       </Field>
       <div>
-        <SubmitButton busy={busy} disabled={incomplete}>
+        <Button type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={incomplete}>
           Add template
-        </SubmitButton>
+        </Button>
       </div>
     </form>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Form primitives, shared with the campaign editor.
-// ---------------------------------------------------------------------------
-
-export function Field({
-  label,
-  hint,
-  grow = false,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  grow?: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <label className={"flex flex-col gap-1 " + (grow ? "min-w-48 flex-1" : "")}>
-      <span className="text-xs font-medium text-muted">{label}</span>
-      {children}
-      {hint === undefined ? null : <span className="text-xs text-subtle">{hint}</span>}
-    </label>
-  );
-}
-
-export function TextInput({
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-  type?: string;
-}): ReactNode {
-  return (
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      onChange={(event) => onChange(event.target.value)}
-      className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-subtle"
-    />
-  );
-}
-
-export function SubmitButton({
-  busy,
-  disabled,
-  children,
-}: {
-  busy: boolean;
-  disabled: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <button
-      type="submit"
-      disabled={busy || disabled}
-      className="rounded border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-fg hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {busy ? "Working…" : children}
-    </button>
   );
 }
