@@ -751,3 +751,188 @@ proto-gen-check:
 ##@ Release (engine image)
 ##> The cloud deploy is GitOps: bump the digest in deploy/k8s/overlays/cloud + merge -> ArgoCD reconciles.
 .PHONY: release tag-submodules
+
+## Cut an immutable engine release image memql:<VERSION> from VERSION + the
+## short git SHA (znasllc-io/memql#493, epic #491). The engine ships every node
+## type product-agnostic; this image tag is the engine-version leg of a
+## release's {engine version, bundle digest, client digest} triple, pinned in
+## one deploy overlay (not a standalone backend-version file). The X.Y.Z tag is
+## write-once: pushing over an existing tag is refused without --allow-overwrite.
+## Implementation lives in scripts/release/release.sh per the function-based
+## shell-script convention (CLAUDE.md).
+## PUSH=1 is BREAK-GLASS, not the release path (memql#4116). Deployable
+## images are built by the GitHub build server (OIDC -> ACR), so a push from
+## an operator machine needs CONFIRM=push-from-an-operator-machine and is
+## refused (exit 3) without it. Building locally is unaffected.
+##   make release                                   # local image, VERSION semver prefix
+##   make release VERSION=2.4.0                      # explicit version, local only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 DRY_RUN=1   # plan only
+##   make release VERSION=2.4.0 ACR=acrmemql PUSH=1 CONFIRM=push-from-an-operator-machine
+release:
+	@bash scripts/release/release.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${REGISTRY:+--registry=$$REGISTRY} \
+		$${ACR:+--acr=$$ACR} \
+		$${PUSH:+--push} \
+		$${CONFIRM:+--confirm=$$CONFIRM} \
+		$${ALLOW_OVERWRITE:+--allow-overwrite} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+## Cut the Go module tags for the nested modules (memql#3245).
+## A nested module is only fetchable at <module-dir>/vX.Y.Z -- the root tag
+## does NOT publish it. `wire` and `engine` carry independent version lines;
+## every other module is lockstep with the root release. Tags are write-once
+## and name the commit the root vX.Y.Z tag names. See VERSIONING.md.
+##   make tag-submodules VERSION=0.16.0                # all three lines
+##   make tag-submodules VERSION=0.16.0 LINE=wire      # one line
+##   make tag-submodules VERSION=0.16.0 DRY_RUN=1      # plan only
+tag-submodules:
+	@bash scripts/release/tag-submodules.sh \
+		$${VERSION:+--version=$$VERSION} \
+		$${LINE:+--line=$$LINE} \
+		$${COMMIT:+--commit=$$COMMIT} \
+		$${NO_PUSH:+--no-push} \
+		$${DRY_RUN:+--dry-run} \
+		$(ARGS)
+
+# The per-node `docker-*` targets (docker / docker-bff / docker-voice /
+# docker-cognition / docker-agent / docker-planner) were removed in #2205:
+# immutable release images come from `make release` (and the GitHub build
+# server for the cloud), while the local inner loop is `make dev` (build +
+# k3d import). A hand-built `docker build` image fed neither path.
+
+# ---------------------------------------------------------------------------
+# Dev tooling
+# ---------------------------------------------------------------------------
+# Config has ONE delivery path (epic memql#3958): the memql-secrets Secret.
+# `make secrets` seeds it locally via scripts/k3d/seed-secrets.sh; ESO
+# reconciles it from Key Vault in the cloud. The sealed genesis envelope, its
+# `genesis-seal` target and its .znas format are gone.
+
+##@ Dev tooling
+.PHONY: install-deps env-registry-sync env-registry-check
+.PHONY: setup-agents verify-agents
+
+## Regenerate the embedded env-registry manifest snapshot
+## (component/envregistry/manifest.yaml) from the authored registry
+## (scripts/secrets/manifest.yaml). Run after editing the authored file;
+## TestEmbeddedManifestInSync fails CI otherwise. (Epic 7 / memql#2104)
+env-registry-sync:
+	@bash scripts/secrets/sync-embedded-manifest.sh
+
+## Drift-check the env-var registry both ways: a var read in code but not
+## registered, or a registry entry that appears nowhere in the repo, fails.
+## The shared classifier behind the CI gate (memql#2105).
+env-registry-check:
+	$(GO) run ./cmd/envscan -check
+
+## Install + verify every build-time tool the dev workflow needs:
+## protoc + protoc-gen-go + protoc-gen-go-grpc (auto-installed when
+## missing) plus go / docker / k3d / kubectl (verified only -- printed
+## install hint if missing). Idempotent. Run before 'make generate'
+## or after a fresh clone so 'make up' isn't surprised by a missing tool.
+install-deps:
+	@bash scripts/dev/install-deps.sh
+
+## Install the agent stack: the GitHub MCP server, the Superpowers plugin,
+## and the CCPM skill. Idempotent -- every step probes current state first, so
+## a repeat run changes nothing. Needs GITHUB_PAT in the environment or in a
+## gitignored .env at the repo root. See docs/internal/ops/agent-stack.md.
+##   make setup-agents            install what is missing
+##   make setup-agents ARGS=--update   also refresh what is already installed
+setup-agents:
+	@bash scripts/setup-agents.sh $(ARGS)
+
+## Read-only status check for the agent stack; exits non-zero if anything is
+## missing. Installs nothing, so it is safe to run as a gate. Fix with
+## 'make setup-agents'.
+verify-agents:
+	@bash scripts/verify-agents.sh
+
+# ---------------------------------------------------------------------------
+# Deploy gates (engine ops)
+# ---------------------------------------------------------------------------
+
+##@ Deploy gates (engine ops)
+.PHONY: conn-headroom-check
+
+## Connection-headroom deploy gate (memql#1820, from the #1817 53300 spike):
+## check whether the fleet's projected DB connections fit the instance budget.
+## Override the budget via env: MAX_CONNECTIONS, RESERVED_CONNECTIONS,
+## MAX_OPEN_CONNS. Exits non-zero when the peak would exceed budget.
+##   make conn-headroom-check
+##   MAX_CONNECTIONS=300 make conn-headroom-check
+conn-headroom-check:
+	@bash scripts/deploy/conn-headroom-check.sh
+
+# ===========================================================================
+# BREAK-GLASS -- imperative deploy. ArgoCD OWNS the cluster (deploys = merges;
+# selfHeal reverts out-of-band kubectl applies), so this target is the escape
+# hatch for when Argo is unavailable (#2207).
+#
+# THE BLESSED DEPLOY IS A GIT MERGE, NOT `make deploy`:
+#   bump the image digest in deploy/k8s/overlays/cloud + merge to main
+#   -> ArgoCD reconciles. Rollback = `git revert` the overlay. See
+#   docs/public/operate/deployment-strategy.md.
+# ===========================================================================
+
+##@ Deploy (break-glass -- ArgoCD owns the cluster; use only when Argo is unavailable)
+.PHONY: deploy
+
+## BREAK-GLASS imperative deploy -- DELEGATES TO THE COCKPIT (I16, epic
+## znasllc-io/memql#2212/#2227). `make` is a thin launcher now: it shells into
+## `memql-cockpit deploy`, which embeds the engine automation runtime, loads the
+## deployment bundle, and runs the PINNED `deployEngineCluster` automation
+## (role-gated + audited + version-pinned) from OUTSIDE the target cluster.
+## See DEVOPS_DSL_BUNDLE_HANDOFF.md "Execution model".
+##
+## NOT the normal path -- the normal path is GitOps (digest bump in
+## overlays/cloud + merge -> ArgoCD syncs). Use this break-glass path only when
+## ArgoCD is unavailable (#2207).
+##
+## OWNER-GATED (honest, not a silent failure): the cockpit's in-process engine
+## carries no database yet, so DB-backed deployment steps cannot complete until
+## the I13 runner surface + a live engine DB are wired (memql#2220/#2228). A real
+## deploy reports `BLOCKED (owner-gated): ...` cleanly; a DRY_RUN is a clean
+## no-op resolve. The cockpit binary is resolved by scripts/deploy/cockpit.sh
+## (COCKPIT_BIN > PATH > built from the sibling ../memql-cockpit via `make
+## cockpit`). There is NO fallback to the old script path.
+##
+## Forwarded knobs: VERSION->--ref, DRY_RUN->--dry-run, plus the role gate
+## (ROLE->--role or MEMQL_COCKPIT_ROLE; deny-by-default) and ACTOR->--actor for
+## the audit trail. ARGS passes extra cockpit flags through.
+##   make deploy VERSION=0.9.6 ROLE=developer            # imperative roll-out
+##   make deploy VERSION=0.9.6 DRY_RUN=1 ROLE=developer  # resolve only, no changes
+##   make deploy COCKPIT_BIN=/path/to/memql-cockpit      # pin the binary
+deploy:
+	@COCKPIT_BIN="$${COCKPIT_BIN:-}" bash scripts/deploy/cockpit.sh deploy \
+		$${VERSION:+--ref=$$VERSION} \
+		$${ROLE:+--role=$$ROLE} \
+		$${ACTOR:+--actor=$$ACTOR} \
+		$${DRY_RUN:+--dry-run} \
+		$${APPLY:+--apply} \
+		$(ARGS)
+
+# ---------------------------------------------------------------------------
+# Utility targets
+# ---------------------------------------------------------------------------
+
+##@ Utility
+.PHONY: clean version help help-check
+
+## Remove build artifacts
+clean:
+	rm -rf $(BIN_DIR)/ coverage.out
+
+## Print the current version
+version:
+	@echo $(VERSION)
+
+## Show all available targets (auto-generated from the '##' doc comments -- never drifts)
+help:
+	@bash scripts/make/help.sh
+
+## Drift guard: fail if any target lacks a '## ' doc comment (also run by `make test`)
+help-check:
+	@bash scripts/make/help.sh --check && echo "OK: every Makefile target is documented"
