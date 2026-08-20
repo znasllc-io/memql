@@ -34,15 +34,21 @@ import (
 // docs/public/build/plugin-sdk.md.
 const PluginContractVersion = 1
 
-// PluginContext is the narrow Go surface that self-registering integration
-// plug-ins receive at startup. It is the stable extension contract: a plug-in
-// either finds what it needs here or on Engine. Reaching into app/ internals
-// is not permitted.
+// PluginContext is the narrow Go surface every registrant -- a pack, or a
+// core integration self-registering -- receives at startup through the
+// registration primitives (RegisterPlugin / RegisterPluginForContract). It is
+// the stable extension contract: a pack either finds what it needs here or on
+// Engine. Reaching into app/ internals is not permitted.
+//
+// Vocabulary: docs/public/concepts/component-integration-pack.md. The
+// registrant is a pack (or a core integration self-registering); "plugin"
+// survives only inside the primitive names (RegisterPlugin, PluginContext,
+// the Plugin SDK).
 //
 // PluginContext is built once by the app bootstrap after core state (engine,
-// database, providers) is ready, then passed to every registered plug-in
-// factory. Callbacks (BunDB, VisionProvider, resolvers) are lazily evaluated
-// so plug-ins see the live state even if they stash the context.
+// database, providers) is ready, then passed to every registered factory.
+// Callbacks (BunDB, VisionProvider, resolvers) are lazily evaluated so packs
+// see the live state even if they stash the context.
 type PluginContext struct {
 	Logger *slog.Logger
 
@@ -52,7 +58,7 @@ type PluginContext struct {
 	Engine IntegrationEngineAccess
 
 	// BunDB returns the database handle, or nil if the node-type binary
-	// runs without a database. Plug-ins that need DB access should return
+	// runs without a database. Packs that need DB access should return
 	// an error from their factory when nil.
 	//
 	// This is the MAIN, transaction-POOLED endpoint -- use it for all bulk
@@ -60,7 +66,7 @@ type PluginContext struct {
 	BunDB func() *bun.DB
 
 	// DirectBunDB returns the handle for the DIRECT (non-pooled) endpoint,
-	// falling back to the main pool when DIRECT_DSN is unset. Plug-ins that
+	// falling back to the main pool when DIRECT_DSN is unset. Packs that
 	// hold a SESSION across statements -- session-scoped advisory locks,
 	// leader election -- must resolve their *bun.DB through this getter so
 	// they bypass the transaction pooler, which recycles a server backend
@@ -81,7 +87,7 @@ type PluginContext struct {
 
 	// ResolveVariable resolves a named partition-scoped plaintext
 	// variable from v1:platform:partitionVariable, falling back to v1:platform:globalVariable
-	// when the partition lookup misses. Plug-ins that need an
+	// when the partition lookup misses. Packs that need an
 	// instance-wide value should call ResolveSystemVariable instead.
 	ResolveVariable func(ctx context.Context, name string) (string, error)
 
@@ -100,7 +106,7 @@ type PluginContext struct {
 	// (vendor API keys, OAuth client secrets, integration credentials).
 	ResolveSystemSecret func(ctx context.Context, name string) (string, error)
 
-	// Providers is the AI provider registry. Plug-ins that catalog
+	// Providers is the AI provider registry. Packs that catalog
 	// providers (e.g. the router admin integration listing available
 	// models) read from it directly. Lives on the engine -- pointer is
 	// stable for the life of the process.
@@ -114,9 +120,9 @@ type PluginContext struct {
 	// present, addressable, open to writes, and withheld from the ordinary read
 	// path until the concept is trained (epic memql#3974).
 	//
-	// Every plug-in that issues a HAND-ROLLED read against "MemoryNodes" must
+	// Every pack that issues a HAND-ROLLED read against "MemoryNodes" must
 	// consult this before returning rows. The DSL seams get the same fact from
-	// the engine directly (memql#3983); a plug-in's raw SQL passes through
+	// the engine directly (memql#3983); a pack's raw SQL passes through
 	// neither the parser nor the filter path, so nothing is injected into it and
 	// this callback is the whole of the enforcement there.
 	//
@@ -131,7 +137,7 @@ type PluginContext struct {
 
 	// AdmitSourceRow reports whether one row read DIRECTLY from the node store
 	// may be shown to this caller -- the per-row authorization gate, applied to
-	// the rows a plug-in fetched itself (memql#4029).
+	// the rows a pack fetched itself (memql#4029).
 	//
 	// The sibling of ConceptDataIsStaged above, answering the OTHER question
 	// about the same row: that one asks "is this concept's data visible to
@@ -171,7 +177,9 @@ type PluginContext struct {
 // Returning an error aborts app startup with a fatal log.
 type PluginFactory func(pctx PluginContext) (IntegrationProvider, error)
 
-// PluginRegistration names a registered plug-in factory.
+// PluginRegistration names a registered pack factory -- one entry in the
+// registry the RegisterPlugin / RegisterPluginForContract primitives append
+// to.
 type PluginRegistration struct {
 	Name    string
 	Factory PluginFactory
@@ -186,10 +194,10 @@ type PluginRegistration struct {
 
 // ValidateContract checks this registration's declared contract version
 // against the core's PluginContractVersion. Returns a descriptive error,
-// naming the plug-in, when the versions are incompatible.
+// naming the pack, when the versions are incompatible.
 func (r PluginRegistration) ValidateContract() error {
 	if err := CheckPluginContractCompat(r.RequiresContractVersion); err != nil {
-		return fmt.Errorf("plugin %q: %w", r.Name, err)
+		return fmt.Errorf("pack %q: %w", r.Name, err)
 	}
 	return nil
 }
@@ -206,12 +214,12 @@ func (r PluginRegistration) ValidateContract() error {
 func CheckPluginContractCompat(requiresContractVersion int) error {
 	if requiresContractVersion <= 0 {
 		return fmt.Errorf(
-			"plug-in declares no contract version (got %d); register it via RegisterPlugin or RegisterPluginForContract so it is stamped against memql.PluginContractVersion=%d",
+			"pack declares no contract version (got %d); register it via RegisterPlugin or RegisterPluginForContract so it is stamped against memql.PluginContractVersion=%d",
 			requiresContractVersion, PluginContractVersion)
 	}
 	if requiresContractVersion != PluginContractVersion {
 		return fmt.Errorf(
-			"plug-in contract version mismatch: pack built against contract v%d, this core provides v%d -- rebuild the pack against this core",
+			"pack contract version mismatch: built against contract v%d, this core provides v%d -- rebuild the pack against this core",
 			requiresContractVersion, PluginContractVersion)
 	}
 	return nil
@@ -222,10 +230,10 @@ var (
 	pluginRegistry []PluginRegistration
 )
 
-// RegisterPlugin registers an integration plug-in factory against the CURRENT
-// PluginContractVersion. Called from an init() function in each plug-in
-// package; build tags on the enclosing .go file control which node-type
-// binaries include the registration.
+// RegisterPlugin registers a pack (or a core integration self-registering)
+// against the CURRENT PluginContractVersion. Called from an init() function in
+// the registrant's package; build tags on the enclosing .go file control which
+// node-type binaries include the registration.
 //
 // Panics on empty name, nil factory, or duplicate name -- these are
 // programmer errors and should surface loudly at startup.
@@ -242,10 +250,10 @@ func RegisterPlugin(name string, factory PluginFactory) {
 // Panics on empty name, nil factory, or duplicate name.
 func RegisterPluginForContract(name string, requiresContractVersion int, factory PluginFactory) {
 	if name == "" {
-		panic("memql.RegisterPlugin: empty plugin name")
+		panic("memql.RegisterPluginForContract: empty pack name")
 	}
 	if factory == nil {
-		panic("memql.RegisterPlugin: nil factory for plugin " + name)
+		panic("memql.RegisterPluginForContract: nil factory for pack " + name)
 	}
 
 	pluginMu.Lock()
@@ -253,7 +261,7 @@ func RegisterPluginForContract(name string, requiresContractVersion int, factory
 
 	for _, r := range pluginRegistry {
 		if r.Name == name {
-			panic("memql.RegisterPlugin: plugin " + name + " already registered")
+			panic("memql.RegisterPluginForContract: pack " + name + " already registered")
 		}
 	}
 	pluginRegistry = append(pluginRegistry, PluginRegistration{
@@ -263,9 +271,9 @@ func RegisterPluginForContract(name string, requiresContractVersion int, factory
 	})
 }
 
-// RegisteredPlugins returns all plug-ins registered at init time, in
-// registration order. The app bootstrap iterates this list after the
-// engine and core state are ready.
+// RegisteredPlugins returns every registration made at init time (packs and
+// self-registering core integrations), in registration order. The app
+// bootstrap iterates this list after the engine and core state are ready.
 func RegisteredPlugins() []PluginRegistration {
 	pluginMu.Lock()
 	defer pluginMu.Unlock()
