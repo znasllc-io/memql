@@ -50,7 +50,7 @@ func (w *Worker) Capabilities() []memql.IntegrationCapability {
 	return []memql.IntegrationCapability{
 		{
 			Name:        "startSend",
-			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template or audience is not ready.",
+			Description: "Preflight and start a campaign send. Refuses rather than partially sending when the sender, one-click unsubscribe, template, audience or product_purchasable catalog is not ready.",
 			Handler:     w.handleStartSend,
 			ArgsSchema: map[string]string{
 				"campaignId": "string (required) - the campaign to send",
@@ -309,6 +309,9 @@ func (w *Worker) preflight(ctx context.Context, op string, campaign Campaign) (i
 	}
 	if w.resolveSender() == nil {
 		return 0, fmt.Errorf("campaigns.%s: no email sender is registered on this node, so nothing could deliver the campaign", op)
+	}
+	if reason := w.catalogRefusal(ctx); reason != "" {
+		return 0, fmt.Errorf("campaigns.%s: %s", op, reason)
 	}
 
 	tmpl, found, err := w.store.TemplateByID(ctx, campaign.TemplateID)

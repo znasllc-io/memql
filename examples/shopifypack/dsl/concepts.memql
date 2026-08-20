@@ -1,0 +1,27 @@
+// shopifypack -- client-agnostic Shopify portal projection (memql#4138).
+//
+// PACK, not core. dsl/shopify is the thin index; this pack is the
+// operator-facing attach / secret-reference / sync-toggle surface.
+// Skins stay in clients/<storefront>/. This pack must install on more
+// than one product without a code fork.
+//
+// Secret fields store secret NAMES from scripts/secrets/manifest.yaml
+// (MEMQL_SHOPIFY_*), never token values. Admin tokens do not appear in
+// pack UI beyond those names. The storefront keeps its own cart URL. This pack does not rebuild
+// inbound webhooks or add a second cart.
+
+@version("1.0.0")
+@namespace("shopifypack")
+@description("One attached Shopify shop. Token fields hold secret names (MEMQL_SHOPIFY_*), never the token values. Sync is a data toggle so a client can pause ingest without a rebuild.")
+@displayCard(primary="storeDomain", secondary="syncEnabled", status="syncEnabled")
+@rowAuthz(owner="ownerUserId")
+concept shop {
+  ownerUserId             string!  @description("v1:identity:user.id of the operator who attached this shop. Stamped from actor.userId.")
+  storeDomain             string!  @description("Shop hostname (example.myshopify.com). Display only; the Storefront/Admin tokens live behind the secret names below.")
+  storefrontTokenSecret   string!  @description("Secret NAME for the Storefront token, e.g. MEMQL_SHOPIFY_STOREFRONT_TOKEN. Never a token value.")
+  adminTokenSecret        string!  @description("Secret NAME for the Admin token, e.g. MEMQL_SHOPIFY_ADMIN_TOKEN. Never a token value.")
+  storeDomainSecret       string   @description("Optional secret NAME for the shop domain (MEMQL_SHOPIFY_STORE_DOMAIN) when the hostname is also vaulted.")
+  apiVersionSecret        string   @description("Optional secret NAME for the API version (MEMQL_SHOPIFY_API_VERSION).")
+  apiVersion              string   @description("Optional Storefront API version string when it is data rather than a secret. Not a token.")
+  syncEnabled             bool!    @description("When true, inbound apply + reconcile may write the thin index. Flipped at runtime; not compiled into .memql.")
+}

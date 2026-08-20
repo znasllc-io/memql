@@ -110,6 +110,10 @@ type Worker struct {
 	now      func() time.Time
 	sendHook func(ctx context.Context, sender email.Sender, msg email.Message) error
 
+	// shopifyConfigured is the #4140 "index in play" half. Tests inject
+	// it; production leaves it nil and reads shopify.ConfigFromEnv.
+	shopifyConfigured func() bool
+
 	// reputation accumulates the per-domain counters this replica observes
 	// (memql#3462), flushed once per drain pass.
 	reputation *reputationCollector
@@ -460,6 +464,10 @@ func (w *Worker) sendBatch(
 		return errors.New("no email sender registered")
 	}
 	if reason := w.cfg.RequireUnsubscribe(); reason != "" {
+		w.failJob(systemCtx, *job, reason)
+		return errors.New(reason)
+	}
+	if reason := w.catalogRefusal(ctx); reason != "" {
 		w.failJob(systemCtx, *job, reason)
 		return errors.New(reason)
 	}

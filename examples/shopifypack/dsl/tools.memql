@@ -1,0 +1,21 @@
+// shopifypack tools -- agent surface for attach / secrets / sync.
+
+@enabled
+@handler(type="function", name="shopifyPackAttachShop")
+@executionTime("fast")
+@description("Attach a Shopify shop by hostname and secret names. Token values are refused.")
+tool shopifyPackAttach {
+  shopId                 string  @required  @description("Row id for the attached shop.")
+  storeDomain            string  @required  @description("Shop hostname.")
+  storefrontTokenSecret  string  @required  @description("Secret name, not the token.")
+  adminTokenSecret       string  @required  @description("Secret name, not the token.")
+}
+
+@enabled
+@handler(type="function", name="shopifyPackSetShopSync")
+@executionTime("fast")
+@description("Flip Shopify index sync on or off.")
+tool shopifyPackSetSync {
+  shopId       string  @required  @description("Attached shop id.")
+  syncEnabled  bool    @required  @description("Whether sync is on.")
+}

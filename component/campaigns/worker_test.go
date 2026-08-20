@@ -71,6 +71,9 @@ type fakeEngine struct {
 	// which is the pre-paging shape most tests still want.
 	pageSize int
 
+	// shopifyProducts backs shopifyProducts for #4140. Nil is an empty catalog.
+	shopifyProducts []map[string]any
+
 	calls []recordedCall
 }
 
@@ -116,6 +119,8 @@ func (e *fakeEngine) Execute(ctx context.Context, q string) (any, error) {
 			return rowsEnvelope([]map[string]any{row}), nil
 		}
 		return rowsEnvelope(nil), nil
+	case strings.HasPrefix(q, "query shopifyProducts"):
+		return rowsEnvelope(e.shopifyProducts), nil
 	default:
 		return nil, nil
 	}
@@ -329,10 +334,11 @@ func newTestWorker(t *testing.T, engine Engine, sender email.Sender) *Worker {
 			UnsubscribeSecret:  "test-signing-secret-not-a-credential",
 			UnsubscribeBaseURL: "https://example.test",
 		},
-		now:        time.Now,
-		readyCh:    make(chan struct{}),
-		doneCh:     make(chan struct{}),
-		reputation: newReputationCollector("sender@example.test", "n1"),
+		now:               time.Now,
+		readyCh:           make(chan struct{}),
+		doneCh:            make(chan struct{}),
+		reputation:        newReputationCollector("sender@example.test", "n1"),
+		shopifyConfigured: func() bool { return false },
 	}
 	w.limiter = newRateLimiter(w.cfg.SendRatePerMinute, w.now)
 	return w

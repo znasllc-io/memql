@@ -63,3 +63,9 @@ concept view {
 // and NOT a new clients/ app. The host publishes v1:calendar:bookingHours
 // and takes v1:calendar:booking rows; the portal's concept browser and
 // composed views (this domain) render them. Skin stays per product.
+
+// Shopify pack attach/sync (memql#4138) is the same shape: not a new
+// portalviews concept and not a new clients/ app. The pack contributes
+// v1:shopifypack:shop (secret NAMES, not token values; sync is a data
+// toggle). This domain's composed views render those rows. Skin stays
+// per product.

@@ -1,0 +1,59 @@
+// shopifypack writes (memql#4138).
+//
+// Owned tier: ownerUserId is stamped from actor.userId. Secret fields
+// are accepted as names; the Go attach/setSecrets capabilities refuse
+// values that look like Shopify tokens.
+
+/// Attach a shop. Secret args are names, not token values.
+@actor
+mutate shop attachShop {
+  args {
+    shopId                  string!
+    storeDomain             string!
+    storefrontTokenSecret   string!
+    adminTokenSecret        string!
+    storeDomainSecret       string
+    apiVersionSecret        string
+    apiVersion              string
+    syncEnabled             bool
+  }
+  insert {
+    accept { storeDomain, storefrontTokenSecret, adminTokenSecret, storeDomainSecret, apiVersionSecret, apiVersion, syncEnabled }
+    stamp {
+      id: args.shopId
+      ownerUserId: actor.userId
+    }
+  }
+}
+
+/// Replace secret references on an attached shop. Names only.
+@actor
+mutate shop setShopSecrets {
+  args {
+    shopId                  string!
+    storefrontTokenSecret   string!
+    adminTokenSecret        string!
+    storeDomainSecret       string
+    apiVersionSecret        string
+  }
+  update {
+    id: args.shopId
+    storefrontTokenSecret: args.storefrontTokenSecret
+    adminTokenSecret: args.adminTokenSecret
+    storeDomainSecret: args.storeDomainSecret
+    apiVersionSecret: args.apiVersionSecret
+  }
+}
+
+/// Flip sync on or off. Data, not source -- no rebuild.
+@actor
+mutate shop setShopSync {
+  args {
+    shopId       string!
+    syncEnabled  bool!
+  }
+  update {
+    id: args.shopId
+    syncEnabled: args.syncEnabled
+  }
+}

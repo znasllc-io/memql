@@ -1,0 +1,14 @@
+/// Attached shop projection. Secret fields are names, never token values.
+@row
+shape shop shopFull {
+  row.id
+  ownerUserId
+  storeDomain
+  storefrontTokenSecret
+  adminTokenSecret
+  storeDomainSecret
+  apiVersionSecret
+  apiVersion
+  syncEnabled
+  row.createdAt
+}
