@@ -18,7 +18,7 @@ import {
   IdentityHttpError,
   refreshAccessToken,
 } from "../src/auth/identityClient";
-import type { PortalRuntimeConfig } from "../src/cluster/config";
+import { UNKNOWN_RUNTIME_CONFIG, type PortalRuntimeConfig } from "../src/cluster/config";
 
 const CROSS_ORIGIN: PortalRuntimeConfig = {
   identityUrl: "https://identity.example.com",
@@ -179,6 +179,41 @@ describe("the token endpoints", () => {
   it("rejects a 200 that carries no access token", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ token_type: "Bearer" }));
     await expect(refreshAccessToken(fetchImpl, CROSS_ORIGIN)).rejects.toThrow(/no access token/);
+  });
+
+  it("does not POST against UNKNOWN_RUNTIME_CONFIG (memql#4154)", async () => {
+    // AuthCallbackPage can fire completeSignIn on first paint, before
+    // runtime-config.json has landed. Posting then sends client_id="" and
+    // identity answers "code, client_id, and redirect_uri are required"
+    // (token.go lists all three whenever any one is missing).
+    const fetchImpl = vi.fn(async () => jsonResponse({ access_token: "AT", expires_in: 900 }));
+    await expect(
+      exchangeAuthorizationCode(fetchImpl, UNKNOWN_RUNTIME_CONFIG, {
+        code: "AUTH-CODE",
+        codeVerifier: "THE-VERIFIER",
+        redirectUri: "https://portal.memql.localhost/auth/callback",
+      }),
+    ).rejects.toThrow(/identity URL and OAuth client id/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("does not POST an empty code or redirect_uri", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ access_token: "AT", expires_in: 900 }));
+    await expect(
+      exchangeAuthorizationCode(fetchImpl, CROSS_ORIGIN, {
+        code: "",
+        codeVerifier: "THE-VERIFIER",
+        redirectUri: "https://portal.memql.localhost/auth/callback",
+      }),
+    ).rejects.toThrow(/code and redirect_uri/);
+    await expect(
+      exchangeAuthorizationCode(fetchImpl, CROSS_ORIGIN, {
+        code: "AUTH-CODE",
+        codeVerifier: "THE-VERIFIER",
+        redirectUri: "",
+      }),
+    ).rejects.toThrow(/code and redirect_uri/);
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it("does not let a failed sign-out throw at the caller", async () => {

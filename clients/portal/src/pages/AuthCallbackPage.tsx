@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
+import { isRuntimeConfigReady } from "../cluster/config";
 import { ErrorMessage, Loading } from "../components/StatusMessage";
 import { DEFAULT_RETURN_TO } from "../auth/pending";
 
@@ -28,7 +29,7 @@ import { DEFAULT_RETURN_TO } from "../auth/pending";
 // an action that actually succeeded.
 
 export function AuthCallbackPage(): ReactNode {
-  const { completeSignIn } = useAuth();
+  const { completeSignIn, config, status, error: sessionError } = useAuth();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   const [error, setError] = useState("");
@@ -41,7 +42,6 @@ export function AuthCallbackPage(): ReactNode {
 
   useEffect(() => {
     if (started.current) return;
-    started.current = true;
 
     const code = params.get("code") ?? "";
     const state = params.get("state") ?? "";
@@ -49,12 +49,16 @@ export function AuthCallbackPage(): ReactNode {
 
     // Scrub first, before any await. The window between arriving and
     // exchanging is where a screenshot or an accidental copy happens, and it
-    // costs nothing to close it immediately.
-    scrubQueryString();
+    // costs nothing to close it immediately. useSearchParams keeps the
+    // router's copy; history.replaceState does not clear that.
+    if (code || state || oauthError) {
+      scrubQueryString();
+    }
 
     if (oauthError) {
       // identity redirects failures back here rather than dead-ending on its
       // own error page, so this is a normal path, not an exceptional one.
+      started.current = true;
       setError(
         params.get("error_description") ||
           `The identity service refused the sign-in (${oauthError}).`,
@@ -62,9 +66,30 @@ export function AuthCallbackPage(): ReactNode {
       return;
     }
     if (!code || !state) {
+      started.current = true;
       setError("The sign-in response was missing its authorization code.");
       return;
     }
+
+    // This page sits outside RequireAuth, so it paints on the first tick of
+    // a cold load while AuthProvider is still reading runtime-config.json.
+    // completeSignIn reads configRef.current; if that is still
+    // UNKNOWN_RUNTIME_CONFIG, oauthClientId is empty and identity answers
+    // "code, client_id, and redirect_uri are required" (memql#4154). Wait.
+    // Do not set started until we actually hand the code over -- otherwise
+    // a late-arriving config can never retry.
+    if (!isRuntimeConfigReady(config)) {
+      if (status === "misconfigured") {
+        started.current = true;
+        setError(
+          sessionError ||
+            "This cluster is not configured for portal sign-in. See docs/public/operate/portal.md.",
+        );
+      }
+      return;
+    }
+
+    started.current = true;
 
     void completeSignIn({ code, state }).then((result) => {
       if (result.ok) {
@@ -73,7 +98,7 @@ export function AuthCallbackPage(): ReactNode {
       }
       setError(result.error);
     });
-  }, [completeSignIn, navigate, params]);
+  }, [completeSignIn, navigate, params, config, status, sessionError]);
 
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">

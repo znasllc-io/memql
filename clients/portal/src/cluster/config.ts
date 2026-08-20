@@ -80,6 +80,16 @@ export const UNKNOWN_RUNTIME_CONFIG: PortalRuntimeConfig = {
   authEnabled: true,
 };
 
+// isRuntimeConfigReady is the gate for anything that posts to identity
+// with client_id / authorize URL fields. UNKNOWN (and a half-loaded
+// document) has empty oauthClientId; exchanging then produces identity's
+// "code, client_id, and redirect_uri are required" (token.go lists all
+// three whenever any one is missing). Empty identityApiBaseUrl is fine --
+// that is the same-origin proxy shape.
+export function isRuntimeConfigReady(config: PortalRuntimeConfig): boolean {
+  return Boolean(config.identityUrl && config.oauthClientId);
+}
+
 export type RuntimeConfigFetch = (
   input: string,
   init?: RequestInit,

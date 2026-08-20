@@ -33,7 +33,7 @@
 // portal is site #1, memql#3711; component/portal/config.go, which used to
 // own this, is retired).
 
-import type { PortalRuntimeConfig } from "../cluster/config";
+import { isRuntimeConfigReady, type PortalRuntimeConfig } from "../cluster/config";
 
 export interface TokenSet {
   accessToken: string;
@@ -126,6 +126,17 @@ export async function exchangeAuthorizationCode(
   config: PortalRuntimeConfig,
   params: { code: string; codeVerifier: string; redirectUri: string },
 ): Promise<TokenSet> {
+  if (!isRuntimeConfigReady(config)) {
+    throw new Error(
+      "memQL portal: cannot exchange an authorization code until the " +
+        "serving node has published an identity URL and OAuth client id.",
+    );
+  }
+  if (!params.code || !params.redirectUri) {
+    throw new Error(
+      "memQL portal: authorization code exchange requires a code and redirect_uri.",
+    );
+  }
   return postForTokens(fetchImpl, apiUrl(config, "/oauth/token"), {
     grant_type: "authorization_code",
     code: params.code,
