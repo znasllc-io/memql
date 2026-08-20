@@ -28,4 +28,14 @@ The worked example is Shopify, which exists as TWO artifacts on either side of t
 
 Reviews is a **pack** only (`examples/reviewspack`): a product feature with no external system behind it, so it has no integration half. The thin product index and checkout URL live on the engine side of that line — merchandising stays on Shopify; checkout stays `cart.checkoutUrl`.
 
+## "Module" is the umbrella, not a fourth word
+
+When the platform needs a collective term over these kinds — the portal's
+management surface, the engine's inventory reporting — the word is
+**module**. A module is any of: a component, an integration, a pack, or a
+node-type module (a deployment unit of the mesh, such as voice). It names
+the group, never a new kind of thing, and each kind keeps its own
+enablement mechanism. The full mental model, including what
+enabling/disabling means per kind, is [Modules](modules.md).
+
 See [Plugin SDK](../build/plugin-sdk.md) for the Go contract and [Building a pack](../build/building-a-pack.md) for the walkthrough.
