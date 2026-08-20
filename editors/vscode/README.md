@@ -450,6 +450,49 @@ cluster -- needs nothing from the language server and is unaffected. (The Run
 CodeLens does need it, because the constructs it offers are read from the
 server.)
 
+## Security: the information policy
+
+The extension is a public tool that holds credentials and talks to clusters,
+so what its UI may SHOW is a policy, not a habit (audited in memql#4194). New
+surfaces inherit these rules; the mechanically checkable ones are enforced by
+the test suite (`test/clusterForm.test.ts`, `test/clusterStatus.test.ts`,
+`test/displayRedaction.test.ts`, `test/diagnostics.test.ts`).
+
+1. **Panels, toasts and tooltips carry a short, classified verdict; the raw
+   material lives in an output channel.** Three channels: `MemQL Install`
+   (capability stderr and run refusals), `MemQL Connection` (dial, sign-in and
+   language-server failures -- every dial failure is recorded exactly once, at
+   the connection-state seam), `MemQL Training` (schema diffs and outcomes).
+   A toast that has more to say offers "Show details", which reveals the
+   channel. A hover can be neither scrolled nor copied, so it is never the
+   only home of a diagnostic.
+2. **One redactor.** Everything on its way to a file OR a human surface goes
+   through `src/install/secrets.ts`: the receipt/run-log withholding gates,
+   and `redactForDisplay` (home directory masked to `~`, `sk-`/`mql_*_`
+   credentials scrubbed) for channel and panel text.
+3. **Credential inputs are never prefilled.** The token boxes show empty
+   whatever is stored; the prompt says that something is stored; an empty
+   answer keeps it. Removing a credential is sign-out's job, which also clears
+   the SecretStorage half. (`src/clusters/form.ts` is the seam.)
+4. **Reveal-once credentials are shown by explicit click, once, and nowhere
+   else.** The recovery key renders only after "Reveal the recovery key" on
+   the install done screen; it never reaches the run log, the receipt, or any
+   channel (`src/install/recoveryKey.ts` is the narrow, tested seam -- do not
+   widen it). The device code is the deliberate exception: the user must read
+   it, so it stays on the progress line and its notification.
+5. **Addresses are detail, not decoration.** The cluster list and QuickPick
+   show state + version; the endpoint lives in the row tooltip and on the
+   Connection page. Internal node ids stay in tooltips. The signed-in email
+   appears on the Connection page only.
+6. **Values stay out of hovers.** The Runs tree shows argument NAMES and
+   SHAPES; the values are in the configurations file, one command away.
+7. **Files that hold credentials are 0600.** `clusters.yaml` (plaintext
+   access token, shared with the Cockpit), the install receipt and the run
+   logs are written owner-only, and their writes pass the withholding gates.
+8. **The sudo password is asked by VS Code's own input, held in memory for
+   the one run, never exported to an env var or a file**
+   (`src/install/sudoAgent.ts` documents the trade).
+
 ## Development
 
 This surface is "the VS Code extension" (VS Code's own marketplace word),
