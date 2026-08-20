@@ -80,7 +80,7 @@ func TestFrontDoorPathsAreNotStale(t *testing.T) {
 // `--check` writes nothing, so a failing CI run leaves the tree untouched.
 func TestFrontDoorHostsAreNotStale(t *testing.T) {
 	out, err := exec.Command("go", "run", "../../../cmd/frontdoorhosts", "--check", "--overlays=.").CombinedOutput()
-	if err != None {
+	if err != nil {
 		t.Errorf("a generated front door is stale -- run `make frontdoor` (hosts, then paths).\n%s", out)
 	}
 }
