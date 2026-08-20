@@ -50,8 +50,9 @@ import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
-import { redactForDisplay } from "../install/secrets.js";
+import { maskHomePath, redactForDisplay } from "../install/secrets.js";
 import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
+import { preflightItems, type PreflightInputs, type PreflightItem } from "../state/preflight.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -317,6 +318,8 @@ export class AddClusterPanel {
    * projector -- without the key on it.
    */
   private recoveryKeyRevealed = false;
+  /** The "Before it runs" checklist for the collect screen (memql#4195). */
+  private preflight: PreflightItem[] | undefined;
 
   /** The removal's own state (memql#3476). See state/uninstallRun.ts. */
   private readonly uninstall = new UninstallRunState();
@@ -397,6 +400,9 @@ export class AddClusterPanel {
     // default, so the form is answerable the instant it renders and the list
     // only widens what can be chosen.
     if (action === "install" || action === "installGuided") void this.loadVersionChoices();
+    if (action === "install" || action === "installGuided" || action === "repair") {
+      void this.computePreflight(action);
+    }
     this.render();
   }
 
@@ -484,6 +490,9 @@ export class AddClusterPanel {
       // recorded answers already in the boxes -- nobody retypes a good path,
       // and a bad one is finally reachable.
       if (action === "repair") void this.prefillFromReceipt();
+      if (action === "install" || action === "installGuided" || action === "repair") {
+        void this.computePreflight(action);
+      }
       // The itemized list is the confirmation, so it is read the moment the
       // branch opens rather than behind a further click: there is nothing on
       // this screen for the operator to do until it is on screen.
@@ -1713,6 +1722,7 @@ ${cards}`;
       errors: this.state.errors,
       versionChoices: this.versionChoices,
       latestRelease: this.latestRelease(),
+      ...(this.preflight === undefined ? {} : { preflight: this.preflight }),
     });
   }
 
@@ -1962,6 +1972,44 @@ ${this.sharedToolsHtml()}
       }
       await agent.dispose();
     }
+  }
+
+  /**
+   * Gathers the "Before it runs" facts and repaints (memql#4195).
+   *
+   * The same sources the run itself consults -- the graph document, the
+   * `sudo -n` probe (through the deps seam the elevation tests use), the
+   * receipt's recorded key path -- so the checklist can never promise a
+   * different run than the one Start begins. Stale answers are prevented by
+   * re-checking the action when the async work lands.
+   */
+  private async computePreflight(action: "install" | "installGuided" | "repair"): Promise<void> {
+    this.preflight = undefined;
+    let graph: PreflightInputs["graph"];
+    let needsElevation = false;
+    try {
+      const loaded = await loadGraphFile(graphDocumentPath("install", this.deps.installRoot));
+      needsElevation = loaded.steps.some((step) => step.elevation !== "none");
+      graph = { ok: true, steps: loaded.steps.length, needsElevation };
+    } catch (err) {
+      graph = {
+        ok: false,
+        error: redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()),
+      };
+    }
+    let sudoFree = process.getuid?.() === 0;
+    if (!sudoFree && needsElevation) {
+      const isFree = this.deps.sudoIsFree ?? (() => sudoRunsWithoutAsking());
+      sudoFree = await isFree().catch(() => false);
+    }
+    const receipt = await readReceipt(this.deps.receiptFile).catch(() => null);
+    const recordedKeyPath = maskHomePath(
+      usablePath(recordedProviderKeyFile(receipt)),
+      os.homedir(),
+    );
+    if (this.disposed || this.state.action !== action || this.state.screen !== "collect") return;
+    this.preflight = preflightItems({ action, graph, sudoFree, recordedKeyPath });
+    this.render();
   }
 
   /** Whether any step of this graph needs a privilege this process lacks. */

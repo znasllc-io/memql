@@ -27,11 +27,23 @@ a trusted workspace, since it reads credentials and opens a network connection.
 
 | View | Answers |
 |---|---|
+| **Clusters** | Which clusters can I reach, as whom, in what state -- the home view |
 | **Deployments** | What do I operate, at what version, and what changed it |
-| **Clusters** | Which clusters can I reach, as whom |
 | **Constructs** | What is DEFINED on this cluster |
 | **Data** | What rows EXIST |
 | **Runs** | What have I run against a cluster |
+
+**Clusters is the home view** (memql#4195): the extension's mission is managing
+clusters -- many remote ones, and installing / repairing / uninstalling the
+local one -- so the list of them leads. Each row leads with its state (connected
+/ needs sign-in / unreachable) and recorded release; a cluster recorded behind
+the release this extension ships for says so in its tooltip. With zero clusters
+the view offers the two ways to get one -- install a local cluster, or add an
+existing one -- and install / repair are also in the view's title menu. The
+install, repair and uninstall flows open with a "Before it runs" checklist
+(graph loaded, whether your password will be needed, where the provider key
+path comes from) before anything starts, show honest per-step progress during,
+and put the full run log in the `MemQL Install` output channel.
 
 Constructs and Data are the two halves of one question, and keeping them apart
 is what the naming is for: a query is a definition, the rows it returns are

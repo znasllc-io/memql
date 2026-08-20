@@ -120,13 +120,13 @@
     "views": {
       "memql": [
         {
-          "id": "memqlDeployments",
-          "name": "Deployments",
+          "id": "memqlClusters",
+          "name": "Clusters",
           "when": "isWorkspaceTrusted"
         },
         {
-          "id": "memqlClusters",
-          "name": "Clusters",
+          "id": "memqlDeployments",
+          "name": "Deployments",
           "when": "isWorkspaceTrusted"
         },
         {
@@ -146,6 +146,12 @@
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "memqlClusters",
+        "contents": "No clusters yet. MemQL runs as a cluster this editor installs, repairs and connects to; managing what runs inside one is its portal's job.\n[Install a local cluster](command:memql.deployments.createDeployment)\n[Add an existing cluster](command:memql.clusters.add)"
+      }
+    ],
     "commands": [
       {
         "command": "memql.clusters.refresh",
@@ -308,6 +314,10 @@
     "menus": {
       "commandPalette": [
         {
+          "command": "memql.clusters.refreshReleases",
+          "when": "isWorkspaceTrusted"
+        },
+        {
           "command": "memql.clusters.refresh",
           "when": "isWorkspaceTrusted"
         },
@@ -459,6 +469,16 @@
           "command": "memql.clusters.refresh",
           "when": "view == memqlClusters",
           "group": "navigation@2"
+        },
+        {
+          "command": "memql.deployments.createDeployment",
+          "when": "view == memqlClusters",
+          "group": "1_manage@1"
+        },
+        {
+          "command": "memql.clusters.repair",
+          "when": "view == memqlClusters",
+          "group": "1_manage@2"
         },
         {
           "command": "memql.constructs.refresh",

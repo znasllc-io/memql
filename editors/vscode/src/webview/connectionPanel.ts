@@ -264,6 +264,10 @@ export class ConnectionPanel {
 ${factsHtml(view.connection)}
 <h2>Identity</h2>
 ${factsHtml(view.identity)}
+<p class="boundary">${escapeHtml(
+      "This editor owns what is on your machine and what you can reach: install, repair, connect, sign in. " +
+        "Managing what runs INSIDE the cluster -- people, modules, sites, deployments, observability -- is its portal's job. Open Portal, above.",
+    )}</p>
 <div class="actions">
   <button class="secondary" type="button" data-act="signIn">Sign in</button>
   <button class="secondary" type="button" data-act="signOut">Sign out</button>
@@ -298,6 +302,8 @@ ${viewKitStyles}
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
          background: var(--vscode-editor-background); margin: 0;
          padding: 16px 20px; max-width: 780px; }
+  .boundary { color: var(--vscode-descriptionForeground); border-top: 1px solid var(--vscode-panel-border);
+              margin-top: 18px; padding-top: 10px; font-size: 0.92em; }
   .head { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
   h1 { font-size: 1.2em; margin: 0 0 4px; }
   h2 { font-size: 1em; margin: 20px 0 6px; }

@@ -508,9 +508,11 @@ function registerRuntimeSurface(context: ExtensionContext): void {
   context.subscriptions.push(watcher);
 
 
-  // The Deployments tree (memql#3737). Above Clusters in the container, because
-  // it answers the question an operator arrives with -- "what do I run, and at
-  // what version" -- while Clusters answers "what can I reach".
+  // The Deployments tree (memql#3737). Below Clusters in the container since
+  // the clusters-first IA (memql#4195): the extension's mission is managing
+  // CLUSTERS -- what you can reach, and installing/repairing the local one --
+  // so the clusters list is the home surface, with the machine's deployment
+  // detail one view further down.
   //
   // Every collaborator is passed as a THUNK rather than a value: the connection
   // and its query client both change without this view being told, and a
