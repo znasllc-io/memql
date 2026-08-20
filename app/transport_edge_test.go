@@ -176,3 +176,32 @@ func TestEdgeAPITargetFromEnvUsesAConfiguredValueQuietly(t *testing.T) {
 		t.Errorf("a configured value must not warn: %q", buf.String())
 	}
 }
+
+func TestEdgeIdentityTargetFromEnvWarnsWhenUnset(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	got := edgeIdentityTargetFromEnv(logger)
+
+	if got != "" {
+		t.Errorf("got %q, want empty when unset", got)
+	}
+	if !strings.Contains(buf.String(), "MEMQL_IDENTITY_VERIFIER_BASE_URL") {
+		t.Errorf("warning should name the env var: %q", buf.String())
+	}
+}
+
+func TestEdgeIdentityTargetFromEnvUsesAConfiguredValueQuietly(t *testing.T) {
+	t.Setenv("MEMQL_IDENTITY_VERIFIER_BASE_URL", "https://identity:8085/")
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	got := edgeIdentityTargetFromEnv(logger)
+
+	if got != "https://identity:8085" {
+		t.Errorf("got %q, want the trimmed configured value", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("a configured value must not warn: %q", buf.String())
+	}
+}
