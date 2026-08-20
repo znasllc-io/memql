@@ -2,7 +2,7 @@
 //
 // THE DEFECT THIS PINS. The install's `recoveryKey` step CLAIMS the cluster's
 // break-glass key -- claiming rotates and reveals the plaintext exactly once,
-// into the envelope's `result.recoveryKey` -- and in the plugin NOBODY EVER SAW
+// into the envelope's `result.recoveryKey` -- and in the extension NOBODY EVER SAW
 // IT. Two requirements collided: memql#3908's default-deny credential
 // withholding (a GATE, tested) and the step description's "show it once"
 // (PROSE, untested). The gate won silently: the value was withheld from the

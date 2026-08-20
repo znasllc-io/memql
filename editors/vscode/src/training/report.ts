@@ -55,7 +55,7 @@ export interface TrainingCluster {
    * The recorded release (memql#3990), when clusters.yaml carries one.
    *
    * Carried here so a failure that severed the session can say whether this
-   * cluster is OLDER than the plugin -- see `version/skewHint.ts`. Undefined is
+   * cluster is OLDER than the extension -- see `version/skewHint.ts`. Undefined is
    * the ordinary case for a cluster nothing has learned a version for yet, and
    * produces no hint rather than a guess.
    */

@@ -3,7 +3,7 @@
 // This replaces the topology view, and not because it is nicer. The boundary
 // rule this epic establishes is:
 //
-//   The plugin owns what is on your machine and what you can reach.
+//   The extension owns what is on your machine and what you can reach.
 //   The portal owns what is inside a cluster.
 //
 // A pod grid, orphan verdicts and under-replica alarms are cluster state.

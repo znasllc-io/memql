@@ -720,9 +720,9 @@ export class TrainingActions {
   }
 
   // A failure that SEVERED THE SESSION gets one extra sentence when the
-  // cluster is recorded as older than this plugin (memql#4000).
+  // cluster is recorded as older than this extension (memql#4000).
   //
-  // This is the exact path the motivating incident travelled: a plugin newer
+  // This is the exact path the motivating incident travelled: a extension newer
   // than its cluster sent a field that release refused, the refusal ended the
   // session rather than failing the request, and every surface reported
   // "stream closed" with nothing naming the skew. The hint is composed in

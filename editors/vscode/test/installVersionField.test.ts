@@ -10,7 +10,7 @@ import { dedupeKeepingDefault } from "../src/webview/installScreens.js";
 //
 // An operator uninstalled a local cluster and reinstalled it cleanly. The
 // install was correct in every respect and still produced a cluster that could
-// not be used: the plugin got 404 on api.memql.localhost, sign-in returned
+// not be used: the extension got 404 on api.memql.localhost, sign-in returned
 // `500 could not persist client`, and the database had zero tables. It had
 // faithfully deployed v0.17.1, and all three fixes were on main.
 //

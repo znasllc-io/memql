@@ -970,7 +970,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       //
       // The owner account exists and has no passkey and no magic-link identity,
       // so there is nothing to authenticate WITH. An operator reads that as
-      // "the plugin will not let me in". Both routes are offered rather than
+      // "the extension will not let me in". Both routes are offered rather than
       // one chosen, because this side cannot know whether the operator already
       // registered a passkey on another machine -- they may have -- so it asks.
       // The buttons speak the walk's vocabulary (memql#4078): the action is
@@ -1002,7 +1002,7 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // a person can sign in with. The install mints an enrolment link, and an
     // operator who dismissed the notification, whose 15-minute link expired, or
     // who installed before that screen offered one had no way back to a link at
-    // all -- the only route was a terminal, which is not a route a plugin user
+    // all -- the only route was a terminal, which is not a route a extension user
     // has.
     //
     // A FRESH LINK EVERY TIME, never a replay: the install's link is single-use
@@ -1884,7 +1884,7 @@ let runOrchestrator: RunOrchestrator | undefined;
 // The recorded version joined that set in memql#4000. It is safe to carry for
 // the same reason the others are -- it is a release tag, not a credential --
 // and it is what lets a severed session say the cluster is older than the
-// plugin instead of only "stream closed".
+// extension instead of only "stream closed".
 function currentRunCluster(
   clustersPath: string,
   conns: ConnectionManager
@@ -1904,7 +1904,7 @@ function currentRunCluster(
     label: cluster.displayName !== undefined && cluster.displayName !== '' ? cluster.displayName : cluster.name,
     local: cluster.local === true,
     // The recorded release, so a severed session can say whether this cluster
-    // is older than the plugin (memql#4000). Undefined stays undefined -- an
+    // is older than the extension (memql#4000). Undefined stays undefined -- an
     // unlearned version produces no hint rather than a guess.
     version: cluster.version,
   };

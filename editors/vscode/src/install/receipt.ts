@@ -634,7 +634,7 @@ export function recordedStackRefKind(receipt: Receipt | null): string {
  * step that produced an envelope, failed ones included, and the params on it are
  * the ones that run was invoked with. A repair after a cluster that came up
  * half-way should replay the images that half-built cluster was asked for, not
- * whichever release this plugin build happens to pin today.
+ * whichever release this extension build happens to pin today.
  */
 export function recordedImageTag(receipt: Receipt | null): string {
   if (!receipt) return "";
@@ -696,7 +696,7 @@ export interface RecordedCheckout {
  * a repair replays; it said nothing about which node images that code runs
  * against, and nothing else did either -- the image tag was derived a second
  * time, from a tag a branch install deliberately does not have, and fell through
- * to whatever release the running plugin build pinned. That defect arrived with
+ * to whatever release the running extension build pinned. That defect arrived with
  * branch installs and only ever affected them (memql#3901): before that every
  * recorded checkout carried a tag, so the second derivation happened to agree
  * with the first. Carrying `imageTag` here rather than leaving it to each caller

@@ -70,7 +70,7 @@
 // `api-front-door.yaml`, which arrived with the five-host front door. So NOTHING
 // ROUTED `api.memql.localhost`, the one host every client dials. The editor
 // extension reported `websocket open failed: Unexpected server response: 404`
-// and the operator reasonably read it as a plugin fault. It was a manifest that
+// and the operator reasonably read it as a extension fault. It was a manifest that
 // had never been cut into a release.
 //
 // The other two were quieter and pointed at the wrong component just as hard.
@@ -84,7 +84,7 @@
 // WHAT THIS ADDS TO THE ARGUMENT ABOVE. The v0.16.1 note already says a pin is
 // only as good as the release it names. What v0.17.1 adds is that a stale pin
 // does not fail like a stale pin. Each symptom accused a healthy component --
-// the plugin, identity, cognition -- and none of them pointed at the version.
+// the extension, identity, cognition -- and none of them pointed at the version.
 // Bumping this is the release step; skipping it spends somebody's afternoon.
 //
 // BUMPED TO v0.19.0 (memql#4059). 262 commits accumulated behind v0.18.0, and
@@ -104,11 +104,11 @@
 //
 // The second is the skew this pin exists to prevent, and v0.18.0 is the release
 // that demonstrates it best. `AuthoringValidateBundleMsg.origin` landed SIX
-// HOURS after the v0.18.0 tag was cut, so no release carries it; a plugin built
+// HOURS after the v0.18.0 tag was cut, so no release carries it; a extension built
 // past the tag sends it, the cluster refuses it, and because the WebSocket
 // bridge decodes with unknown fields on, the refusal severs the session instead
 // of failing one request. The operator sees `ERROR (validate): stream closed`
-// and nothing says their cluster is simply older than their plugin. See
+// and nothing says their cluster is simply older than their extension. See
 // version/skewHint.ts, which exists only because the pin was allowed to go
 // stale.
 //

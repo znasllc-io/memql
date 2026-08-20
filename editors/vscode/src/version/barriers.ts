@@ -23,7 +23,7 @@
 // Same reason `TAG_SENSITIVE_STEPS` is a list (state/upgradePlan.ts): the
 // derivation would have to be "which releases changed something the checkout
 // move cannot carry", and that is a fact about what shipped in each release
-// rather than about anything the plugin can read. A list a reviewer can check
+// rather than about anything the extension can read. A list a reviewer can check
 // against the release beats an inference that looks principled and is not --
 // and the failure mode of a wrong inference here is silent data loss, which is
 // the worst thing in this epic's blast radius.

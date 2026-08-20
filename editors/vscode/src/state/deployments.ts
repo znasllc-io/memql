@@ -12,7 +12,7 @@
 //     The local instance is resolved from evidence already on the machine (the
 //     install receipt, a `local: true` row in clusters.yaml, the front-door
 //     probe -- all of it via clusters/presence.ts); a remote instance is a
-//     clusters.yaml row. The plugin cannot CREATE a remote cluster, so a
+//     clusters.yaml row. The extension cannot CREATE a remote cluster, so a
 //     "declared but not installed" remote row would be a row you can only look
 //     at.
 //
@@ -156,7 +156,7 @@ export interface RunItem {
 }
 
 export interface Run {
-  /** Local: plugin-minted, see runLog.mintRunId. Remote: the deploymentId. */
+  /** Local: extension-minted, see runLog.mintRunId. Remote: the deploymentId. */
   id: string;
   /** The Instance.name this run belongs to. */
   instance: string;
@@ -246,7 +246,7 @@ export function localInstance(input: LocalInstanceInput): Instance {
  * A remote instance's presence, from whether it answers.
  *
  * A REMOTE IS NEVER `absent`. A clusters.yaml row is an operator's assertion
- * that a cluster is there; the plugin cannot install one and so can never know
+ * that a cluster is there; the extension cannot install one and so can never know
  * that it is not. "Declared but never reached" and "was reachable and now is
  * not" are the same actionable state -- it does not answer -- and collapsing
  * them keeps the verdict to the question the surface can actually resolve.

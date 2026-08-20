@@ -3,7 +3,7 @@
 // WHAT WAS MISSING, AND WHY IT STAYED MISSING. The install's `recoveryKey`
 // step CLAIMS the cluster's break-glass key at install end -- claiming ROTATES
 // and reveals the plaintext exactly once, into the envelope's
-// `result.recoveryKey` -- and in the plugin, nobody ever saw it. Two
+// `result.recoveryKey` -- and in the extension, nobody ever saw it. Two
 // requirements collided: memql#3908's default-deny credential withholding (a
 // GATE, tested) and the step description's "show it once" (PROSE, untested).
 // The gate won silently. `recoveryKey` has head-noun `key` and an `mql_`
@@ -14,7 +14,7 @@
 // `recoveryKeyState`, the state machine, not the experience. And the same
 // script was complete in the terminal, where stdout IS the display
 // (memql#3969 designed exactly that: `KEY=$(kubectl exec ...)`), so the lane
-// CI exercises stayed green while the plugin swallowed the envelope.
+// CI exercises stayed green while the extension swallowed the envelope.
 //
 // THE LESSON, worth keeping where the seam lives: every reveal-once credential
 // needs a NAMED display surface and a test that the surface received it. A

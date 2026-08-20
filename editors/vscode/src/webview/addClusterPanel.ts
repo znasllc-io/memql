@@ -908,7 +908,7 @@ export class AddClusterPanel {
           // above replay the recorded CODE; without this one the node images
           // were derived again, from the empty tag a branch install's record
           // deliberately carries, and fell through to DEFAULT_STACK_TAG. So a
-          // repair from a newer plugin build reconciled the recorded commit's
+          // repair from a newer extension build reconciled the recorded commit's
           // manifests against a different release's engine -- an upgrade the
           // operator did not ask for, and a skew nobody chose.
           //

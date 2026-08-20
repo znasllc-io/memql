@@ -115,7 +115,7 @@ export interface SessionOptions {
    * IMAGES too, rather than re-derive them from a version a branch install does
    * not have. `imageTagForVersion` falls back to DEFAULT_STACK_TAG when handed
    * nothing, so re-deriving turned every repair of a branch install into an
-   * upgrade to whatever release the running plugin build pinned -- silently, and
+   * upgrade to whatever release the running extension build pinned -- silently, and
    * with the recorded commit's manifests still reconciling underneath it.
    *
    * `cli.ts`'s `repairOptions` and the wizard's repair path both read it off the
@@ -445,7 +445,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // branch install's recorded checkout is a commit and an EMPTY tag, so
           // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the
           // repaired cluster reconciled the recorded commit's manifests against
-          // whatever release THIS plugin build pins. An upgrade nobody asked for
+          // whatever release THIS extension build pins. An upgrade nobody asked for
           // -- exactly what memql#3605 defines a repair as never being -- plus a
           // manifest/image skew nobody chose.
           //

@@ -1130,7 +1130,7 @@ test("the claimed recovery key is shown once, on the done screen", async () => {
   // and the receipt, correctly; and no display surface was ever built. A
   // tested gate plus an untested promise equals a credential shown to no one
   // -- the CLI's terminal made the design complete there, so CI stayed green
-  // while the plugin swallowed the envelope. This is the test the promise
+  // while the extension swallowed the envelope. This is the test the promise
   // never had.
   const h = await runToDoneWithRecovery("claimed", RECOVERY_KEY);
   try {

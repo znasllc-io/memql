@@ -373,7 +373,7 @@ test("a repair of a TAG install replays that tag, not this build's pin", () => {
 // -- deliberately, because there is no release, and answering "main" would send
 // `imageTagFor` a branch name. The image tag was then derived a SECOND time from
 // that same empty tag, which falls straight through to DEFAULT_STACK_TAG. So a
-// repair run from a newer plugin build replayed the recorded commit's manifests
+// repair run from a newer extension build replayed the recorded commit's manifests
 // against a DIFFERENT release's engine images: an upgrade nobody asked for (the
 // thing memql#3605 refuses) plus a manifest/image skew nobody chose.
 //
@@ -430,7 +430,7 @@ test("a repair of a TAG install replays its recorded image tag too", () => {
   assert.notEqual(
     params["image-tag"],
     imageTagFor(DEFAULT_STACK_TAG),
-    "a newer plugin build must not move the images of what it repairs",
+    "a newer extension build must not move the images of what it repairs",
   );
 });
 

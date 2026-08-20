@@ -3,7 +3,7 @@
 // One property matters more than every other assertion in this file: a value
 // this module cannot parse must report `notComparable`, and `notComparable`
 // must NEVER be rendered as "up to date". That is the failure direction which
-// reproduces the motivating incident -- a plugin talking to a cluster older
+// reproduces the motivating incident -- a extension talking to a cluster older
 // than itself, with nothing anywhere saying so.
 //
 // The comparison lives here rather than in install/tags.ts because that
@@ -151,7 +151,7 @@ test("an unparseable value NEVER reports as current, in either position", () => 
   // The single most important assertion in this file. "current" is what a
   // surface renders as "up to date", and saying that about a cluster whose
   // version we could not read is precisely the incident this epic exists to
-  // prevent -- a plugin newer than its cluster, with nothing saying so.
+  // prevent -- a extension newer than its cluster, with nothing saying so.
   for (const [value] of NOT_COMPARABLE) {
     const forward: VersionRelation = compareVersions(value, "v0.18.0");
     const backward: VersionRelation = compareVersions("v0.18.0", value);
