@@ -4,7 +4,7 @@ import { NavLink, Outlet } from "react-router-dom";
 import { ClusterBadge } from "../components/ClusterBadge";
 import { ConnectionIndicator } from "../components/ConnectionIndicator";
 import { IdentityBadge } from "../components/IdentityBadge";
-import { MemqlMark } from "../components/MemqlMark";
+import { RailMark } from "../components/RailMark";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { CONCEPTS_ROOT } from "../concepts/urls";
 import {
@@ -196,9 +196,7 @@ export function AppShell(): ReactNode {
               "flex items-center gap-2.5 px-1.5 pt-1 " + (collapsed ? "justify-center" : "")
             }
           >
-            <span className="text-accent">
-              <MemqlMark size={24} />
-            </span>
+            <RailMark size={24} />
             {collapsed ? null : (
               <span className="font-display text-lg leading-none tracking-wide">
                 MemQL Portal

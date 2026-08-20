@@ -96,3 +96,95 @@
     outline-offset: 2px;
   }
 }
+
+/*
+ * The reactive grammar (memql#4180): the rail mark's connection states and
+ * the accent wash a freshly arrived row gets. CSS rather than JS animation
+ * so one reduced-motion media query flattens all of it to static states.
+ */
+@layer components {
+  @keyframes mm-node-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @keyframes mark-breathe {
+    0%,
+    100% {
+      opacity: 0.95;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  @keyframes row-wash {
+    from {
+      background-color: var(--portal-accent-subtle);
+    }
+    to {
+      background-color: transparent;
+    }
+  }
+
+  /* A just-arrived row region: a brief accent wash that fades to rest. */
+  .row-wash {
+    animation: row-wash 600ms ease-out;
+  }
+
+  /* Streaming: the nodes pulse in a stagger, the graph visibly alive. */
+  .mark-connection[data-conn="streaming"] .mm-node {
+    animation: mm-node-pulse 2.4s ease-in-out infinite;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n2 {
+    animation-delay: 0.25s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n3 {
+    animation-delay: 0.5s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n4 {
+    animation-delay: 0.75s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n5 {
+    animation-delay: 1s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n6 {
+    animation-delay: 1.25s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n7 {
+    animation-delay: 1.5s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n8 {
+    animation-delay: 1.75s;
+  }
+  .mark-connection[data-conn="streaming"] .mm-n9 {
+    animation-delay: 2s;
+  }
+
+  /* Connecting: the whole mark breathes while the dial is in flight. */
+  .mark-connection[data-conn="connecting"] svg {
+    animation: mark-breathe 1.6s ease-in-out infinite;
+  }
+
+  /* Offline (idle / closed / error): dimmed and desaturated, unmistakably
+     not the live mark. A static state -- nothing to animate. */
+  .mark-connection[data-conn="offline"] {
+    opacity: 0.35;
+    filter: grayscale(0.6);
+  }
+
+  /* Reduced motion: static colour/opacity states only. The offline dimming
+     stays (it is not motion); everything that moves stops. */
+  @media (prefers-reduced-motion: reduce) {
+    .mark-connection .mm-node,
+    .mark-connection svg,
+    .row-wash {
+      animation: none !important;
+    }
+  }
+}

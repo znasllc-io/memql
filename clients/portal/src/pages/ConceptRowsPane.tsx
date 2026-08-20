@@ -4,7 +4,8 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetail } from "../components/RowDetail";
 import { RowList } from "../components/RowList";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 import { liveBandIsEmpty } from "../concepts/liveBand";
 import { CURSOR_LOOP_ERROR } from "../concepts/rowWalk";
 import { conceptPath, conceptRowPath } from "../concepts/urls";
@@ -79,9 +80,7 @@ export function ConceptRowsPane(): ReactNode {
         {listArea === "hidden" ? null : (
           <div className="overflow-hidden rounded-lg border border-line bg-surface">
             {listArea === "loading" ? (
-              <div className="p-3">
-                <Loading what="rows" />
-              </div>
+              <Skeleton variant="rows" rows={6} />
             ) : (
               <RowList
                 rows={[...walk.rows]}
@@ -243,12 +242,17 @@ function LiveBand({
         </button>
       </div>
       {band.created.length > 0 ? (
-        <RowList
-          rows={[...band.created]}
-          concept={concept}
-          {...(selectedRowId ? { selectedRowId } : {})}
-          onSelect={onSelect}
-        />
+        // Keyed by the arrival count so each new row re-triggers the accent
+        // wash -- a brief background fade that says "this just happened"
+        // without stealing the scroll position or re-fetching anything.
+        <div key={band.created.length} className="row-wash">
+          <RowList
+            rows={[...band.created]}
+            concept={concept}
+            {...(selectedRowId ? { selectedRowId } : {})}
+            onSelect={onSelect}
+          />
+        </div>
       ) : null}
     </div>
   );
@@ -269,7 +273,7 @@ function RowDetailPane({
       {error ? (
         <ErrorMessage>Failed to read the row: {error}</ErrorMessage>
       ) : loading ? (
-        <Loading what="the row" />
+        <Skeleton variant="kv" rows={6} />
       ) : missing ? (
         <Empty>
           The cluster has no row with that id under this concept. It may have been

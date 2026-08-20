@@ -16,14 +16,6 @@ const LABELS: Record<string, string> = {
   error: "Connection failed",
 };
 
-const DOT_CLASSES: Record<string, string> = {
-  idle: "bg-subtle",
-  connecting: "bg-warn animate-pulse",
-  connected: "bg-ok",
-  closed: "bg-subtle",
-  error: "bg-danger",
-};
-
 export function ConnectionIndicator(): ReactNode {
   const { status, nodeId, serverVersion, error, reconnect } = useCluster();
 
@@ -37,10 +29,8 @@ export function ConnectionIndicator(): ReactNode {
 
   return (
     <div className="flex items-center gap-2 text-sm">
-      <span
-        aria-hidden="true"
-        className={`inline-block h-2 w-2 rounded-full ${DOT_CLASSES[status] ?? "bg-subtle"}`}
-      />
+      {/* The coloured state lives on the rail mark (memql#4180); this row is
+          the words -- the replica id, the version, and the retry. */}
       <span role="status" className="text-fg">
         {LABELS[status] ?? status}
       </span>

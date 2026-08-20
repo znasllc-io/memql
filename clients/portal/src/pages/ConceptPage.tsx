@@ -4,8 +4,8 @@ import { Link, Outlet, useMatch, useParams, useSearchParams } from "react-router
 import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Breadcrumbs, Tabs } from "../ui";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Breadcrumbs, Skeleton, Tabs } from "../ui";
 import type { ConceptPaneContext } from "./conceptContext";
 import {
   SCHEMA_ROUTE_PATTERN,
@@ -61,7 +61,7 @@ export function ConceptPage(): ReactNode {
   }
   if (error) return <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>;
   if (concept === undefined) {
-    if (loading) return <Loading what="the concept registry" />;
+    if (loading) return <Skeleton variant="rows" rows={8} />;
     return (
       <section className="mx-auto max-w-2xl">
         <h1 className="font-mono text-lg font-semibold break-all">{conceptId}</h1>
