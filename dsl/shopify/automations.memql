@@ -25,8 +25,8 @@ automation applyShopifyInboundProduct {
   }
   step apply {
     builtin shopifyApplyInboundProduct (
-      inboundRequestId: id
-      body: body
+      inboundRequestId: id,
+      body: body,
       source: source
     )
   }

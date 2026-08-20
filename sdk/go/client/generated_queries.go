@@ -4051,6 +4051,61 @@ func SendableRecipientsForAudienceBuild(args SendableRecipientsForAudienceArgs) 
 	return b.String()
 }
 
+// ShopifyProductById -- One thin product by GID.
+//
+// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProductById"] in generated_concepts.go).
+type ShopifyProductByIdArgs struct {
+	ProductId string
+}
+
+// ShopifyProductById calls the engine query shopifyProductById.
+func (qc *QueryClient) ShopifyProductById(ctx context.Context, args ShopifyProductByIdArgs) (*Result, error) {
+	call := ShopifyProductByIdBuild(args)
+	return qc.executeNamed(ctx, "shopifyProductById", call)
+}
+
+func ShopifyProductByIdBuild(args ShopifyProductByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProductById(")
+	b.WriteString("productId: ")
+	b.WriteString(quoteMemQL(args.ProductId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ShopifyProducts -- Index rows, newest first. Optional handle / present filters.
+//
+// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["shopifyProducts"] in generated_concepts.go).
+type ShopifyProductsArgs struct {
+	Handle     string
+	Present    bool
+	PresentSet bool // set true to send present; required because zero-value bool is ambiguous
+}
+
+// ShopifyProducts calls the engine query shopifyProducts.
+func (qc *QueryClient) ShopifyProducts(ctx context.Context, args ShopifyProductsArgs) (*Result, error) {
+	call := ShopifyProductsBuild(args)
+	return qc.executeNamed(ctx, "shopifyProducts", call)
+}
+
+func ShopifyProductsBuild(args ShopifyProductsArgs) string {
+	var b strings.Builder
+	b.WriteString("query shopifyProducts(")
+	if args.Handle != "" {
+		b.WriteString("handle: ")
+		b.WriteString(quoteMemQL(args.Handle))
+	}
+	if args.PresentSet {
+		if b.Len() > 22 {
+			b.WriteString(", ")
+		}
+		b.WriteString("present: ")
+		b.WriteString(fmt.Sprintf("%v", args.Present))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SiParticipantForSpace -- Find the active AI participant in a space.
 //
 // Bound concept: v1:cognition:participant (machine-readable: BoundConcepts["siParticipantForSpace"] in generated_concepts.go).
