@@ -50,6 +50,17 @@ go build -tags voice -o bin/memql-voice .
 
 ## Project Structure
 
+memQL has **exactly three** extension words. Do not invent a fourth.
+See [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md).
+
+- **component** — engine internals (`component/`: DSL lexer/AST, HTTP servers, bus, identity)
+- **integration** — talk to other DBs/services (`integrations/`). Shopify, email, telephony live here
+- **pack** — client-agnostic product feature (Plugin SDK v1 / `examples/referencepack`). Intake "plugin" means this
+
+`dsl/todos`, `dsl/calendar`, `dsl/campaigns` are **core**. Packs cannot shadow them.
+`memql.RegisterPlugin` is the Go registration primitive. It is not a fourth runtime.
+
+
 ```
 memQL/
 ├── app/               Phased service bootstrap (Go)
@@ -167,6 +178,7 @@ memQL/
 - [Auto-generated architecture diagrams](docs/internal/design/auto-generated-diagrams.md) -- the static topology model + observe runtime + cockpit drill-down navigator. Includes `.env` repo-root override flow (`component/envregistry/localenv.go`) and `MEMQL_OBSERVE_LEVEL`.
 
 **Core concepts:**
+- [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md) -- the three words; intake "plugin" means pack
 - [Architecture](docs/public/concepts/architecture.md)
 - [MemQL Language](docs/public/language/memql.md)
 - [Functions](docs/public/language/functions.md)
