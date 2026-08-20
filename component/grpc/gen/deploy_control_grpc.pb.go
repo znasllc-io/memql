@@ -32,7 +32,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// DeployControlService is the gRPC surface behind the memQL Deployment
+// DeployControlService is the gRPC surface behind the MemQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
 // machinery -- the image authority (the kustomize overlay), the release
 // lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and
@@ -167,7 +167,7 @@ func (c *deployControlServiceClient) RollbackDeployment(ctx context.Context, in 
 // All implementations must embed UnimplementedDeployControlServiceServer
 // for forward compatibility.
 //
-// DeployControlService is the gRPC surface behind the memQL Deployment
+// DeployControlService is the gRPC surface behind the MemQL Deployment
 // Console (znasllc-io/memql#725 + #728). It exposes the deployment-v2
 // machinery -- the image authority (the kustomize overlay), the release
 // lockfiles, Argo CD app status, Argo Rollouts progressive delivery, and

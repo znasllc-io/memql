@@ -1,7 +1,7 @@
 // automations.memql -- the referencepack reference pack.
 //
 // One automation that HOOKS A CORE SERVICE EVENT: it triggers on the
-// creation of a core `v1:notes:note` row -- a node owned by a core memQL
+// creation of a core `v1:notes:note` row -- a node owned by a core MemQL
 // domain, not by this pack. This is the "automation hooking a core service"
 // half of the pack acceptance: a pack reacts to a core concept's lifecycle
 // event without the core knowing the pack exists.

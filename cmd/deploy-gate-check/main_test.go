@@ -65,7 +65,7 @@ func TestResolveToken(t *testing.T) {
 // MUST be a well-formed MemQL query. The prior default ("count v1:cognition:space")
 // failed the parser with `unexpected token after expression: "v1:cognition:space"`,
 // which the engine logged as a `memql query execution failed` ERROR on the node on
-// every gate run (component=memQL, bff node) -- the staging log noise the issue
+// every gate run (component=MemQL, bff node) -- the staging log noise the issue
 // flagged. This test fails (with that exact error) on the old default and passes on
 // the well-formed queryActivePartitionIds replacement.
 func TestDefaultGateQueryParses(t *testing.T) {

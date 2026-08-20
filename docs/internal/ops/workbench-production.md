@@ -110,7 +110,7 @@ shipped in #804) serves bytes back by calling
 
 ## 3. Environment topology (decisions locked #805)
 
-memQL uses a **separate Azure Storage account per environment** —
+MemQL uses a **separate Azure Storage account per environment** —
 strong blast-radius isolation with no cross-env data bleed.
 
 | Environment | Storage backend | Account | Container | Status |

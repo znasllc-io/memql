@@ -17,7 +17,7 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// Store wraps the memQL engine with typed badge operations. Mirrors
+// Store wraps the MemQL engine with typed badge operations. Mirrors
 // the workertoken.Store pattern: create, revoke, lookup, list, touch.
 type Store struct {
 	Engine identity.EngineExecutor

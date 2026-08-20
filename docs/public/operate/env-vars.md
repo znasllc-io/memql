@@ -1,5 +1,5 @@
 ---
-title: Environment Variables -- memQL
+title: Environment Variables -- MemQL
 audience: public
 status: stable
 area: operate
@@ -7,9 +7,9 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# Environment Variables -- memQL
+# Environment Variables -- MemQL
 
-**Audience:** engineers running memQL locally or operating it in lab/prod.
+**Audience:** engineers running MemQL locally or operating it in lab/prod.
 **Last updated:** 2026-04-25 (post env-var refactor; Phase 8 complete)
 **Companion doc:** the product frontend repo's env-vars doc covers the frontend side.
 
@@ -18,7 +18,7 @@ owner: znas
 ## The registry (source of truth)
 
 `scripts/secrets/manifest.yaml` is the authoritative registry of **every**
-environment variable memQL reads (Epic 7 / memql#2104). One file drives three
+environment variable MemQL reads (Epic 7 / memql#2104). One file drives three
 consumers so they can never drift: the seal floor, the cockpit Configuration
 screen, and boot-time fail-fast validation. Each entry carries `component`,
 `scope` (`node` / `global` / `partition`), `kind`, `required` (node types that
@@ -57,7 +57,7 @@ Two limits worth knowing before you trust a green result:
 
 ## TL;DR
 
-memQL splits configuration into two tiers:
+MemQL splits configuration into two tiers:
 
 1. **Bootstrap values** -- a small set of OS environment variables the
    process must see *before* it can read anything else. Things like
@@ -76,7 +76,7 @@ memQL splits configuration into two tiers:
 2. **Concept storage** -- everything else. API keys, OAuth client
    secrets, model defaults, feature flags, mail-sender addresses, and
    any tunable a tenant might want to override. These live in four
-   memQL concepts and are seeded via the `make secrets-*` /
+   MemQL concepts and are seeded via the `make secrets-*` /
    `make variable-*` workflow rather than env files.
 
 The bootstrap envelope is intentionally tiny so that rotating an API
@@ -99,7 +99,7 @@ Where `COMPONENT` is the subsystem that consumes the value:
 
 | Prefix          | Subsystem                                                                                  | Example                                                                          |
 |-----------------|--------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------|
-| `MEMQL_`        | memQL itself: master key, node identity, transport, engine tuning.                         | `MEMQL_MASTER_KEY`, `MEMQL_NODE_TYPE`, `MEMQL_GRPC_ADDRESS`, `MEMQL_DEFAULT_*`.   |
+| `MEMQL_`        | MemQL itself: master key, node identity, transport, engine tuning.                         | `MEMQL_MASTER_KEY`, `MEMQL_NODE_TYPE`, `MEMQL_GRPC_ADDRESS`, `MEMQL_DEFAULT_*`.   |
 | `MEMORY_NODES_` | Database tier (the row store).                                                             | `MEMQL_DATABASE_DSN`.                                                     |
 | `MEMQL_SI_`     | Synthetic-intelligence providers (LLM / STT / TTS). Vendor goes after the prefix.          | `MEMQL_AI_OPENAI_API_KEY`, `MEMQL_AI_ANTHROPIC_API_KEY`.                         |
 | `EMAIL_`        | Email integration (Microsoft Graph or SMTP sender).                                        | `MEMQL_EMAIL_AZURE_TENANT_ID`, `MEMQL_EMAIL_SENDER`, `MEMQL_EMAIL_FROM_NAME`.                      |
@@ -114,7 +114,7 @@ the browser"):
 
 | Prefix              | Subsystem                                                                  | Example                                                                  |
 |---------------------|----------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| `VITE_MEMQL_`       | Backend connection URLs (memQL is the backend product name).               | `VITE_MEMQL_WS_URL`, `VITE_MEMQL_API_URL`.                               |
+| `VITE_MEMQL_`       | Backend connection URLs (MemQL is the backend product name).               | `VITE_MEMQL_WS_URL`, `VITE_MEMQL_API_URL`.                               |
 | `VITE_IDENTITY_`    | Identity-service metadata visible to the browser.                          | `VITE_IDENTITY_BASE_URL`.                                                |
 | `VITE_OPENAI_`      | Direct browser-to-OpenAI calls (Realtime / STT / TTS model names).         | `VITE_OPENAI_REALTIME_MODEL`.                                            |
 | `VITE_BYPASS_AUTH`  | Dev-only auth bypass.                                                      | -                                                                        |
@@ -129,11 +129,11 @@ the browser"):
 - **Two prefixes for the same thing.** We had `MAIL_*` and
   `AZURE_*` for the same (email) integration; merging onto `EMAIL_*`
   with the vendor as the second segment removes that ambiguity.
-- **The `MEMQL_` prefix where it's redundant.** Inside the memQL
-  repo, every var is "memQL's" -- prefixing every one of them with
+- **The `MEMQL_` prefix where it's redundant.** Inside the MemQL
+  repo, every var is "MemQL's" -- prefixing every one of them with
   `MEMQL_` is noise. Reserve `MEMQL_` for things that are about
-  memQL itself (master key, node identity, engine tuning), not for
-  things memQL happens to call (`MEMQL_OPENAI_API_KEY` reads cleaner than
+  MemQL itself (master key, node identity, engine tuning), not for
+  things MemQL happens to call (`MEMQL_OPENAI_API_KEY` reads cleaner than
   `MEMQL_OPENAI_API_KEY`).
 
 ### Migration window
@@ -157,7 +157,7 @@ These would tighten the naming scheme but the change radius is too
 wide to justify in the same commit as the doc:
 
 - `MEMQL_SI_*_API_KEY` -> `SI_*_API_KEY`. The `MEMQL_` prefix is
-  redundant inside the memQL repo and the dev manifest already
+  redundant inside the MemQL repo and the dev manifest already
   seeds the bare form. Touches 6 provider `.memql` files plus Go
   bridge-agent and STT bootstrap; coordinate with manifest +
   user-yaml renames.
@@ -315,7 +315,7 @@ them.
 
 | Variable                                         | Default | Purpose                                                                              |
 |--------------------------------------------------|---------|--------------------------------------------------------------------------------------|
-| `MEMQL_SERVICE_NAME`                             | `memQL` | Logged on every record; useful for routing. Every deployed node sets the same value -- the "per-node `memQL-bff`" this row used to claim is not what the manifests do (memql#3892). Legacy name `SERVICE_NAME` still accepted. |
+| `MEMQL_SERVICE_NAME`                             | `MemQL` | Logged on every record; useful for routing. Every deployed node sets the same value -- the "per-node `MemQL-bff`" this row used to claim is not what the manifests do (memql#3892). Legacy name `SERVICE_NAME` still accepted. |
 | `MEMQL_SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL`   | `info`  | Service-level log level (`debug`, `info`, `warn`, `error`). Legacy name `SERVICE_CAPABILITIES_LOGGING_LOG_LEVEL` still accepted. |
 | `MEMORY_ENGINE_CAPABILITIES_LOGGING_LOG_LEVEL`   | `info`  | MemQL engine log level. Independent of the service logger.                           |
 
@@ -343,7 +343,7 @@ to Postgres slots (epic memql#1925). Transaction-mode poolers recycle a
 server backend *between statements*, which would drop a held
 **session-scoped** resource -- session advisory locks (cognition
 dispatch gate, cron leader, reconciler, planner admission) and the
-migrator's lock. memQL therefore runs a **hybrid endpoint split**:
+migrator's lock. MemQL therefore runs a **hybrid endpoint split**:
 
 | Variable                              | Default        | Purpose                                                                                                                                                                                                 |
 |---------------------------------------|----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -425,7 +425,7 @@ delivery).
 | `MEMQL_POLYPHON_PREDICTION_ENGINE_URL` | none           | External Polyphon prediction engine; absent = embedded engine.                   |
 | `VOICE_AGENT_TOKEN`            | unset            | Identity-issued `class="voice_agent"` JWT the Go voice-agent presents on `MemqlService.Stream`. When empty the agent self-bootstraps via `/node/bootstrap` (dev). See `docs/public/operate/auth/voice-agent-jwt.md`. |
 | `MEMQL_VOICE_EXECUTOR`         | `realtime`       | Go voice-agent executor: `realtime` (OpenAI gpt-realtime speech-to-speech, the default since #483) or `cascade` (OpenAI STT -> cognition -> OpenAI TTS). Realtime degrades cleanly to the cascade when its preconditions fail (persona build etc.), logging the reason -- so a fresh run uses realtime and there is no silent cascade surprise. Set `cascade` to opt out. The active executor is logged loudly at session start (`voice-agent voice executor: ...`). |
-| `MEMQL_VOICE_ROOM_NAME`        | unset            | LiveKit room the Go voice-agent joins (memQL convention: `polyphon-<spaceId>`). Falls back here when no `--room` flag is passed. |
+| `MEMQL_VOICE_ROOM_NAME`        | unset            | LiveKit room the Go voice-agent joins (MemQL convention: `polyphon-<spaceId>`). Falls back here when no `--room` flag is passed. |
 | `MEMQL_REALTIME_NOISE_REDUCTION` | `far_field`    | Server-side input noise reduction on the realtime voice session (`audio.input.noise_reduction`): `far_field` (laptop/conference mics -- the documented mitigation for speaker-echo phantom turns), `near_field` (headsets), or `off` (field omitted). Filters audio BEFORE the model's VAD, reducing turn-detection false positives. Layered with the `MEMQL_REALTIME_VAD_THRESHOLD` energy gate and the transcript filters. See `docs/public/operate/voice-realtime-ga.md` (#1431). |
 | `MEMQL_REALTIME_TRANSCRIPT_MIN_CONFIDENCE` | `-1.0` | Mean per-token logprob floor a realtime input-transcription FINAL must clear to reach chat (the session requests `item.input_audio_transcription.logprobs`; requires the `gpt-4o-transcribe` model family). Finals WITHOUT logprobs always pass -- the signal is intermittently missing and absence never drops a real utterance. Raise toward `-0.5` to gate harder; set very low (e.g. `-100`) to effectively disable. Composes with the #1199 hallucination denylist (#1431). |
 | `MEMQL_AVATAR_VENDOR`          | `anam`           | Avatar vendor on the voice-agent side: `anam`, `simli`, or `none`.               |
@@ -464,7 +464,7 @@ key" or "where do I change the default model".
 The authoritative manifest is
 [`scripts/secrets/manifest.yaml`](../../../scripts/secrets/manifest.yaml).
 Every entry in the manifest is what `make secrets-init` will prompt
-for and what `make secrets-seed` will push into the running memQL.
+for and what `make secrets-seed` will push into the running MemQL.
 
 ### Default global secrets (manifest)
 
@@ -490,7 +490,7 @@ Stored in `v1:platform:globalVariable`.
 | `MEMQL_EMAIL_AZURE_TENANT_ID`       | none                                 | Azure AD tenant id used by the **email integration**'s GraphSender. Legacy name `AZURE_TENANT_ID` still accepted (fallback).           |
 | `MEMQL_EMAIL_AZURE_CLIENT_ID`       | none                                 | Azure AD application id used by the email integration's GraphSender. Legacy name `AZURE_CLIENT_ID` still accepted.                     |
 | `MEMQL_EMAIL_SENDER`                | none                                 | Sender address for transactional mail (e.g. `no-reply@znas.io`). Legacy name `MAIL_SENDER` still accepted.                             |
-| `MEMQL_EMAIL_FROM_NAME`             | `memQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
+| `MEMQL_EMAIL_FROM_NAME`             | `MemQL`                              | Display name in the From header. Legacy name `MAIL_FROM_NAME` still accepted.                                                          |
 
 ### Variables consumed by the product frontend
 
@@ -514,7 +514,7 @@ frontend's runtime config layer (its publicConfig whitelist):
 | `MEMQL_DEFAULT_TTS_PROVIDER`    | `tts1Hd`               | Same.                                                                          |
 | `MEMQL_DEFAULT_USER_LANGUAGE`   | `en-US`                | Same.                                                                          |
 
-The exact name on the memQL side has to match the entry in the
+The exact name on the MemQL side has to match the entry in the
 frontend's publicConfig whitelist exactly. To add a new one: add it
 to the whitelist, then
 `make variable-set NAME=... VALUE=... SCOPE=global`.
@@ -540,7 +540,7 @@ This is the BYOK ("bring your own key") path. The DSL surface is
 ## The yaml file (`~/.memql/dev-secrets.yaml`)
 
 This is **operator-local, gitignored, and dev-only**. It is the
-plaintext stash of values that get encrypted-and-pushed to memQL on
+plaintext stash of values that get encrypted-and-pushed to MemQL on
 `make secrets-seed`.
 
 Schema:
@@ -587,7 +587,7 @@ the concept-seeding step:
    reads `~/.memql/dev-secrets.yaml`.
 2. It encrypts each yaml entry under the master key (resolved from the
    seeded `MEMQL_MASTER_KEY` env) and upserts the row into the right
-   concept over gRPC against the running memQL.
+   concept over gRPC against the running MemQL.
 
 ### Make targets
 
@@ -596,11 +596,11 @@ All driven by `scripts/secrets/main.go`:
 | Target                                                          | Purpose                                                                          |
 |-----------------------------------------------------------------|----------------------------------------------------------------------------------|
 | `make secrets-init`                                             | Interactive walk through the manifest. Generates a master key on first run, prompts only for empty entries on subsequent runs. |
-| `make secrets-seed`                                             | Encrypt + push every entry from the yaml into the running memQL.                 |
+| `make secrets-seed`                                             | Encrypt + push every entry from the yaml into the running MemQL.                 |
 | `make secrets-list`                                             | Print the manifest, scope, and whether each entry has a value locally.           |
 | `make secret-set NAME=X VALUE=Y SCOPE=global`                   | One-off; doesn't touch the yaml.                                                 |
 | `make variable-set NAME=X VALUE=Y SCOPE=global`                 | Same for plaintext variables.                                                    |
-| `make secrets-export`                                           | Pull every active secret + variable from the running memQL, decrypt locally, merge into the yaml (memQL wins on conflict). Used to back state up before a `make down && make up` recreates the database. |
+| `make secrets-export`                                           | Pull every active secret + variable from the running MemQL, decrypt locally, merge into the yaml (MemQL wins on conflict). Used to back state up before a `make down && make up` recreates the database. |
 
 `make secrets-export` then `make secrets-seed` round-trips concept state
 through the yaml, so it stays in sync across a cluster recreate.
@@ -673,8 +673,8 @@ Is the value sensitive?
     └── Instance-only?              → v1:platform:globalVariable only
 ```
 
-If the value has to be available *before* memQL connects to its
-database (i.e. it controls how memQL connects), it's a bootstrap
+If the value has to be available *before* MemQL connects to its
+database (i.e. it controls how MemQL connects), it's a bootstrap
 envelope var, not a concept entry. There's a strong bias against
 adding new entries to the bootstrap envelope -- it requires a
 deploy-config change every time it rotates.
@@ -766,9 +766,9 @@ Full procedure and reasoning:
 make secrets-export
 ```
 
-Pulls every active row from the running memQL, decrypts secrets
+Pulls every active row from the running MemQL, decrypts secrets
 locally with the master key, and merges the result into the yaml.
-Conflict resolution: memQL wins. Run this before any
+Conflict resolution: MemQL wins. Run this before any
 `make down && make up` that resets the database.
 
 ### "Why is my provider giving 'no value' errors?"
@@ -782,7 +782,7 @@ Check the resolver chain in order:
    ```
    or in DSL:
    `getQuery("queryConfigSecret", { name: "MEMQL_OPENAI_API_KEY" })`.
-2. Does the running memQL have `MEMQL_MASTER_KEY` set in env?
+2. Does the running MemQL have `MEMQL_MASTER_KEY` set in env?
 3. Is the master key the **same one** that encrypted the row? If
    you regenerated it, the existing rows are unreadable -- run
    `make secrets-seed` again to overwrite with the new key.
@@ -790,7 +790,7 @@ Check the resolver chain in order:
 ### Local override without polluting the yaml
 
 `make secret-set` / `make variable-set` write directly to the
-running memQL without modifying the yaml. Useful for one-off
+running MemQL without modifying the yaml. Useful for one-off
 experiments. Note that the next `make down && make up` recreates the
 database, so re-running `make secrets-seed` replaces the value with
 whatever's in the yaml -- export first if you want to keep it.

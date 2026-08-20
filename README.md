@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/memql-lockup.png" alt="memQL" width="500">
+  <img src="assets/memql-lockup.png" alt="MemQL" width="500">
 </p>
 
-<h1 align="center">memQL</h1>
+<h1 align="center">MemQL</h1>
 
 <p align="center">
   <strong>The AI memory platform: agents, automations, and voice on a time-series memory graph.</strong><br>
@@ -19,19 +19,19 @@
 
 <p align="center"><sub><em>Designed and built with Claude as co-author.</em></sub></p>
 
-> **Status: Alpha / pre-1.0 — not production-ready.** memQL is under active development. The DSL, engine API, and wire surface are still evolving; expect breaking changes between commits. Suitable for experimentation, prototyping, and early-design feedback today.
+> **Status: Alpha / pre-1.0 — not production-ready.** MemQL is under active development. The DSL, engine API, and wire surface are still evolving; expect breaking changes between commits. Suitable for experimentation, prototyping, and early-design feedback today.
 
 ---
 
-## What is memQL?
+## What is MemQL?
 
-memQL is a distributed AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes.
+MemQL is a distributed AI platform built on a time-series memory graph, with its own DSL — a single language for declaring concepts (schemas), queries, mutations, tools, and event-driven automations side-by-side, then executing them across specialized nodes.
 
-It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a memQL cluster.
+It replaces the integration glue AI-native teams typically hand-write — vector store + workflow engine + AI gateway + voice stack — with one deployable primitive. A team that would otherwise stitch together four systems can declare an agent's memory, behavior, and triggers in one DSL file and run them on a MemQL cluster.
 
-## Why memQL?
+## Why MemQL?
 
-Agent and voice deployments today are integration-heavy. Most of the engineering effort is plumbing — keeping state consistent across a vector store, an orchestrator, a tool registry, and a model provider. memQL collapses that plumbing: concepts and queries live in the same place; tools, automations, and workflows reference them directly; the engine handles consistency, time-series storage, and execution.
+Agent and voice deployments today are integration-heavy. Most of the engineering effort is plumbing — keeping state consistent across a vector store, an orchestrator, a tool registry, and a model provider. MemQL collapses that plumbing: concepts and queries live in the same place; tools, automations, and workflows reference them directly; the engine handles consistency, time-series storage, and execution.
 
 ## Example
 
@@ -109,7 +109,7 @@ make test
 
 ## Environments
 
-memQL ships **one installation shape**: an operator who wants a second
+MemQL ships **one installation shape**: an operator who wants a second
 environment installs a second instance, with its own domain and its own
 ArgoCD — there is no staging-versus-production dimension inside the product.
 What varies between a local dev cluster and a cloud install is the deploy
@@ -133,7 +133,7 @@ provisioning, never the shape of the system. See
 
 ### Prerequisites
 
-memQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
+MemQL development runs on **both Linux/amd64 and macOS/Apple Silicon** —
 the local cluster's prerequisites (`docker`, `k3d`, `kubectl`) have no
 platform-specific step on either, and the `make up` dev flow is exercised
 on both. Linux/amd64 is a fully supported target in its own right, not a
@@ -199,7 +199,7 @@ targets Linux/amd64 only and refuses macOS by design -- on macOS, use the
 ## Project Structure
 
 ```
-memQL/
+MemQL/
 ├── main.go              # Entry point (thin orchestrator)
 ├── app/                  # Phased service bootstrap
 │   ├── app.go            # Build() orchestrator
@@ -218,7 +218,7 @@ memQL/
 │   ├── cognition/        # AI collaboration
 │   └── voice/            # Voice + video pipeline (LiveKit room, avatar)
 ├── clients/              # Surfaces built ON the platform (SPAs, portal)
-│   └── portal/           # memQL Portal -- the platform's ops console
+│   └── portal/           # MemQL Portal -- the platform's ops console
 ├── dsl/                  # The MemQL DSL tree (one directory per namespace)
 │   ├── cognition/        # e.g. concepts.memql, queries.memql, mutations.memql,
 │   │                     #      tools.memql, automations.memql, ... per namespace
@@ -263,7 +263,7 @@ service** (`component/identity`):
 - OAuth-style code exchange for SPAs (`/oauth/token`)
 - JWKS-published EdDSA signing keys (`/.well-known/jwks.json`)
 - Role-based access control (RBAC) per `v1:identity:user.role`
-- Admin surfaces (people, tokens, keys, settings) live in the memQL portal
+- Admin surfaces (people, tokens, keys, settings) live in the MemQL portal
 
 **Developer access:**
 - **Local:** All developers (own machine)
@@ -292,7 +292,7 @@ and the `MEMQL_REQUIRE_DB=1` / db-gated-lane details.
 
 ## Local Cluster (k3d + ArgoCD)
 
-Full stack with PostgreSQL + TimescaleDB (via CloudNativePG) + memQL node
+Full stack with PostgreSQL + TimescaleDB (via CloudNativePG) + MemQL node
 pods, reconciled by ArgoCD from `deploy/k8s/overlays/local`:
 
 ```bash
@@ -342,12 +342,12 @@ automation autoJoinSI {
 
 ## Deployment
 
-memQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
+MemQL runs on Azure Kubernetes Service (AKS), reconciled by ArgoCD from
 `deploy/k8s/overlays/cloud`. The blessed deploy is a GIT MERGE: bump the
 `{engine version, bundle digest, client digest}` in that overlay and merge.
 
 `make deploy VERSION=X` is the break-glass path for when ArgoCD is
-unavailable — it delegates to the memQL Cockpit's pinned, role-gated,
+unavailable — it delegates to the MemQL Cockpit's pinned, role-gated,
 audited `deployEngineCluster` automation. It is not the normal path.
 
 See [docs/public/operate/deploy-bundle-runbook.md](docs/public/operate/deploy-bundle-runbook.md)
@@ -368,7 +368,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 5. Stage files by explicit path (`git add <file>`)
 
 **Git workflow:** Single long-lived `main` branch. Pre-release: no
-backwards-compat shims; fix both memQL and the consumer at once.
+backwards-compat shims; fix both MemQL and the consumer at once.
 
 ---
 
@@ -388,4 +388,4 @@ Apache License 2.0 — see [LICENSE](LICENSE).
 
 ---
 
-**memQL - the AI memory platform: agents, automations, and voice on a time-series memory graph**
+**MemQL - the AI memory platform: agents, automations, and voice on a time-series memory graph**

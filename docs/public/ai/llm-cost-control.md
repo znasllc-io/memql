@@ -9,7 +9,7 @@ owner: znas
 
 # LLM cost control — defense in depth
 
-This is the canonical map of how memQL bounds LLM spend so that a runaway
+This is the canonical map of how MemQL bounds LLM spend so that a runaway
 loop **cannot** burn unbounded money regardless of which path triggers it
 (epic [memql#1141](https://github.com/znasllc-io/memql/issues/1141)).
 

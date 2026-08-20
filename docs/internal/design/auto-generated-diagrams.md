@@ -13,7 +13,7 @@ owner: znas
 
 **Status:** Shipped 2026-05-15 on `feature/auto-generated-diagrams`.
 
-**One-line:** Walk the workspace's Go source, build a typed graph of cluster / service / package / type / function nodes plus relationship edges, embed the graph in the binary, and let memQL Cockpit render it as an interactive drill-down topology with live observability data layered on top.
+**One-line:** Walk the workspace's Go source, build a typed graph of cluster / service / package / type / function nodes plus relationship edges, embed the graph in the binary, and let MemQL Cockpit render it as an interactive drill-down topology with live observability data layered on top.
 
 ---
 
@@ -43,7 +43,7 @@ The framework treats the diagram as a **compiled artifact**: same lifecycle as t
      |                                     | live cluster nodes | <-- existing tcell grid
      |                                     |  (red/green health)|     (live snapshot)
      +-->+----------------------+          +---------+----------+
-         | memQL Cockpit        |                    |
+         | MemQL Cockpit        |                    |
          |  Topology pane       |<-------------------+ same pane, toggled with X
          |                      |
          |  ArchView (architecture)

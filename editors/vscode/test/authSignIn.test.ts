@@ -227,7 +227,7 @@ test("describeSignInFailure handles every kind in the taxonomy", () => {
     assert.notEqual(report.message, "", `${kind} produced no message`);
     assert.match(
       report.message,
-      /^memQL: signing in to "local" failed\./,
+      /^MemQL: signing in to "local" failed\./,
       `${kind} must name the cluster`,
     );
     assert.ok(
@@ -235,7 +235,7 @@ test("describeSignInFailure handles every kind in the taxonomy", () => {
       `${kind} must carry the flow's own explanation through`,
     );
     assert.ok(
-      report.message.length > `memQL: signing in to "local" failed. the ${kind} sentence`.length,
+      report.message.length > `MemQL: signing in to "local" failed. the ${kind} sentence`.length,
       `${kind} must add a next action, not only restate the failure`,
     );
   }
@@ -297,7 +297,7 @@ test("describeSignInFailure survives a rejection that is not an AuthFlowError", 
 // -----------------------------------------------------------------------------
 //
 // The defect these pin is not a wrong result -- it is a capability that shipped
-// unreachable. `memQL: Sign In` called a PRIVATE function in extension.ts that
+// unreachable. `MemQL: Sign In` called a PRIVATE function in extension.ts that
 // ran loopback alone, while an exported function of the SAME NAME in
 // auth/deviceCodeUi.ts ran the loopback-to-device-code fallback and had zero
 // importers. Nothing failed for a host that could do loopback. A host that could

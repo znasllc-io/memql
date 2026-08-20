@@ -165,7 +165,7 @@ export class TrainingDecorations {
     const painted = this.painted;
     if (painted === undefined) {
       vscode.window.showInformationMessage(
-        "memQL: no training state for the active editor. Open a .memql file with a cluster connected."
+        "MemQL: no training state for the active editor. Open a .memql file with a cluster connected."
       );
       return;
     }
@@ -176,7 +176,7 @@ export class TrainingDecorations {
       // "everything here is on the cluster" is the good news this whole surface
       // exists to tell somebody.
       vscode.window.showInformationMessage(
-        "memQL: every construct in this file is on the cluster -- nothing untrained, nothing drifted."
+        "MemQL: every construct in this file is on the cluster -- nothing untrained, nothing drifted."
       );
       return;
     }

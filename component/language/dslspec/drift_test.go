@@ -1,7 +1,7 @@
 package dslspec
 
 // drift_test.go is the #2124 CI drift pin. dslspec is the single
-// machine-readable source of truth for the memQL DSL authoring surface
+// machine-readable source of truth for the MemQL DSL authoring surface
 // (constructs / keywords / operators / field-types / legal-next rules)
 // plus a strict projection of the annotations registry. Nothing else
 // pins that SoT against the LIVE grammar, so Sense could silently fall

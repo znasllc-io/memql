@@ -77,7 +77,7 @@ func (l *Loader) validateTriggerWiring(automation *Automation) error {
 				"component", ComponentName,
 				"automation", automation.Name,
 				"schedule", automation.Schedule,
-				"note", "memQL crons carry a LEADING SECONDS field, so `*/5 * * * * *` is every 5 SECONDS; every 5 minutes is `0 */5 * * * *`")
+				"note", "MemQL crons carry a LEADING SECONDS field, so `*/5 * * * * *` is every 5 SECONDS; every 5 minutes is `0 */5 * * * *`")
 		}
 	}
 
@@ -109,7 +109,7 @@ func validateCronExpression(expr string) error {
 	if promoted, ok := promoteFiveFieldCron(trimmed); ok {
 		if _, perr := automationCronParser.Parse(promoted); perr == nil {
 			return fmt.Errorf("invalid cron schedule %q: %w. "+
-				"That is the 5-field crontab spelling; memQL crons carry a LEADING SECONDS field "+
+				"That is the 5-field crontab spelling; MemQL crons carry a LEADING SECONDS field "+
 				"(second minute hour day-of-month month day-of-week). Write %q for the same schedule. "+
 				"The leading 0 is not added for you on purpose -- a corpus that accepted both widths would "+
 				"make `*/5 * * * *` (every 5 minutes) and `*/5 * * * * *` (every 5 seconds) indistinguishable "+
@@ -119,7 +119,7 @@ func validateCronExpression(expr string) error {
 	}
 
 	return fmt.Errorf("invalid cron schedule %q: %w. "+
-		"memQL crons are SIX fields (second minute hour day-of-month month day-of-week), e.g. "+
+		"MemQL crons are SIX fields (second minute hour day-of-month month day-of-week), e.g. "+
 		"\"0 */10 * * * *\" = every 10 minutes, \"0 0 2 * * *\" = daily at 02:00. "+
 		"Descriptors (@hourly, @daily, @weekly, @monthly, @yearly, @every <duration>) also parse",
 		trimmed, err)

@@ -320,7 +320,7 @@ logic auditEventRetentionSweep {
 // the operator wants tighter cleanup, bump the cadence here.
 //
 // The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
-// because the memQL query planner rejects function-call literals
+// because the MemQL query planner rejects function-call literals
 // in filter comparisons.
 /// Hourly sweep that stamps consumedAt + consumedFromIP='system:expiry' on v1:identity:magiclink
 /// rows whose expiresAt is in the past, so the row reads as 'spent' in audit queries and any
@@ -371,7 +371,7 @@ logic onDelegationCreated {
 //
 // `now` is passed by the caller (the automation step computes
 // `now` so the query receives a plain RFC3339 string) because
-// the memQL query planner doesn't accept function-call literals in
+// the MemQL query planner doesn't accept function-call literals in
 // comparison expressions yet.
 
 /// Find every expired active delegation. PURE READ -- returns the rows; it revokes nothing.

@@ -1,6 +1,6 @@
-# `fleet` — the memQL Cloud control plane
+# `fleet` — the MemQL Cloud control plane
 
-memQL Cloud's control plane, built on memQL. Epic memql#3852, task memql#3853.
+MemQL Cloud's control plane, built on MemQL. Epic memql#3852, task memql#3853.
 
 ## The shape of it
 
@@ -27,15 +27,15 @@ holding credentials for the cluster's control plane.
 
 |  | Lives in | Why |
 |---|---|---|
-| The **fleet DSL** — subscribers, subscriptions, tiers, instances, meters, and the lifecycle automations | `deploy/fleet/dsl/` — a data-only bundle, **not embedded** | memQL Cloud is a PRODUCT. The engine under it is product-neutral by doctrine, so our control plane reaches a node the same way any customer's product does: at runtime, through `MEMQL_DSL_PATH`. |
-| The **tenant lifecycle scripts** — [`scripts/fleet/`](../../scripts/fleet/) — and the [`tenant`](../k8s/components/tenant/README.md) kustomize component | the engine repo, compiled/registered normally | These provision *a memQL instance*. They take a tenant name, a profile and a domain, render an overlay, and talk to ArgoCD. They know nothing about subscriptions, money or trials. Any operator running memQL for anyone would want them — that is what makes them platform rather than product. |
+| The **fleet DSL** — subscribers, subscriptions, tiers, instances, meters, and the lifecycle automations | `deploy/fleet/dsl/` — a data-only bundle, **not embedded** | MemQL Cloud is a PRODUCT. The engine under it is product-neutral by doctrine, so our control plane reaches a node the same way any customer's product does: at runtime, through `MEMQL_DSL_PATH`. |
+| The **tenant lifecycle scripts** — [`scripts/fleet/`](../../scripts/fleet/) — and the [`tenant`](../k8s/components/tenant/README.md) kustomize component | the engine repo, compiled/registered normally | These provision *a MemQL instance*. They take a tenant name, a profile and a domain, render an overlay, and talk to ArgoCD. They know nothing about subscriptions, money or trials. Any operator running MemQL for anyone would want them — that is what makes them platform rather than product. |
 
 `dsl/embed.go` does not name `fleet`, and
 [`bundle_test.go`](bundle_test.go) fails the build if it ever does.
 
 ## Running it
 
-The control plane is an ordinary memQL deployment with this bundle mounted:
+The control plane is an ordinary MemQL deployment with this bundle mounted:
 
 ```yaml
 components:

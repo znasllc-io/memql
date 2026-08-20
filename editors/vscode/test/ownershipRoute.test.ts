@@ -14,7 +14,7 @@ import {
 
 // ownershipRoute.test.ts -- memql#3906.
 //
-// An operator installs a local cluster from the plugin and cannot get in. The
+// An operator installs a local cluster from the extension and cannot get in. The
 // owner account exists -- `seedBootstrap` made it from the seeded values -- and
 // holds no human credential at all, so sign-in has nothing to authenticate
 // with. Verified on a live cluster: 21 `v1:identity:identity` rows, every one a

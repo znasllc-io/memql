@@ -112,7 +112,7 @@
       "activitybar": [
         {
           "id": "memql",
-          "title": "memQL",
+          "title": "MemQL",
           "icon": "icons/memql-activity.svg"
         }
       ]
@@ -149,160 +149,160 @@
     "commands": [
       {
         "command": "memql.clusters.refresh",
-        "title": "memQL: Refresh Clusters",
+        "title": "MemQL: Refresh Clusters",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.clusters.select",
-        "title": "memQL: Select Cluster"
+        "title": "MemQL: Select Cluster"
       },
       {
         "command": "memql.clusters.add",
-        "title": "memQL: Add Cluster",
+        "title": "MemQL: Add Cluster",
         "icon": "$(add)"
       },
       {
         "command": "memql.clusters.edit",
-        "title": "memQL: Edit Cluster",
+        "title": "MemQL: Edit Cluster",
         "icon": "$(edit)"
       },
       {
         "command": "memql.clusters.remove",
-        "title": "memQL: Remove Cluster From List",
+        "title": "MemQL: Remove Cluster From List",
         "icon": "$(trash)"
       },
       {
         "command": "memql.clusters.uninstall",
-        "title": "memQL: Uninstall Local Cluster..."
+        "title": "MemQL: Uninstall Local Cluster..."
       },
       {
         "command": "memql.constructs.refresh",
-        "title": "memQL: Refresh Constructs",
+        "title": "MemQL: Refresh Constructs",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.constructs.open",
-        "title": "memQL: Open Construct"
+        "title": "MemQL: Open Construct"
       },
       {
         "command": "memql.deployments.refresh",
-        "title": "memQL: Refresh Deployments",
+        "title": "MemQL: Refresh Deployments",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.deployments.createDeployment",
-        "title": "memQL: Create Deployment...",
+        "title": "MemQL: Create Deployment...",
         "icon": "$(add)"
       },
       {
         "command": "memql.deployments.open",
-        "title": "memQL: Open Local Deployment",
+        "title": "MemQL: Open Local Deployment",
         "icon": "$(server)"
       },
       {
         "command": "memql.clusters.repair",
-        "title": "memQL: Repair Local Cluster"
+        "title": "MemQL: Repair Local Cluster"
       },
       {
         "command": "memql.clusters.takeOwnership",
-        "title": "memQL: Take Ownership (enrol a passkey)",
+        "title": "MemQL: Take Ownership (enrol a passkey)",
         "icon": "$(key)"
       },
       {
         "command": "memql.clusters.signIn",
-        "title": "memQL: Sign In",
+        "title": "MemQL: Sign In",
         "icon": "$(sign-in)"
       },
       {
         "command": "memql.clusters.signOut",
-        "title": "memQL: Sign Out"
+        "title": "MemQL: Sign Out"
       },
       {
         "command": "memql.clusters.disconnect",
-        "title": "memQL: Disconnect"
+        "title": "MemQL: Disconnect"
       },
       {
         "command": "memql.clusters.signInWithCode",
-        "title": "memQL: Sign In With a Device Code"
+        "title": "MemQL: Sign In With a Device Code"
       },
       {
         "command": "memql.clusters.connection",
-        "title": "memQL: Open Cluster Connection",
+        "title": "MemQL: Open Cluster Connection",
         "icon": "$(plug)"
       },
       {
         "command": "memql.clusters.openPortal",
-        "title": "memQL: Open Portal",
+        "title": "MemQL: Open Portal",
         "icon": "$(link-external)"
       },
       {
         "command": "memql.data.refresh",
-        "title": "memQL: Refresh Data",
+        "title": "MemQL: Refresh Data",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.data.open",
-        "title": "memQL: Browse Concept Rows"
+        "title": "MemQL: Browse Concept Rows"
       },
       {
         "command": "memql.runs.refresh",
-        "title": "memQL: Refresh Runs",
+        "title": "MemQL: Refresh Runs",
         "icon": "$(refresh)"
       },
       {
         "command": "memql.runs.open",
-        "title": "memQL: Open Run Configurations File",
+        "title": "MemQL: Open Run Configurations File",
         "icon": "$(json)"
       },
       {
         "command": "memql.runs.execute",
-        "title": "memQL: Run Configuration",
+        "title": "MemQL: Run Configuration",
         "icon": "$(play)"
       },
       {
         "command": "memql.runs.delete",
-        "title": "memQL: Delete Run Configuration",
+        "title": "MemQL: Delete Run Configuration",
         "icon": "$(trash)"
       },
       {
         "command": "memql.run.construct",
-        "title": "memQL: Run Construct"
+        "title": "MemQL: Run Construct"
       },
       {
         "command": "memql.run.constructWith",
-        "title": "memQL: Run Construct With Arguments"
+        "title": "MemQL: Run Construct With Arguments"
       },
       {
         "command": "memql.run.automation",
-        "title": "memQL: Run Automation"
+        "title": "MemQL: Run Automation"
       },
       {
         "command": "memql.training.dryRun",
-        "title": "memQL: Dry-run Construct Against The Cluster"
+        "title": "MemQL: Dry-run Construct Against The Cluster"
       },
       {
         "command": "memql.training.tryInSession",
-        "title": "memQL: Try Construct In This Session"
+        "title": "MemQL: Try Construct In This Session"
       },
       {
         "command": "memql.training.stage",
-        "title": "memQL: Stage Construct For Yourself"
+        "title": "MemQL: Stage Construct For Yourself"
       },
       {
         "command": "memql.training.promote",
-        "title": "memQL: Promote Construct To The Cluster"
+        "title": "MemQL: Promote Construct To The Cluster"
       },
       {
         "command": "memql.training.demote",
-        "title": "memQL: Demote Construct From The Cluster"
+        "title": "MemQL: Demote Construct From The Cluster"
       },
       {
         "command": "memql.training.showList",
-        "title": "memQL: Show Untrained And Drifted Constructs"
+        "title": "MemQL: Show Untrained And Drifted Constructs"
       },
       {
         "command": "memql.clusters.refreshReleases",
-        "title": "memQL: Check For New Releases"
+        "title": "MemQL: Check For New Releases"
       }
     ],
     "menus": {

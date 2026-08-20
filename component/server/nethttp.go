@@ -813,7 +813,7 @@ func PublicPaths() []string {
 	paths = append(paths, AuthPaths()...) // identity-service auth endpoints
 	// The two Polyphon Bridge Agent endpoints that used to be appended here
 	// were removed in memql#3531 -- see the removal note below PolyphonStatusPaths.
-	// AI HTTP endpoints (service-to-service, e.g., frontend -> memQL)
+	// AI HTTP endpoints (service-to-service, e.g., frontend -> MemQL)
 	paths = append(paths, AIHTTPPaths()...)
 	// Concept metadata endpoint (public, no auth required)
 	paths = append(paths, ConceptAPIPaths()...)
@@ -976,7 +976,7 @@ func EdgePaths() []string {
 // plus a per-source HMAC check, and refuses with 404/401 when either is
 // missing. Listing it in PublicPaths() would bypass the verifier for
 // /inbound/* on every verifier-consuming node -- unnecessary (the handler
-// wants no memQL identity) and strictly worse, since the prefix would then
+// wants no MemQL identity) and strictly worse, since the prefix would then
 // bless anything mounted beneath it later.
 func InboundWebhookPaths() []string {
 	return pathsWithBase("/inbound/")

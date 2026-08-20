@@ -1,5 +1,5 @@
-// Package deploypack is the memQL DEPLOY PACK (Epic 2 / #2095) -- the dogfood
-// pack that packages memQL's own deployment workflow as a memQL pack. It is the
+// Package deploypack is the MemQL DEPLOY PACK (Epic 2 / #2095) -- the dogfood
+// pack that packages MemQL's own deployment workflow as a MemQL pack. It is the
 // production-shaped sibling of examples/referencepack: same pack primitives,
 // but the capabilities are the REAL deploy effects that component/deploycontrol
 // performs imperatively today.

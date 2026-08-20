@@ -502,7 +502,7 @@ func seamResultValue(res *ExecuteResult) any {
 // TestPositionalBuiltinEvaluatorsAgree pins the fn.Expr evaluators against the
 // canonical ones.
 //
-// WHY. memQL evaluates `??` and `concat(...)` on two different paths depending
+// WHY. MemQL evaluates `??` and `concat(...)` on two different paths depending
 // on a property of the DSL that has nothing to do with meaning: a logic body
 // with an intermediate `name := ...` step runs through the LogicRunner and
 // RuntimeEvaluator; a single-statement body runs through fn.Expr and the

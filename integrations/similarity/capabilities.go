@@ -253,7 +253,7 @@ func (i *Integration) similarToHandler(ctx context.Context, args map[string]any,
 	// Same-shape SQL as the retired knowledge.lookup but parameterised
 	// on concept so the operator is reusable for any vector-indexed
 	// concept (not just documentChunk). CTE picks the latest payload
-	// per id (memQL is time-series; re-ingests append new versions)
+	// per id (MemQL is time-series; re-ingests append new versions)
 	// then cosine-ranks on node_vectors.
 	db := i.dbGetter()
 	var rows *sql.Rows

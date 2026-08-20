@@ -1,4 +1,4 @@
-# memQL database operand image
+# MemQL database operand image
 
 PostgreSQL 16 + TimescaleDB Community + pgvector — the container CloudNativePG
 runs as a Postgres instance in **every** environment (local k3d, cloud),

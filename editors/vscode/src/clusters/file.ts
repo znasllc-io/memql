@@ -1,6 +1,6 @@
 // Reading and writing ~/.memql/clusters.yaml.
 //
-// This file is SHARED with the memQL Cockpit, which is the reason every write
+// This file is SHARED with the MemQL Cockpit, which is the reason every write
 // goes through the yaml Document API rather than a parse-and-serialize round
 // trip. A naive rewrite would strip the operator's comments and drop any key a
 // newer cockpit writes that this version does not model -- silent data loss on
@@ -66,7 +66,7 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   ["clientId", "client_id"],
   // `token`, not `pat`: the credential this extension dials with is an
   // identity-issued JWT access token, and the old spelling advertised a class
-  // the bff structurally rejects (memql#3383). CONTRACT NOTE: the memQL
+  // the bff structurally rejects (memql#3383). CONTRACT NOTE: the MemQL
   // Cockpit writes this same file, so its ClusterConfig carries the same
   // rename.
   ["token", "token"],
@@ -76,7 +76,7 @@ const FIELD_MAP: ReadonlyArray<readonly [StringFieldKey, string]> = [
   // version learners run opportunistically and mostly learn nothing, and an
   // undefined that meant "clear it" would let a failed refresh erase a version
   // an earlier, more trustworthy source had established. CONTRACT NOTE: the
-  // memQL Cockpit writes this same file, so its ClusterConfig carries the
+  // MemQL Cockpit writes this same file, so its ClusterConfig carries the
   // matching `Version string` with `yaml:"version,omitempty"` (memql#3994) --
   // the same coordination the `token` rename above went through.
   ["version", "version"],
@@ -341,7 +341,7 @@ export async function addCluster(file: string, cluster: ClusterUpdate): Promise<
 // removeCluster deletes one entry and returns what it deleted.
 //
 // It lives here, next to upsert and add, because removal is a DOCUMENT
-// operation for the same reason they are: the file is shared with the memQL
+// operation for the same reason they are: the file is shared with the MemQL
 // Cockpit, so the node is dropped out of the live YAMLSeq rather than the file
 // being reserialized from a parse. A round trip would satisfy "the entry is
 // gone" while stripping the operator's comments and any key a newer cockpit

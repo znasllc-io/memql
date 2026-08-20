@@ -18,8 +18,8 @@ package knowledge
 //
 // Idempotency: chunk ids are sha256("seed:" + recipeVersion + ":" +
 // domainId + ":" + index). Re-running with the same recipeVersion is
-// a no-op (memQL latest-wins with identical content). Bumping
-// recipeVersion invalidates all old chunks for that domain (memQL
+// a no-op (MemQL latest-wins with identical content). Bumping
+// recipeVersion invalidates all old chunks for that domain (MemQL
 // time-series; old rows still exist as historical versions but reads
 // return the latest).
 

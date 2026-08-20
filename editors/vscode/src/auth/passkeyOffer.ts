@@ -216,7 +216,7 @@ export async function decidePasskeyOffer(
  */
 export function passkeyOfferMessage(clusterLabel: string): string {
   return (
-    `memQL: "${clusterLabel}" has no passkey registered for your account. ` +
+    `MemQL: "${clusterLabel}" has no passkey registered for your account. ` +
     "Enrolling one lets you sign in without waiting for an email."
   );
 }
@@ -250,5 +250,5 @@ export function enrolmentStillNeeded(passkeyCount: number): boolean {
  * finished -- not that something went wrong.
  */
 export function passkeyAlreadyEnrolledMessage(): string {
-  return "memQL: this account already has a passkey -- you are all set.";
+  return "MemQL: this account already has a passkey -- you are all set.";
 }

@@ -41,7 +41,7 @@ export const REDACTED = "[redacted: a provider key was given where a path was ex
  * path with a long random directory name in it.
  *
  * It is not a general secret detector and does not pretend to be. A key from a
- * vendor memQL does not support is not a value this field can receive, because
+ * vendor MemQL does not support is not a value this field can receive, because
  * `provider` is an enum of the two.
  *
  * No absolute path begins `sk-`, and a relative one that did would be refused

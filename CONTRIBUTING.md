@@ -1,8 +1,8 @@
-# Contributing to memQL
+# Contributing to MemQL
 
 Thanks for your interest in contributing.
 
-memQL is pre-1.0. The DSL and engine API are still evolving, so the best contributions today are small, focused, and discussed before they land.
+MemQL is pre-1.0. The DSL and engine API are still evolving, so the best contributions today are small, focused, and discussed before they land.
 
 ## Before you write code
 

@@ -30,7 +30,7 @@ owner: znas
 > `dsl/platform/concepts.memql`. Those are **config storage** and
 > derive nobody's visibility.
 
-memQL's authorization has three layers: **authentication** (who are
+MemQL's authorization has three layers: **authentication** (who are
 you), **identity** (which credential you're using), and
 **authorization** (per-row checks inside the DSL: ownership /
 grants / admin / public). This document describes the data model and
@@ -215,7 +215,7 @@ those two (memql#3062):
 
 | declaration | meaning |
 |---|---|
-| `server.SelfAuthenticatedPaths()` | reachable **without a memQL credential on a node that DOES install the verifier**, because the route authenticates itself with a credential that is not a memQL identity |
+| `server.SelfAuthenticatedPaths()` | reachable **without a MemQL credential on a node that DOES install the verifier**, because the route authenticates itself with a credential that is not a MemQL identity |
 
 The first two cannot express a third-party webhook. `PublicPaths()`
 would work, but it is matched with an open **prefix** walk, so listing
@@ -224,7 +224,7 @@ it would declare the route *unauthenticated* rather than
 *differently-authenticated*. `HandlerAuthorizedPaths()` is consulted
 **only** on a binary with no verifier, so on the bff -- which installs
 one -- it never runs, and a webhook carrying a vendor HMAC instead of a
-memQL bearer is rejected before the handler's allowlist and signature
+MemQL bearer is rejected before the handler's allowlist and signature
 check ever execute.
 
 Membership in the third tier means **the bearer middleware steps
@@ -398,7 +398,7 @@ fact a `v1:identity:user` row carries (see "Role spectrum," above).
 
 A cluster-wide role is set by an owner or admin over `IdentityAdminMsg`
 (`Service.SetUserRole`, `component/identity/adminops/adminops.go`), audited
-as `user_role_changed`. The admin screens that call it live in the memQL
+as `user_role_changed`. The admin screens that call it live in the MemQL
 portal, not the identity binary's own web app -- `/admin/*` on the identity
 binary itself is now just its sign-in pages plus an `/admin/` root that
 answers `410 Gone`. There is no separate partition-grant mutation to run:

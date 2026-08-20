@@ -3,7 +3,7 @@ package release
 // submodule_lines_test.go -- the version-line assignment is complete and real
 // (memql#3245, epic memql#3228).
 //
-// memQL's nested modules carry TWO independent version lines -- `wire` and
+// MemQL's nested modules carry TWO independent version lines -- `wire` and
 // `engine` -- and everything else is lockstep with the root release. The lists
 // live in scripts/release/tag-submodules.sh because a version line is a
 // DECISION: deriving it from the tree would let a directory acquire an

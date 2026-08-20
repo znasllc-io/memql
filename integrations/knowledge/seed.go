@@ -11,7 +11,7 @@ import (
 )
 
 // StandardDomain is a seed record for a knowledge domain shipped with
-// memQL. Seeding is idempotent: the seedStandardDomains capability only
+// MemQL. Seeding is idempotent: the seedStandardDomains capability only
 // creates domains that don't already exist, so re-running on every
 // startup is safe and manual overrides (admin-edited domain rows) are
 // preserved.

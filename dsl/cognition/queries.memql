@@ -169,7 +169,7 @@ query audioOverride audioOverridesForSpace {
 // product spec.
 //
 // The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
-// because the memQL query planner rejects function-call literals in
+// because the MemQL query planner rejects function-call literals in
 // filter comparisons (see queryExpiredPendingGuestInvitations).
 
 // ---- queries/v1/cognition/greetingUtterance.memql ----

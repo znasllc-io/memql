@@ -1,7 +1,7 @@
 // A minimal virtual-node tree and HTML serializer.
 //
 // view-kit deliberately does NOT touch the DOM. Its consumers are a VS Code
-// webview (which is handed an HTML string) and, later, the memQL portal. A
+// webview (which is handed an HTML string) and, later, the MemQL portal. A
 // pure data-to-string renderer is testable under `node --test` with no jsdom
 // and no browser, and it keeps the package dependency-free.
 //

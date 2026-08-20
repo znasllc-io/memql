@@ -24,7 +24,7 @@
 #   The install receipt records, per artifact, whether the installer CREATED it
 #   or merely FOUND it already there. A developer who already had mkcert, or a
 #   hosts entry, or a k3d cluster before this installer ran must not lose it
-#   because they uninstalled memQL. The guard therefore lives AT THE POINT OF
+#   because they uninstalled MemQL. The guard therefore lives AT THE POINT OF
 #   ACTION -- inside every removal path, immediately before the mutation --
 #   not in the executor that reads the receipt and not once at the top of
 #   argument parsing. An executor bug, a hand-edited receipt and a direct shell
@@ -114,7 +114,7 @@ function refuse_if_pre_existing() {
         ""|false|FALSE|False|0|no|NO|No) return 0 ;;
     esac
     cap_fail 3 "refusing to remove ${kind} (${target}): --pre-existing=${v} says the installer \
-did not create it, and uninstalling memQL must never take something that was already here"
+did not create it, and uninstalling MemQL must never take something that was already here"
 }
 
 #=============================================================================
@@ -162,7 +162,7 @@ function remove_binary() {
 #
 # This is deliberately NOT automatic. It runs only with --prune-empty-parents,
 # which the uninstall graph passes for the steps whose artifacts live under the
-# memQL home, so an operator removing a binary from /usr/local/bin can never
+# MemQL home, so an operator removing a binary from /usr/local/bin can never
 # have a parent directory disappear as a side effect they did not ask for.
 #
 # Three bounds, because "walk up deleting empty directories" is a dangerous
@@ -320,7 +320,7 @@ function remove_hosts_entries() {
     if [[ -w "$path" ]]; then
         cat "$tmp" > "$path" || { rm -f "$tmp"; cap_fail 5 "could not write ${path}"; }
     else
-        if ! elevate_begin "remove the memQL entries from ${path}"; then
+        if ! elevate_begin "remove the MemQL entries from ${path}"; then
             rm -f "$tmp"
             cap_result_set remedy "sudo $(printf '%q' "${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")") --kind=hostsEntries --path=$(printf '%q' "$path") --marker=$(printf '%q' "$marker")"
             cap_fail 4 "${path} is not writable and $(elevate_no_ask_reason)"
@@ -381,7 +381,7 @@ _RA_PAIR_REMOVED=false
 #    here. That flag carries this step's single verdict, `result.caPreExisting`,
 #    which is a fact about the CA in another directory; the two answers differ in
 #    both directions (see the mkcert-setup.sh header). So key material is removed
-#    only where memQL can PROVE it wrote it, and the proof is the marker the
+#    only where MemQL can PROVE it wrote it, and the proof is the marker the
 #    issuing run left beside it. No marker, no removal, and the run says so
 #    rather than deciding quietly.
 function remove_issued_pair() {
@@ -405,7 +405,7 @@ function remove_issued_pair() {
     fi
 
     if [[ ! -f "$marker" ]]; then
-        cap_info "No ${MEMQL_PAIR_MARKER} beside ${cert}: memQL did not issue this pair, so it stays."
+        cap_info "No ${MEMQL_PAIR_MARKER} beside ${cert}: MemQL did not issue this pair, so it stays."
         return 0
     fi
 
@@ -414,11 +414,11 @@ function remove_issued_pair() {
     rm -f "${targets[@]}" || cap_fail 5 "could not remove the front-door pair at ${cert}"
     _RA_PAIR_REMOVED=true
     cap_changed
-    cap_info "Removed the front-door certificate and key memQL issued (${cert})."
+    cap_info "Removed the front-door certificate and key MemQL issued (${cert})."
     # The certs directory is ours and nothing else lives in it, so it goes the
     # way ~/.memql/bin does -- under the same opt-in flag, with the same bounds.
     # The CAROOT deliberately does NOT get this treatment: it can be a machine
-    # location (~/.local/share/mkcert) whose shape memQL does not own.
+    # location (~/.local/share/mkcert) whose shape MemQL does not own.
     prune_empty_parents "$cert"
 }
 
@@ -426,7 +426,7 @@ function remove_mkcert_ca() {
     local caroot="$1" cert="$2" key="$3"
 
     # THE PAIR GOES FIRST, and the order is load-bearing. The CA half can end in
-    # `cap_fail 3` -- an operator's own CA, which memQL must not take -- and
+    # `cap_fail 3` -- an operator's own CA, which MemQL must not take -- and
     # cap_fail exits. Removing the pair afterwards would mean never removing it
     # on exactly the machines where the two provenance answers differ, which is
     # the case this whole marker scheme exists to get right.
@@ -461,13 +461,13 @@ function remove_mkcert_ca() {
     # because the uninstall that would have cleared it is the thing being
     # blocked.
     #
-    # So: a marker present means memQL created this CA and may take it. NO
+    # So: a marker present means MemQL created this CA and may take it. NO
     # marker falls back to the receipt's verdict, which is the conservative
     # half -- an unmarked CA on a machine whose receipt says "already here" is
     # still refused, exactly as before.
     # Absence before the guard -- see remove_binary (memql#3583).
     # This is the one that was actually reported: an operator removed the CA by
-    # hand, ran the uninstall, and was told memQL was refusing to take a CA that
+    # hand, ran the uninstall, and was told MemQL was refusing to take a CA that
     # had not been there for an hour.
     if [[ ! -f "${caroot}/rootCA.pem" ]]; then
         cap_info "No CA at ${caroot} -- nothing to remove."
@@ -475,7 +475,7 @@ function remove_mkcert_ca() {
     fi
 
     if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
-        cap_info "${caroot}/${MEMQL_CA_MARKER} says memQL created this CA."
+        cap_info "${caroot}/${MEMQL_CA_MARKER} says MemQL created this CA."
     else
         refuse_if_pre_existing mkcertCA "$caroot"
     fi

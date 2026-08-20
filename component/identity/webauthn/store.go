@@ -21,7 +21,7 @@ const canonicalIdentityIdPrefix = "v1:identity:identity:"
 // maxPageWalk bounds the keyset walk (mirrors badge / workertoken).
 const maxPageWalk = 1000
 
-// Store wraps the memQL engine with typed passkey operations. Mirrors
+// Store wraps the MemQL engine with typed passkey operations. Mirrors
 // badge.Store: create, lookup, list.
 //
 // Rename, Revoke and the sign-in-route count landed with the management

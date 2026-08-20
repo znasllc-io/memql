@@ -565,7 +565,7 @@ func ApproveRequestBuild(args ApproveRequestArgs) string {
 	return b.String()
 }
 
-// ArchiveAccount -- Archive an account: flip status to archived and stamp archivedAt. The row is retained in full -- memQL has no hard delete, and the operator's history of a closed customer is the point. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
+// ArchiveAccount -- Archive an account: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and the operator's history of a closed customer is the point. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
 //
 // Bound concept: v1:identity:account (machine-readable: BoundConcepts["archiveAccount"] in generated_concepts.go).
 type ArchiveAccountArgs struct {
@@ -609,7 +609,7 @@ func ArchiveAudienceBuild(args ArchiveAudienceArgs) string {
 	return b.String()
 }
 
-// ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- memQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
+// ArchiveComposedView -- Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in full -- MemQL has no hard delete, and a person who retires a view they spent time on should be able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor does not own.
 //
 // Bound concept: v1:portalviews:view (machine-readable: BoundConcepts["archiveComposedView"] in generated_concepts.go).
 type ArchiveComposedViewArgs struct {
@@ -9656,7 +9656,7 @@ func RecordResponsibilityEvaluationBuild(args RecordResponsibilityEvaluationArgs
 	return b.String()
 }
 
-// RecordRouterCall -- Record a single AI call through the memQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
+// RecordRouterCall -- Record a single AI call through the MemQL AI Router. Writes one v1:router:call row per call for observability, usage reporting, and cost attribution.
 //
 // Bound concept: v1:router:call (machine-readable: BoundConcepts["recordRouterCall"] in generated_concepts.go).
 type RecordRouterCallArgs struct {

@@ -19,7 +19,7 @@ import (
 // canonicalIdentityIdPrefix mirrors pat.canonicalIdentityIdPrefix.
 const canonicalIdentityIdPrefix = "v1:identity:identity:"
 
-// Store wraps the memQL engine with typed worker-token operations.
+// Store wraps the MemQL engine with typed worker-token operations.
 // Mirrors the pat.Store pattern; lookup, create, revoke, list.
 type Store struct {
 	Engine identity.EngineExecutor

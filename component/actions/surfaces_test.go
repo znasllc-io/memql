@@ -96,7 +96,7 @@ func TestPolicyDefaultSurface_DeployPackInheritsCockpitRunner(t *testing.T) {
 		{
 			// An install action has no cluster to run inside: it places k3d on
 			// the operator's laptop, edits /etc/hosts and installs a trust-store
-			// CA, all before anything memQL exists to host it. The runner is not
+			// CA, all before anything MemQL exists to host it. The runner is not
 			// a policy preference here -- it is the only placement that can
 			// execute at all (#3371).
 			name:   "install-pack origin inherits cockpit/runner",

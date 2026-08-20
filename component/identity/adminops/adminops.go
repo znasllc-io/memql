@@ -4,12 +4,12 @@
 // ===========================================================================
 // WHY THIS PACKAGE EXISTS AT ALL
 // ===========================================================================
-// Every write below already had a memQL mutation -- updateUser,
+// Every write below already had a MemQL mutation -- updateUser,
 // revokePATIdentity, revokeNodeTokenIdentity, updateClusterSettings -- and the
 // portal could have called each one directly over the ordinary query surface.
 // That would have deleted the gate rather than moved it.
 //
-// A memQL mutation cannot carry a role predicate. `filter` is a read
+// A MemQL mutation cannot carry a role predicate. `filter` is a read
 // construct and there is no mutation-side spec. Row-authz does not fill the
 // gap either, for two reasons that survive it having become real: it enforces
 // OWNERSHIP (memql#3174 refuses a write whose target row's declared owner is

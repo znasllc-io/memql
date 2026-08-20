@@ -109,7 +109,7 @@ func (e *MemQLEngine) executeUpdate(ctx context.Context, mutation MutationNode) 
 		return result, err
 	}
 
-	// memQL is append-only: every successful write materialises as a new
+	// MemQL is append-only: every successful write materialises as a new
 	// row that fires graph.node.created via executeWrite. Most subscribers
 	// want one or the other -- automations like emitScopeElevationCanvasCard
 	// fire on the FIRST insert (kind + initial status), backend handlers

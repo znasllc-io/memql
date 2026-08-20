@@ -27,7 +27,7 @@ import (
 //
 // Authentication is via metadata header
 // `authorization: Bearer <voice_agent_token>`. The token is an
-// identity-issued class="voice_agent" JWT; the memQL voice-agent stream
+// identity-issued class="voice_agent" JWT; the MemQL voice-agent stream
 // interceptor (component/grpc/voice_agent_stream_interceptor.go) verifies it
 // via the cluster JWKS and admits the resulting identity to the VoiceAgent*
 // message surface only.
@@ -89,7 +89,7 @@ type Client struct {
 }
 
 // NewClient builds a Client for addr authenticating with token. A nil dialer
-// uses the default insecure gRPC dialer (the cluster runs memQL over plain
+// uses the default insecure gRPC dialer (the cluster runs MemQL over plain
 // in-network gRPC; TLS is terminated at the entry point). A nil logger
 // disables logging.
 func NewClient(addr, token string, dial Dialer, logger *slog.Logger) *Client {
@@ -347,7 +347,7 @@ func (c *Client) SendRequest(ctx context.Context, envelope *memqlv1.MemqlClientM
 		return nil, fmt.Errorf("voice-agent SendRequest: nil envelope")
 	}
 	// #1426: every one-shot request/reply round-trip on the voice path is a
-	// memQL (and usually DB) call -- time them all at this choke point so the
+	// MemQL (and usually DB) call -- time them all at this choke point so the
 	// per-call breakdown (SessionStart, ListTools, CallTool, RealtimeOutput,
 	// ...) is greppable via voice_timing without instrumenting each caller.
 	start := time.Now()
@@ -499,7 +499,7 @@ func ServerPayloadName(envelope *memqlv1.MemqlServerMessage) string {
 // ClientPayloadName returns a stable, log-friendly name for a client
 // message's payload oneof (e.g. "VoiceAgentSessionStart"), the send-side
 // analog of ServerPayloadName. Used by the voice_timing instrumentation
-// (#1426) to stamp WHICH memQL call a measured round-trip was.
+// (#1426) to stamp WHICH MemQL call a measured round-trip was.
 func ClientPayloadName(envelope *memqlv1.MemqlClientMessage) string {
 	if envelope == nil {
 		return "<nil>"

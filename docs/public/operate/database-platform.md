@@ -9,7 +9,7 @@ owner: znas
 
 # Database platform (CloudNativePG)
 
-memQL runs its own PostgreSQL 16 + TimescaleDB Community + pgvector, managed by
+MemQL runs its own PostgreSQL 16 + TimescaleDB Community + pgvector, managed by
 **CloudNativePG**, on every deploy target — local k3d and the cloud alike.
 One operator, one operand image, one set of manifests; what differs per
 environment is numbers and endpoints.

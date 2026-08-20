@@ -1,5 +1,5 @@
 ---
-title: memQL Quick Start
+title: MemQL Quick Start
 audience: public
 status: stable
 area: overview
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL Quick Start
+# MemQL Quick Start
 ## Get Running in 5 Minutes
 
 ---

@@ -3,7 +3,7 @@ package devicecode
 // The quoting round-trip POST /device/code never had (memql#3611).
 //
 // createDeviceCode interpolated eleven caller-supplied values into a MemQL
-// statement with Go's %q. The memQL lexer implements the JSON escape set and
+// statement with Go's %q. The MemQL lexer implements the JSON escape set and
 // ONLY that -- `" \ / b f n r t u` -- and returns `invalid escape character`
 // for anything else. %q emits `\x00`, `\a`, `\v` and `\xNN`, none of which the
 // lexer knows, so one control byte or one invalid UTF-8 byte anywhere in a

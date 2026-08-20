@@ -79,10 +79,10 @@ export interface Step {
   /** Why it is kept. Required when `retained`; shown to whoever reads the graph. */
   retainedReason: string;
   /**
-   * This uninstall step removes something that is NOT memQL-only -- k3d,
+   * This uninstall step removes something that is NOT MemQL-only -- k3d,
    * kubectl, mkcert, the local CA. The operator may now depend on it, so its
    * removal is offered rather than assumed and the wizard shows it unticked.
-   * A step without this flag removes something only memQL put there.
+   * A step without this flag removes something only MemQL put there.
    */
   shared: boolean;
   /** What else the thing is good for -- what the operator reads beside the checkbox. */

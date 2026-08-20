@@ -9,7 +9,7 @@ owner: znas
 
 # Sign-in Paths
 
-There is more than one way to obtain a credential for a memQL cluster, and they
+There is more than one way to obtain a credential for a MemQL cluster, and they
 are not interchangeable. This page says what each path is FOR, when it is the
 right one, what recovery looks like when mail does not work, and why a passkey
 does not follow you from one cluster to another.
@@ -47,11 +47,11 @@ Work down this list and stop at the first line that is true.
    install wizard.
 4. **You are an editor or a CLI on a machine with a browser and a bindable
    loopback port.** Use the browser sign-in flow (the VS Code extension's
-   **memQL: Sign In**). It runs the standard authorization-code + PKCE flow
+   **MemQL: Sign In**). It runs the standard authorization-code + PKCE flow
    against a one-shot `127.0.0.1` listener.
 5. **You are on a headless box, in a container, or behind a network where the
    browser cannot reach `127.0.0.1`.** Use the **device code** flow -- in the
-   editor, **memQL: Sign In With a Device Code**. See
+   editor, **MemQL: Sign In With a Device Code**. See
    [Reaching the device grant from the editor](#reaching-the-device-grant-from-the-editor).
 6. **You are a script talking to the identity service itself.** Use a **PAT**.
    Note the hard limit below: a PAT does not authenticate against mesh nodes.
@@ -233,9 +233,9 @@ does not half-serve the flow.
 
 ## The editor's sign-in
 
-The VS Code extension exposes **memQL: Sign In** and **memQL: Sign Out** on each
+The VS Code extension exposes **MemQL: Sign In** and **MemQL: Sign Out** on each
 cluster in the Clusters view (`memql.clusters.signIn` / `memql.clusters.signOut`),
-plus **memQL: Sign In With a Device Code** in the palette.
+plus **MemQL: Sign In With a Device Code** in the palette.
 
 The flow needs an **issuer**, which is a different fact from the endpoint the
 stream dials -- `identity.<domain>` versus `api.<domain>`. A cluster naming
@@ -248,7 +248,7 @@ Where the resulting tokens live is a deliberate split:
 
 | Credential | Stored in | Why |
 |---|---|---|
-| Access token | `~/.memql/clusters.yaml`, `token:` | Short-lived, and the memQL Cockpit reads the same file. A cluster the extension has signed in to but which carries no credential at all would read, to the Cockpit, as a cluster nobody has signed in to |
+| Access token | `~/.memql/clusters.yaml`, `token:` | Short-lived, and the MemQL Cockpit reads the same file. A cluster the extension has signed in to but which carries no credential at all would read, to the Cockpit, as a cluster nobody has signed in to |
 | Refresh token | VS Code `SecretStorage`, keyed per cluster | A 30-day credential has no business in a plaintext shared file. `clusters.yaml`'s `refresh_token:` key is an INGEST path only -- on the first successful exchange the token moves into `SecretStorage` and the plaintext key is deleted |
 | Access-token expiry | `SecretStorage`, beside the refresh token | Redundant for today's JWT (`exp` is inside it); it exists so an opaque access token could still be renewed proactively |
 
@@ -257,7 +257,7 @@ no way to ask what keys exist -- so the store keeps its own index of the cluster
 it has written for, and offers a rename-as-move and a reconcile sweep over it.
 Both are wired (memql#3515):
 
-- **Renaming a cluster moves its credential.** `memQL: Edit Cluster` goes
+- **Renaming a cluster moves its credential.** `MemQL: Edit Cluster` goes
   through `saveClusterEdit`, which writes the entry and then moves the
   `SecretStorage` half to the new name. The file write runs first, because it is
   the half that can fail -- a secret moved to a name no entry carries is the
@@ -270,12 +270,12 @@ Both are wired (memql#3515):
 
 ### Reaching the device grant from the editor
 
-**memQL: Sign In With a Device Code** (`memql.clusters.signInWithCode`, palette
+**MemQL: Sign In With a Device Code** (`memql.clusters.signInWithCode`, palette
 only) runs the device grant deliberately, skipping loopback. Use it when you
 already know this host cannot do a browser round trip -- otherwise you sit
 through the callback deadline first only to be told so.
 
-**memQL: Sign In** reaches the same grant by itself when the browser round trip
+**MemQL: Sign In** reaches the same grant by itself when the browser round trip
 proves impossible (memql#3515) -- both commands run through one sign-in shell
 that differs only in which flow it starts. Which one ran is announced rather
 than silently substituted: the progress notification says it is switching, and

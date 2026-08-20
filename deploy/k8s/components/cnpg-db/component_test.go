@@ -1,7 +1,7 @@
 // Package cnpgdb holds the gates for the reusable database component (epic
 // memql#3842, task memql#3851).
 //
-// The component is the seam a client cluster today -- and a memQL Cloud tenant
+// The component is the seam a client cluster today -- and a MemQL Cloud tenant
 // later -- composes its database from. Its failure modes are the ones a
 // component has rather than a manifest: a consumer that forgets to supply a
 // required value, and a preset whose numbers stopped matching what it is

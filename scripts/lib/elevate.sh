@@ -29,7 +29,7 @@
 # /root, trusted for a user who is not the one running a browser. With an
 # askpass helper mkcert keeps running as the operator and only the trust-store
 # write it shells out to becomes root -- which is exactly the split mkcert
-# already implements. It also means memQL never re-implements any tool's
+# already implements. It also means MemQL never re-implements any tool's
 # privileged half; it hands the tool a way to ask.
 #
 # The helper is a small script this file writes at call time. It carries NO
@@ -80,7 +80,7 @@ function elevate_has_display() {
 # machine, or nothing.
 #
 # macOS always has osascript, and its dialog does not need DISPLAY. On Linux the
-# desktop's own prompt is preferred over anything memQL might draw, in the order
+# desktop's own prompt is preferred over anything MemQL might draw, in the order
 # a desktop is likely to have installed one.
 # elevate_inherited_helper -- an askpass helper our CALLER already provided.
 #
@@ -168,7 +168,7 @@ function elevate_available() {
 # their display instead of re-running and typing their password.
 function elevate_no_ask_reason() {
     if elevate_caller_owns_the_asking; then
-        printf 'the memQL installer is driving this run and holds no password for it -- re-run and enter your password when it asks, or run the command below in a terminal\n'
+        printf 'the MemQL installer is driving this run and holds no password for it -- re-run and enter your password when it asks, or run the command below in a terminal\n'
         return 0
     fi
     printf 'this machine has no way to ask for a password without a terminal\n'
@@ -181,13 +181,13 @@ function elevate_no_ask_reason() {
 # elevate_begin <purpose> -- prepare elevation, exporting SUDO_ASKPASS when a
 # dialog is needed. Returns non-zero when this machine cannot elevate at all.
 #
-# <purpose> is one clause completing "memQL needs your password to ___". It
+# <purpose> is one clause completing "MemQL needs your password to ___". It
 # reaches the operator inside a dialog box that has interrupted them, so it has
 # to say which of several privileged things is being asked for.
 #
 # EXPORTED, NOT PASSED. sudo reads $SUDO_ASKPASS from the environment, and the
 # programs that need it most (mkcert) invoke sudo themselves with arguments
-# memQL does not control. Setting the variable is the entire integration.
+# MemQL does not control. Setting the variable is the entire integration.
 function elevate_begin() {
     local purpose="$1" program prompt
     case "$(elevate_method)" in
@@ -198,7 +198,7 @@ function elevate_begin() {
     esac
 
     program="$(elevate_dialog_program)"
-    prompt="memQL needs your password to ${purpose}."
+    prompt="MemQL needs your password to ${purpose}."
     _ELEVATE_HELPER="$(mktemp "${TMPDIR:-/tmp}/memql-askpass.XXXXXX")"
     chmod 700 "$_ELEVATE_HELPER"
 
@@ -208,18 +208,18 @@ function elevate_begin() {
         cat >"$_ELEVATE_HELPER" <<EOF
 #!/usr/bin/env bash
 exec $(printf '%q' "$program") \\
-  -e $(printf '%q' "display dialog \"${prompt}\" default answer \"\" with title \"memQL installer\" with hidden answer") \\
+  -e $(printf '%q' "display dialog \"${prompt}\" default answer \"\" with title \"MemQL installer\" with hidden answer") \\
   -e 'text returned of result'
 EOF
     elif [[ "$(basename "$program")" == "kdialog" ]]; then
         cat >"$_ELEVATE_HELPER" <<EOF
 #!/usr/bin/env bash
-exec $(printf '%q' "$program") --password $(printf '%q' "$prompt") --title 'memQL installer'
+exec $(printf '%q' "$program") --password $(printf '%q' "$prompt") --title 'MemQL installer'
 EOF
     else
         cat >"$_ELEVATE_HELPER" <<EOF
 #!/usr/bin/env bash
-exec $(printf '%q' "$program") --password --title=$(printf '%q' "memQL installer -- ${prompt}")
+exec $(printf '%q' "$program") --password --title=$(printf '%q' "MemQL installer -- ${prompt}")
 EOF
     fi
 

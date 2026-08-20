@@ -165,11 +165,11 @@ test("the provider is one of the fields collected, and it is pre-answered", () =
   );
 });
 
-test("a provider memQL cannot verify is refused here, in the operator's terms", () => {
+test("a provider MemQL cannot verify is refused here, in the operator's terms", () => {
   // The second wall. The control is a select, so the wrong answer is not
   // expressible by clicking -- but the postMessage channel is untrusted, and
   // the alternative to refusing here is exit 2 out of the script, whose
-  // guidance correctly says "a fault in memQL rather than in your machine or
+  // guidance correctly says "a fault in MemQL rather than in your machine or
   // your answers". That is the wrong sentence about a value the operator chose.
   const s = new AddClusterState();
   s.chooseAction("install");

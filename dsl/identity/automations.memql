@@ -236,7 +236,7 @@ automation expireDelegations {
 // the operator wants tighter cleanup, bump the cadence here.
 //
 // The `now` cutoff is passed in as an arg (rather than referencing the clock inline)
-// because the memQL query planner rejects function-call literals
+// because the MemQL query planner rejects function-call literals
 // in filter comparisons.
 /// Hourly sweep: mark expired magic-link requests as consumed-from-system so the row is canonically
 /// spent.

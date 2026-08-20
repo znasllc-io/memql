@@ -63,7 +63,7 @@ export const INPUT_FIELDS: readonly InputField[] = [
  * The fields rendered as a CHOICE rather than as a text box.
  *
  * `provider` is one because the set is closed and the script refuses anything
- * outside it with exit 2 -- whose guidance says "a fault in memQL rather than
+ * outside it with exit 2 -- whose guidance says "a fault in MemQL rather than
  * in your machine or your answers", which would be a lie about a value the
  * operator typed. A control that cannot express the wrong answer is the fix;
  * `problemWith` is the second wall, for a message this page did not render.
@@ -94,7 +94,7 @@ export const FIELD_HINTS: Record<InputField, string> = {
   providerKeyFile:
     "A PATH to a file holding the key, never the key itself: a command line is readable by every process on this machine.",
   version:
-    "Which memQL release to install. The default is the version this extension was built and tested against; pick another only if you need a specific one.",
+    "Which MemQL release to install. The default is the version this extension was built and tested against; pick another only if you need a specific one.",
 };
 
 export const COLLECT_TITLE: Partial<Record<AddClusterAction, string>> = {
@@ -373,7 +373,7 @@ ${renderToHtml(renderInstallSteps(toStepViews(input.steps)))}
  * a person reads it and presses Enter. A privileged command that ran itself
  * the instant a button was clicked would be a worse thing than the problem it
  * solves, and the operator's own shell is where their sudo prompt and their
- * password belong -- memQL never sees either.
+ * password belong -- MemQL never sees either.
  *
  * The button carries the step's ID and NOT the command: the panel looks the
  * command up against the failures it recorded, so nothing running in that

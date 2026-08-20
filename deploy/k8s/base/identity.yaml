@@ -102,7 +102,7 @@ spec:
             - configMapRef:
                 name: memql-db-pool
           env:
-            - { name: MEMQL_SERVICE_NAME, value: "memQL" }
+            - { name: MEMQL_SERVICE_NAME, value: "MemQL" }
             - { name: MEMQL_NODE_TYPE, value: "identity" }
             - { name: MEMQL_NODE_ADDRESS, value: "identity:50061" }
             # Unique per-pod mesh identity (#1042). Overrides the shared genesis
@@ -172,7 +172,7 @@ spec:
             # deployment's overlay patches the real host.
             - { name: MEMQL_DISCOVERY_GRPC_ENDPOINT, value: "api.example.com:443" }
             # CORS + OAuth redirect for the product SPA host (deployment-specific placeholder).
-            # The ops-edge host is listed alongside it because the memQL Portal
+            # The ops-edge host is listed alongside it because the MemQL Portal
             # (memql#3315) is itself a browser client of this identity service:
             # it exchanges its authorization code cross-origin, and with the
             # origin absent that XHR dies in CORS with nothing in identity's

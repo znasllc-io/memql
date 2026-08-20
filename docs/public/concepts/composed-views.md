@@ -144,7 +144,7 @@ properties fall out of that and out of nothing else:
   view is browsable at `/concepts/v1:portalviews:view` like any other row
   set, with its own `@displayCard`, and the saved view page links
   straight to it.
-- **It has version history**, because a write in memQL is an append.
+- **It has version history**, because a write in MemQL is an append.
   Editing a view keeps the previous arrangement.
 
 **Sharing is not modelled, and the reason is honest rather than

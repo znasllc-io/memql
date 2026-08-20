@@ -7,7 +7,7 @@ import (
 	"os/exec"
 )
 
-// Executor is THE single side-effect boundary for memQL deployments
+// Executor is THE single side-effect boundary for MemQL deployments
 // (Epic 2 / #2098). Every cluster read, git operation, and action-script
 // invocation goes through it, so the Service logic is testable with a
 // fake AND -- crucially -- so the deploy PACK (examples/deploypack) drives

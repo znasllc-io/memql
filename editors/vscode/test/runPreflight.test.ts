@@ -79,11 +79,11 @@ test("writeConfirmationMessage -- names both the cluster and the construct", () 
   // to be one they can immediately recognise as right or wrong.
   const message = writeConfirmationMessage({
     clusterName: "staging",
-    clusterLabel: "memQL Staging",
+    clusterLabel: "MemQL Staging",
     constructName: "createSpace",
     constructKind: "mutate",
   });
   assert.match(message, /createSpace/);
-  assert.match(message, /memQL Staging/);
+  assert.match(message, /MemQL Staging/);
   assert.match(message, /not marked local/);
 });

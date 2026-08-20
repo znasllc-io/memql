@@ -3,7 +3,7 @@
 # scripts/install/hosts-entries.sh
 # ================================
 #
-# Capability: install.hostsEntries -- add or remove the memQL front-door
+# Capability: install.hostsEntries -- add or remove the MemQL front-door
 # hostnames in the system hosts file, inside a delimited managed block.
 #
 # The local stack is reached exactly as staging is: through the front door at
@@ -70,10 +70,10 @@ source "${SCRIPT_DIR}/../lib/elevate.sh"
 # shellcheck source=../lib/resolve.sh
 source "${SCRIPT_DIR}/../lib/resolve.sh"
 
-cap_init "install.hostsEntries" "Add or remove the memQL front-door hostnames in the system hosts file."
+cap_init "install.hostsEntries" "Add or remove the MemQL front-door hostnames in the system hosts file."
 cap_spec_param_required "action"     "add | remove (required)"
 cap_spec_param "hosts-file" "hosts file to edit (default: /etc/hosts)"
-cap_spec_param "hostnames"  "comma/space separated hostnames (default: the memQL front door)"
+cap_spec_param "hostnames"  "comma/space separated hostnames (default: the MemQL front door)"
 cap_spec_param "domain"     "front-door apex; derives api.<d>, identity.<d>, mcp.<d>, portal.<d>, <d> (mutually exclusive with --hostnames)"
 cap_spec_param "ip"         "address the hostnames resolve to (default: 127.0.0.1)"
 cap_spec_param "confirm"    "exact phrase: 'add-memql-hosts' or 'remove-memql-hosts'"
@@ -503,7 +503,7 @@ function main() {
             cap_fail 5 "malformed managed block in ${hosts_file}: '${BLOCK_BEGIN}' with no '${BLOCK_END}' -- fix it by hand"
         fi
 
-        cap_step "${action} memQL hosts entries in ${hosts_file}"
+        cap_step "${action} MemQL hosts entries in ${hosts_file}"
         cap_info "hostnames: ${HOSTNAMES[*]}"
 
         if apply "$mode" "$hosts_file"; then

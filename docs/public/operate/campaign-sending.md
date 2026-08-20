@@ -319,8 +319,8 @@ mailto-only, and say so in the next send's footer.
 
 ### SPF / DKIM alignment is structural
 
-memQL does not sign DKIM — the relay does, with the keys published for the
-mailbox it authenticated as. What memQL guarantees is that it never sets a
+MemQL does not sign DKIM — the relay does, with the keys published for the
+mailbox it authenticated as. What MemQL guarantees is that it never sets a
 `From` address the relay did not authenticate as:
 
 - the From **address** comes from the configured sender credential, inside the

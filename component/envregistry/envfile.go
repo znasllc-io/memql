@@ -1,4 +1,4 @@
-// Package envregistry owns memQL's environment-variable REGISTRY: the
+// Package envregistry owns MemQL's environment-variable REGISTRY: the
 // manifest that names every variable the platform knows about, the boot-time
 // validation that refuses to start a node missing a required one, the
 // domain derivations that compose a node's issuer / CORS origins / redirect

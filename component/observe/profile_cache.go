@@ -20,7 +20,7 @@ type profileEntry struct {
 // v1:observability:codeProfile rows arrive.
 //
 // The cache is process-local; the source of truth is the concept
-// row in memQL. On restart the cache is empty until the CDC
+// row in MemQL. On restart the cache is empty until the CDC
 // subscriber catches up.
 type profileCache struct {
 	mu      sync.RWMutex

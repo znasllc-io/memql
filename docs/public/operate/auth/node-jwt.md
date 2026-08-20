@@ -9,7 +9,7 @@ owner: znas
 
 # Node service-account JWTs
 
-memQL cluster nodes authenticate to `NodeService.Stream` using an
+MemQL cluster nodes authenticate to `NodeService.Stream` using an
 identity-issued `class="node"` JWT. Closes
 [threat-model §5.1](../../../internal/design/auth-threat-model.md#51-inter-node-mesh-trust-f1) /
 [#105](https://github.com/znasllc-io/memql/issues/105).

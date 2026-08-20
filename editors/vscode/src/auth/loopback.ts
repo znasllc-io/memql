@@ -104,7 +104,7 @@ const SUCCESS_PAGE = `<!DOCTYPE html>
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>Signed in to memQL</title>
+<title>Signed in to MemQL</title>
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:#f5f6f8;color:#1a1a1a;margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center}
 .card{background:#fff;border:1px solid #e2e4e9;border-radius:10px;padding:2rem;max-width:24rem;margin:1rem;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.06)}
@@ -114,7 +114,7 @@ p{color:#555;line-height:1.5;margin:0}
 </head>
 <body>
 <div class="card">
-<h1>Signed in to memQL</h1>
+<h1>Signed in to MemQL</h1>
 <p>You can close this tab and return to VS Code.</p>
 </div>
 </body>

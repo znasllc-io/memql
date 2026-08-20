@@ -67,10 +67,10 @@ export interface PreviewStep {
    */
   elevation: RemovalElevation;
   /**
-   * This artifact is NOT memQL-only, so its removal is the operator's choice
+   * This artifact is NOT MemQL-only, so its removal is the operator's choice
    * (memql#3566). k3d, kubectl, mkcert and the local CA are general tools they
    * may now depend on for other work; the cluster, the checkout and the hosts
-   * block exist only because memQL was installed.
+   * block exist only because MemQL was installed.
    */
   shared: boolean;
   /** What else the shared thing is good for. Empty unless `shared`. */
@@ -149,7 +149,7 @@ function itemFor(step: PreviewStep): RemovalItemView {
     kind: step.preserved ? "preserved" : "removed",
     // SET ON EVERY ROW, "none" included. The preview IS the confirmation, so
     // this list is the only moment the operator consents -- and two of the
-    // seven uninstall steps stop and ask for something outside memQL's own
+    // seven uninstall steps stop and ask for something outside MemQL's own
     // footprint (removeHostsBlock takes root to edit the system hosts file,
     // removeLocalCA takes a trust-store prompt to withdraw a CA the browsers
     // trust). A row that omitted the value would render no marker at all, which

@@ -1,7 +1,7 @@
 // concepts.memql -- the referencepack reference pack (examples/referencepack).
 //
 // This file is the schema half of the minimal reference pack that
-// demonstrates the memQL pack model end-to-end (epic 2, issue 2.5). It
+// demonstrates the MemQL pack model end-to-end (epic 2, issue 2.5). It
 // declares ONE concept so the pack contributes a real, queryable schema
 // to the engine's concept registry the same way a core domain does.
 //

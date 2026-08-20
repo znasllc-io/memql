@@ -76,7 +76,7 @@ mutate view updateComposedView {
 }
 
 /// Archive a composed view: flip status to archived and stamp archivedAt. The row is retained in
-/// full -- memQL has no hard delete, and a person who retires a view they spent time on should be
+/// full -- MemQL has no hard delete, and a person who retires a view they spent time on should be
 /// able to find it again. Owned: ownerUserId is re-stamped from actor.userId and the write guard
 /// refuses a target row the actor does not own.
 @actor

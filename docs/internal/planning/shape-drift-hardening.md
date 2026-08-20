@@ -18,7 +18,7 @@ a read-merge-validate-write partial update sits alongside full-replace
 exists anywhere in `component`/`test` -- so this doc stays open for Proposal
 A only.
 **Priority:** Medium — passive bug with loud failure mode.
-**Owner:** TBD (memQL core).
+**Owner:** TBD (MemQL core).
 **Related:** Any product that persists concept fields and updates records
 via a full-payload mutation (all of them today).
 
@@ -186,7 +186,7 @@ func (Mutation) updateAgent(args any) error {
   concept updates); (b) add a `@version` field and use CAS; (c)
   serialize updates per-ID at the engine layer. Start with (a) and
   upgrade if we see conflicts in practice.
-- **Append-only compatibility.** memQL stores each version; patch
+- **Append-only compatibility.** MemQL stores each version; patch
   doesn't change that. Each `insert` still writes a new row with the
   fully-merged payload. Readers see the merged row, writers read the
   previous merged row. No behavioural change for queries.
@@ -254,7 +254,7 @@ For B:
   `Agent` types to verify the frontend consumes every shape field?
   Probably useful but cross-repo tooling adds complexity. Could be a
   `codegen:concepts` extension on the product-frontend side instead.
-- Does memQL's query-projection engine already expose "which shape was
+- Does MemQL's query-projection engine already expose "which shape was
   used for this query" at query time? If so, the dispatch layer could
   emit a warning when a partial shape is used for a write path ("you
   fetched with `agentSummary` and you're updating — are you sure?").

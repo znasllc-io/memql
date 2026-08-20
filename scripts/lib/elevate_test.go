@@ -330,7 +330,7 @@ exit 0
 }
 
 // The purpose reaches the operator inside a box that has interrupted them. Three
-// privileged things happen during one install, and "memQL needs your password"
+// privileged things happen during one install, and "MemQL needs your password"
 // with no object leaves them guessing which.
 func TestElevateHelperNamesWhatThePasswordIsFor(t *testing.T) {
 	w := newElevateWorld(t)

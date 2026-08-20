@@ -41,7 +41,7 @@ export interface ClusterConfig {
   // that renews `token`.
   //
   // It is deliberately not the storage: this file is plaintext and shared with
-  // the memQL Cockpit, and a 30-day credential does not belong there. The
+  // the MemQL Cockpit, and a 30-day credential does not belong there. The
   // resolver takes custody on the first successful exchange -- the rotated
   // token goes into VS Code's SecretStorage and this key is DELETED from the
   // file. See src/connection/credentials.ts for the full rationale, including

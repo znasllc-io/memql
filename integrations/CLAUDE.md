@@ -2,13 +2,17 @@
 
 **Purpose:** External service integrations (Go code)
 **Language:** Go
-**Type:** Protocol adapters that bridge external services into the memQL ecosystem
+**Type:** Protocol adapters that bridge external services into the MemQL ecosystem
 
 ---
 
 ## Integration Contract
 
-Integrations are **protocol adapters**. They bridge external services (OpenAI voice, LiveKit, avatar vendors, etc.) into the memQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
+MemQL has **exactly three** extension words -- component / integration / pack;
+intake "plugin" means pack. See
+[Component vs integration vs pack](../docs/public/concepts/component-integration-pack.md).
+
+Integrations are **protocol adapters**. They bridge external services (OpenAI voice, LiveKit, avatar vendors, etc.) into the MemQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
 
 ### What Integrations DO (Go code)
 - Handle external protocols (WebSocket, gRPC, HTTP webhooks, binary audio)
@@ -399,7 +403,7 @@ return full payloads; the `*CardSummary` domains generate canvas-card bodies;
 
 ## START Adding New Integrations
 
-memQL's integration system has two registration paths:
+MemQL's integration system has two registration paths:
 
 1. **Self-registration** (`memql.RegisterPlugin`; preferred) -- the
    integration registers itself at `init()` with a narrow

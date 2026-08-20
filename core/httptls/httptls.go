@@ -1,5 +1,5 @@
 // Package httptls provides the HTTP-side companion to core/grpctls:
-// optional TLS for the memQL HTTP server and a CA-overlay HTTP client
+// optional TLS for the MemQL HTTP server and a CA-overlay HTTP client
 // for nodes that talk to the identity service over an internal
 // (self-signed) CA.
 //

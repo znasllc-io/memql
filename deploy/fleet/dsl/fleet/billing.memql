@@ -242,8 +242,8 @@ automation dunningEmailOnPaymentFailure {
           requestId:   concat("fleet-dunning-", id, "-", graceEndsAt),
           medium:      "email",
           target:      billingEmail,
-          subject:     "Action needed: your memQL Cloud payment did not go through",
-          body:        "We could not process your latest memQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
+          subject:     "Action needed: your MemQL Cloud payment did not go through",
+          body:        "We could not process your latest MemQL Cloud payment. Your instance keeps running -- please update your payment details in the billing portal within the grace period to avoid interruption.",
           requestedBy: "fleet.dunningEmailOnPaymentFailure"
         }
       }

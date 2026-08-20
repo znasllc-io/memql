@@ -46,7 +46,7 @@
 // same rule broken in a second place: a branch install's `recordedCheckout()`
 // returns a commit and no TAG -- deliberately, there is no release -- and the
 // image tag was DERIVED from that same empty tag rather than replayed, so it
-// fell through to DEFAULT_STACK_TAG and a repair run from a newer plugin build
+// fell through to DEFAULT_STACK_TAG and a repair run from a newer extension build
 // reconciled the recorded commit's manifests against a different release's
 // engine images. The fix is `recordedCheckout().imageTag`: the resolved value
 // the install already recorded, replayed rather than derived a second time. A
@@ -258,7 +258,7 @@ export function parseCliArgs(argv: string[], env: NodeJS.ProcessEnv = process.en
  *
  *   NO USABLE KEY PATH -- the run cannot pass wave 2 (`providerKey` gates every
  *   mutating step), and the failure it would produce is exit 2, whose guidance
- *   reads "a fault in memQL rather than in your machine". Say the true thing
+ *   reads "a fault in MemQL rather than in your machine". Say the true thing
  *   before anything runs. `--provider-key-file` still supplies it, because a
  *   path the receipt never carried is not a value the receipt is overriding.
  */

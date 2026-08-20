@@ -40,7 +40,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "fleet.tenantSuspend" "Scale a memQL tenant to zero, leaving its data intact."
+cap_init "fleet.tenantSuspend" "Scale a MemQL tenant to zero, leaving its data intact."
 cap_spec_param_required "tenant" "tenant slug -- its namespace and its ArgoCD Application name"
 cap_spec_param "includeDatabase" "also scale the CNPG Cluster to zero (cheaper, slower to resume)"
 cap_spec_param "argocdNamespace" "namespace the ArgoCD Application lives in"

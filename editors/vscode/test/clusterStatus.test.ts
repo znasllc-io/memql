@@ -115,7 +115,7 @@ test("a cluster with an endpoint and no token asks for a JWT, not for a PAT", ()
   );
   assert.equal(view.icon, "credential");
   assert.match(view.tooltip, /JWT access token/);
-  assert.doesNotMatch(view.tooltip, /memQL Cockpit first/);
+  assert.doesNotMatch(view.tooltip, /MemQL Cockpit first/);
 });
 
 // -----------------------------------------------------------------------------

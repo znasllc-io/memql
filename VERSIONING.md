@@ -1,6 +1,6 @@
 # Versioning
 
-memQL (the engine + node-type binaries in this repo) follows
+MemQL (the engine + node-type binaries in this repo) follows
 [Semantic Versioning](https://semver.org/) with **git tags as the
 single source of truth**.
 
@@ -33,7 +33,7 @@ tag from a different lineage.
 
 ## Git tag is the source of truth
 
-The version of a memQL build is the **git tag** it was cut from
+The version of a MemQL build is the **git tag** it was cut from
 (`vX.Y.Z` on `main`), not a number embedded in a file.
 
 - The in-repo `VERSION` file carries the **plain semver** the next
@@ -204,7 +204,7 @@ next section.
 
 ## Submodule versions (memql#3228 / memql#3245)
 
-memQL is **48 Go modules**, one per tier directory, so its dependency
+MemQL is **48 Go modules**, one per tier directory, so its dependency
 direction is enforced by the compiler rather than by convention (see
 [docs/internal/ops/ci-design.md](docs/internal/ops/ci-design.md) §D3). Each of those modules has
 its own tag namespace.
@@ -219,7 +219,7 @@ vX.Y.Z                          the root module
 So `github.com/znasllc-io/memql/component/grpc/gen@v0.15.0` resolves
 **only** if the tag `component/grpc/gen/v0.15.0` exists. The root tag
 does not publish nested modules; there is no inheritance. This is Go's
-rule for a repository with nested modules, not a memQL convention.
+rule for a repository with nested modules, not a MemQL convention.
 
 ### Two independent lines. Everything else is lockstep.
 
@@ -347,7 +347,7 @@ away at the next release; nothing besides operator action is blocking it.
 ### Consumers: what this means for the per-module `replace` set
 
 [`memql-cockpit`](https://github.com/znasllc-io/memql-cockpit) consumes
-21 memQL packages spanning every tier, and today resolves them through a
+21 MemQL packages spanning every tier, and today resolves them through a
 per-module `replace` set against a **pinned sibling checkout**
 (memql#3238). Its go.mod records why in detail.
 
@@ -358,7 +358,7 @@ one `<dir>/vX.Y.Z` tag per module at each release, cut by the command
 above.
 
 What it should *not* do is drop the sibling `replace` for **local
-development**. That replace is how the cockpit dev loop edits memQL and
+development**. That replace is how the cockpit dev loop edits MemQL and
 its client together, and pinning to a published version would trade a
 one-command inner loop for a publish round-trip. The change is to the
 CI/consumer path: with tags published, cockpit's workflows pin versions
@@ -372,12 +372,12 @@ landing, and after this epic nothing is landing.
 While we are below `1.0.0`:
 
 - **Minor bumps may change contracts.** A wire/API change lands in
-  memQL and its consumer (typically the product's BFF carrier) at the
+  MemQL and its consumer (typically the product's BFF carrier) at the
   same time. No backwards-compat shims, no deprecation windows — fix
   both ends and delete what is no longer needed (see the branch
   workflow notes in [CLAUDE.md](CLAUDE.md)).
 - **Patch bumps** are bug fixes that keep the contract identical.
-- memQL versions **independently** from the other platform repos. The
+- MemQL versions **independently** from the other platform repos. The
   engine may reach `0.14` while memql-cockpit is at `0.10`; that is
   expected. Coherence across repos is maintained by the pin chain, not
   by lockstep numbers — see [COMPATIBILITY.md](COMPATIBILITY.md).

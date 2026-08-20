@@ -1,4 +1,4 @@
-// Package metadata provides contextual metadata collection for memQL nodes.
+// Package metadata provides contextual metadata collection for MemQL nodes.
 // It reads identity, request, geographic, server, and source context from
 // context.Context and assembles a flat map[string]string stored in the
 // MemoryNodes.metadata JSONB column.

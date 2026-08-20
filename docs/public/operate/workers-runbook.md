@@ -18,7 +18,7 @@ truth now that the implementation plan has shipped end-to-end.
 ## 1. What is a worker?
 
 A worker is the **user's own machine** running
-`memql-cockpit worker run`. It connects to a memQL cluster via
+`memql-cockpit worker run`. It connects to a MemQL cluster via
 `WorkerService.Stream` (gRPC bidi), advertises its capabilities
 (HEADLESS, optionally COMPUTERUSE), and accepts dispatched tool calls
 (`workerHost.*`, `workerComputer.*`) from agents acting in

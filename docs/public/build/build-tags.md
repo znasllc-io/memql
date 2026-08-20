@@ -17,7 +17,7 @@ owner: znas
 > See the topology in the engine `CLAUDE.md` and
 > [../../internal/design/platform-consolidation.md](../../internal/design/platform-consolidation.md).
 
-memQL uses Go build tags to compile separate binaries for each node type in the
+MemQL uses Go build tags to compile separate binaries for each node type in the
 distributed cluster. Each binary selects its own `app.Build` and the transport /
 integration wiring that goes with it.
 
@@ -38,7 +38,7 @@ numbers and why.
 | **planner** | `planner` | Task planning and orchestration |
 | **workbench** | `workbench` | Sandboxed per-Plan Linux execution surface |
 | **mcp** | `mcp` | MCP (Model Context Protocol) server -- engine tool surface to external MCP hosts (epic memql#1529) |
-| **edge** | `edge` | Serves this cluster's hosted web surfaces (every SPA/website + the memQL Portal, site #1) by resolving the request `Host` header to a `v1:platform:site` row. Excludes the voice pipeline, the cognition pipeline, file processing, and the agent tool surface (epic memql#3700) |
+| **edge** | `edge` | Serves this cluster's hosted web surfaces (every SPA/website + the MemQL Portal, site #1) by resolving the request `Host` header to a `v1:platform:site` row. Excludes the voice pipeline, the cognition pipeline, file processing, and the agent tool surface (epic memql#3700) |
 
 The `bff` tag and the no-tag default build the same node; `bff` exists so a
 manifest can name it explicitly.

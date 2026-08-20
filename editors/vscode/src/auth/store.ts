@@ -7,7 +7,7 @@
 // The issue's acceptance criteria say the ACCESS token goes into SecretStorage
 // too, and that no token material is ever written to clusters.yaml. memql#3385
 // landed first and decided otherwise for that one half, deliberately:
-// clusters.yaml is OWNED and SHARED with the memQL Cockpit, so a cluster entry
+// clusters.yaml is OWNED and SHARED with the MemQL Cockpit, so a cluster entry
 // the extension has signed in to but which carries no credential at all reads,
 // to the Cockpit, as a cluster nobody has signed in to. A registry two tools
 // disagree about is worse than one they share. So the split follows the blast

@@ -815,7 +815,7 @@ query delegation delegationsByIdentity {
 // to deactivate.
 //
 // The cutoff is passed in as the `now` arg (rather than referencing the
-// clock inline) because the memQL query planner rejects the timestamp
+// clock inline) because the MemQL query planner rejects the timestamp
 // call-form AST node in filter comparisons ("unsupported literal type
 // *ast.TimestampExprFunc"). The automation supplies the arg from the bare
 // reserved `now` identifier at the call site so the resulting value is a
@@ -925,7 +925,7 @@ query authCode expiredConsumedAuthCodes {
 // is identical to an expired row from the consume handler's POV).
 //
 // The `now` cutoff is passed in as an arg (rather than referencing the
-// clock inline) for the same reason as expiredActiveDelegations: the memQL
+// clock inline) for the same reason as expiredActiveDelegations: the MemQL
 // query planner rejects the timestamp call-form AST node in filter
 // comparisons. The automation supplies it from the bare reserved `now`
 // identifier at the call site.
@@ -997,7 +997,7 @@ query accessRequest expiredPendingAccessRequests {
 //
 // Arguments:
 //   invitationId (string) - Full node ID, e.g. v1:identity:invitation:<uuid>
-//                           (the partition prefix is re-added by memQL).
+//                           (the partition prefix is re-added by MemQL).
 //
 
 /// Returns the invitation with the given id. Zero or one result.
@@ -1224,7 +1224,7 @@ query identity patIdentitiesForSelf {
 // Returns the PAT identity row in identityFull shape -- includes the
 // credentials.keyHash field. Used by the revoke / bump-lastUsedAt
 // paths which need to re-stamp the keyHash on the new version row
-// (memQL is append-only; updates write a new version that must
+// (MemQL is append-only; updates write a new version that must
 // preserve every variant-discriminator field).
 //
 // NEVER project this into UI surfaces -- it carries the SHA-256 hash

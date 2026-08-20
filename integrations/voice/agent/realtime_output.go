@@ -1,7 +1,7 @@
 package agent
 
 // realtime_output.go captures the gpt-realtime model's final spoken output for
-// one turn and forwards it to memQL as a v1:cognition:utterance with full
+// one turn and forwards it to MemQL as a v1:cognition:utterance with full
 // chat/canvas/audit parity (#458, the Go analog of
 // the Python voice-agent's realtime_output.py).
 //
@@ -34,7 +34,7 @@ import (
 	memqlv1 "github.com/znasllc-io/memql/component/grpc/gen"
 )
 
-// RealtimeOutputForwarder forwards the realtime model's spoken output to memQL
+// RealtimeOutputForwarder forwards the realtime model's spoken output to MemQL
 // as AI utterances. One per session. It holds the space + GA attribution and
 // the citation resolver; Forward mints a reply id (the chat streaming-replyId
 // contract), derives citations, and sends VoiceAgentRealtimeOutput. The server

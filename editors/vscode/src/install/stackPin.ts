@@ -1,4 +1,4 @@
-// Which memQL release an install checks out when nobody says.
+// Which MemQL release an install checks out when nobody says.
 //
 // WHY THERE HAS TO BE A DEFAULT AT ALL. `install.cloneStack` requires a tag and
 // has no default of its own, deliberately: a checkout that silently follows a
@@ -11,7 +11,7 @@
 // wizard has no tag field and passed none, so `installPlan` dropped the empty
 // value and every install started from the "+" button died at stackCheckout
 // with `exit 2: missing required parameter: tag` -- an exit code whose guidance
-// correctly reads "a fault in memQL rather than in your machine", and it was
+// correctly reads "a fault in MemQL rather than in your machine", and it was
 // (memql#3560).
 //
 // WHY A PINNED CONSTANT RATHER THAN "THE NEWEST TAG". Resolving the latest
@@ -70,7 +70,7 @@
 // `api-front-door.yaml`, which arrived with the five-host front door. So NOTHING
 // ROUTED `api.memql.localhost`, the one host every client dials. The editor
 // extension reported `websocket open failed: Unexpected server response: 404`
-// and the operator reasonably read it as a plugin fault. It was a manifest that
+// and the operator reasonably read it as a extension fault. It was a manifest that
 // had never been cut into a release.
 //
 // The other two were quieter and pointed at the wrong component just as hard.
@@ -84,7 +84,7 @@
 // WHAT THIS ADDS TO THE ARGUMENT ABOVE. The v0.16.1 note already says a pin is
 // only as good as the release it names. What v0.17.1 adds is that a stale pin
 // does not fail like a stale pin. Each symptom accused a healthy component --
-// the plugin, identity, cognition -- and none of them pointed at the version.
+// the extension, identity, cognition -- and none of them pointed at the version.
 // Bumping this is the release step; skipping it spends somebody's afternoon.
 //
 // BUMPED TO v0.19.0 (memql#4059). 262 commits accumulated behind v0.18.0, and
@@ -97,18 +97,18 @@
 // correct commit on its envelope, over a directory holding a .git and no files
 // -- an earlier install had been interrupted mid-clone, and every check the
 // script made was a REF check. The install then failed at `clusterUp` with
-// "it is a git checkout, but not of memQL", which is a true sentence about the
-// wrong problem: it was memQL, with nothing checked out of it. Fixed in
+// "it is a git checkout, but not of MemQL", which is a true sentence about the
+// wrong problem: it was MemQL, with nothing checked out of it. Fixed in
 // scripts/install/clone-stack.sh, and the reason it belongs in this release is
 // that the repair only reaches an operator through a release.
 //
 // The second is the skew this pin exists to prevent, and v0.18.0 is the release
 // that demonstrates it best. `AuthoringValidateBundleMsg.origin` landed SIX
-// HOURS after the v0.18.0 tag was cut, so no release carries it; a plugin built
+// HOURS after the v0.18.0 tag was cut, so no release carries it; a extension built
 // past the tag sends it, the cluster refuses it, and because the WebSocket
 // bridge decodes with unknown fields on, the refusal severs the session instead
 // of failing one request. The operator sees `ERROR (validate): stream closed`
-// and nothing says their cluster is simply older than their plugin. See
+// and nothing says their cluster is simply older than their extension. See
 // version/skewHint.ts, which exists only because the pin was allowed to go
 // stale.
 //
@@ -268,7 +268,7 @@ export function imageTagFor(releaseTag: string): string {
  * one got created; and `255` is baked into the path the receipt records, so the
  * next snap refresh strands it and every refresh accumulates another.
  *
- * `~/.memql/mkcert` is memQL's own directory, identical whether the installer
+ * `~/.memql/mkcert` is MemQL's own directory, identical whether the installer
  * or a human runs mkcert, and independent of how the editor was packaged.
  */
 export const DEFAULT_CAROOT_DIR = ".memql/mkcert";
@@ -320,16 +320,16 @@ export function installDomainProblem(domain: string): string | undefined {
   if (DOMAIN_PATTERN.test(trimmed)) return undefined;
 
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
-    return "Enter a domain, not a URL: memQL adds the scheme and the front-door hostnames itself, so `memql.localhost` rather than `https://memql.localhost`.";
+    return "Enter a domain, not a URL: MemQL adds the scheme and the front-door hostnames itself, so `memql.localhost` rather than `https://memql.localhost`.";
   }
   if (trimmed.includes(":")) {
-    return "Enter a domain with no port. The front door is on 443 and memQL puts the cluster there itself.";
+    return "Enter a domain with no port. The front door is on 443 and MemQL puts the cluster there itself.";
   }
   if (trimmed.startsWith("*.")) {
-    return "Enter the domain itself, not a wildcard. memQL derives `api.` and `identity.` from it, and the certificate covers the wildcard for you.";
+    return "Enter the domain itself, not a wildcard. MemQL derives `api.` and `identity.` from it, and the certificate covers the wildcard for you.";
   }
   if (!trimmed.includes(".")) {
-    return `Enter a domain with at least two labels, such as ${DEFAULT_LOCAL_DOMAIN}. A single label cannot carry the front-door subdomains memQL needs.`;
+    return `Enter a domain with at least two labels, such as ${DEFAULT_LOCAL_DOMAIN}. A single label cannot carry the front-door subdomains MemQL needs.`;
   }
-  return `That is not a domain memQL can serve. Use lowercase letters, digits and hyphens, with at least two labels -- for example ${DEFAULT_LOCAL_DOMAIN}.`;
+  return `That is not a domain MemQL can serve. Use lowercase letters, digits and hyphens, with at least two labels -- for example ${DEFAULT_LOCAL_DOMAIN}.`;
 }

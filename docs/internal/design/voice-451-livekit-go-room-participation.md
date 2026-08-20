@@ -66,7 +66,7 @@ the implementation phase (#449 core) must plan around:
    the CGO Opus binding `gopkg.in/hraban/opus.v2` (and
    `livekit/amrwb-cgo`). That makes `CGO_ENABLED=1` + system `libopus`
    headers a hard build requirement for the agent binary and the CI
-   image that builds it. memQL builds CGO-free today; this is a build-
+   image that builds it. MemQL builds CGO-free today; this is a build-
    system change, not just a code change. See
    [Caveat 1](#caveat-1-cgo--libopus-build-dependency).
 
@@ -95,7 +95,7 @@ below.
 
 ## 1. Where Go is today
 
-memQL currently touches LiveKit in exactly one place and only for JWT
+MemQL currently touches LiveKit in exactly one place and only for JWT
 minting. `component/polyphon/localroom.go` builds a room token:
 
 ```go
@@ -148,7 +148,7 @@ type ConnectInfo struct {
 func WithAutoSubscribe(val bool) ConnectOption   // default true
 ```
 
-`ConnectToRoomWithToken` is the natural fit for memQL: we already mint
+`ConnectToRoomWithToken` is the natural fit for MemQL: we already mint
 the JWT in `localroom.go`, so the Go agent reuses that exact token-
 minting path (the agent's own identity, e.g. `<space>-ga`) and calls
 `ConnectToRoomWithToken(livekitURL, token, cb)`. With auto-subscribe
@@ -217,7 +217,7 @@ Key types and functions:
   trivial `int16 -> bytes` little-endian pack).
 
 `rp.Identity()` on the `*RemoteParticipant` gives the per-track
-speaker identity for attribution -- the same identity memQL stamps as
+speaker identity for attribution -- the same identity MemQL stamps as
 the participant id, and the same value
 `_default_speaker_provider`/`TranscriptForwarder` use today. This is
 what makes per-track (not best-effort) attribution possible for the
@@ -331,7 +331,7 @@ the Python voice-agent's `main.py::entrypoint` did, but in Go:
 In the **cluster** topology this is the **Voice node** (per the
 downstream product repo's `CLAUDE.md` cluster map: "BFF forwards to
 Voice node, which runs the streaming STT provider"). The Voice node hosts the
-`RoomAgent`; it joins the LiveKit room whose name memQL already
+`RoomAgent`; it joins the LiveKit room whose name MemQL already
 computes as `polyphon-<spaceId>` (`localroom.go`). The trigger is the
 existing `VoiceAgentSessionStart` path -- today it acks the Python
 worker; in the Go world it spins up a `RoomAgent.Join`.
@@ -354,7 +354,7 @@ Browser mic ──Opus 48k──▶ LiveKit room
                   PCMLocalTrack.WriteSample ──Opus 48k──▶ LiveKit room ──▶ Browser plays
 ```
 
-memQL's existing `voice_agent_handlers.go` surface
+MemQL's existing `voice_agent_handlers.go` surface
 (`handleVoiceAgentFinalTranscript`, `handleVoiceAgentTurnRequest`,
 `VoiceAgentSpeak`) stays identical -- the room/media layer is what
 changes language, not the cognition contract. This matches the
@@ -436,7 +436,7 @@ epic's work.
 | Track subscribe event | `room.on("track_subscribed", ...)` | `RoomCallback.OnTrackSubscribed` |
 | Decoded audio to STT | **Automatic** via RoomIO -> `session.input.audio` | **Manual**: `NewPCMRemoteTrack` -> our `WriteSample` -> our STT client |
 | VAD / endpointing | **Built in** (Silero plugin, EOU model) | **Not provided** -- we add it (Silero-Go, WebRTC VAD, or server-VAD on the realtime model) |
-| STT/LLM/TTS plugin chain | **Built in** (Deepgram/memQL-LLM/Aura plugins) | **Not provided** -- we call Deepgram/OpenAI/Aura directly |
+| STT/LLM/TTS plugin chain | **Built in** (Deepgram/MemQL-LLM/Aura plugins) | **Not provided** -- we call Deepgram/OpenAI/Aura directly |
 | `session.say(text)` TTS pipeline | **Built in** | **Manual**: TTS -> PCM16 -> `PCMLocalTrack.WriteSample` |
 | Publish agent audio | **Automatic** via `session.output.audio` | **Manual**: `NewPCMLocalTrack` + `PublishTrack` |
 | Active speaker | `room.on("active_speakers_changed", ...)` | `OnSpeakersChanged` / `ActiveSpeakers()` |
@@ -470,7 +470,7 @@ implementation phase:
    the browser. (The two unproven acceptance bullets.)
 2. **CGO build in the real CI/release image.** Verify
    `CGO_ENABLED=1` + `libopus`/`libopusfile` build cleanly in the
-   memQL build image and that the produced binary runs in the Voice
+   MemQL build image and that the produced binary runs in the Voice
    node container. This is the gating caveat -- prove it early.
 3. **Latency of the Go decode/resample path** vs the Python
    `AgentSession` baseline (per `433`/`432` latency plans). The CGO
@@ -508,7 +508,7 @@ image change -- validate it first (Open question 2).
 `libopus`/`libopusfile`) and `github.com/livekit/amrwb-cgo`. Implications:
 
 - The agent build requires `CGO_ENABLED=1` and the Opus dev headers in
-  the toolchain image. memQL builds CGO-free today, so the Voice-node
+  the toolchain image. MemQL builds CGO-free today, so the Voice-node
   build target (and its CI lane) needs the C toolchain + `libopus-dev`
   / `libopusfile-dev`.
 - Cross-compilation and fully-static binaries get harder (CGO).

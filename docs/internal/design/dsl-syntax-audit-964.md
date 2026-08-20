@@ -1,5 +1,5 @@
 ---
-title: memQL DSL syntax audit + standardization reference (#964)
+title: MemQL DSL syntax audit + standardization reference (#964)
 audience: internal
 status: historical
 area: design
@@ -7,7 +7,7 @@ sinceVersion: 0.9.0
 owner: znas
 ---
 
-# memQL DSL syntax audit + standardization reference (#964)
+# MemQL DSL syntax audit + standardization reference (#964)
 
 > Historical: shipped in 0.9.0; kept for rationale.
 

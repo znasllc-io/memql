@@ -40,7 +40,7 @@ export function SignInPage(): ReactNode {
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">
       <div className="w-full max-w-md rounded-lg border border-line bg-surface p-6">
-        <h1 className="text-lg font-semibold tracking-tight">memQL Portal</h1>
+        <h1 className="text-lg font-semibold tracking-tight">MemQL Portal</h1>
         <p className="mt-1 text-sm text-muted">
           Sign in to{" "}
           <span className="font-mono text-fg">{cluster || "this cluster"}</span>.
@@ -60,7 +60,7 @@ export function SignInPage(): ReactNode {
               onClick={() => signIn(returnTo)}
               className="mt-5 w-full rounded bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:opacity-90"
             >
-              Continue with memQL identity
+              Continue with MemQL identity
             </button>
             <p className="mt-3 text-xs text-subtle">
               {autoStartAuthorize && !error

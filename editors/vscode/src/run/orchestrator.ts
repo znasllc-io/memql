@@ -97,7 +97,7 @@ export interface RunCluster {
    * The recorded release (memql#3990), when clusters.yaml carries one.
    *
    * Carried so a failure that severed the session can say whether this cluster
-   * is OLDER than the plugin -- see `version/skewHint.ts`. Undefined is the
+   * is OLDER than the extension -- see `version/skewHint.ts`. Undefined is the
    * ordinary case and produces no hint rather than a guess.
    */
   version?: string;

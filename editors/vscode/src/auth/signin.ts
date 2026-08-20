@@ -76,7 +76,7 @@ export type AuthFlowRunner = (
 /**
  * Which grant a sign-in should run.
  *
- * `auto` is what `memQL: Sign In` uses. `deviceCode` is the deliberate command
+ * `auto` is what `MemQL: Sign In` uses. `deviceCode` is the deliberate command
  * (memql#3411) for a user who already knows their host cannot do loopback and
  * should not spend the callback deadline finding out.
  */
@@ -234,7 +234,7 @@ export function describeSignInFailure(clusterName: string, err: unknown): SignIn
   if (!isAuthFlowError(err)) {
     return {
       level: "error",
-      message: `memQL: signing in to "${clusterName}" failed: ${err instanceof Error ? err.message : String(err)}`,
+      message: `MemQL: signing in to "${clusterName}" failed: ${err instanceof Error ? err.message : String(err)}`,
       retryable: false,
     };
   }
@@ -244,13 +244,13 @@ export function describeSignInFailure(clusterName: string, err: unknown): SignIn
     message:
       levelFor(err.kind) === "silent"
         ? ""
-        : `memQL: signing in to "${clusterName}" failed. ${err.message}${advice === "" ? "" : ` ${advice}`}`,
+        : `MemQL: signing in to "${clusterName}" failed. ${err.message}${advice === "" ? "" : ` ${advice}`}`,
     retryable: retryableFor(err.kind),
   };
 }
 
 // A user who cancelled already knows. Anything louder than silence there
-// teaches an operator to dismiss memQL toasts without reading them, which costs
+// teaches an operator to dismiss MemQL toasts without reading them, which costs
 // us the ones that matter. A timeout is a warning rather than an error because
 // nothing is broken -- a page was left unfinished.
 function levelFor(kind: AuthFlowErrorKind): SignInFailureLevel {
@@ -282,13 +282,13 @@ function retryableFor(kind: AuthFlowErrorKind): boolean {
 function adviceFor(kind: AuthFlowErrorKind): string {
   switch (kind) {
     case "misconfigured":
-      return 'Edit the cluster ("memQL: Edit Cluster") and set its domain, or add an `issuer` to clusters.yaml.';
+      return 'Edit the cluster ("MemQL: Edit Cluster") and set its domain, or add an `issuer` to clusters.yaml.';
     case "registrationFailed":
       return "Nothing was opened and no credential changed. Retry once the identity service is reachable and accepting dynamic client registration.";
     case "bindFailed":
       return "This is a local machine problem -- a firewall or sandbox preventing a loopback listener -- not a problem with the cluster.";
     case "timeout":
-      return 'Run "memQL: Sign In" again and finish the page in your browser.';
+      return 'Run "MemQL: Sign In" again and finish the page in your browser.';
     case "browserUnavailable":
       return "This host cannot open a browser. Sign in on a machine that can and put the resulting `token` (and `refresh_token`) into clusters.yaml.";
     case "authorizationDenied":

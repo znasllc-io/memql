@@ -1,6 +1,6 @@
 // Taking ownership of a local cluster (znasllc-io#3905, #3885).
 //
-// WHAT AN OPERATOR IS ACTUALLY STUCK ON. A memQL cluster's owner account is
+// WHAT AN OPERATOR IS ACTUALLY STUCK ON. A MemQL cluster's owner account is
 // created by `seedBootstrap`, from the values the installer seeds. That account
 // then holds NO human credential -- no passkey, no magic-link identity -- and
 // the only thing that gives it one is a single-use enrolment link minted inside

@@ -137,7 +137,7 @@ func TestClientsDirectoryIsAllowlisted(t *testing.T) {
 			"in the engine needs to change for it to work -- that is the whole design "+
 			"(clients/README.md).\n"+
 			"IF %s IS A PLATFORM SURFACE (an ops console, a demo the engine itself "+
-			"serves, a landing page for memQL): add it to allowedClients in "+
+			"serves, a landing page for MemQL): add it to allowedClients in "+
 			"clients_allowlist_test.go with a one-line reason, in the same PR.\n\n"+
 			"allowed today: %v\ntracked files that put it here: %v",
 			name, name, name, allowed, files)

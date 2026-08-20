@@ -76,7 +76,7 @@ func (s *bunStore) InsertMemoryNode(ctx context.Context, node *memorynodes.Memor
 	// Two simultaneous mutations with the same deterministic id can
 	// land at the same microsecond -- React StrictMode in dev fires
 	// effects twice, and concurrent autoJoin / dailySpace ensure
-	// flows can race. Both inserts compute the same id (memQL
+	// flows can race. Both inserts compute the same id (MemQL
 	// mutation ids are content-addressed) and the engine stamps the
 	// same `time.Now()` if the second call arrives within the same
 	// microsecond bucket. Without ON CONFLICT, the second insert

@@ -1,5 +1,5 @@
 ---
-title: Connect to the memQL MCP server
+title: Connect to the MemQL MCP server
 audience: public
 status: stable
 area: operate
@@ -7,9 +7,9 @@ sinceVersion: 0.9.60
 owner: znas
 ---
 
-# Connect to the memQL MCP server
+# Connect to the MemQL MCP server
 
-The `mcp` node exposes the memQL engine tool surface to MCP hosts (Claude Code,
+The `mcp` node exposes the MemQL engine tool surface to MCP hosts (Claude Code,
 and -- once OAuth lands, [#1556] -- Claude Desktop / claude.ai). It speaks two
 transports:
 

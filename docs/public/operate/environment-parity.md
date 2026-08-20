@@ -9,9 +9,9 @@ owner: znas
 
 # Environment parity — one topology everywhere
 
-**The standard, non-negotiable:** every memQL installation runs the **same
+**The standard, non-negotiable:** every MemQL installation runs the **same
 topology**, the **same deployment process**, and the **same connection model**.
-Whether memQL is running on a laptop in k3d or on a server in the cloud, the
+Whether MemQL is running on a laptop in k3d or on a server in the cloud, the
 *architecture* is identical. The **only** things that change are
 **configuration values** and the **hardware resources** the workloads run on —
 never the shape of the system.
@@ -21,7 +21,7 @@ only makes sense locally, an `if env == "local"` branch, a port-forward that
 stands in for real infrastructure — **stop**. That is a deviation from this
 standard and it is the thing this document exists to prevent.
 
-> memQL ships **one installation shape** (epic memql#3943). There is no
+> MemQL ships **one installation shape** (epic memql#3943). There is no
 > staging-versus-production dimension inside the product: an operator who wants
 > a second environment installs a second instance, with its own domain, its own
 > ArgoCD and its own database. So "parity" here is between the LOCAL cluster and

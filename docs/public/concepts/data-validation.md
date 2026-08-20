@@ -11,7 +11,7 @@ owner: znas
 
 ## Overview
 
-memQL uses a three-state validation lifecycle for data records: **draft**, **checked**, and **confirmed**. This replaces the old staging/production concept split with a unified `v1:data:record` concept where data visibility is governed by validation state and configurable policies.
+MemQL uses a three-state validation lifecycle for data records: **draft**, **checked**, and **confirmed**. This replaces the old staging/production concept split with a unified `v1:data:record` concept where data visibility is governed by validation state and configurable policies.
 
 ## Vocabulary
 

@@ -19,7 +19,7 @@ import (
 // notices until a proxy is in front.
 //
 // The X-Forwarded-Proto arm is load-bearing rather than lenient: in every
-// environment memQL actually runs in, TLS terminates at the ingress and the
+// environment MemQL actually runs in, TLS terminates at the ingress and the
 // binary sees plaintext on the hop behind it. Without this arm the check would
 // refuse every production request and admit only the ones nobody makes.
 //

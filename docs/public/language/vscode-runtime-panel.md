@@ -9,7 +9,7 @@ owner: znas
 
 # VS Code Runtime Panel
 
-The memQL extension's activity-bar panel connects VS Code to a running
+The MemQL extension's activity-bar panel connects VS Code to a running
 cluster: pick a cluster, browse what that cluster has **defined**
 (Constructs) and what rows **exist** (Data), and run either without
 leaving the editor.
@@ -33,7 +33,7 @@ leaves to a human.
 
 ## Clusters
 
-The panel reads the same `~/.memql/clusters.yaml` the memQL Cockpit uses,
+The panel reads the same `~/.memql/clusters.yaml` the MemQL Cockpit uses,
 so a cluster added in either tool appears in both. The file is watched:
 an external edit refreshes the view.
 
@@ -90,7 +90,7 @@ The refresh token is a 30-day credential, so the panel does not leave it
 in `clusters.yaml`. The `refresh_token` key is an **ingest path only**: on
 the first successful exchange the rotated token is moved into VS Code's
 `SecretStorage` and the plaintext key is deleted from the file. The access
-token stays in the file, because it is short-lived and because the memQL
+token stays in the file, because it is short-lived and because the MemQL
 Cockpit shares this registry and needs to see it.
 
 A cluster entry therefore looks like this:
@@ -152,7 +152,7 @@ what removing it will ask of you -- a step needing elevation says so before
 you consent rather than surprising you with a password prompt mid-run.
 Anything the install *found* rather than created is listed as preserved and
 is not touched: an mkcert CA that predated the install belongs to the
-machine, not to memQL, and guessing otherwise would break every other
+machine, not to MemQL, and guessing otherwise would break every other
 locally-trusted certificate on it.
 
 ## Installing a local cluster
@@ -161,7 +161,7 @@ locally-trusted certificate on it.
 **Create deployment** on the `local` row -- which is there whether or not
 anything is installed, reading `not installed` when nothing is. (Before
 memql#3733 this was filed under the Clusters **+**, as a branch of "add a
-cluster". Installing memQL on a machine and registering a connection to one are
+cluster". Installing MemQL on a machine and registering a connection to one are
 different acts with different failure modes, and filing the first under the
 second made the destructive one an incidental branch of the benign one.) The page collects what an install
 needs before any work starts -- the domain, who owns the cluster, and which AI
@@ -336,7 +336,7 @@ surfaces prints stringified JSON into a `<pre>`, and a guard test
 (`editors/vscode/test/surfaceGuards.test.ts`) fails the build if one
 starts to.
 
-It lives in `sdk/ts-viewkit`, which is also what the memQL portal renders
+It lives in `sdk/ts-viewkit`, which is also what the MemQL portal renders
 through, so the two surfaces agree on what a value looks like rather than
 each deriving an answer.
 

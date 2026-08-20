@@ -115,7 +115,7 @@ export interface SessionOptions {
    * IMAGES too, rather than re-derive them from a version a branch install does
    * not have. `imageTagForVersion` falls back to DEFAULT_STACK_TAG when handed
    * nothing, so re-deriving turned every repair of a branch install into an
-   * upgrade to whatever release the running plugin build pinned -- silently, and
+   * upgrade to whatever release the running extension build pinned -- silently, and
    * with the recorded commit's manifests still reconciling underneath it.
    *
    * `cli.ts`'s `repairOptions` and the wizard's repair path both read it off the
@@ -143,7 +143,7 @@ export interface SessionOptions {
   ownerLastName?: string;
   registrationMode?: string;
   /**
-   * Where `install.cloneStack` puts the memQL checkout, and therefore the root
+   * Where `install.cloneStack` puts the MemQL checkout, and therefore the root
    * `k3d.up` reads deploy/ and its target revision from (memql#3491).
    *
    * ONE VALUE FEEDS BOTH STEPS, from here, rather than each defaulting
@@ -305,7 +305,7 @@ export interface FrontDoor {
   probeHosts: string[];
 }
 
-// The subdomains memQL puts on a front door. Kept as data, and TWO lists
+// The subdomains MemQL puts on a front door. Kept as data, and TWO lists
 // because the hosts block and the probe answer different questions.
 //
 // The HOSTS BLOCK must name everything something will type, which includes
@@ -445,7 +445,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
           // branch install's recorded checkout is a commit and an EMPTY tag, so
           // `imageTagForVersion("")` fell through to DEFAULT_STACK_TAG and the
           // repaired cluster reconciled the recorded commit's manifests against
-          // whatever release THIS plugin build pins. An upgrade nobody asked for
+          // whatever release THIS extension build pins. An upgrade nobody asked for
           // -- exactly what memql#3605 defines a repair as never being -- plus a
           // manifest/image skew nobody chose.
           //
@@ -582,7 +582,7 @@ export function installPlan(opts: SessionOptions): (step: Step) => StepPlan {
  *   - WHETHER the installer created it. `--pre-existing=true` is an
  *     unconditional refusal inside remove-artifact.sh, so passing the recorded
  *     verdict faithfully is what keeps a developer's own k3d cluster, mkcert CA
- *     or checkout when they uninstall memQL. When the receipt says the artifact
+ *     or checkout when they uninstall MemQL. When the receipt says the artifact
  *     pre-existed, the refusal that follows is the expected outcome, so the step
  *     is planned as preservedOnRefusal and reports `preserved` rather than
  *     failing the run.
@@ -761,7 +761,7 @@ export interface PlannedStep {
    */
   elevation: Elevation;
   /**
-   * This removal takes away something that is NOT memQL-only, so the operator
+   * This removal takes away something that is NOT MemQL-only, so the operator
    * chooses (memql#3566). k3d, kubectl, mkcert and the local CA are general
    * tools they may now depend on; the cluster, the checkout and the hosts block
    * are not. Carried from the graph so the wizard can offer the shared ones

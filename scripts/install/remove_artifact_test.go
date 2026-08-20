@@ -5,7 +5,7 @@
 // receipt records, per artifact, whether the installer CREATED it or merely
 // found it already there -- and the second case is the dangerous one: a
 // developer who had mkcert, or a /etc/hosts entry, or a k3d cluster before
-// this installer ever ran does not lose it because they uninstalled memQL.
+// this installer ever ran does not lose it because they uninstalled MemQL.
 //
 // THE assertion this file exists for: `--pre-existing=true` is an
 // UNCONDITIONAL EXIT 3, enforced AT THE POINT OF ACTION. Not in the executor
@@ -219,7 +219,7 @@ func (w raWorld) seedCA(t *testing.T) {
 	}
 }
 
-// raHostsFile writes a hosts file carrying a memQL-marked block plus lines
+// raHostsFile writes a hosts file carrying a MemQL-marked block plus lines
 // that must survive untouched.
 func raHostsFile(t *testing.T) string {
 	t.Helper()
@@ -904,7 +904,7 @@ func TestRemoveArtifactPrunesEmptyParents(t *testing.T) {
 			t.Errorf("%s survived: the now-empty bin dir was not pruned", bin)
 		}
 		if _, err := os.Stat(home); !os.IsNotExist(err) {
-			t.Errorf("%s survived: the now-empty memQL home was not pruned", home)
+			t.Errorf("%s survived: the now-empty MemQL home was not pruned", home)
 		}
 	})
 
@@ -987,7 +987,7 @@ func TestRemoveArtifactPrunesEmptyParents(t *testing.T) {
 // ran the uninstall, and was told:
 //
 //	refusing to remove mkcertCA (...): --pre-existing=true says the installer
-//	did not create it, and uninstalling memQL must never take something that
+//	did not create it, and uninstalling MemQL must never take something that
 //	was already here
 //
 // about a CA that had not existed for an hour -- with a summary line claiming

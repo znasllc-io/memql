@@ -1,4 +1,4 @@
-# memQL Makefile
+# MemQL Makefile
 # Source of truth for all build, test, run, and development commands.
 #
 # Usage:
@@ -48,7 +48,7 @@ ALL_PKGS    := $(MODULE)/...
 ## Build all binaries (standalone + healthcheck)
 all: build healthcheck
 
-## Build the standalone memQL server (all components)
+## Build the standalone MemQL server (all components)
 build:
 	$(GO) build $(GOFLAGS) -o $(BIN_DIR)/memql .
 
@@ -464,7 +464,7 @@ db-failover-litmus:
 ##
 ## Multi-root: the generator (and the importable sdk/gen package it
 ## wraps) accepts repeatable / comma-separated --dsl roots and merges
-## constructs from all of them deterministically. memQL itself passes
+## constructs from all of them deterministically. MemQL itself passes
 ## a single root (the core DSL). A product BFF -- a separate Go module
 ## that depends on github.com/znasllc-io/memql -- imports sdk/gen and
 ## calls gen.Generate over `core DSL ∪ its own DSL`, and wires its own
@@ -614,7 +614,7 @@ vscode-deps:
 vscode-test: vscode-deps
 	cd editors/vscode && npm ci --no-audit --no-fund && npm test
 
-## Install the memQL Portal's dependencies (clients/portal), building the
+## Install the MemQL Portal's dependencies (clients/portal), building the
 ## sdk/ts + sdk/ts-viewkit `file:` dependencies first -- their dist/ must
 ## exist before anything in the portal can resolve against them. Idempotent.
 portal-install:

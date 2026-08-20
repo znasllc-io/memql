@@ -1,6 +1,6 @@
 // Package secret provides authenticated symmetric encryption helpers
 // for memql. The live surface is per-value Encrypt / Decrypt: seals one
-// secret string at a time for storage in memQL concept rows
+// secret string at a time for storage in MemQL concept rows
 // (v1:platform:partitionSecret, v1:platform:globalSecret, historical
 // v1:router:apikey).
 //

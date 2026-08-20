@@ -16,7 +16,7 @@ type MiddlewareOptions struct {
 	PublicPaths []string
 	// SelfAuthenticatedPaths are routes this middleware must SKIP even on a
 	// verifier-consuming node, because they authenticate themselves with a
-	// credential that is not a memQL identity -- today a per-source vendor
+	// credential that is not a MemQL identity -- today a per-source vendor
 	// HMAC over the request body (memql#2957, memql#3062).
 	//
 	// Deliberately NOT PublicPaths, and the difference is a security boundary
@@ -178,7 +178,7 @@ func shouldBypassAuth(r *http.Request, publicPaths map[string]struct{}) bool {
 }
 
 // isSelfAuthenticated reports whether the request is one of the routes that
-// carries its own non-memQL credential, and is therefore exempt from bearer
+// carries its own non-MemQL credential, and is therefore exempt from bearer
 // verification on a verifier-consuming node.
 //
 // The matching rule is the entire security argument, so it is written out

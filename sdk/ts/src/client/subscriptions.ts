@@ -75,7 +75,7 @@ export class SubscriptionManager {
   // unsubscribe function. The server composes the bus topic from
   // opts.concept + opts.actions (memql#2460), so the client never writes a
   // `graph.node.<action>.<concept>` string. This is the graph counterpart
-  // of subscribe(); it is what every reactive UI on memQL uses.
+  // of subscribe(); it is what every reactive UI on MemQL uses.
   subscribeGraph(handler: EventHandler, opts: GraphSubscribeOptions = {}): Unregister {
     const actions = (opts.actions ?? []).map(graphActionWire);
     return this.register(handler, {

@@ -9,10 +9,10 @@ owner: znas
 
 # Connected — a site that stays where it is
 
-There are three ways a customer's web application can relate to a memQL
+There are three ways a customer's web application can relate to a MemQL
 cluster, and the cheapest one needs nothing built. **Their site stays exactly
 where it already runs — Vercel, Netlify, a VPS, whatever they have — adds the
-memQL SDK, and points at `api.<domain>`.** memQL is the backend; the hosting
+MemQL SDK, and points at `api.<domain>`.** MemQL is the backend; the hosting
 stays theirs.
 
 This page is that option, called **Connected**, and the ladder it sits at the
@@ -36,7 +36,7 @@ Related: [front-door.md](front-door.md) ·
 understanding before choosing a rung.** The SDK integration is *identical* at
 every rung: the same generated client, the same queries, the same
 subscriptions, the same auth flow. What changes is where the bytes are served
-from, not how the application talks to memQL.
+from, not how the application talks to MemQL.
 
 Moving up will in fact *remove* code. A hosted site is designed to be served by
 the edge on its own origin with `/_memql/*` proxied to the bff, so it is
@@ -238,7 +238,7 @@ setting for a cookie the bff issues to its own origin, so this is not a bug to
 be fixed. It is true today, before third-party cookie deprecation is considered
 at all; deprecation only removes the workarounds.
 
-The flow that does work is the one the memQL Portal already uses, described
+The flow that does work is the one the MemQL Portal already uses, described
 step by step in [portal.md](portal.md#how-the-portal-authenticates):
 
 1. Top-level navigation to `https://identity.<domain>/authorize` with
@@ -275,7 +275,7 @@ browser — the same shape as the `SameSite=Lax` problem above: a browser-side
 rule that makes a correct server-side configuration insufficient. A reader who
 hits one of these will hit the other.
 
-memQL emits no CSP for a Connected site and cannot: the customer serves their
+MemQL emits no CSP for a Connected site and cannot: the customer serves their
 own site and their own headers, so there is no setting on our side to go looking
 for. What we can tell them is **which origins to allow**. If they set a CSP at
 all, `connect-src` has to name them:
@@ -299,7 +299,7 @@ one place an operator would look for the cause holds no evidence that anything
 was even attempted. The only signal is a CSP violation in the customer's own
 browser console, so that is where the diagnosis is.
 
-None of this is theoretical, and memQL has already been on the receiving end of
+None of this is theoretical, and MemQL has already been on the receiving end of
 it. `component/edge/csp.go` names the cluster's identity origin in
 `connect-src` for exactly this reason (memql#3711 fix round 2) — and, because
 the edge serves every hosted site rather than one bundle on one origin, it
@@ -326,7 +326,7 @@ Two practical notes carried over from that file's reasoning:
   only the identity *origin*, so the value survives an endpoint path
   changing. Do the same.
 
-For contrast, memQL *does* generate the policy for pages it serves itself, from
+For contrast, MemQL *does* generate the policy for pages it serves itself, from
 the same configuration the bundle reads, so the two cannot drift apart. A
 Connected site is outside that mechanism by construction — which is the whole
 reason it needs writing down here.
@@ -369,7 +369,7 @@ it":
 | Their existing pipeline | Kept | Replaced |
 | Needs from you | Nothing built | The edge and the site machinery |
 
-The one-system property is the substantive difference. Under one memQL cluster
+The one-system property is the substantive difference. Under one MemQL cluster
 per customer, "we build it, then hand it over if they want to run it
 themselves" is a promise you can keep about the cluster — and Connected leaves
 their hosting outside the thing you would be handing over. That is fine when

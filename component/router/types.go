@@ -1,4 +1,4 @@
-// Package router is the memQL AI Router: the single entry point every AI
+// Package router is the MemQL AI Router: the single entry point every AI
 // call flows through. It resolves a ResolveRequest to a concrete provider,
 // wraps the provider with an observer that records one v1:router:call row
 // per call (tokens, cost, latency, outcome), and hands the wrapped provider

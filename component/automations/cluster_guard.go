@@ -17,7 +17,7 @@ import (
 // ClusterExecutionGuard makes EVENT-triggered automations exactly-once
 // across the cluster, and makes any double-fire observable (#561).
 //
-// When a memQL node-type runs >=2 replicas, the same triggering event can
+// When a MemQL node-type runs >=2 replicas, the same triggering event can
 // reach more than one replica (the EventBridge dedup is per-process). Each
 // replica calls Claim(automation, dedupKey) before executing; the claim
 // inserts a row keyed by (automation_name, dedup_key) whose PRIMARY KEY lets

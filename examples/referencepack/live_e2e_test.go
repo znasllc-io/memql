@@ -22,7 +22,7 @@ package referencepack_test
 // A spy WRAPS the pack's genuine composeGreeting handler (delegates to it, then
 // records the call) to observe the Go capability actually running.
 //
-// (The scheduler's internal event->step auto-dispatch is core memQL plumbing,
+// (The scheduler's internal event->step auto-dispatch is core MemQL plumbing,
 // wired in the app via the EventBridge; here we exercise the pack's own seams.)
 //
 // Postgres-gated like the sibling *_db_test.go: skips when no DB is reachable.

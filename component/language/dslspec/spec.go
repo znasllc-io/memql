@@ -1,12 +1,12 @@
 // Package dslspec is the single machine-readable source of truth for the
-// memQL DSL authoring surface: the top-level constructs an author may
+// MemQL DSL authoring surface: the top-level constructs an author may
 // write, the keywords / operators / field-types the grammar accepts, the
 // annotations each construct allows, and the "legal-next" rules that drive
 // context-aware completion.
 //
 // # Why this package exists
 //
-// Before dslspec, memQL Sense (component/memql/sense) carried its
+// Before dslspec, MemQL Sense (component/memql/sense) carried its
 // completion / hover / diagnose tables as hand-maintained Go literals
 // (sense/builtins.go's Keywords / ReceiverTypes / FieldTypes, etc.). They
 // drifted from the grammar with nothing to catch it -- e.g. they still

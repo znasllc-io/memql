@@ -8,7 +8,7 @@ package agent
 // per-response instructions (#455 cascade path / #457 realtime path), so the
 // static block stays small.
 //
-// This is the realtime analog of memQL's cognition agent prompt (the
+// This is the realtime analog of MemQL's cognition agent prompt (the
 // "YOUR IDENTITY" / "Personality & Instructions" blocks in
 // dsl/cognition/prompts/cognitionReply.tmpl). It always returns a non-empty
 // string: when the persona carries no role / style the neutral default

@@ -1,7 +1,7 @@
 {
   "name": "install",
   "kind": "install",
-  "description": "Bring a local memQL cluster up on a fresh machine: inventory it, place the pinned tools, open the front door, check the stack out, start it, and hand back a sign-in link.",
+  "description": "Bring a local MemQL cluster up on a fresh machine: inventory it, place the pinned tools, open the front door, check the stack out, start it, and hand back a sign-in link.",
   "steps": [
     {
       "id": "detect",
@@ -123,7 +123,7 @@
       ],
       "elevation": "sudo",
       "retained": true,
-      "retainedReason": "certutil is a general system tool other software uses. memQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
+      "retainedReason": "certutil is a general system tool other software uses. MemQL installs it because without it Firefox and Chrome cannot trust the local CA and the front door is unreachable in a browser -- but an application uninstaller that removes distribution packages is how installers earn their reputation, so this one is never taken back.",
       "verify": {
         "kind": "resultTrue",
         "field": "result.installed"
@@ -151,7 +151,7 @@
     {
       "id": "stackCheckout",
       "script": "install.cloneStack",
-      "description": "Check the memQL stack out at a release tag into the pinned local source directory.",
+      "description": "Check the MemQL stack out at a release tag into the pinned local source directory.",
       "dependsOn": [
         "detect",
         "providerKey",

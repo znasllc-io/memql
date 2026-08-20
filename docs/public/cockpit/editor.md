@@ -39,11 +39,14 @@ contract behind the Editor and the panel's as-built behaviour.
 
 Two terms that look similar and are not the same:
 
-- A **pack** is a compile-time `.memql` subtree embedded in, or
-  `RegisterTree`'d into, the engine. Packs are part of the binary (or a
-  Go module compiled into it). The Editor browses packs, and they are
-  **read-only** there -- a pack subtree is owned by its registering
-  module and the embedded tree is immutable.
+- The Editor browses **domains**: the engine's own core embedded
+  namespaces plus any pack-registered ones (`dsl/pack_browse.go` labels
+  the origin `embedded` vs `pack:<domain>`). A **pack** is only the
+  latter -- a client-agnostic product feature whose `.memql` subtree an
+  external Go module `RegisterTree`s into the engine (see
+  [component vs integration vs pack](../concepts/component-integration-pack.md)).
+  Either way the trees are **read-only** here -- a pack subtree is owned
+  by its registering module and the embedded tree is immutable.
 - A **bundle** is a runtime-authored set of constructs validated and
   injected through the authoring API. Bundles are not packs; they are
   not part of the binary. In the Cockpit a bundle is a local directory

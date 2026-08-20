@@ -1,4 +1,4 @@
-/// The memQL Portal, as site #1.
+/// The MemQL Portal, as site #1.
 ///
 /// SEEDED, not special-cased. The portal is how sites are managed, so if it
 /// were an ordinary row the cluster would ship with an empty site table and no
@@ -20,7 +20,7 @@
 /// the portal gets from the cluster install. It carries the committed default
 /// the same way the Ingress hosts do (memql#3593); an install on another
 /// domain overrides it through the same seam.
-@description("The memQL Portal as site #1")
+@description("The MemQL Portal as site #1")
 seed site portal {
   id:          "portal"
   hostname:    "portal.memql.localhost"
@@ -29,5 +29,5 @@ seed site portal {
   status:      "live"
   apiProxy:    true
   systemOwned: true
-  title:       "memQL Portal"
+  title:       "MemQL Portal"
 }

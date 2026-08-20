@@ -1,4 +1,4 @@
-// Package email is a minimal outbound-mail helper used by memQL for
+// Package email is a minimal outbound-mail helper used by MemQL for
 // transactional messages (currently just guest invites).
 //
 // The package intentionally avoids the full integrations.Integration

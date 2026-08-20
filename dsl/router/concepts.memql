@@ -23,7 +23,7 @@ concept budget {
   @relationship(type="references", field="scopeId", target=agent, direction="outgoing")
 }
 
-/// One AI invocation recorded by the memQL AI Router. Every call through the router -- agent
+/// One AI invocation recorded by the MemQL AI Router. Every call through the router -- agent
 /// replies, prompt renders, suggest endpoints, TTS, transcription -- produces exactly one row here
 /// with attribution, token counts, latency, and cost. Partition-scoped usage ledger; the
 /// time-series axis rides the shared MemoryNodes hypertable.
@@ -41,7 +41,7 @@ concept call {
 
   vendor              string!  @description("Vendor family: openai or anthropic. Derived from provider .memql @type.")
   model               string!  @description("Model identifier as sent to the vendor (e.g. gpt-5.4-mini, claude-sonnet-4-6).")
-  providerName        string!  @description("memQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
+  providerName        string!  @description("MemQL provider registry name (e.g. stream54Mini, streamClaudeSonnet).")
 
   inputTokens         int     @description("Tokens in the input/prompt.")
   outputTokens        int     @description("Tokens generated in the output.")

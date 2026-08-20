@@ -31,7 +31,7 @@
 //   - behavioural: the refusal is RECORDED. A 403 that leaves no trace is
 //     invisible to the operator reviewing an incident, and the audit write is
 //     the half of the gate that a status-code assertion cannot see. Added with
-//     memql#3324, which moved four of these screens into the memQL portal and
+//     memql#3324, which moved four of these screens into the MemQL portal and
 //     needed the surviving gate pinned in both of its effects rather than one:
 //     the refusal AND the `admin_auth_forbidden` row it appends.
 //
@@ -275,7 +275,7 @@ func TestGatedAdminRoutesRejectNonAdminRole(t *testing.T) {
 
 // The refusal is a RECORD, not just a status code.
 //
-// memql#3324 moved four of these screens into the memQL portal, and the
+// memql#3324 moved four of these screens into the MemQL portal, and the
 // standing requirement across that move is that "a 403 with an
 // admin_auth_forbidden audit event is the current behaviour and must survive".
 // Nothing asserted the second half: requireAdmin could stop calling s.audit

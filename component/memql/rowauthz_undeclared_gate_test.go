@@ -115,7 +115,7 @@ const undeclared3461ByIdReason = "memql#3461 -- by-id read of a staged webhook; 
 const undeclared3178SelfScopedReason = "memql#3178 -- self-scoped on actor.userId; v1:identity:identity still declares no tier (epic Decision D)"
 
 // undeclared3322AccountTokenReason covers the two constructs memql#3322 added
-// for the account-token surface in the memQL Portal.
+// for the account-token surface in the MemQL Portal.
 //
 // Same shape as the memql#3178 pair above, and listed for the same single
 // reason: `v1:identity:identity` declares no `@rowAuthz` tier, so the engine

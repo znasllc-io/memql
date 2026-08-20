@@ -82,7 +82,7 @@ export function authorizeUrl(
 ): string {
   if (!config.identityUrl) {
     throw new Error(
-      "memQL portal: this cluster published no identity URL, so there is " +
+      "MemQL portal: this cluster published no identity URL, so there is " +
         "nowhere to sign in. The node serving the portal derives it from " +
         "MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER -- see " +
         "docs/public/operate/portal.md.",
@@ -90,7 +90,7 @@ export function authorizeUrl(
   }
   if (!config.oauthClientId) {
     throw new Error(
-      "memQL portal: this cluster published no OAuth client id " +
+      "MemQL portal: this cluster published no OAuth client id " +
         "(MEMQL_PORTAL_OAUTH_CLIENT_ID).",
     );
   }
@@ -128,13 +128,13 @@ export async function exchangeAuthorizationCode(
 ): Promise<TokenSet> {
   if (!isRuntimeConfigReady(config)) {
     throw new Error(
-      "memQL portal: cannot exchange an authorization code until the " +
+      "MemQL portal: cannot exchange an authorization code until the " +
         "serving node has published an identity URL and OAuth client id.",
     );
   }
   if (!params.code || !params.redirectUri) {
     throw new Error(
-      "memQL portal: authorization code exchange requires a code and redirect_uri.",
+      "MemQL portal: authorization code exchange requires a code and redirect_uri.",
     );
   }
   return postForTokens(fetchImpl, apiUrl(config, "/oauth/token"), {

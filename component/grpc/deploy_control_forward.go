@@ -6,7 +6,7 @@ package memql
 //
 // WHY THE HOP EXISTS. DeployControlService shells out against an on-disk
 // overlay checkout, so it is built `//go:build identity` and exists only on the
-// identity node. The memQL portal's BUNDLE is served by the edge, as site #1
+// identity node. The MemQL portal's BUNDLE is served by the edge, as site #1
 // (component/edge, memql#3711), but its gRPC/WS stream still terminates on a
 // bff -- the edge's /_memql/* reverse proxy (memql#3712) forwards it there
 // for any site with apiProxy=true, the portal included -- so the portal's

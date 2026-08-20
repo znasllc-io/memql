@@ -13,7 +13,7 @@ owner: znas
 **Default mode:** shadow end-to-end.
 **Audience:** operators responsible for flipping `enforce` per-surface.
 
-This is the playbook for moving memQL's safety classifier from
+This is the playbook for moving MemQL's safety classifier from
 shadow (observe-only) to enforce (live blocking) per surface. The
 substrate is built so the rollout is **incremental + reversible**:
 one surface at a time, env-only knobs, no code deploy needed for

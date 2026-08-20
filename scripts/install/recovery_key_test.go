@@ -129,15 +129,15 @@ func rkArgs() []string {
 // subcommand_recovery_key.go. A JSON line rides along in each because the
 // subcommand redirects every component log to stderr, so the plain sentence is
 // never alone there.
-const rkStderrNoOwner = `{"level":"INFO","component":"memQLEngine","msg":"started"}
+const rkStderrNoOwner = `{"level":"INFO","component":"MemQLEngine","msg":"started"}
 recovery-key claim: this cluster has no owner yet, so there is no recovery key to claim. A cluster is claimed by its first sign-in; the key is minted once an owner exists.`
 
-const rkStderrAlreadyClaimed = `{"level":"INFO","component":"memQLEngine","msg":"started"}
+const rkStderrAlreadyClaimed = `{"level":"INFO","component":"MemQLEngine","msg":"started"}
 recovery-key claim: the key for v1:identity:user:ada was already claimed at 2026-08-17T09:41:02Z.
 Only its SHA-256 hash was ever stored, so the original value cannot be shown again.
 Pass --reclaim to RETIRE that key and mint a replacement, which is revealed here once.`
 
-const rkStderrRealFailure = `{"level":"INFO","component":"memQLEngine","msg":"started"}
+const rkStderrRealFailure = `{"level":"INFO","component":"MemQLEngine","msg":"started"}
 recovery-key claim: read active keys: connect to database: connection refused`
 
 func rkKey() string { return "mql_rec_" + strings.Repeat("a", 43) }
@@ -260,7 +260,7 @@ func TestRecoveryKeyClaimEmitsTheKeyAndMarksTheRunChanged(t *testing.T) {
 	env := []string{
 		"FAKE_EXIT=0",
 		"FAKE_STDOUT=" + key,
-		`FAKE_STDERR={"level":"INFO","component":"memQLEngine","msg":"started"}`,
+		`FAKE_STDERR={"level":"INFO","component":"MemQLEngine","msg":"started"}`,
 	}
 	stdout, code := rkRun(t, env, rkArgs()...)
 	if code != 0 {

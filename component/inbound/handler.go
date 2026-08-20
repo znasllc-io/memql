@@ -34,7 +34,7 @@ type Engine interface {
 // every path, which is why the route is declared in
 // server.HandlerAuthorizedPaths() rather than server.PublicPaths(): the latter
 // would make it unauthenticated on every verifier-consuming node, and this
-// endpoint is unauthenticated only in the sense that the caller holds no memQL
+// endpoint is unauthenticated only in the sense that the caller holds no MemQL
 // credential. It holds a shared secret instead.
 type Handler struct {
 	cfg    Config
@@ -336,7 +336,7 @@ func requestIDFor(source, identityKey string) string {
 func memqlString(s string) string { return langparser.QuoteString(s) }
 
 // systemInboundActor is the actor the staging mutation runs as. The request
-// carries no memQL identity -- a third party signed it with a shared secret,
+// carries no MemQL identity -- a third party signed it with a shared secret,
 // which authorizes the DELIVERY and says nothing about a user -- so the write
 // runs as a named system actor and is auditable as one (outbound worker
 // precedent).

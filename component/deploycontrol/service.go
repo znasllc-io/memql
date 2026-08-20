@@ -1,5 +1,5 @@
 // Package deploycontrol implements the gRPC DeployControlService behind
-// the memQL Deployment Console (znasllc-io/memql#725 + #728).
+// the MemQL Deployment Console (znasllc-io/memql#725 + #728).
 //
 // The service exposes the deployment-v2 machinery -- the image authority
 // (the kustomize overlay), release lockfiles, Argo CD app status, Argo

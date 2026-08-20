@@ -18,7 +18,7 @@ import (
 // canonicalIdentityIdPrefix mirrors pat / workertoken.
 const canonicalIdentityIdPrefix = "v1:identity:identity:"
 
-// Store wraps the memQL engine with typed account-token operations.
+// Store wraps the MemQL engine with typed account-token operations.
 //
 // EVERY METHOD RUNS AS THE CALLER. That is the difference from
 // workertoken.Store, and it is the whole authorization story: this

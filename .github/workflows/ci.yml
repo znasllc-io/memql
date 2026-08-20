@@ -255,7 +255,7 @@ jobs:
               #                  the version-drift failure to whoever pushed next.
               - 'deploy/db-image/**'
               #   deploy/fleet/** -> deploy/fleet/bundle_test.go (epic memql#3852
-              #                  / #3853). The memQL Cloud control plane's DSL
+              #                  / #3853). The MemQL Cloud control plane's DSL
               #                  bundle and the data-only image that delivers it.
               #                  The .memql files already route via '**/*.memql'
               #                  above; the DOCKERFILE matched nothing, and it is
@@ -458,7 +458,7 @@ jobs:
               # Go half reads the same file -- see the note there.
               - 'test/fixtures/**'
             # The `clients/` category -- surfaces built on the platform, of
-            # which this repo carries exactly one, the memQL Portal
+            # which this repo carries exactly one, the MemQL Portal
             # (memql#3314). Written as `clients/**` rather than
             # `clients/portal/**` so a second inhabitant is covered the day it
             # lands rather than the day someone remembers this file.
@@ -1076,7 +1076,7 @@ jobs:
       - name: test
         run: make viewkit-test
 
-  # memQL Portal lane (memql#3314). Gates on `portal`, which deliberately
+  # MemQL Portal lane (memql#3314). Gates on `portal`, which deliberately
   # includes the portal's `file:` dependencies (sdk/ts, sdk/ts-viewkit) --
   # see the bucket definition for why omitting them is a silent fail-open.
   #

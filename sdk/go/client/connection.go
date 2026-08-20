@@ -1,10 +1,10 @@
-// Package client is the canonical Go SDK for talking to a memQL
+// Package client is the canonical Go SDK for talking to a MemQL
 // cluster. It manages the gRPC connection -- one persistent bidirectional
 // stream per cluster -- and provides typed wrappers for queries,
 // mutations, subscriptions, and Sense calls, with automatic correlation
 // of request/response messages.
 //
-// Every memQL Go client (the cockpit TUI, the worker daemon, future
+// Every MemQL Go client (the cockpit TUI, the worker daemon, future
 // integrations) should consume this package rather than reimplementing
 // the wire dance. Higher-level helpers (voice, computer-use,
 // chat-state-machine) live in sibling sub-packages under
@@ -24,7 +24,7 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// Connection holds an active gRPC stream to a memQL cluster.
+// Connection holds an active gRPC stream to a MemQL cluster.
 type Connection struct {
 	conn       *grpc.ClientConn
 	client     memqlv1.MemqlServiceClient
@@ -145,7 +145,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 		c.Version = hello.GetVersion()
 		c.EngineVersion = hello.GetEngineVersion()
 		if c.logger != nil {
-			c.logger.Info("connected to memQL node",
+			c.logger.Info("connected to MemQL node",
 				"nodeId", c.NodeId,
 				"protocolVersion", c.Version,
 				"engineVersion", c.EngineVersion,

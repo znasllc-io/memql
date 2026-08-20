@@ -501,7 +501,7 @@ test("a session-define that fails on the transport claims nothing", async () => 
 // The version-skew hint on a severed session (memql#4000)
 // -----------------------------------------------------------------------------
 //
-// This is the path the motivating incident travelled: a plugin newer than its
+// This is the path the motivating incident travelled: a extension newer than its
 // cluster sends a field that cluster refuses, the refusal ENDS THE SESSION
 // rather than failing the request, and the operator reads
 // `ERROR (validate): stream closed` with nothing anywhere naming the skew.
@@ -509,7 +509,7 @@ test("a session-define that fails on the transport claims nothing", async () => 
 const transportClose = (): Error =>
   Object.assign(new Error("stream closed"), { reason: "transport" });
 
-test("a severed session on a cluster BEHIND the plugin names the possible skew", async () => {
+test("a severed session on a cluster BEHIND the extension names the possible skew", async () => {
   const h = harness();
   h.setCluster({ ...LOCAL, version: "v0.17.0" });
   h.engine.throwOn = "validate";

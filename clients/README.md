@@ -1,7 +1,7 @@
 # `clients/` — surfaces built on the platform
 
 A **client** is an application that a person or another system points at a
-memQL cluster: a landing page, a single-page app, a mobile app, a game, a
+MemQL cluster: a landing page, a single-page app, a mobile app, a game, a
 kiosk. `clients/<name>/` is where one lives.
 
 This is a plural, first-class category, alongside `integrations/`. The two are
@@ -9,13 +9,13 @@ the platform's outward faces and they point in opposite directions:
 
 | Directory | Direction | What lives there |
 |-----------|-----------|------------------|
-| `integrations/` | memQL → the world | Go code the engine calls out through (AI providers, email, storage, knowledge, voice) |
-| `clients/` | the world → memQL | Applications that connect *in*, over gRPC or the `/memql/ws` bridge |
+| `integrations/` | MemQL → the world | Go code the engine calls out through (AI providers, email, storage, knowledge, voice) |
+| `clients/` | the world → MemQL | Applications that connect *in*, over gRPC or the `/memql/ws` bridge |
 | `sdk/` | the wire itself | Libraries clients are built *with* (`sdk/go`, `sdk/ts`, `sdk/ts-viewkit`) |
 
 ## Why the engine repo has a `clients/` directory at all
 
-memQL is a platform other people self-host and build surfaces on. The question
+MemQL is a platform other people self-host and build surfaces on. The question
 "where does my SPA go, and how does it get served, built, tested and deployed
 alongside the engine?" has to have an answer, and the answer is better as a
 **worked example** than as prose: one real inhabitant, wired end to end, that

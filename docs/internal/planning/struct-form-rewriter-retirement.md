@@ -19,7 +19,7 @@ resolve in this repo's history -- the five-file consolidation
 `automation_rewrite.go` / `args_rewrite.go` plus `normalise_all.go`) predates
 this repo's tracked history: `component/language/parser/rewriter.go` already
 existed as a single consolidated file at the repo's first commit
-(`ad7acaa6`, "Initial commit: memQL core (post-split residual)", 2026-05-14),
+(`ad7acaa6`, "Initial commit: MemQL core (post-split residual)", 2026-05-14),
 so the actual consolidation commit is not recoverable from this tree. The
 consolidated
 [`component/language/parser/rewriter.go`](../../../component/language/parser/rewriter.go)

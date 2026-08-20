@@ -475,7 +475,7 @@ func (s *Server) LayoutData(r *http.Request, title string, dataMe bool, navLinks
 // allowed-domains hints (e.g. the login form renderer).
 func (s *Server) snapshotSettings(r *http.Request) Settings {
 	settings := Settings{
-		BrandName:           "memQL",
+		BrandName:           "MemQL",
 		BrandPrimaryColor:   "#0433ff",
 		RegistrationMode:    s.Cfg.RegistrationMode,
 		RegistrationDomains: strings.Join(s.Cfg.RegistrationDomains, ", "),

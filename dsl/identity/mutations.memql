@@ -24,7 +24,7 @@
 // There is no restoreAccount and no hard delete. Un-archiving is
 // deliberately out of this pass's scope (memql#3321 enumerates create /
 // update / archive) and is a two-line sibling of archiveAccount when a
-// surface needs it; hard delete does not exist in memQL at all -- a
+// surface needs it; hard delete does not exist in MemQL at all -- a
 // write is an append onto the same id.
 
 /// Create an account (an operator-managed customer record). Owned: ownerUserId is stamped from
@@ -78,7 +78,7 @@ mutate account updateAccount {
 }
 
 /// Archive an account: flip status to archived and stamp archivedAt. The row is retained in full --
-/// memQL has no hard delete, and the operator's history of a closed customer is the point. Owned:
+/// MemQL has no hard delete, and the operator's history of a closed customer is the point. Owned:
 /// ownerUserId is re-stamped from actor.userId and the write guard refuses a target row the actor
 /// does not own.
 @actor
@@ -2206,7 +2206,7 @@ mutate user setUserActiveSpace {
 // Update the singleton v1:identity:clusterSettings row keyed by
 // id="cluster". The admin UI calls this when an operator edits a
 // runtime-tunable setting; the full row payload is passed every
-// time (memQL is append-only, partial updates require a read-
+// time (MemQL is append-only, partial updates require a read-
 // modify-write cycle on the caller).
 //
 // Schema-equivalent to createClusterSettings but kept as a
@@ -2294,7 +2294,7 @@ mutate identity updateIdentity {
 // and writes the merged payload) so a caller doesn't have to re-pass
 // every field on the user concept just to change ONE.
 //
-// Why update() and not insert(): memQL's `insert()` is a full-replace
+// Why update() and not insert(): MemQL's `insert()` is a full-replace
 // -- any field the caller omits gets dropped. A partial write carrying
 // only a handful of fields would silently wipe the user's directory
 // fields (firstName, lastName, phone, primaryRole, gender, birthdate,

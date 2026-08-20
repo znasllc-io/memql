@@ -42,7 +42,7 @@ func looksLikeCanonicalUserId(s string) bool {
 // non-streaming one-shot generation (voice / polyphon-text path), controlled
 // by hints["tools_disabled"].
 //
-// Provider selection for the streaming path runs through the memQL AI Router
+// Provider selection for the streaming path runs through the MemQL AI Router
 // (component/router), which wraps the chosen provider with observability and
 // writes a v1:router:call ledger row per call.
 type Replier struct {
@@ -246,7 +246,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// hiccups. Ordinary turns are untouched (the hint is absent).
 	toolNames = ScopeToolsForDeliverableSurface(msg.Hints, toolNames)
 
-	// Provider selection runs through the memQL AI Router. The replier
+	// Provider selection runs through the MemQL AI Router. The replier
 	// still owns the default policy (operator-capable agents get
 	// strongReasoning because the prompt is long and tool-calling
 	// choreography punishes instruction-following lapses); resolution,
@@ -533,7 +533,7 @@ func (r *Replier) prepareTurn(ctx context.Context, msg *memqlv1.AgentGenerateTur
 	// strangers." The check is partition-scoped (every utterance for
 	// this agent across every space owned by this user), so a "first
 	// meeting" reads as truly first-time even if the agent has chatted
-	// with other users in the same memQL instance.
+	// with other users in the same MemQL instance.
 	//
 	// Best-effort: if the query errors, we default to false (treat
 	// as first meeting) so the failure mode is "agent might say hi"
@@ -2187,7 +2187,7 @@ func (r *Replier) lookupDomainCached(
 	return flat
 }
 
-// jsonString quotes a string for safe interpolation into a memQL DSL
+// jsonString quotes a string for safe interpolation into a MemQL DSL
 // call. Reuses encoding/json's escaping rules.
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)

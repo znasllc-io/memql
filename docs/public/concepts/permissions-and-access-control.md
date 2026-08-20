@@ -99,10 +99,10 @@ in-house identity service:
   default to the cluster's configured `MEMQL_IDENTITY_INTERNAL_DEFAULT_ROLE`
   (default `writer`).
 - External users default to `reader` and are provisioned their own personal
-  partition (memQL's per-tenant configuration/secret scope -- see
+  partition (MemQL's per-tenant configuration/secret scope -- see
   [Partition scoping](partition-scoping.md) -- not a row-level access
   boundary).
-- Admins re-assign roles from the memQL portal at `/admin/people`. The
+- Admins re-assign roles from the MemQL portal at `/admin/people`. The
   write is gated server-side in `component/identity/adminops` (owner or admin)
   and appends a `user_role_changed` audit event; a refusal appends
   `admin_auth_forbidden`.
@@ -156,7 +156,7 @@ organizational units used to scope agent visibility and space invitations:
 
 ## Space Access Control
 
-memQL's chat/collaboration surface is the **space**
+MemQL's chat/collaboration surface is the **space**
 (`v1:cognition:space`, delivered as product DSL) with humans and AI
 agents represented as `v1:cognition:participant` rows. There is no
 `conversation` concept in the current model -- `space` +

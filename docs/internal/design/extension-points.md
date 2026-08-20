@@ -11,12 +11,16 @@ owner: znas
 
 > Historical: shipped in 0.9.0; kept for rationale.
 
+> Vocabulary note: this audit predates the component / integration / pack
+> lock. Where it says "plug-in" for an `integrations/` package, read it
+> against [component-integration-pack.md](../../public/concepts/component-integration-pack.md).
+
 Status: completed 2026-06-22 for Epic 2 (platform / plugin), issue 2.3
 [G:2.1]. Spec: `docs/internal/program/02-epic-platform-plugin.md`.
 
 ## Problem
 
-Epic 2 turns memQL into a host that third-party **packs** drop into.
+Epic 2 turns MemQL into a host that third-party **packs** drop into.
 2.1 shipped the versioned Plugin SDK (`component/memql/plugins.go`:
 `PluginContext` / `PluginFactory` / `RegisterPlugin` + a contract
 version; reference in `docs/public/build/plugin-sdk.md`). 2.3 must
@@ -29,7 +33,7 @@ This document is the audit: a per-service list of the concrete
 extension points a pack uses today, with file:symbol evidence, and the
 sufficiency decision.
 
-## How a pack extends memQL (the four mechanisms)
+## How a pack extends MemQL (the four mechanisms)
 
 A pack injects behavior through exactly four mechanisms, in preference
 order. None of the three core services adds a fifth.

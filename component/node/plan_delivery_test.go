@@ -115,7 +115,7 @@ func TestPlanCrossReplicaDeliveryViaRouteGap(t *testing.T) {
 
 // TestPlanStatusTransitionsAllDeliverDespiteStablePlanID is the regression proof
 // that a plan's status transitions all deliver despite sharing one logical plan
-// id. memQL is append-only: every status transition (planning -> queued ->
+// id. MemQL is append-only: every status transition (planning -> queued ->
 // running -> succeeded) re-inserts under the SAME plan id, and the outbox
 // enforces uniqueness on EventID. With EventID = bare plan id, only the FIRST
 // transition would land durably and the planner would never see the rest -- the

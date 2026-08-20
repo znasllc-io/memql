@@ -44,7 +44,7 @@ func (a *capturingAudit) last() identity.AuditEvent {
 // the supplied resolution.
 func newEnrolServer(t *testing.T, res EnrolmentResolution) (*http.ServeMux, *capturingAudit, *Server) {
 	t.Helper()
-	srv, err := NewServer(identity.Config{BaseURL: "https://identity.example.test", BrandName: "memQL"},
+	srv, err := NewServer(identity.Config{BaseURL: "https://identity.example.test", BrandName: "MemQL"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)

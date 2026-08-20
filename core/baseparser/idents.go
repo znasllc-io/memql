@@ -8,7 +8,7 @@ package baseparser
 
 // IsSimpleIdentifier reports whether s is a non-empty
 // `[A-Za-z_][A-Za-z0-9_]*` identifier. The ASCII-only definition
-// matches what every memQL parser expected at its call sites; the
+// matches what every MemQL parser expected at its call sites; the
 // language doesn't allow unicode in identifiers today.
 func IsSimpleIdentifier(s string) bool {
 	if s == "" {

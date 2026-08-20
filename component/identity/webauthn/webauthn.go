@@ -57,7 +57,7 @@ const DefaultChallengeTTL = 5 * time.Minute
 // DefaultRPDisplayName is the human-facing relying-party name the
 // browser shows in its credential-creation sheet when the operator has
 // not set one.
-const DefaultRPDisplayName = "memQL"
+const DefaultRPDisplayName = "MemQL"
 
 var (
 	// ErrNoBaseURL is returned when the identity service has no

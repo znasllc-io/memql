@@ -5,7 +5,7 @@
 // it is -- that is the control for choosing. This is the control for the case
 // the whole epic is about: a newer release exists, and the operator wants THIS
 // cluster on it. Making them open a picker to select the value the row just
-// told them is the newest is asking them to repeat what the plugin already
+// told them is the newest is asking them to repeat what the extension already
 // knows.
 //
 // WHAT IT DECIDES, AND WHAT IT DOES NOT

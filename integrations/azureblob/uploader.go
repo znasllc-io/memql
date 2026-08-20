@@ -1,5 +1,5 @@
 // Package azureblob provides Azure Blob Storage upload functionality.
-// It replaces the retired GCS storage backend (memql#801): memQL is on
+// It replaces the retired GCS storage backend (memql#801): MemQL is on
 // Azure, so attachment + workbench/computer-use deliverable bytes live in
 // an Azure Blob container.
 package azureblob

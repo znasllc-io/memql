@@ -19,7 +19,7 @@ the cluster. It runs as its own node-type binary
 - What is left of the admin web app at `/admin/*`: the sign-in
   pages, and an `/admin/` root that answers `410 Gone`. Six of its
   seven screens (users, tokens, audit, JWKS, cluster settings, and
-  the dashboard) moved into the memQL portal in memql#3324, writes
+  the dashboard) moved into the MemQL portal in memql#3324, writes
   and owner/admin gate together -- see [../portal.md](../portal.md).
   Deployments followed in memql#3380: `DeployControlService` still
   runs against an on-disk overlay checkout and therefore exists only
@@ -169,7 +169,7 @@ snapshotted at boot:
 | Source | Set by | Takes effect | For |
 |---|---|---|---|
 | `MEMQL_IDENTITY_CORS_ALLOWED_ORIGINS` (plus `MEMQL_IDENTITY_CORS_EXTRA_ORIGINS`) | env, on the identity Deployment | on restart | The **bootstrap** set every deployment has: identity itself, the portal, the app. Derived from `MEMQL_DOMAIN` where the overlay does not set it explicitly |
-| `corsOriginsJSON` on a `v1:identity:oauthClient` row | an **owner or admin**, over `IdentityAdminMsg` | **no restart** -- within 10 seconds | Any further origin: a customer's existing website calling this cluster with the memQL SDK |
+| `corsOriginsJSON` on a `v1:identity:oauthClient` row | an **owner or admin**, over `IdentityAdminMsg` | **no restart** -- within 10 seconds | Any further origin: a customer's existing website calling this cluster with the MemQL SDK |
 
 The env list is checked first, in memory. Only a miss consults the graph, so the
 origins a cluster needs in order to serve its own login page never depend on the

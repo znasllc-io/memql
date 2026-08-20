@@ -33,7 +33,7 @@ Everything below follows from that sentence, including the awkward part in §3.
 
 ## 2. Why the account cannot be the subject
 
-Because nothing in memQL can authenticate as one, and that is structural rather
+Because nothing in MemQL can authenticate as one, and that is structural rather
 than unfinished.
 
 An `account` row is **a record the operator keeps about a customer**. It holds

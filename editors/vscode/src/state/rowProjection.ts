@@ -3,7 +3,7 @@
 // payload fields directly, so the list needs the merge. Detail rendering
 // deliberately does NOT flatten -- it shows the nesting.
 //
-// Row intrinsics always win over a payload field of the same name. memQL
+// Row intrinsics always win over a payload field of the same name. MemQL
 // concepts routinely carry payload fields, so a payload `id` (or
 // `createdAt`, `type`, `concept`, ...) colliding with the row intrinsic of
 // the same name is reachable, not theoretical -- and `data-row-id`

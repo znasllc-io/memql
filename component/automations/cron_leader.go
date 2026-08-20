@@ -17,7 +17,7 @@ import (
 // CronLeader elects a single cluster-wide owner of SCHEDULED (cron)
 // automations via a Postgres session-level advisory lock (znasllc-io/memql#561).
 //
-// Why: every memQL node runs the automation scheduler, and a cron entry
+// Why: every MemQL node runs the automation scheduler, and a cron entry
 // fires independently on each one -- so the daily purges + the */5min
 // feedback sweep run once PER NODE TYPE today, and would run once per
 // REPLICA too. Event-triggered automations are unaffected (the mesh routes

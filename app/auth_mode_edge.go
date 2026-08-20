@@ -7,7 +7,7 @@ package app
 // proxy whose upstream -- the bff -- authenticates for itself (D5, D7, D8,
 // D9 in docs/superpowers/specs/2026-08-13-cluster-front-door-design.md).
 // Anonymous public traffic is the product this node type exists to serve,
-// not a concession: a hosted site's visitor carries no memQL credential and
+// not a concession: a hosted site's visitor carries no MemQL credential and
 // never will.
 //
 // THIS IS NOT A SILENT OPENING. With no verifier, createHTTPServer's

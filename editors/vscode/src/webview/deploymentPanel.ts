@@ -230,7 +230,7 @@ export class DeploymentPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       "memqlDeployment",
-      "memQL deployment",
+      "MemQL deployment",
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true },
     );
@@ -493,10 +493,10 @@ export class DeploymentPanel {
     if (providerKeyFile === "") {
       // REFUSE RATHER THAN START, the same call the repair path makes: without
       // a key path the run cannot pass the providerKey gate, and the failure it
-      // would produce is exit 2 -- whose guidance says "a fault in memQL rather
+      // would produce is exit 2 -- whose guidance says "a fault in MemQL rather
       // than in your machine", which would be a lie here.
       this.error =
-        "memQL has no record of an AI provider key for this machine, so it cannot re-run the install graph. " +
+        "MemQL has no record of an AI provider key for this machine, so it cannot re-run the install graph. " +
         "Repair or reinstall from the Clusters page, where the key can be collected and verified.";
       this.screen = "overview";
       this.render();
@@ -922,14 +922,14 @@ export class DeploymentPanel {
     if (this.disposed) return;
     const nonce = nonceValue();
     this.panel.title =
-      this.instance === undefined ? "memQL deployment" : `Deployment: ${this.instance.name}`;
+      this.instance === undefined ? "MemQL deployment" : `Deployment: ${this.instance.name}`;
     this.panel.webview.html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
-<title>${escapeHtml(this.instance?.name ?? "memQL deployment")}</title>
+<title>${escapeHtml(this.instance?.name ?? "MemQL deployment")}</title>
 <style nonce="${nonce}">
   :root {
     --vk-fg: var(--vscode-foreground);

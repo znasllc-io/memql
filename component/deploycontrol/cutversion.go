@@ -1,6 +1,6 @@
 // cutversion.go implements the "cut a version" flow (#1877, epic
 // #1871). With deployments now persisted (#1872), the current version is
-// known, so memQL can propose the next semver and let an owner cut it.
+// known, so MemQL can propose the next semver and let an owner cut it.
 //
 // SuggestNextVersion (read) reads the latest succeeded deployment's
 // version and proposes the next major / minor / patch.

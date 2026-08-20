@@ -1,7 +1,7 @@
 # Local overlay -- k3d development (Epic 0, znasllc-io/memql#2064/#2065).
 #
 # PURPOSE
-# This overlay runs the full memQL stack on a local k3d cluster via ArgoCD.
+# This overlay runs the full MemQL stack on a local k3d cluster via ArgoCD.
 # It differs from the cloud overlay in three ways only:
 #   1. Config -- local DB (in-cluster CNPG Cluster + azurite blob), no Tiger Cloud.
 #   2. Resources -- minimal requests; no limits set so developer laptops aren't

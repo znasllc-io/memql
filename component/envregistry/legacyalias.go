@@ -75,7 +75,7 @@ var LegacyAliases = map[string]string{
 	// literals at every call site the whole time.
 	//
 	// The LiveKit trio found beside them is NOT renamed and is not here: those
-	// are LiveKit's own convention rather than memQL's name to change, which is
+	// are LiveKit's own convention rather than MemQL's name to change, which is
 	// why they sit in envscan's `external` list beside LIVEKIT_PUBLIC_URL.
 	"MEMQL_ANAM_DEFAULT_PERSONA_ID":   "ANAM_DEFAULT_PERSONA_ID",
 	"MEMQL_ANAM_DEFAULT_AVATAR_ID":    "ANAM_DEFAULT_AVATAR_ID",

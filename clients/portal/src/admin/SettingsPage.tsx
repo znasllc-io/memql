@@ -18,7 +18,7 @@ import { WriteOutcome } from "./WriteOutcome";
 // ===========================================================================
 // THE FORM IS NOT THE GATE
 // ===========================================================================
-// `updateClusterSettings` carries no role predicate of its own -- a memQL
+// `updateClusterSettings` carries no role predicate of its own -- a MemQL
 // mutation cannot -- and the coarse write check that applies to a call over
 // the query surface admits every role from `writer` up. So the console does
 // NOT call the mutation. It calls IdentityAdminClient, which lands on

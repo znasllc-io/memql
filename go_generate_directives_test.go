@@ -431,7 +431,7 @@ func protoDirs(t *testing.T, root string) map[string]string {
 //
 // A `.proto` that generates nothing. `component/polyphon/proto/polyphon.proto`
 // was one for the whole life of this repository: two gRPC services and
-// seventeen messages describing a memQL-to-Bridge-Agent contract, no `.pb.go`
+// seventeen messages describing a MemQL-to-Bridge-Agent contract, no `.pb.go`
 // ever produced from it in any commit, no Go symbol naming any of its types.
 // It still matched the `proto` bucket in ci.yml, so editing it scheduled the
 // drift gate over three trees it could not affect -- and, worse, it read as a

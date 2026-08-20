@@ -31,7 +31,7 @@ const (
 
 func newTestCeremony(t *testing.T) *Ceremony {
 	t.Helper()
-	c, err := New(Config{BaseURL: testBaseURL, DisplayName: "memQL Test"})
+	c, err := New(Config{BaseURL: testBaseURL, DisplayName: "MemQL Test"})
 	require.NoError(t, err)
 	return c
 }

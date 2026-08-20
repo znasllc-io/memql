@@ -91,7 +91,7 @@ export type RemovalItemKind = "removed" | "preserved";
  * separate yes/no box afterwards, so the list is the ONLY moment the operator
  * consents. Consent to "delete a directory" is not consent to "remove a CA
  * from your system trust store" or "edit /etc/hosts as root" -- and two of the
- * seven uninstall steps change machine-wide state outside memQL's own
+ * seven uninstall steps change machine-wide state outside MemQL's own
  * footprint. Invisible here means approved unseen.
  */
 export type RemovalElevation = "none" | "sudo" | "user-trust";
@@ -303,7 +303,7 @@ export function renderRemovalPreview(items: RemovalItemView[]): VNode {
 function elevationMeaning(elevation: Exclude<RemovalElevation, "none">): string {
   switch (elevation) {
     case "sudo":
-      return "needs root -- this edits a system file outside memQL's own footprint";
+      return "needs root -- this edits a system file outside MemQL's own footprint";
     case "user-trust":
       return "needs your trust store -- this removes a certificate authority your browsers trust";
   }

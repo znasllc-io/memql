@@ -25,7 +25,7 @@ import (
 // the seed materializer first, then flip the flag to backfill once
 // the operator confirms the role catalog landed cleanly.
 //
-// Pre-release reality: memQL has not shipped a production cluster
+// Pre-release reality: MemQL has not shipped a production cluster
 // yet, so the realistic input set for this migration is local dev
 // databases + the CI fixture set. The function still ships the
 // per-row transform so the moment we accumulate production data the

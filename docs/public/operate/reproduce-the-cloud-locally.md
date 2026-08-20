@@ -16,7 +16,7 @@ ArgoCD-reconciled manifests, the same `ignoreDifferences`/selfHeal config -- so
 the full class of GitOps + cross-node mesh bugs reproduces locally instead of
 only after a deploy.
 
-> **memQL ships ONE installation shape** (epic memql#3943). There is no
+> **MemQL ships ONE installation shape** (epic memql#3943). There is no
 > staging-versus-production dimension inside the product: an operator who wants
 > a second environment installs a second instance, with its own domain and its
 > own ArgoCD. Local and cloud are two INSTALLS of the same system, not two

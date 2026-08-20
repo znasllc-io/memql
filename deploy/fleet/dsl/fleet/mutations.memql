@@ -48,7 +48,7 @@ use fleet.concepts.{ instance, subscriber, subscription, usageMeter }
 //   subscriber -- the account
 // =============================================================================
 
-/// Create the caller's memQL Cloud account. Called at signup, BEFORE checkout and before any
+/// Create the caller's MemQL Cloud account. Called at signup, BEFORE checkout and before any
 /// instance exists, so a checkout that is abandoned leaves an account with no subscription rather
 /// than a half-written record. Owned: ownerUserId is stamped from actor.userId, so a caller can
 /// only ever create their own account.

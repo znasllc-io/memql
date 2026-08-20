@@ -621,11 +621,11 @@ func lookupInvitationByPreviousTokenHash(ctx context.Context, engine *memqlengin
 // reads them back out, runs the two DSL mutations via engine.Execute,
 // and replies.
 //
-// Splits into two single-insert mutations because the memQL DSL
+// Splits into two single-insert mutations because the MemQL DSL
 // function body takes a single expression -- two inserts in one
 // function don't parse. Running them back-to-back on the server is
 // the next-best thing to atomic: both mutations are idempotent under
-// append-only memQL semantics, so a partial failure just means the
+// append-only MemQL semantics, so a partial failure just means the
 // guest can retry.
 func (s *streamSession) handleJoinSpaceAsGuest(envelope *memqlv1.MemqlClientMessage, msg *memqlv1.JoinSpaceAsGuestMsg) error {
 	if msg == nil {

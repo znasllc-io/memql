@@ -75,7 +75,7 @@
         "value": "mkcertCA"
       },
       "shared": true,
-      "sharedReason": "The mkcert root CA is per machine, not per project -- it may be signing certificates for your other local stacks. Removing it makes those untrusted too. The front-door certificate and private key memQL issued go with it; they are memQL's own and are only removed when memQL issued them."
+      "sharedReason": "The mkcert root CA is per machine, not per project -- it may be signing certificates for your other local stacks. Removing it makes those untrusted too. The front-door certificate and private key MemQL issued go with it; they are MemQL's own and are only removed when MemQL issued them."
     },
     {
       "id": "removeToolK3d",
@@ -96,7 +96,7 @@
         "value": "binary"
       },
       "shared": true,
-      "sharedReason": "k3d creates and manages local Kubernetes clusters generally, not only memQL's."
+      "sharedReason": "k3d creates and manages local Kubernetes clusters generally, not only MemQL's."
     },
     {
       "id": "removeToolKubectl",
@@ -117,7 +117,7 @@
         "value": "binary"
       },
       "shared": true,
-      "sharedReason": "kubectl talks to any Kubernetes cluster, not only memQL's."
+      "sharedReason": "kubectl talks to any Kubernetes cluster, not only MemQL's."
     },
     {
       "id": "removeToolMkcert",

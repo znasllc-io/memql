@@ -893,7 +893,7 @@ func parseIdentityProviderInfo() map[string]any {
 	}
 
 	info := map[string]any{
-		"name":         firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_BRAND_NAME"), "memQL Identity"),
+		"name":         firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_BRAND_NAME"), "MemQL Identity"),
 		"providerType": "oidc",
 		"issuerUrl":    firstNonEmptyStr(os.Getenv("MEMQL_IDENTITY_VERIFIER_EXPECTED_ISSUER"), baseURL),
 	}

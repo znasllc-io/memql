@@ -9,7 +9,7 @@ import { AccountConsole } from "../accounts/AccountConsole";
 import { ViewElement } from "./ViewElement";
 import { Band, type ViewProps } from "./ViewLayout";
 
-// Customers: the businesses this operator runs memQL for.
+// Customers: the businesses this operator runs MemQL for.
 //
 // LAYOUT RATIONALE. The quietest of the five, on purpose. A customer list is
 // a ledger: an operator opens it to find one row, or to check that the

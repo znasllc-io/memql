@@ -1,5 +1,5 @@
 ---
-title: memQL Cloud trials, hibernation, and the condensed profile
+title: MemQL Cloud trials, hibernation, and the condensed profile
 audience: public
 status: stable
 area: operate
@@ -9,7 +9,7 @@ owner: znas
 
 # Trials, hibernation, and what "condensed" actually costs
 
-**Audience:** operators running memQL Cloud.
+**Audience:** operators running MemQL Cloud.
 **Epic:** memql#3852. **This task:** memql#3856.
 **Companions:** [the control plane](memql-cloud.md), [billing](memql-cloud-billing.md).
 

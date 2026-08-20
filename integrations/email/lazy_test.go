@@ -53,7 +53,7 @@ func TestLazySender_FallsThroughToMemqlGraph(t *testing.T) {
 		"MEMQL_EMAIL_AZURE_TENANT_ID": "tenant-1",
 		"MEMQL_EMAIL_AZURE_CLIENT_ID": "client-1",
 		"MEMQL_EMAIL_SENDER":          "noreply@dev.local",
-		"MEMQL_EMAIL_FROM_NAME":       "memQL Dev",
+		"MEMQL_EMAIL_FROM_NAME":       "MemQL Dev",
 	}
 	secrets := map[string]string{
 		"MEMQL_EMAIL_AZURE_CLIENT_SECRET": "sekret",

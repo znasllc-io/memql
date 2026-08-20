@@ -44,7 +44,7 @@ name: install-cluster-e2e
 #     leg installs, repairs, and then checks two independent consequences: the
 #     receipt still names the commit that was installed, and `clusterUp` is
 #     still recorded `preExisting: false` -- the ratchet, without which the
-#     uninstall REFUSES to delete a cluster memQL created and the operator is
+#     uninstall REFUSES to delete a cluster MemQL created and the operator is
 #     left running `k3d cluster delete` by hand.
 #   * AN UPGRADE MOVES THE CHECKOUT AND SURVIVES IT. The upgrade leg installs a
 #     released version, moves the cluster to the revision under test, and then
@@ -73,7 +73,7 @@ name: install-cluster-e2e
 #     images, so k3d's own three (rancher/k3s, k3d-proxy, k3d-tools) survive the
 #     teardown. The final assertion therefore fails on any drift at all in the
 #     other three surfaces, and on that surface fails on anything that is not
-#     one of k3d's own images -- so a memQL image left behind is still a red
+#     one of k3d's own images -- so a MemQL image left behind is still a red
 #     lane. Nothing else is exempt.
 #   * THE TRUST STORE IS STILL NOT A SURFACE. Unlike install-e2e.yml this lane
 #     RUNS localCA -- it has to, because clusterUp depends on it and a skipped
@@ -305,7 +305,7 @@ jobs:
       # preinstalled kubectl would make the receipt say our copy pre-existed,
       # remove-artifact.sh would refuse to delete it, and the memqlHome surface
       # would legitimately fail to come back -- a red lane about the runner
-      # image rather than about memQL.
+      # image rather than about MemQL.
       - name: Take preinstalled pinned tools out of the way
         run: |
           set -euo pipefail
@@ -621,14 +621,14 @@ jobs:
           # derivation is "preExisting: true" -- and the receipt must keep the
           # ORIGINAL false. If it does not, `refuse_if_pre_existing` is an
           # unconditional exit 3 and the uninstall below preserves a cluster
-          # memQL created. The k3dClusters diff at the end of this leg is the
+          # MemQL created. The k3dClusters diff at the end of this leg is the
           # second, independent proof of the same property.
           expect_pre="$(field clusterUp preExisting)"
           if [ "$expect_pre" = "false" ]; then
             echo "[x] clusterUp.preExisting is still false after a repair"
           else
             echo "[ ] ERROR: clusterUp.preExisting became '${expect_pre}' after the repair." >&2
-            echo "    The uninstall will now REFUSE to delete a cluster memQL created (memql#3605)." >&2
+            echo "    The uninstall will now REFUSE to delete a cluster MemQL created (memql#3605)." >&2
             fail=1
           fi
 
@@ -754,10 +754,10 @@ jobs:
       # that is asserted with no exceptions at all. The fourth, dockerImages,
       # carries ONE narrow and named exemption: `k3d cluster delete` removes
       # containers and networks and never images, so k3d's own node images
-      # survive a teardown that removed everything memQL put there.
+      # survive a teardown that removed everything MemQL put there.
       #
       # The exemption is written as an allowlist of image REPOSITORIES rather
-      # than as "ignore dockerImages", because the difference matters: a memQL
+      # than as "ignore dockerImages", because the difference matters: a MemQL
       # image, a database operand or anything else left in the daemon still
       # fails this lane. A blanket waiver would have turned the one surface this
       # workflow was written to start exercising back into the surface nothing

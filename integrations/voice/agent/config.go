@@ -1,5 +1,5 @@
 // Package agent is the Go voice-agent: the media participant that joins a
-// LiveKit room on behalf of a memQL space's General Assistant, opens a
+// LiveKit room on behalf of a MemQL space's General Assistant, opens a
 // MemqlService.Stream gRPC session, and runs the turn-taking / STT / TTS
 // orchestration that the retired Python voice-agent (LiveKit
 // Agents 1.5) used to own.
@@ -157,11 +157,11 @@ type Config struct {
 	// set very low (e.g. -100) to effectively disable.
 	RealtimeTranscriptMinConfidence float64
 
-	// memQL gRPC.
+	// MemQL gRPC.
 	MemqlGRPCAddr string
 	// Identity-issued class="voice_agent" JWT bearer presented on every
 	// MemqlService.Stream dial. Resolved by ResolveVoiceAgentToken (operator-
-	// provisioned token, then the self-bootstrap path). The memQL voice-agent
+	// provisioned token, then the self-bootstrap path). The MemQL voice-agent
 	// stream interceptor verifies it via the cluster JWKS and admits it to the
 	// VoiceAgent* message surface only.
 	VoiceAgentToken string

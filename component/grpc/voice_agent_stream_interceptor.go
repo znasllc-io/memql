@@ -215,7 +215,7 @@ func isVoiceAgentPayload(payload any) bool {
 		*memqlv1.MemqlClientMessage_CallTool:
 		// The realtime executor's MCP tool bridge (mcp_tool_bridge.go) lists the
 		// tool registry (ListToolsMsg) at session bring-up and runs model-driven
-		// tool calls (CallToolMsg) through memQL's MCP surface so the result is
+		// tool calls (CallToolMsg) through MemQL's MCP surface so the result is
 		// mirrored + attributed to the space/agent. gpt-realtime function-calling
 		// is part of the voice-agent surface, so these belong on the allowlist --
 		// without them the read loop is torn down with PermissionDenied the moment

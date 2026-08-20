@@ -1,5 +1,5 @@
 // Package telephony provides carrier-agnostic PSTN number + trunk management
-// for memQL voice agents. A phone call is a LiveKit room participant; this
+// for MemQL voice agents. A phone call is a LiveKit room participant; this
 // package owns the carrier (SIP trunk) side of the edge: programmatic DID
 // search / purchase / inbound-routing, abstracted behind CarrierProvider so a
 // first carrier (Telnyx) can be swapped for another with one new package and

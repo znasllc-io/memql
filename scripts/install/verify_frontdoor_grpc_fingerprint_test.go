@@ -12,7 +12,7 @@ import (
 // INCONCLUSIVE for that host for the whole life of the defect:
 //
 //	the wildcard router is live (nodeType=edge) but api.memql.localhost
-//	answered HTTP 415 without naming a memQL node, so which backend serves it
+//	answered HTTP 415 without naming a MemQL node, so which backend serves it
 //	cannot be established
 //
 // Every word of that is true. The response named no node, so the check could

@@ -93,8 +93,8 @@ test("a whitespace-only client_id is not a client_id", async () => {
 
 test("a custom client name reaches the consent screen", async () => {
   const net = http(201, { client_id: "mcp_x" });
-  await registerPublicClient({ issuer: ISSUER, clientName: "memQL (dev build)", fetch: net.fetch });
-  assert.equal(net.calls[0]?.body.client_name, "memQL (dev build)");
+  await registerPublicClient({ issuer: ISSUER, clientName: "MemQL (dev build)", fetch: net.fetch });
+  assert.equal(net.calls[0]?.body.client_name, "MemQL (dev build)");
 });
 
 test("a refused registration reports registrationFailed with the server's sentence", async () => {

@@ -469,10 +469,10 @@ function main() {
     cap_require namespace "$NAMESPACE"
 
     if [[ -n "$CLEAN" ]]; then
-        info "memQL local bring-up (clean slate)"
+        info "MemQL local bring-up (clean slate)"
         STEP_UP="2/6"; STEP_WAIT="3/6"; STEP_DEV="4/6"; STEP_MIGRATE="5/6"; STEP_HEALTHY="6/6"
     else
-        info "memQL local bring-up (fresh)"
+        info "MemQL local bring-up (fresh)"
         STEP_UP="1/5"; STEP_WAIT="2/5"; STEP_DEV="3/5"; STEP_MIGRATE="4/5"; STEP_HEALTHY="5/5"
     fi
     info "Cluster:   ${CLUSTER_NAME}"

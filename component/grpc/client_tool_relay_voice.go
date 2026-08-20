@@ -272,7 +272,7 @@ func (s *streamSession) relayClientToolToBrowser(
 }
 
 // escapeGraphJSONString renders a Go string as a safely-quoted JSON string
-// literal for embedding into a memQL mutation argument. It delegates to
+// literal for embedding into a MemQL mutation argument. It delegates to
 // encoding/json, which produces a fully-escaped, balanced-quote literal so a
 // value containing a double quote (e.g. a tool argument) can never break out of
 // the enclosing quotes. A marshal error (not reachable for a Go string) falls

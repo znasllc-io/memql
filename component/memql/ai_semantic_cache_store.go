@@ -14,7 +14,7 @@ import (
 // the semantic_ai_cache pgvector table (migration 20260622000000). Both
 // implement the narrow interfaces the primitive (ai_semantic_cache.go) depends
 // on, keeping the primitive and its eval hermetic while the real path reuses
-// the same embedding provider + pgvector substrate the rest of memQL uses.
+// the same embedding provider + pgvector substrate the rest of MemQL uses.
 
 // providerEmbedder adapts an EmbeddingAIProvider to the SemanticEmbedder
 // interface the semantic cache consumes.

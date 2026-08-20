@@ -173,7 +173,7 @@ smoke("the activity-bar container and its views exist", async () => {
   // panel that never appears.
   assert.ok(
     registered.has(VIEW_CONTAINER_COMMAND),
-    `${VIEW_CONTAINER_COMMAND} is not registered, so the memQL activity-bar container was not contributed`
+    `${VIEW_CONTAINER_COMMAND} is not registered, so the MemQL activity-bar container was not contributed`
   );
   const missingViews = viewIds.filter((id) => !registered.has(`${id}.focus`));
   assert.deepEqual(
@@ -508,7 +508,7 @@ smoke("every webview surface opens without throwing", async () => {
   // on a fresh checkout sees: presence says `absent`, so the page offers
   // Create deployment and nothing else. The title carries the instance name,
   // which is how this case sees that the catalog read actually completed --
-  // the panel opens titled "memQL deployment" and renames itself once it has
+  // the panel opens titled "MemQL deployment" and renames itself once it has
   // read the machine.
   DeploymentPanel.show(context, {
     catalog: {
@@ -781,7 +781,7 @@ async function withinDeadline<T>(what: string, work: Promise<T>, ms: number): Pr
 }
 
 /** The page's title, which the workbench also uses as its tab label. */
-const ADD_CLUSTER_TAB = "Add a memQL cluster";
+const ADD_CLUSTER_TAB = "Add a MemQL cluster";
 
 /** Every open tab carrying the add-a-cluster page's label, across all groups. */
 function addClusterTabs(): vscode.Tab[] {
@@ -906,7 +906,7 @@ smoke("the presence probe answers in the host runtime, with no Docker and no han
   const answered = await defaultEndpointProbe("127.0.0.1:1", 1_000);
   const took = Date.now() - started;
 
-  assert.equal(answered, false, "something answered on port 1, which cannot be a memQL cluster");
+  assert.equal(answered, false, "something answered on port 1, which cannot be a MemQL cluster");
   assert.ok(took < 5_000, `the probe took ${took}ms against a dead port; the menu would have waited on it`);
   info(`probe against a dead port answered in ${took}ms`);
 });

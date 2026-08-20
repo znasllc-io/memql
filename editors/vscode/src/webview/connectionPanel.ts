@@ -3,7 +3,7 @@
 // This replaces the topology view, and not because it is nicer. The boundary
 // rule this epic establishes is:
 //
-//   The plugin owns what is on your machine and what you can reach.
+//   The extension owns what is on your machine and what you can reach.
 //   The portal owns what is inside a cluster.
 //
 // A pod grid, orphan verdicts and under-replica alarms are cluster state.
@@ -84,7 +84,7 @@ export class ConnectionPanel {
   ) {
     this.panel = vscode.window.createWebviewPanel(
       "memqlConnection",
-      "memQL connection",
+      "MemQL connection",
       vscode.ViewColumn.Beside,
       { enableScripts: true, retainContextWhenHidden: true },
     );
@@ -221,7 +221,7 @@ export class ConnectionPanel {
   private async openPortal(): Promise<void> {
     if (this.portal === "") {
       void vscode.window.showErrorMessage(
-        "memQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.",
+        "MemQL: no portal address can be worked out for this cluster. Give it a domain, or connect to it so its site row can be read.",
       );
       return;
     }
@@ -231,7 +231,7 @@ export class ConnectionPanel {
   private render(): void {
     if (this.disposed) return;
     const nonce = nonceValue();
-    this.panel.title = this.clusterName === "" ? "memQL connection" : `Cluster: ${this.clusterName}`;
+    this.panel.title = this.clusterName === "" ? "MemQL connection" : `Cluster: ${this.clusterName}`;
     this.view =
       this.cluster === undefined
         ? undefined

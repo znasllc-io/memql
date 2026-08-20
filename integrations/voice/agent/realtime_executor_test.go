@@ -315,7 +315,7 @@ func TestRealtimeExecutor_OutputAudio_PublishedToSink(t *testing.T) {
 
 // TestRealtimeExecutor_OutputCapture_ForwardsTranscript verifies the #458
 // output-capture seam: a transcript sealed by EventResponseDone drives a
-// VoiceAgentRealtimeOutput to memQL (so chat/canvas render the realtime turn).
+// VoiceAgentRealtimeOutput to MemQL (so chat/canvas render the realtime turn).
 func TestRealtimeExecutor_OutputCapture_ForwardsTranscript(t *testing.T) {
 	fs := newFakeStream()
 	var outputs int32

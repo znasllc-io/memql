@@ -30,7 +30,7 @@ import {
 import { renderToHtml } from "../src/vnode.js";
 
 function step(over: Partial<InstallStepView> = {}): InstallStepView {
-  return { id: "stackCheckout", label: "Fetch the memQL stack", state: "pending", ...over };
+  return { id: "stackCheckout", label: "Fetch the MemQL stack", state: "pending", ...over };
 }
 
 function item(over: Partial<RemovalItemView> = {}): RemovalItemView {

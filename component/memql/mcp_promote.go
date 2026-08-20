@@ -140,7 +140,7 @@ func FunctionInputJSONSchema(fn *Function) map[string]any {
 	return schema
 }
 
-// argsFieldToJSONSchema maps one args field to a JSON-schema property. memQL
+// argsFieldToJSONSchema maps one args field to a JSON-schema property. MemQL
 // scalar type names map to JSON-schema types; every declared constraint
 // (enum / format / numeric bounds / maxLength / pattern / array items / nested
 // object fields) carries through so the rendered schema is complete.
@@ -202,7 +202,7 @@ func argsFieldToJSONSchema(f *FunctionArgsField) map[string]any {
 	return prop
 }
 
-// jsonSchemaType maps a memQL args type name to its JSON-schema type. "any" maps
+// jsonSchemaType maps a MemQL args type name to its JSON-schema type. "any" maps
 // to "" (no type constraint -- any value is permitted).
 func jsonSchemaType(t string) string {
 	switch strings.ToLower(strings.TrimSpace(t)) {

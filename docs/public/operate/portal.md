@@ -1,5 +1,5 @@
 ---
-title: memQL Portal -- operator guide
+title: MemQL Portal -- operator guide
 audience: public
 status: stable
 area: operate
@@ -7,9 +7,9 @@ sinceVersion: 0.16.0
 owner: platform
 ---
 
-# memQL Portal -- operator guide
+# MemQL Portal -- operator guide
 
-The memQL Portal is the platform's own graphical operations console: a static
+The MemQL Portal is the platform's own graphical operations console: a static
 SPA served by the edge as site #1 (memql#3711) -- the same `v1:platform:site`
 resolution, bundle opener and headers as any customer site, at its own
 hostname -- dialing the same `/memql/ws` gRPC bridge every other client uses.
@@ -358,7 +358,7 @@ gone incoherent across replicas.
 **Writes.** Every write goes through one bridged envelope,
 `IdentityAdminMsg` / `IdentityAdminResult` on `MemqlService.Stream`, onto
 `component/identity/adminops` (memql#3324). The console never calls the
-underlying mutation directly, and that is the whole design: a memQL mutation
+underlying mutation directly, and that is the whole design: a MemQL mutation
 **cannot carry a role predicate** -- `filter` is a read construct -- so
 `updateUser` is server-origin-only with no client-reachable seam, and
 `revokePATIdentity` / `updateClusterSettings` name an arbitrary target under a

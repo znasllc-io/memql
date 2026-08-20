@@ -414,7 +414,7 @@ const ENROLMENT_TTLS: ReadonlyArray<{ label: string; seconds: number }> = [
 // This is the surface that removes email from the critical path: a link that
 // authorizes exactly one action -- register a passkey as this user -- so
 // somebody with no credential and no reachable mailbox can still get their
-// first one. It is deliberately not a "send" button: memQL does not put the
+// first one. It is deliberately not a "send" button: MemQL does not put the
 // credential in a message it cannot see delivered. The operator copies the
 // link and hands it over on whatever channel they already trust.
 function EnrolmentForm({ person, writes }: { person: Row; writes: WriteState }): ReactNode {

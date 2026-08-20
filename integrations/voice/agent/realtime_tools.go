@@ -213,7 +213,7 @@ func (e *RealtimeExecutor) executeToolCall(p *pendingToolCall, arguments string)
 	}
 
 	// #1432 tool.execute: the execution leg only (Dispatch incl. the
-	// tool.transport memQL round-trip it times internally), regardless of when
+	// tool.transport MemQL round-trip it times internally), regardless of when
 	// the result is later injected.
 	logVoiceTiming(e.logger, "tool.execute", execStart,
 		"partition_id", e.cfg.PartitionID, "tool", p.name, "call_id", p.callID, "outcome", p.outcome)

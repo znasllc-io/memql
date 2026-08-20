@@ -423,13 +423,13 @@ test("the shipped install graph installs the NSS tools and keeps them", async ()
   assert.ok(localCA!.dependsOn?.includes("browserTrust"));
 });
 
-test("the shipped uninstall graph separates shared tools from memQL's own", async () => {
+test("the shipped uninstall graph separates shared tools from MemQL's own", async () => {
   const g = await loadGraphFile(graphDocumentPath("uninstall", REPO_ROOT));
   const shared = g.steps.filter((s) => s.shared).map((s) => s.id).sort();
   const own = g.steps.filter((s) => !s.shared).map((s) => s.id).sort();
 
   // The toolchain is the operator's now; the cluster, the checkout and the
-  // hosts block exist only because memQL was installed.
+  // hosts block exist only because MemQL was installed.
   assert.deepEqual(shared, ["removeLocalCA", "removeToolK3d", "removeToolKubectl", "removeToolMkcert"]);
   assert.ok(own.includes("removeCluster"));
   assert.ok(own.includes("removeCheckout"));

@@ -11,7 +11,7 @@ import (
 
 // TestRetiredVocabulary sweeps vocabScope for phrasing this repo's own
 // history has retired -- vocabulary that reads as a plausible, confident
-// sentence about memQL while describing a design the code no longer has
+// sentence about MemQL while describing a design the code no longer has
 // (memql#4091, the repo-cleanup-docs-update campaign's Task 3). Task 4
 // widens vocabScope -- see the "Scope + exemption" section below for the
 // current coverage.

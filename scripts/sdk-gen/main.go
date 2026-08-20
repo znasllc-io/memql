@@ -10,7 +10,7 @@
 //	sdk/go/client/generated_logics.go
 //
 // Multiple DSL roots compose: pass --dsl repeatedly or as a
-// comma-separated list. memQL's own `make sdk-gen` passes a single
+// comma-separated list. MemQL's own `make sdk-gen` passes a single
 // root (the core DSL). A product BFF composes `core ∪ its own DSL` --
 // typically by importing sdk/gen directly rather than shelling out to
 // this CLI, since the BFF's DSL lives in its own repo.

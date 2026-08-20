@@ -9,7 +9,7 @@ owner: znas
 
 # Node Lifecycle, Graceful Drain & Maintenance Runbook
 
-Operational reference for the memQL node lifecycle introduced by the
+Operational reference for the MemQL node lifecycle introduced by the
 resilient-mesh epic (znasllc-io/memql#1259, Phase 3). It covers the explicit
 node state machine, the graceful SIGTERM drain, the operator on-demand
 maintenance trigger, the coordinated/ordered rollout driver, and the

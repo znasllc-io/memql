@@ -14,7 +14,7 @@ import (
 // shows up on QueryClient (matching the Go SDK's `qc.QueryActiveSpaces`
 // receiver-method shape).
 //
-// memQL core no longer emits TS for itself (the runtime core,
+// MemQL core no longer emits TS for itself (the runtime core,
 // @znasllc-io/memql-sdk-core, is client-agnostic). Each product BFF
 // imports this package and emits the TS typed surface from
 // `core DSL ∪ its own DSL`, so this emitter must stay.

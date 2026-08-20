@@ -48,7 +48,7 @@ import { CALLBACK_PATH, LOOPBACK_HOST } from "./loopback.js";
 export const REGISTERED_REDIRECT_URI = `http://${LOOPBACK_HOST}${CALLBACK_PATH}`;
 
 /** What the consent screen shows as the name of the app asking for access. */
-export const DEFAULT_CLIENT_NAME = "memQL for VS Code";
+export const DEFAULT_CLIENT_NAME = "MemQL for VS Code";
 
 export interface RegisterOptions {
   /** The identity service base URL -- where /register, /authorize and /oauth/token live. */

@@ -21,7 +21,7 @@ anymore — Argo's `selfHeal` reverts any out-of-band change. Rollback =
 
 ## One installation shape (epic memql#3943)
 
-memQL has no staging-versus-production dimension. An operator who wants a second
+MemQL has no staging-versus-production dimension. An operator who wants a second
 environment installs a **second instance** — its own cluster or at least its own
 Argo CD, its own domain, its own database — and that instance answers on its own
 address. So there is one Application, one namespace and one overlay, and
@@ -167,7 +167,7 @@ enabled.
 > A **promoted construct** (memql#3746) is none of those things: it is a
 > `v1:authoring:construct` **row** in this installation's database. Shipping an
 > engine version does not create, move or delete one, and an installation you
-> trained is the only installation that has it — memQL ships one installation
+> trained is the only installation that has it — MemQL ships one installation
 > shape (epic memql#3943), so a second environment is a second install with its
 > own database.
 >

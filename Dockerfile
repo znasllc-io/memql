@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-# PORTAL_DIST_STAGE selects which stage the runtime copies the memQL Portal
+# PORTAL_DIST_STAGE selects which stage the runtime copies the MemQL Portal
 # bundle from (memql#3314). It is a GLOBAL ARG -- declared before the first
 # FROM -- because that is the only scope a `FROM ${VAR}` line can read.
 #
@@ -220,7 +220,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} go build -ldflags="-s -w" -o /app/bin/healthcheck ./cmd/healthcheck
 
-# --- memQL Portal SPA (memql#3314) ----------------------------------------
+# --- MemQL Portal SPA (memql#3314) ----------------------------------------
 #
 # A Node stage, entirely separate from the Go builder: nothing here touches
 # the Go toolchain and nothing in the Go stages touches Node. That separation
@@ -279,7 +279,7 @@ COPY --from=builder /app/bin/healthcheck ./healthcheck
 # MEMQL_DSL_PATH is set at runtime to override the embedded tree
 # (dev/per-deploy patches). Cloud Run runs from the embedded copy.
 #
-# The memQL Portal bundle is the opposite: NEVER embedded, always a directory,
+# The MemQL Portal bundle is the opposite: NEVER embedded, always a directory,
 # because embedding it would put a Node build in front of every Go build (see
 # component/edge/doc.go). /app/portal is the directory the site #1 seed's
 # bundleRef names (file:///app/portal, dsl/platform/seeds.memql, memql#3711).

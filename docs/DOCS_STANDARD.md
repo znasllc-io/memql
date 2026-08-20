@@ -15,7 +15,7 @@ This is the single rulebook for where documentation lives, how it is
 tagged, and how it reaches **memql.io**. It exists because docs had
 sprawled and the public site drifted from the engine. The contract:
 **the repo is the source of truth; the site is generated from it,
-versioned per memQL release.** (Epic: znasllc-io/memql#1167.)
+versioned per MemQL release.** (Epic: znasllc-io/memql#1167.)
 
 ---
 
@@ -30,7 +30,7 @@ docs/
 │   ├── language/             # MemQL DSL: constructs, authoring, reference
 │   ├── ai/                   # AI providers, policies, integrations & tools
 │   ├── operate/              # deploy, auth, env, runbooks that are public
-│   ├── build/                # gRPC API, SDKs, building against memQL
+│   ├── build/                # gRPC API, SDKs, building against MemQL
 │   ├── cockpit/              # the terminal IDE / ops console
 │   └── reference/_generated/ # MACHINE-GENERATED at release time — do not hand-edit
 └── internal/                 # never published to the site
@@ -80,7 +80,7 @@ owner: znas             # github handle responsible for keeping it current
 | Historical program-level epic/plan docs | `docs/internal/program/` | platformization program master plan + epics, kept for rationale (`area: planning`) |
 | Repo governance | repo root | CONTRIBUTING, SECURITY, VERSIONING |
 
-When unsure: if an outside developer building **against** memQL would
+When unsure: if an outside developer building **against** MemQL would
 want it, it's `public`; if it only helps someone changing **the engine**,
 it's `internal`.
 

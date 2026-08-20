@@ -56,7 +56,7 @@ export interface CampaignsState {
 
 export interface CampaignInput {
   // Empty for a new campaign. The id is minted client-side (newShortId) exactly
-  // as every other memQL write does it, so a create is idempotent under a retry
+  // as every other MemQL write does it, so a create is idempotent under a retry
   // and the caller knows the id before the round trip.
   campaignId: string;
   name: string;

@@ -156,7 +156,7 @@ func renderKustomization(t *testing.T, dir string) string {
 	// other gate green -- so "silently verified nothing" is precisely the state
 	// it must not be allowed to reach there.
 	//
-	// The trigger is GITHUB'S OWN `CI` VARIABLE rather than a memQL knob. A knob
+	// The trigger is GITHUB'S OWN `CI` VARIABLE rather than a MemQL knob. A knob
 	// only this test honours is one more thing to remember to set, and the
 	// failure mode of forgetting is exactly the silence being closed here.
 	// GitHub Actions sets CI=true on every runner, so this needs no workflow

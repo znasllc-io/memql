@@ -52,7 +52,7 @@ function requireCrypto(impl?: CryptoLike): CryptoLike {
   // portal bug rather than "this page must be served over HTTPS".
   if (!crypto?.subtle || typeof crypto.getRandomValues !== "function") {
     throw new Error(
-      "memQL portal: Web Crypto is unavailable, so the sign-in flow cannot " +
+      "MemQL portal: Web Crypto is unavailable, so the sign-in flow cannot " +
         "generate a PKCE verifier. Serve the portal over HTTPS (or from " +
         "localhost) -- crypto.subtle is restricted to secure contexts.",
     );

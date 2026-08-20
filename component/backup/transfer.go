@@ -319,7 +319,7 @@ type RestoreReport struct {
 
 // Restore reads a backup into the database.
 //
-// INSERT-ONLY, and deliberately so. memQL rows are a time series keyed by
+// INSERT-ONLY, and deliberately so. MemQL rows are a time series keyed by
 // (id, createdAt): a row is a VERSION, not a mutable record. So a restore adds
 // versions and never overwrites one, and re-running it is a conflict on the
 // primary key rather than a silent double-write. The caller decides whether a

@@ -1,6 +1,6 @@
 name: build-db-image
 
-# Builds + pushes the memQL DATABASE OPERAND image (epic memql#3842, task
+# Builds + pushes the MemQL DATABASE OPERAND image (epic memql#3842, task
 # memql#3844): PostgreSQL 16 + TimescaleDB Community + pgvector, the container
 # CloudNativePG runs as a Postgres instance in every environment.
 #

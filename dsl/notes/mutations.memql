@@ -4,7 +4,7 @@
 // actor.userId server-side (never from a caller-supplied arg) so a
 // caller can neither create a note owned by someone else nor
 // reassign an existing note's owner. The update path re-inserts a
-// new version of the row (memQL's insert-versioning model -- there
+// new version of the row (MemQL's insert-versioning model -- there
 // is no in-place update block); ownerUserId is re-stamped on every
 // version so ownership is immutable across the row's history.
 // updatedAt is stamped to `now` on every write.

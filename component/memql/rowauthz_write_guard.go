@@ -27,7 +27,7 @@ package memql
 //     `clusterOwner`). The other 88 are untouched; widening that
 //     population is task #3173, not this file.
 //   - Writes: those that land on an EXISTING row -- `update`, the
-//     soft-delete/status-flip class (memQL has no hard DELETE; a delete
+//     soft-delete/status-flip class (MemQL has no hard DELETE; a delete
 //     is an append onto the same id), and a raw `insert(` aimed at an id
 //     that already has a row. All of them converge on executeWrite,
 //     which is where this is called from.

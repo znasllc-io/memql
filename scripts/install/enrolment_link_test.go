@@ -233,7 +233,7 @@ func TestEnrolmentLinkIgnoresPodLogsWhenPickingTheLink(t *testing.T) {
 	env := []string{
 		"FAKE_EXIT=0",
 		"FAKE_STDOUT=" + link,
-		`FAKE_STDERR={"level":"INFO","component":"memQLEngine","msg":"started"}`,
+		`FAKE_STDERR={"level":"INFO","component":"MemQLEngine","msg":"started"}`,
 	}
 	stdout, code := elRun(t, env, elArgs()...)
 	if code != 0 {

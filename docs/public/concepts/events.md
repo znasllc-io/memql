@@ -466,7 +466,7 @@ The event bus is a pure Go in-memory pub/sub implementation:
 
 ### No External Dependencies
 
-The event system requires no external infrastructure (Redis, NATS, etc.). All event routing happens in-memory within each memQL node; in cluster mode the node-to-node `EventBridge` propagates events across the mesh (with dedup and TTL) over the same gRPC streams the nodes already share.
+The event system requires no external infrastructure (Redis, NATS, etc.). All event routing happens in-memory within each MemQL node; in cluster mode the node-to-node `EventBridge` propagates events across the mesh (with dedup and TTL) over the same gRPC streams the nodes already share.
 
 ### Event Delivery
 

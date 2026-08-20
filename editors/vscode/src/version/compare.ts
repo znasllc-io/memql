@@ -19,7 +19,7 @@
 //
 // THE FAILURE DIRECTION THAT MATTERS
 //
-// `notComparable` must never be rendered as "up to date". A plugin talking to a
+// `notComparable` must never be rendered as "up to date". A extension talking to a
 // cluster older than itself, with nothing anywhere saying so, is the incident
 // this epic exists to end. When in doubt this module says it does not know,
 // because "I cannot tell" sends an operator to look, and "up to date" does not.

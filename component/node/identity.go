@@ -1,5 +1,5 @@
 // Package node provides the distributed node identity, peer management, and
-// NodeService gRPC server for inter-node communication in a memQL cluster.
+// NodeService gRPC server for inter-node communication in a MemQL cluster.
 package node
 
 import (

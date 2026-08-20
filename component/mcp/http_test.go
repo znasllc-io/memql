@@ -277,8 +277,8 @@ func TestHTTPProtectedResourceMetadata(t *testing.T) {
 	if len(doc.AuthorizationServers) != 1 || doc.AuthorizationServers[0] != authServer {
 		t.Errorf("authorization_servers = %v, want [%q]", doc.AuthorizationServers, authServer)
 	}
-	if doc.ResourceName != "memQL MCP" {
-		t.Errorf("resource_name = %q, want %q", doc.ResourceName, "memQL MCP")
+	if doc.ResourceName != "MemQL MCP" {
+		t.Errorf("resource_name = %q, want %q", doc.ResourceName, "MemQL MCP")
 	}
 	if len(doc.BearerMethodsSupported) != 1 || doc.BearerMethodsSupported[0] != "header" {
 		t.Errorf("bearer_methods_supported = %v, want [header]", doc.BearerMethodsSupported)

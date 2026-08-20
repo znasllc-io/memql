@@ -14,7 +14,7 @@ import (
 // # Why a gate, and why this particular one
 //
 // `inputCostPerMillion` / `outputCostPerMillion` on a provider are read by
-// component/memql's Pricing and surfaced through the router. Under memQL Cloud
+// component/memql's Pricing and surfaced through the router. Under MemQL Cloud
 // (epic memql#3852) they are also the AI cost of goods that every tier margin
 // is computed against.
 //

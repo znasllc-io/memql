@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 #
-# memQL database operand image -- PostgreSQL 16 + TimescaleDB Community + pgvector
+# MemQL database operand image -- PostgreSQL 16 + TimescaleDB Community + pgvector
 # ==============================================================================
 #
 # The single database artifact every environment runs (epic memql#3842, task
@@ -31,7 +31,7 @@
 # all verified in component/database/memory-nodes/migrations/, and all absent
 # from the Apache-2.0 build of TimescaleDB. That is also why Azure's managed
 # PostgreSQL cannot host this schema. Licensing posture, and the reason no
-# public file may call memQL a database:
+# public file may call MemQL a database:
 # docs/internal/ops/timescaledb-license-compliance.md.
 #
 # WHY TWO TimescaleDB `.so` FILES -- the upgrade choreography

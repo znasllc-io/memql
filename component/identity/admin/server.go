@@ -17,7 +17,7 @@ import (
 // identity binary's mux
 // via the SetAdminMounter setter on component/identity.Service.
 //
-// It hosted seven screens. Six moved into the memQL portal in memql#3324 --
+// It hosted seven screens. Six moved into the MemQL portal in memql#3324 --
 // writes and owner/admin gate together, the gate landing in
 // component/identity/adminops and reached over MemqlService.Stream rather than
 // over an HTTP route. Deployments did not, for a topology reason:
@@ -57,7 +57,7 @@ type AdminServer struct {
 
 // This app serves no pages.
 //
-// It served seven. Six moved into the memQL portal in memql#3324; the seventh,
+// It served seven. Six moved into the MemQL portal in memql#3324; the seventh,
 // Deployments, followed in memql#3380 once a deploy call could reach the
 // identity node from a bff-served portal. The nav is empty because there is
 // nothing left to navigate to -- the routes went with the pages, in the same

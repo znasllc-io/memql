@@ -23,7 +23,7 @@ SNAPSHOT="$REPO_ROOT/component/envregistry/manifest.yaml"
 
 function write_banner() {
     cat > "$SNAPSHOT" <<'BANNER'
-# memQL env-var registry -- EMBEDDED SNAPSHOT (generated, do not edit)
+# MemQL env-var registry -- EMBEDDED SNAPSHOT (generated, do not edit)
 # ============================================================================
 # This is a //go:embed snapshot of scripts/secrets/manifest.yaml baked into
 # the binary as the last-resort fallback (loader priority 4), so `genesis

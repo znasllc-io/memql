@@ -211,7 +211,7 @@ test("returns the removed cluster so the caller can report what went", async () 
 // -----------------------------------------------------------------------------
 //
 // memql#3515's second half. `renameClusterCredentials` was written for exactly
-// this, correct and tested, with no callers -- so `memQL: Edit Cluster` rewrote
+// this, correct and tested, with no callers -- so `MemQL: Edit Cluster` rewrote
 // the YAML entry and left the refresh token behind under the old name.
 //
 // It was invisible from every angle. SecretStorage cannot be enumerated, so

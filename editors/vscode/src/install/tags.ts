@@ -9,7 +9,7 @@
 // `stackPin.ts` argues at length why the pinned tag is a reviewed diff rather
 // than whatever was pushed this morning; the same reasoning holds when the
 // operator is choosing rather than defaulting. A version somebody picked off a
-// list is a fact they can be held to, and one the plugin picked silently is
+// list is a fact they can be held to, and one the extension picked silently is
 // not. This module therefore returns an ORDER, never a selection.
 //
 // AND IT DEGRADES TO TYPING. `git ls-remote` needs a network and a git; an

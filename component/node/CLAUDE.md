@@ -1,6 +1,6 @@
 # Node - Distributed Node System
 
-**Purpose:** Inter-node communication, peer discovery, and bootstrap strategy for memQL cluster mode
+**Purpose:** Inter-node communication, peer discovery, and bootstrap strategy for MemQL cluster mode
 **Language:** Go
 **Proto:** `node.proto` (NodeService gRPC bidirectional stream)
 
@@ -8,7 +8,7 @@
 
 ## Overview
 
-memQL uses **Go build tags** to compile separate binaries for each node type.
+MemQL uses **Go build tags** to compile separate binaries for each node type.
 Each binary includes only the code relevant to its purpose. The node type is
 determined at compile time via `node.CompiledNodeType()`, with `MEMQL_NODE_TYPE`
 env var as a runtime fallback for the default (BFF) build.

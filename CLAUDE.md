@@ -1,11 +1,11 @@
-# memQL - the AI memory platform
+# MemQL - the AI memory platform
 
 **Type:** AI platform -- agents, automations, and voice on a time-series memory graph
 **Language:** Go + MemQL DSL
 **Stack:** PostgreSQL + TimescaleDB extension
 **Purpose:** Run agents, automations, and voice against a time-series memory graph
 
-> **Positioning is load-bearing, not marketing** (memql#3843). memQL is an AI
+> **Positioning is load-bearing, not marketing** (memql#3843). MemQL is an AI
 > platform *built on* a time-series memory graph; it is not a database, and no
 > public-facing file may say it is. The embedded TimescaleDB Community Edition
 > is licensed under the Timescale License (TSL), whose §2.1(b) "Value Added
@@ -13,7 +13,7 @@
 > and §3.10 prong (i) withholds that grant from a product that is "primarily
 > [a] database storage or operations" product. Describing the storage layer
 > precisely is fine ("backed by / built on a time-series memory graph");
-> claiming memQL *is* a database is not. `TestNoDatabaseProductClaims`
+> claiming MemQL *is* a database is not. `TestNoDatabaseProductClaims`
 > (`database_positioning_test.go`) fails the build on the latter. Compliance
 > pack: [docs/internal/ops/timescaledb-license-compliance.md](docs/internal/ops/timescaledb-license-compliance.md).
 
@@ -50,7 +50,7 @@ go build -tags voice -o bin/memql-voice .
 
 ## Project Structure
 
-memQL has **exactly three** extension words. Do not invent a fourth.
+MemQL has **exactly three** extension words. Do not invent a fourth.
 See [Component vs integration vs pack](docs/public/concepts/component-integration-pack.md).
 
 - **component** — engine internals (`component/`: DSL lexer/AST, HTTP servers, bus, identity)
@@ -62,7 +62,7 @@ See [Component vs integration vs pack](docs/public/concepts/component-integratio
 
 
 ```
-memQL/
+MemQL/
 ├── app/               Phased service bootstrap (Go)
 │   ├── app.go         Build() orchestrator + Overrides
 │   ├── config.go      Phase 1: config + auth middleware
@@ -102,7 +102,7 @@ memQL/
 │   ├── README.md      The convention: what belongs here, and the wiring a
 │   │                  client needs (npm package, Go server, CI lane + bucket,
 │   │                  Dockerfile stage, deploy component)
-│   └── portal/        memQL Portal -- the platform's graphical operations
+│   └── portal/        MemQL Portal -- the platform's graphical operations
 │                      console, the Cockpit's browser sibling. React + TS +
 │                      Vite + Tailwind; served by component/edge as site #1
 ├── component/         Core Go components
@@ -155,7 +155,7 @@ memQL/
 | `dsl/policies/policies.memql` | AI provider-selection policies | MemQL | — |
 | `integrations/` | External service integrations + DSL capabilities | Go | [→](integrations/CLAUDE.md) |
 | `clients/` | Surfaces built ON the platform (SPAs, landing pages, apps). Plural + first-class, the inward-facing mirror of `integrations/`. The engine carries one inhabitant -- the portal -- as the worked example downstream repos copy | TypeScript | [→](clients/README.md) |
-| `clients/portal/` | memQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/edge` as site #1 (its own hostname, `bundleRef: file:///app/portal`) | TypeScript | [→](clients/README.md) |
+| `clients/portal/` | MemQL Portal -- the platform's graphical ops console (React + Vite + Tailwind), served by `component/edge` as site #1 (its own hostname, `bundleRef: file:///app/portal`) | TypeScript | [→](clients/README.md) |
 | `component/` | Core service components | Go | [→](component/CLAUDE.md) |
 | `component/bus/` | Channel-based component communication bus | Go | -- |
 | `component/config/` | Centralized configuration loading | Go | -- |
@@ -189,7 +189,7 @@ memQL/
 - [Tool ↔ Knowledge Domain Pattern](docs/public/concepts/tool-knowledge-domain-pattern.md) -- when a capability has operational knowledge (UI takeover, Computer Use, etc.), put it in a knowledge domain that the tool requires, not in the agent prompt template. Read before adding capability-bundled documentation.
 
 **Tooling:**
-- **memql-cockpit** -- terminal-native IDE and operations console (display name "memQL Cockpit"). Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
+- **memql-cockpit** -- terminal-native IDE and operations console (display name "MemQL Cockpit"). Lives in its own repo at `github.com/znasllc-io/memql-cockpit`; consult that repo's CLAUDE.md and Makefile.
 
 ---
 
@@ -329,7 +329,7 @@ the engine images, pin those three digests, merge -> ArgoCD reconciles. See
 
 ## Branch Workflow
 
-memQL uses a single long-lived branch: `main`. Core engine, wire
+MemQL uses a single long-lived branch: `main`. Core engine, wire
 protocol, and DSL all live here.
 
 **Rules of engagement:**
@@ -372,7 +372,7 @@ protocol, and DSL all live here.
    watcher looking only for merged / failed / clean cannot see `DIRTY`
    at all, and its silence is indistinguishable from "still queued".
 2. **Pre-release -- no backwards-compat shims or deprecation windows.**
-   When a contract changes, fix both memQL and the consumer at once and
+   When a contract changes, fix both MemQL and the consumer at once and
    delete what is no longer needed. Do not add legacy adapters, fallback
    code paths, or "keep working while we migrate" layers.
 3. **Stage files by explicit path** (`git add <file>`) -- never
@@ -425,7 +425,7 @@ frontend coordination.
 
 ### Deploy targets
 
-memQL ships **one installation shape** (epic memql#3943). There is no
+MemQL ships **one installation shape** (epic memql#3943). There is no
 staging-versus-production dimension inside the product: an operator who
 wants a second environment installs a second instance, with its own
 domain and its own ArgoCD. What varies is the deploy TARGET, which is a
@@ -481,7 +481,7 @@ and `scripts/identity/build-css.sh` all branch on `darwin`/`linux`.
 
 ### Distributed Node Architecture (Cluster Mode)
 
-memQL uses **Go build tags** to compile separate binaries for each node type.
+MemQL uses **Go build tags** to compile separate binaries for each node type.
 A tag selects which `app/build_*.go` runs, and therefore which integrations and
 transport layers a node WIRES UP.
 
@@ -524,7 +524,7 @@ is in "The engine is the whole platform" below.
 - **Agent**: Task execution, AI work, tool calling
 - **Planner**: Task planning and orchestration
 - **Edge**: Serves this cluster's hosted web surfaces -- every hosted SPA/website
-  and the memQL Portal itself (site #1, no special path) -- by resolving the
+  and the MemQL Portal itself (site #1, no special path) -- by resolving the
   request `Host` header to a `v1:platform:site` graph row (epic memql#3700)
 
 Nodes discover each other via mesh. All nodes share a single
@@ -650,7 +650,7 @@ in *shape* it stops proving anything about the cloud. Ask of any change: *is
 this the shape of the system (→ base/component, everywhere) or a value (→
 overlay)?* The standard: [docs/public/operate/environment-parity.md](docs/public/operate/environment-parity.md).
 
-**ONE INSTALLATION SHAPE (epic memql#3943).** memQL has no
+**ONE INSTALLATION SHAPE (epic memql#3943).** MemQL has no
 staging-versus-production dimension. An operator who wants a second environment
 installs a second instance -- its own cluster or at least its own ArgoCD, its
 own domain, its own database. There is one cloud overlay
@@ -717,12 +717,12 @@ replica fan-out, or node lifecycle. Runbook:
 
 #### Client-tool relay (agent → browser, across nodes)
 
-The memQL tool registry supports **client-executed tools** (tools whose
+The MemQL tool registry supports **client-executed tools** (tools whose
 implementation runs in the browser, e.g. UI-drive helpers). In
 single-binary mode the agent's `InvokeClientTool` writes directly to
 the browser's stream and parks on a session-scoped waiter. In cluster
 mode the agent and browser live on different nodes, so the
-`ClientToolCall` envelope needs a cross-node round-trip. memQL does
+`ClientToolCall` envelope needs a cross-node round-trip. MemQL does
 this via the graph event bus:
 
 1. Cognition intercepts `ClientToolCall` in `consumeAgentTurnStream`
@@ -766,17 +766,17 @@ symmetry with the distributed gRPC model.
 
 ## Endpoint Protocol Policy (gRPC-First)
 
-**IMPORTANT: This policy is a hard requirement for all memQL development.**
+**IMPORTANT: This policy is a hard requirement for all MemQL development.**
 
 gRPC is the **default and required** protocol for all internal and service-to-service
-endpoints in memQL. HTTP endpoints are allowed **only** when an external protocol
+endpoints in MemQL. HTTP endpoints are allowed **only** when an external protocol
 requirement makes gRPC impossible.
 
 ### Decision Criteria
 
-When adding a new endpoint or capability to memQL, apply this decision tree:
+When adding a new endpoint or capability to MemQL, apply this decision tree:
 
-1. **Is this a service-to-service call?** (e.g., frontend to memQL, bridge agent to memQL)
+1. **Is this a service-to-service call?** (e.g., frontend to MemQL, bridge agent to MemQL)
    - YES: **Must be gRPC** -- add a new message type to `memql.proto`
 2. **Is this consumed by a browser client?**
    - YES: Route through the existing WebSocket bridge (`/memql/ws`), which tunnels to `MemqlService.Stream` gRPC -- **still gRPC under the hood**
@@ -794,7 +794,7 @@ These endpoints **must** remain HTTP due to external protocol requirements:
 | **Health check** | `/healthz` | Docker and Kubernetes health probes expect HTTP GET |
 | **WebSocket upgrades** | `/memql/ws`, `/memql/audio` | Browser clients need HTTP upgrade to establish WebSocket |
 | **File uploads** | `/spaces/{id}/attachments` | Multipart form-data uploads map poorly to gRPC |
-| **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | The reasoning already recorded above for `/spaces/{id}/attachments`: multipart bundles map poorly to gRPC (memql#3713, explicit owner approval on the issue). A CI job publishing a built site hands over an arbitrary, variable-shaped tree of files -- unknown paths, unknown count, mixed binary content types -- which is exactly the shape multipart form-data exists to carry and exactly the shape a fixed protobuf message schema does not. Every CI toolchain already knows how to POST a multipart body; none carries a memQL gRPC client. `component/edge.Publisher` is what makes the deploy atomic once the bytes arrive: the whole bundle lands under a new content-addressed version prefix and only then does the site row's `bundleRef` flip, so a failed upload never leaves a half-published site reachable, and rollback is one more row write to bytes that are still there. Authorization is a `class="service_account"` identity-issued JWT (memql#691) the handler verifies itself; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`, for the same reason the inbound receiver is below: that list is consulted by the verifier middleware on every verifier-consuming node, so listing it there would make the route unauthenticated for every bearer instead of pinned to the service-account credential specifically. Served by the bff, never the edge node -- the edge is wildcard-routed by site hostname, so a site-agnostic publish endpoint has no coherent address there |
+| **Site bundle publish** | `POST /sites/{id}/bundles` (bff only) | The reasoning already recorded above for `/spaces/{id}/attachments`: multipart bundles map poorly to gRPC (memql#3713, explicit owner approval on the issue). A CI job publishing a built site hands over an arbitrary, variable-shaped tree of files -- unknown paths, unknown count, mixed binary content types -- which is exactly the shape multipart form-data exists to carry and exactly the shape a fixed protobuf message schema does not. Every CI toolchain already knows how to POST a multipart body; none carries a MemQL gRPC client. `component/edge.Publisher` is what makes the deploy atomic once the bytes arrive: the whole bundle lands under a new content-addressed version prefix and only then does the site row's `bundleRef` flip, so a failed upload never leaves a half-published site reachable, and rollback is one more row write to bytes that are still there. Authorization is a `class="service_account"` identity-issued JWT (memql#691) the handler verifies itself; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`, for the same reason the inbound receiver is below: that list is consulted by the verifier middleware on every verifier-consuming node, so listing it there would make the route unauthenticated for every bearer instead of pinned to the service-account credential specifically. Served by the bff, never the edge node -- the edge is wildcard-routed by site hostname, so a site-agnostic publish endpoint has no coherent address there |
 | **Inbound webhooks** | `POST /inbound/{source}` (bff only) | The third party dials US -- Shopify, Amazon SP-API, a POS will POST to a URL and nothing else, so there is no gRPC version of this capability (memql#2957). Deny-by-default source allowlist + per-source HMAC; declared in `server.HandlerAuthorizedPaths()`, not `PublicPaths()`. See [inbound-delivery.md](docs/public/operate/inbound-delivery.md) |
 | **One-click unsubscribe** | `GET+POST /unsubscribe` (bff only) | The third party dials US, exactly as with the inbound webhook -- and here the third party is the RECIPIENT'S MAIL CLIENT (memql#3348). RFC 8058 one-click is a contract with Gmail / Outlook / Yahoo: they read the `List-Unsubscribe` header off a message we sent and POST `List-Unsubscribe=One-Click` to the URI they find there. There is no gRPC form of that conversation, and without it there is no one-click unsubscribe -- which the same providers now treat as a bulk-sender defect. GET renders a confirmation page (what a person clicking the link in the body reaches); POST performs the opt-out. The split is load-bearing: mail clients and security appliances PREFETCH links, so a GET with the side effect silently unsubscribes people who never clicked, which is precisely why the RFC specifies POST. Authorization is an HMAC-signed token carrying (owner, recipient, campaign) -- verified before any row is read, and the identity the handler then impersonates comes out of the signed payload rather than a parameter, so an unsigned request cannot aim it. Declared in `server.HandlerAuthorizedPaths()` + `SelfAuthenticatedPaths()`, not `PublicPaths()`. See [campaign-sending.md](docs/public/operate/campaign-sending.md) |
 
@@ -902,7 +902,7 @@ Everything below lives on `MemqlService.Stream`; cross-node proxying rides
 
 ### For AI Agents and Developers
 
-When implementing new functionality in memQL:
+When implementing new functionality in MemQL:
 
 1. **Never add new HTTP endpoints** without explicit user approval
 2. **Default to gRPC** -- add message types to `component/grpc/memql.proto`
@@ -917,7 +917,7 @@ When implementing new functionality in memQL:
 
 ## AI Integration
 
-memQL centralizes all AI operations through a pluggable provider system:
+MemQL centralizes all AI operations through a pluggable provider system:
 
 ### Provider System
 - **Multi-provider architecture** - Unified interfaces (`ChatAIProvider`, `VisionAIProvider`, `TTSAIProvider`, `ChatStreamProvider`) with pluggable backends
@@ -1403,7 +1403,7 @@ node-type binary (`make identity`) and owns:
   `/legal/*`, `/me/*`).
 - What remains of the admin web app at `/admin/*`: the sign-in pages,
   and an `/admin/` root that answers `410 Gone`. The admin screens live
-  in the memQL portal; their owner/admin gate is
+  in the MemQL portal; their owner/admin gate is
   `component/identity/adminops`, riding `IdentityAdminMsg` on
   `MemqlService.Stream`. `DeployControlService` shells out against an
   on-disk overlay checkout and so exists only on the identity node, but
@@ -2270,7 +2270,7 @@ is a product-repo pack, not part of engine-only core.
 
 ### Extension Points
 
-Three ways to extend memQL, in preference order:
+Three ways to extend MemQL, in preference order:
 
 1. **DSL files** (`.memql`) -- queries, mutations, specs, automations,
    prompts, providers, shapes, tools, builtins. Always the first choice.
@@ -2391,7 +2391,7 @@ interceptor, validates the token against the invitation registry,
 and builds a guest `AccessContext` under the `identity.guest`
 claim key (subject
 `guest:<invitationId>`; scope carried in claims for downstream
-partition checks). The memQL WS bridge accepts the token as
+partition checks). The MemQL WS bridge accepts the token as
 `?guest_token=<token>` since browsers cannot set custom headers on
 the WebSocket upgrade.
 

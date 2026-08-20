@@ -39,7 +39,7 @@ import { renderMemQLValue } from "@znasllc-io/memql-sdk-core/client";
 // IdentityAdminClient (@znasllc-io/memql-sdk-core/identityadmin), NOT through
 // a `mutation ...` call on the query surface, and that is the whole design.
 //
-// A memQL mutation cannot carry a role predicate: `filter` is a read
+// A MemQL mutation cannot carry a role predicate: `filter` is a read
 // construct. So `updateUser` is @serverOnly with no client-reachable seam at
 // all, and `revokePATIdentity` / `updateClusterSettings` name an arbitrary
 // target under a coarse write check that admits every role from `writer` up.

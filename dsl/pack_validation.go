@@ -44,7 +44,7 @@ import (
 //   - domain must not contain a path separator (it names a single
 //     top-level namespace, not a nested path).
 //   - domain must not collide with a core embedded domain. Core domains
-//     are canonical and owned by memQL; a pack cannot shadow or extend
+//     are canonical and owned by MemQL; a pack cannot shadow or extend
 //     one.
 //   - domain must not collide with another pack's already-registered
 //     domain. Two packs claiming the same namespace is ambiguous and is
@@ -78,7 +78,7 @@ func ValidatePackDomain(domain string, coreDomains, existing []string) error {
 }
 
 // coreDomains returns the sorted set of top-level directory names in the
-// embedded DSL tree -- the namespaces memQL owns canonically. These are
+// embedded DSL tree -- the namespaces MemQL owns canonically. These are
 // the domains a pack may not collide with. Built by reading the embedded
 // FS root so it stays in lockstep with the //go:embed directive without a
 // hand-maintained list. The "_reference" authoring skeletons directory is

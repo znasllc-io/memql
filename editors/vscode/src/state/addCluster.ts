@@ -83,7 +83,7 @@ export interface StepProgress {
  *
  * DERIVED FROM WHAT THE SCRIPT ACCEPTS, not from what the wizard felt like
  * offering: `scripts/install/verify-provider-key.sh` supports exactly these
- * two and exits 2 on anything else, which is a fault in memQL rather than in
+ * two and exits 2 on anything else, which is a fault in MemQL rather than in
  * the operator's answer -- so the field is a CHOICE and this list is what it
  * chooses from.
  */
@@ -203,7 +203,7 @@ export const DEFAULT_INPUTS: Inputs = {
  *   - the domain names where sign-in POSTs (identityBaseUrlFor); without it
  *     that derivation depends on the endpoint happening to be spelled
  *     `api.<domain>`, which a hand-registered cluster need not be;
- *   - the token is the paste-a-credential path, which "memQL: Sign In" has
+ *   - the token is the paste-a-credential path, which "MemQL: Sign In" has
  *     made the exception rather than the rule -- so the field stays, and the
  *     ordinary answer is to leave it empty.
  */
@@ -695,10 +695,10 @@ export class AddClusterState {
       if (problem !== undefined) return problem;
     }
     // The refusal is HERE rather than at the script, which would report exit 2
-    // -- correctly worded as a fault in memQL rather than in the operator's
+    // -- correctly worded as a fault in MemQL rather than in the operator's
     // answer, and therefore the wrong sentence for a value they chose.
     if (field === "provider" && !SUPPORTED_PROVIDERS.some((p) => p === trimmed)) {
-      return `memQL can verify a key for ${SUPPORTED_PROVIDERS.join(" or ")}.`;
+      return `MemQL can verify a key for ${SUPPORTED_PROVIDERS.join(" or ")}.`;
     }
     // THE KEY ITSELF, PASTED WHERE THE PATH GOES (memql#3545).
     //
@@ -758,7 +758,7 @@ export class AddClusterState {
   /**
    * Hands over the registry the duplicate-name check reads.
    *
-   * A SNAPSHOT, and knowingly one. clusters.yaml is shared with the memQL
+   * A SNAPSHOT, and knowingly one. clusters.yaml is shared with the MemQL
    * Cockpit, so this list is only true of the moment it was read -- which is
    * why it is the FIRST of two walls and not the only one: `addCluster` re-reads
    * the file at write time and refuses there too. What this one buys is the
@@ -838,7 +838,7 @@ export class AddClusterState {
       errors.push({
         field: "token",
         message:
-          "That is a Personal Access Token, and the mesh cannot verify one: it checks bearers against the identity service's JWKS feed, so a PAT fails before any lookup. Paste the `access_token` from POST <identity>/oauth/token, or leave this empty and run \"memQL: Sign In\".",
+          "That is a Personal Access Token, and the mesh cannot verify one: it checks bearers against the identity service's JWKS feed, so a PAT fails before any lookup. Paste the `access_token` from POST <identity>/oauth/token, or leave this empty and run \"MemQL: Sign In\".",
       });
     } else if (/\s/.test(token)) {
       errors.push({

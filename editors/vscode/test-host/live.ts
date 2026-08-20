@@ -100,7 +100,7 @@ async function configuredCluster(): Promise<ClusterConfig> {
   // lane exists to stop.
   if ((cluster.token ?? "") === "") {
     throw new Error(
-      `cluster "${name}" in ${file} has no token: -- sign in first (memQL: Sign In, or scripts/vscode/verification-setup.sh)`,
+      `cluster "${name}" in ${file} has no token: -- sign in first (MemQL: Sign In, or scripts/vscode/verification-setup.sh)`,
     );
   }
   return cluster;

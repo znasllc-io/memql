@@ -97,7 +97,7 @@ provider chat54Mini {
     // $0.75 / $4.50 per million, so every cost this provider reported was
     // understated FIVE-fold on input and SEVEN-fold on output.
     //
-    // It mattered from the moment memQL Cloud attached billing to it (epic
+    // It mattered from the moment MemQL Cloud attached billing to it (epic
     // memql#3852): these numbers price the AI cost of goods that the tier
     // margins are computed against, and an understated cost does not present
     // as an error -- it presents as a business that looks profitable. The
@@ -694,7 +694,7 @@ provider tts4oMini {
 
 // ---- providers/v1/openai/whisper1.memql ----
 
-/// OpenAI whisper-1 - verbatim speech-to-text; the memQL default STT model (see
+/// OpenAI whisper-1 - verbatim speech-to-text; the MemQL default STT model (see
 /// integrations/stt/openai_whisper.go and MEMQL_WHISPER_MODEL)
 @extends("openai")
 @type("OpenAISTT")

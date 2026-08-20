@@ -274,7 +274,7 @@ func (s *Server) handleRefreshTokenGrant(w http.ResponseWriter, r *http.Request,
 	})
 }
 
-// readTokenRequest accepts both application/json (memQL / the product
+// readTokenRequest accepts both application/json (MemQL / the product
 // SPA) and the OAuth-canonical x-www-form-urlencoded body so external
 // integrations can call the endpoint with a stock OAuth client.
 func readTokenRequest(r *http.Request) (*tokenRequest, error) {

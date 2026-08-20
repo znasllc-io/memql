@@ -1,7 +1,7 @@
 # `cnpg-db` — the database, as a component
 
 The seam a deployment composes its database from: a client cluster today, a
-memQL Cloud tenant later. It mirrors the way [`dsl-bundle`](../dsl-bundle/kustomization.yaml)
+MemQL Cloud tenant later. It mirrors the way [`dsl-bundle`](../dsl-bundle/kustomization.yaml)
 delivers product DSL — one shape, values per overlay.
 
 Epic memql#3842, task memql#3851.

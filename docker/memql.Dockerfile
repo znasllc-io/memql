@@ -1,4 +1,4 @@
-# memQL Service Dockerfile
+# MemQL Service Dockerfile
 # Multi-stage build for optimized image size
 #
 # Build with node type:

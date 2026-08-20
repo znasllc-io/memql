@@ -34,7 +34,7 @@ const humanUtteranceDebounce = 400 * time.Millisecond
 
 // composeReplyId generates the canonical id for a new agent reply turn.
 //
-// memQL's node-id convention is "{concept}:{shortId}". Every stored
+// MemQL's node-id convention is "{concept}:{shortId}". Every stored
 // utterance lives at that fully-qualified address. The chunks emitted
 // while the reply streams carry the same id in their `replyId` field
 // so consumers (the chat surface, transcription views) can key the

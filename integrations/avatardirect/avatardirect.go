@@ -4,14 +4,14 @@
 //
 // Background. The legacy direct avatar (integration.liveavatar) used
 // liveavatar.com, which OWNS the LiveKit room and does its own TTS + lip-sync:
-// memQL just minted a liveavatar session and handed back room creds. The
+// MemQL just minted a liveavatar session and handed back room creds. The
 // cloud-engine vendors work the opposite way -- the vendor DIALS INTO an
 // existing LiveKit room as the avatar participant and lip-syncs to audio
 // published INTO that room. There is no voice-agent on the direct path, so
-// memQL drives a TWO-PHASE handshake for an `anam`- or `simli`-vendor agent.
+// MemQL drives a TWO-PHASE handshake for an `anam`- or `simli`-vendor agent.
 // The phases exist because Simli's cloud engine joins the room, waits for an
 // audio-providing AGENT-kind participant to ALREADY be present, and reads that
-// participant's lk.audio_stream byte stream for lip-sync; if memQL starts the
+// participant's lk.audio_stream byte stream for lip-sync; if MemQL starts the
 // engine before the browser has joined and begun forwarding audio (the old
 // single-phase flow), the engine waits on an absent participant and never
 // publishes video (memql#782).

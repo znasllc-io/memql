@@ -1,4 +1,4 @@
-# memQL monitoring + alerting (memql#1523)
+# MemQL monitoring + alerting (memql#1523)
 
 Observability + alerting for the failure classes that were silent on
 2026-06-16: a ~50% auth-reject storm and a paused, unpromoted bff
@@ -50,13 +50,13 @@ Alert rules (prometheus-operator CRDs):
 
 Scrape config:
 
-- `podmonitor.yaml` -- scrapes each memQL node pod's `/metrics` once.
+- `podmonitor.yaml` -- scrapes each MemQL node pod's `/metrics` once.
 - `servicemonitor-argo-rollouts.yaml` -- OPTIONAL; scrapes the Argo
   Rollouts controller's `rollout_info` metric (only if not already scraped).
 
 ## Assumed infrastructure
 
-memQL does **not** ship a monitoring stack. These manifests assume a
+MemQL does **not** ship a monitoring stack. These manifests assume a
 **prometheus-operator / kube-prometheus-stack** is already installed in a
 `monitoring` namespace -- the SAME assumption the existing deploy-gate SLO
 analysis already makes (`deploy/rollouts/analysis/deploy-gate.yaml`
@@ -75,7 +75,7 @@ references `http://prometheus-operated.monitoring:9090`). Specifically:
 
 If no operator is present, the app-side metrics still emit on `/metrics`
 and can be scraped by any Prometheus with a static/relabel scrape job
-pointing at the memQL Services on port 8085, path `/metrics`; translate
+pointing at the MemQL Services on port 8085, path `/metrics`; translate
 the alert exprs into a plain `rules.yaml`.
 
 ## Apply

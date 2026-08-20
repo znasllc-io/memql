@@ -46,7 +46,7 @@ func TestRecoveryKeyConstructsAreServerOnlyAndInternalOriginPasses(t *testing.T)
 	const probeId = "rk-serveronly-probe"
 
 	// Quoted through langparser.QuoteString rather than %q, for the reason
-	// TestDSLCallStringsDoNotUseGoQuoting gives: %q emits escapes the memQL
+	// TestDSLCallStringsDoNotUseGoQuoting gives: %q emits escapes the MemQL
 	// lexer rejects, so one control byte would make the statement unparseable
 	// rather than merely wrong. The value here is inert, but the gate is about
 	// the pattern -- a test that models the call form incorrectly teaches the

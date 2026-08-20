@@ -11,7 +11,7 @@ owner: znas
 
 A **service-account** JWT is the machine identity for automation and synthetic
 checks — most importantly the in-cluster **deploy gate** (the Argo Rollouts
-`AnalysisTemplate`, deployment-v2 Phase 3). It authenticates to memQL's
+`AnalysisTemplate`, deployment-v2 Phase 3). It authenticates to MemQL's
 `MemqlService.Stream` on the **BFF / mesh** surface, where a PAT cannot.
 Resolves [#691](https://github.com/znasllc-io/memql/issues/691); part of epic
 [#697](https://github.com/znasllc-io/memql/issues/697).
@@ -45,7 +45,7 @@ JWTs are the **machine** credential.
 
 ## The credential-class family
 
-memQL stamps a `class` claim on identity-issued JWTs; each class is admitted by
+MemQL stamps a `class` claim on identity-issued JWTs; each class is admitted by
 a dedicated interceptor that **pins the surface** it may use. Service-account
 joins `node` (#105) and `voice_agent` (#109) as a machine class.
 

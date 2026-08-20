@@ -29,7 +29,7 @@ top of the existing Sense package, not a fork of the brain.
 This document covers two things and how they relate:
 
 1. **The DSL spec (`dslspec`)** -- the single machine-readable source
-   of truth for the memQL authoring surface, from which Sense is driven
+   of truth for the MemQL authoring surface, from which Sense is driven
    and which any editor can fetch as portable JSON.
 2. **MemQL Sense itself** -- the language operations, how their
    completion / hover / diagnose behaviour is projected from the spec,
@@ -41,7 +41,7 @@ This document covers two things and how they relate:
 ## The DSL spec: one source of truth
 
 `component/language/dslspec` is the single machine-readable source of
-truth for the memQL DSL authoring surface:
+truth for the MemQL DSL authoring surface:
 
 - the **top-level constructs** an author may write (`concept`, `query`,
   `mutation`, `logic`, `automation`, `spec`, `trait`, `shape`, `tool`,

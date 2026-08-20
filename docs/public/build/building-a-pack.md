@@ -1,5 +1,5 @@
 ---
-title: Building a pack -- extend memQL with your own domain
+title: Building a pack -- extend MemQL with your own domain
 audience: public
 status: stable
 area: build
@@ -7,9 +7,9 @@ sinceVersion: 0.9.7
 owner: znas
 ---
 
-# Building a pack -- extend memQL with your own domain
+# Building a pack -- extend MemQL with your own domain
 
-A **pack** is the unit of product-specific extension in memQL: a bundle of Go
+A **pack** is the unit of product-specific extension in MemQL: a bundle of Go
 integration code plus a `.memql` DSL subtree that drops into the engine and
 runs alongside the core domains. A product's DSL bundle plus its client is the
 production reference consumer; this guide walks you through building one from
@@ -132,7 +132,7 @@ before mounting, and **panics** on a violation:
 
 - the domain must be non-empty and contain no `/`;
 - it must **not collide with a core embedded domain** -- core domains are
-  canonical and owned by memQL; a pack cannot shadow or extend one;
+  canonical and owned by MemQL; a pack cannot shadow or extend one;
 - it must **not collide with another pack's already-registered domain** -- two
   packs claiming the same namespace is ambiguous and rejected.
 
@@ -323,7 +323,7 @@ core, and extends both the concept and tool surfaces -- with no database.
 
 The reference pack is the minimal teaching example. The **deploy pack** at
 [`examples/deploypack/`](../../../examples/deploypack) (Epic 2 / #2095) is the
-production-shaped sibling: it packages memQL's OWN deployment workflow as a pack,
+production-shaped sibling: it packages MemQL's OWN deployment workflow as a pack,
 dogfooding the model. Same primitives, but its capabilities are the REAL deploy
 effects.
 
@@ -372,6 +372,22 @@ This is the canonical example of a pack contributing **effects backed by an
 existing Go side-effect boundary** rather than a fresh capability. The E2.3
 chained automations fire these effects on deployment status transitions; the
 pack is the substrate they call into.
+
+---
+
+## Shipped packs
+
+Beyond the two teaching examples above, the engine tree carries two shipped
+packs worth reading as real worked examples:
+
+- `examples/reviewspack` (memql#4139) -- the client-agnostic reviews product
+  feature. A pack with no integration half: no external system sits behind it.
+- `examples/shopifypack` (memql#4138) -- the Shopify product feature (portal
+  views for shop, secrets, sync), layered on the `integrations/shopify`
+  integration. The pair is the canonical worked example of the
+  [component / integration / pack](../concepts/component-integration-pack.md)
+  split: the integration talks to Shopify; the pack is the product feature;
+  the thin product index stays core (`dsl/shopify`).
 
 ---
 

@@ -2,7 +2,7 @@ package dslspec
 
 import "sort"
 
-// builtins.go is the single source of truth for the memQL expression-level
+// builtins.go is the single source of truth for the MemQL expression-level
 // builtins -- the bare functions an author calls inside a filter / shape /
 // mutation / logic body (concat / coalesce / hash / lower / year / ...), the
 // context accessors (item / event / step / now / actor / ...), and the

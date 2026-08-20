@@ -6,7 +6,7 @@ import "github.com/google/uuid"
 //
 // Two use cases share this function:
 //
-//   - The {shortId} segment of a memQL canonical node id
+//   - The {shortId} segment of a MemQL canonical node id
 //     ({partition}:{concept}:{shortId}), for INSTANCE rows --
 //     anything user-created or runtime-created where the row is one
 //     of many. CATALOG rows (agentRole, knowledgeDomain, nodeType --

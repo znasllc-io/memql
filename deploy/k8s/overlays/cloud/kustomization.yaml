@@ -1,7 +1,7 @@
 # CLOUD overlay -- ENGINE-ONLY (decoupling P3).
 #
 # ONE CLUSTER, ONE ArgoCD, ONE BASE, ONE OVERLAY (epic memql#3943). This is the
-# only cloud overlay: memQL ships one installation shape, and an operator who
+# only cloud overlay: MemQL ships one installation shape, and an operator who
 # wants a second environment installs a second instance, with its own domain and
 # its own ArgoCD. There was briefly a second overlay beside this one --
 # a second cloud overlay, the same file with different numbers in it -- and it

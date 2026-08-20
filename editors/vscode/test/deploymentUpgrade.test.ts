@@ -4,7 +4,7 @@
 //
 //   THE TAG LIST NEVER PICKS FOR YOU, and it degrades to typing. A picker that
 //   auto-selected the newest would make "which version is this cluster on"
-//   something the plugin decided silently, and an operator with no network
+//   something the extension decided silently, and an operator with no network
 //   still has a cluster to move.
 //
 //   THE FORECAST IS HONEST ABOUT WHAT IT IS. A run that reports fifteen steps

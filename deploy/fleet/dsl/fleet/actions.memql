@@ -1,4 +1,4 @@
-// fleet domain -- ACTIONS: the world-touching layer of the memQL Cloud control
+// fleet domain -- ACTIONS: the world-touching layer of the MemQL Cloud control
 // plane (epic memql#3852, task memql#3853).
 //
 // Per the behavioral-constructs split: logic decides, mutations persist,

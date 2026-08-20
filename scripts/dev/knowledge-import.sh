@@ -4,14 +4,14 @@
 # ===============================
 #
 # Restores LLM-seeded knowledge chunks + their vectors from
-# ~/.memql/dev-knowledge.sql into a fresh memQL Postgres. Mirrors
+# ~/.memql/dev-knowledge.sql into a fresh MemQL Postgres. Mirrors
 # the secrets-import pattern -- runs after a `make dev-refresh`
 # wipe + restart so the rebuilt stack already carries the seeded
 # corpus without paying for re-generation.
 #
 # Idempotent: the chunk ids are deterministic across every writer
 # (seedDomainContent / augmentDomainGenerate / ensureKnowledgeBridge),
-# so re-importing on top of an existing set is a no-op (memQL's
+# so re-importing on top of an existing set is a no-op (MemQL's
 # time-series concept layer handles same-id same-content writes as
 # no-ops; node_vectors uses ON CONFLICT for the vector rows).
 #

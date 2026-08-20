@@ -10,7 +10,7 @@
 // witness: UNINSTALL. Every mutating install step records what it left behind
 // and, critically, whether the machine ALREADY had it -- a developer who had
 // mkcert, or a k3d cluster, or a checkout at that path before this installer
-// ran must not lose it because they later uninstalled memQL. That judgement can
+// ran must not lose it because they later uninstalled MemQL. That judgement can
 // only be made at install time, so it has to be written down at install time.
 // The receipts here are what remove-artifact.sh's --pre-existing refusal reads.
 //

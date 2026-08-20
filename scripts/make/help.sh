@@ -80,7 +80,7 @@ function scan() {
 }
 
 function render() {
-    echo "memQL Makefile -- v${VERSION}"
+    echo "MemQL Makefile -- v${VERSION}"
     echo "Common: make up | make dev | make test | make vscode-install"
     scan render
 }

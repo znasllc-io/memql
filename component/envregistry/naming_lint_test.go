@@ -7,7 +7,7 @@ import (
 
 // knownExternalRegistryNames mirrors the envscan external denylist
 // (cmd/envscan/scan.go `external` + `externalPrefixes`): env keys that
-// are NOT memQL-owned configuration (CI / build / OS / runtime-platform).
+// are NOT MemQL-owned configuration (CI / build / OS / runtime-platform).
 // A registry entry whose name is external is exempt from the MEMQL_
 // prefix rule. Kept here (rather than imported) so this test in the
 // genesis package does not take a dependency on the envscan command.
@@ -55,7 +55,7 @@ func legacyAliasNames() map[string]bool {
 }
 
 // TestOwnedVarsArePrefixed is the Epic 7.3 (memql#2106) enforcement: every
-// memQL-owned registry entry name must start with MEMQL_. The only
+// MemQL-owned registry entry name must start with MEMQL_. The only
 // exemptions are (a) a registered legacy alias (a VALUE in LegacyAliases,
 // kept for back-compat and resolved by ApplyLegacyEnvAliases) and (b) a
 // known-external var (CI / build / OS / runtime-platform, the envscan
@@ -77,13 +77,13 @@ func TestOwnedVarsArePrefixed(t *testing.T) {
 			continue // deprecated alias, intentionally registered
 		}
 		if isExternalRegistryName(name) {
-			continue // CI / build / OS var, not memQL-owned
+			continue // CI / build / OS var, not MemQL-owned
 		}
 		violations = append(violations, name)
 	}
 
 	if len(violations) > 0 {
-		t.Fatalf("registry entries are memQL-owned but not MEMQL_-prefixed "+
+		t.Fatalf("registry entries are MemQL-owned but not MEMQL_-prefixed "+
 			"(and are neither a legacy alias nor an external var): %s\n"+
 			"Owned env vars must use the MEMQL_ convention (Epic 7.3 / memql#2106). "+
 			"If this is a legacy alias add it to LegacyAliases; if external, add it to "+

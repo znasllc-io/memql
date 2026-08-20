@@ -189,7 +189,7 @@ func TestNssToolsAlreadyPresentInstallsNothing(t *testing.T) {
 
 // Each distribution carries certutil in a differently-named package, and the
 // manager's non-interactive flags differ with it. Getting the pair wrong is an
-// install that stops on a machine memQL claimed to support.
+// install that stops on a machine MemQL claimed to support.
 func TestNssToolsInstallsTheRightPackagePerManager(t *testing.T) {
 	for _, tc := range []struct {
 		manager string

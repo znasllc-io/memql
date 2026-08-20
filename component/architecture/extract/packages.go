@@ -39,7 +39,7 @@ type ServicePlan struct {
 // Planning every module was harmless while the repo was one module. The module
 // split (epic memql#3228) made it wrong in two ways at once:
 //
-//   - MODELLING. memQL's root arch.yaml declares ONE service whose roots are
+//   - MODELLING. MemQL's root arch.yaml declares ONE service whose roots are
 //     `github.com/znasllc-io/memql/...` -- the whole workspace. Every nested
 //     module then ALSO became a service named `filepath.Base(moduleDir)`, so
 //     the cockpit's Topology tab grew 20 nodes that are Go modules rather than

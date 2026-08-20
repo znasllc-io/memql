@@ -59,7 +59,7 @@ func TestDeviceApprovalMarksASelfRegisteredClient(t *testing.T) {
 	// The impostor name matters: this is the shape the marker exists for --
 	// a plausible name an attacker picked, on a page asking someone to
 	// approve a sign-in they did not start.
-	s, token := deviceSelfRegisteredServer(t, "memQL for VS Code")
+	s, token := deviceSelfRegisteredServer(t, "MemQL for VS Code")
 
 	body := renderDeviceApproval(t, s, token)
 
@@ -86,7 +86,7 @@ func TestDeviceApprovalLeavesAnOperatorConfiguredClientUnmarked(t *testing.T) {
 
 	body := renderDeviceApproval(t, s, token)
 
-	if !strings.Contains(body, "memQL for VS Code") {
+	if !strings.Contains(body, "MemQL for VS Code") {
 		t.Fatalf("the harness's client name is not on the page, so this test is not "+
 			"measuring the case it names.\nbody: %.600s", body)
 	}

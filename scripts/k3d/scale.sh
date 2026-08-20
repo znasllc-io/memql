@@ -3,7 +3,7 @@
 # scripts/k3d/scale.sh
 # ====================
 #
-# Capability: k3d.scale -- scale all memQL app Deployments to a target replica
+# Capability: k3d.scale -- scale all MemQL app Deployments to a target replica
 # count.
 #
 # Why not use ArgoCD for this?
@@ -19,7 +19,7 @@
 # ONE namespace (epic memql#3943)
 # --------------------------------
 # This took an `--env` naming which of two namespaces to scale, back when one
-# cluster carried two environments. memQL ships one installation shape: the
+# cluster carried two environments. MemQL ships one installation shape: the
 # namespace is `memql`, and a cluster whose namespace is named something else
 # passes --namespace. MEMQL_K3D_NAMESPACE is honoured as the default because it
 # is the knob `make up` itself uses to decide what to create.
@@ -45,7 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/capability.sh
 source "${SCRIPT_DIR}/../lib/capability.sh"
 
-cap_init "k3d.scale" "Scale all memQL app Deployments to a target replica count."
+cap_init "k3d.scale" "Scale all MemQL app Deployments to a target replica count."
 cap_spec_param "replicas"  "replica count per Deployment (0 parks the cluster)"
 cap_spec_param "cluster"   "k3d cluster name"
 cap_spec_param "namespace" "k8s namespace (default: memql, or MEMQL_K3D_NAMESPACE)"

@@ -315,13 +315,13 @@ test("run -- refuses when disconnected, naming the cluster", async () => {
 
 test("run -- a mutation against a NON-LOCAL cluster prompts once, naming both", async () => {
   const h = harness();
-  h.setCluster({ name: "staging", label: "memQL Staging", local: false });
+  h.setCluster({ name: "staging", label: "MemQL Staging", local: false });
   const mutation = target({ kind: "mutate", name: "createSpace", args: [] });
 
   await h.orchestrator.run(mutation, {});
   assert.equal(h.confirmations.length, 1);
   assert.match(h.confirmations[0] ?? "", /createSpace/);
-  assert.match(h.confirmations[0] ?? "", /memQL Staging/);
+  assert.match(h.confirmations[0] ?? "", /MemQL Staging/);
 
   await h.orchestrator.run(mutation, {});
   assert.equal(h.confirmations.length, 1, "the second run of the same mutation must not re-prompt");

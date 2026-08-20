@@ -12,7 +12,7 @@ references it, and no root-level Bazel files are committed to `main`.
 ```bash
 git switch -c spike/bazel
 bash scripts/bazel-spike/bootstrap.sh
-# iterate per the "memQL-specific hard parts" in the plan doc
+# iterate per the "MemQL-specific hard parts" in the plan doc
 ```
 
 Goal of the spike: a green `bazel test //...` plus a demonstrated

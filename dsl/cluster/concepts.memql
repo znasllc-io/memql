@@ -3,7 +3,7 @@
 // holds every construct of that kind in the domain. The companion
 // files cover the other construct kinds.
 
-/// A memQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
+/// A MemQL cluster -- the top-level deployment unit consisting of a shared database and seed nodes
 /// (bff, cognition, planner). Partitions exist within a cluster for data isolation.
 @displayCard(primary="name", secondary="provider", tertiary="region", status="status")
 concept cluster {
@@ -13,7 +13,7 @@ concept cluster {
   status            enum("bootstrapping", "healthy", "degraded", "shutting_down")  @default("bootstrapping") @description("Current cluster health status.")
   databaseId        string  @description("Node ID of the v1:cluster:database record for this cluster's database.")
   identityProviderId  string  @description("Node ID of the v1:cluster:identityProvider record.")
-  version           string  @description("memQL version running on this cluster.")
+  version           string  @description("MemQL version running on this cluster.")
   provider          string  @description("Cloud provider / deploy target backing this cluster: 'docker-local' (local Docker) or 'azure' (AKS). Empty until stamped by the deploy driver (#1872).")
 
   @relationship(type="owns", field="databaseId", target=database, direction="outgoing")
@@ -22,7 +22,7 @@ concept cluster {
 
 // ---- concepts/v1/cluster/database/concept.memql ----
 
-/// A PostgreSQL database instance backing a memQL cluster. Tracks connection info, engine version,
+/// A PostgreSQL database instance backing a MemQL cluster. Tracks connection info, engine version,
 /// and installed extensions.
 @displayCard(primary="dbName", secondary="engine", tertiary="host", status="status")
 concept database {
@@ -42,11 +42,11 @@ concept database {
 
 // ---- concepts/v1/cluster/identityProvider/concept.memql ----
 
-/// An identity provider used for authentication and user management in a memQL cluster. Typically
+/// An identity provider used for authentication and user management in a MemQL cluster. Typically
 /// the in-house identity service (component/identity), surfaced for cluster-topology dashboards.
 @displayCard(primary="name", secondary="providerType", tertiary="issuerUrl", status="status")
 concept identityProvider {
-  name              string! @description("Provider name (e.g., 'memQL Identity').")
+  name              string! @description("Provider name (e.g., 'MemQL Identity').")
   providerType      enum("oidc", "saml", "ldap")! @default("oidc") @description("Authentication protocol.")
   issuerUrl         string! @description("Token issuer URL (e.g., 'https://auth.example.com/').")
   clientIdPrefix    string  @description("First 8 characters of the OAuth client ID (non-secret, for identification). Empty for the in-house identity service.")
@@ -60,7 +60,7 @@ concept identityProvider {
   @relationship(type="parent", field="clusterId", target=cluster, direction="outgoing")
 }
 
-/// A registered node in the memQL cluster. The record is written on registration and updated on
+/// A registered node in the MemQL cluster. The record is written on registration and updated on
 /// every liveness transition (connecting, healthy, degraded, draining, offline, stopped). States
 /// mirror the NodeHealthStatus enum defined in component/node/node.proto -- that proto is the
 /// source of truth.

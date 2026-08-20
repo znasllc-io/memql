@@ -33,7 +33,7 @@ holds. See [section 8](#8-verdict).
 > ~1-1.5s round-trip epic #475 is trying to delete. This spike redesigns the
 > gate so the WHEN/brevity decision is decoupled from the WHAT (the reply),
 > and validates that the WHEN decision alone can be cheap enough to stay off
-> the generation critical path. #432 proved memQL *can* gate the model; #477
+> the generation critical path. #432 proved MemQL *can* gate the model; #477
 > proves the gate can be *fast*.
 
 ---
@@ -112,7 +112,7 @@ What the gate must **NOT** do:
   brain"). The gate never produces `response`-shaped text; it produces a
   *mode + brevity directive* the model conditions on.
 - It must not add a serial LLM call in front of `response.create` on the common
-  case. The whole point is that engage/defer is decidable from signals memQL
+  case. The whole point is that engage/defer is decidable from signals MemQL
   already has by the time the final transcript lands.
 
 This is the same engage/defer/brevity vocabulary the existing
@@ -235,7 +235,7 @@ The Polyphon scorer's whole job (`scoreAgent`, six factors, `scoring.go:154`)
 already runs per voice turn today (`cognitionScore`, `capabilities.go:24`) and
 is the input to the deterministic direct-address override. Its cost is
 in-process arithmetic over a handful of candidate agents -- **sub-millisecond**
-in aggregate. The gate is, in the common case, *a reordering of work memQL is
+in aggregate. The gate is, in the common case, *a reordering of work MemQL is
 already doing,* not new work. The sub-50ms target is met by roughly three
 orders of magnitude; the sub-10ms reach is met by two-plus.
 
@@ -526,7 +526,7 @@ conductor round-trip in the generation path" (epic #475 acceptance).
 | Term                                  | Current path        | Target gate path                     |
 |---------------------------------------|---------------------|--------------------------------------|
 | Gate / authoring (decision)           | ~1000-1500ms (LLM authoring) | <1ms heuristic; <=1 cached small classifier call on the residue, parallelized |
-| memQL -> executor push                | tens of ms          | tens of ms (unchanged seam)          |
+| MemQL -> executor push                | tens of ms          | tens of ms (unchanged seam)          |
 | Model TTFB (first audio)              | ~170ms (re-voicing) | ~170ms (native generation)           |
 | **Decision -> first audio (headline)**| **~1.2-1.7s**       | **~0.17s + push (dominated by model)** |
 
@@ -622,7 +622,7 @@ gaps):**
    single-agent saving), but the live number waits on a credentialed room
    (section 7.3). The mitigations are all knobs already in the tree.
 
-**No NO-GO findings.** Nothing surfaced a signal memQL lacks, a place the full
+**No NO-GO findings.** Nothing surfaced a signal MemQL lacks, a place the full
 conductor LLM must serialize in front of generation, or a multi-party need that
 forces a second stack. The single net-new piece (the directive renderer) is a
 small string builder; everything else is reordering work the handler already

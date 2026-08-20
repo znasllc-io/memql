@@ -21,7 +21,7 @@ import (
 // slug when persisting a v1:identity:identity row.
 const canonicalIdentityIdPrefix = "v1:identity:identity:"
 
-// Store wraps the memQL engine with typed PAT operations: Create,
+// Store wraps the MemQL engine with typed PAT operations: Create,
 // Revoke, Lookup, BumpLastUsed, ListForUser. Mirrors the existing
 // identity.Store pattern -- thin wrappers around mutations / queries
 // that parse the returned graph bundles into typed Go structs.

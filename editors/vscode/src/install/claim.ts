@@ -1,6 +1,6 @@
 // Claiming a cluster: the magic link, host side (znasllc-io/memql#3884).
 //
-// WHAT WAS MISSING. A memQL cluster is claimed by its FIRST SIGN-IN -- that
+// WHAT WAS MISSING. A MemQL cluster is claimed by its FIRST SIGN-IN -- that
 // sign-in is what creates the owner account. The install's `magicLink` step
 // recovers the owner's link out of the identity workload's log and returns it
 // on `result.link`, and until this module existed NOTHING READ IT. The only

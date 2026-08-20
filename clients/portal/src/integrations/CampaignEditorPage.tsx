@@ -177,7 +177,7 @@ export function CampaignEditorPage(): ReactNode {
             grow
             hint="Overrides the integration-wide default for this campaign. The from ADDRESS is bound to the configured mailbox and is not settable here."
           >
-            <TextInput value={fromName} onChange={setFromName} placeholder="The memQL team" />
+            <TextInput value={fromName} onChange={setFromName} placeholder="The MemQL team" />
           </Field>
           <Field label="Reply-to" grow hint="Empty sends replies to the configured sender address.">
             <TextInput value={replyTo} onChange={setReplyTo} placeholder="hello@example.com" />

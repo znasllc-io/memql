@@ -9,7 +9,7 @@ owner: znas
 
 # Site hosting
 
-A memQL cluster hosts a site the same way it hosts everything else: as a
+A MemQL cluster hosts a site the same way it hosts everything else: as a
 graph row. This page is the runbook for going from a built application to a
 working, rollback-able site at its own hostname on the cluster's front
 door -- what a build has to emit, how to publish and roll one back, and
@@ -21,7 +21,7 @@ on. This page does not restate it.
 
 Related: [The cluster front door](front-door.md) ·
 [Connected -- a site that stays where it is](connected-integration.md) ·
-[memQL Portal](portal.md) ·
+[MemQL Portal](portal.md) ·
 [Service-account JWTs](auth/service-account-jwt.md)
 
 ---
@@ -59,13 +59,13 @@ Naming these explicitly matters more than the abstract rule: someone will
 reach for one of them, and finding out at deploy time -- a build that
 "succeeds" and then serves broken routes, or an adapter that expects a Node
 process nothing here provides -- is worse than reading it here first. (A
-site built with one of these is not locked out of memQL entirely; see
+site built with one of these is not locked out of MemQL entirely; see
 [The escape hatch](#the-escape-hatch-a-site-that-genuinely-needs-ssr) below.)
 
-### You are not losing a server. The server is memQL.
+### You are not losing a server. The server is MemQL.
 
 The instinct is that "static only" means giving up a backend. It does not --
-it means the backend moves. A Next.js API route becomes a memQL integration
+it means the backend moves. A Next.js API route becomes a MemQL integration
 plus DSL: a language change, not a capability loss (see "Extension Points"
 in the top-level `CLAUDE.md`). Data a server-rendered route would have
 fetched and stamped into HTML instead lands in the graph -- via
@@ -92,10 +92,10 @@ three layers, each answering a different question:
    as the last build, no fresher.
 2. **Hydrate from the graph** -- once the bundle's own JS runs, it reads
    current values same-origin through `/_memql/*` and replaces whatever the
-   build guessed. This is memQL's own data: price, stock, whatever your
+   build guessed. This is MemQL's own data: price, stock, whatever your
    inbound automations keep current in the graph.
 3. **Live vendor calls from the browser** -- for the parts that must stay
-   the vendor's, not memQL's (a Shopify cart, a hosted checkout redirect),
+   the vendor's, not MemQL's (a Shopify cart, a hosted checkout redirect),
    the browser talks to the vendor directly, exactly as it would from any
    other frontend.
 
@@ -132,8 +132,8 @@ researched for this page:
 | Cart create / add / update | No | The Cart API is client-side |
 | **Checkout** | **No** | `cart.checkoutUrl` redirects to Shopify's own HOSTED checkout page; the old Checkout API was shut off 2025-04-01 |
 | Customer accounts | No | The Customer Account API supports public OAuth PKCE clients -- built for SPAs |
-| Inbound events reaching memQL (orders, inventory) | Yes | `POST /inbound/{source}` -- see [inbound-delivery.md](inbound-delivery.md) |
-| Admin / private-token operations | Yes | A memQL integration; the private token never reaches a browser |
+| Inbound events reaching MemQL (orders, inventory) | Yes | `POST /inbound/{source}` -- see [inbound-delivery.md](inbound-delivery.md) |
+| Admin / private-token operations | Yes | A MemQL integration; the private token never reaches a browser |
 
 **Payments and PCI are Shopify's**, not this platform's and not the site's --
 that is the fact that makes static-only viable for commerce at all. A
@@ -471,7 +471,7 @@ build.
 
 A site's `apiProxy` flag mounts `/_memql/*` on the site's own origin,
 reverse-proxied to the bff (`component/edge/proxy.go`). Turn it on for any
-site whose bundle calls back into memQL -- which, per
+site whose bundle calls back into MemQL -- which, per
 [the contract](#the-contract-a-build-is-a-directory-of-static-files) above,
 is essentially every site hosting more than pure marketing copy.
 
@@ -513,7 +513,7 @@ site has no client to present."
 ## Live data in a hosted site
 
 The reactive path is not hosted-only, and it is not a new mechanism to
-learn: memQL carries structured CDC subscriptions on the same wire every
+learn: MemQL carries structured CDC subscriptions on the same wire every
 query and mutation rides.
 
 The TS SDK exposes it as `subscriptions.subscribeGraph(handler, { concept,
@@ -634,7 +634,7 @@ as the only option is what turns a real constraint into a resented one.
 A site that genuinely needs server-side rendering -- true per-request
 personalization, something with no static shape at all -- can be hosted
 somewhere that runs Node (Vercel, Cloudflare, anywhere) and still use
-memQL as its data plane, dialing `api.<domain>` exactly as any other
+MemQL as its data plane, dialing `api.<domain>` exactly as any other
 cross-origin client does. See
 [Connected -- a site that stays where it is](connected-integration.md) for
 the full setup: a typed client generated from the cluster's DSL, an OAuth
@@ -668,7 +668,7 @@ for the shape it would take (HTTP-01 only, a pending/verifying state
 machine on the site row, and either cert-manager objects per domain or SNI
 passthrough in the edge) and why it was not needed under this design's
 core decision: a customer's cluster is already on the customer's own
-domain (D1 -- one memQL cluster per customer). If a cluster ever needs a
+domain (D1 -- one MemQL cluster per customer). If a cluster ever needs a
 second domain, that is a cluster configuration change at install -- the
 same lever `MEMQL_DOMAIN` already is -- not a row a site's owner sets.
 

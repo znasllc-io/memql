@@ -1,11 +1,11 @@
-# The memQL cluster (epic memql#3943).
+# The MemQL cluster (epic memql#3943).
 #
 # One cluster, one ArgoCD, one repository, one base, ONE Application. It
 # reconciles deploy/k8s/overlays/cloud into namespace `memql`.
 #
 # WHAT CHANGED. This was `memql-prod`, one of two Applications reconciling two
 # overlays into two namespaces, with the second (`memql-staging`) alongside it.
-# memQL ships ONE installation shape: an operator who wants a second environment
+# MemQL ships ONE installation shape: an operator who wants a second environment
 # installs a second instance, with its own cluster or at least its own ArgoCD
 # and its own domain. Both the second Application and the schema-search-path
 # boundary that separated the two namespaces' data are gone; there is one

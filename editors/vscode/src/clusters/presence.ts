@@ -1,4 +1,4 @@
-// Whether this machine already HAS a local memQL cluster, and whether it answers.
+// Whether this machine already HAS a local MemQL cluster, and whether it answers.
 //
 // The "+" button in the Clusters view used to mean exactly one thing: register
 // a remote cluster. It could not tell an operator who has no cluster at all
@@ -473,7 +473,7 @@ export interface AddClusterChoice {
 const RECONNECT: AddClusterChoice = {
   action: "reconnect",
   label: "Connect to the local cluster",
-  detail: "It is already on this machine. memQL uses what the install recorded -- nothing to type.",
+  detail: "It is already on this machine. MemQL uses what the install recorded -- nothing to type.",
 };
 
 const CONNECT: AddClusterChoice = {
@@ -518,7 +518,7 @@ export function addClusterMenu(
         {
           action: "install",
           label: "Install a local cluster",
-          detail: "Recommended. Build a local memQL cluster on this machine.",
+          detail: "Recommended. Build a local MemQL cluster on this machine.",
         },
         {
           action: "installGuided",

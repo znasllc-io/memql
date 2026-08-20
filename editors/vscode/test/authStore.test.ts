@@ -90,7 +90,7 @@ function tokens(overrides: Partial<Parameters<typeof persistSignIn>[2]> = {}) {
 test("a sign-in puts the refresh token in SecretStorage and the access token in the file", async () => {
   // The divergence from the issue's literal wording, asserted so it cannot be
   // undone by accident: the ACCESS token stays in clusters.yaml because that
-  // file is shared with the memQL Cockpit, which must see a credential. Only
+  // file is shared with the MemQL Cockpit, which must see a credential. Only
   // the thirty-day refresh token is a secret this extension keeps to itself.
   const secrets = new FakeSecrets();
   const written: ClusterUpdate[] = [];

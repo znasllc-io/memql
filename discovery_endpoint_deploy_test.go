@@ -35,7 +35,7 @@ const discoveryEndpointEnvVar = "MEMQL_DISCOVERY_GRPC_ENDPOINT"
 // client parser accepts: a bare host with an explicit port. No scheme, no path.
 var dialAddressRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-]*:[0-9]+$`)
 
-// frontDoorPrefix names the ONE host in a memQL deployment whose ingress carries
+// frontDoorPrefix names the ONE host in a MemQL deployment whose ingress carries
 // gRPC to the bff. identity.<domain> serves HTTP only; bff.<domain> is not a
 // host any overlay creates. Pinning the prefix is what makes this test catch the
 // original defect rather than merely its spelling.

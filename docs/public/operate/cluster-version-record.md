@@ -11,7 +11,7 @@ owner: znas
 
 `clusters.yaml` carries a `version` key per cluster: the release that
 cluster is believed to be running. This page is the contract for that
-key, because the file is shared -- the VS Code extension and the memQL
+key, because the file is shared -- the VS Code extension and the MemQL
 Cockpit both read and write it, and a key one of them does not model is
 at risk on the other's next write.
 
@@ -27,7 +27,7 @@ at risk on the other's next write.
   step is gone: the release now goes into the binary via the linker and
   nowhere else, and neither runtime stage copies a `VERSION` file.
 
-memQL engine releases now stamp a real version into the binary and
+MemQL engine releases now stamp a real version into the binary and
 introduce it on an additive `ServerHello.engine_version` field. That
 fixes the problem going forward and **cannot reach backwards**: it
 cannot teach an already-installed v0.18.0 to introduce itself, and

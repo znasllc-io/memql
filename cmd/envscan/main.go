@@ -132,7 +132,7 @@ func reportUnresolvable(w io.Writer, sites []scan.Unresolvable) {
 	}
 }
 
-// reportExempt writes the pre-convention exemption block: memQL-owned keys
+// reportExempt writes the pre-convention exemption block: MemQL-owned keys
 // this scan READ that the registry cannot yet name, because
 // TestOwnedVarsArePrefixed refuses a non-MEMQL_-prefixed entry and none of them
 // is a legacy alias (see scan.ownedPreConvention).
@@ -144,7 +144,7 @@ func reportExempt(w io.Writer, keys []string) {
 	if len(keys) == 0 {
 		return
 	}
-	fmt.Fprintf(w, "WARNING: %d memQL-owned key(s) are READ but NOT REGISTERED, exempted from forward "+
+	fmt.Fprintf(w, "WARNING: %d MemQL-owned key(s) are READ but NOT REGISTERED, exempted from forward "+
 		"drift only because they predate the MEMQL_ prefix convention and a non-prefixed registry "+
 		"entry fails TestOwnedVarsArePrefixed (memql#2106). They need renaming, not tolerating:\n",
 		len(keys))

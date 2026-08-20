@@ -74,7 +74,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # `portal` names the Dockerfile stage the runtime copies the memQL
+        # `portal` names the Dockerfile stage the runtime copies the MemQL
         # Portal bundle from (memql#3314). The portal is site #1, served by
         # the edge (component/edge, memql#3711) -- component/portal, which
         # used to serve it from the bff, is retired. Every entry here takes

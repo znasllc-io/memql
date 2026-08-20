@@ -18,7 +18,7 @@ import (
 //
 // # The defect
 //
-// Go's %q and the memQL lexer do not agree on the escape set, and the
+// Go's %q and the MemQL lexer do not agree on the escape set, and the
 // disagreement is a hard error rather than a fallback. readString implements
 // the JSON escapes and only those -- `" \ / b f n r t u` -- and returns
 // `invalid escape character` for anything else. %q emits Go's set, which
@@ -148,7 +148,7 @@ func TestDSLCallStringsDoNotUseGoQuoting(t *testing.T) {
 	}
 	sort.Strings(findings)
 	t.Errorf("Go's %%q escape grammar reached %d MemQL statement site(s).\n\n"+
-		"%%q emits \\x00, \\a, \\v and \\xNN. The memQL lexer implements the JSON escapes\n"+
+		"%%q emits \\x00, \\a, \\v and \\xNN. The MemQL lexer implements the JSON escapes\n"+
 		"and rejects all of those, so ONE control byte or invalid UTF-8 byte in the value\n"+
 		"makes the whole statement unparseable -- the write does not happen, and nothing\n"+
 		"reports that it did not.\n\n"+

@@ -43,7 +43,7 @@ const defaultSiteCacheTTL = 30 * time.Second
 // serves that site's bundle -- the edge's whole job. Mounted at the ROOT of
 // the node's HTTP server ("/", not a shared prefix like the bff's mounts
 // use): every hosted site owns its own Host, and the path space beneath it
-// belongs to the SITE, not to memQL, except for the /_memql/* prefix the
+// belongs to the SITE, not to MemQL, except for the /_memql/* prefix the
 // handler itself reserves (D9; the reverse proxy that fills it in is Task 7,
 // #3712). The portal is one of those hosted sites -- site #1, memql#3711 --
 // with no mount of its own to except.

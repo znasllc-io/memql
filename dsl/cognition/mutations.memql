@@ -218,7 +218,7 @@ mutate session createSessionForParticipant {
 // (purgeExpiredArchivedSpaces) when an archived space hits its
 // retention deadline.
 //
-// memQL is append-only -- the historical rows still exist in the
+// MemQL is append-only -- the historical rows still exist in the
 // time-series table; downstream queries filter on isNotDeleted
 // so the row disappears from every list.
 //
@@ -333,7 +333,7 @@ mutate chunk emitTextChunk {
 // NOT canonicalId()'d: it carries a v1:cognition:space id whose concept
 // is PACK-OWNED and unknown to the engine, so the caller must pass it in
 // one consistent shape (bare post-#2441). Repeat joins with the same
-// inputs land on the SAME participant id; memQL stores them as
+// inputs land on the SAME participant id; MemQL stores them as
 // time-series versions of one logical row, and the latest-version dedup
 // at query time keeps the UI from rendering doubles.
 //
@@ -386,7 +386,7 @@ mutate participant joinSpaceAsHuman {
 // partitionId) -- both args go through canonicalId() before being
 // concatenated. The id is invariant whether the caller passes bare
 // slugs or already-canonical ids; repeat joins land on the SAME
-// participant id (memQL versions, no duplicate rows).
+// participant id (MemQL versions, no duplicate rows).
 //
 // Without canonicalId(), an automation passing bare slugs and a
 // browser passing canonical ids would derive different participant
@@ -587,7 +587,7 @@ mutate utterance sendActionUtterance {
     // which makes the id injective by CONSTRUCTION rather than by
     // constraining what a caller may send. No separator, nothing to alias on.
     //
-    // This re-keys existing utt- ids, deliberately: memQL is pre-release and
+    // This re-keys existing utt- ids, deliberately: MemQL is pre-release and
     // CLAUDE.md forbids migration shims.
     id: coalesce(
       args.utteranceId,
@@ -773,7 +773,7 @@ mutate utterance sendTextUtterance {
 //
 // IDEMPOTENCY:
 // The id is the deterministic audioOverride:hash(partitionId:agentId)
-// so re-toggling the same orb hits the SAME row -- memQL stores the
+// so re-toggling the same orb hits the SAME row -- MemQL stores the
 // versions as a time-series and the latest wins at read time. No
 // per-click row growth.
 //
@@ -828,7 +828,7 @@ mutate audioOverride setAgentAudioOverride {
 //
 // IDEMPOTENCY:
 // The id is the deterministic videoOverride:hash(partitionId:agentId)
-// so re-toggling the same orb hits the SAME row -- memQL stores the
+// so re-toggling the same orb hits the SAME row -- MemQL stores the
 // versions as a time-series and the latest wins at read time. No
 // per-click row growth.
 //

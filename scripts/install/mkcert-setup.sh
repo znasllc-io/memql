@@ -19,7 +19,7 @@
 # may be signing certificates for half a dozen other local stacks the operator
 # depends on, so this script NEVER regenerates one: when $CAROOT/rootCA.pem is
 # present it reports caPreExisting=true / caInstalled=false and the file's
-# bytes are the same afterwards. Installing memQL must never be the reason
+# bytes are the same afterwards. Installing MemQL must never be the reason
 # someone's other local projects start failing TLS.
 #
 # WHAT THAT RESTRAINT USED TO ALSO COVER, WRONGLY (memql#3560). It used to mean
@@ -117,7 +117,7 @@ readonly DEFAULT_HOSTNAMES="$MEMQL_LOCAL_TLS_HOSTNAMES"
 readonly CONFIRM_INSTALL_CA="install-memql-ca"
 
 # The provenance marker, beside the key material it describes. Shared with
-# remove-artifact.sh, which reads it to decide whether the CA is memQL's to
+# remove-artifact.sh, which reads it to decide whether the CA is MemQL's to
 # take (memql#3576).
 readonly MEMQL_CA_MARKER=".memql-created"
 
@@ -133,9 +133,9 @@ readonly MEMQL_CA_MARKER=".memql-created"
 # receipt cannot give one: a receipt records ONE pre-existence verdict per step,
 # and localCA's is `result.caPreExisting` -- a fact about the CA, in another
 # directory, whose answer differs from the pair's in BOTH directions. An
-# operator can hold a CA of their own while memQL issues the pair, and can hold
+# operator can hold a CA of their own while MemQL issues the pair, and can hold
 # a pair of their own (a plain `make up` issues into the very same
-# ~/.memql/certs) while memQL creates the CA.
+# ~/.memql/certs) while MemQL creates the CA.
 #
 # So the pair gets its own marker, for the reasons memql#3576 gave the CA one:
 # it is written by the run that issued, it is a fact about the artifact so it is
@@ -316,7 +316,7 @@ function ensure_ca_trusted() {
 
     # mkcert SHELLS OUT TO SUDO for the trust-store write, and sudo with no
     # terminal reads the password from $SUDO_ASKPASS. Exporting that variable is
-    # the entire integration -- memQL does not wrap, re-implement or elevate
+    # the entire integration -- MemQL does not wrap, re-implement or elevate
     # mkcert, it gives mkcert's own sudo a way to ask (memql#3562).
     #
     # NOT `sudo mkcert -install`, which would be the obvious thing and is wrong:
@@ -443,7 +443,7 @@ function mark_pair_as_ours() {
     local marker
     marker="$(dirname "$1")/${MEMQL_PAIR_MARKER}"
     [[ -f "$marker" ]] && return 0
-    printf 'memQL issued the front-door certificate and key beside this file.\nRemoving this file makes an uninstall leave them in place.\n' > "$marker" || true
+    printf 'MemQL issued the front-door certificate and key beside this file.\nRemoving this file makes an uninstall leave them in place.\n' > "$marker" || true
 }
 
 #=============================================================================
@@ -507,7 +507,7 @@ function main() {
     #
     # A marker beside the key material has none of that. It is written by the
     # run that creates the CA, it survives every receipt, and it disappears with
-    # the CA it describes. The question "did memQL create this" is a fact about
+    # the CA it describes. The question "did MemQL create this" is a fact about
     # the artifact, so it is stored with the artifact.
     # TWO DIFFERENT QUESTIONS, and conflating them made a re-run claim it had
     # installed a CA that was already there:
@@ -517,17 +517,17 @@ function main() {
     #   ca_pre_existing -- was it here before MEMQL ever touched this machine?
     #                      decides whether an uninstall may take it.
     #
-    # A CA memQL created on an earlier run is on disk (so this run installs
+    # A CA MemQL created on an earlier run is on disk (so this run installs
     # nothing) and NOT pre-existing (so it is still ours to remove).
     local ca_on_disk=false ca_pre_existing=false ca_installed=false
     if [[ -f "${caroot}/rootCA.pem" ]]; then
         ca_on_disk=true
         if [[ -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
-            cap_info "root CA at ${caroot} was created by memQL -- reusing it."
+            cap_info "root CA at ${caroot} was created by MemQL -- reusing it."
         else
             ca_pre_existing=true
             cap_info "root CA already present at ${caroot}/rootCA.pem -- it will not be regenerated."
-            cap_info "  (no ${MEMQL_CA_MARKER}: memQL did not create it, so an uninstall will leave it)"
+            cap_info "  (no ${MEMQL_CA_MARKER}: MemQL did not create it, so an uninstall will leave it)"
         fi
     else
         cap_confirm_or_die "$confirm" "$CONFIRM_INSTALL_CA"
@@ -547,7 +547,7 @@ function main() {
         # Stamped AFTER the CA exists, so a run that died creating one leaves no
         # claim on a CA it did not finish making.
         if [[ -f "${caroot}/rootCA.pem" && ! -f "${caroot}/${MEMQL_CA_MARKER}" ]]; then
-            printf 'memQL created this certificate authority. Removing this file makes an\nuninstall leave the CA in place.\n' > "${caroot}/${MEMQL_CA_MARKER}" || true
+            printf 'MemQL created this certificate authority. Removing this file makes an\nuninstall leave the CA in place.\n' > "${caroot}/${MEMQL_CA_MARKER}" || true
         fi
     fi
 
@@ -556,7 +556,7 @@ function main() {
     # coverage_before is: after issue_cert the answer is yes either way
     # (memql#4071).
     #
-    # EITHER file counts, not both. This decides whether memQL may later delete
+    # EITHER file counts, not both. This decides whether MemQL may later delete
     # key material, so the conservative reading is the right one: a directory
     # holding half a pair is a directory somebody else was using, and issuing
     # over it does not make what was there ours.
