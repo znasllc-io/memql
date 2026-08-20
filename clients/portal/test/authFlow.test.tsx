@@ -142,6 +142,41 @@ describe("route protection", () => {
     expect(screen.queryByRole("button", { name: /Continue with/ })).toBeNull();
   });
 
+  it("reloads / via same-origin /auth/refresh and does not auto-start PKCE", async () => {
+    // After a successful exchange the refresh cookie is host-only on
+    // portal.* -- the next load of / must probe same-origin /auth/refresh
+    // (empty identityApiBaseUrl), and autoStartAuthorize stays false when
+    // that probe returns a token (memql#4154).
+    const navigated: string[] = [];
+    const refreshUrls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.includes("runtime-config")) {
+        return jsonResponse({
+          identityUrl: "https://identity.memql.localhost",
+          identityApiBaseUrl: "",
+          oauthClientId: "portal",
+          authEnabled: true,
+        });
+      }
+      if (path.includes("/auth/refresh")) {
+        refreshUrls.push(path);
+        return jsonResponse({ access_token: "AT-1", expires_in: 900 });
+      }
+      throw new Error(`unexpected fetch ${path}`);
+    });
+    renderPortal({
+      path: "/",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      navigate: (url) => navigated.push(url),
+    });
+    await waitFor(() => expect(screen.getByText("Concepts")).toBeTruthy());
+    expect(refreshUrls).toEqual(["/auth/refresh"]);
+    expect(navigated).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /Continue with/ })).toBeNull();
+  });
+
   it("renders the shell, and says so, on a cluster with auth disabled", async () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error("no identity call should be made when auth is disabled");
@@ -380,6 +415,132 @@ describe("the callback", () => {
     expect(exchange.client_id).toBe("portal");
     expect(exchange.redirect_uri).toBe(REDIRECT_URI);
     expect(storage.map.size).toBe(0);
+  });
+
+  it("shows a portal error and does not POST /oauth/token when the callback has no code or state (memql#4154 F)", async () => {
+    // Acceptance F: a bare /auth/callback (magic-link dest with no OAuth
+    // params, a bookmark, a scrubbed reload) must not invent a token request.
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("/oauth/token")) {
+        throw new Error("token exchange must not run without code and state");
+      }
+      return unauthenticated();
+    });
+    renderPortal({ path: "/auth/callback", fetchImpl });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /missing its authorization code/,
+      ),
+    );
+    const exchanges = fetchImpl.mock.calls.filter((call) =>
+      String((call as unknown[])[0]).includes("/oauth/token"),
+    );
+    expect(exchanges).toHaveLength(0);
+  });
+
+  it("refuses a callback with no pending PKCE rather than posting the code", async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes("/oauth/token")) {
+        throw new Error("must not exchange without pending PKCE");
+      }
+      return unauthenticated();
+    });
+    renderPortal({
+      path: "/auth/callback?code=AUTH-CODE&state=STATE-1",
+      fetchImpl,
+      storage: memoryStorage(),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /could not be matched|different browser|Start again/,
+      ),
+    );
+    const exchanges = fetchImpl.mock.calls.filter((call) =>
+      String((call as unknown[])[0]).includes("/oauth/token"),
+    );
+    expect(exchanges).toHaveLength(0);
+  });
+
+  it("surfaces a misconfigured cluster on the callback and never POSTs /oauth/token", async () => {
+    // Config "never arrives" as a usable identityUrl + oauthClientId:
+    // AuthProvider settles misconfigured; the callback must not POST.
+    const storage = memoryStorage();
+    storage.setItem(
+      "memql-portal-pending-auth",
+      JSON.stringify({
+        state: "STATE-1",
+        verifier: "VERIFIER-1",
+        returnTo: DEEP_LINK,
+        createdAt: Date.now(),
+      }),
+    );
+    const tokenBodies: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("runtime-config")) {
+        return jsonResponse({
+          identityUrl: "https://identity.memql.localhost",
+          identityApiBaseUrl: "",
+          oauthClientId: "",
+          authEnabled: true,
+        });
+      }
+      if (path.includes("/oauth/token")) {
+        tokenBodies.push(String(init?.body ?? ""));
+        return jsonResponse({ access_token: "AT-1", expires_in: 900 });
+      }
+      return unauthenticated();
+    });
+    renderPortal({
+      path: "/auth/callback?code=AUTH-CODE&state=STATE-1",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      storage,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /not configured|published no identity|OAuth client id/,
+      ),
+    );
+    expect(tokenBodies).toHaveLength(0);
+  });
+
+  it("does not POST /oauth/token when runtime-config.json never arrives", async () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      "memql-portal-pending-auth",
+      JSON.stringify({
+        state: "STATE-1",
+        verifier: "VERIFIER-1",
+        returnTo: DEEP_LINK,
+        createdAt: Date.now(),
+      }),
+    );
+    const fetchImpl = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path.includes("runtime-config")) {
+        return jsonResponse({}, 404);
+      }
+      if (path.includes("/oauth/token")) {
+        throw new Error("token exchange must not run without a runtime config");
+      }
+      return unauthenticated();
+    });
+    renderPortal({
+      path: "/auth/callback?code=AUTH-CODE&state=STATE-1",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      storage,
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toMatch(
+        /runtime-config|not configured|serving this bundle/,
+      ),
+    );
+    const exchanges = fetchImpl.mock.calls.filter((call) =>
+      String((call as unknown[])[0]).includes("/oauth/token"),
+    );
+    expect(exchanges).toHaveLength(0);
   });
 });
 
