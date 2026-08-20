@@ -62,8 +62,16 @@ test("the inline mark is the activity-bar asset's geometry", () => {
 });
 
 test("the header and strip escape their titles", () => {
-  assert.doesNotMatch(brandHeader('<img src=x onerror=1>'), /<img/);
-  assert.doesNotMatch(brandStrip('<script>'), /<script>/);
+  // String assertions, not tag-shaped regexes (CodeQL js/bad-tag-filter): the
+  // claim is that the EXACT fixture text cannot survive unescaped and its
+  // escaped form is what renders -- both directions, so the test cannot pass
+  // vacuously against an empty string.
+  const header = brandHeader("<img src=x onerror=1>");
+  assert.ok(!header.includes("<img"), "the raw tag must not survive into the header");
+  assert.ok(header.includes("&lt;img src=x onerror=1&gt;"), "the escaped title must render");
+  const strip = brandStrip("</span><script>alert(1)</script>");
+  assert.ok(!strip.includes("<script>"), "the raw tag must not survive into the strip");
+  assert.ok(strip.includes("&lt;script&gt;"), "the escaped title must render");
 });
 
 test("no panel or tree hardcodes a palette hex outside the token module", () => {

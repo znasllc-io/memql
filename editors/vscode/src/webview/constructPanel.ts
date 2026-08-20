@@ -36,7 +36,7 @@ import * as vscode from "vscode";
 
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { brandStrip, brandStyleBlock } from "./brandTokens.js";
 
 import type { CatalogConstruct } from "../state/constructCatalog.js";
 import { renderConstructPage } from "./constructScreens.js";

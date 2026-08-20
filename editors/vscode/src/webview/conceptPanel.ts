@@ -38,7 +38,7 @@ import {
   viewKitStyles,
 } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
 
 import type { ConnectionManager } from "../connection/manager.js";
 import { ConceptPanelState } from "../state/conceptPanelState.js";

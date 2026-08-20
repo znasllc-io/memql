@@ -44,7 +44,7 @@ import {
   renderValueView,
 } from "@znasllc-io/memql-view-kit";
 
-import { brandMarkSvg, brandStrip, brandStyleBlock } from "./brandTokens.js";
+import { brandMarkSvg, brandStyleBlock } from "./brandTokens.js";
 
 import type { AutomationTarget } from "../constructs/runnable.js";
 import type {

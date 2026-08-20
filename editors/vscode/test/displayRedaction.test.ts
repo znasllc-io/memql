@@ -32,7 +32,10 @@ test("maskHomePath refuses to corrupt paths on a degenerate home", () => {
 test("redactForDisplay scrubs provider keys out of echoed stderr", () => {
   const out = redactForDisplay("using key sk-ant-abcdef1234567890 for provider", "/home/op");
   assert.doesNotMatch(out, /sk-ant/);
-  assert.match(out, new RegExp(SCRUBBED.replace(/[[\]]/g, "\\$&")));
+  // Verbatim containment, not a regex built by escaping the marker by hand
+  // (CodeQL js/incomplete-sanitization): the claim is exactly "the marker
+  // appears", and includes() states it without a sanitizer to get wrong.
+  assert.ok(out.includes(SCRUBBED), "the scrub marker must replace the key");
 });
 
 test("redactForDisplay scrubs every mql_ credential family", () => {
