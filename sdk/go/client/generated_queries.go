@@ -1722,6 +1722,28 @@ func ComposedViewsBuild(args ComposedViewsArgs) string {
 	return b.String()
 }
 
+// ConsentEventsBySubscriber -- Consent event stream for one subscriber, newest first. Export answers status/date/source from these rows: current status is the latest kind. Owned: ownerUserId==actor.userId is a top-level conjunct.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentEventsBySubscriber"] in generated_concepts.go).
+type ConsentEventsBySubscriberArgs struct {
+	EmailDigest string
+}
+
+// ConsentEventsBySubscriber calls the engine query consentEventsBySubscriber.
+func (qc *QueryClient) ConsentEventsBySubscriber(ctx context.Context, args ConsentEventsBySubscriberArgs) (*Result, error) {
+	call := ConsentEventsBySubscriberBuild(args)
+	return qc.executeNamed(ctx, "consentEventsBySubscriber", call)
+}
+
+func ConsentEventsBySubscriberBuild(args ConsentEventsBySubscriberArgs) string {
+	var b strings.Builder
+	b.WriteString("query consentEventsBySubscriber(")
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ConsentOptOut -- Opt-out rows for an external number (newest first). Read in the outbound call path to block calls to opted-out numbers (TCPA). Not owner-gated: the enforcement check runs in the agent/call context, not an admin one.
 //
 // Bound concept: v1:telephony:consent (machine-readable: BoundConcepts["consentOptOut"] in generated_concepts.go).
@@ -1740,6 +1762,28 @@ func ConsentOptOutBuild(args ConsentOptOutArgs) string {
 	b.WriteString("query consentOptOut(")
 	b.WriteString("phoneNumber: ")
 	b.WriteString(quoteMemQL(args.PhoneNumber))
+	b.WriteString(")")
+	return b.String()
+}
+
+// ConsentStatus -- Latest consent event for one subscriber -- the derived current status. Owned.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["consentStatus"] in generated_concepts.go).
+type ConsentStatusArgs struct {
+	EmailDigest string
+}
+
+// ConsentStatus calls the engine query consentStatus.
+func (qc *QueryClient) ConsentStatus(ctx context.Context, args ConsentStatusArgs) (*Result, error) {
+	call := ConsentStatusBuild(args)
+	return qc.executeNamed(ctx, "consentStatus", call)
+}
+
+func ConsentStatusBuild(args ConsentStatusArgs) string {
+	var b strings.Builder
+	b.WriteString("query consentStatus(")
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
 	b.WriteString(")")
 	return b.String()
 }
