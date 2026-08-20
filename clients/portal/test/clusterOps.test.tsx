@@ -42,7 +42,7 @@ function fakeConnection(role: string, sent: Array<Record<string, unknown>>): Con
       primaryEmail: "op@example.test",
       clusterRole: role,
     })),
-    executeNamed: vi.fn(async (name: string, call: string) => {
+    executeNamed: vi.fn(async (_name: string, call: string) => {
       sent.push({ executeNamed: call });
       const rows = call.includes("v1:cluster:deployment,") || call.includes("v1:cluster:deployment ")
         ? DEPLOYMENT_ROWS

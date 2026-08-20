@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Route, Routes } from "react-router-dom";
 import type { ReactNode } from "react";
 
 import { AppShell } from "./AppShell";
@@ -16,12 +16,12 @@ import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
 import { ClusterOpsPage } from "../clusterops/ClusterOpsPage";
+import { HomePage } from "../home/HomePage";
 import {
   CONCEPTS_ROUTE_PATTERN,
   CONCEPT_ROUTE_PATTERN,
   CONCEPT_ROW_CHILD_PATTERN,
   CONCEPT_SCHEMA_CHILD_PATTERN,
-  conceptsPath,
 } from "../concepts/urls";
 import { VIEW_ROUTE_PATTERN, VIEW_ROW_CHILD_PATTERN } from "../views/urls";
 
@@ -103,8 +103,9 @@ export function AppRoutes(): ReactNode {
 
       <Route element={<RequireAuth />}>
         <Route element={<AppShell />}>
-          {/* The portal has no dashboard yet; concepts is the landing surface. */}
-          <Route index element={<Navigate to={conceptsPath()} replace />} />
+          {/* The console home (memql#4182): cluster identity + live tiles,
+              every one a door into its full surface. */}
+          <Route index element={<HomePage />} />
           <Route path={VIEW_ROUTE_PATTERN} element={<ViewPage />} />
           <Route path={`${VIEW_ROUTE_PATTERN}/${VIEW_ROW_CHILD_PATTERN}`} element={<ViewPage />} />
           <Route path={CONCEPTS_ROUTE_PATTERN} element={<ConceptsPage />} />

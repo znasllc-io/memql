@@ -14,6 +14,7 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Globe,
+  House,
   LayoutGrid,
   Plug,
   Rocket,
@@ -95,6 +96,10 @@ const ADMINISTER: readonly NavItem[] = [
 const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
 const CLUSTER_OPS_ITEM: NavItem = { to: "/cluster-ops", label: "Cluster ops", icon: Rocket };
 
+// Home is the rail's first destination: the landing surface every group
+// hangs under (memql#4182). `end` matching keeps it inactive on deep routes.
+const HOME_ITEM: NavItem = { to: "/", label: "Home", icon: House };
+
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
 function readStoredRail(): "expanded" | "collapsed" {
@@ -134,14 +139,19 @@ function NavGroup({
   label,
   items,
   collapsed,
+  end = false,
 }: {
-  label: string;
+  // Omitted renders an uncaptioned group -- the Home entry above the three
+  // captioned ones.
+  label?: string;
   items: readonly NavItem[];
   collapsed: boolean;
+  // NavLink end-matching, for the one item whose path prefixes every other.
+  end?: boolean;
 }): ReactNode {
   return (
     <div>
-      {collapsed ? null : (
+      {collapsed || label === undefined ? null : (
         <h2 className="px-3 pb-1 text-xs font-semibold tracking-wide text-subtle uppercase">
           {label}
         </h2>
@@ -153,6 +163,7 @@ function NavGroup({
             <li key={item.to}>
               <NavLink
                 to={item.to}
+                end={end}
                 className={({ isActive }) => navClass(isActive, collapsed)}
                 {...(collapsed ? { title: item.label, "aria-label": item.label } : {})}
               >
@@ -215,6 +226,7 @@ export function AppShell(): ReactNode {
           </div>
 
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+            <NavGroup items={[HOME_ITEM]} collapsed={collapsed} end />
             <NavGroup label="Operate" items={OPERATE} collapsed={collapsed} />
             <NavGroup label="Explore" items={EXPLORE} collapsed={collapsed} />
             <NavGroup label="Administer" items={administer} collapsed={collapsed} />

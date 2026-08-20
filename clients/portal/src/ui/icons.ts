@@ -11,6 +11,7 @@ export {
   ChevronsLeft,
   ChevronsRight,
   Globe,
+  House,
   Inbox,
   LayoutGrid,
   Monitor,
