@@ -29,6 +29,8 @@ import { randomBytes } from "node:crypto";
 import * as vscode from "vscode";
 
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
+
+import { brandHeader, brandStyleBlock } from "./brandTokens.js";
 import { browseConceptPage, type Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { readClustersFileSafe } from "../clusters/file.js";
@@ -255,10 +257,10 @@ export class ConnectionPanel {
       return `<h1>${escapeHtml(this.clusterName)}</h1>
 <p class="lede">This cluster is no longer in your list.</p>`;
     }
-    return `<div class="head">
-  <h1>Cluster: ${escapeHtml(view.title)}</h1>
-  <button class="secondary" type="button" data-act="openPortal">Open Portal</button>
-</div>
+    return `${brandHeader(
+      `Cluster: ${view.title}`,
+      `<button class="secondary" type="button" data-act="openPortal">Open Portal</button>`,
+    )}
 <p class="lede">${escapeHtml(view.summary)}</p>
 <h2>Connection</h2>
 ${factsHtml(view.connection)}
@@ -286,41 +288,17 @@ ${factsHtml(view.identity)}
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>${escapeHtml(this.clusterName)}</title>
 <style nonce="${nonce}">
-  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-    --vk-mono-font: var(--vscode-editor-font-family, monospace);
-    --vk-subtle-bg: var(--vscode-textCodeBlock-background, transparent);
-  }
-
+${brandStyleBlock()}
 ${viewKitStyles}
 
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0;
-         padding: 16px 20px; max-width: 780px; }
-  .boundary { color: var(--vscode-descriptionForeground); border-top: 1px solid var(--vscode-panel-border);
-              margin-top: 18px; padding-top: 10px; font-size: 0.92em; }
-  .head { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; }
-  h1 { font-size: 1.2em; margin: 0 0 4px; }
-  h2 { font-size: 1em; margin: 20px 0 6px; }
-  .lede { color: var(--vscode-descriptionForeground); margin: 0 0 16px; }
+  body { max-width: 780px; }
   .fact { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
-  .fact-key { flex: none; min-width: 9em; color: var(--vscode-descriptionForeground); }
-  .fact-value { min-width: 0; overflow-wrap: anywhere; }
-  .fact-note { color: var(--vscode-descriptionForeground); }
-  .error { color: var(--vscode-inputValidation-errorForeground,
-                   var(--vscode-editorError-foreground)); }
-  .actions { display: flex; gap: 8px; margin-top: 20px; flex-wrap: wrap; }
-  button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
-    border: 1px solid transparent;
-    background: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground); }
-  button.destructive { color: var(--vscode-editorWarning-foreground); }
+  .fact-key { flex: none; min-width: 9em; color: var(--memql-muted); }
+  .fact-value { min-width: 0; overflow-wrap: anywhere;
+                font-family: var(--vscode-editor-font-family, ui-monospace, monospace);
+                font-size: 0.95em; }
+  .fact-note { color: var(--memql-muted); font-family: var(--vscode-font-family); }
+  .error { color: var(--memql-danger); }
 </style>
 </head>
 <body>

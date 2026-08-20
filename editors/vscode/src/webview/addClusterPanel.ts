@@ -51,6 +51,7 @@ import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
 import { maskHomePath, redactForDisplay } from "../install/secrets.js";
+import { brandStrip, brandStyleBlock } from "./brandTokens.js";
 import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
 import { preflightItems, type PreflightInputs, type PreflightItem } from "../state/preflight.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
@@ -1485,56 +1486,43 @@ export class AddClusterPanel {
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>Add a MemQL cluster</title>
 <style nonce="${nonce}">
-  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-  }
-
+${brandStyleBlock()}
 ${viewKitStyles}
 
-  body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
-         background: var(--vscode-editor-background); margin: 0;
-         padding: 16px 20px; max-width: 780px; }
-  h1 { font-size: 1.2em; margin: 0 0 4px; }
-  .lede { color: var(--vscode-descriptionForeground); margin: 0 0 16px; }
+  body { max-width: 780px; }
   .card { display: block; width: 100%; text-align: left; cursor: pointer;
-          border: 1px solid var(--vscode-panel-border); border-radius: 4px;
-          background: transparent; color: var(--vscode-foreground);
+          border: 1px solid var(--memql-border); border-radius: 6px;
+          background: var(--memql-surface); color: var(--memql-fg);
           padding: 10px 12px; margin-bottom: 8px; font: inherit; }
-  .card:hover { background: var(--vscode-list-hoverBackground); }
+  .card:hover { background: var(--memql-raised); border-color: var(--memql-accent); }
   .card-label { font-weight: 600; }
-  .card-detail { color: var(--vscode-descriptionForeground); margin-top: 2px; }
-  .card[data-tone="destructive"] .card-label { color: var(--vscode-editorWarning-foreground); }
+  .card-detail { color: var(--memql-muted); margin-top: 2px; }
+  .card[data-tone="destructive"] .card-label { color: var(--memql-danger); }
   .field { margin-bottom: 12px; }
   .field label { display: block; margin-bottom: 3px; }
   .field input, .field select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
-                 color: var(--vscode-input-foreground);
-                 background: var(--vscode-input-background);
-                 border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+                 color: var(--memql-fg);
+                 background: var(--memql-surface);
+                 border: 1px solid var(--memql-border-strong); border-radius: 3px; }
+  .field input:focus, .field select:focus { outline: 1px solid var(--memql-accent); }
   /* The box and its Browse button read as one control (memql#3547): the button
      is an alternative way to fill the field beside it, not a separate action. */
   .control-row { display: flex; gap: 6px; align-items: stretch; }
   .control-row input { flex: 1 1 auto; min-width: 0; }
   button.browse { flex: 0 0 auto; white-space: nowrap; }
-  .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
   /* What the step itself said, as opposed to the generic advice for its code. */
   .said { margin: 0 0 8px; }
   .remedy { font-family: var(--vscode-editor-font-family, monospace);
-            background: var(--vscode-textCodeBlock-background, transparent);
-            border: 1px solid var(--vscode-panel-border);
+            background: var(--memql-raised);
+            border: 1px solid var(--memql-border);
             border-radius: 4px; padding: 8px 10px; margin: 6px 0 0;
             overflow-x: auto; white-space: pre; }
-  .error { color: var(--vscode-inputValidation-errorForeground,
-                   var(--vscode-editorError-foreground)); margin-top: 3px; }
+  .error { color: var(--memql-danger); margin-top: 3px; }
   /* A refusal that belongs to the whole form rather than to one box, so it
      sits away from the fields instead of looking like the last one's. */
   .form-error { margin: 14px 0 0; }
   .field[data-invalid="true"] input, .field[data-invalid="true"] select {
-    border-color: var(--vscode-editorError-foreground); }
+    border-color: var(--memql-danger); }
   /* The one-time recovery key reveal (memql#4079). Monospace and boxed like
      .remedy so the value reads as the credential it is; user-select: all so a
      single click selects the whole 47 characters for the operator who prefers
@@ -1543,21 +1531,14 @@ ${viewKitStyles}
   .recovery-heading { font-size: 1.05em; margin: 16px 0 4px; }
   .recovery-key-row { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
   .recovery-key { font-family: var(--vscode-editor-font-family, monospace);
-                  background: var(--vscode-textCodeBlock-background, transparent);
-                  border: 1px solid var(--vscode-panel-border);
+                  background: var(--memql-raised);
+                  border: 1px solid var(--memql-accent);
                   border-radius: 4px; padding: 6px 8px; overflow-x: auto;
-                  user-select: all; }
-  .actions { display: flex; gap: 8px; margin-top: 16px; }
-  button.primary, button.secondary {
-    font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
-    border: 1px solid transparent; }
-  button.primary { background: var(--vscode-button-background);
-                   color: var(--vscode-button-foreground); }
-  button.secondary { background: var(--vscode-button-secondaryBackground);
-                     color: var(--vscode-button-secondaryForeground); }
+                  user-select: all; color: var(--memql-data-number); }
 </style>
 </head>
 <body>
+${brandStrip("MemQL")}
 ${this.bodyHtml()}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();

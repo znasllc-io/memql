@@ -37,6 +37,8 @@ import * as vscode from "vscode";
 
 import { escapeHtml, viewKitStyles } from "@znasllc-io/memql-view-kit";
 
+import { brandMarkSvg, brandStrip, brandStyleBlock } from "./brandTokens.js";
+
 import {
   DEPLOY_ACTIONS,
   confirmationMatches,
@@ -931,17 +933,7 @@ export class DeploymentPanel {
       content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';">
 <title>${escapeHtml(this.instance?.name ?? "MemQL deployment")}</title>
 <style nonce="${nonce}">
-  :root {
-    --vk-fg: var(--vscode-foreground);
-    --vk-muted-fg: var(--vscode-descriptionForeground);
-    --vk-border: var(--vscode-panel-border);
-    --vk-hover-bg: var(--vscode-list-hoverBackground);
-    --vk-selected-bg: var(--vscode-list-activeSelectionBackground);
-    --vk-selected-fg: var(--vscode-list-activeSelectionForeground);
-    --vk-mono-font: var(--vscode-editor-font-family, monospace);
-    --vk-subtle-bg: var(--vscode-textCodeBlock-background, transparent);
-  }
-
+${brandStyleBlock()}
 ${viewKitStyles}
 
   body { font-family: var(--vscode-font-family); color: var(--vscode-foreground);
@@ -949,19 +941,19 @@ ${viewKitStyles}
          padding: 16px 20px; max-width: 780px; }
   h1 { font-size: 1.2em; margin: 0 0 4px; }
   h2 { font-size: 1em; margin: 20px 0 6px; }
-  .lede { color: var(--vscode-descriptionForeground); margin: 0 0 16px; }
-  .notice { color: var(--vscode-descriptionForeground); margin: 0 0 12px; }
+  .lede { color: var(--memql-muted); margin: 0 0 16px; }
+  .notice { color: var(--memql-muted); margin: 0 0 12px; }
   .facts { margin-bottom: 12px; }
   .fact { display: flex; gap: 8px; align-items: baseline; padding: 1px 0; }
-  .fact-key { flex: none; min-width: 8em; color: var(--vscode-descriptionForeground); }
+  .fact-key { flex: none; min-width: 8em; color: var(--memql-muted); }
   .runs, .plan { list-style: none; margin: 0; padding: 0; }
   .run, .plan-step { display: flex; gap: 8px; align-items: baseline; padding: 2px 0; }
   .run-kind, .plan-id { flex: none; min-width: 10em; }
-  .run-detail, .plan-detail { color: var(--vscode-descriptionForeground); }
-  .plan-mark { flex: none; width: 2em; color: var(--vscode-descriptionForeground); }
+  .run-detail, .plan-detail { color: var(--memql-muted); }
+  .plan-mark { flex: none; width: 2em; color: var(--memql-muted); }
   /* "Node types", never "Steps": a remote run's items are per-tier specs, not
      script executions, and the label is what stops one being read as the other. */
-  .items-label { color: var(--vscode-descriptionForeground); margin: 2px 0 0 1em; }
+  .items-label { color: var(--memql-muted); margin: 2px 0 0 1em; }
   .run-block { margin-bottom: 10px; }
   .run-block .runs { margin-left: 1em; }
   /* The steps that will actually change something read at full strength; the
@@ -972,19 +964,18 @@ ${viewKitStyles}
   .field { margin-bottom: 12px; }
   .field label { display: block; margin-bottom: 3px; }
   .field input, .field select { width: 100%; box-sizing: border-box; padding: 4px 6px; font: inherit;
-                 color: var(--vscode-input-foreground);
-                 background: var(--vscode-input-background);
-                 border: 1px solid var(--vscode-input-border, var(--vscode-panel-border)); }
+                 color: var(--memql-fg);
+                 background: var(--memql-surface);
+                 border: 1px solid var(--memql-border-strong); border-radius: 3px; }
   .field[data-invalid="true"] input { border-color: var(--vscode-editorError-foreground); }
-  .hint { color: var(--vscode-descriptionForeground); margin-top: 3px; }
+  .hint { color: var(--memql-muted); margin-top: 3px; }
   .said { margin: 0 0 8px; }
   .remedy { font-family: var(--vscode-editor-font-family, monospace);
-            background: var(--vscode-textCodeBlock-background, transparent);
-            border: 1px solid var(--vscode-panel-border);
+            background: var(--memql-raised);
+            border: 1px solid var(--memql-border);
             border-radius: 4px; padding: 8px 10px; margin: 6px 0 0;
             overflow-x: auto; white-space: pre; }
-  .error { color: var(--vscode-inputValidation-errorForeground,
-                   var(--vscode-editorError-foreground)); margin-top: 3px; }
+  .error { color: var(--memql-danger); margin-top: 3px; }
   .actions { display: flex; gap: 8px; margin-top: 16px; }
   button.primary, button.secondary {
     font: inherit; padding: 4px 12px; cursor: pointer; border-radius: 2px;
@@ -993,11 +984,12 @@ ${viewKitStyles}
                    color: var(--vscode-button-foreground); }
   button.secondary { background: var(--vscode-button-secondaryBackground);
                      color: var(--vscode-button-secondaryForeground); }
-  button.destructive { color: var(--vscode-editorWarning-foreground); }
+  button.destructive { color: var(--memql-data-string); }
   button[disabled] { opacity: 0.5; cursor: default; }
 </style>
 </head>
 <body>
+${brandStrip("MemQL")}
 ${this.bodyHtml()}
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
