@@ -10,6 +10,10 @@
 # livekit-sip / mcp (and livekit-redis, which exists only for the sip
 # plane). It is not LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP
 # digest -- those were fail-closed placeholders for a running pin.
+#
+# The generated front door lives in overlays/cloud. kustomize will not
+# load that sibling file from this directory; ZNAS Argo patches hosts
+# onto this overlay (or a copied generated file) at install time.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -17,9 +21,6 @@ namespace: memql
 
 resources:
   - ../../base
-  # Shared generated front door (memql.localhost placeholders). An install
-  # overrides hosts through the Application's kustomize.patches.
-  - front-door.generated.yaml
 
 patches:
   # Replica counts, STATED rather than inherited. Request-serving mesh
