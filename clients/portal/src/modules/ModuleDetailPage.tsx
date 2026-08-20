@@ -20,6 +20,7 @@ import {
 import { useAdminAccess } from "../admin/useAdminConsole";
 import { ModulesRefused } from "./ModulesRefused";
 import { stateTone, useModuleDetail, useSetPackEnabled } from "./useModules";
+import { ObservabilitySection } from "./ObservabilitySection";
 import { MODULES_ROOT } from "./urls";
 
 // One module's detail (memql#4191): the environment-variable surface the
@@ -114,6 +115,8 @@ export function ModuleDetailPage(): ReactNode {
                 </ul>
               )}
             </Band>
+
+            <ObservabilitySection module={detail.module} />
           </>
         )}
       </section>

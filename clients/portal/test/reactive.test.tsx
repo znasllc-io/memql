@@ -40,6 +40,13 @@ function fakeConnection({
 } = {}): Connection {
   const query = {
     listConcepts: vi.fn(async () => CONCEPTS),
+    // The shell reads the caller's access to decide what the rail offers
+    // (the Modules item is owner/admin-only, memql#4191).
+    getMyAccess: vi.fn(async () => ({
+      userId: "user-test",
+      primaryEmail: "op@example.test",
+      clusterRole: "admin",
+    })),
     browseConceptPage: vi.fn(
       browse ?? (async () => ({ rows: [], cursor: "", hasMore: false })),
     ),
