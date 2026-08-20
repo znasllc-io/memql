@@ -9,7 +9,7 @@
 // per-row machinery as the rest of the graph. A campaign editor is then a
 // layout over queries and mutations, not a new subsystem.
 //
-// SEVEN CONCEPTS. Five answer the four questions a send has to answer --
+// EIGHT CONCEPTS. Five answer the four questions a send has to answer --
 // who, what, when, and what happened -- and two are the sending engine's
 // own state (memql#3348):
 //
@@ -20,6 +20,7 @@
 //   delivery     OUTCOME    one row per recipient per campaign
 //   sendJob      ENGINE     the per-campaign send run the worker drains
 //   suppression  ENGINE     the cluster-wide do-not-mail list, digest-keyed
+//   consentEvent EXPORT    append-only grant/withdraw/bounce/complaint/suppress
 //
 // PER-ROW AUTHZ TIER: owned, on the five operator-facing concepts. Every row
 // carries ownerUserId, every concept declares @rowAuthz(owner="ownerUserId"),
@@ -354,4 +355,30 @@ concept warmupState {
   evaluatedAt      datetime  @description("When the ramp last looked at the evidence.")
   stepEnteredAt    datetime  @description("When the current step began. The minimum-hold clock runs from here.")
   acceptedInStep   int  @default("0")  @description("Messages accepted since the current step began -- the volume half of the advance condition. A step that has sent nothing has produced no evidence, and advancing on no evidence is what this design exists to avoid.")
+}
+
+/// Append-only consent / suppression event for one subscriber (memql#4141).
+/// Current status is derived from the latest event -- there is no mutable
+/// status column on this concept. Send-time suppression (v1:campaigns:suppression
+/// + recipient.subscriptionStatus) is unchanged; this stream is the
+/// export/compliance answer for "status, date, source".
+///
+/// grant / withdraw / bounce / complaint / suppress are events. reason is
+/// required on suppress (enforced by recordConsentSuppress). Config and
+/// templates stay data, not this schema.
+@displayCard(primary="kind", secondary="emailDigest", tertiary="occurredAt", status="kind")
+@rowAuthz(owner="ownerUserId")
+concept consentEvent {
+  ownerUserId  string!  @description("v1:identity:user.id of the operator whose send this consent belongs to. Stamped from actor.userId. The per-row authz key for export.")
+  emailDigest  string!  @description("SHA-256 hex digest of the normalized (lowercased, trimmed) address. The subscriber key. The mailbox is never stored here -- a caller can ask about an address only when it already holds it.")
+  kind         enum("grant", "withdraw", "bounce", "complaint", "suppress")!  @description("The event. grant = opted in; withdraw = opted out; bounce / complaint = provider verdict; suppress = operator or policy suppression. There is no mutable status field -- current status is the latest kind.")
+  source       enum("signup", "one_click", "import", "provider", "operator", "rfc8058")!  @description("Where the event came from. Data, not DSL source.")
+  occurredAt   datetime!  @description("When the event happened. Stamped from the engine clock unless the writer records an earlier verified event (e.g. a provider timestamp).")
+  reason       string   @description("Why, when kind is suppress. Required on the suppress write path. Empty for grant/withdraw/bounce/complaint.")
+  recipientId  string   @description("Optional v1:campaigns:recipient.id when the event is about a specific audience membership. The digest is the subscriber identity; this is the membership the operator was looking at.")
+  campaignId   string   @description("Optional v1:campaigns:campaign.id of the send that produced a bounce, complaint, or one-click withdraw.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="recipientId", target=recipient, direction="outgoing")
+  @relationship(type="references", field="campaignId", target=campaign, direction="outgoing")
 }

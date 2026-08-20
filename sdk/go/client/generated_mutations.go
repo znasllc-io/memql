@@ -8738,6 +8738,292 @@ func RecordCampaignDeliveryBuild(args RecordCampaignDeliveryArgs) string {
 	return b.String()
 }
 
+// RecordConsentBounce -- Append a provider bounce event. Append-only.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentBounce"] in generated_concepts.go).
+type RecordConsentBounceArgs struct {
+	EventId     string
+	EmailDigest string
+	Source      string
+	OccurredAt  string
+	RecipientId string
+	CampaignId  string
+}
+
+// RecordConsentBounce calls the engine mutation recordConsentBounce.
+func (qc *QueryClient) RecordConsentBounce(ctx context.Context, args RecordConsentBounceArgs) (*Result, error) {
+	call := RecordConsentBounceBuild(args)
+	return qc.executeNamed(ctx, "recordConsentBounce", call)
+}
+
+func RecordConsentBounceBuild(args RecordConsentBounceArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordConsentBounce(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 29 {
+		b.WriteString(", ")
+	}
+	b.WriteString("occurredAt: ")
+	b.WriteString(quoteMemQL(args.OccurredAt))
+	if args.RecipientId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientId: ")
+		b.WriteString(quoteMemQL(args.RecipientId))
+	}
+	if args.CampaignId != "" {
+		if b.Len() > 29 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordConsentComplaint -- Append a provider complaint event. Append-only.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentComplaint"] in generated_concepts.go).
+type RecordConsentComplaintArgs struct {
+	EventId     string
+	EmailDigest string
+	Source      string
+	OccurredAt  string
+	RecipientId string
+	CampaignId  string
+}
+
+// RecordConsentComplaint calls the engine mutation recordConsentComplaint.
+func (qc *QueryClient) RecordConsentComplaint(ctx context.Context, args RecordConsentComplaintArgs) (*Result, error) {
+	call := RecordConsentComplaintBuild(args)
+	return qc.executeNamed(ctx, "recordConsentComplaint", call)
+}
+
+func RecordConsentComplaintBuild(args RecordConsentComplaintArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordConsentComplaint(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 32 {
+		b.WriteString(", ")
+	}
+	b.WriteString("occurredAt: ")
+	b.WriteString(quoteMemQL(args.OccurredAt))
+	if args.RecipientId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientId: ")
+		b.WriteString(quoteMemQL(args.RecipientId))
+	}
+	if args.CampaignId != "" {
+		if b.Len() > 32 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordConsentGrant -- Append a consent grant. No update path exists on consentEvent -- a later withdraw is a new row. Owned: ownerUserId is stamped from actor.userId.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentGrant"] in generated_concepts.go).
+type RecordConsentGrantArgs struct {
+	EventId     string
+	EmailDigest string
+	Source      string
+	OccurredAt  string
+	RecipientId string
+	CampaignId  string
+}
+
+// RecordConsentGrant calls the engine mutation recordConsentGrant.
+func (qc *QueryClient) RecordConsentGrant(ctx context.Context, args RecordConsentGrantArgs) (*Result, error) {
+	call := RecordConsentGrantBuild(args)
+	return qc.executeNamed(ctx, "recordConsentGrant", call)
+}
+
+func RecordConsentGrantBuild(args RecordConsentGrantArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordConsentGrant(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("occurredAt: ")
+	b.WriteString(quoteMemQL(args.OccurredAt))
+	if args.RecipientId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientId: ")
+		b.WriteString(quoteMemQL(args.RecipientId))
+	}
+	if args.CampaignId != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordConsentSuppress -- Append a suppression event. reason is required -- a suppress without a reason is inexpressible on this path. Send-time suppression list is unchanged (recordSuppression).
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentSuppress"] in generated_concepts.go).
+type RecordConsentSuppressArgs struct {
+	EventId     string
+	EmailDigest string
+	Source      string
+	Reason      string
+	OccurredAt  string
+	RecipientId string
+	CampaignId  string
+}
+
+// RecordConsentSuppress calls the engine mutation recordConsentSuppress.
+func (qc *QueryClient) RecordConsentSuppress(ctx context.Context, args RecordConsentSuppressArgs) (*Result, error) {
+	call := RecordConsentSuppressBuild(args)
+	return qc.executeNamed(ctx, "recordConsentSuppress", call)
+}
+
+func RecordConsentSuppressBuild(args RecordConsentSuppressArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordConsentSuppress(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("reason: ")
+	b.WriteString(quoteMemQL(args.Reason))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("occurredAt: ")
+	b.WriteString(quoteMemQL(args.OccurredAt))
+	if args.RecipientId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientId: ")
+		b.WriteString(quoteMemQL(args.RecipientId))
+	}
+	if args.CampaignId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// RecordConsentWithdraw -- Append a consent withdraw (unsubscribe / opt-out). Append-only.
+//
+// Bound concept: v1:campaigns:consentEvent (machine-readable: BoundConcepts["recordConsentWithdraw"] in generated_concepts.go).
+type RecordConsentWithdrawArgs struct {
+	EventId     string
+	EmailDigest string
+	Source      string
+	OccurredAt  string
+	RecipientId string
+	CampaignId  string
+}
+
+// RecordConsentWithdraw calls the engine mutation recordConsentWithdraw.
+func (qc *QueryClient) RecordConsentWithdraw(ctx context.Context, args RecordConsentWithdrawArgs) (*Result, error) {
+	call := RecordConsentWithdrawBuild(args)
+	return qc.executeNamed(ctx, "recordConsentWithdraw", call)
+}
+
+func RecordConsentWithdrawBuild(args RecordConsentWithdrawArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation recordConsentWithdraw(")
+	b.WriteString("eventId: ")
+	b.WriteString(quoteMemQL(args.EventId))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("emailDigest: ")
+	b.WriteString(quoteMemQL(args.EmailDigest))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("source: ")
+	b.WriteString(quoteMemQL(args.Source))
+	if b.Len() > 31 {
+		b.WriteString(", ")
+	}
+	b.WriteString("occurredAt: ")
+	b.WriteString(quoteMemQL(args.OccurredAt))
+	if args.RecipientId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("recipientId: ")
+		b.WriteString(quoteMemQL(args.RecipientId))
+	}
+	if args.CampaignId != "" {
+		if b.Len() > 31 {
+			b.WriteString(", ")
+		}
+		b.WriteString("campaignId: ")
+		b.WriteString(quoteMemQL(args.CampaignId))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // RecordDependencyEdge -- Record one dependency edge for a bundle's construct (#957). Written by the compile/bind pass once it resolves a construct's references. ownerUserId stamped from actor.userId.
 //
 // Bound concept: v1:authoring:dependencyEdge (machine-readable: BoundConcepts["recordDependencyEdge"] in generated_concepts.go).
