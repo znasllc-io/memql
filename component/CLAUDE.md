@@ -4,6 +4,10 @@
 **Language:** Go
 **Type:** Reusable service modules (database, server, auth, etc.)
 
+memQL has **exactly three** extension words -- component / integration / pack;
+intake "plugin" means pack. See
+[Component vs integration vs pack](../docs/public/concepts/component-integration-pack.md).
+
 ---
 
 ## STRUCTURE Directory Structure

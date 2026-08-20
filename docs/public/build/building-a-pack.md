@@ -375,6 +375,22 @@ pack is the substrate they call into.
 
 ---
 
+## Shipped packs
+
+Beyond the two teaching examples above, the engine tree carries two shipped
+packs worth reading as real worked examples:
+
+- `examples/reviewspack` (memql#4139) -- the client-agnostic reviews product
+  feature. A pack with no integration half: no external system sits behind it.
+- `examples/shopifypack` (memql#4138) -- the Shopify product feature (portal
+  views for shop, secrets, sync), layered on the `integrations/shopify`
+  integration. The pair is the canonical worked example of the
+  [component / integration / pack](../concepts/component-integration-pack.md)
+  split: the integration talks to Shopify; the pack is the product feature;
+  the thin product index stays core (`dsl/shopify`).
+
+---
+
 ## See also
 
 - [Plugin SDK](plugin-sdk.md) -- the contract reference (PluginContext,

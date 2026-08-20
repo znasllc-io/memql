@@ -11,6 +11,10 @@ owner: znas
 
 > Historical: shipped in 0.9.0; kept for rationale.
 
+> Vocabulary note: this audit predates the component / integration / pack
+> lock. Where it says "plug-in" for an `integrations/` package, read it
+> against [component-integration-pack.md](../../public/concepts/component-integration-pack.md).
+
 Status: completed 2026-06-22 for Epic 2 (platform / plugin), issue 2.3
 [G:2.1]. Spec: `docs/internal/program/02-epic-platform-plugin.md`.
 

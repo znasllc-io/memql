@@ -8,6 +8,10 @@
 
 ## Integration Contract
 
+memQL has **exactly three** extension words -- component / integration / pack;
+intake "plugin" means pack. See
+[Component vs integration vs pack](../docs/public/concepts/component-integration-pack.md).
+
 Integrations are **protocol adapters**. They bridge external services (OpenAI voice, LiveKit, avatar vendors, etc.) into the memQL ecosystem using Go code for protocol-level concerns that cannot be expressed in the MemQL DSL.
 
 ### What Integrations DO (Go code)

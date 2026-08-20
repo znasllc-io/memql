@@ -112,8 +112,8 @@ context still observes live state.
 | `Agents` | `*AgentRegistry` | DSL-declared agent registry (stable pointer) |
 
 `ResolvePartitionFromContext` is the sanctioned way for a pack to scope work to
-a tenant: `partition` is the canonical tenant scope. The dedicated
-partition-scoping reference lands with issue 2.2.
+a tenant: `partition` is the canonical tenant scope. The dedicated reference is
+[Partition scoping](../concepts/partition-scoping.md).
 
 **`ConceptDataIsStaged` is required reading for any pack that issues a
 hand-rolled `SELECT` against `"MemoryNodes"`** (epic memql#3974). A pack that
