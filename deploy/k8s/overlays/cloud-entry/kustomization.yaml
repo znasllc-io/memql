@@ -11,9 +11,12 @@
 # plane). It is not LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP
 # digest -- those were fail-closed placeholders for a running pin.
 #
-# The generated front door lives in overlays/cloud. kustomize will not
-# load that sibling file from this directory; ZNAS Argo patches hosts
-# onto this overlay (or a copied generated file) at install time.
+# The generated front door lives in THIS directory (memql#4204).
+# cmd/frontdoorhosts writes front-door.generated.yaml here with the
+# committed default memql.localhost. kustomize will not load a sibling
+# file from overlays/cloud, so each instance overlay owns its own copy.
+# An install patches hosts and MEMQL_DOMAIN through the ArgoCD
+# Application -- do not commit a real domain here (memql#3593).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -21,6 +24,9 @@ namespace: memql
 
 resources:
   - ../../base
+  # The front door, GENERATED from the role set and the domain by
+  # cmd/frontdoorhosts (memql#4204) -- run `make frontdoor`, never edit it.
+  - front-door.generated.yaml
 
 patches:
   # Replica counts, STATED rather than inherited. Request-serving mesh
