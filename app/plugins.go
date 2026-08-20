@@ -10,17 +10,18 @@ import (
 	"github.com/znasllc-io/memql/core/common"
 )
 
-// materializePlugins iterates plug-ins registered at init time via
-// memql.RegisterPlugin and materializes each one with a live PluginContext.
-// Each plug-in's IntegrationProvider is then registered with the engine,
-// making its capabilities callable from the DSL.
+// materializePlugins iterates the registrations made at init time via
+// memql.RegisterPlugin / RegisterPluginForContract -- packs and
+// self-registering core integrations -- and materializes each one with a live
+// PluginContext. Each registrant's IntegrationProvider is then registered
+// with the engine, making its capabilities callable from the DSL.
 //
 // Call order: after the engine is constructed and core integrations are
-// wired (database/auth/identity are themselves plug-ins now, but cognition/
+// wired (database/auth/identity self-register now, but cognition/
 // agent/stt still go through explicit app wiring because they need
 // deps outside the stable PluginContext surface).
 //
-// A plug-in factory returning an error is a fatal startup error: plug-ins
+// A factory returning an error is a fatal startup error: registrants
 // that can run in degraded mode should return an instance that no-ops
 // instead, so the app still boots.
 func (a *App) materializePlugins() {
@@ -35,25 +36,25 @@ func (a *App) materializePlugins() {
 		// version before materializing it -- a stale pack fails loudly here
 		// instead of mis-binding against a contract it was not built for.
 		if err := p.ValidateContract(); err != nil {
-			a.fatal("plug-in contract incompatible", "plugin", p.Name, "error", err)
+			a.fatal("pack contract incompatible", "pack", p.Name, "error", err)
 		}
 		prov, err := p.Factory(pctx)
 		if err != nil {
-			a.fatal("plug-in factory failed", "plugin", p.Name, "error", err)
+			a.fatal("pack factory failed", "pack", p.Name, "error", err)
 		}
 		if prov == nil {
-			// (nil, nil) is the documented "opt out" signal: the plug-in
+			// (nil, nil) is the documented "opt out" signal: the pack
 			// is compiled in but its dependencies aren't satisfied in this
 			// environment (e.g. GCS without a bucket configured). The
 			// factory is expected to log its own warning if the opt-out
 			// is worth reporting.
-			a.Logger.Info("plug-in opted out", "name", p.Name)
+			a.Logger.Info("pack opted out", "pack", p.Name)
 			continue
 		}
 		if err := a.engine.RegisterIntegration(prov); err != nil {
-			a.fatal("plug-in registration failed", "plugin", p.Name, "error", err)
+			a.fatal("pack registration failed", "pack", p.Name, "error", err)
 		}
-		a.Logger.Info("plug-in registered", "name", p.Name)
+		a.Logger.Info("pack registered", "pack", p.Name)
 	}
 
 	// Wire the semantic (vector) AI-call cache (5.9) now that the engine,
@@ -81,8 +82,9 @@ func (a *App) semanticCacheDBGetter() func() *sql.DB {
 	}
 }
 
-// pluginContext builds the narrow surface plug-ins receive. All callbacks
-// are lazy so plug-ins observe live state even if they stash the context.
+// pluginContext builds the narrow surface every registrant (pack or
+// self-registering core integration) receives. All callbacks are lazy so
+// packs observe live state even if they stash the context.
 func (a *App) pluginContext() memql.PluginContext {
 	return memql.PluginContext{
 		Logger: a.Logger,
@@ -123,7 +125,7 @@ func (a *App) pluginContext() memql.PluginContext {
 		ResolveSystemSecret: func(ctx context.Context, name string) (string, error) {
 			return a.engine.ResolveSystemSecret(ctx, name)
 		},
-		// Staged-DATA visibility for the plug-ins that hand-roll SQL
+		// Staged-DATA visibility for the packs that hand-roll SQL
 		// (epic memql#3974, task memql#3984). Lazy like every other callback
 		// here, and deliberately a call THROUGH the engine rather than a
 		// snapshot: the staged set changes when a concept is promoted or
