@@ -1392,6 +1392,53 @@ func BadgesForSelfBuild(args BadgesForSelfArgs) string {
 	return "query badgesForSelf()"
 }
 
+// BookingById -- One booking by id, gated to the host. Owned.
+//
+// Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["bookingById"] in generated_concepts.go).
+type BookingByIdArgs struct {
+	BookingId string
+}
+
+// BookingById calls the engine query bookingById.
+func (qc *QueryClient) BookingById(ctx context.Context, args BookingByIdArgs) (*Result, error) {
+	call := BookingByIdBuild(args)
+	return qc.executeNamed(ctx, "bookingById", call)
+}
+
+func BookingByIdBuild(args BookingByIdArgs) string {
+	var b strings.Builder
+	b.WriteString("query bookingById(")
+	b.WriteString("bookingId: ")
+	b.WriteString(quoteMemQL(args.BookingId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// BookingHours -- The host's booking hours, newest first. Owned.
+//
+// Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["bookingHours"] in generated_concepts.go).
+type BookingHoursArgs struct {
+	Published    bool
+	PublishedSet bool // set true to send published; required because zero-value bool is ambiguous
+}
+
+// BookingHours calls the engine query bookingHours.
+func (qc *QueryClient) BookingHours(ctx context.Context, args BookingHoursArgs) (*Result, error) {
+	call := BookingHoursBuild(args)
+	return qc.executeNamed(ctx, "bookingHours", call)
+}
+
+func BookingHoursBuild(args BookingHoursArgs) string {
+	var b strings.Builder
+	b.WriteString("query bookingHours(")
+	if args.PublishedSet {
+		b.WriteString("published: ")
+		b.WriteString(fmt.Sprintf("%v", args.Published))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // CalendarEventById -- Get a single calendar event by node id. Self-scoped: the ownerUserId==actor.userId predicate guarantees a caller can only fetch their own events. Backs the calendar tool's update/delete pre-read and the event detail view.
 //
 // Bound concept: v1:calendar:calendarEvent (machine-readable: BoundConcepts["calendarEventById"] in generated_concepts.go).
@@ -2608,6 +2655,30 @@ func HistoricalPlanMetricsBuild(args HistoricalPlanMetricsArgs) string {
 	b.WriteString("query historicalPlanMetrics(")
 	b.WriteString("planKind: ")
 	b.WriteString(quoteMemQL(args.PlanKind))
+	b.WriteString(")")
+	return b.String()
+}
+
+// HostedBookings -- The host's bookings, newest first. Owned. Projects @pii bookerEmail, so the caller constraint is load-bearing.
+//
+// Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["hostedBookings"] in generated_concepts.go).
+type HostedBookingsArgs struct {
+	Status string
+}
+
+// HostedBookings calls the engine query hostedBookings.
+func (qc *QueryClient) HostedBookings(ctx context.Context, args HostedBookingsArgs) (*Result, error) {
+	call := HostedBookingsBuild(args)
+	return qc.executeNamed(ctx, "hostedBookings", call)
+}
+
+func HostedBookingsBuild(args HostedBookingsArgs) string {
+	var b strings.Builder
+	b.WriteString("query hostedBookings(")
+	if args.Status != "" {
+		b.WriteString("status: ")
+		b.WriteString(quoteMemQL(args.Status))
+	}
 	b.WriteString(")")
 	return b.String()
 }
