@@ -15,14 +15,14 @@ import { ErrorMessage } from "../components/StatusMessage";
 // persisted across the redirect to identity -- see auth/pending.ts -- because
 // the document itself is destroyed by that navigation.)
 //
-// memql#4152: when auth is on and the portal is signed-out, start the existing
-// PKCE /authorize immediately. A magic-link landing is just https://portal.../
-// with no OAuth params -- RequireAuth used to leave this page up, so the
-// identity session never minted a portal token. The button stays as a
-// fallback when auto-start fails (blocked storage, misconfigured cluster).
+// memql#4152: on a COLD signed-out landing, start the existing PKCE
+// /authorize immediately. A magic-link dest is just https://portal.../ with
+// no OAuth params -- leaving this page up never minted a portal token.
+// After an in-tab Sign out, stay on the card until Continue: auto-start
+// would race `endIdentitySession` and SSO the operator back in.
 
 export function SignInPage(): ReactNode {
-  const { signIn, error, config, status } = useAuth();
+  const { signIn, error, config, status, autoStartAuthorize } = useAuth();
   const location = useLocation();
   const cluster = clusterLabelFor(globalThis.location);
   const returnTo = location.pathname + location.search;
@@ -31,11 +31,11 @@ export function SignInPage(): ReactNode {
   // second PKCE start would overwrite the pending verifier.
   const started = useRef(false);
   useEffect(() => {
-    if (status === "misconfigured" || error) return;
+    if (!autoStartAuthorize || status === "misconfigured" || error) return;
     if (started.current) return;
     started.current = true;
     signIn(returnTo);
-  }, [status, error, returnTo, signIn]);
+  }, [autoStartAuthorize, status, error, returnTo, signIn]);
 
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">
@@ -63,13 +63,13 @@ export function SignInPage(): ReactNode {
               Continue with memQL identity
             </button>
             <p className="mt-3 text-xs text-subtle">
-              {error
-                ? "You will be sent to "
-                : "Continuing to "}
+              {autoStartAuthorize && !error
+                ? "Continuing to "
+                : "You will be sent to "}
               <span className="font-mono">{hostOf(config.identityUrl)}</span>
-              {error
-                ? " to sign in with a magic link, then returned here."
-                : " to finish sign-in."}
+              {autoStartAuthorize && !error
+                ? " to finish sign-in."
+                : " to sign in with a magic link, then returned here."}
             </p>
             {error ? (
               <div className="mt-4">

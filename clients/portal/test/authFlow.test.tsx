@@ -109,7 +109,7 @@ const unauthenticated = () =>
   jsonResponse({ error: "invalid_grant", message: "no refresh token presented" }, 401);
 
 describe("route protection", () => {
-  it("auto-starts PKCE /authorize when signed out instead of leaving SignInPage up (memql#4152)", async () => {
+  it("auto-starts PKCE /authorize on a cold signed-out landing (memql#4152)", async () => {
     const navigated: string[] = [];
     renderPortal({
       path: DEEP_LINK,
@@ -351,10 +351,10 @@ describe("the header", () => {
     await waitFor(() => screen.getByRole("button", { name: "Sign out" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
+    await waitFor(() => expect(screen.getByRole("button", { name: /Continue with/ })).toBeTruthy());
     await waitFor(() => expect(logoutCalls).toBe(1));
-    // #4152: signed-out auto-starts PKCE (SSO). The local credential is gone
-    // before that navigation; logout is best-effort behind it.
-    await waitFor(() => expect(navigated.length).toBeGreaterThan(0));
-    expect(new URL(navigated[0]!).pathname).toBe("/authorize");
+    // Cold-landing auto-start must not run after an in-tab Sign out
+    // (memql#4152): that races endIdentitySession and SSO's the operator back in.
+    expect(navigated).toHaveLength(0);
   });
 });
