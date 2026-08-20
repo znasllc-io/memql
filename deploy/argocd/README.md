@@ -14,7 +14,7 @@ anymore — Argo's `selfHeal` reverts any out-of-band change. Rollback =
               │  Argo CD (argocd ns)            │  project `memql`
               │  watches main                   │
               │   app memql  -> ns memql        │  (manual sync)
-              └────────────────────────┤
+              └──────────┴──────────────────────┘
                          ▼
           ONE NAMESPACE, ONE CLUSTER, ONE BASE
 ```
