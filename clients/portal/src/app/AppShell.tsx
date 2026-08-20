@@ -93,6 +93,7 @@ const ADMINISTER: readonly NavItem[] = [
 // is HIDDEN rather than shown-and-refused -- the engine refuses the reads
 // anyway; the rail just declines to advertise a door that will not open.
 const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
+const CLUSTER_OPS_ITEM: NavItem = { to: "/cluster-ops", label: "Cluster ops", icon: Rocket };
 
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
@@ -170,7 +171,7 @@ export function AppShell(): ReactNode {
   const [rail, setRail] = useState<"expanded" | "collapsed">(() => readStoredRail());
   const collapsed = rail === "collapsed";
   const { canAdminister } = useAdminAccess();
-  const administer = canAdminister ? [...ADMINISTER, MODULES_ITEM] : ADMINISTER;
+  const administer = canAdminister ? [...ADMINISTER, MODULES_ITEM, CLUSTER_OPS_ITEM] : ADMINISTER;
 
   function toggleRail(): void {
     const next = collapsed ? "expanded" : "collapsed";

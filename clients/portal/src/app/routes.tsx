@@ -15,6 +15,7 @@ import { ComposeRoutes } from "../compose/ComposeRoutes";
 import { IntegrationsRoutes } from "../integrations/IntegrationsRoutes";
 import { SitesRoutes } from "../sites/SitesRoutes";
 import { ModulesRoutes } from "../modules/ModulesRoutes";
+import { ClusterOpsPage } from "../clusterops/ClusterOpsPage";
 import {
   CONCEPTS_ROUTE_PATTERN,
   CONCEPT_ROUTE_PATTERN,
@@ -117,6 +118,7 @@ export function AppRoutes(): ReactNode {
           <Route path="admin/*" element={<AdminRoutes />} />
           <Route path="sites/*" element={<SitesRoutes />} />
           <Route path="modules/*" element={<ModulesRoutes />} />
+          <Route path="cluster-ops" element={<ClusterOpsPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Route>
