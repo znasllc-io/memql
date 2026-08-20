@@ -330,3 +330,30 @@ query warmupState warmupStateForIdentity {
   filter  row.id==args.sendingIdentity && actor.isClusterOwner==true
   shape   warmupStateFull
 }
+
+/// Consent event stream for one subscriber, newest first. Export answers
+/// status/date/source from these rows: current status is the latest kind.
+/// Owned: ownerUserId==actor.userId is a top-level conjunct.
+@actor
+query consentEvent consentEventsBySubscriber {
+  args {
+    emailDigest  string!
+  }
+  filter    ownerUserId==actor.userId && emailDigest==args.emailDigest
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     consentEventFull
+}
+
+/// Latest consent event for one subscriber -- the derived current status.
+/// Owned.
+@actor
+query consentEvent consentStatus {
+  args {
+    emailDigest  string!
+  }
+  filter    ownerUserId==actor.userId && emailDigest==args.emailDigest
+  sort      "row.createdAt", "desc"
+  paginate  1
+  shape     consentEventFull
+}

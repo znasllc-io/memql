@@ -172,3 +172,19 @@ shape warmupState warmupStateFull {
   acceptedInStep
   row.createdAt
 }
+
+/// Full consent-event projection. The export/compliance answer for
+/// status (kind), date (occurredAt), source, and suppress reason.
+@row
+shape consentEvent consentEventFull {
+  row.id
+  ownerUserId
+  emailDigest
+  kind
+  source
+  occurredAt
+  reason
+  recipientId
+  campaignId
+  row.createdAt
+}

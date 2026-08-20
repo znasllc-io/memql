@@ -520,3 +520,117 @@ mutate warmupState recordWarmupState {
     }
   }
 }
+
+/// Append a consent grant. No update path exists on consentEvent -- a later
+/// withdraw is a new row. Owned: ownerUserId is stamped from actor.userId.
+@actor
+mutate consentEvent recordConsentGrant {
+  args {
+    eventId      string!
+    emailDigest  string!
+    source       string!
+    occurredAt   datetime
+    recipientId  string
+    campaignId   string
+  }
+  insert {
+    accept { emailDigest, source, recipientId, campaignId }
+    stamp {
+      id: args.eventId
+      ownerUserId: actor.userId
+      kind: "grant"
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+/// Append a consent withdraw (unsubscribe / opt-out). Append-only.
+@actor
+mutate consentEvent recordConsentWithdraw {
+  args {
+    eventId      string!
+    emailDigest  string!
+    source       string!
+    occurredAt   datetime
+    recipientId  string
+    campaignId   string
+  }
+  insert {
+    accept { emailDigest, source, recipientId, campaignId }
+    stamp {
+      id: args.eventId
+      ownerUserId: actor.userId
+      kind: "withdraw"
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+/// Append a provider bounce event. Append-only.
+@actor
+mutate consentEvent recordConsentBounce {
+  args {
+    eventId      string!
+    emailDigest  string!
+    source       string!
+    occurredAt   datetime
+    recipientId  string
+    campaignId   string
+  }
+  insert {
+    accept { emailDigest, source, recipientId, campaignId }
+    stamp {
+      id: args.eventId
+      ownerUserId: actor.userId
+      kind: "bounce"
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+/// Append a provider complaint event. Append-only.
+@actor
+mutate consentEvent recordConsentComplaint {
+  args {
+    eventId      string!
+    emailDigest  string!
+    source       string!
+    occurredAt   datetime
+    recipientId  string
+    campaignId   string
+  }
+  insert {
+    accept { emailDigest, source, recipientId, campaignId }
+    stamp {
+      id: args.eventId
+      ownerUserId: actor.userId
+      kind: "complaint"
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
+
+/// Append a suppression event. reason is required -- a suppress without a
+/// reason is inexpressible on this path. Send-time suppression list is
+/// unchanged (recordSuppression).
+@actor
+mutate consentEvent recordConsentSuppress {
+  args {
+    eventId      string!
+    emailDigest  string!
+    source       string!
+    reason       string!
+    occurredAt   datetime
+    recipientId  string
+    campaignId   string
+  }
+  insert {
+    accept { emailDigest, source, reason, recipientId, campaignId }
+    stamp {
+      id: args.eventId
+      ownerUserId: actor.userId
+      kind: "suppress"
+      occurredAt: args.occurredAt ?? now
+    }
+  }
+}
