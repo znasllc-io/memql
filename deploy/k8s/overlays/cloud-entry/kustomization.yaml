@@ -1,0 +1,137 @@
+# CLOUD-ENTRY overlay -- keep-it / client install (memql#4203).
+#
+# A SECOND INSTANCE overlay, not a staging/prod split. overlays/cloud stays
+# on cnpg-db/presets/top + mesh 2 and is what deploy/argocd/apps/memql.yaml
+# points at. This directory is what a ZNAS (or client) Argo in its OWN
+# cluster reconciles: same base, same cnpg-db shape, entry sizes, mesh 1,
+# voice-off. Do not apply overlays/cloud to rg-znas-memql.
+#
+# Voice-off is first-class replicas 0 on voice / voice-agent / livekit /
+# livekit-sip / mcp (and livekit-redis, which exists only for the sip
+# plane). It is not LiveKit NODE_IP=0.0.0.0 and not an all-zeros MCP
+# digest -- those were fail-closed placeholders for a running pin.
+#
+# The generated front door lives in overlays/cloud. kustomize will not
+# load that sibling file from this directory; ZNAS Argo patches hosts
+# onto this overlay (or a copied generated file) at install time.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: memql
+
+resources:
+  - ../../base
+
+patches:
+  # Replica counts, STATED rather than inherited. Request-serving mesh
+  # nodes are 1. Voice-off is 0, not a leftover placeholder.
+  - target: { kind: Deployment, name: identity }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: bff }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: cognition }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: planner }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: workbench }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: edge }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 1 }
+  - target: { kind: Deployment, name: mcp }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+  - target: { kind: Deployment, name: voice }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+  - target: { kind: Deployment, name: voice-agent }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+  - target: { kind: Deployment, name: livekit }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+  - target: { kind: Deployment, name: livekit-sip }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+  - target: { kind: Deployment, name: livekit-redis }
+    patch: |
+      - { op: replace, path: /spec/replicas, value: 0 }
+
+  # -------------------------------------------------------------------------
+  # DATABASE -- same cloud VALUES as overlays/cloud; SIZES come from entry.
+  # -------------------------------------------------------------------------
+  - target: { kind: Cluster, name: memql-db }
+    patch: |
+      - { op: add, path: /spec/storage/storageClass, value: managed-csi-premium-v2 }
+      - { op: add, path: /spec/walStorage/storageClass, value: managed-csi-premium-v2 }
+      - op: add
+        path: /spec/affinity
+        value:
+          nodeSelector:
+            memql.io/node-pool: database
+          tolerations:
+            - key: memql.io/dedicated
+              operator: Equal
+              value: database
+              effect: NoSchedule
+      - op: add
+        path: /spec/serviceAccountTemplate
+        value:
+          metadata:
+            labels:
+              azure.workload.identity/use: "true"
+            annotations:
+              azure.workload.identity/client-id: "REPLACE-WITH-DB-IDENTITY-CLIENT-ID"
+
+  - target: { kind: ObjectStore, name: memql-db-backup }
+    patch: |
+      - op: replace
+        path: /spec/configuration/destinationPath
+        value: "azure://memql-db-backups/"
+      - op: replace
+        path: /spec/configuration/azureCredentials
+        value:
+          inheritFromAzureAD: true
+      - { op: replace, path: /spec/retentionPolicy, value: "30d" }
+
+images:
+  # Same pins as overlays/cloud for images that still render. MCP is
+  # omitted on purpose: replicas 0, so there is no running pin and no
+  # all-zeros digest (memql#4203).
+  - name: memql-db
+    newName: acrmemql.azurecr.io/memql-db
+    newTag: 16.15-timescaledb-2.29.1
+  - name: acrmemql.azurecr.io/memql-identity
+    digest: sha256:06cea2b58d662fee2c6b49bddbbd5c3cabda4de2234853cd6cb9233e6079d254
+  - name: acrmemql.azurecr.io/memql-cognition
+    digest: sha256:17c596966cfeed1cab2e76af746b156f31dc743f4edac2e815dcd5d94ac1c0f6
+  - name: acrmemql.azurecr.io/memql-voice
+    digest: sha256:aff90e206e3e37facc0c0f5e9079a815cd08b6e06a3aefde495182e36a2d2b9a
+  - name: acrmemql.azurecr.io/memql-agent
+    digest: sha256:c2dfd072d99d008be35a52ad22569da3ecb48ed35d3ab52dbacfd29ea5e6313c
+  - name: acrmemql.azurecr.io/memql-planner
+    digest: sha256:c68b33dd6fcd736a920b981555821f84498f2ec970d7a90692bb651568be9f9c
+  - name: acrmemql.azurecr.io/memql-workbench
+    digest: sha256:d3d849354d5615534ad74a090a42fa4b693727b9cd3dc6561aa890b5e92118d0
+  - name: livekit/livekit-server
+    newName: livekit/livekit-server
+    digest: sha256:9e34703b97ceb9f622bcbb533107e4786c7aa65966f0494966a452ad41a0c0d4
+  - name: livekit/sip
+    newName: livekit/sip
+    digest: sha256:f8621da1f203ba46e567f08311771ee5f77b0f93aad3eb7f24aaf93067f253cc
+  - name: redis
+    newName: redis
+    digest: sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+
+components:
+  - ../../components/engine-bff
+  - ../../components/cnpg-db
+  - ../../components/cnpg-db/presets/entry
