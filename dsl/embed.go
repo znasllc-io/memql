@@ -36,7 +36,17 @@ import (
 // RegisterTree; engine-only core builds omit them (ids preserved: v1:guide:*
 // / v1:curriculum:*).
 //
-//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:common all:data all:deployment all:forge all:harness all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
+// memql#4190: `harness` is deliberately ABSENT from this list. The harness
+// is the platform's own proof that a substantial capability can be a
+// module: its tree still lives at dsl/harness/ and still ships in every
+// binary, but it is embedded by dsl/harness_pack.go's own directive and
+// registered through RegisterTree like any other pack -- which is what
+// makes it enable/disable-able per instance (v1:platform:packState).
+// Removing the token here is also what frees the domain name:
+// coreDomains() reads THIS FS's root, so the pack registration below
+// passes ValidatePackDomain without a second list to maintain.
+//
+//go:embed all:actions all:agents all:authoring all:calendar all:campaigns all:capabilities all:cluster all:cognition all:common all:data all:deployment all:forge all:healing all:identity all:install all:integrations all:knowledge all:library all:memql all:notes all:observability all:planner all:platform all:policies all:portalviews all:providers all:rbac all:router all:safety all:shopify all:telephony all:todos all:workbench all:worker
 var embedFS embed.FS
 
 // pluginTrees holds the additional DSL subtrees registered by external

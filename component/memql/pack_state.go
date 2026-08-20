@@ -45,6 +45,14 @@ type packStatePayload struct {
 // ReadPackStates returns the newest version of every v1:platform:packState
 // row, keyed by pack domain.
 //
+// staged-data: MUST-NOT-GATE -- this is the phase-3 boot read of cluster
+// infrastructure state, before the engine (and therefore the staged
+// predicate) exists; gating it would refuse every boot. And packState must
+// bind every node identically: withholding a row per-author would fork the
+// mesh's loaded-pack set per node, which is exactly the pack-rot failure
+// strict boot exists to prevent. packState is a core clusterOwner-tier
+// concept; its rows are never authored staged data.
+//
 // A database with no MemoryNodes relation yet -- the very first boot, before
 // migrations have run -- reads as EMPTY, not as an error: absence of state
 // means every pack is enabled, and a fresh install must not need seeding to

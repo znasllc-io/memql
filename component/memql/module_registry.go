@@ -431,6 +431,12 @@ type clusterConceptRow struct {
 // raw, mirroring ReadPackStates. Used for the v1:cluster:* topology
 // concepts. Missing relation reads as empty (a cluster that has never
 // registered a node simply has no node-type rows).
+//
+// staged-data: MUST-NOT-GATE -- the module inventory reports the cluster's
+// operating state to owner/admin callers; withholding a topology row would
+// report a node type as absent while the mesh runs it. The v1:cluster:*
+// concepts this reads are system-written bookkeeping, never authored
+// staged data, and the surface is already role-gated above this read.
 func latestRowsByConcept(ctx context.Context, db *bun.DB, conceptID string) ([]clusterConceptRow, error) {
 	if db == nil {
 		return nil, nil
