@@ -5,6 +5,7 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
 import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Breadcrumbs, Tabs } from "../ui";
 import type { ConceptPaneContext } from "./conceptContext";
 import {
   SCHEMA_ROUTE_PATTERN,
@@ -82,15 +83,13 @@ export function ConceptPage(): ReactNode {
 
   return (
     <section className="flex min-h-full flex-col gap-4">
-      <nav aria-label="Breadcrumb" className="text-xs text-muted">
-        <Link to={conceptsPath(search)} className="hover:text-fg hover:underline">
-          Concepts
-        </Link>
-        <span className="mx-1.5 text-subtle">/</span>
-        <span className="text-fg">{concept.domain}</span>
-        <span className="mx-1.5 text-subtle">/</span>
-        <span className="text-fg">{concept.entity}</span>
-      </nav>
+      <Breadcrumbs
+        items={[
+          { label: "Concepts", to: conceptsPath(search) },
+          { label: concept.domain },
+          { label: concept.entity },
+        ]}
+      />
 
       <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <h1 className="text-xl font-semibold tracking-tight">{concept.entity}</h1>
@@ -103,15 +102,16 @@ export function ConceptPage(): ReactNode {
         <p className="max-w-3xl text-sm text-muted">{concept.description}</p>
       ) : null}
 
-      {/* Tabs are ROUTES, so a schema view is a link someone can send. */}
-      <nav aria-label="Concept views" className="flex gap-1 border-b border-line">
-        <Tab to={conceptPath(concept.id, search)} active={!onSchema}>
-          Rows
-        </Tab>
-        <Tab to={conceptSchemaPath(concept.id, search)} active={onSchema}>
-          Schema
-        </Tab>
-      </nav>
+      {/* Tabs are ROUTES, so a schema view is a link someone can send. Active
+          state is passed explicitly: /rows/:rowId IS the rows view, which
+          path matching alone cannot express (see the useMatch above). */}
+      <Tabs
+        label="Concept views"
+        items={[
+          { to: conceptPath(concept.id, search), label: "Rows", active: !onSchema },
+          { to: conceptSchemaPath(concept.id, search), label: "Schema", active: onSchema },
+        ]}
+      />
 
       <div className="min-h-0 flex-1">
         <Outlet context={context} />
@@ -125,30 +125,5 @@ function Chip({ children }: { children: ReactNode }): ReactNode {
     <span className="rounded-full border border-line px-2 py-0.5 font-mono text-xs text-muted">
       {children}
     </span>
-  );
-}
-
-function Tab({
-  to,
-  active,
-  children,
-}: {
-  to: string;
-  active: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <Link
-      to={to}
-      aria-current={active ? "page" : undefined}
-      className={
-        "-mb-px border-b-2 px-3 py-1.5 text-sm " +
-        (active
-          ? "border-accent font-medium text-fg"
-          : "border-transparent text-muted hover:text-fg")
-      }
-    >
-      {children}
-    </Link>
   );
 }

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { useCluster } from "../cluster/ClusterProvider";
+import { Button } from "../ui";
 
 // The header's connection state. Deliberately always visible rather than
 // appearing only on failure: "no error shown" and "not looking" are
@@ -49,13 +50,9 @@ export function ConnectionIndicator(): ReactNode {
         </span>
       ) : null}
       {status === "error" || status === "closed" ? (
-        <button
-          type="button"
-          onClick={reconnect}
-          className="rounded border border-line px-2 py-0.5 text-xs text-fg hover:bg-raised"
-        >
+        <Button size="xs" onClick={reconnect}>
           Retry
-        </button>
+        </Button>
       ) : null}
     </div>
   );
