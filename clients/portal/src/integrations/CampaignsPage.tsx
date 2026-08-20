@@ -4,6 +4,7 @@ import { STAT_TILE_ELEMENT, TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 
 import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
+import { Button as UiButton, Field, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { useCampaigns } from "./useCampaigns";
 import {
@@ -249,50 +250,13 @@ function NewTemplateForm({
 }
 
 // ---------------------------------------------------------------------------
-// Form primitives, shared with the campaign editor.
+// Form primitives -- the shared src/ui vocabulary (memql#4178). The
+// definitions moved there; these namings survive because three sibling pages
+// (the campaign editor, sites list and detail) import them from this module.
+// The page-by-page pass points those imports at ../ui and retires these.
 // ---------------------------------------------------------------------------
 
-export function Field({
-  label,
-  hint,
-  grow = false,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  grow?: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <label className={"flex flex-col gap-1 " + (grow ? "min-w-48 flex-1" : "")}>
-      <span className="text-xs font-medium text-muted">{label}</span>
-      {children}
-      {hint === undefined ? null : <span className="text-xs text-subtle">{hint}</span>}
-    </label>
-  );
-}
-
-export function TextInput({
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-}: {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-  type?: string;
-}): ReactNode {
-  return (
-    <input
-      type={type}
-      value={value}
-      placeholder={placeholder}
-      onChange={(event) => onChange(event.target.value)}
-      className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-subtle"
-    />
-  );
-}
+export { Field, TextInput };
 
 export function SubmitButton({
   busy,
@@ -304,12 +268,8 @@ export function SubmitButton({
   children: ReactNode;
 }): ReactNode {
   return (
-    <button
-      type="submit"
-      disabled={busy || disabled}
-      className="rounded border border-line bg-surface px-2.5 py-1.5 text-xs font-medium text-fg hover:bg-raised disabled:cursor-not-allowed disabled:opacity-40"
-    >
-      {busy ? "Working…" : children}
-    </button>
+    <UiButton type="submit" size="xs" busy={busy} busyLabel="Working…" disabled={disabled}>
+      {children}
+    </UiButton>
   );
 }

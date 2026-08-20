@@ -5,40 +5,31 @@ import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 import { RowDetail } from "../components/RowDetail";
 import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
 import { useRowDetail } from "../cluster/useConceptRows";
+import { Band as UiBand, Button, PageHeader, Panel, PopulationMeta as UiPopulationMeta } from "../ui";
 import type { ViewDefinition } from "./registry";
 import { viewPath } from "./urls";
 
 // THE LAYOUT GRAMMAR every predefined view is built out of.
 //
 // One shape, five views (see registry.ts for why): a header that names the
-// population, then bands -- a reading, a shape, a roll. This module owns the
-// chrome around the bands; the bands' CONTENTS are always elements, rendered
-// through <ViewElement>.
+// population, then bands -- a reading, a shape, a roll. Since memql#4178 the
+// PRIMITIVES live in src/ui (PageHeader, Band, Button, PopulationMeta) --
+// one vocabulary for the whole portal -- and this module keeps only what is
+// view-specific: the ViewProps contract, the frame that knows a view's
+// eyebrow is its concept id, and the row aside. The five view BODIES import
+// Band/MetaButton from here unchanged, which keeps the guarded views
+// directory decoupled from ui's file layout.
 //
-// TYPOGRAPHY AND HIERARCHY, stated once here so five views cannot each
-// invent it:
+// TYPOGRAPHY AND HIERARCHY live in src/ui/README.md now, stated once for
+// every surface. The view-specific statement stands: the eyebrow is the
+// concept id -- the one thing on the page that tells an operator which rows
+// they are looking at, and the address they would paste into a query.
 //
-//   eyebrow   the concept id, monospace, subtle. Not decoration -- it is the
-//             one thing on the page that tells an operator which rows they
-//             are looking at, and it is the address they would paste into a
-//             query. Monospace because ids are read character by character.
-//   title     text-xl semibold. The only element at that size on the page.
-//   blurb     one line of muted prose, capped at a readable measure. It says
-//             what the population IS, in the operator's words.
-//   band      a small-caps label on a hairline rule that runs to the pane's
-//             edge. A rule with a caption, not a card header: a band is a
-//             HORIZON in one continuous page, and boxing each one would make
-//             three readings of a single population look like three
-//             unrelated widgets.
-//
-// The bands are not numbered. They are three simultaneous facts about one
-// population, and "01 / 02 / 03" would assert a sequence that does not exist.
-//
-// COLOUR. The chrome here is greyscale plus the one accent. Colour appears in
-// exactly two places on a view: series identity inside an element (view-kit's
-// validated palette) and lifecycle severity on a status badge
-// (src/styles/status.css). Anything else would spend the channel that carries
-// "this deploy failed" on decoration.
+// COLOUR. The chrome here is greyscale plus the one accent. Colour appears
+// in exactly two places on a view: series identity inside an element
+// (view-kit's validated palette) and lifecycle severity on a status badge
+// (src/styles/status.css). Anything else would spend the channel that
+// carries "this deploy failed" on decoration.
 
 // What every view body is handed.
 //
@@ -75,8 +66,8 @@ export function ViewFrame({
   // Right-aligned, small: the honest state of the data behind the page (how
   // much of the population is loaded, and how to load more).
   meta?: ReactNode;
-  // Right-aligned, prominent: what an operator can DO here. Absent when the
-  // caller cannot do anything -- see each view for the role gate.
+  // Right-aligned, prominent: what an operator can DO here -- rendered as a
+  // ROW by PageHeader. Absent when the caller cannot do anything.
   actions?: ReactNode;
   aside?: ReactNode;
   children: ReactNode;
@@ -84,17 +75,13 @@ export function ViewFrame({
   return (
     <section className="flex min-h-full flex-col gap-6 pb-8 xl:flex-row xl:items-start xl:gap-8">
       <div className="flex min-w-0 flex-1 flex-col gap-6">
-        <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-          <div className="min-w-0">
-            <p className="font-mono text-xs break-all text-subtle">{conceptId}</p>
-            <h1 className="mt-1 text-xl font-semibold tracking-tight">{view.title}</h1>
-            <p className="mt-1 max-w-2xl text-sm text-muted">{view.blurb}</p>
-          </div>
-          <div className="flex shrink-0 flex-col items-end gap-2">
-            {actions}
-            {meta}
-          </div>
-        </header>
+        <PageHeader
+          eyebrow={conceptId}
+          title={view.title}
+          blurb={view.blurb}
+          {...(actions === undefined ? {} : { actions })}
+          {...(meta === undefined ? {} : { meta })}
+        />
 
         {children}
       </div>
@@ -104,100 +91,15 @@ export function ViewFrame({
   );
 }
 
-// Band is one horizon of the page.
-//
-// `title` omitted makes it the opening reading -- the numbers ARE the label,
-// and captioning a stat strip "Summary" adds a word and no information.
-export function Band({
-  title,
-  meta,
-  panel = false,
-  children,
-}: {
-  title?: string;
-  meta?: ReactNode;
-  // Wrap the contents in a surface. On for an enumerable body (a table needs
-  // an edge and its own horizontal scroll); off for a reading or a rail,
-  // which sit directly on the page.
-  panel?: boolean;
-  children: ReactNode;
-}): ReactNode {
-  return (
-    <section className="min-w-0">
-      {title === undefined ? null : (
-        <div className="mb-3 flex items-baseline gap-3">
-          <h2 className="shrink-0 text-xs font-semibold tracking-wide text-muted uppercase">
-            {title}
-          </h2>
-          <span aria-hidden="true" className="h-px min-w-4 flex-1 bg-line" />
-          {meta === undefined ? null : (
-            <span className="shrink-0 text-xs text-subtle">{meta}</span>
-          )}
-        </div>
-      )}
-      {panel ? (
-        <div className="overflow-x-auto rounded-lg border border-line bg-surface p-1">
-          {children}
-        </div>
-      ) : (
-        children
-      )}
-    </section>
-  );
-}
+// Band and PopulationMeta ARE the ui primitives; re-exported so the guarded
+// view bodies keep their import path.
+export const Band = UiBand;
+export const PopulationMeta = UiPopulationMeta;
 
-// PopulationMeta is the honest state of the keyset walk behind a view.
-//
-// Every reading on the page -- the counts, the proportions -- describes THE
-// ROWS LOADED, not the whole concept. Saying so is not a caveat, it is the
-// difference between a dashboard and a lie: an operator who reads "3 owners"
-// off a page that has loaded one of nine pages has been misinformed. So the
-// count is always present and always says "loaded".
-export function PopulationMeta({
-  count,
-  status,
-  error,
-  onLoadMore,
-  onRetry,
-}: {
-  count: number;
-  status: "idle" | "loading" | "ready" | "exhausted" | "failed";
-  error: string;
-  onLoadMore: () => void;
-  onRetry: () => void;
-}): ReactNode {
-  if (status === "failed") {
-    return (
-      <div className="flex items-center gap-2">
-        {/* Said in words at full contrast, not in a hue. This sits in the
-            header at 12px, where --portal-danger is about 4.0:1 on the page
-            ground in light mode -- under the floor, and the sentence is
-            unambiguous without any colour at all. */}
-        <span className="text-xs text-fg">
-          {count > 0 ? `Paging stopped after ${count}` : "Could not read rows"}: {error}
-        </span>
-        <MetaButton onClick={onRetry}>Try again</MetaButton>
-      </div>
-    );
-  }
-  if (status === "loading" || status === "idle") {
-    return <span className="text-xs text-subtle">Loading… ({count} so far)</span>;
-  }
-  if (status === "ready") {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-subtle">{count} loaded, more available</span>
-        <MetaButton onClick={onLoadMore}>Load more</MetaButton>
-      </div>
-    );
-  }
-  return (
-    <span className="text-xs text-subtle">
-      {count === 0 ? "Nothing here yet" : `All ${count} loaded`}
-    </span>
-  );
-}
-
+// MetaButton is ui/Button at the meta size, preserved as a named idiom
+// because "the small header action" is a real role the five views share.
+// There is deliberately no "primary" here: on these screens the most
+// prominent thing should be the data, not a button.
 export function MetaButton({
   onClick,
   disabled = false,
@@ -206,26 +108,13 @@ export function MetaButton({
 }: {
   onClick: () => void;
   disabled?: boolean;
-  // "quiet" for navigation-ish actions, "danger" for the one that cannot be
-  // undone. There is deliberately no "primary": on these screens the most
-  // prominent thing should be the data, not a button.
   tone?: "quiet" | "danger";
   children: ReactNode;
 }): ReactNode {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={
-        "rounded border px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 " +
-        (tone === "danger"
-          ? "border-danger bg-danger-subtle text-fg hover:bg-danger hover:text-accent-fg"
-          : "border-line bg-surface text-fg hover:bg-raised")
-      }
-    >
+    <Button size="xs" tone={tone} onClick={onClick} disabled={disabled}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -257,7 +146,7 @@ export function RowAside({
           Close
         </Link>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-line bg-surface p-3">
+      <Panel>
         <p className="mb-2 font-mono text-xs break-all text-subtle">{rowId}</p>
         {error ? (
           <ErrorMessage>Failed to read the row: {error}</ErrorMessage>
@@ -271,7 +160,7 @@ export function RowAside({
         ) : row ? (
           <RowDetail row={row} />
         ) : null}
-      </div>
+      </Panel>
     </aside>
   );
 }

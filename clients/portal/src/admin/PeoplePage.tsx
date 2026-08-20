@@ -6,6 +6,7 @@ import type { Row } from "@znasllc-io/memql-sdk-core/client";
 import { useConcepts } from "../cluster/useConcepts";
 import { ErrorMessage } from "../components/StatusMessage";
 import { Band, MetaButton } from "../views/ViewLayout";
+import { Button as UiButton, Field as UiField, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { AdminFrame, Reading, Refused } from "./AdminLayout";
 import { surfaceById } from "./urls";
@@ -602,21 +603,16 @@ function Field({
   onChange: (next: string) => void;
 }): ReactNode {
   return (
-    <label className="flex flex-col gap-1 text-xs text-muted">
-      {label}
-      <input
-        type="text"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
-      />
-    </label>
+    <UiField label={label}>
+      <TextInput value={value} onChange={onChange} />
+    </UiField>
   );
 }
 
 // A submit button in the MetaButton idiom. Not MetaButton itself, because that
 // one is `type="button"` with an onClick and these live inside forms, where
-// submitting on Enter is the behaviour an operator expects.
+// submitting on Enter is the behaviour an operator expects. The rendering is
+// ui/Button (memql#4178); this naming survives for SettingsPage's import.
 export function SubmitButton({
   busy,
   tone = "quiet",
@@ -627,17 +623,8 @@ export function SubmitButton({
   children: ReactNode;
 }): ReactNode {
   return (
-    <button
-      type="submit"
-      disabled={busy}
-      className={
-        "rounded border px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 " +
-        (tone === "danger"
-          ? "border-danger bg-danger-subtle text-fg hover:bg-danger hover:text-accent-fg"
-          : "border-line bg-surface text-fg hover:bg-raised")
-      }
-    >
+    <UiButton type="submit" size="xs" tone={tone} busy={busy}>
       {children}
-    </button>
+    </UiButton>
   );
 }

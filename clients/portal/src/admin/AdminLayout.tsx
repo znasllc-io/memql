@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { NavLink } from "react-router-dom";
 
+import { PageHeader, Tabs } from "../ui";
 import { adminPath, ADMIN_SURFACES, type AdminSurface } from "./urls";
 
 // The chrome the admin screens share.
@@ -14,9 +14,9 @@ import { adminPath, ADMIN_SURFACES, type AdminSurface } from "./urls";
 // population. It is a question about the cluster's own operating state, and two
 // of them render nothing that came out of the graph at all.
 //
-// So the grammar is kept and the frame is not. Bands, hairline rules, the type
-// hierarchy and every token come from the views (Band is imported from them
-// outright); what changes is the one line where a view puts a concept id.
+// So the grammar is kept and the frame is not: the header is the shared
+// PageHeader, the surface strip is the shared Tabs idiom, and what changes is
+// the one line where a view puts a concept id.
 //
 // ===========================================================================
 // THE EYEBROW IS THE ROLE FLOOR
@@ -49,9 +49,9 @@ export function AdminFrame({
 }): ReactNode {
   return (
     <section className="flex min-h-full flex-col gap-6 pb-8">
-      <header className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3 border-b border-line pb-4">
-        <div className="min-w-0">
-          <p className="font-mono text-xs text-subtle">
+      <PageHeader
+        eyebrow={
+          <>
             owner or admin
             <span aria-hidden="true"> · </span>
             {resolved
@@ -59,46 +59,29 @@ export function AdminFrame({
                 ? "no role on this connection"
                 : `you are ${role}`
               : "resolving your role"}
-          </p>
-          <h1 className="mt-1 text-xl font-semibold tracking-tight">{surface.title}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">{surface.blurb}</p>
-        </div>
-        {actions === undefined ? null : (
-          <div className="flex shrink-0 flex-col items-end gap-2">{actions}</div>
-        )}
-      </header>
+          </>
+        }
+        title={surface.title}
+        blurb={surface.blurb}
+        {...(actions === undefined ? {} : { actions })}
+      />
 
-      <AdminNav current={surface.id} />
+      {/* The surfaces, as the one Tabs idiom directly under the header. A
+          second nav RAIL would compete with the shell's; a tab strip reads as
+          what it is -- facets of one console, not unrelated destinations. */}
+      <div className="-mt-2">
+        <Tabs
+          label="Administration"
+          items={ADMIN_SURFACES.map((s) => ({
+            to: adminPath(s.id),
+            label: s.label,
+            end: true,
+          }))}
+        />
+      </div>
 
       {children}
     </section>
-  );
-}
-
-// The surfaces, as a row of links directly under the header.
-//
-// A second nav RAIL would compete with the shell's; a row of links reads as
-// what it is -- facets of one console, not unrelated destinations.
-function AdminNav({ current }: { current: string }): ReactNode {
-  return (
-    <nav aria-label="Administration" className="-mt-2 flex flex-wrap gap-1">
-      {ADMIN_SURFACES.map((surface) => (
-        <NavLink
-          key={surface.id === "" ? "overview" : surface.id}
-          to={adminPath(surface.id)}
-          end
-          aria-current={surface.id === current ? "page" : undefined}
-          className={({ isActive }) =>
-            "rounded border px-2.5 py-1 text-xs font-medium " +
-            (isActive
-              ? "border-line-strong bg-accent-subtle text-fg"
-              : "border-line bg-surface text-muted hover:bg-raised hover:text-fg")
-          }
-        >
-          {surface.label}
-        </NavLink>
-      ))}
-    </nav>
   );
 }
 
