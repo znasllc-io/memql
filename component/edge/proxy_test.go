@@ -90,6 +90,69 @@ func TestAPIProxyPreservesTheUpgradeHeaders(t *testing.T) {
 	}
 }
 
+func TestAPIProxyPreservesTheBearerSubprotocol(t *testing.T) {
+	const jwt = "eyJhbGciOiJIUzI1NiJ9.e30.sig"
+	var saw []string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = append([]string(nil), r.Header.Values("Sec-WebSocket-Protocol")...)
+		w.Header().Set("Sec-WebSocket-Protocol", "bearer")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Add("Sec-WebSocket-Protocol", "bearer")
+	req.Header.Add("Sec-WebSocket-Protocol", jwt)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	joined := strings.Join(saw, ", ")
+	if !strings.Contains(joined, "bearer") || !strings.Contains(joined, jwt) {
+		t.Fatalf("upstream saw Sec-WebSocket-Protocol=%q; want bearer + jwt", saw)
+	}
+}
+
+func TestAPIProxyPreservesCombinedBearerSubprotocol(t *testing.T) {
+	const jwt = "eyJhbGciOiJIUzI1NiJ9.e30.sig"
+	var saw string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		saw = r.Header.Get("Sec-WebSocket-Protocol")
+		w.Header().Set("Sec-WebSocket-Protocol", "bearer")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+	}))
+	defer upstream.Close()
+
+	h := NewHandler(Options{
+		Resolver: staticResolver{site: &Site{
+			ID: "s1", Hostname: "shop.example.com", Status: "live", Kind: "spa", APIProxy: true,
+		}},
+		Opener:    mapOpener(map[string]string{"index.html": "ROOT"}),
+		APITarget: upstream.URL,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/_memql/ws", nil)
+	req.Host = "shop.example.com"
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Sec-WebSocket-Protocol", "bearer, "+jwt)
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	if !strings.Contains(saw, "bearer") || !strings.Contains(saw, jwt) {
+		t.Fatalf("upstream saw Sec-WebSocket-Protocol=%q; want bearer, jwt", saw)
+	}
+}
+
 // serveAPI's own cleanPath guard is the ONLY thing refusing these -- calling
 // h.ServeHTTP directly, exactly as every test in this file does, never goes
 // through http.ServeMux's redirect. That is precisely the scenario the

@@ -84,6 +84,7 @@ func (h *Handler) serveAPI(w http.ResponseWriter, r *http.Request, site *Site) {
 			// service name.
 			pr.SetXForwarded()
 			pr.Out.Host = pr.In.Host
+			copyWebsocketSubprotocols(pr)
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
 			h.logger.Error("edge: proxying to the API failed",
@@ -127,4 +128,18 @@ func cleanPathLikeMux(p string) string {
 		}
 	}
 	return np
+}
+
+// copyWebsocketSubprotocols keeps the bearer/guest JWT pair on the
+// hop to bff (memql#4160). Values(), not Get: browsers may send two
+// Sec-WebSocket-Protocol lines.
+func copyWebsocketSubprotocols(pr *httputil.ProxyRequest) {
+	protos := pr.In.Header.Values("Sec-WebSocket-Protocol")
+	if len(protos) == 0 {
+		return
+	}
+	pr.Out.Header.Del("Sec-WebSocket-Protocol")
+	for _, proto := range protos {
+		pr.Out.Header.Add("Sec-WebSocket-Protocol", proto)
+	}
 }

@@ -23,6 +23,8 @@ import {
   type ReactNode,
 } from "react";
 
+import { useLocation } from "react-router-dom";
+
 import {
   UNKNOWN_RUNTIME_CONFIG,
   isRuntimeConfigReady,
@@ -143,6 +145,7 @@ export function AuthProvider({
   config: configOverride,
   redirectUri = defaultRedirectUri(),
 }: AuthProviderProps): ReactNode {
+  const location = useLocation();
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [autoStartAuthorize, setAutoStartAuthorize] = useState(false);
   const [config, setConfig] = useState<PortalRuntimeConfig>(
@@ -219,6 +222,16 @@ export function AuthProvider({
         return;
       }
 
+      // On the OAuth callback document, completeSignIn owns the session.
+      // A parallel /auth/refresh 401 (cookie not set yet) used to flip
+      // signedOut, tear the ClusterProvider dial (GoingAway ~0.5s), then
+      // signedIn again — the portal hung Connecting / Unknown (memql#4160).
+      // Stay loading so the socket is opened once, after the exchange.
+      if (location.pathname === portalRedirectPath || location.pathname.endsWith("/auth/callback")) {
+        setAutoStartAuthorize(false);
+        return;
+      }
+
       // Probe for an existing session by attempting a refresh.
       //
       // ONE unconditional request, and a 401 is a NORMAL outcome. identity
@@ -242,7 +255,7 @@ export function AuthProvider({
       cancelled = true;
     };
     // configOverride/fetchImpl are test-injected and constant in production.
-  }, [authSource, configOverride, fetchImpl]);
+  }, [authSource, configOverride, fetchImpl, location.pathname]);
 
   const signIn = useCallback(
     (returnTo?: string) => {
