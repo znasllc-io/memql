@@ -3,9 +3,9 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { rowBool, rowString } from "@znasllc-io/memql-sdk-core/client";
 
 import { useMyAccess } from "../cluster/useMyAccess";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Field, SubmitButton, TextInput } from "../integrations/CampaignsPage";
-import { Band, MetaButton } from "../views/ViewLayout";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Breadcrumbs, Button, ConfirmDialog, DataText, Field, PageHeader, Skeleton, TextInput } from "../ui";
+import { Band } from "../ui";
 import { EnumSelect } from "./EnumSelect";
 import { SitesRefused } from "./SitesRefused";
 import { sitesPath } from "./urls";
@@ -44,6 +44,7 @@ export function SiteDetailPage(): ReactNode {
   const detail = useSiteDetail(siteId);
   const history = useSiteHistory(siteId);
   const [bundleRef, setBundleRef] = useState("");
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   // A successful delete leaves nothing at this address -- go back to the
   // list rather than rendering a "site not found" a moment after the
@@ -52,14 +53,14 @@ export function SiteDetailPage(): ReactNode {
     if (detail.deleted) navigate(sitesPath());
   }, [detail.deleted, navigate]);
 
-  if (!accessResolved) return <Loading what="your access" />;
+  if (!accessResolved) return <Skeleton variant="text" width="w-40" />;
   if (!isOwner) return <SitesRefused role={role} resolved={accessResolved} />;
 
   if (detail.error) {
     return <ErrorMessage>Could not read this site: {detail.error}</ErrorMessage>;
   }
   if (detail.loading && detail.site === null) {
-    return <Loading what="the site" />;
+    return <Skeleton variant="kv" rows={6} />;
   }
   if (detail.site === null) {
     return (
@@ -91,17 +92,17 @@ export function SiteDetailPage(): ReactNode {
 
   return (
     <section className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 pb-8">
-      <header className="border-b border-line pb-4">
-        <Link to={sitesPath()} className="text-xs text-muted hover:text-fg hover:underline">
-          ← Sites
-        </Link>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight">{title || hostname}</h1>
-        <p className="mt-1 text-sm text-muted">
-          {hostname} · {kind || "unknown kind"} · status{" "}
-          <span className="font-medium text-fg">{status || "unknown"}</span>
-          {systemOwned ? " · system-owned" : ""}
-        </p>
-      </header>
+      <PageHeader
+        eyebrow={<Breadcrumbs items={[{ label: "Sites", to: sitesPath() }, { label: title || hostname }]} />}
+        title={title || hostname}
+        blurb={
+          <>
+            <DataText kind="id">{hostname}</DataText> · {kind || "unknown kind"} · status{" "}
+            <span className="font-medium text-fg">{status || "unknown"}</span>
+            {systemOwned ? " · system-owned" : ""}
+          </>
+        }
+      />
 
       {detail.actionError ? <ErrorMessage>{detail.actionError}</ErrorMessage> : null}
       {detail.actionMessage ? (
@@ -119,9 +120,9 @@ export function SiteDetailPage(): ReactNode {
           >
             <TextInput value={bundleRef} onChange={setBundleRef} placeholder={currentBundleRef} />
           </Field>
-          <SubmitButton busy={detail.busy} disabled={bundleRef.trim() === ""}>
+          <Button type="submit" size="xs" busyLabel="Working…" busy={detail.busy} disabled={bundleRef.trim() === ""}>
             Publish
-          </SubmitButton>
+          </Button>
         </form>
         <p className="mt-1 text-xs text-subtle">Currently serving {currentBundleRef || "(none set)"}.</p>
       </Band>
@@ -131,7 +132,7 @@ export function SiteDetailPage(): ReactNode {
         meta={`the last ${MAX_HISTORY_VERSIONS <= 1 ? "version" : `up to ${MAX_HISTORY_VERSIONS} versions`}`}
       >
         {history.loading ? (
-          <Loading what="version history" />
+          <Skeleton variant="rows" rows={4} />
         ) : history.error ? (
           <ErrorMessage>Could not read version history: {history.error}</ErrorMessage>
         ) : history.versions.length === 0 ? (
@@ -144,19 +145,19 @@ export function SiteDetailPage(): ReactNode {
                 className="flex items-center justify-between gap-3 rounded-lg border border-line bg-surface px-3 py-2"
               >
                 <div className="min-w-0">
-                  <p className="truncate font-mono text-xs text-fg">{version.bundleRef || "(empty)"}</p>
+                  <p className="truncate text-xs"><DataText kind="id">{version.bundleRef || "(empty)"}</DataText></p>
                   <p className="text-xs text-subtle">
                     {version.createdAt}
                     {index === 0 ? " · current" : ""}
                   </p>
                 </div>
                 {index === 0 ? null : (
-                  <MetaButton
+                  <Button size="xs"
                     onClick={() => detail.publish(version.bundleRef)}
                     disabled={detail.busy || version.bundleRef === ""}
                   >
                     Roll back to this
-                  </MetaButton>
+                  </Button>
                 )}
               </li>
             ))}
@@ -186,10 +187,32 @@ export function SiteDetailPage(): ReactNode {
             enabled; an operator cannot brick cluster management by deleting this row.
           </p>
         ) : null}
-        <MetaButton onClick={detail.remove} disabled={detail.busy || systemOwned} tone="danger">
+        <Button
+          size="xs"
+          onClick={() => setConfirmingDelete(true)}
+          disabled={detail.busy || systemOwned}
+          tone="danger"
+        >
           Delete site
-        </MetaButton>
+        </Button>
       </Band>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete this site?"
+        confirmLabel="Delete site"
+        tone="danger"
+        busy={detail.busy}
+        onConfirm={() => {
+          setConfirmingDelete(false);
+          detail.remove();
+        }}
+        onCancel={() => setConfirmingDelete(false)}
+      >
+        The edge stops answering for <DataText kind="id">{hostname}</DataText> once its resolve
+        cache turns over. Uploaded bundle bytes are not removed by this; re-creating the site at
+        the same hostname and re-publishing a version brings it back.
+      </ConfirmDialog>
     </section>
   );
 }

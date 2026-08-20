@@ -5,8 +5,8 @@ import { useConcepts } from "../cluster/useConcepts";
 import { liveBandIsEmpty } from "../concepts/liveBand";
 import { enumValuesForField } from "../concepts/schema";
 import { RowList } from "../components/RowList";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
-import { Field, SubmitButton, TextInput } from "../integrations/CampaignsPage";
+import { ErrorMessage } from "../components/StatusMessage";
+import { Button, Container, EmptyState, Field, PageHeader, Skeleton, TextInput } from "../ui";
 import { Band, PopulationMeta } from "../views/ViewLayout";
 import { SITE_CONCEPT_ID } from "./concepts";
 import { EnumSelect } from "./EnumSelect";
@@ -41,24 +41,20 @@ export function SitesPage(): ReactNode {
   // header. Resolving is its own state so "you are not the owner" is never
   // said before the connection has actually answered who you are.
   if (!accessResolved) {
-    return <Loading what="your access" />;
+    return <Skeleton variant="text" width="w-40" />;
   }
   if (!isOwner) {
     return <SitesRefused role={role} resolved={accessResolved} />;
   }
 
   return (
-    <section className="mx-auto flex min-h-full max-w-4xl flex-col gap-6 pb-8">
-      <header className="border-b border-line pb-4">
-        <p className="font-mono text-xs break-all text-subtle">{SITE_CONCEPT_ID}</p>
-        <h1 className="mt-1 text-xl font-semibold tracking-tight">Sites</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          Every hosted surface this cluster's edge answers for -- the platform's own portal
-          included. A site is data, not infrastructure: publishing and rolling back point its
-          row at a bundle version, and the edge picks up the change on its next resolve for that
-          hostname.
-        </p>
-      </header>
+    <Container variant="data">
+      <section className="flex min-h-full flex-col gap-6 pb-8">
+      <PageHeader
+        eyebrow={SITE_CONCEPT_ID}
+        title="Sites"
+        blurb="Every hosted surface this cluster's edge answers for -- the platform's own portal included. A site is data, not infrastructure: publishing and rolling back point its row at a bundle version, and the edge picks up the change on its next resolve for that hostname."
+      />
 
       <Band title="New site">
         <NewSiteForm
@@ -101,13 +97,9 @@ export function SitesPage(): ReactNode {
                     } changed`
                   : ""}
               </span>
-              <button
-                type="button"
-                onClick={rows.reload}
-                className="rounded border border-line bg-surface px-2 py-0.5 text-xs text-fg hover:bg-raised"
-              >
+              <Button size="xs" onClick={rows.reload}>
                 Reload the list
-              </button>
+              </Button>
             </div>
             {rows.live.created.length > 0 && concept ? (
               <RowList rows={[...rows.live.created]} concept={concept} onSelect={select} />
@@ -121,17 +113,18 @@ export function SitesPage(): ReactNode {
           <ErrorMessage>Could not read sites: {rows.walk.error}</ErrorMessage>
         ) : rows.walk.rows.length === 0 ? (
           conceptsLoading || rows.walk.status === "loading" || rows.walk.status === "idle" ? (
-            <Loading what="sites" />
+            <Skeleton variant="rows" rows={5} />
           ) : (
-            <Empty>No sites yet. Create one above.</Empty>
+            <EmptyState statement="No sites yet. Name a hostname in the form above to create the first one." />
           )
         ) : concept ? (
           <RowList rows={[...rows.walk.rows]} concept={concept} onSelect={select} />
         ) : (
-          <Loading what="the site concept" />
+          <Skeleton variant="rows" rows={5} />
         )}
       </Band>
-    </section>
+      </section>
+    </Container>
   );
 }
 
@@ -190,9 +183,9 @@ function NewSiteForm({
         />
       </Field>
       <div>
-        <SubmitButton busy={busy} disabled={incomplete}>
+        <Button type="submit" size="xs" busyLabel="Working…" busy={busy} disabled={incomplete}>
           Create site
-        </SubmitButton>
+        </Button>
       </div>
     </form>
   );

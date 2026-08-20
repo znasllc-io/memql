@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
 import { RowDetail } from "../components/RowDetail";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
 import { useRowDetail } from "../cluster/useConceptRows";
-import { Band as UiBand, Button, PageHeader, Panel, PopulationMeta as UiPopulationMeta } from "../ui";
+import { Band as UiBand, Button, PageHeader, Panel, PopulationMeta as UiPopulationMeta, Skeleton } from "../ui";
 import type { ViewDefinition } from "./registry";
 import { viewPath } from "./urls";
 
@@ -151,7 +151,7 @@ export function RowAside({
         {error ? (
           <ErrorMessage>Failed to read the row: {error}</ErrorMessage>
         ) : loading ? (
-          <Loading what="the row" />
+          <Skeleton variant="kv" rows={4} />
         ) : missing ? (
           <Empty>
             This cluster has no row with that id. It may have been deleted, or the

@@ -3,7 +3,8 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { newShortId } from "@znasllc-io/memql-sdk-core/client";
 
 import { useCluster } from "../cluster/ClusterProvider";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
+import { Skeleton, TextInput } from "../ui";
 import { ComposeButton } from "./ComposeLayout";
 import { ComposerSection } from "./ComposerSection";
 import {
@@ -73,7 +74,7 @@ export function ComposerEditPage(): ReactNode {
   const { view, loading, error, missing } = useSavedView(viewId);
 
   if (error) return <ErrorMessage>Failed to read the view: {error}</ErrorMessage>;
-  if (loading) return <Loading what="the view" />;
+  if (loading) return <Skeleton variant="rows" rows={5} />;
   if (missing || view === null) {
     return <Empty>You have no saved view with that id.</Empty>;
   }
@@ -139,26 +140,20 @@ function Composer({
               <span className="text-xs font-semibold tracking-wide text-muted uppercase">
                 Name
               </span>
-              <input
-                type="text"
+              <TextInput
                 value={draft.name}
-                onChange={(e) => dispatch({ kind: "named", name: e.target.value })}
+                onChange={(name) => dispatch({ kind: "named", name })}
                 placeholder="What this view is for"
-                className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
               />
             </label>
             <label className="flex min-w-64 flex-1 flex-col gap-1">
               <span className="text-xs font-semibold tracking-wide text-muted uppercase">
                 Description
               </span>
-              <input
-                type="text"
+              <TextInput
                 value={draft.description}
-                onChange={(e) =>
-                  dispatch({ kind: "described", description: e.target.value })
-                }
+                onChange={(description) => dispatch({ kind: "described", description })}
                 placeholder="Optional"
-                className="rounded border border-line bg-surface px-2 py-1 text-sm text-fg"
               />
             </label>
           </div>

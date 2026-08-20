@@ -1,9 +1,10 @@
+import { Skeleton, TextInput } from "../ui";
 import { useMemo, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
-import { Empty, ErrorMessage, Loading } from "../components/StatusMessage";
+import { Empty, ErrorMessage } from "../components/StatusMessage";
 import {
   domainSummaries,
   filterConcepts,
@@ -79,12 +80,11 @@ export function ConceptsPage(): ReactNode {
       <div className="flex flex-col gap-3">
         <label className="relative block">
           <span className="sr-only">Search concepts</span>
-          <input
+          <TextInput
             type="search"
             value={filter.query}
-            onChange={(event) => setParam(SEARCH_PARAM, event.target.value)}
+            onChange={(next) => setParam(SEARCH_PARAM, next)}
             placeholder="Search ids, entities and descriptions…"
-            className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg placeholder:text-subtle"
           />
         </label>
 
@@ -119,7 +119,7 @@ export function ConceptsPage(): ReactNode {
       {error ? (
         <ErrorMessage>Failed to list concepts: {error}</ErrorMessage>
       ) : loading && concepts.length === 0 ? (
-        <Loading what="the concept registry" />
+        <Skeleton variant="rows" rows={6} />
       ) : concepts.length === 0 ? (
         <Empty>This cluster declares no concepts.</Empty>
       ) : matches.length === 0 ? (

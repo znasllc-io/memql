@@ -394,6 +394,11 @@ describe("delete", () => {
     const deleteButton = screen.getByRole("button", { name: "Delete site" }) as HTMLButtonElement;
     expect(deleteButton.disabled).toBe(false);
     fireEvent.click(deleteButton);
+    // Deleting confirms in a dialog that states what stops resolving (memql#4181).
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "Delete site" }),
+    );
 
     await waitFor(() => expect(h.callsNamed("deleteSite").length).toBe(1));
     expect(h.callsNamed("deleteSite")[0]).toBe('mutation deleteSite(siteId: "site-shop")');

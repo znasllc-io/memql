@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "../auth/AuthProvider";
 import { SignInPage } from "../pages/SignInPage";
-import { Loading } from "../components/StatusMessage";
+import { Skeleton } from "../ui";
 
 // Route protection.
 //
@@ -34,7 +34,7 @@ export function RequireAuth(): ReactNode {
   if (status === "loading") {
     return (
       <div className="flex min-h-full items-center justify-center bg-bg p-6">
-        <Loading what="your session" />
+        <Skeleton variant="text" width="w-40" />
       </div>
     );
   }

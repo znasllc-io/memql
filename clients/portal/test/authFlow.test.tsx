@@ -132,7 +132,8 @@ describe("route protection", () => {
     // sign-in page at someone who IS signed in teaches them to distrust it.
     renderPortal({ path: DEEP_LINK, fetchImpl: () => new Promise<Response>(() => {}) });
     expect(screen.queryByRole("button", { name: /Continue with/ })).toBeNull();
-    expect(screen.getByText(/Loading your session/)).toBeTruthy();
+    // The probe state renders a shaped skeleton (memql#4180), not prose.
+    expect(document.querySelector("[data-skeleton]")).toBeTruthy();
   });
 
   it("renders the shell once a session is restored from the refresh cookie", async () => {

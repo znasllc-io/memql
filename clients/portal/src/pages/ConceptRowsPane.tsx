@@ -5,7 +5,7 @@ import { useRowDetail } from "../cluster/useConceptRows";
 import { RowDetail } from "../components/RowDetail";
 import { RowList } from "../components/RowList";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Skeleton } from "../ui";
+import { Button, Skeleton } from "../ui";
 import { liveBandIsEmpty } from "../concepts/liveBand";
 import { CURSOR_LOOP_ERROR } from "../concepts/rowWalk";
 import { conceptPath, conceptRowPath } from "../concepts/urls";
@@ -191,13 +191,9 @@ function FooterButton({
   children: ReactNode;
 }): ReactNode {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded border border-line bg-surface px-3 py-1.5 text-xs font-medium text-fg hover:bg-raised"
-    >
+    <Button size="xs" onClick={onClick}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -233,13 +229,9 @@ function LiveBand({
               } changed`
             : ""}
         </span>
-        <button
-          type="button"
-          onClick={onReload}
-          className="rounded border border-line bg-surface px-2 py-0.5 text-xs text-fg hover:bg-raised"
-        >
+        <Button size="xs" onClick={onReload}>
           Reload the list
-        </button>
+        </Button>
       </div>
       {band.created.length > 0 ? (
         // Keyed by the arrival count so each new row re-triggers the accent

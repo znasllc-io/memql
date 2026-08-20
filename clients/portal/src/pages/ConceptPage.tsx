@@ -5,7 +5,7 @@ import { useCluster } from "../cluster/ClusterProvider";
 import { useConcepts } from "../cluster/useConcepts";
 import { useConceptRows } from "../cluster/useConceptRows";
 import { Empty, ErrorMessage } from "../components/StatusMessage";
-import { Breadcrumbs, Skeleton, Tabs } from "../ui";
+import { Breadcrumbs, DataText, Skeleton, Tabs } from "../ui";
 import type { ConceptPaneContext } from "./conceptContext";
 import {
   SCHEMA_ROUTE_PATTERN,
@@ -64,7 +64,7 @@ export function ConceptPage(): ReactNode {
     if (loading) return <Skeleton variant="rows" rows={8} />;
     return (
       <section className="mx-auto max-w-2xl">
-        <h1 className="font-mono text-lg font-semibold break-all">{conceptId}</h1>
+        <h1 className="text-xl font-semibold tracking-tight break-all"><DataText kind="id">{conceptId}</DataText></h1>
         <p className="mt-2 text-sm text-muted">
           This cluster declares no concept with that id. It may belong to a product
           bundle this node does not mount, or the link may predate a rename.

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { TABLE_ELEMENT } from "@znasllc-io/memql-view-kit";
 import type { Concept, Row } from "@znasllc-io/memql-sdk-core/client";
 
+import { Button, ConfirmDialog, DataText, TextInput } from "../ui";
 import { ViewElement } from "../views/ViewElement";
 import { ACCOUNT_TOKEN_CONCEPT, accountTokenRows } from "./rows";
 import {
@@ -85,14 +86,9 @@ export function AccountConsole({
         />
       ) : (
         <div>
-          <button
-            type="button"
-            className="rounded border border-line px-3 py-1.5 text-sm font-medium hover:bg-raised"
-            onClick={() => setCreating(true)}
-            disabled={console.busy}
-          >
+          <Button onClick={() => setCreating(true)} disabled={console.busy}>
             New customer
-          </button>
+          </Button>
         </div>
       )}
 
@@ -133,31 +129,25 @@ function SelectedCustomer({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">{selected.name || selected.id}</h3>
-          <p className="font-mono text-xs break-all text-subtle">{selected.id}</p>
+          <p className="text-xs break-all"><DataText kind="id">{selected.id}</DataText></p>
         </div>
         {!editing ? (
           <div className="flex gap-2">
-            <button
-              type="button"
-              className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
-              onClick={() => setEditing(true)}
-              disabled={state.busy}
-            >
+            <Button onClick={() => setEditing(true)} disabled={state.busy}>
               Edit
-            </button>
-            <button
-              type="button"
-              className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised disabled:opacity-50"
+            </Button>
+            {/* Archiving is reversible-ish and non-destructive -- the row is
+                kept and a write is an append onto the same id -- so it does
+                not warrant a confirm. Revoking a credential DOES confirm: it
+                cuts off whatever is presenting the token right now, and the
+                dialog is where that consequence gets said. */}
+            <Button
               onClick={() => state.archive()}
               disabled={state.busy || archived}
-              // Archiving is reversible-ish and non-destructive -- the row is
-              // kept and a write is an append onto the same id -- so it does
-              // not warrant a type-to-confirm. Revoking a credential does not
-              // either: it takes effect immediately and re-issuing is cheap.
               title={archived ? "Already archived" : "Archive this customer"}
             >
               {archived ? "Archived" : "Archive"}
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>
@@ -217,20 +207,11 @@ function TokenPanel({
       >
         <label className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-medium text-muted">Label</span>
-          <input
-            className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-            value={label}
-            onChange={(event) => setLabel(event.target.value)}
-            placeholder="Nightly export job"
-          />
+          <TextInput value={label} onChange={setLabel} placeholder="Nightly export job" />
         </label>
-        <button
-          type="submit"
-          className="rounded border border-line px-3 py-1.5 text-sm font-medium hover:bg-raised disabled:opacity-50"
-          disabled={state.busy}
-        >
+        <Button type="submit" disabled={state.busy} busy={state.busy} busyLabel="Working…">
           Issue credential
-        </button>
+        </Button>
       </form>
 
       {state.tokensError ? (
@@ -262,6 +243,7 @@ function TokenPanel({
 // credential to revoke; the list above is what they read it from.
 function RevokeControl({ state }: { state: AccountConsoleState }): ReactNode {
   const [identityId, setIdentityId] = useState("");
+  const [confirming, setConfirming] = useState(false);
   const live = state.tokens.filter((token) => token.active).length;
 
   if (live === 0) {
@@ -278,26 +260,33 @@ function RevokeControl({ state }: { state: AccountConsoleState }): ReactNode {
       onSubmit={(event: FormEvent) => {
         event.preventDefault();
         if (identityId.trim() === "") return;
-        state.revoke(identityId.trim());
-        setIdentityId("");
+        setConfirming(true);
       }}
     >
       <label className="flex min-w-0 flex-1 flex-col gap-1">
         <span className="text-xs font-medium text-muted">Revoke by credential id</span>
-        <input
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 font-mono text-xs"
-          value={identityId}
-          onChange={(event) => setIdentityId(event.target.value)}
-          placeholder="paste an id from the list above"
-        />
+        <TextInput value={identityId} onChange={setIdentityId} placeholder="paste an id from the list above" />
       </label>
-      <button
-        type="submit"
-        className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised disabled:opacity-50"
-        disabled={state.busy}
-      >
+      <Button type="submit" tone="danger" disabled={state.busy || identityId.trim() === ""}>
         Revoke
-      </button>
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        title="Revoke this credential?"
+        confirmLabel="Revoke credential"
+        tone="danger"
+        busy={state.busy}
+        onConfirm={() => {
+          setConfirming(false);
+          state.revoke(identityId.trim());
+          setIdentityId("");
+        }}
+        onCancel={() => setConfirming(false)}
+      >
+        Whatever presents <DataText kind="id">{identityId.trim()}</DataText> stops authenticating
+        immediately. The row stays in the list for audit; re-issuing is a new credential with a
+        new value.
+      </ConfirmDialog>
     </form>
   );
 }
@@ -328,17 +317,11 @@ function MintedToken({
         {plainToken}
       </code>
       <p className="text-xs text-muted">
-        Authenticates as <span className="font-mono">{subjectUserId}</span> — your user, bound to
+        Authenticates as <DataText kind="id">{subjectUserId}</DataText> — your user, bound to
         this customer.
       </p>
       <div>
-        <button
-          type="button"
-          className="rounded border border-line px-3 py-1.5 text-sm hover:bg-raised"
-          onClick={onDismiss}
-        >
-          I have copied it
-        </button>
+        <Button onClick={onDismiss}>I have copied it</Button>
       </div>
     </div>
   );
@@ -395,63 +378,33 @@ function AccountForm({
       <h3 className="text-sm font-semibold">{heading}</h3>
 
       <Field label="Name" required>
-        <input
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-          value={draft.name}
-          onChange={(event) => field("name", event.target.value)}
-          placeholder="Northwind Trading"
-        />
+        <TextInput value={draft.name} onChange={(next) => field("name", next)} placeholder="Northwind Trading" />
       </Field>
       <Field label="What you do for them">
-        <input
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-          value={draft.description}
-          onChange={(event) => field("description", event.target.value)}
-          placeholder="Runs their storefront search"
-        />
+        <TextInput value={draft.description} onChange={(next) => field("description", next)} placeholder="Runs their storefront search" />
       </Field>
       <Field label="Primary contact">
-        <input
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-          value={draft.primaryContactName}
-          onChange={(event) => field("primaryContactName", event.target.value)}
-          placeholder="Ada Fournier"
-        />
+        <TextInput value={draft.primaryContactName} onChange={(next) => field("primaryContactName", next)} placeholder="Ada Fournier" />
       </Field>
       <Field label="Contact email">
-        <input
+        <TextInput
           type="email"
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
           value={draft.primaryContactEmail}
-          onChange={(event) => field("primaryContactEmail", event.target.value)}
+          onChange={(next) => field("primaryContactEmail", next)}
           placeholder="ada@northwind.example"
         />
       </Field>
       <Field label="Your reference for them">
-        <input
-          className="w-full rounded border border-line bg-bg px-2 py-1.5 text-sm"
-          value={draft.externalRef}
-          onChange={(event) => field("externalRef", event.target.value)}
-          placeholder="CRM-4471"
-        />
+        <TextInput value={draft.externalRef} onChange={(next) => field("externalRef", next)} placeholder="CRM-4471" />
       </Field>
 
       <div className="flex gap-2">
-        <button
-          type="submit"
-          className="rounded border border-line px-3 py-1.5 text-sm font-medium hover:bg-raised disabled:opacity-50"
-          disabled={busy || draft.name.trim() === ""}
-        >
+        <Button type="submit" busy={busy} busyLabel="Working…" disabled={draft.name.trim() === ""}>
           {submitLabel}
-        </button>
-        <button
-          type="button"
-          className="rounded px-3 py-1.5 text-sm text-muted hover:text-fg"
-          onClick={onCancel}
-          disabled={busy}
-        >
+        </Button>
+        <Button onClick={onCancel} disabled={busy}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
   );

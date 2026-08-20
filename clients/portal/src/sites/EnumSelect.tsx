@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 
+import { Select } from "../ui";
+
 // A <select> populated from a concept field's DECLARED enum values rather
 // than a hardcoded option list (memql#3717, ruling 5). `values` comes from
 // concepts/schema.ts's enumValuesForField -- reading the SAME JSON Schema
@@ -19,17 +21,13 @@ export function EnumSelect({
   placeholder?: string;
 }): ReactNode {
   return (
-    <select
-      value={value}
-      onChange={(event) => onChange(event.target.value)}
-      className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-fg"
-    >
+    <Select value={value} onChange={onChange}>
       <option value="">{placeholder}</option>
       {values.map((v) => (
         <option key={v} value={v}>
           {v}
         </option>
       ))}
-    </select>
+    </Select>
   );
 }

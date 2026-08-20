@@ -495,6 +495,11 @@ describe("people -- the change surface", () => {
     ).toEqual({ userId: "user-grace", role: "admin" });
 
     screen.getByRole("button", { name: "Suspend the account" }).click();
+    // Suspending confirms in a dialog (memql#4181); the write happens there.
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeTruthy());
+    within(screen.getByRole("dialog"))
+      .getByRole("button", { name: "Suspend the account" })
+      .click();
     await waitFor(() => expect(sent.length).toBe(2));
     const suspend = (sent[1] as { identityAdmin?: Record<string, unknown> }).identityAdmin
       ?.setUserSuspended as Record<string, unknown>;
