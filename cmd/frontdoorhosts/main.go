@@ -1,5 +1,5 @@
-// Command frontdoorhosts emits the cloud overlay's front-door manifests from
-// the cluster's role set and its domain.
+// Command frontdoorhosts emits front-door manifests for each instance overlay
+// from the cluster's role set and its domain.
 //
 // # Why generated
 //
@@ -13,7 +13,7 @@
 //	sites       *.<d> + the apex
 //
 // It emits ~390 lines of Ingress + Certificate from those five names, which is
-// what earns generation for a single target: hand-maintaining that is the same
+// what earns generation for a listed target: hand-maintaining that is the same
 // shape of mistake cmd/frontdoorpaths exists to stop, one level up. There, a
 // path with no rule does not 404 -- it hands HTTP/1.1 to an h2c backend and
 // fails naming nothing. Here, a host with no rule is a service that is simply
@@ -22,15 +22,18 @@
 // This tool used to walk every overlay and take an ENVIRONMENT LABEL out of
 // each one's environment.yaml, hyphenating it into role hosts and nesting it
 // into site hosts. Epic memql#3943 removed "environment" as a product concept:
-// there is one cloud overlay, and a second environment is a second install with
-// its own domain and its own front door.
+// there is one installation shape, and a second environment is a second
+// install with its own domain and its own front door. Two instance overlays
+// remain -- overlays/cloud (in-cluster Application, top) and
+// overlays/cloud-entry (keep-it / client, memql#4204) -- and kustomize will
+// not load a sibling generated file, so each overlay owns its own copy.
 //
 // # What is generated and what is not
 //
-// This tool owns the SHAPE and the HOSTS of the cloud overlay's front door. It
-// does NOT own the bff's HTTP path list -- cmd/frontdoorpaths does, from
-// component/server's own declarations -- so the block between the markers in
-// the api Ingress is PRESERVED across a regeneration and filled by
+// This tool owns the SHAPE and the HOSTS of each instance overlay's front
+// door. It does NOT own the bff's HTTP path list -- cmd/frontdoorpaths does,
+// from component/server's own declarations -- so the block between the markers
+// in the api Ingress is PRESERVED across a regeneration and filled by
 // `make frontdoor-paths`. `make frontdoor` runs both, in that order.
 //
 // The LOCAL overlay is deliberately not written here. It is traefik rather than
@@ -57,8 +60,8 @@
 //
 // Usage:
 //
-//	go run ./cmd/frontdoorhosts             # write the cloud overlay's front door
-//	go run ./cmd/frontdoorhosts --check     # fail when it is stale
+//	go run ./cmd/frontdoorhosts             # write every instance overlay's front door
+//	go run ./cmd/frontdoorhosts --check     # fail when either file is stale
 package main
 
 import (
@@ -71,15 +74,14 @@ import (
 	"strings"
 )
 
-// generatedName is the file this tool owns in the cloud overlay.
+// generatedName is the file this tool owns in each instance overlay.
 const generatedName = "front-door.generated.yaml"
 
-// cloudOverlay is the one overlay this tool writes into, relative to the
-// overlays root. Named rather than discovered: with one cloud target there is
-// nothing to discover, and a walk that found zero overlays would generate
-// nothing and exit 0 -- a generator reporting success without doing the work is
-// the defect the --check gate exists to catch.
-const cloudOverlay = "cloud"
+// instanceOverlays is every overlay this tool writes into, relative to the
+// overlays root. Listed rather than discovered: a walk that found zero
+// overlays would generate nothing and exit 0 -- a generator reporting success
+// without doing the work is the defect the --check gate exists to catch.
+var instanceOverlays = []string{"cloud", "cloud-entry"}
 
 // Markers, byte-identical to cmd/frontdoorpaths' -- the block between them is
 // that tool's output and is carried across a regeneration here.
@@ -93,30 +95,37 @@ func main() {
 		"directory holding the kustomize overlays")
 	domain := flag.String("domain", "memql.localhost",
 		"the committed default domain -- an install overrides it through the ArgoCD Application's kustomize.patches")
-	check := flag.Bool("check", false, "exit non-zero when the generated file is stale, writing nothing")
+	check := flag.Bool("check", false, "exit non-zero when a generated file is stale, writing nothing")
 	flag.Parse()
 
-	dir := filepath.Join(*root, cloudOverlay)
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		fail(fmt.Errorf("%s is not a directory, so there is no cloud overlay to generate a "+
-			"front door for", dir))
-	}
-	path := filepath.Join(dir, generatedName)
+	var stale []string
+	for _, overlay := range instanceOverlays {
+		dir := filepath.Join(*root, overlay)
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			fail(fmt.Errorf("%s is not a directory, so there is no %s overlay to generate a "+
+				"front door for", dir, overlay))
+		}
+		path := filepath.Join(dir, generatedName)
 
-	existing, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		fail(fmt.Errorf("reading %s: %w", path, err))
-	}
-	want := manifest(*domain, preservedPathBlock(string(existing)))
+		existing, err := os.ReadFile(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			fail(fmt.Errorf("reading %s: %w", path, err))
+		}
+		want := manifest(overlay, *domain, preservedPathBlock(string(existing)))
 
-	if bytes.Equal(existing, []byte(want)) {
-		return
+		if bytes.Equal(existing, []byte(want)) {
+			continue
+		}
+		if *check {
+			stale = append(stale, path)
+			continue
+		}
+		if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
+			fail(fmt.Errorf("writing %s: %w", path, err))
+		}
 	}
-	if *check {
-		fail(fmt.Errorf("stale, run `make frontdoor-hosts`:\n  %s", path))
-	}
-	if err := os.WriteFile(path, []byte(want), 0o644); err != nil {
-		fail(fmt.Errorf("writing %s: %w", path, err))
+	if *check && len(stale) > 0 {
+		fail(fmt.Errorf("stale, run `make frontdoor-hosts`:\n  %s", strings.Join(stale, "\n  ")))
 	}
 }
 
