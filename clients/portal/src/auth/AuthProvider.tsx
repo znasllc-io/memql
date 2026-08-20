@@ -25,6 +25,7 @@ import {
 
 import {
   UNKNOWN_RUNTIME_CONFIG,
+  isRuntimeConfigReady,
   loadRuntimeConfig,
   type PortalRuntimeConfig,
 } from "../cluster/config";
@@ -282,6 +283,19 @@ export function AuthProvider({
 
   const completeSignIn = useCallback(
     async ({ code, state }: { code: string; state: string }) => {
+      const cfg = configRef.current;
+      if (!isRuntimeConfigReady(cfg)) {
+        // Do not consume the PKCE verifier: the callback can retry once
+        // runtime-config.json lands. Posting now would send client_id=""
+        // and identity would answer invalid_request (memql#4154).
+        return {
+          ok: false,
+          returnTo: DEFAULT_RETURN_TO,
+          error:
+            "Sign-in is still waiting for this cluster to publish its " +
+            "identity URL and OAuth client id.",
+        };
+      }
       const pending = consumePending(storage);
       if (!pending) {
         return {
@@ -305,7 +319,7 @@ export function AuthProvider({
         };
       }
       try {
-        const tokens = await exchangeAuthorizationCode(fetchImpl, configRef.current, {
+        const tokens = await exchangeAuthorizationCode(fetchImpl, cfg, {
           code,
           codeVerifier: pending.verifier,
           redirectUri,

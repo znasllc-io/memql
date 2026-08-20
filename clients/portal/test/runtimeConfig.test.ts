@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  isRuntimeConfigReady,
   loadRuntimeConfig,
   normalizeRuntimeConfig,
   runtimeConfigPathFor,
@@ -100,5 +101,29 @@ describe("loadRuntimeConfig", () => {
 describe("UNKNOWN_RUNTIME_CONFIG", () => {
   it("assumes auth is enforced", () => {
     expect(UNKNOWN_RUNTIME_CONFIG.authEnabled).toBe(true);
+  });
+});
+
+describe("isRuntimeConfigReady", () => {
+  // AuthCallbackPage sits outside RequireAuth and will exchange on first
+  // paint if this returns true. UNKNOWN must stay false so a cold callback
+  // does not POST an empty client_id (memql#4154).
+  it("is false until both identityUrl and oauthClientId are published", () => {
+    expect(isRuntimeConfigReady(UNKNOWN_RUNTIME_CONFIG)).toBe(false);
+    expect(
+      isRuntimeConfigReady({ ...UNKNOWN_RUNTIME_CONFIG, identityUrl: "https://identity.example.com" }),
+    ).toBe(false);
+    expect(isRuntimeConfigReady({ ...UNKNOWN_RUNTIME_CONFIG, oauthClientId: "portal" })).toBe(false);
+  });
+
+  it("is true for the same-origin production shape (empty identityApiBaseUrl)", () => {
+    expect(
+      isRuntimeConfigReady({
+        identityUrl: "https://identity.memql.localhost",
+        identityApiBaseUrl: "",
+        oauthClientId: "portal",
+        authEnabled: true,
+      }),
+    ).toBe(true);
   });
 });

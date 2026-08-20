@@ -75,6 +75,9 @@ function fakeDial(): typeof Connection.dial {
 interface HarnessOptions {
   path?: string;
   config?: PortalRuntimeConfig;
+  // When true, AuthProvider fetches runtime-config.json itself -- the
+  // production path, and the one that races the callback exchange.
+  loadRuntimeConfig?: boolean;
   fetchImpl: (url: string, init?: RequestInit) => Promise<Response>;
   storage?: StorageLike;
   navigate?: (url: string) => void;
@@ -87,7 +90,7 @@ function renderPortal(opts: HarnessOptions) {
     ...render(
       <MemoryRouter initialEntries={[opts.path ?? "/"]}>
         <AuthProvider
-          config={opts.config ?? CONFIG}
+          {...(opts.loadRuntimeConfig ? {} : { config: opts.config ?? CONFIG })}
           fetchImpl={opts.fetchImpl}
           storage={storage}
           cryptoImpl={nodeCrypto}
@@ -314,6 +317,69 @@ describe("the callback", () => {
     await waitFor(() =>
       expect(screen.getByRole("alert").textContent).toMatch(/already been used/),
     );
+  });
+
+  it("waits for a real runtime config before exchanging (memql#4154)", async () => {
+    // AuthCallbackPage sits outside RequireAuth. On a cold load it paints
+    // "Signing in" and used to call completeSignIn while configRef was still
+    // UNKNOWN_RUNTIME_CONFIG -- empty client_id, identity invalid_request.
+    const storage = memoryStorage();
+    storage.setItem(
+      "memql-portal-pending-auth",
+      JSON.stringify({
+        state: "STATE-1",
+        verifier: "VERIFIER-1",
+        returnTo: DEEP_LINK,
+        createdAt: Date.now(),
+      }),
+    );
+
+    let releaseConfig!: (cfg: PortalRuntimeConfig) => void;
+    const configHeld = new Promise<PortalRuntimeConfig>((resolve) => {
+      releaseConfig = resolve;
+    });
+
+    const tokenBodies: string[] = [];
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("runtime-config")) {
+        return jsonResponse(await configHeld);
+      }
+      if (path.includes("/oauth/token")) {
+        tokenBodies.push(String(init?.body ?? ""));
+        return jsonResponse({ access_token: "AT-1", expires_in: 900 });
+      }
+      return unauthenticated();
+    });
+
+    renderPortal({
+      path: "/auth/callback?code=AUTH-CODE&state=STATE-1",
+      loadRuntimeConfig: true,
+      fetchImpl,
+      storage,
+    });
+
+    await waitFor(() => expect(screen.getByText("Signing in")).toBeTruthy());
+    // Held: no exchange, and the PKCE verifier is still in storage so a
+    // retry after the config lands can consume it.
+    expect(tokenBodies).toHaveLength(0);
+    expect(storage.getItem("memql-portal-pending-auth")).not.toBeNull();
+
+    releaseConfig({
+      identityUrl: "https://identity.memql.localhost",
+      identityApiBaseUrl: "",
+      oauthClientId: "portal",
+      authEnabled: true,
+    });
+
+    await waitFor(() => expect(screen.getByText("v1:cluster:node")).toBeTruthy());
+    expect(tokenBodies).toHaveLength(1);
+    const exchange = JSON.parse(tokenBodies[0]!) as Record<string, string>;
+    expect(exchange.grant_type).toBe("authorization_code");
+    expect(exchange.code).toBe("AUTH-CODE");
+    expect(exchange.client_id).toBe("portal");
+    expect(exchange.redirect_uri).toBe(REDIRECT_URI);
+    expect(storage.map.size).toBe(0);
   });
 });
 
