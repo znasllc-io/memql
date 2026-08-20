@@ -304,7 +304,7 @@ func TestPIIBearingConceptPopulation(t *testing.T) {
 	// v1:identity:user is the concept this gate exists for: it declares no
 	// tier, so the unbound path is what protects it.
 	//
-	// The three below arrived with the memQL Portal (memql#3322 / #3323) and
+	// The three below arrived with the memQL Portal (memql#3322 / #3323), and v1:calendar:booking (memql#4142) does the same -- they
 	// every one DECLARES @rowAuthz(owner="ownerUserId"). Per
 	// TestDeclaredTierTakesPrecedence that is the complete answer: the tier
 	// decides, the engine ANDs the owner predicate into every read of them,
@@ -317,6 +317,7 @@ func TestPIIBearingConceptPopulation(t *testing.T) {
 		"v1:identity:account":    true,
 		"v1:campaigns:recipient": true,
 		"v1:campaigns:delivery":  true,
+		"v1:calendar:booking":    true,
 	}
 
 	got := map[string][]string{}

@@ -129,15 +129,11 @@ mutate bookingHours setBookingHours {
     label        string
   }
   update {
-    id: args.hoursId
-    ownerUserId: actor.userId
-    weekday: args.weekday
-    startLocal: args.startLocal
-    endLocal: args.endLocal
-    timezone: args.timezone
-    slotMinutes: args.slotMinutes
-    published: args.published
-    label: args.label
+    accept { weekday, startLocal, endLocal, timezone, slotMinutes, published, label }
+    stamp {
+      id: args.hoursId
+      ownerUserId: actor.userId
+    }
   }
 }
 
