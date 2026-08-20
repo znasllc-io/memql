@@ -14,6 +14,9 @@ A **pack** extends memQL with product-specific behavior: Go integrations plus a
 build tags; the `.memql` domains load compiled-in or at runtime from disk (see
 Scope below). A product's DSL bundle plus its client is the reference consumer.
 
+> **Three words.** A **component** is engine internals. An **integration** talks to other systems (`integrations/`). A **pack** is a client-agnostic product feature — that is what intake "plugin" means. `RegisterPlugin` is the registration primitive, not a fourth runtime. Core domains (`dsl/todos`, `dsl/calendar`, `dsl/campaigns`) cannot be shadowed. See [Component vs integration vs pack](../concepts/component-integration-pack.md).
+
+
 This page is the **contract reference** for the Go surface a pack targets -- the
 `PluginContext` it receives, the `PluginFactory` it implements, the
 registration primitives it calls, and the **contract version** the loader

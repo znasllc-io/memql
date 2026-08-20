@@ -137,6 +137,7 @@ integrations/
 ├── planner/           # Planner Agent loop, task fan-out, refresh cron, action substitution (planner build)
 ├── rbac/              # Relational governance rank arithmetic -- canCreatePrincipal, governPrincipal
 ├── router/            # BYOK credential + budget admin -- setApiKey, listModels, listPolicies
+├── shopify/           # Storefront/Admin product read -- fetchProduct (GID, handle, availableForSale)
 ├── similarity/        # pgvector similarTo() builtin
 ├── stt/               # Speech-to-text -- transcribe (batch capability + streaming session)
 ├── telephony/         # PSTN edge -- number provisioning, call control, E911, consent, DTMF
@@ -337,6 +338,16 @@ The database connection itself remains a core component. This integration expose
 - `integration.files.extractText` -- Extract text from PDF, DOCX, images, text files
 
 Uses VisionAIProvider for image descriptions.
+
+### shopify/ - Shopify Storefront + Admin
+**Purpose:** Server-side product read for the thin catalog index (memql#4136).
+First slice: GID, handle, `availableForSale`. Tokens stay off any
+browser-reachable surface. Checkout stays `cart.checkoutUrl`.
+
+**DSL Capabilities:**
+- `integration.shopify.fetchProduct` -- read GID / handle / availableForSale by Storefront GID or handle (Admin GraphQL if only an Admin token is set; GID required)
+
+Opt-out when `MEMQL_SHOPIFY_STORE_DOMAIN` plus a Storefront or Admin token is missing.
 
 ### azureblob/ - Azure Blob Storage
 **Purpose:** Cloud storage file operations (registered as `storage`)

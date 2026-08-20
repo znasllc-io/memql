@@ -47,6 +47,7 @@ import (
 	_ "github.com/znasllc-io/memql/integrations/rbac"
 	_ "github.com/znasllc-io/memql/integrations/router"
 	_ "github.com/znasllc-io/memql/integrations/similarity"
+	_ "github.com/znasllc-io/memql/integrations/shopify"
 	_ "github.com/znasllc-io/memql/integrations/telephony"
 	_ "github.com/znasllc-io/memql/integrations/telephony/telnyx"
 	_ "github.com/znasllc-io/memql/integrations/timeutil"

@@ -17,6 +17,8 @@ scratch, using the minimal **reference pack** at
 [`examples/referencepack/`](../../../examples/referencepack) as the worked
 example.
 
+> **Three words.** A **component** is engine internals. An **integration** talks to other systems (`integrations/`). A **pack** is a client-agnostic product feature — that is what intake "plugin" means. `RegisterPlugin` is the registration primitive, not a fourth runtime. Core domains (`dsl/todos`, `dsl/calendar`, `dsl/campaigns`) cannot be shadowed. See [Component vs integration vs pack](../concepts/component-integration-pack.md).
+
 If you want the bare contract reference instead of a walkthrough -- the exact
 `PluginContext` fields, the `PluginFactory` signature, the registration
 primitives -- read [Plugin SDK](plugin-sdk.md). This guide assumes that page as
