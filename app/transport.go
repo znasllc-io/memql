@@ -113,6 +113,17 @@ func (a *App) transportBase() {
 			a.fatal("identity admin: build failed", "error", err)
 		}
 		a.grpcServer.SetIdentityAdminHandler(identityAdmin)
+
+		// The module registry's one write (SetPackEnabledMsg, memql#4183)
+		// audits through the same two-sink logger: slog for the operator
+		// tailing logs, the engine sink so the event lands on
+		// v1:identity:auditEvent where the portal's Audit view reads it.
+		// Without a sink the write surface refuses rather than flipping
+		// packs unaudited.
+		a.grpcServer.SetModuleAuditLogger(&identity.SlogAuditLogger{
+			Logger: a.Logger,
+			DB:     &identity.EngineAuditSink{Engine: a.engine, Logger: a.Logger},
+		})
 	}
 
 	// Configure gRPC authentication. The interceptor chain reads

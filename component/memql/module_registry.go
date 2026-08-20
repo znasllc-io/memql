@@ -234,6 +234,13 @@ func (e *MemQLEngine) ModuleDetail(ctx context.Context, kind, name string) (*Mod
 	return nil, nil
 }
 
+// PackStateSnapshot exposes the live v1:platform:packState read to the
+// wire layer (the SetPackEnabled handler reports prior state honestly).
+// Same reader boot uses, same interpretation.
+func (e *MemQLEngine) PackStateSnapshot(ctx context.Context) (map[string]PackStateRow, error) {
+	return e.packStatesForInventory(ctx)
+}
+
 // packStatesForInventory reads the live v1:platform:packState rows when a
 // database is available. A pre-database engine (unit tests over pure
 // assembly) reports packs with no persisted state, which reads as

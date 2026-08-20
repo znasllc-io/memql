@@ -347,6 +347,14 @@ message MemqlClientMessage {
     // and DurablePromoteBundle (persisted, shared, broadcast) -- epic
     // memql#3928. See StageBundleMsg.
     StageBundleMsg stage_bundle = 108;
+
+    // Module registry (epic memql#4183; design:
+    // docs/superpowers/specs/2026-08-20-module-registry-design.md).
+    // Reads are owner/admin-gated; the pack flip is owner-only and
+    // audited. Refusals ride the result payloads, never a stream error.
+    ModulesListMsg modules_list = 109;
+    ModuleDetailMsg module_detail = 110;
+    SetPackEnabledMsg set_pack_enabled = 111;
   }
 }
 
@@ -513,6 +521,14 @@ message MemqlServerMessage {
 
     // Staged-tier reply (see StageBundleMsg, memql#3928).
     StageBundleResult stage_bundle_result = 130;
+
+    // Module-registry replies (see ModulesListMsg, epic memql#4183).
+    // Start at 131 because 112-130 are taken by the pack-browser,
+    // authoring, badge, deploy-control, account-token, identity-admin,
+    // constructs and staged-tier replies above.
+    ModulesListResult modules_list_result = 131;
+    ModuleDetailResult module_detail_result = 132;
+    SetPackEnabledResult set_pack_enabled_result = 133;
   }
 }
 
@@ -3659,4 +3675,124 @@ message SetOAuthClientCorsOriginsRequest {
   // http://127.0.0.1 and hand every local process on somebody's machine
   // cookie-bearing read access to identity.
   repeated string origins = 2;
+}
+
+// -----------------------------------------------------------------------------
+// Module registry (epic memql#4183)
+// -----------------------------------------------------------------------------
+// The runtime answer to "what does this instance run": components,
+// integrations, packs, and node-type modules, assembled from registries
+// that already exist (design: docs/superpowers/specs/
+// 2026-08-20-module-registry-design.md). Reads are owner/admin-gated;
+// SetPackEnabled is owner-only and audited, including refusals. Every
+// result carries error_code/error_message INSIDE the payload -- a handler
+// error would tear down the multiplexed stream -- plus the reporting-node
+// envelope facts, because per-node vs cluster-wide honesty is part of the
+// contract: rows built from the answering binary's own registries say so.
+
+message ModulesListMsg {
+  string request_id = 1;
+}
+
+// ModuleInfo is one module row. `kind` is one of "component" |
+// "integration" | "pack" | "node-type" -- "module" is the collective term,
+// never a fourth extension kind. `scope` says which truth tier the row's
+// state is: "node" (the answering binary's registries and env) or
+// "cluster" (the shared graph). State strings per kind are documented in
+// the design section 2.2; state_detail is one honest sentence (e.g.
+// "state changed since this node booted; restart required to apply").
+message ModuleInfo {
+  string kind = 1;
+  string name = 2;
+  string description = 3;
+  string state = 4;
+  string state_detail = 5;
+  string scope = 6;
+  // Manifest component keys whose env vars belong to this module
+  // (component/envregistry). The detail call joins against these.
+  repeated string env_components = 7;
+  // Observability join keys: codeReference prefixes this module's
+  // invocations carry (e.g. "integration.harnessRecall."). Empty when the
+  // engine cannot honestly assert a mapping (components, v1).
+  repeated string fqn_prefixes = 8;
+  // Architecture-model id where one exists (node-types, from
+  // v1:cluster:nodeType.codeReference).
+  string code_reference = 9;
+}
+
+message ModulesListResult {
+  string request_id = 1;
+  repeated ModuleInfo modules = 2;
+  // Which binary answered. Node-scope rows are THIS node's facts.
+  string reporting_node_id = 3;
+  string reporting_node_type = 4;
+  // gRPC status code + message, inside the payload (0 = OK).
+  int32 error_code = 5;
+  string error_message = 6;
+}
+
+message ModuleDetailMsg {
+  string request_id = 1;
+  // The (kind, name) pair from a ModulesListResult row.
+  string kind = 2;
+  string name = 3;
+}
+
+// ModuleEnvVar is one manifest-declared environment variable on a module's
+// detail surface, evaluated on the ANSWERING node. A secret entry carries
+// set/unset and NOTHING else -- no value, no mask, no prefix; there is no
+// reveal call and none may be added (design section 3).
+message ModuleEnvVar {
+  string name = 1;
+  string description = 2;
+  bool secret = 3;
+  // Manifest scope: node | global | partition.
+  string scope = 4;
+  // Node types this entry is required for, per the manifest.
+  repeated string required_for = 5;
+  // True when the env var is set non-empty on the answering node OR the
+  // manifest carries a default.
+  bool set = 6;
+  // Resolved value -- POPULATED ONLY FOR NON-SECRET VARIABLES (env first,
+  // manifest default second). Always empty for secret entries.
+  string value = 7;
+  string default_value = 8;
+}
+
+message ModuleDetailResult {
+  string request_id = 1;
+  ModuleInfo module = 2;
+  repeated ModuleEnvVar env_vars = 3;
+  string reporting_node_id = 4;
+  string reporting_node_type = 5;
+  int32 error_code = 6;
+  string error_message = 7;
+}
+
+// SetPackEnabledMsg flips a pack's per-instance enablement -- the one
+// module-registry write. Owner-only; every call including refusals emits
+// one v1:identity:auditEvent. The write lands as a v1:platform:packState
+// row via the setPackEnabled mutation under the caller's actor, so the
+// concept's clusterOwner tier is the independent second layer.
+message SetPackEnabledMsg {
+  string request_id = 1;
+  // The registered pack domain (bare, e.g. "harness").
+  string pack_domain = 2;
+  bool enabled = 3;
+  // Operator note recorded with the flip; shown in module detail.
+  string reason = 4;
+}
+
+message SetPackEnabledResult {
+  string request_id = 1;
+  string pack_domain = 2;
+  // State before and after the write, from the graph.
+  bool prior_enabled = 3;
+  bool enabled = 4;
+  // ALWAYS true in v1: a flip changes what each node reads at its next
+  // boot, never what a running node has loaded. The portal renders this
+  // honestly rather than implying a live toggle.
+  bool restart_required = 5;
+  int32 error_code = 6;
+  string error_message = 7;
 }
