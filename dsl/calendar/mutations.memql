@@ -89,3 +89,107 @@ mutate calendarEvent deleteCalendarEvent {
     deleted: true
   }
 }
+
+/// Publish a weekly booking window. Owned: ownerUserId is stamped from actor.userId.
+/// published is data -- the host flips it without a rebuild.
+@actor
+mutate bookingHours createBookingHours {
+  args {
+    hoursId      string!
+    weekday      string!
+    startLocal   string!
+    endLocal     string!
+    timezone     string!
+    slotMinutes  int
+    published    bool
+    label        string
+  }
+  insert {
+    accept { weekday, startLocal, endLocal, timezone, label }
+    stamp {
+      id: args.hoursId
+      ownerUserId: actor.userId
+      slotMinutes: args.slotMinutes ?? 30
+      published: args.published ?? true
+    }
+  }
+}
+
+/// Flip the published flag (and optional hours) without a deploy.
+@actor
+mutate bookingHours setBookingHours {
+  args {
+    hoursId      string!
+    weekday      string
+    startLocal   string
+    endLocal     string
+    timezone     string
+    slotMinutes  int
+    published    bool
+    label        string
+  }
+  update {
+    id: args.hoursId
+    ownerUserId: actor.userId
+    weekday: args.weekday
+    startLocal: args.startLocal
+    endLocal: args.endLocal
+    timezone: args.timezone
+    slotMinutes: args.slotMinutes
+    published: args.published
+    label: args.label
+  }
+}
+
+/// Take a booking against the host's published hours. The host is the
+/// caller -- this is the portal operations path (memql#4142). Booker
+/// identity is payload.
+@actor
+mutate booking takeBooking {
+  args {
+    bookingId    string!
+    hoursId      string
+    startsAt     datetime!
+    endsAt       datetime!
+    bookerName   string!
+    bookerEmail  string
+    notes        string
+  }
+  insert {
+    accept { hoursId, startsAt, endsAt, bookerName, bookerEmail, notes }
+    stamp {
+      id: args.bookingId
+      ownerUserId: actor.userId
+      status: "booked"
+    }
+  }
+}
+
+/// Cancel a booking. Owned: ownerUserId is re-stamped from actor.userId.
+@actor
+mutate booking cancelBooking {
+  args {
+    bookingId  string!
+  }
+  update {
+    id: args.bookingId
+    ownerUserId: actor.userId
+    status: "cancelled"
+  }
+}
+
+/// Mark a booking rescheduled and point at the replacement row.
+/// The replacement is created by a separate takeBooking call.
+@actor
+mutate booking rescheduleBooking {
+  args {
+    bookingId        string!
+    rescheduledToId  string!
+  }
+  update {
+    id: args.bookingId
+    ownerUserId: actor.userId
+    status: "rescheduled"
+    rescheduledToId: args.rescheduledToId
+  }
+}

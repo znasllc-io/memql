@@ -37,3 +37,43 @@ concept calendarEvent {
 
   @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
 }
+
+/// Weekly booking hours a client owner publishes (memql#4142). Calendly-style
+/// availability without a Calendly bill or a new SPA. Config is data -- flipping
+/// `published` does not require a rebuild. Per-row authz: owned by the host.
+@displayCard(primary="weekday", secondary="startLocal", tertiary="timezone", status="published")
+@rowAuthz(owner="ownerUserId")
+concept bookingHours {
+  ownerUserId   string!  @description("v1:identity:user.id of the host who publishes these hours. Stamped from actor.userId.")
+  weekday       enum("sun", "mon", "tue", "wed", "thu", "fri", "sat")!  @description("Day of week these hours apply, in the host's timezone.")
+  startLocal    string!  @description("Local start time as HH:MM (24h) in timezone, e.g. \"09:00\".")
+  endLocal      string!  @description("Local end time as HH:MM (24h) in timezone, e.g. \"17:00\". Must be after startLocal.")
+  timezone      string!  @description("IANA timezone the local times are expressed in, e.g. America/Phoenix.")
+  slotMinutes   int      @default("30")  @description("Booking slot length in minutes. Data, not source.")
+  published     bool!    @description("When true, these hours are offered for booking. Flipped at runtime.")
+  label         string   @description("Optional host-facing label, e.g. \"Office hours\".")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+}
+
+/// A booking taken against published hours (memql#4142). Owned by the host so
+/// the portal's host calendar is the operations surface. Booker identity is
+/// payload (name + email), not a second owner. Cancel and reschedule append a
+/// new version of this id -- there is no silent overwrite of history.
+@displayCard(primary="bookerName", secondary="startsAt", tertiary="status", status="status")
+@rowAuthz(owner="ownerUserId")
+concept booking {
+  ownerUserId      string!  @description("v1:identity:user.id of the host. Stamped from actor.userId. The per-row authz key.")
+  hoursId          string   @description("Optional v1:calendar:bookingHours.id this slot was taken from.")
+  startsAt         datetime!  @description("Booking start instant (RFC3339).")
+  endsAt           datetime!  @description("Booking end instant (RFC3339).")
+  bookerName       string!  @description("Who the slot is for. Displayed on the host's booking list.")
+  bookerEmail      string   @pii  @description("Booker contact. Marked @pii: queries projecting it must constrain the caller.")
+  status           enum("booked", "cancelled", "rescheduled")!  @description("Lifecycle. booked is the active hold; cancelled and rescheduled are terminal for this version. A reschedule writes a new booked row and stamps this one rescheduled.")
+  notes            string   @description("Optional host or booker note.")
+  rescheduledToId  string   @description("When status=rescheduled, the v1:calendar:booking.id of the replacement.")
+
+  @relationship(type="parent", field="ownerUserId", target=user, direction="outgoing")
+  @relationship(type="references", field="hoursId", target=bookingHours, direction="outgoing")
+  @relationship(type="references", field="rescheduledToId", target=booking, direction="outgoing")
+}
