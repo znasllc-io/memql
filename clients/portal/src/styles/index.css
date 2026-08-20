@@ -12,6 +12,17 @@
  */
 
 @import "tailwindcss";
+
+/* Self-hosted brand faces (memql#4177). The edge CSP declares no font-src,
+ * so font requests fall back to default-src 'self' -- a bundled font works
+ * and an external host never can. fontsource packages ship the files into
+ * the bundle; nothing here reaches the network. */
+@import "@fontsource-variable/inter";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+@import "@fontsource/jetbrains-mono/700.css";
+@import "@fontsource/squada-one";
+
 @import "./tokens.css";
 @import "./status.css";
 
@@ -38,14 +49,19 @@
   --color-danger: var(--portal-danger);
   --color-danger-subtle: var(--portal-danger-subtle);
 
+  --color-data-number: var(--portal-data-number);
+  --color-data-string: var(--portal-data-string);
+
   --font-sans: var(--portal-font-sans);
   --font-mono: var(--portal-font-mono);
+  --font-display: var(--portal-font-display);
 
   --text-xs: var(--portal-text-xs);
   --text-sm: var(--portal-text-sm);
   --text-base: var(--portal-text-base);
   --text-lg: var(--portal-text-lg);
   --text-xl: var(--portal-text-xl);
+  --text-display: var(--portal-text-display);
 
   --radius-DEFAULT: var(--portal-radius);
   --radius-lg: var(--portal-radius-lg);
