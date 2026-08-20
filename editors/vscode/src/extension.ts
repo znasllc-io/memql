@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   CancellationToken,
@@ -65,7 +66,9 @@ import {
   signOut as signOutCredentials,
 } from './auth/store.js';
 import { defaultClustersPath, readClustersFileSafe, setSelectedCluster, upsertCluster, type ClusterUpdate } from './clusters/file.js';
+import { refreshTokenFieldPlan, resolveCredentialInput, tokenFieldPlan } from './clusters/form.js';
 import { displayLabel, needsAuth, type ClusterConfig } from './clusters/model.js';
+import { clusterRowText } from './clusters/status.js';
 import { ClusterPresence } from './clusters/presence.js';
 import { probeClaimState, setupUrl } from './clusters/claimState.js';
 import {
@@ -121,6 +124,12 @@ import { outcomeReport } from './training/outcomeReport.js';
 import type { TrainingPrompt } from './training/report.js';
 import { sessionLensPlans } from './training/session.js';
 import { defaultReceiptPath, readReceipt, recordedDomain, recordedOwner } from './install/receipt.js';
+import { maskHomePath, redactForDisplay } from './install/secrets.js';
+import {
+  briefMessage,
+  recordDiagnostic,
+  type DiagnosticSink,
+} from './state/diagnostics.js';
 import { runCapabilityScript } from './install/runner.js';
 import { EnrolmentError, openEnrolmentLink } from './install/enrolment.js';
 import { OwnershipError, mintOwnershipLink } from './clusters/takeOwnership.js';
@@ -180,6 +189,45 @@ import { ResultPanel, RunPanel, conceptMap, type RunPanelHost } from './webview/
 let client: LanguageClient | undefined;
 let connections: ConnectionManager | undefined;
 
+// The output-channel family (memql#4194). MemQL Training already existed; these
+// two carry what the information policy moved OUT of panels, toasts and
+// tooltips: Install holds capability stderr and run refusals, Connection holds
+// transport, sign-in and language-server failures. Created in activate() so the
+// language-client path can reach them in an untrusted window too.
+let installOutput: OutputChannel | undefined;
+let connectionOutput: OutputChannel | undefined;
+
+function sinkFor(output: OutputChannel | undefined): DiagnosticSink {
+  return { appendLine: (line) => output?.appendLine(line) };
+}
+
+/** Record a failure's raw detail into a channel, redacted (memql#4194). */
+function noteDiagnostic(output: OutputChannel | undefined, headline: string, detail: string): void {
+  recordDiagnostic(sinkFor(output), headline, redactForDisplay(detail, os.homedir()), new Date().toISOString());
+}
+
+/**
+ * The policy's toast shape: a short headline, the caller's own actions, and a
+ * "Show details" that reveals the channel holding the record. Returns the
+ * caller's action when one was clicked; reveal is handled here.
+ */
+async function offerDetails(
+  severity: 'error' | 'warning',
+  output: OutputChannel | undefined,
+  headline: string,
+  ...actions: string[]
+): Promise<string | undefined> {
+  const details = 'Show details';
+  const choice = await (severity === 'error'
+    ? window.showErrorMessage(headline, ...actions, details)
+    : window.showWarningMessage(headline, ...actions, details));
+  if (choice === details) {
+    output?.show(true);
+    return undefined;
+  }
+  return choice;
+}
+
 // Which clusters will not get the passkey offer this session: those the
 // operator declined it on (memql#3902), and those the ownership walk has
 // claimed (memql#4078). Module-scoped so it lives exactly as long as the
@@ -204,6 +252,10 @@ const passkeyOfferMemory = new OfferMemory();
 // Neither half may short-circuit the other. startLanguageClient reports its own
 // failure and returns.
 export function activate(context: ExtensionContext): void {
+  installOutput = window.createOutputChannel('MemQL Install');
+  connectionOutput = window.createOutputChannel('MemQL Connection');
+  context.subscriptions.push(installOutput, connectionOutput);
+
   startLanguageClient(context);
 
   // The runtime surface reads credentials from the home directory and opens a
@@ -275,9 +327,9 @@ function startLanguageClient(context: ExtensionContext): void {
   // rejection (the LanguageClient shows its own UI too, but this makes the
   // failure explicit and actionable).
   void client.start().catch((err) => {
-    window.showErrorMessage(
-      `MemQL: language server failed to start: ${err instanceof Error ? err.message : String(err)}`
-    );
+    const detail = err instanceof Error ? err.message : String(err);
+    noteDiagnostic(connectionOutput, 'the language server failed to start', detail);
+    void offerDetails('error', connectionOutput, 'MemQL: the language server failed to start.');
   });
 }
 
@@ -346,6 +398,20 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     // next action starts a clean sign-in instead of replaying a dead one.
     storeDeps
   );
+
+  // THE ONE PLACE a dial failure's raw text is recorded (memql#4194). Every
+  // surface that mentions the failure afterwards -- tree tooltip, toast,
+  // Connection page -- shows the brief form and points here, so shortening
+  // them loses nothing.
+  connections.onDidChangeState((state) => {
+    if (state.status === 'error') {
+      noteDiagnostic(
+        connectionOutput,
+        `dial to "${state.clusterName}" failed (${state.reason})`,
+        state.message
+      );
+    }
+  });
 
   // The version machinery (epic memql#3989). Constructed here, driven by the
   // tree: nothing below does any work until getChildren asks it to, which is
@@ -785,10 +851,14 @@ function registerRuntimeSurface(context: ExtensionContext): void {
     installRoot: string;
     receiptFile: string;
     removeRegistryEntry: (name: string) => Promise<ClusterConfig>;
+    diagnostics: DiagnosticSink;
   } => ({
     clustersPath,
     refreshTree: () => clustersTree.refresh(),
     installRoot: installRootFor(context),
+    // The MemQL Install channel (memql#4194): where every run's full,
+    // redacted stderr lives.
+    diagnostics: sinkFor(installOutput),
     // ONE receipt path for the install that writes it, the uninstall that
     // reverses it and the repair that reads a key path back out of it. The
     // page used to resolve it three times for itself.
@@ -905,9 +975,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         // was actually connected to, and it is the one carrying the domain
         // `canSignIn` and `signInToCluster` read to find the identity service.
         const offer = signInCanRecover(state.reason) && canSignIn(dialing);
+        // Brief; the raw text is already in the Connection channel via the
+        // state listener above (memql#4194, audit 45).
+        const headline = `MemQL: ${briefMessage(state.message)}`;
         const choice = offer
-          ? await window.showErrorMessage(`MemQL: ${state.message}`, 'Sign in')
-          : await window.showErrorMessage(`MemQL: ${state.message}`);
+          ? await offerDetails('error', connectionOutput, headline, 'Sign in')
+          : await offerDetails('error', connectionOutput, headline);
         if (choice === 'Sign in') {
           await signInToCluster(dialing, {
             clustersPath,
@@ -1041,7 +1114,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         );
       } catch (err) {
         const detail = err instanceof OwnershipError ? err.message : String(err);
-        window.showErrorMessage(`MemQL: ${detail}`);
+        noteDiagnostic(connectionOutput, 'minting an enrolment link failed', detail);
+        void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(detail)}`);
         return;
       }
       try {
@@ -1054,7 +1128,8 @@ function registerRuntimeSurface(context: ExtensionContext): void {
         });
       } catch (err) {
         const detail = err instanceof EnrolmentError ? err.message : String(err);
-        window.showErrorMessage(`MemQL: ${detail}`);
+        noteDiagnostic(connectionOutput, 'opening the enrolment link failed', detail);
+        void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(detail)}`);
         return;
       }
       // THE REST OF THE WALK, offered rather than assumed (memql#3906).
@@ -1107,8 +1182,12 @@ function registerRuntimeSurface(context: ExtensionContext): void {
       try {
         await signInStore.signOut(target.cluster.name);
       } catch (err) {
-        window.showErrorMessage(
-          `MemQL: signing out of "${target.cluster.name}" failed: ${err instanceof Error ? err.message : String(err)}`
+        const detail = err instanceof Error ? err.message : String(err);
+        noteDiagnostic(connectionOutput, `signing out of "${target.cluster.name}" failed`, detail);
+        void offerDetails(
+          'error',
+          connectionOutput,
+          `MemQL: signing out of "${target.cluster.name}" failed.`
         );
         return;
       }
@@ -1215,9 +1294,9 @@ function registerRuntimeSurface(context: ExtensionContext): void {
           disconnect: () => connections?.disconnect(),
         });
       } catch (err) {
-        window.showErrorMessage(
-          `MemQL: removing "${name}" failed: ${err instanceof Error ? err.message : String(err)}`
-        );
+        const detail = err instanceof Error ? err.message : String(err);
+        noteDiagnostic(connectionOutput, `removing "${name}" failed`, detail);
+        void offerDetails('error', connectionOutput, `MemQL: removing "${name}" failed.`);
         return;
       }
 
@@ -1855,7 +1934,9 @@ function registerRunSurface(
           removeRunConfig(current, node.config.name)
         );
       } catch (err) {
-        window.showErrorMessage(`MemQL: ${err instanceof Error ? err.message : String(err)}`);
+        window.showErrorMessage(
+          `MemQL: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
+        );
         return;
       }
       runsTree.refresh();
@@ -2207,7 +2288,7 @@ function readFileOrThrow(p: string): string {
     return fs.readFileSync(p, 'utf8');
   } catch (err) {
     throw new Error(
-      `cannot read ${p}: ${err instanceof Error ? err.message : String(err)} -- open the file and try again`
+      `cannot read ${maskHomePath(p, os.homedir())}: ${err instanceof Error ? err.message : String(err)} -- open the file and try again`
     );
   }
 }
@@ -2352,7 +2433,7 @@ async function constructForConfig(
     document = await workspace.openTextDocument(uri);
   } catch (err) {
     window.showErrorMessage(
-      `MemQL: cannot open ${config.file}: ${err instanceof Error ? err.message : String(err)}`
+      `MemQL: cannot open ${config.file}: ${briefMessage(redactForDisplay(err instanceof Error ? err.message : String(err), os.homedir()))}`
     );
     return undefined;
   }
@@ -2504,7 +2585,13 @@ async function pickCluster(clustersPath: string): Promise<ClusterNode | undefine
   const picked = await window.showQuickPick(
     file.clusters.map((cluster) => ({
       label: cluster.name,
-      description: cluster.endpoint,
+      // The row policy (memql#4194, audit 42): state + version, never the
+      // address. Same composer as the tree, so the two lists cannot disagree.
+      description: clusterRowText(
+        cluster,
+        connections?.state ?? { status: 'disconnected' },
+        releaseCache.peek()
+      ).description,
       cluster,
     })),
     { placeHolder: 'Select a MemQL cluster' }
@@ -2645,17 +2732,21 @@ async function signInToCluster(
                 onUserCode,
                 resolveExternalUri,
                 openExternal: (url) => env.openExternal(Uri.parse(url)),
-                onFallback: (reason) => announceDeviceCodeFallback(progress, reason),
+                onFallback: (reason) =>
+                  announceDeviceCodeFallback(progress, reason, sinkFor(connectionOutput)),
               }),
             deviceCode: (target, signal) => runDeviceCodeFlow(target, { signal, onUserCode }),
           }),
         });
       } catch (err) {
         const report = describeSignInFailure(cluster.name, err);
+        if (report.level !== 'silent') {
+          noteDiagnostic(connectionOutput, `sign-in to "${cluster.name}" failed`, report.message);
+        }
         if (report.level === 'error') {
-          void window.showErrorMessage(report.message);
+          void offerDetails('error', connectionOutput, briefMessage(report.message));
         } else if (report.level === 'warning') {
-          void window.showWarningMessage(report.message);
+          void offerDetails('warning', connectionOutput, briefMessage(report.message));
         }
         return false;
       } finally {
@@ -2683,7 +2774,7 @@ async function signInToCluster(
           await connections?.connect(fresh);
           const state = connections?.state;
           if (state?.status === 'error') {
-            void window.showErrorMessage(`MemQL: ${state.message}`);
+            void offerDetails('error', connectionOutput, `MemQL: ${briefMessage(state.message)}`);
             return true;
           }
         }
@@ -2807,9 +2898,9 @@ async function offerPasskeyEnrolment(cluster: ClusterConfig): Promise<void> {
   } catch (err) {
     // LOUD here, unlike the decision above: the operator asked for this one, so
     // silence would leave them waiting for a browser tab that is not coming.
-    void window.showErrorMessage(
-      `MemQL: could not mint an enrolment link -- ${err instanceof Error ? err.message : String(err)}`
-    );
+    const detail = err instanceof Error ? err.message : String(err);
+    noteDiagnostic(connectionOutput, 'minting an enrolment link failed', detail);
+    void offerDetails('error', connectionOutput, 'MemQL: could not mint an enrolment link.');
   }
 }
 
@@ -2854,19 +2945,22 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // operator who answered it correctly still could not connect, and nothing
   // said why.
   //
-  // The field is now OPTIONAL IN PRACTICE (memql#3403): the extension can mint
-  // its own credential through the browser, so leaving this empty and running
-  // "MemQL: Sign In" is the ordinary path rather than a dead end. Saying so
-  // here is the difference between an operator who signs in and one who goes
-  // hunting for a token to paste -- the prompt is where they are standing when
-  // the question arises.
-  const token = await window.showInputBox({
-    prompt:
-      'Access token (optional): the identity-issued JWT from POST <identity>/oauth/token. Leave empty and run "MemQL: Sign In" to authenticate through your browser. A PAT (mql_pat_...) will not work -- the mesh verifies bearers via JWKS.',
-    value: existing?.token ?? '',
+  // The field is OPTIONAL IN PRACTICE (memql#3403): the extension can mint its
+  // own credential through the browser, so leaving this empty and running
+  // "MemQL: Sign In" is the ordinary path rather than a dead end.
+  //
+  // NEVER PREFILLED (memql#4194, audit 7/8). The plan comes from
+  // src/clusters/form.ts: the box is empty whatever is stored, the prompt says
+  // what IS stored, and an empty answer KEEPS the stored value -- removing a
+  // credential is sign-out's job, where the SecretStorage half goes too.
+  const tokenPlan = tokenFieldPlan(existing?.token);
+  const tokenEntered = await window.showInputBox({
+    prompt: tokenPlan.prompt,
+    value: tokenPlan.value,
     ignoreFocusOut: true,
     password: true,
   });
+  const token = resolveCredentialInput(tokenEntered, existing?.token);
   if (token === undefined) {
     return undefined;
   }
@@ -2874,20 +2968,15 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
   // The refresh token is collected here as the INGEST path only (memql#3385):
   // the credential resolver takes custody of it on the first exchange, moving
   // it into VS Code's SecretStorage and deleting it from the cockpit-shared
-  // plaintext file. It is a 30-day credential, so leaving it on disk is the
-  // thing this flow exists to avoid, not a step in it.
-  const refreshToken = await window.showInputBox({
-    prompt:
-      'Refresh token (optional): the `refresh_token` from the same response. Stored in the editor\'s secret storage and used to renew the access token as it expires.',
-    // Prefilled from whatever is still PENDING in the file. Normally nothing:
-    // once the resolver has taken custody the key is gone from disk, and the
-    // secret is deliberately not readable back into a text box. Prefilling the
-    // pending case is what stops "add a cluster, then edit it before the first
-    // connect" from silently dropping the token the operator just pasted.
-    value: existing?.refreshToken ?? '',
+  // plaintext file. Same no-prefill plan as the access token.
+  const refreshPlan = refreshTokenFieldPlan(existing?.refreshToken);
+  const refreshEntered = await window.showInputBox({
+    prompt: refreshPlan.prompt,
+    value: refreshPlan.value,
     ignoreFocusOut: true,
     password: true,
   });
+  const refreshToken = resolveCredentialInput(refreshEntered, existing?.refreshToken);
   if (refreshToken === undefined) {
     return undefined;
   }
@@ -2926,11 +3015,12 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     return undefined;
   }
 
-  // Every collected field is returned, INCLUDING the empty ones. An empty
-  // string means "the user cleared this input", which upsertCluster turns into
-  // a key delete. Omitting the key instead would mean "leave whatever is on
-  // disk alone" -- so clearing the token field to revoke a credential left the
-  // old one sitting in clusters.yaml while the UI showed it gone.
+  // Every collected field is returned, INCLUDING the empty ones. For the
+  // non-credential fields an empty string means "the user cleared this input",
+  // which upsertCluster turns into a key delete. The two CREDENTIAL fields are
+  // different since memql#4194: their boxes are never prefilled, so an empty
+  // answer means "keep what is stored" and resolveCredentialInput has already
+  // substituted the stored value -- revoking a credential is sign-out's job.
   //
   // `local` is returned as a real boolean for the same reason: false here means
   // "the user chose not-local", which upsertCluster writes as an ABSENT key
@@ -2939,8 +3029,8 @@ async function promptForCluster(existing?: ClusterConfig): Promise<ClusterConfig
     name: name.trim(),
     endpoint: endpoint.trim(),
     domain: domain.trim(),
-    token: token.trim(),
-    refreshToken: refreshToken.trim(),
+    token,
+    refreshToken,
     local: localChoice.value,
   };
 }

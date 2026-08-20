@@ -50,6 +50,8 @@ import { completeInstallHandoff } from "../install/handoff.js";
 import { offersReconnect, planLocalReconnect } from "../clusters/reconnect.js";
 import { ClaimError, claimUrlFrom, openClaimLink } from "../install/claim.js";
 import { recoveryKeyStateFrom, revealedRecoveryKeyFrom } from "../install/recoveryKey.js";
+import { redactForDisplay } from "../install/secrets.js";
+import { recordDiagnostic, type DiagnosticSink } from "../state/diagnostics.js";
 import { ownerAccountExistsFrom } from "../install/enrolment.js";
 import {
   deleteReceipt,
@@ -205,6 +207,13 @@ const STEP_TIMEOUT_MS = 600_000;
 export interface AddClusterDeps {
   /** ~/.memql/clusters.yaml, resolved once at activation. */
   clustersPath: string;
+  /**
+   * The MemQL Install output channel (memql#4194). Every line of capability
+   * stderr is recorded here, redacted, as the run emits it -- the panel's step
+   * list keeps only the short what-failed line, so this is where the whole
+   * story lives.
+   */
+  diagnostics: DiagnosticSink;
   /** Repaints the Clusters view once an entry lands. */
   refreshTree: () => void;
   /**
@@ -301,6 +310,13 @@ export class AddClusterPanel {
   private runAbort: AbortController | undefined;
   /** Why the run could not be attempted at all. Not a step failure. */
   private runError = "";
+  /**
+   * Whether the operator has clicked through the recovery-key reveal
+   * (memql#4194, audit 1). The plaintext renders only after a deliberate
+   * click, so the done screen can sit open -- in a screen share, on a
+   * projector -- without the key on it.
+   */
+  private recoveryKeyRevealed = false;
 
   /** The removal's own state (memql#3476). See state/uninstallRun.ts. */
   private readonly uninstall = new UninstallRunState();
@@ -619,6 +635,10 @@ export class AddClusterPanel {
     if (type === "copyRecoveryKey") {
       void this.copyRecoveryKey();
     }
+    if (type === "revealRecoveryKey") {
+      this.recoveryKeyRevealed = true;
+      this.render();
+    }
     // The uninstall screen's own channel (memql#3476), recognised against
     // UNINSTALL_ACTIONS -- see that list for why an irreversible operation in
     // particular is reached only by comparison against a name written out in
@@ -924,6 +944,14 @@ export class AddClusterPanel {
         }),
         this.hooks({
           onEvent: (event) => {
+            // The FULL log's home (memql#4194, audit 30): every stderr line,
+            // redacted, as the run emits it. The step list keeps only the
+            // short what-failed line (state/installProgress.ts).
+            if (event.type === "stepLog") {
+              this.deps.diagnostics.appendLine(
+                `[${event.step.id}] ${redactForDisplay(event.line, os.homedir())}`,
+              );
+            }
             this.state.apply(event);
             void recorder.apply(event);
             this.render();
@@ -937,7 +965,14 @@ export class AddClusterPanel {
       // not be attempted at all -- a missing graph document, an unreadable
       // script -- and the step list would otherwise sit empty with no account
       // of why.
-      failure = err instanceof Error ? err.message : String(err);
+      const raw = err instanceof Error ? err.message : String(err);
+      recordDiagnostic(
+        this.deps.diagnostics,
+        "the run could not be attempted",
+        raw,
+        new Date().toISOString(),
+      );
+      failure = redactForDisplay(raw, os.homedir());
     } finally {
       this.runAbort = undefined;
       // The run is over either way; the password has no further use.
@@ -1370,6 +1405,14 @@ export class AddClusterPanel {
         this.uninstallOptions(),
         this.hooks({
           onEvent: (event) => {
+            // The FULL log's home (memql#4194, audit 30): every stderr line,
+            // redacted, as the run emits it. The step list keeps only the
+            // short what-failed line (state/installProgress.ts).
+            if (event.type === "stepLog") {
+              this.deps.diagnostics.appendLine(
+                `[${event.step.id}] ${redactForDisplay(event.line, os.homedir())}`,
+              );
+            }
             this.uninstall.apply(event);
             void recorder.apply(event);
             this.render();
@@ -2217,9 +2260,16 @@ ${renderToHtml(renderInstallSteps(toStepViews(this.uninstall.steps)))}
     try {
       await vscode.env.clipboard.writeText(key);
     } catch (err) {
+      // Generic sentence; the exception detail is record material, not toast
+      // material (memql#4194, audit 3).
+      recordDiagnostic(
+        this.deps.diagnostics,
+        "the recovery key could not be copied to the clipboard",
+        err instanceof Error ? err.message : String(err),
+        new Date().toISOString(),
+      );
       vscode.window.showErrorMessage(
-        "MemQL: the recovery key could not be copied -- select it in the panel and copy it " +
-          `by hand (${err instanceof Error ? err.message : String(err)}).`,
+        "MemQL: the recovery key could not be copied -- select it in the panel and copy it by hand.",
       );
       return;
     }
@@ -2373,6 +2423,18 @@ ${claimNote}
   private recoveryKeyBlock(): string {
     const state = this.state.recoveryKeyState;
     const key = this.state.revealedRecoveryKey;
+    if (state === "claimed" && key !== "" && !this.recoveryKeyRevealed) {
+      // THE REVEAL IS A CLICK, NOT A DEFAULT (memql#4194, audit 1). The value
+      // stays out of the DOM entirely until asked for -- this branch renders a
+      // button, not a hidden element a style could unhide.
+      return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- shown once")}</h2>
+<p>${escapeHtml(
+        "This cluster minted its break-glass recovery key. It is shown exactly once, on this screen, when you choose to look.",
+      )}</p>
+<div class="actions">
+  <button class="primary" type="button" data-act="revealRecoveryKey">Reveal the recovery key</button>
+</div>`;
+    }
     if (state === "claimed" && key !== "") {
       return `<h2 class="recovery-heading">${escapeHtml("Cluster recovery key -- shown once")}</h2>
 <div class="recovery-key-row">
