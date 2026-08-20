@@ -10698,6 +10698,28 @@ func RetireConstructConceptBuild(args RetireConstructConceptArgs) string {
 	return b.String()
 }
 
+// RetireShopifyProduct -- Retire an index row we already had. Does not create a row -- the engine update of a missing id is a no-op / miss, never an invent.
+//
+// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["retireShopifyProduct"] in generated_concepts.go).
+type RetireShopifyProductArgs struct {
+	ProductId string
+}
+
+// RetireShopifyProduct calls the engine mutation retireShopifyProduct.
+func (qc *QueryClient) RetireShopifyProduct(ctx context.Context, args RetireShopifyProductArgs) (*Result, error) {
+	call := RetireShopifyProductBuild(args)
+	return qc.executeNamed(ctx, "retireShopifyProduct", call)
+}
+
+func RetireShopifyProductBuild(args RetireShopifyProductArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation retireShopifyProduct(")
+	b.WriteString("productId: ")
+	b.WriteString(quoteMemQL(args.ProductId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // RevertRecord -- Revert a data record to a previous validation state with counter reset
 //
 // Bound concept: v1:data:record (machine-readable: BoundConcepts["revertRecord"] in generated_concepts.go).
@@ -14880,6 +14902,40 @@ func UpdateWorkerLastSeenBuild(args UpdateWorkerLastSeenArgs) string {
 		b.WriteString("lastConnectedFromIP: ")
 		b.WriteString(quoteMemQL(args.LastConnectedFromIP))
 	}
+	b.WriteString(")")
+	return b.String()
+}
+
+// UpsertShopifyProduct -- Upsert the thin index row after a successful Storefront/Admin fetch. Id is the Shopify GID. present is stamped true.
+//
+// Bound concept: v1:shopify:shopifyProduct (machine-readable: BoundConcepts["upsertShopifyProduct"] in generated_concepts.go).
+type UpsertShopifyProductArgs struct {
+	ProductId        string
+	Handle           string
+	AvailableForSale bool
+}
+
+// UpsertShopifyProduct calls the engine mutation upsertShopifyProduct.
+func (qc *QueryClient) UpsertShopifyProduct(ctx context.Context, args UpsertShopifyProductArgs) (*Result, error) {
+	call := UpsertShopifyProductBuild(args)
+	return qc.executeNamed(ctx, "upsertShopifyProduct", call)
+}
+
+func UpsertShopifyProductBuild(args UpsertShopifyProductArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation upsertShopifyProduct(")
+	b.WriteString("productId: ")
+	b.WriteString(quoteMemQL(args.ProductId))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("handle: ")
+	b.WriteString(quoteMemQL(args.Handle))
+	if b.Len() > 30 {
+		b.WriteString(", ")
+	}
+	b.WriteString("availableForSale: ")
+	b.WriteString(fmt.Sprintf("%v", args.AvailableForSale))
 	b.WriteString(")")
 	return b.String()
 }

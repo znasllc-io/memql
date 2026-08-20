@@ -1,0 +1,35 @@
+// shopify domain -- engine-called index writes (memql#4137).
+//
+// No @actor: these are reached from the Shopify integration after a
+// verified Storefront fetch (or a products/delete). A caller cannot
+// invent a product; the builtin refuses to call upsert when fetch misses.
+
+/// Upsert the thin index row after a successful Storefront/Admin fetch.
+/// Id is the Shopify GID. present is stamped true.
+mutate shopifyProduct upsertShopifyProduct {
+  args {
+    productId          string!
+    handle             string!
+    availableForSale   bool!
+  }
+  insert {
+    accept { handle, availableForSale }
+    stamp {
+      id: args.productId
+      present: true
+    }
+  }
+}
+
+/// Retire an index row we already had. Does not create a row -- the
+/// engine update of a missing id is a no-op / miss, never an invent.
+mutate shopifyProduct retireShopifyProduct {
+  args {
+    productId  string!
+  }
+  update {
+    id: args.productId
+    present: false
+    availableForSale: false
+  }
+}

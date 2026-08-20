@@ -91,7 +91,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/component/identity/web":          13,  // static/* legal/*.md (admin-settings-branding.js went with the settings page, memql#3324; +passkey-login.js memql#3407; +me-passkeys.js memql#3409; +enroll.js memql#3408)
 	"github.com/znasllc-io/memql/component/mcp":                   1,   // icon.svg
 	"github.com/znasllc-io/memql/docs":                            1,   // public/language/memql.md
-	"github.com/znasllc-io/memql/dsl":                             234, // all:<domain> x36 (+campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
+	"github.com/znasllc-io/memql/dsl":                             240, // all:<domain> x37 (+shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
 	"github.com/znasllc-io/memql/examples/deploypack":             3,   // all:dsl
 	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
 	"github.com/znasllc-io/memql/integrations":                    1,   // *.json

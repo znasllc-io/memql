@@ -69,8 +69,8 @@ func TestStrictAutomationBoot_EmbeddedTreeIsClean(t *testing.T) {
 // yields. Measured when the strict gate landed (memql#2830); 31 -> 32 when
 // campaigns gained ingestCampaignFeedback (memql#3461); 32 -> 31 when
 // purgeExpiredPolicyTraces went with the rest of the dead policyTrace
-// subsystem (memql#4114).
-const shippedAutomationCount = 31
+// subsystem (memql#4114); 31 -> 33 when shopify gained applyShopifyInboundProduct + reconcileShopifyIndex (memql#4137).
+const shippedAutomationCount = 33
 
 // TestStrictAutomationBoot_MalformedAutomationRefusesBoot is the core
 // acceptance test: a malformed automation injected as a throwaway domain (the

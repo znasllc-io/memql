@@ -80,7 +80,7 @@ memQL/
 │   │   │              forge, harness, healing, identity, install,
 │   │   │              integrations, knowledge, library, memql, notes,
 │   │   │              observability, planner, platform, policies,
-│   │   │              portalviews, providers, rbac, router, safety,
+│   │   │              portalviews, providers, rbac, router, safety, shopify,
 │   │   │              telephony, todos, workbench, worker)
 │   │   ├── concepts.memql     Concept definitions (schemas)
 │   │   ├── mutations.memql    Mutation functions
