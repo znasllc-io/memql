@@ -1,0 +1,8 @@
+@enabled
+@handler(type="function", name="reviewsExportReview")
+@executionTime("fast")
+@description("Export a storefront review as files, including image bytes.")
+tool reviewsExport {
+  reviewId  string  @required  @description("Review id to export.")
+  images    object  @description("Image list [{name, bytes}].")
+}

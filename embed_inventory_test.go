@@ -94,6 +94,7 @@ var embedInventory = map[string]int{
 	"github.com/znasllc-io/memql/dsl":                             240, // all:<domain> x37 (+shopify thin index -- memql#4137; +campaigns, +integrations -- memql#3323; +portalviews -- memql#3320; +install concepts+actions -- memql#3371; +campaigns builtins -- memql#3348; +campaigns automations -- memql#3461; +platform seeds -- the portal-is-site-1 seed, memql#3711)
 	"github.com/znasllc-io/memql/examples/deploypack":             3,   // all:dsl
 	"github.com/znasllc-io/memql/examples/referencepack":          5,   // all:dsl
+	"github.com/znasllc-io/memql/examples/reviewspack":            5,   // all:dsl (memql#4139)
 	"github.com/znasllc-io/memql/examples/shopifypack":            6,   // all:dsl -- memql#4138 attach/secrets/sync
 	"github.com/znasllc-io/memql/integrations":                    1,   // *.json
 	"github.com/znasllc-io/memql/scripts/install/graph":           2,   // install.json uninstall.json (memql#3369)
