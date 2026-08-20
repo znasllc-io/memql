@@ -106,6 +106,19 @@ func RegisterTree(domain string, tree fs.FS) {
 	pluginTrees[trimmed] = tree
 }
 
+// pluginTreeRegistered reports whether a plugin tree is already registered
+// under domain. Read-only companion to RegisterTree for callers that must
+// decide BEFORE registering whether a registration would collide -- the
+// lint overlay mount (lint_mount.go), which walks a disk root that can
+// legitimately contain a domain an in-tree pack has already registered
+// from init() (harness, memql#4190).
+func pluginTreeRegistered(domain string) bool {
+	pluginTreesMu.RLock()
+	defer pluginTreesMu.RUnlock()
+	_, ok := pluginTrees[strings.TrimSpace(domain)]
+	return ok
+}
+
 // UnregisterTree removes a previously registered plug-in domain from the
 // unified tree. Production packs register once at init() and never
 // unregister; this exists for test teardown (and registry symmetry): the

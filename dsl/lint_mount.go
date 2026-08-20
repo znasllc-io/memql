@@ -79,6 +79,27 @@ func MountOverlayDomains(logger *slog.Logger, root fs.FS) (mounted, skippedCore 
 			skippedCore = append(skippedCore, domain)
 			continue
 		}
+		// An IN-TREE PACK: a domain whose DSL lives under this repo's dsl/
+		// and registers itself from init() -- the harness, since memql#4190
+		// -- is already in the plugin registry by the time any mount runs,
+		// because importing this package runs its init. RegisterTree would
+		// panic on the collision (correctly: two packs must not fight for a
+		// namespace), so skip the disk copy instead. This is NOT reported
+		// through skippedCore: that channel means "on-disk content was never
+		// looked at because the embedded tree owns DIFFERENT content",
+		// whereas here the registered tree IS these files (the binary was
+		// compiled from the tree being linted, in the memqllint case), so
+		// the domain is validated in full through the registration that
+		// already exists. Linting a FOREIGN root that happens to name an
+		// in-binary pack's domain is the one case where content could
+		// differ; the log line below is its honest trace.
+		if pluginTreeRegistered(domain) {
+			if logger != nil {
+				logger.Info("lint overlay mount: domain already registered by an in-process pack; using the registered tree",
+					"component", "dsl.lintMount", "domain", domain)
+			}
+			continue
+		}
 		sub, subErr := fs.Sub(root, domain)
 		if subErr != nil {
 			if logger != nil {
