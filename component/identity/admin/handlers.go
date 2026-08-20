@@ -79,7 +79,7 @@ func (s *AdminServer) handleEstablish(w http.ResponseWriter, r *http.Request) {
 		ActorRole:   claims.Role,
 		Outcome:     identity.AuditOutcomeSuccess,
 	})
-	http.Redirect(w, r, "/admin/", http.StatusSeeOther)
+	http.Redirect(w, r, s.portalHome(), http.StatusSeeOther)
 }
 
 // handleLogout clears the admin cookie and bounces to the login page.
@@ -135,8 +135,23 @@ func claimsFromRequestToken(r *http.Request, issuer *identity.JWTIssuer) *identi
 func (s *AdminServer) handleRoot(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusGone)
-	_, _ = w.Write([]byte(
-		"The server-rendered admin console has been retired.\n\n" +
-			"Every surface it served -- users, tokens, audit, JWKS, settings and " +
-			"Deployments -- now lives in the memQL portal, served by the bff at /portal/.\n"))
+	dest := s.portalHome()
+	msg := "The server-rendered admin console has been retired.\n\n" +
+		"Every surface it served -- users, tokens, audit, JWKS, settings and " +
+		"Deployments -- now lives in the memQL portal"
+	if dest != "" && dest != "/me" {
+		msg += " at " + dest + ".\n"
+	} else {
+		msg += ".\n"
+	}
+	_, _ = w.Write([]byte(msg))
+}
+
+// portalHome is the post-establish dest (memql#4144). Never /admin/.
+func (s *AdminServer) portalHome() string {
+	base := ""
+	if s != nil {
+		base = s.Cfg.BaseURL
+	}
+	return identity.DefaultPostLoginLanding("", base)
 }

@@ -106,7 +106,7 @@ func (s *Server) handleComplete(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, dest, http.StatusFound)
 			return
 		}
-		http.Redirect(w, r, "/admin/", http.StatusFound)
+		http.Redirect(w, r, s.postLoginLanding(r), http.StatusFound)
 		return
 	}
 
@@ -250,6 +250,22 @@ func (s *Server) startBrowserSession(
 		})
 	}
 	return nil
+}
+
+// postLoginLanding is the first-party dest after setup or a bare
+// admin-session magic-link click (memql#4144). /admin/ is retired.
+func (s *Server) postLoginLanding(r *http.Request) string {
+	domain := ""
+	if s != nil && s.Store != nil && r != nil {
+		if row, err := s.Store.ReadClusterSettings(r.Context()); err == nil && row != nil {
+			domain = row.ClusterDomain
+		}
+	}
+	base := ""
+	if s != nil {
+		base = s.Cfg.BaseURL
+	}
+	return identity.DefaultPostLoginLanding(domain, base)
 }
 
 // buildClientCallback returns the OAuth-style redirect target the
