@@ -109,9 +109,17 @@ const unauthenticated = () =>
   jsonResponse({ error: "invalid_grant", message: "no refresh token presented" }, 401);
 
 describe("route protection", () => {
-  it("shows the sign-in view instead of the requested route when signed out", async () => {
-    renderPortal({ path: DEEP_LINK, fetchImpl: async () => unauthenticated() });
-    await waitFor(() => expect(screen.getByRole("button", { name: /Continue with/ })).toBeTruthy());
+  it("auto-starts PKCE /authorize when signed out instead of leaving SignInPage up (memql#4152)", async () => {
+    const navigated: string[] = [];
+    renderPortal({
+      path: DEEP_LINK,
+      fetchImpl: async () => unauthenticated(),
+      navigate: (url) => navigated.push(url),
+    });
+    await waitFor(() => expect(navigated).toHaveLength(1));
+    const url = new URL(navigated[0]!);
+    expect(url.origin + url.pathname).toBe("https://identity.example.com/authorize");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     // The protected content is not merely hidden -- it never rendered.
     expect(screen.queryByText("Concepts")).toBeNull();
   });
@@ -168,8 +176,6 @@ describe("signing in", () => {
       navigate: (url) => navigated.push(url),
     });
 
-    await waitFor(() => screen.getByRole("button", { name: /Continue with/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Continue with/ }));
     await waitFor(() => expect(navigated).toHaveLength(1));
 
     const url = new URL(navigated[0]!);
@@ -204,9 +210,6 @@ describe("signing in", () => {
       storage: blocked,
       navigate: (url) => navigated.push(url),
     });
-
-    await waitFor(() => screen.getByRole("button", { name: /Continue with/ }));
-    fireEvent.click(screen.getByRole("button", { name: /Continue with/ }));
 
     await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/session storage/));
     expect(navigated).toHaveLength(0);
@@ -331,6 +334,7 @@ describe("the header", () => {
 
   it("signs out locally without waiting for the server round trip", async () => {
     let logoutCalls = 0;
+    const navigated: string[] = [];
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.endsWith("/auth/logout")) {
         logoutCalls++;
@@ -338,12 +342,19 @@ describe("the header", () => {
       }
       return jsonResponse({ access_token: "AT-1", expires_in: 900 });
     });
-    renderPortal({ path: "/concepts", fetchImpl });
+    renderPortal({
+      path: "/concepts",
+      fetchImpl,
+      navigate: (url) => navigated.push(url),
+    });
 
     await waitFor(() => screen.getByRole("button", { name: "Sign out" }));
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /Continue with/ })).toBeTruthy());
     await waitFor(() => expect(logoutCalls).toBe(1));
+    // #4152: signed-out auto-starts PKCE (SSO). The local credential is gone
+    // before that navigation; logout is best-effort behind it.
+    await waitFor(() => expect(navigated.length).toBeGreaterThan(0));
+    expect(new URL(navigated[0]!).pathname).toBe("/authorize");
   });
 });

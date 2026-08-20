@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 
@@ -14,15 +15,27 @@ import { ErrorMessage } from "../components/StatusMessage";
 // persisted across the redirect to identity -- see auth/pending.ts -- because
 // the document itself is destroyed by that navigation.)
 //
-// The cluster is named here, before sign-in, because it is the one thing the
-// operator must confirm BEFORE authenticating: "am I about to sign in to
-// production?" is a question worth answering while it is still cheap.
+// memql#4152: when auth is on and the portal is signed-out, start the existing
+// PKCE /authorize immediately. A magic-link landing is just https://portal.../
+// with no OAuth params -- RequireAuth used to leave this page up, so the
+// identity session never minted a portal token. The button stays as a
+// fallback when auto-start fails (blocked storage, misconfigured cluster).
 
 export function SignInPage(): ReactNode {
   const { signIn, error, config, status } = useAuth();
   const location = useLocation();
   const cluster = clusterLabelFor(globalThis.location);
   const returnTo = location.pathname + location.search;
+
+  // Exactly once: React 19 StrictMode re-runs effects in development, and a
+  // second PKCE start would overwrite the pending verifier.
+  const started = useRef(false);
+  useEffect(() => {
+    if (status === "misconfigured" || error) return;
+    if (started.current) return;
+    started.current = true;
+    signIn(returnTo);
+  }, [status, error, returnTo, signIn]);
 
   return (
     <div className="flex min-h-full items-center justify-center bg-bg p-6 text-fg">
@@ -50,9 +63,13 @@ export function SignInPage(): ReactNode {
               Continue with memQL identity
             </button>
             <p className="mt-3 text-xs text-subtle">
-              You will be sent to{" "}
-              <span className="font-mono">{hostOf(config.identityUrl)}</span> to
-              sign in with a magic link, then returned here.
+              {error
+                ? "You will be sent to "
+                : "Continuing to "}
+              <span className="font-mono">{hostOf(config.identityUrl)}</span>
+              {error
+                ? " to sign in with a magic link, then returned here."
+                : " to finish sign-in."}
             </p>
             {error ? (
               <div className="mt-4">
