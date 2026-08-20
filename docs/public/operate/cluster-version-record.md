@@ -11,7 +11,7 @@ owner: znas
 
 `clusters.yaml` carries a `version` key per cluster: the release that
 cluster is believed to be running. This page is the contract for that
-key, because the file is shared -- the VS Code plugin and the memQL
+key, because the file is shared -- the VS Code extension and the memQL
 Cockpit both read and write it, and a key one of them does not model is
 at risk on the other's next write.
 
@@ -52,7 +52,7 @@ clusters:
 |---|---|
 | YAML key | `version` |
 | Type | string |
-| Plugin model | `ClusterConfig.version?: string` (`clusters/model.ts`) |
+| Extension model | `ClusterConfig.version?: string` (`clusters/model.ts`) |
 | Cockpit model | `Version string` with `yaml:"version,omitempty"` |
 | Absent | The cluster's release is unknown. Not an error. |
 
@@ -148,13 +148,13 @@ which is why it changed no cluster's record until one was upgraded.
 **They do not write this file the same way, and the difference is the
 whole reason a shared key needs coordinating.**
 
-**The plugin** read-modify-writes the file as a YAML *document*, not by
+**The extension** read-modify-writes the file as a YAML *document*, not by
 serialising a struct over it. Two properties follow, both enforced by
 tests in `clustersFile.test.ts`:
 
-- **Comments survive** a plugin write. An operator's comments are part of
+- **Comments survive** an extension write. An operator's comments are part of
   their file.
-- **Unmodelled keys survive** a plugin write. A key written by a newer
+- **Unmodelled keys survive** an extension write. A key written by a newer
   cockpit is left untouched.
 
 That matters more for this key than for a hand-edited one, because the
@@ -184,7 +184,7 @@ neighbours -- the `token` rename (which fixed a field advertising a
 credential class the bff structurally rejects) and the `local` flag.
 
 Given the asymmetry above, that coordination is **load-bearing**. If the
-cockpit preserved unmodelled keys, the plugin could ship `version` alone
+cockpit preserved unmodelled keys, the extension could ship `version` alone
 and nothing would need coordinating at all; because it does not, the
 cockpit's matching `Version string` has to land as part of the same
 change rather than after it. A recorded version that the operator's next

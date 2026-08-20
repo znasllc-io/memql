@@ -9,24 +9,24 @@ owner: znas
 
 # Upgrade Barriers
 
-Moving a local cluster to another release is normally a **retag**: the plugin
-moves the pinned checkout, reconciles the local overlay from it, and every other
-install step verifies itself and skips. That is the whole reason one button can
-honestly offer it.
+Moving a local cluster to another release is normally a **retag**: the VS Code
+extension moves the pinned checkout, reconciles the local overlay from it, and
+every other install step verifies itself and skips. That is the whole reason
+one button can honestly offer it.
 
 Between some pairs of releases it is not a retag. This page lists those pairs,
 says what each one actually changes, and gives the procedure that replaces the
 button.
 
 WARNING: **the procedures on this page are written for a LOCAL cluster.** A
-barrier is a fact about what a release changed, so the plugin refuses the
+barrier is a fact about what a release changed, so the extension refuses the
 crossing on a remote (deploy-control) cluster too — but the steps below assume a
 k3d cluster on the operator's own machine, and one of them offers to destroy and
 rebuild it. See [Crossing a barrier on a remote
 cluster](#crossing-a-barrier-on-a-remote-cluster) before applying any of this to
 staging or production.
 
-**The plugin refuses rather than warns.** When a move crosses a barrier, the
+**The extension refuses rather than warns.** When a move crosses a barrier, the
 confirmation dialog becomes a refusal and the button does not run. A warning an
 operator can click past is not a safeguard for a change that can leave a cluster
 running with an empty graph and no error anywhere.
@@ -38,7 +38,7 @@ running with an empty graph and no error anywhere.
 | `v0.18.0` | The database changes from an in-overlay Postgres Deployment to a CloudNativePG cluster, and the cluster gains an operator stack (cert-manager + CloudNativePG). |
 
 The machine-readable copy is `editors/vscode/src/version/barriers.ts`, and it is
-the one the plugin reads. This table is prose for a human; that file is the
+the one the extension reads. This table is prose for a human; that file is the
 table.
 
 ---
@@ -80,7 +80,7 @@ cluster containing none of their graph. That is a silent outcome, which is why
 this is a refusal and not a warning.
 
 WARNING: the old PVC is not deleted by the move, so the data is still on the
-machine until something removes it. `make down PURGE=1` and the plugin's
+machine until something removes it. `make down PURGE=1` and the extension's
 uninstall graph both remove it. Take the dump below **before** either.
 
 ### Procedure A — discard the data and re-install (the usual choice)
@@ -90,9 +90,9 @@ survive, this is the shortest correct path and the one to prefer. It destroys
 and re-creates the cluster, so it is not a procedure for anything else -- see
 [Crossing a barrier on a remote cluster](#crossing-a-barrier-on-a-remote-cluster).
 
-- [ ] Uninstall the cluster (the plugin's **Uninstall** action, behind its
+- [ ] Uninstall the cluster (the extension's **Uninstall** action, behind its
       removal preview; or `make down PURGE=1` in the checkout).
-- [ ] Install again at the new tag (the plugin's **Create deployment**; or
+- [ ] Install again at the new tag (the extension's **Create deployment**; or
       `make up` in a checkout moved to the new tag).
 
 The install graph registers the operator stack and provisions the CNPG cluster
@@ -144,18 +144,18 @@ Notes that matter:
 
 ### Moving back before v0.18.0
 
-The plugin refuses this direction too, and it is the worse one: it puts a plain
-Postgres Deployment in front of data that lives in a CloudNativePG cluster, and
-the CNPG `Cluster` resource is left behind by an overlay that no longer contains
-it. There is no supported downgrade procedure. If a release after v0.18.0 has to
-be backed out of, do it by re-installing at the older tag from empty, restoring a
-dump you took beforehand.
+The extension refuses this direction too, and it is the worse one: it puts a
+plain Postgres Deployment in front of data that lives in a CloudNativePG
+cluster, and the CNPG `Cluster` resource is left behind by an overlay that no
+longer contains it. There is no supported downgrade procedure. If a release
+after v0.18.0 has to be backed out of, do it by re-installing at the older tag
+from empty, restoring a dump you took beforehand.
 
 ---
 
 ## Crossing a barrier on a remote cluster
 
-**The refusal is right; the procedures above are not the answer.** The plugin
+**The refusal is right; the procedures above are not the answer.** The extension
 refuses this crossing on a remote cluster for the same reason it refuses it
 locally — the barrier records what the *release* changed, and that is true
 wherever the release runs. What differs is everything about how you cross it.
@@ -188,7 +188,7 @@ What to do instead:
       [database-platform.md](database-platform.md) covers the backup regime and
       the restore drill.
 - [ ] Cross the barrier as a deliberate, planned migration rather than as a
-      deploy. The plugin's button is not going to become the way to do this, and
+      deploy. The extension's button is not going to become the way to do this, and
       that is the point of the refusal.
 
 If you carry a remote cluster across this barrier, write down what you did and
