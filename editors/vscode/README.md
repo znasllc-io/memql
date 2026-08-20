@@ -45,17 +45,17 @@ its commands moved with it: `memql.concepts.*` is now `memql.data.*`.
 One rule decides where every surface in this extension goes, including ones
 nobody has proposed yet:
 
-> **The plugin owns what is on your machine and what you can reach.
+> **The extension owns what is on your machine and what you can reach.
 > The portal owns what is inside a cluster.**
 
 | Question | Surface |
 |---|---|
-| What instances do I operate, at what version? | plugin -- Deployments |
-| Install / upgrade / repair / uninstall / roll out | plugin -- Deployments |
-| Which clusters can I reach, as whom? | plugin -- Clusters |
+| What instances do I operate, at what version? | extension -- Deployments |
+| Install / upgrade / repair / uninstall / roll out | extension -- Deployments |
+| Which clusters can I reach, as whom? | extension -- Clusters |
 | Which pods run, which are orphaned, which tier is under-replicated | **portal** |
 | Integrations, identity, sites, accounts | **portal** |
-| What does this construct do, what rows exist | plugin -- Constructs / Data / Runs |
+| What does this construct do, what rows exist | extension -- Constructs / Data / Runs |
 
 **Topology used to be here and is not any more.** A pod grid, orphan verdicts
 and under-replica alarms are cluster state, the portal already draws them, and
@@ -117,7 +117,7 @@ reinstall to whoever is watching it.
 
 **Choosing a version never happens by itself.** The tag list comes from the
 checkout's origin, newest first, and nothing is pre-selected: a version somebody
-picked off a list is a fact they can be held to, and one the plugin picked
+picked off a list is a fact they can be held to, and one the extension picked
 silently is not. With no network there is a text box, and the reason the list is
 missing is printed beside it.
 
@@ -451,6 +451,10 @@ CodeLens does need it, because the constructs it offers are read from the
 server.)
 
 ## Development
+
+This surface is "the VS Code extension" (VS Code's own marketplace word),
+never "the plugin". The commit scope for extension work is `vscode`:
+`feat(vscode)` / `fix(vscode)`.
 
 ```bash
 make vscode-deps                 # from the repo root -- see below
