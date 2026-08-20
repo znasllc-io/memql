@@ -152,14 +152,14 @@ integrations/
 # either -- see the root CLAUDE.md Coding Agent section (memql#4120).
 #
 # training/ (the per-agent "Train" pipeline: identity embedding + distilled
-# system prompt + just-in-time knowledge seeding) is a product
-# integration -- it lives in the product repo as a thin Go plugin module and
-# self-registers via memql.RegisterPlugin("training"), so engine-only core no
-# longer carries it. Under the consolidated platform (memql#2472) the engine
-# ships product-agnostic and product DSL rides in at runtime via
-# MEMQL_DSL_PATH; training is a still-shipped product-Go integration -- the
-# transitional exception, not yet absorbed into the engine or reduced to a
-# data-only bundle.
+# system prompt + just-in-time knowledge seeding) is a pack -- it lives in
+# the product repo as a thin Go module and self-registers via
+# memql.RegisterPlugin("training"), so engine-only core no longer carries
+# it. Under the consolidated platform (memql#2472) the engine ships
+# product-agnostic and product DSL rides in at runtime via MEMQL_DSL_PATH;
+# training is a still-shipped product-Go pack -- the transitional
+# exception, not yet absorbed into the engine or reduced to a data-only
+# bundle.
 ```
 
 ---
@@ -385,11 +385,11 @@ core (`component/grpc/ai_handlers.go` + the `memql.RegisterSuggestDomain`
 registry in `component/memql/suggest_registry.go`). `knowledge` registers
 from core; the product domains (spaces / spaceTitle / agents /
 groups / groupDescription / agentCardSummary / spaceCardSummary /
-groupCardSummary) register from the product's own suggest plugin (a thin Go
+groupCardSummary) register from the product's own suggest pack (a thin Go
 module in the product repo). Under the consolidated platform (memql#2472) the
 engine ships product-agnostic and product DSL rides in at runtime via
 `MEMQL_DSL_PATH`; these Go-backed suggest handlers are a transitional
-product-repo plugin, pending engine-generic absorption or bundle delivery.
+product-repo pack, pending engine-generic absorption or bundle delivery.
 `spaceTitle` / `groupDescription` are lightweight single-field generations
 (create-modal blur handlers); the richer `spaces` / `agents` / `groups`
 return full payloads; the `*CardSummary` domains generate canvas-card bodies;
@@ -401,7 +401,8 @@ return full payloads; the `*CardSummary` domains generate canvas-card bodies;
 
 memQL's integration system has two registration paths:
 
-1. **Plug-in** (preferred) -- self-registers at `init()` with a narrow
+1. **Self-registration** (`memql.RegisterPlugin`; preferred) -- the
+   integration registers itself at `init()` with a narrow
    `PluginContext`. Good for integrations whose dependencies fit
    the common surface (Logger, Engine, BunDB, VisionProvider,
    EmbeddingProviderByName, partition/variable resolvers). Use this
@@ -411,7 +412,7 @@ memQL's integration system has two registration paths:
    that need deps outside `PluginContext` (cognition, agent, stt).
    Stays in `app/integrations_*.go` with build-tag gating.
 
-### Plug-in path (most cases)
+### Self-registration path (most cases)
 
 **1. Create the package**
 ```bash
@@ -451,7 +452,7 @@ func (i *Integration) handleDoThing(ctx context.Context, args map[string]any, _ 
 }
 ```
 
-**3. Plug-in registration** -- self-register at `init()`
+**3. Self-registration** (`memql.RegisterPlugin`) -- register at `init()`
 ```go
 // integrations/<name>/plugin.go
 package <name>
@@ -471,7 +472,7 @@ feature that needs configuration the environment didn't supply).
 **4. Anchor the package** so its `init()` runs. Add a blank import
 to `app/plugins_core.go` for core integrations; a product-specific
 integration anchors from its pack repo instead.
-Build-tag-gate the anchor file if the plug-in should only run on
+Build-tag-gate the anchor file if the integration should only run on
 certain node types.
 
 **5. Expose it from the DSL via a builtin**

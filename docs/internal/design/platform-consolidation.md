@@ -85,7 +85,7 @@ cross-repo release dance**, both downstream of static DSL linking.
   nodes read via `MEMQL_DSL_PATH` at boot.
 - **A "BFF" is an engine `bff` node** fronting a product (mounting its bundle).
   A deploy concern, not code. Genuinely-bespoke product Go (rare) becomes a thin
-  optional `bff/` plugin module in the product repo.
+  optional `bff/` pack module in the product repo.
 - **A release is `{engine version, bundle digest, client digest}`** pinned in one
   overlay in one repo. No cross-repo assembly, no coherence check, no lockfile
   fleet.
