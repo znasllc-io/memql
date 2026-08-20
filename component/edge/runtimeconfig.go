@@ -37,24 +37,19 @@ type RuntimeConfig struct {
 	IdentityURL string `json:"identityUrl"`
 	// IdentityAPIBaseURL is the base a client uses for the identity JSON
 	// calls it makes with fetch() -- POST /oauth/token, /auth/refresh,
-	// /auth/logout. Equal to IdentityURL: cross-origin against the
-	// identity service, the zero-configuration default every deployment
-	// gets without front-door rules. This WORKS: csp.go's connect-src
-	// names the cluster's identity origin (identityOriginFromEnv, reading
-	// the same env this field does) on every site's policy alike, not
-	// only the portal's, which is what makes a cross-origin fetch() here
-	// survive the browser's own CSP check rather than being silently
-	// blocked before the request leaves the page.
+	// /auth/logout, GET /.well-known/jwks.json. Empty means same-origin:
+	// the browser resolves those paths against the site that served the
+	// page, and serveIdentityXHR (identity_proxy.go) forwards the exact
+	// four paths to the identity binary. That is the topology
+	// docs/public/operate/auth/identity-service.md requires -- sibling
+	// hosts that share a wildcard cert + IP otherwise HTTP/2-coalesce
+	// and a Mac browser's POST /oauth/token lands on this site's SPA
+	// fallback (200 HTML, no access_token; memql#4154).
 	//
-	// REJECTED FOR NOW: a same-origin path proxied through the site's own
-	// /_memql/* surface to identity. It would need a SECOND proxy target
-	// (today /_memql/* forwards only to the bff, which does not itself
-	// serve /oauth/token et al.) and a second declared prefix to carry
-	// it, which is a design change to the proxy Task 7 shipped -- not
-	// this task's to make. Cross-origin is not a workaround; it is the
-	// same shape every other OAuth 2.1 + PKCE public client on the web
-	// uses, and it is what component/portal/config.go defaulted to
-	// before this epic.
+	// IdentityURL stays the issuer for top-level /authorize navigation.
+	// csp.go's connect-src still names the identity origin so a leftover
+	// cross-origin fetch is not a CSP violation; the published base is
+	// empty so the ordinary path never leaves the site origin.
 	IdentityAPIBaseURL string `json:"identityApiBaseUrl"`
 	// OAuthClientID is the public OAuth client_id registered for THIS
 	// site's own hostname -- see clientIDForHostname. Empty when no
@@ -96,7 +91,7 @@ func runtimeConfigForSite(site *Site, env func(string) string, authEnabled bool)
 	}
 	return RuntimeConfig{
 		IdentityURL:        identityURL,
-		IdentityAPIBaseURL: identityURL,
+		IdentityAPIBaseURL: "",
 		OAuthClientID:      clientIDForHostname(hostname, env("MEMQL_IDENTITY_REGISTERED_CLIENTS")),
 		AuthEnabled:        authEnabled,
 	}

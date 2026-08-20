@@ -56,20 +56,22 @@ via magic link, then carry the resulting access JWT to bff/voice/etc.
 
 Browsers send `/auth/refresh`, `/auth/logout`, `/oauth/token`, and
 `/.well-known/jwks.json` SAME-ORIGIN through the SPA's host (e.g.
-`app.${DOMAIN}`), which the LB nginx proxies internally to the
-identity binary. Top-level magic-link redirects (the `/login` UI,
-the `/auth/callback` redirect-back) still go to
-`identity.${DOMAIN}` directly.
+`app.${DOMAIN}` / `portal.${DOMAIN}`). The edge binary proxies those
+four exact paths to the identity service
+(`MEMQL_IDENTITY_VERIFIER_BASE_URL`); `/auth/callback` is a site
+route and is not forwarded. Top-level magic-link redirects (the
+`/login` UI, the `/authorize` navigation) still go to
+`identity.${DOMAIN}` directly. `runtime-config.json` publishes an
+empty `identityApiBaseUrl` so `fetch()` stays on the site origin.
 
-Same-origin XHR avoids a Safari quirk where cross-origin fetch
-to a sibling host that shares a wildcard cert + IP can be refused
-intermittently with "TypeError: Load failed" / "Could not connect
-to the server" -- HTTP/2 connection coalescing biting on
-cookie-bound XHR-with-credentials. Routing the four XHR endpoints
-through the SPA's own origin sidesteps the entire class of
-issues. A front-door nginx should carry explicit `location =`
-blocks for each of the four paths; production setups should
-mirror the same routing.
+Same-origin XHR avoids a Safari / Chrome quirk where cross-origin
+fetch to a sibling host that shares a wildcard cert + IP can land
+on the wrong vhost (HTTP/2 connection coalescing). The portal
+then reports `identity returned no access token (invalid_response)`
+because the SPA fallback answered 200 HTML. A front-door nginx
+`location =` block for each of the four paths is still fine as
+defense in depth; it is no longer required for the edge-hosted
+sites.
 
 ## Endpoints
 

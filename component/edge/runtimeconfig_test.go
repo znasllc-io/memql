@@ -80,7 +80,7 @@ func TestRuntimeConfigForSite_FullDerivation(t *testing.T) {
 
 	want := RuntimeConfig{
 		IdentityURL:        "https://identity.example.com",
-		IdentityAPIBaseURL: "https://identity.example.com",
+		IdentityAPIBaseURL: "",
 		OAuthClientID:      "shop",
 		AuthEnabled:        true,
 	}
@@ -156,6 +156,9 @@ func TestServeRuntimeConfig_IsGenericPerSite(t *testing.T) {
 			}
 			if doc.IdentityURL != tc.wantAuthURL {
 				t.Errorf("identityUrl = %q, want %q", doc.IdentityURL, tc.wantAuthURL)
+			}
+			if doc.IdentityAPIBaseURL != "" {
+				t.Errorf("identityApiBaseUrl = %q, want empty (same-origin XHR)", doc.IdentityAPIBaseURL)
 			}
 			if doc.OAuthClientID != tc.wantClient {
 				t.Errorf("oauthClientId = %q, want %q", doc.OAuthClientID, tc.wantClient)

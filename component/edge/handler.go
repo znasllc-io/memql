@@ -13,20 +13,25 @@ import (
 // Options configures a Handler. APITarget names the bff's plain-HTTP address
 // (e.g. "http://bff-http:8085") that serveAPI (proxy.go) reverse-proxies
 // /_memql/* to; a Handler built without it simply refuses /_memql/* for
-// every site.
+// every site. IdentityTarget names the identity binary (typically
+// MEMQL_IDENTITY_VERIFIER_BASE_URL, e.g. "https://identity:8085") that
+// serveIdentityXHR reverse-proxies the four same-origin JSON paths to;
+// empty refuses those paths with 502 rather than SPA-fallback HTML.
 type Options struct {
-	Resolver  Resolver
-	Opener    BundleOpener
-	Logger    *slog.Logger
-	APITarget string
+	Resolver       Resolver
+	Opener         BundleOpener
+	Logger         *slog.Logger
+	APITarget      string
+	IdentityTarget string
 }
 
 // Handler serves whichever site the request's Host names.
 type Handler struct {
-	resolver  Resolver
-	opener    BundleOpener
-	logger    *slog.Logger
-	apiTarget string
+	resolver       Resolver
+	opener         BundleOpener
+	logger         *slog.Logger
+	apiTarget      string
+	identityTarget string
 }
 
 var _ http.Handler = (*Handler)(nil)
@@ -37,10 +42,11 @@ func NewHandler(opts Options) *Handler {
 		logger = slog.Default()
 	}
 	return &Handler{
-		resolver:  opts.Resolver,
-		opener:    opts.Opener,
-		logger:    logger,
-		apiTarget: opts.APITarget,
+		resolver:       opts.Resolver,
+		opener:         opts.Opener,
+		logger:         logger,
+		apiTarget:      opts.APITarget,
+		identityTarget: opts.IdentityTarget,
 	}
 }
 
@@ -80,6 +86,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if strings.HasPrefix(r.URL.Path, apiPrefix) {
 		h.serveAPI(w, r, site)
+		return
+	}
+
+	// Exact-path identity JSON, ahead of the bundle / SPA fallback.
+	// A miss here is how a Mac browser's coalesced POST /oauth/token
+	// used to get index.html 200 (memql#4154).
+	if isIdentityXHRPath(r.URL.Path) {
+		h.serveIdentityXHR(w, r, site)
 		return
 	}
 

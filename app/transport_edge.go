@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/znasllc-io/memql/component/edge"
@@ -77,10 +78,11 @@ func (a *App) mountEdgeEndpoints() {
 	resolver := edge.NewResolver(executor, edgeSiteCacheTTLFromEnv(a.Logger))
 
 	handler := edge.NewHandler(edge.Options{
-		Resolver:  resolver,
-		Opener:    edgeBundleOpener(a.Logger),
-		Logger:    a.Logger,
-		APITarget: edgeAPITargetFromEnv(a.Logger),
+		Resolver:       resolver,
+		Opener:         edgeBundleOpener(a.Logger),
+		Logger:         a.Logger,
+		APITarget:      edgeAPITargetFromEnv(a.Logger),
+		IdentityTarget: edgeIdentityTargetFromEnv(a.Logger),
 	})
 
 	a.handleRoute("/", handler)
@@ -111,6 +113,29 @@ func edgeAPITargetFromEnv(logger *slog.Logger) string {
 	target, ok := reader.String("API_TARGET")
 	if !ok || target == "" {
 		logger.Warn("edge: MEMQL_EDGE_API_TARGET is unset; /_memql/* is refused for every site regardless of a site's apiProxy setting",
+			"component", "edge")
+		return ""
+	}
+	return target
+}
+
+// edgeIdentityTargetFromEnv resolves MEMQL_IDENTITY_VERIFIER_BASE_URL --
+// the in-cluster identity address the edge already carries to verify
+// nothing (verifierRequired=false on this binary) and that serveIdentityXHR
+// now uses as the upstream for the four same-origin JSON paths. Reuses
+// the existing var rather than inventing MEMQL_EDGE_IDENTITY_TARGET: the
+// edge pod already has https://identity:8085 (deploy/k8s/base/edge.yaml).
+//
+// UNSET WARNS. An empty target turns POST /oauth/token into 502 instead
+// of SPA-fallback HTML (memql#4154). Not fatal at boot: a cluster that
+// hosts only static sites never needs identity XHR, and the request path
+// already fails closed.
+func edgeIdentityTargetFromEnv(logger *slog.Logger) string {
+	reader := env.NewEnvReader("MEMQL_IDENTITY_VERIFIER")
+	target, ok := reader.String("BASE_URL")
+	target = strings.TrimRight(strings.TrimSpace(target), "/")
+	if !ok || target == "" {
+		logger.Warn("edge: MEMQL_IDENTITY_VERIFIER_BASE_URL is unset; identity JSON paths (/oauth/token, /auth/refresh, /auth/logout, /.well-known/jwks.json) return 502 on every site",
 			"component", "edge")
 		return ""
 	}
