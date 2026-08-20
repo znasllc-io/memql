@@ -78,3 +78,38 @@ query calendarEvent findEvents {
   paginate 50
   shape   calendarEventFull
 }
+
+/// The host's booking hours, newest first. Owned.
+@actor
+query bookingHours bookingHours {
+  args {
+    published  bool
+  }
+  filter    ownerUserId==actor.userId && when(args.published) { published==args.published }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     bookingHoursFull
+}
+
+/// The host's bookings, newest first. Owned. Projects @pii bookerEmail,
+/// so the caller constraint is load-bearing.
+@actor
+query booking hostedBookings {
+  args {
+    status  string
+  }
+  filter    ownerUserId==actor.userId && when(args.status) { status==args.status }
+  sort      "row.createdAt", "desc"
+  paginate  50
+  shape     bookingFull
+}
+
+/// One booking by id, gated to the host. Owned.
+@actor
+query booking bookingById {
+  args {
+    bookingId  string!
+  }
+  filter  row.id==args.bookingId && ownerUserId==actor.userId
+  shape   bookingFull
+}

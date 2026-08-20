@@ -872,6 +872,28 @@ func BumpUserRevocationEpochBuild(args BumpUserRevocationEpochArgs) string {
 	return b.String()
 }
 
+// CancelBooking -- Cancel a booking. Owned: ownerUserId is re-stamped from actor.userId.
+//
+// Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["cancelBooking"] in generated_concepts.go).
+type CancelBookingArgs struct {
+	BookingId string
+}
+
+// CancelBooking calls the engine mutation cancelBooking.
+func (qc *QueryClient) CancelBooking(ctx context.Context, args CancelBookingArgs) (*Result, error) {
+	call := CancelBookingBuild(args)
+	return qc.executeNamed(ctx, "cancelBooking", call)
+}
+
+func CancelBookingBuild(args CancelBookingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation cancelBooking(")
+	b.WriteString("bookingId: ")
+	b.WriteString(quoteMemQL(args.BookingId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // CancelCampaign -- Cancel a campaign. Terminal by intent: a cancelled campaign is kept for its history rather than deleted, and re-running it means authoring a new one. Owned.
 //
 // Bound concept: v1:campaigns:campaign (machine-readable: BoundConcepts["cancelCampaign"] in generated_concepts.go).
@@ -2756,6 +2778,77 @@ func CreateBadgeIdentityBuild(args CreateBadgeIdentityArgs) string {
 	}
 	b.WriteString("registeredBy: ")
 	b.WriteString(quoteMemQL(args.RegisteredBy))
+	b.WriteString(")")
+	return b.String()
+}
+
+// CreateBookingHours -- Publish a weekly booking window. Owned: ownerUserId is stamped from actor.userId. published is data -- the host flips it without a rebuild.
+//
+// Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["createBookingHours"] in generated_concepts.go).
+type CreateBookingHoursArgs struct {
+	HoursId      string
+	Weekday      string
+	StartLocal   string
+	EndLocal     string
+	Timezone     string
+	SlotMinutes  int
+	Published    bool
+	PublishedSet bool // set true to send published; required because zero-value bool is ambiguous
+	Label        string
+}
+
+// CreateBookingHours calls the engine mutation createBookingHours.
+func (qc *QueryClient) CreateBookingHours(ctx context.Context, args CreateBookingHoursArgs) (*Result, error) {
+	call := CreateBookingHoursBuild(args)
+	return qc.executeNamed(ctx, "createBookingHours", call)
+}
+
+func CreateBookingHoursBuild(args CreateBookingHoursArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation createBookingHours(")
+	b.WriteString("hoursId: ")
+	b.WriteString(quoteMemQL(args.HoursId))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("weekday: ")
+	b.WriteString(quoteMemQL(args.Weekday))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("startLocal: ")
+	b.WriteString(quoteMemQL(args.StartLocal))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("endLocal: ")
+	b.WriteString(quoteMemQL(args.EndLocal))
+	if b.Len() > 28 {
+		b.WriteString(", ")
+	}
+	b.WriteString("timezone: ")
+	b.WriteString(quoteMemQL(args.Timezone))
+	if args.SlotMinutes != 0 {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("slotMinutes: ")
+		b.WriteString(fmt.Sprintf("%v", args.SlotMinutes))
+	}
+	if args.PublishedSet {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("published: ")
+		b.WriteString(fmt.Sprintf("%v", args.Published))
+	}
+	if args.Label != "" {
+		if b.Len() > 28 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
 	b.WriteString(")")
 	return b.String()
 }
@@ -10469,6 +10562,34 @@ func RequestPlanFeedbackBuild(args RequestPlanFeedbackArgs) string {
 	return b.String()
 }
 
+// RescheduleBooking -- Mark a booking rescheduled and point at the replacement row. The replacement is created by a separate takeBooking call.
+//
+// Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["rescheduleBooking"] in generated_concepts.go).
+type RescheduleBookingArgs struct {
+	BookingId       string
+	RescheduledToId string
+}
+
+// RescheduleBooking calls the engine mutation rescheduleBooking.
+func (qc *QueryClient) RescheduleBooking(ctx context.Context, args RescheduleBookingArgs) (*Result, error) {
+	call := RescheduleBookingBuild(args)
+	return qc.executeNamed(ctx, "rescheduleBooking", call)
+}
+
+func RescheduleBookingBuild(args RescheduleBookingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation rescheduleBooking(")
+	b.WriteString("bookingId: ")
+	b.WriteString(quoteMemQL(args.BookingId))
+	if b.Len() > 27 {
+		b.WriteString(", ")
+	}
+	b.WriteString("rescheduledToId: ")
+	b.WriteString(quoteMemQL(args.RescheduledToId))
+	b.WriteString(")")
+	return b.String()
+}
+
 // ResolveApprovalRequest -- Resolve a pending v1:safety:approvalRequest. Sets status (`approved` or `denied`), decidedBy, decidedAt, and decisionReason. Called from the cockpit approval card (follow-up in memql-cockpit) or directly via CLI / mutation as the v0 workaround until the card lands. Does NOT re-check that status was `pending` -- the read-modify-write happens on the caller side (cockpit / CLI calls approvalRequestById first); v1 ships the simple shape.
 //
 // Bound concept: v1:safety:approvalRequest (machine-readable: BoundConcepts["resolveApprovalRequest"] in generated_concepts.go).
@@ -11565,6 +11686,85 @@ func SetAuthoringBundleStatusBuild(args SetAuthoringBundleStatusArgs) string {
 	return b.String()
 }
 
+// SetBookingHours -- Flip the published flag (and optional hours) without a deploy.
+//
+// Bound concept: v1:calendar:bookingHours (machine-readable: BoundConcepts["setBookingHours"] in generated_concepts.go).
+type SetBookingHoursArgs struct {
+	HoursId      string
+	Weekday      string
+	StartLocal   string
+	EndLocal     string
+	Timezone     string
+	SlotMinutes  int
+	Published    bool
+	PublishedSet bool // set true to send published; required because zero-value bool is ambiguous
+	Label        string
+}
+
+// SetBookingHours calls the engine mutation setBookingHours.
+func (qc *QueryClient) SetBookingHours(ctx context.Context, args SetBookingHoursArgs) (*Result, error) {
+	call := SetBookingHoursBuild(args)
+	return qc.executeNamed(ctx, "setBookingHours", call)
+}
+
+func SetBookingHoursBuild(args SetBookingHoursArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation setBookingHours(")
+	b.WriteString("hoursId: ")
+	b.WriteString(quoteMemQL(args.HoursId))
+	if args.Weekday != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("weekday: ")
+		b.WriteString(quoteMemQL(args.Weekday))
+	}
+	if args.StartLocal != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("startLocal: ")
+		b.WriteString(quoteMemQL(args.StartLocal))
+	}
+	if args.EndLocal != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("endLocal: ")
+		b.WriteString(quoteMemQL(args.EndLocal))
+	}
+	if args.Timezone != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("timezone: ")
+		b.WriteString(quoteMemQL(args.Timezone))
+	}
+	if args.SlotMinutes != 0 {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("slotMinutes: ")
+		b.WriteString(fmt.Sprintf("%v", args.SlotMinutes))
+	}
+	if args.PublishedSet {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("published: ")
+		b.WriteString(fmt.Sprintf("%v", args.Published))
+	}
+	if args.Label != "" {
+		if b.Len() > 25 {
+			b.WriteString(", ")
+		}
+		b.WriteString("label: ")
+		b.WriteString(quoteMemQL(args.Label))
+	}
+	b.WriteString(")")
+	return b.String()
+}
+
 // SetBudget -- Create or update a budget cap. Scope 'partition' covers all agents; scope 'agent' targets one v1:agents:agent by scopeId.
 //
 // Bound concept: v1:router:budget (machine-readable: BoundConcepts["setBudget"] in generated_concepts.go).
@@ -12529,6 +12729,70 @@ func StartPlanBuild(args StartPlanArgs) string {
 	b.WriteString("mutation startPlan(")
 	b.WriteString("planId: ")
 	b.WriteString(quoteMemQL(args.PlanId))
+	b.WriteString(")")
+	return b.String()
+}
+
+// TakeBooking -- Take a booking against the host's published hours. The host is the caller -- this is the portal operations path (memql#4142). Booker identity is payload.
+//
+// Bound concept: v1:calendar:booking (machine-readable: BoundConcepts["takeBooking"] in generated_concepts.go).
+type TakeBookingArgs struct {
+	BookingId   string
+	HoursId     string
+	StartsAt    string
+	EndsAt      string
+	BookerName  string
+	BookerEmail string
+	Notes       string
+}
+
+// TakeBooking calls the engine mutation takeBooking.
+func (qc *QueryClient) TakeBooking(ctx context.Context, args TakeBookingArgs) (*Result, error) {
+	call := TakeBookingBuild(args)
+	return qc.executeNamed(ctx, "takeBooking", call)
+}
+
+func TakeBookingBuild(args TakeBookingArgs) string {
+	var b strings.Builder
+	b.WriteString("mutation takeBooking(")
+	b.WriteString("bookingId: ")
+	b.WriteString(quoteMemQL(args.BookingId))
+	if args.HoursId != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("hoursId: ")
+		b.WriteString(quoteMemQL(args.HoursId))
+	}
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("startsAt: ")
+	b.WriteString(quoteMemQL(args.StartsAt))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("endsAt: ")
+	b.WriteString(quoteMemQL(args.EndsAt))
+	if b.Len() > 21 {
+		b.WriteString(", ")
+	}
+	b.WriteString("bookerName: ")
+	b.WriteString(quoteMemQL(args.BookerName))
+	if args.BookerEmail != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("bookerEmail: ")
+		b.WriteString(quoteMemQL(args.BookerEmail))
+	}
+	if args.Notes != "" {
+		if b.Len() > 21 {
+			b.WriteString(", ")
+		}
+		b.WriteString("notes: ")
+		b.WriteString(quoteMemQL(args.Notes))
+	}
 	b.WriteString(")")
 	return b.String()
 }

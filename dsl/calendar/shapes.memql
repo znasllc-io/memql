@@ -21,3 +21,35 @@ shape calendarEvent calendarEventFull {
   externalRef
   row.createdAt
 }
+
+/// Full bookingHours projection. Backs the host's availability editor.
+@row
+shape bookingHours bookingHoursFull {
+  row.id
+  ownerUserId
+  weekday
+  startLocal
+  endLocal
+  timezone
+  slotMinutes
+  published
+  label
+  row.createdAt
+}
+
+/// Full booking projection. Carries @pii bookerEmail, so every query
+/// binding it gates on the caller.
+@row
+shape booking bookingFull {
+  row.id
+  ownerUserId
+  hoursId
+  startsAt
+  endsAt
+  bookerName
+  bookerEmail
+  status
+  notes
+  rescheduledToId
+  row.createdAt
+}
