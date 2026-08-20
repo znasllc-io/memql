@@ -187,6 +187,7 @@ function openPanel(options: {
   resetRecorded();
   const dir = fs.mkdtempSync(path.join(HOME, "case-"));
   const deps: AddClusterDeps = {
+    diagnostics: { appendLine: () => {} },
     clustersPath: path.join(dir, "clusters.yaml"),
     receiptFile: path.join(dir, "install-receipt.json"),
     installRoot: REPO_ROOT,

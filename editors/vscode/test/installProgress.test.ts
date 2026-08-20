@@ -19,7 +19,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { SYNTHESISED_EXIT_CODES } from "../src/install/runner.js";
-import { failureGuidance, runIsSettled, toStepViews } from "../src/state/installProgress.js";
+import {
+  failureGuidance,
+  inlineStepError,
+  runIsSettled,
+  toStepViews,
+} from "../src/state/installProgress.js";
 import type { StepProgress } from "../src/state/addCluster.js";
 
 // dist-test/test -> dist-test -> editors/vscode -> editors -> the repository.
@@ -113,12 +118,27 @@ test("an exit code rides only on a failure", () => {
   assert.equal(toStepViews([step({ state: "skipped", exitCode: 3 })])[0]?.exitCode, undefined);
 });
 
-test("the log is surfaced where something went wrong, and not on every green step", () => {
+test("the log's LAST LINE is surfaced where something went wrong, and not on every green step", () => {
   // Attaching output to all twelve steps buries the one failure in a dozen
-  // disclosures that all say "fine".
-  assert.equal(toStepViews([step({ state: "failed", log: "boom" })])[0]?.error, "boom");
-  assert.equal(toStepViews([step({ state: "preserved", log: "kept" })])[0]?.error, "kept");
+  // disclosures that all say "fine". And the panel keeps only the short
+  // what-failed line (memql#4194, audit 30): the full stderr's home is the
+  // MemQL Install output channel, which the line names.
+  const failed = toStepViews([step({ state: "failed", log: "first line\nboom" })])[0]?.error;
+  assert.match(failed ?? "", /^boom/);
+  assert.doesNotMatch(failed ?? "", /first line/);
+  assert.match(failed ?? "", /MemQL Install output channel/);
+  assert.match(toStepViews([step({ state: "preserved", log: "kept" })])[0]?.error ?? "", /^kept/);
   assert.equal(toStepViews([step({ state: "done", log: "chatter" })])[0]?.error, undefined);
+});
+
+test("the inline step error is redacted and capped", () => {
+  const home = "/home/op";
+  const long = `wrote /home/op/.memql/x with key sk-ant-abcdef12345678\n${"y".repeat(400)}`;
+  const inline = inlineStepError(long, home);
+  assert.doesNotMatch(inline, /sk-ant/);
+  assert.ok(inline.split("\n")[0]!.length <= 140);
+  const pathy = inlineStepError("could not write /home/op/.memql/receipt", home);
+  assert.match(pathy, /~\/\.memql\/receipt/);
 });
 
 test("a guided step says so, alongside any reason", () => {

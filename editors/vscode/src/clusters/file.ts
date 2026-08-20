@@ -15,6 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Document, parseDocument, type YAMLMap, type YAMLSeq } from "yaml";
 
+import { maskHomePath } from "../install/secrets.js";
 import type { ClusterConfig, ClustersFile } from "./model.js";
 
 export function defaultClustersPath(): string {
@@ -176,13 +177,23 @@ export async function readClustersFileSafe(file: string): Promise<ReadClustersRe
   try {
     return { ok: true, file: await readClustersFile(file) };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    // The message reaches tree rows and panels, so the home directory is
+    // masked at the SOURCE (memql#4194, audit rows 14/27): every consumer of
+    // this error renders `~/.memql/clusters.yaml`, and none can forget to.
+    const raw = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: maskHomePath(raw, os.homedir()) };
   }
 }
 
 async function saveDocument(file: string, doc: Document): Promise<void> {
   await fs.mkdir(path.dirname(file), { recursive: true });
-  await fs.writeFile(file, doc.toString(), "utf8");
+  // 0600 (memql#4194, audit row 72): the file carries the plaintext access
+  // token the Cockpit shares, so it is owner-only on create AND re-asserted on
+  // every rewrite -- writeFile's mode applies only to creation, and this file
+  // predates the tightening on most machines. Best-effort: a filesystem that
+  // refuses chmod (some mounts) still gets the write.
+  await fs.writeFile(file, doc.toString(), { encoding: "utf8", mode: 0o600 });
+  await fs.chmod(file, 0o600).catch(() => {});
 }
 
 export async function setSelectedCluster(file: string, name: string): Promise<void> {
