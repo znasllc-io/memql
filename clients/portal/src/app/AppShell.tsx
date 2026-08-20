@@ -20,8 +20,10 @@ import {
   ScrollText,
   Shield,
   Users,
+  Blocks,
 } from "../ui/icons";
 import { VIEWS } from "../views/registry";
+import { useAdminAccess } from "../admin/useAdminConsole";
 import { viewPath } from "../views/urls";
 
 // The routed layout: a branded nav rail, a quiet topbar, and an <Outlet>.
@@ -86,6 +88,11 @@ const ADMINISTER: readonly NavItem[] = [
   { to: "/admin", label: "Administration", icon: Shield },
   { to: "/sites", label: "Sites", icon: Globe },
 ];
+
+// Modules is owner/admin territory (memql#4191): below that access the item
+// is HIDDEN rather than shown-and-refused -- the engine refuses the reads
+// anyway; the rail just declines to advertise a door that will not open.
+const MODULES_ITEM: NavItem = { to: "/modules", label: "Modules", icon: Blocks };
 
 const RAIL_STORAGE_KEY = "memql-portal-rail";
 
@@ -162,6 +169,8 @@ function NavGroup({
 export function AppShell(): ReactNode {
   const [rail, setRail] = useState<"expanded" | "collapsed">(() => readStoredRail());
   const collapsed = rail === "collapsed";
+  const { canAdminister } = useAdminAccess();
+  const administer = canAdminister ? [...ADMINISTER, MODULES_ITEM] : ADMINISTER;
 
   function toggleRail(): void {
     const next = collapsed ? "expanded" : "collapsed";
@@ -207,7 +216,7 @@ export function AppShell(): ReactNode {
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
             <NavGroup label="Operate" items={OPERATE} collapsed={collapsed} />
             <NavGroup label="Explore" items={EXPLORE} collapsed={collapsed} />
-            <NavGroup label="Administer" items={ADMINISTER} collapsed={collapsed} />
+            <NavGroup label="Administer" items={administer} collapsed={collapsed} />
           </div>
 
           <button

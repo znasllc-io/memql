@@ -4,6 +4,7 @@
 // where they clarify, and in status -- never as decoration.
 
 export {
+  Blocks,
   Bot,
   Boxes,
   Building2,
