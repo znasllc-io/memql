@@ -208,3 +208,19 @@ func buildSSORedirect(redirectURI, code, state string) string {
 	u.RawQuery = q.Encode()
 	return u.String()
 }
+
+// portalHome is the signed-in dest for a bare /login or / revisit
+// (memql#4144). Never /admin/.
+func (s *Server) portalHome(r *http.Request) string {
+	domain := ""
+	if s != nil && s.Store != nil && r != nil {
+		if row, err := s.Store.ReadClusterSettings(r.Context()); err == nil && row != nil {
+			domain = row.ClusterDomain
+		}
+	}
+	base := ""
+	if s != nil {
+		base = s.Cfg.BaseURL
+	}
+	return identity.DefaultPostLoginLanding(domain, base)
+}

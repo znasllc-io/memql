@@ -342,14 +342,16 @@ func (s *Server) Mount(mux *http.ServeMux) {
 
 	// Pre-auth GET surfaces wrap with redirectIfAuthenticated. If
 	// the caller already has a valid memql_admin cookie, the
-	// browser is bounced to /admin/ instead of being asked to
-	// re-authenticate. The middleware no-ops on requests that
-	// carry a return_to (relying-party flow) so SPA sign-in
-	// callbacks still see the form. Add new pre-auth GETs here
-	// rather than open-coding "if signed in, redirect" inside the
-	// handler.
+	// browser is bounced to the portal (memql#4144) instead of
+	// being asked to re-authenticate. /admin/ is retired (410).
+	// The middleware no-ops on requests that carry a return_to
+	// (relying-party flow) so SPA sign-in callbacks still see the
+	// form. Add new pre-auth GETs here rather than open-coding
+	// "if signed in, redirect" inside the handler.
 	preAuth := func(h http.HandlerFunc) http.HandlerFunc {
-		return s.redirectIfAuthenticated("/admin/", h)
+		return func(w http.ResponseWriter, r *http.Request) {
+			s.redirectIfAuthenticated(s.portalHome(r), h)(w, r)
+		}
 	}
 	mux.HandleFunc("GET /{$}", wrap(preAuth(s.handleRoot)))
 	mux.HandleFunc("GET /login", wrap(preAuth(s.handleLoginGet)))
